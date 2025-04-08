@@ -517,15 +517,16 @@ impl ConfusionMatrix {
 ///
 /// ```
 /// use rustyml::metric::accuracy;
+/// use ndarray::array;
 ///
-/// let predicted = [0.0, 1.0, 1.0];
-/// let actual = [0.0, 0.0, 1.0];
-/// let acc = accuracy(&predicted, &actual).unwrap();
+/// let predicted = array![0.0, 1.0, 1.0];
+/// let actual = array![0.0, 0.0, 1.0];
+/// let acc = accuracy(predicted.view(), actual.view()).unwrap();
 ///
 /// // Two out of three predictions are correct: accuracy = 2/3 ≈ 0.6666666666666667
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
-pub fn accuracy(predicted: &[f64], actual: &[f64]) -> Result<f64, ModelError> {
+pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Result<f64, ModelError> {
     if predicted.len() != actual.len() {
         return Err(ModelError::InputValidationError(
             format!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len())
@@ -684,26 +685,27 @@ fn expected_mutual_information(
 ///
 /// # Parameters
 ///
-/// * `labels_true` - A slice of cluster assignments representing the ground truth or reference clustering
-/// * `labels_pred` - A slice of cluster assignments representing the predicted or comparison clustering
+/// * `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
+/// * `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
 ///
 /// - `Ok(f64)` - The NMI score as a float between 0 and 1
-/// - `Err(ModelError::InputValidationError)` - If the input slices have different lengths
+/// - `Err(ModelError::InputValidationError)` - If the input arrays have different lengths
 ///
 /// # Examples
 ///
 /// ```
 /// use rustyml::metric::normalized_mutual_info;
+/// use ndarray::array;
 ///
-/// let true_labels = vec![0, 0, 1, 1, 2, 2];
-/// let pred_labels = vec![0, 0, 1, 2, 1, 2];
+/// let true_labels = array![0, 0, 1, 1, 2, 2];
+/// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let nmi = normalized_mutual_info(&true_labels, &pred_labels).unwrap();
+/// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view()).unwrap();
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
-pub fn normalized_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Result<f64, ModelError> {
+pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> Result<f64, ModelError> {
     if labels_true.len() != labels_pred.len() {
         return Err(ModelError::InputValidationError(
             format!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len())
@@ -717,7 +719,11 @@ pub fn normalized_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> R
     }
 
     let n = labels_true.len();
-    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
+
+    let labels_true_slice: &[usize] = labels_true.as_slice().unwrap();
+    let labels_pred_slice: &[usize] = labels_pred.as_slice().unwrap();
+
+    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true_slice, labels_pred_slice);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
@@ -747,26 +753,27 @@ pub fn normalized_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> R
 ///
 /// # Parameters
 ///
-/// * `labels_true` - A slice of cluster assignments representing the ground truth or reference clustering
-/// * `labels_pred` - A slice of cluster assignments representing the predicted or comparison clustering
+/// * `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
+/// * `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
 ///
 /// - `Ok(f64)` - The AMI score, typically between -1 and 1
-/// - `Err(ModelError::InputValidationError)` - If the input slices have different lengths
+/// - `Err(ModelError::InputValidationError)` - If the input arrays have different lengths
 ///
 /// # Examples
 ///
 /// ```
 /// use rustyml::metric::adjusted_mutual_info;
+/// use ndarray::array;
 ///
-/// let true_labels = vec![0, 0, 1, 1, 2, 2];
-/// let pred_labels = vec![0, 0, 1, 2, 1, 2];
+/// let true_labels = array![0, 0, 1, 1, 2, 2];
+/// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let ami = adjusted_mutual_info(&true_labels, &pred_labels).unwrap();
+/// let ami = adjusted_mutual_info(true_labels.view(), pred_labels.view()).unwrap();
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
-pub fn adjusted_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Result<f64, ModelError> {
+pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> Result<f64, ModelError> {
     if labels_true.len() != labels_pred.len() {
         return Err(ModelError::InputValidationError(
             format!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len())
@@ -780,7 +787,11 @@ pub fn adjusted_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Res
     }
 
     let n = labels_true.len();
-    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
+
+    let labels_true_slice: &[usize] = labels_true.as_slice().unwrap();
+    let labels_pred_slice: &[usize] = labels_pred.as_slice().unwrap();
+
+    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true_slice, labels_pred_slice);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
@@ -802,8 +813,8 @@ pub fn adjusted_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Res
 ///
 /// # Parameters
 ///
-/// * `scores` - A slice of predicted scores or probabilities for each sample
-/// * `labels` - A slice of boolean values indicating the true class of each sample (true for positive class, false for negative class)
+/// * `scores` - An array of predicted scores or probabilities for each sample
+/// * `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
 ///
 /// # Returns
 ///
@@ -814,10 +825,11 @@ pub fn adjusted_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Res
 ///
 /// ```
 /// use rustyml::metric::calculate_auc;
+/// use ndarray::array;
 ///
-/// let scores = vec![0.1, 0.4, 0.35, 0.8];
-/// let labels = vec![false, true, false, true];
-/// let auc = calculate_auc(&scores, &labels).unwrap();
+/// let scores = array![0.1, 0.4, 0.35, 0.8];
+/// let labels = array![false, true, false, true];
+/// let auc = calculate_auc(scores.view(), labels.view()).unwrap();
 /// println!("AUC-ROC: {}", auc);
 /// ```
 ///
@@ -826,7 +838,7 @@ pub fn adjusted_mutual_info(labels_true: &[usize], labels_pred: &[usize]) -> Res
 /// The implementation handles tied scores by assigning average ranks to tied elements.
 /// It implements the AUC calculation based on the Mann-Whitney U statistic, which is
 /// mathematically equivalent to the area under the ROC curve.
-pub fn calculate_auc(scores: &[f64], labels: &[bool]) -> Result<f64, ModelError> {
+pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> Result<f64, ModelError> {
     if scores.len() != labels.len() {
         return Err(ModelError::InputValidationError(
             format!("Input arrays must have the same length. Scores: {}, Labels: {}", scores.len(), labels.len())

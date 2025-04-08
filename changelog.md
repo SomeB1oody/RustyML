@@ -10,6 +10,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Add `Adam` optimizer for neural network
 - Added new loss functions: `CategoricalCrossEntropy` and `SparseCategoricalCrossEntropy`
 
+### Changed
+- Replaced slices with `ndarray`'s `ArrayView` to improve consistency and compatibility with numerical operations in metric module.
+
 ## [v0.4.0] - 2025-4-7
 ### Added
 - Add neural network support(initial implementation)

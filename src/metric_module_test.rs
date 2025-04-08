@@ -318,46 +318,46 @@ fn test_summary() {
 #[test]
 fn test_accuracy() {
     // Test case 1: Binary classification with perfect prediction
-    let predicted = vec![1.0, 0.0, 1.0, 0.0, 1.0];
-    let actual = vec![1.0, 0.0, 1.0, 0.0, 1.0];
-    assert_eq!(accuracy(&predicted, &actual).unwrap(), 1.0);
+    let predicted = array![1.0, 0.0, 1.0, 0.0, 1.0];
+    let actual = array![1.0, 0.0, 1.0, 0.0, 1.0];
+    assert_eq!(accuracy(predicted.view(), actual.view()).unwrap(), 1.0);
 
     // Test case 2: Binary classification with some errors
-    let predicted = vec![1.0, 0.0, 1.0, 1.0, 0.0];
-    let actual = vec![1.0, 0.0, 0.0, 1.0, 1.0];
-    assert_eq!(accuracy(&predicted, &actual).unwrap(), 0.6);
+    let predicted = array![1.0, 0.0, 1.0, 1.0, 0.0];
+    let actual = array![1.0, 0.0, 0.0, 1.0, 1.0];
+    assert_eq!(accuracy(predicted.view(), actual.view()).unwrap(), 0.6);
 
     // Test case 3: Multi-class classification
-    let predicted = vec![0.0, 1.0, 2.0, 3.0, 2.0, 1.0];
-    let actual = vec![0.0, 1.0, 2.0, 2.0, 1.0, 1.0];
-    assert_eq!(accuracy(&predicted, &actual).unwrap(), 2.0/3.0); // 4 out of 6 correct
+    let predicted = array![0.0, 1.0, 2.0, 3.0, 2.0, 1.0];
+    let actual = array![0.0, 1.0, 2.0, 2.0, 1.0, 1.0];
+    assert_eq!(accuracy(predicted.view(), actual.view()).unwrap(), 2.0/3.0); // 4 out of 6 correct
 
     // Test case 5: Floating point equality with very small differences
     // (should be considered equal due to epsilon comparison)
-    let predicted = vec![0.0000001, 1.0];
-    let actual = vec![0.0, 1.0];
-    assert!(accuracy(&predicted, &actual).unwrap() < 1.0); // Should fail equality due to floating point precision
+    let predicted = array![0.0000001, 1.0];
+    let actual = array![0.0, 1.0];
+    assert!(accuracy(predicted.view(), actual.view()).unwrap() < 1.0); // Should fail equality due to floating point precision
 
     // Test case 6: All predictions are wrong
-    let predicted = vec![1.0, 1.0, 0.0, 0.0];
-    let actual = vec![0.0, 0.0, 1.0, 1.0];
-    assert_eq!(accuracy(&predicted, &actual).unwrap(), 0.0);
+    let predicted = array![1.0, 1.0, 0.0, 0.0];
+    let actual = array![0.0, 0.0, 1.0, 1.0];
+    assert_eq!(accuracy(predicted.view(), actual.view()).unwrap(), 0.0);
 }
 
 #[test]
 #[should_panic]
 fn test_accuracy_with_different_length_arrays() {
-    let predicted = vec![1.0, 0.0, 1.0];
-    let actual = vec![1.0, 0.0];
-    accuracy(&predicted, &actual).unwrap(); // This should panic
+    let predicted = array![1.0, 0.0, 1.0];
+    let actual = array![1.0, 0.0];
+    accuracy(predicted.view(), actual.view()).unwrap(); // This should panic
 }
 
 // Test that when the clusterings are identical, both NMI and AMI return 1.0.
 #[test]
 fn test_identical_clusterings() {
-    let labels = vec![0, 1, 1, 0, 2, 2];
-    let nmi = normalized_mutual_info(&labels, &labels).unwrap();
-    let ami = adjusted_mutual_info(&labels, &labels).unwrap();
+    let labels = array![0, 1, 1, 0, 2, 2];
+    let nmi = normalized_mutual_info(labels.view(), labels.view()).unwrap();
+    let ami = adjusted_mutual_info(labels.view(), labels.view()).unwrap();
     assert!((nmi - 1.0).abs() < 1e-6, "NMI of identical clusterings should be 1.0, got {}", nmi);
     assert!((ami - 1.0).abs() < 1e-6, "AMI of identical clusterings should be 1.0, got {}", ami);
 }
@@ -365,17 +365,17 @@ fn test_identical_clusterings() {
 // Test different clusterings using the example provided in the documentation.
 #[test]
 fn test_different_clusterings() {
-    let labels_true = vec![0, 0, 1, 1, 2, 2];
-    let labels_pred = vec![0, 0, 1, 2, 1, 2];
+    let labels_true = array![0, 0, 1, 1, 2, 2];
+    let labels_pred = array![0, 0, 1, 2, 1, 2];
 
     // Test NMI
-    let nmi = normalized_mutual_info(&labels_true, &labels_pred).unwrap();
+    let nmi = normalized_mutual_info(labels_true.view(), labels_pred.view()).unwrap();
     // The expected NMI is approximately 0.578 (subject to implementation details)
     let expected_nmi = 0.578;
     assert!((nmi - expected_nmi).abs() < 0.05, "Expected NMI approx {} but got {}", expected_nmi, nmi);
 
     // Test AMI
-    let ami = adjusted_mutual_info(&labels_true, &labels_pred).unwrap();
+    let ami = adjusted_mutual_info(labels_true.view(), labels_pred.view()).unwrap();
     // Since EMI calculation may affect the exact value, we assert that:
     // - AMI is less than 1.0 (since the clusterings are not identical)
     // - AMI is non-negative
@@ -386,33 +386,33 @@ fn test_different_clusterings() {
 // Test that an error is returned when the input slices have different lengths.
 #[test]
 fn test_length_mismatch() {
-    let labels_true = vec![0, 1, 1];
-    let labels_pred = vec![0, 1];
-    assert!(normalized_mutual_info(&labels_true, &labels_pred).is_err(), "Should return error for length mismatch in NMI");
-    assert!(adjusted_mutual_info(&labels_true, &labels_pred).is_err(), "Should return error for length mismatch in AMI");
+    let labels_true = array![0, 1, 1];
+    let labels_pred = array![0, 1];
+    assert!(normalized_mutual_info(labels_true.view(), labels_pred.view()).is_err(), "Should return error for length mismatch in NMI");
+    assert!(adjusted_mutual_info(labels_true.view(), labels_pred.view()).is_err(), "Should return error for length mismatch in AMI");
 }
 
 // Test the special case when all samples are assigned to the same cluster.
 #[test]
 fn test_constant_labels() {
-    let labels_true = vec![0, 0, 0, 0];
-    let labels_pred = vec![1, 1, 1, 1];
+    let labels_true = array![0, 0, 0, 0];
+    let labels_pred = array![1, 1, 1, 1];
 
     // For constant labels, since the entropy is 0, the function returns 0.0 for NMI.
-    let nmi = normalized_mutual_info(&labels_true, &labels_pred).unwrap();
+    let nmi = normalized_mutual_info(labels_true.view(), labels_pred.view()).unwrap();
     assert_eq!(nmi, 0.0, "NMI for constant labels should be 0.0");
 
     // For AMI, the special handling returns 1.0 when the denominator is close to 0.
-    let ami = adjusted_mutual_info(&labels_true, &labels_pred).unwrap();
+    let ami = adjusted_mutual_info(labels_true.view(), labels_pred.view()).unwrap();
     assert_eq!(ami, 1.0, "AMI for constant labels should be 1.0");
 }
 
 #[test]
 fn test_calculate_auc_valid() {
     // Test a valid case.
-    let scores = vec![0.1, 0.4, 0.35, 0.8];
-    let labels = vec![false, true, true, false];
-    let auc = calculate_auc(&scores, &labels).unwrap();
+    let scores = array![0.1, 0.4, 0.35, 0.8];
+    let labels = array![false, true, true, false];
+    let auc = calculate_auc(scores.view(), labels.view()).unwrap();
     // Calculation:
     // Sorted: [(0.1, false), (0.35, true), (0.4, true), (0.8, false)]
     // The ranks for positive samples are 2 and 3, so sum_positive_ranks = 2 + 3 = 5.
@@ -424,47 +424,47 @@ fn test_calculate_auc_valid() {
 #[test]
 fn test_calculate_auc_empty_input() {
     // Test empty input arrays: should return an error.
-    let scores: Vec<f64> = vec![];
-    let labels: Vec<bool> = vec![];
-    let result = calculate_auc(&scores, &labels);
+    let scores: Array1<f64> = array![];
+    let labels: Array1<bool> = array![];
+    let result = calculate_auc(scores.view(), labels.view());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_calculate_auc_length_mismatch() {
     // Test input arrays with different lengths: should return an error.
-    let scores = vec![0.1, 0.2];
-    let labels = vec![true];
-    let result = calculate_auc(&scores, &labels);
+    let scores = array![0.1, 0.2];
+    let labels = array![true];
+    let result = calculate_auc(scores.view(), labels.view());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_calculate_auc_no_positive() {
     // Test case with no positive samples: should return an error.
-    let scores = vec![0.2, 0.3, 0.4];
-    let labels = vec![false, false, false];
-    let result = calculate_auc(&scores, &labels);
+    let scores = array![0.2, 0.3, 0.4];
+    let labels = array![false, false, false];
+    let result = calculate_auc(scores.view(), labels.view());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_calculate_auc_no_negative() {
     // Test case with no negative samples: should return an error.
-    let scores = vec![0.2, 0.3, 0.4];
-    let labels = vec![true, true, true];
-    let result = calculate_auc(&scores, &labels);
+    let scores = array![0.2, 0.3, 0.4];
+    let labels = array![true, true, true];
+    let result = calculate_auc(scores.view(), labels.view());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_calculate_auc_with_ties() {
     // Test case with tied scores, where positive and negative samples are balanced.
-    let scores = vec![0.5, 0.5, 0.5, 0.5];
-    let labels = vec![true, false, true, false];
+    let scores = array![0.5, 0.5, 0.5, 0.5];
+    let labels = array![true, false, true, false];
     // With all scores tied, the average rank is (1+2+3+4)/4 = 2.5.
     // For two positive samples, sum_positive_ranks = 2.5 + 2.5 = 5.0.
     // U = 5 - (2*(2+1)/2) = 5 - 3 = 2, negative sample count = 2, so AUC = 2/(2*2) = 0.5.
-    let auc = calculate_auc(&scores, &labels).unwrap();
+    let auc = calculate_auc(scores.view(), labels.view()).unwrap();
     assert!((auc - 0.5).abs() < 1e-12);
 }
