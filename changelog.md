@@ -11,7 +11,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Added new loss functions: `CategoricalCrossEntropy` and `SparseCategoricalCrossEntropy`
 
 ### Changed
-- Replaced slices with `ndarray`'s `ArrayView` to improve consistency and compatibility with numerical operations in metric module.
+- Replaced slices with `ndarray`'s `ArrayView` to improve consistency and compatibility with numerical operations in metric module
+- Refactor polynomial feature generation to exclude constant term
 
 ## [v0.4.0] - 2025-4-7
 ### Added

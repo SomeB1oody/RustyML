@@ -75,16 +75,16 @@ fn test_generate_polynomial_features() {
     // Test degree = 1 (should return intercept + original features)
     let poly_features_1 = generate_polynomial_features(x.view(), 1);
     let expected_degree_1 = arr2(&[
-        [1.0, 1.0, 2.0],  // Intercept + original features
-        [1.0, 3.0, 4.0]
+        [1.0, 2.0],
+        [3.0, 4.0]
     ]);
     assert_eq!(poly_features_1, expected_degree_1);
 
     // Test degree = 2
     let poly_features_2 = generate_polynomial_features(x.view(), 2);
     let expected_degree_2 = arr2(&[
-        [1.0, 1.0, 2.0, 1.0, 2.0, 4.0],  // Intercept + first-order + second-order terms
-        [1.0, 3.0, 4.0, 9.0, 12.0, 16.0]
+        [1.0, 2.0, 1.0, 2.0, 4.0],
+        [3.0, 4.0, 9.0, 12.0, 16.0]
     ]);
 
     assert_eq!(poly_features_2.shape(), expected_degree_2.shape());

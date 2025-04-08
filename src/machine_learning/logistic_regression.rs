@@ -413,10 +413,10 @@ impl LogisticRegression {
 pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2<f64> {
     let (n_samples, n_features) = x.dim();
 
-    // Calculate the number of output features (including constant term)
+    // Calculate the number of output features (excluding constant term)
     // Formula: C(n+d,d) = (n+d)!/(n!*d!) where n is feature count and d is degree
     let n_output_features = {
-        let mut count = 1; // Constant term
+        let mut count = 0; // No constant term
         for d in 1..=degree {
             let mut term = 1;
             for i in 0..d {
@@ -427,8 +427,8 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
         count
     };
 
-    // Initialize result matrix with ones in the first column (constant term)
-    let mut result = Array2::<f64>::ones((n_samples, n_output_features));
+    // Initialize result matrix (without the constant term column)
+    let mut result = Array2::<f64>::zeros((n_samples, n_output_features));
 
     // Add first-order features (original features)
     // Process samples in parallel using Rayon
@@ -438,13 +438,13 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
         .enumerate()
         .for_each(|(i, mut row)| {
             for j in 0..n_features {
-                row[j + 1] = x[[i, j]];
+                row[j] = x[[i, j]]; // Index starts from 0, no +1 offset
             }
         });
 
     // If degree >= 2, add higher-order features
     if degree >= 2 {
-        let mut col_idx = n_features + 1;
+        let mut col_idx = n_features; // Start from n_features, no +1 offset
 
         // Define an inner recursive function to generate combinations
         fn add_combinations(
@@ -477,7 +477,6 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
                         row[current_col] = value;
                     });
                 return;
-
             }
 
             // Recursively build combinations (sequential since it modifies shared state)
