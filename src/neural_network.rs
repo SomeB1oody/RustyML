@@ -20,7 +20,7 @@ pub trait Layer {
     fn layer_type(&self) -> &str {
         "Unknown"
     }
-    // 返回该层前向传播输出的形状描述（这里只给出一个简单字符串）
+    // 返回该层前向传播输出的形状描述（默认实现只给出未知）
     fn output_shape(&self) -> String {
         "Unknown".to_string()
     }
@@ -28,9 +28,12 @@ pub trait Layer {
     fn param_count(&self) -> usize {
         0
     }
-    // 根据给定学习率更新该层的参数（如果有）
-    fn update_parameters(&mut self, _lr: f32) {
+    // 根据给定学习率更新该层的参数（如果有，默认0）
+    fn update_parameters_sgd(&mut self, _lr: f32) {
         // 默认什么都不做
+    }
+    fn update_parameters_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _epsilon: f32, _t: u64) {
+        // 默认什么也不做
     }
 }
 

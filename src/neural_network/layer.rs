@@ -12,6 +12,11 @@ pub struct Dense {
     pub input_cache: Option<Array2<f32>>, // 缓存 forward 时的输入，供 backward 使用
     pub grad_weights: Option<Array2<f32>>, // 存储计算得到的权重梯度
     pub grad_bias: Option<Array2<f32>>,    // 存储计算得到的偏置梯度
+    // Adam 状态：一阶矩和二阶矩
+    pub m_weights: Option<Array2<f32>>,
+    pub v_weights: Option<Array2<f32>>,
+    pub m_bias: Option<Array2<f32>>,
+    pub v_bias: Option<Array2<f32>>,
 }
 
 impl Dense {
@@ -27,6 +32,10 @@ impl Dense {
             input_cache: None,
             grad_weights: None,
             grad_bias: None,
+            m_weights: None,
+            v_weights: None,
+            m_bias: None,
+            v_bias: None,
         }
     }
 }
@@ -75,10 +84,46 @@ impl Layer for Dense {
         self.input_dim * self.output_dim + self.output_dim
     }
 
-    fn update_parameters(&mut self, lr: f32) {
+    fn update_parameters_sgd(&mut self, lr: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             self.weights = &self.weights - &(lr * grad_w);
             self.bias = &self.bias - &(lr * grad_b);
         }
+    }
+
+    // 使用 Adam 算法更新参数
+    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
+        // 如果 Adam 的状态尚未初始化，则进行初始化
+        if self.m_weights.is_none() {
+            self.m_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
+            self.v_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
+            self.m_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
+            self.v_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
+        }
+        let m_w = self.m_weights.as_mut().unwrap();
+        let v_w = self.v_weights.as_mut().unwrap();
+        let m_b = self.m_bias.as_mut().unwrap();
+        let v_b = self.v_bias.as_mut().unwrap();
+
+        let grad_w = self.grad_weights.as_ref().expect("Adam: 未计算 grad_weights");
+        let grad_b = self.grad_bias.as_ref().expect("Adam: 未计算 grad_bias");
+
+        // 更新一阶矩（动量）
+        *m_w = m_w.mapv(|x| x * beta1) + &(grad_w * (1.0 - beta1));
+        *m_b = m_b.mapv(|x| x * beta1) + &(grad_b * (1.0 - beta1));
+
+        // 更新二阶矩（平方梯度累积），注意使用 elementwise square
+        *v_w = v_w.mapv(|x| x * beta2) + &(grad_w.mapv(|x| x * x) * (1.0 - beta2));
+        *v_b = v_b.mapv(|x| x * beta2) + &(grad_b.mapv(|x| x * x) * (1.0 - beta2));
+
+        // 计算偏差修正后的估计值
+        let m_hat_w = m_w.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
+        let m_hat_b = m_b.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
+        let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+        let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+
+        // 更新参数：w = w - lr * m_hat / (sqrt(v_hat) + epsilon)
+        self.weights = &self.weights - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
+        self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
     }
 }
