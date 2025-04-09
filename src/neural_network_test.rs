@@ -139,3 +139,26 @@ fn adam_test() {
     let prediction = model.predict(&x);
     println!("Prediction: {:?}", prediction);
 }
+
+#[test]
+fn rmsprop_test() {
+    // 构造输入 (batch_size=2, input_dim=4) 和目标张量 (batch_size=2, output_dim=3)
+    let x = Array::ones((2, 4)).into_dyn();
+    let y = Array::ones((2, 1)).into_dyn();
+
+    // 构建模型，添加两个 Dense 层；编译时选择 RMSprop 优化器
+    let mut model = Sequential::new();
+    model.add(Dense::new(4, 3))
+        .add(Dense::new(3, 1));
+    model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+
+    // 打印模型结构（summary）
+    model.summary();
+
+    // 训练模型
+    model.fit(&x, &y, 3);
+
+    // 使用 predict 进行前向传播预测
+    let prediction = model.predict(&x);
+    println!("Prediction: {:?}", prediction);
+}

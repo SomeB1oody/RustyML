@@ -44,3 +44,26 @@ impl Optimizer for Adam {
         layer.update_parameters_adam(self.learning_rate, self.beta1, self.beta2, self.epsilon, self.t);
     }
 }
+
+/// RMSprop 优化器实现：保存学习率、rho 和 epsilon
+pub struct RMSprop {
+    pub learning_rate: f32,
+    pub rho: f32,
+    pub epsilon: f32,
+}
+
+impl RMSprop {
+    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Self {
+        Self {
+            learning_rate,
+            rho,
+            epsilon,
+        }
+    }
+}
+
+impl Optimizer for RMSprop {
+    fn update(&mut self, layer: &mut dyn Layer) {
+        layer.update_parameters_rmsprop(self.learning_rate, self.rho, self.epsilon);
+    }
+}

@@ -5,6 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.4.0] - 2025-4-9
+### Added
+- Add RMSprop optimizer support to the neural network
+- Add MAE(Mean Absolute Error) support in loss function computation
+
 ## [v0.4.0] - 2025-4-8
 ### Added
 - Add `Adam` optimizer for neural network

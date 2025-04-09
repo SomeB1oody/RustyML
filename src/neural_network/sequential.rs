@@ -118,7 +118,7 @@ impl Sequential {
             " Total params: {} ({} B)",
             total_params,
             total_params * 4
-        ); // 假设每个参数 4 字节
+        ); // 使用f32，每个参数 4 字节
         println!(
             " Trainable params: {} ({} B)",
             total_params,

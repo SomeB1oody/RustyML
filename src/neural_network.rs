@@ -35,6 +35,9 @@ pub trait Layer {
     fn update_parameters_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _epsilon: f32, _t: u64) {
         // 默认什么也不做
     }
+    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
+        // 默认什么也不做
+    }
 }
 
 pub trait LossFunction {

@@ -17,6 +17,10 @@ pub struct Dense {
     pub v_weights: Option<Array2<f32>>,
     pub m_bias: Option<Array2<f32>>,
     pub v_bias: Option<Array2<f32>>,
+
+    // RMSprop 优化器所需缓存
+    pub cache_weights: Option<Array2<f32>>,
+    pub cache_bias: Option<Array2<f32>>,
 }
 
 impl Dense {
@@ -36,13 +40,15 @@ impl Dense {
             v_weights: None,
             m_bias: None,
             v_bias: None,
+            cache_weights: None,
+            cache_bias: None,
         }
     }
 }
 
 impl Layer for Dense {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 假设 input 的形状为 [batch_size, input_dim]
+        // input 的形状为 [batch_size, input_dim]
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
         // 缓存输入，便于反向传播计算梯度
         self.input_cache = Some(input_2d.clone());
@@ -125,5 +131,30 @@ impl Layer for Dense {
         // 更新参数：w = w - lr * m_hat / (sqrt(v_hat) + epsilon)
         self.weights = &self.weights - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
         self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
+    }
+
+    // RMSprop 更新
+    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
+        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
+            // 若未初始化 RMSprop 缓存，则以零数组初始化
+            if self.cache_weights.is_none() {
+                self.cache_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
+            }
+            if self.cache_bias.is_none() {
+                self.cache_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
+            }
+            if let Some(ref mut cache_w) = self.cache_weights {
+                *cache_w = cache_w.mapv(|x| x * rho) + &(grad_w.mapv(|x| x * x) * (1.0 - rho));
+            }
+            if let Some(ref mut cache_b) = self.cache_bias {
+                *cache_b = cache_b.mapv(|x| x * rho) + &(grad_b.mapv(|x| x * x) * (1.0 - rho));
+            }
+            if let Some(ref cache_w) = self.cache_weights {
+                self.weights = &self.weights - &(lr * grad_w / &(cache_w.mapv(f32::sqrt) + epsilon));
+            }
+            if let Some(ref cache_b) = self.cache_bias {
+                self.bias = &self.bias - &(lr * grad_b / &(cache_b.mapv(f32::sqrt) + epsilon));
+            }
+        }
     }
 }
