@@ -137,6 +137,10 @@ let model_copy = model.clone();
 // Since Debug is implemented, detailed model information can be printed
 println!("{:?}", model);
 ```
+
+For Chinese mainland users, I provide mandarin video tutorial on Bilibili, follow [@SomeB1oody](https://space.bilibili.com/1349872478)
+对于中国大陆用户,我在B站提供视频教程,关注[@SomeB1oody](https://space.bilibili.com/1349872478)
+
 ## Project Status | 项目状态
 This project is in the **early development stage**. Currently, only a small subset of the planned functionality has been implemented. The API is unstable and subject to significant changes as the project evolves.
 该项目处于**早期开发阶段**。目前，仅实现了计划功能的一小部分。API不稳定，随着项目的发展可能会有重大变化。
