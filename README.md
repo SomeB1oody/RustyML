@@ -62,9 +62,31 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
   - LDA(Linear Discriminant Analysis) | 线性判别分析
   - t-Distributed Stochastic Neighbor Embedding (t-SNE) | t分布随机邻域嵌入
 
+
 - **Datasets | 数据集**:
   - Iris dataset | 鸢尾花分类数据集
   - Diabetes dataset | 糖尿病回归数据集
+
+
+- **Neural Network(initial implementation) | 神经网络(初步实现)**:
+
+- model | 模型:
+  - Sequential
+
+  - Layer | 层:
+    - Dense | 全连接层
+
+  - Loss function | 损失计算函数:
+    - Mean Squared Error | 均方误差
+    - Mean Absolute Error | 平均绝对误差
+    - Binary Cross Entropy | 二元交叉熵
+    - Categorical Cross Entropy | 分类交叉熵
+    - Sparse Categorical Cross Entropy | 稀疏分类交叉熵
+
+  - Optimizer | 优化器:
+    - SGD
+    - Adam
+    - RMSprop
 
 ## Vision | 愿景
 While the library is in its early stages, Rust AI aims to evolve into a comprehensive crate that includes:
@@ -106,7 +128,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = "0.3.0"
+rustyml = "0.4.0"
 ```
 Example usage | 使用示例:
 ``` rust

@@ -9,6 +9,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add RMSprop optimizer support to the neural network
 - Add MAE(Mean Absolute Error) support in loss function computation
+- Add doc comments for neural_network module
 
 ## [v0.4.0] - 2025-4-8
 ### Added

@@ -3,162 +3,162 @@ use crate::neural_network::*;
 
 #[test]
 fn mse_test() {
-    // 构造输入和目标张量，假设输入维度为 4，输出维度为 3，batch_size = 2
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(SGD::new(0.01), MeanSquaredError::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
-    println!("预测结果: {:?}", prediction);
+    println!("Prediction results: {:?}", prediction);
 }
 
 #[test]
 fn mae_test() {
-    // 构造输入和目标张量，假设输入维度为 4，输出维度为 3，batch_size = 2
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(SGD::new(0.01), MeanAbsoluteError::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
-    println!("预测结果: {:?}", prediction);
+    println!("Prediction results: {:?}", prediction);
 }
 
 #[test]
 fn binary_cross_entropy_test() {
-    // 构造输入和目标张量，假设输入维度为 4，输出维度为 3，batch_size = 2
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(SGD::new(0.01), BinaryCrossEntropy::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
-    println!("预测结果: {:?}", prediction);
+    println!("Prediction results: {:?}", prediction);
 }
 
 #[test]
 fn categorical_cross_entropy_test() {
-    // 构造输入和目标张量，假设输入维度为 4，输出维度为 3，batch_size = 2
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(SGD::new(0.01), CategoricalCrossEntropy::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
-    println!("预测结果: {:?}", prediction);
+    println!("Prediction results: {:?}", prediction);
 }
 
 #[test]
 fn sparse_categorical_cross_entropy_test() {
-    // 构造输入和目标张量，假设输入维度为 4，输出维度为 3，batch_size = 2
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
     let x = Array::ones((2, 4)).into_dyn();
-    // 假设有3个类别，标签应该是0,1,2中的一个
+    // Assume there are 3 classes, labels should be one of 0, 1, 2
     let y: ArrayD<f32> = Array::from_shape_vec((2, 1), vec![0.0, 1.0]).unwrap().into_dyn();
 
-    // 构建模型，注意第二个 Dense 层必须用 Dense::new(3, 3),因为是多分类任务
+    // Build the model, note that the second Dense layer must use Dense::new(3, 3) because it's a multi-class task
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 3));
     model.compile(SGD::new(0.01), SparseCategoricalCrossEntropy::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
-    println!("预测结果: {:?}", prediction);
+    println!("Prediction results: {:?}", prediction);
 }
 
 #[test]
 fn adam_test() {
-    // 创建形状为 (batch_size=2, input_dim=4) 的输入张量，以及对应目标张量
+    // Create an input tensor with shape (batch_size=2, input_dim=4) and corresponding target tensor
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型：添加两个 Dense 层，使用 Adam 优化器（学习率、beta1、beta2、epsilon）与 MSE 损失函数
+    // Build the model: add two Dense layers, use Adam optimizer (learning rate, beta1, beta2, epsilon) with MSE loss function
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
-    // 打印模型结构
+    // Print model structure
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
     println!("Prediction: {:?}", prediction);
 }
 
 #[test]
 fn rmsprop_test() {
-    // 构造输入 (batch_size=2, input_dim=4) 和目标张量 (batch_size=2, output_dim=3)
+    // Create input (batch_size=2, input_dim=4) and target tensors (batch_size=2, output_dim=3)
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型，添加两个 Dense 层；编译时选择 RMSprop 优化器
+    // Build the model, add two Dense layers; choose RMSprop optimizer when compiling
     let mut model = Sequential::new();
     model.add(Dense::new(4, 3))
         .add(Dense::new(3, 1));
     model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
-    // 打印模型结构（summary）
+    // Print model structure (summary)
     model.summary();
 
-    // 训练模型
+    // Train the model
     model.fit(&x, &y, 3);
 
-    // 使用 predict 进行前向传播预测
+    // Use predict for forward propagation prediction
     let prediction = model.predict(&x);
     println!("Prediction: {:?}", prediction);
 }

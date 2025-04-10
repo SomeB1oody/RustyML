@@ -1,186 +1,298 @@
 use super::*;
 use ndarray::s;
 
+/// Mean Squared Error loss function
 pub struct MeanSquaredError;
 
 impl MeanSquaredError {
+    /// Creates a new instance of MeanSquaredError
     pub fn new() -> Self {
         Self {}
     }
 }
 
 impl LossFunction for MeanSquaredError {
+    /// Computes the Mean Squared Error between predicted and true values
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values
+    /// * `y_pred` - Tensor with predicted values
+    ///
+    /// # Returns
+    ///
+    /// Average of squared differences between predictions and ground truth
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
-        // 计算预测值和真实值之间的差异
+        // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
 
-        // 计算差异的平方
+        // Calculate the squared difference
         let squared_diff = &diff.mapv(|x| x * x);
 
-        // 计算平均值（总和除以元素数量）
+        // Calculate the mean (sum divided by number of elements)
         let n = squared_diff.len() as f32;
         squared_diff.sum() / n
     }
 
+    /// Computes the gradient of Mean Squared Error with respect to predictions
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values
+    /// * `y_pred` - Tensor with predicted values
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
-        // 计算预测值和真实值之间的差异
+        // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
 
-        // 梯度是差异的2倍除以样本数量
+        // Gradient is 2 times the difference divided by sample count
         let n = diff.len() as f32;
         diff.mapv(|x| 2.0 * x / n)
     }
 }
 
+/// Mean Absolute Error loss function
 pub struct MeanAbsoluteError;
 
 impl MeanAbsoluteError {
+    /// Creates a new instance of MeanAbsoluteError
     pub fn new() -> Self {
         Self {}
     }
 }
 
 impl LossFunction for MeanAbsoluteError {
+    /// Computes the Mean Absolute Error between predicted and true values
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values
+    /// * `y_pred` - Tensor with predicted values
+    ///
+    /// # Returns
+    ///
+    /// Average of absolute differences between predictions and ground truth
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         let diff = y_pred - y_true;
         let abs_diff = diff.mapv(|x| x.abs());
         abs_diff.sum() / (y_true.len() as f32)
     }
 
+    /// Computes the gradient of Mean Absolute Error with respect to predictions
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values
+    /// * `y_pred` - Tensor with predicted values
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         let n = y_true.len() as f32;
         (y_pred - y_true).mapv(|x| if x > 0.0 { 1.0/n } else if x < 0.0 { -1.0/n } else { 0.0 })
     }
 }
 
+/// Binary Cross Entropy loss function for binary classification
 pub struct BinaryCrossEntropy;
 
 impl BinaryCrossEntropy {
+    /// Creates a new instance of BinaryCrossEntropy
     pub fn new() -> Self {
         Self {}
     }
 }
 
 impl LossFunction for BinaryCrossEntropy {
+    /// Computes the Binary Cross Entropy loss between predicted and true values
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values (0 or 1)
+    /// * `y_pred` - Tensor with predicted probabilities in range \[0,1\]
+    ///
+    /// # Returns
+    ///
+    /// Binary cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
-        // 确保预测值在 (0,1) 范围内，避免数值问题
+        // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 二元交叉熵公式: -1/n * Σ[y_true * log(y_pred) + (1 - y_true) * log(1 - y_pred)]
+        // Binary cross entropy formula: -1/n * Σ[y_true * log(y_pred) + (1 - y_true) * log(1 - y_pred)]
         let losses = y_true.mapv(|y_t| y_t).to_owned() * &y_pred_clipped.mapv(|y_p| y_p.ln())
             + (1.0 - y_true).mapv(|y_t| y_t) * &(1.0 - &y_pred_clipped).mapv(|y_p| y_p.ln());
 
-        // 计算平均损失（负号在这里加上）
+        // Calculate average loss (with negative sign)
         let n = losses.len() as f32;
         -losses.sum() / n
     }
 
+    /// Computes the gradient of Binary Cross Entropy with respect to predictions
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values (0 or 1)
+    /// * `y_pred` - Tensor with predicted probabilities in range \[0,1\]
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
-        // 确保预测值在 (0,1) 范围内，避免数值问题
+        // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 二元交叉熵的梯度: -y_true/y_pred + (1-y_true)/(1-y_pred)
+        // Binary cross entropy gradient: -y_true/y_pred + (1-y_true)/(1-y_pred)
         let grad = -y_true / &y_pred_clipped + (1.0 - y_true) / (1.0 - &y_pred_clipped);
 
-        // 除以样本数量以获得平均梯度
+        // Divide by sample count to get average gradient
         let n = grad.len() as f32;
         grad / n
     }
 }
 
+/// Categorical Cross Entropy loss function for multi-class classification
 pub struct CategoricalCrossEntropy;
 
 impl CategoricalCrossEntropy {
+    /// Creates a new instance of CategoricalCrossEntropy
     pub fn new() -> Self {
         Self {}
     }
 }
 
 impl LossFunction for CategoricalCrossEntropy {
+    /// Computes the Categorical Cross Entropy loss between predicted and true values
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values in one-hot encoding
+    /// * `y_pred` - Tensor with predicted probabilities for each class
+    ///
+    /// # Returns
+    ///
+    /// Categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
-        // 确保预测值在数值稳定的范围内，避免log(0)的问题
+        // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 计算多类别交叉熵：-Σ[y_true * log(y_pred)]
-        // 这里y_true必须是one-hot编码
+        // Calculate multi-class cross entropy: -Σ[y_true * log(y_pred)]
+        // Here y_true must be one-hot encoded
         let losses = y_true * &y_pred_clipped.mapv(|y_p| y_p.ln());
 
-        // 计算平均损失（负号）
-        let n = y_true.shape()[0] as f32; // 假设第一维是样本数
+        // Calculate average loss (with negative sign)
+        let n = y_true.shape()[0] as f32; // Assume first dimension is sample count
         -losses.sum() / n
     }
 
+    /// Computes the gradient of Categorical Cross Entropy with respect to predictions
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with ground truth values in one-hot encoding
+    /// * `y_pred` - Tensor with predicted probabilities for each class
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
-        // 确保预测值在数值稳定的范围内
+        // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 多类别交叉熵的梯度是 -y_true / y_pred
+        // Multi-class cross entropy gradient is -y_true / y_pred
         let grad = -y_true / &y_pred_clipped;
 
-        // 除以样本数量以获得平均梯度
-        let n = y_true.shape()[0] as f32; // 假设第一维是样本数
+        // Divide by sample count to get average gradient
+        let n = y_true.shape()[0] as f32; // Assume first dimension is sample count
         grad / n
     }
 }
 
+/// Sparse Categorical Cross Entropy loss function for multi-class classification
+/// where true labels are integers instead of one-hot vectors
 pub struct SparseCategoricalCrossEntropy;
 
 impl SparseCategoricalCrossEntropy {
+    /// Creates a new instance of SparseCategoricalCrossEntropy
     pub fn new() -> Self {
         Self {}
     }
 }
 
 impl LossFunction for SparseCategoricalCrossEntropy {
+    /// Computes the Sparse Categorical Cross Entropy loss between predicted values
+    /// and class indices
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with class indices as ground truth
+    /// * `y_pred` - Tensor with predicted probabilities for each class
+    ///
+    /// # Returns
+    ///
+    /// Sparse categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
-        // 确保预测值在数值稳定的范围内，避免log(0)的问题
+        // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 假设y_true包含类别索引（整数值）
-        // 我们需要从每个样本的预测中获取对应真实类别的概率
+        // Assume y_true contains class indices (integer values)
+        // We need to get the probability of the true class for each sample
         let mut total_loss = 0.0;
         let batch_size = y_true.shape()[0];
 
         for i in 0..batch_size {
-            // 获取当前样本的真实类别索引
+            // Get the true class index for the current sample
             let class_idx = y_true.slice(s![i, ..]).iter().next().unwrap().round() as usize;
 
-            // 先保存切片视图，然后再从中提取值
+            // First save the slice view, then extract value from it
             let slice = y_pred_clipped.slice(s![i, class_idx]);
             let predicted_prob = slice.iter().next().unwrap();
 
-            // 累加交叉熵损失: -log(predicted_prob)
+            // Accumulate cross entropy loss: -log(predicted_prob)
             total_loss -= predicted_prob.ln();
         }
 
-        // 返回平均损失
+        // Return average loss
         total_loss / batch_size as f32
     }
 
+    /// Computes the gradient of Sparse Categorical Cross Entropy with respect to predictions
+    ///
+    /// # Arguments
+    ///
+    /// * `y_true` - Tensor with class indices as ground truth
+    /// * `y_pred` - Tensor with predicted probabilities for each class
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
-        // 确保预测值在数值稳定的范围内
+        // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
 
-        // 创建一个与y_pred形状相同的梯度张量，初始值为0
+        // Create a gradient tensor with the same shape as y_pred, initialized to 0
         let mut grad = y_pred.clone();
         grad.fill(0.0);
 
         let batch_size = y_true.shape()[0];
 
         for i in 0..batch_size {
-            // 获取当前样本的真实类别索引
+            // Get the true class index for the current sample
             let class_idx = y_true.slice(s![i, ..]).iter().next().unwrap().round() as usize;
 
-            // 先保存切片视图，然后再从中提取值
+            // First save the slice view, then extract value from it
             let slice = y_pred_clipped.slice(s![i, class_idx]);
             let predicted_prob = slice.iter().next().unwrap();
 
-            // 修改对应位置的梯度值
+            // Modify the gradient at the corresponding position
             let mut view = grad.slice_mut(s![i, class_idx]);
             *view.iter_mut().next().unwrap() = -1.0 / predicted_prob;
         }
 
-        // 返回平均梯度
+        // Return average gradient
         grad / batch_size as f32
     }
 }

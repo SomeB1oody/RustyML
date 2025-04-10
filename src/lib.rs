@@ -265,6 +265,54 @@ mod metric_module_test;
 /// ```
 pub mod dataset;
 
+/// # This module provides components for building and training neural networks.
+///
+/// ## Features
+///
+/// - Various layer implementations for neural network construction
+/// - Loss functions for measuring model performance
+/// - Optimizers for parameter updates during training
+/// - Sequential model for building linear neural networks
+///
+/// ## Core Components
+///
+/// - `Layer`: Trait for neural network layers with forward and backward propagation
+/// - `LossFunction`: Trait for computing loss and gradients
+/// - `Optimizer`: Trait for parameter optimization strategies
+/// - `Tensor`: Type alias for n-dimensional arrays used throughout the module
+///
+/// ## Examples
+///
+/// ```
+/// use rustyml::neural_network::*;
+/// use ndarray::Array;
+///
+/// //Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
+/// let x = Array::ones((2, 4)).into_dyn();
+/// let y = Array::ones((2, 1)).into_dyn();
+///
+/// // Build the model
+/// let mut model = Sequential::new();
+/// model.add(Dense::new(4, 3))
+/// .add(Dense::new(3, 1));
+/// model.compile(SGD::new(0.01), MeanSquaredError::new());
+///
+/// // Print model structure (summary)
+/// model.summary();
+///
+/// // Train the model
+/// model.fit(&x, &y, 3);
+///
+/// // Use predict for forward propagation prediction
+/// let prediction = model.predict(&x);
+/// println!("Prediction results: {:?}", prediction);
+/// ```
+///
+/// Each submodule contains specialized components:
+/// - `layer`: Different neural network layers (Dense, Activation, Dropout, etc.)
+/// - `loss_function`: Various loss functions (MSE, CrossEntropy, etc.)
+/// - `optimizer`: Parameter optimization algorithms (SGD, Adam, RMSProp, etc.)
+/// - `sequential`: Sequential model for creating feed-forward neural networks
 pub mod neural_network;
 
 #[cfg(test)]

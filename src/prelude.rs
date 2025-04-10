@@ -25,3 +25,5 @@ pub use crate::metric::{mean_squared_error, r2_score, ConfusionMatrix, accuracy}
 pub use crate::machine_learning::svc::{SVC, KernelType};
 
 pub use crate::utility::train_test_split::train_test_split;
+
+pub use crate::neural_network::*;

@@ -3,29 +3,50 @@ use ndarray::{Array, Array2, Axis};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 
-/// Dense 层结构体：自动初始化 weights 和 bias，同时在 backward 中计算梯度并存储
+/// Dense layer struct: automatically initializes weights and bias,
+/// and calculates and stores gradients during backward pass.
 pub struct Dense {
+    /// Input dimension size
     pub input_dim: usize,
+    /// Output dimension size
     pub output_dim: usize,
-    pub weights: Array2<f32>,         // 权重矩阵，形状 (input_dim, output_dim)
-    pub bias: Array2<f32>,            // 偏置，形状 (1, output_dim)
-    pub input_cache: Option<Array2<f32>>, // 缓存 forward 时的输入，供 backward 使用
-    pub grad_weights: Option<Array2<f32>>, // 存储计算得到的权重梯度
-    pub grad_bias: Option<Array2<f32>>,    // 存储计算得到的偏置梯度
-    // Adam 状态：一阶矩和二阶矩
+    /// Weight matrix with shape (input_dim, output_dim)
+    pub weights: Array2<f32>,
+    /// Bias vector with shape (1, output_dim)
+    pub bias: Array2<f32>,
+    /// Cache of the input from forward pass for use in backward pass
+    pub input_cache: Option<Array2<f32>>,
+    /// Stored weight gradients
+    pub grad_weights: Option<Array2<f32>>,
+    /// Stored bias gradients
+    pub grad_bias: Option<Array2<f32>>,
+    /// Adam optimizer state: first moment for weights
     pub m_weights: Option<Array2<f32>>,
+    /// Adam optimizer state: second moment for weights
     pub v_weights: Option<Array2<f32>>,
+    /// Adam optimizer state: first moment for bias
     pub m_bias: Option<Array2<f32>>,
+    /// Adam optimizer state: second moment for bias
     pub v_bias: Option<Array2<f32>>,
-
-    // RMSprop 优化器所需缓存
+    /// RMSprop optimizer cache for weights
     pub cache_weights: Option<Array2<f32>>,
+    /// RMSprop optimizer cache for bias
     pub cache_bias: Option<Array2<f32>>,
 }
 
 impl Dense {
+    /// Creates a new Dense layer with the specified dimensions.
+    ///
+    /// # Arguments
+    ///
+    /// * `input_dim` - Number of input features
+    /// * `output_dim` - Number of output features
+    ///
+    /// # Returns
+    ///
+    /// A new Dense layer with randomly initialized weights and zero bias
     pub fn new(input_dim: usize, output_dim: usize) -> Self {
-        // 使用均匀分布 [-0.05, 0.05] 初始化 weights，bias 初始化为 0
+        // Initialize weights with uniform distribution [-0.05, 0.05], bias initialized to 0
         let weights = Array::random((input_dim, output_dim), Uniform::new(-0.05, 0.05));
         let bias = Array::zeros((1, output_dim));
         Self {
@@ -47,49 +68,87 @@ impl Dense {
 }
 
 impl Layer for Dense {
+    /// Performs forward propagation through the dense layer.
+    ///
+    /// # Arguments
+    ///
+    /// * `input` - Input tensor with shape [batch_size, input_dim]
+    ///
+    /// # Returns
+    ///
+    /// Output tensor after linear transformation
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // input 的形状为 [batch_size, input_dim]
+        // Input shape is [batch_size, input_dim]
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
-        // 缓存输入，便于反向传播计算梯度
+        // Cache the input for backpropagation gradient calculation
         self.input_cache = Some(input_2d.clone());
-        // 计算线性变换： output = input.dot(weights) + bias（利用广播加偏置）
+        // Compute linear transformation: output = input.dot(weights) + bias (using broadcasting for bias)
         let output = input_2d.dot(&self.weights) + &self.bias;
         output.into_dyn()
     }
 
+    /// Performs backward propagation through the dense layer.
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - Gradient tensor from the next layer with shape [batch_size, output_dim]
+    ///
+    /// # Returns
+    ///
+    /// Gradient tensor to be passed to the previous layer
     fn backward(&mut self, grad_output: &Tensor) -> Tensor {
-        // 将梯度转换为二维数组，形状为 [batch_size, output_dim]
+        // Convert gradient to 2D array with shape [batch_size, output_dim]
         let grad_output_2d = grad_output.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
-        // 从缓存中取出 forward 时的输入，形状为 [batch_size, input_dim]
-        let input = self.input_cache.take().expect("Forward 必须先于 backward 调用");
+        // Get the input from cache with shape [batch_size, input_dim]
+        let input = self.input_cache.take().expect("Forward must be called before backward");
 
-        // 计算对权重的梯度： dW = input.T.dot(grad_output)
+        // Calculate gradient with respect to weights: dW = input.T.dot(grad_output)
         let grad_w = input.t().dot(&grad_output_2d);
-        // 计算对偏置的梯度： db = sum(grad_output, axis=0)，保持二维形状
+        // Calculate gradient with respect to bias: db = sum(grad_output, axis=0), keep 2D shape
         let grad_b = grad_output_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
-        // 将计算得到的梯度存储起来，供优化器更新参数时使用
+        // Store the calculated gradients for parameter updates
         self.grad_weights = Some(grad_w);
         self.grad_bias = Some(grad_b);
 
-        // 计算对输入的梯度： dX = grad_output.dot(weights.T)
+        // Calculate gradient with respect to input: dX = grad_output.dot(weights.T)
         let grad_input = grad_output_2d.dot(&self.weights.t());
         grad_input.into_dyn()
     }
 
+    /// Returns the type of this layer.
+    ///
+    /// # Returns
+    ///
+    /// String slice indicating the layer type
     fn layer_type(&self) -> &str {
         "Dense"
     }
 
+    /// Returns a string describing the output shape of this layer.
+    ///
+    /// # Returns
+    ///
+    /// String representation of the output shape as "(None, output_dim)"
     fn output_shape(&self) -> String {
-        // 这里只返回 (None, output_dim)
+        // Returns only (None, output_dim)
         format!("(None, {})", self.output_dim)
     }
 
+    /// Returns the total number of trainable parameters in the layer.
+    ///
+    /// # Returns
+    ///
+    /// Sum of all weights and bias parameters
     fn param_count(&self) -> usize {
-        // 参数数量 = weights 参数数 + bias 参数数
+        // Parameter count = number of weight parameters + number of bias parameters
         self.input_dim * self.output_dim + self.output_dim
     }
 
+    /// Updates layer parameters using Stochastic Gradient Descent.
+    ///
+    /// # Arguments
+    ///
+    /// * `lr` - Learning rate for parameter updates
     fn update_parameters_sgd(&mut self, lr: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             self.weights = &self.weights - &(lr * grad_w);
@@ -97,9 +156,17 @@ impl Layer for Dense {
         }
     }
 
-    // 使用 Adam 算法更新参数
+    /// Updates layer parameters using the Adam optimization algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// * `lr` - Learning rate for parameter updates
+    /// * `beta1` - Exponential decay rate for first moment estimates
+    /// * `beta2` - Exponential decay rate for second moment estimates
+    /// * `epsilon` - Small constant for numerical stability
+    /// * `t` - Current iteration count
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // 如果 Adam 的状态尚未初始化，则进行初始化
+        // Initialize Adam state if not already initialized
         if self.m_weights.is_none() {
             self.m_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
             self.v_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
@@ -111,32 +178,38 @@ impl Layer for Dense {
         let m_b = self.m_bias.as_mut().unwrap();
         let v_b = self.v_bias.as_mut().unwrap();
 
-        let grad_w = self.grad_weights.as_ref().expect("Adam: 未计算 grad_weights");
-        let grad_b = self.grad_bias.as_ref().expect("Adam: 未计算 grad_bias");
+        let grad_w = self.grad_weights.as_ref().expect("Adam: grad_weights not calculated");
+        let grad_b = self.grad_bias.as_ref().expect("Adam: grad_bias not calculated");
 
-        // 更新一阶矩（动量）
+        // Update first moment (momentum)
         *m_w = m_w.mapv(|x| x * beta1) + &(grad_w * (1.0 - beta1));
         *m_b = m_b.mapv(|x| x * beta1) + &(grad_b * (1.0 - beta1));
 
-        // 更新二阶矩（平方梯度累积），注意使用 elementwise square
+        // Update second moment (accumulated squared gradients), using elementwise square
         *v_w = v_w.mapv(|x| x * beta2) + &(grad_w.mapv(|x| x * x) * (1.0 - beta2));
         *v_b = v_b.mapv(|x| x * beta2) + &(grad_b.mapv(|x| x * x) * (1.0 - beta2));
 
-        // 计算偏差修正后的估计值
+        // Calculate bias-corrected estimates
         let m_hat_w = m_w.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
         let m_hat_b = m_b.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
         let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
         let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
 
-        // 更新参数：w = w - lr * m_hat / (sqrt(v_hat) + epsilon)
+        // Update parameters: w = w - lr * m_hat / (sqrt(v_hat) + epsilon)
         self.weights = &self.weights - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
         self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
     }
 
-    // RMSprop 更新
+    /// Updates layer parameters using the RMSprop optimization algorithm.
+    ///
+    /// # Arguments
+    ///
+    /// * `lr` - Learning rate for parameter updates
+    /// * `rho` - Decay rate for moving average of squared gradients
+    /// * `epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            // 若未初始化 RMSprop 缓存，则以零数组初始化
+            // Initialize RMSprop caches with zeros if not already initialized
             if self.cache_weights.is_none() {
                 self.cache_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
             }

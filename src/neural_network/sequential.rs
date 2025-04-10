@@ -1,6 +1,6 @@
 use super::*;
 
-/// Sequential 模型：模拟 Keras 的接口风格，支持链式调用 add、compile、fit 方法
+/// Sequential model: Mimics the Keras API style, supporting chained calls to add, compile, and fit methods
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
@@ -8,6 +8,7 @@ pub struct Sequential {
 }
 
 impl Sequential {
+    /// Creates a new empty Sequential model
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
@@ -16,13 +17,32 @@ impl Sequential {
         }
     }
 
-    // 添加层，支持链式调用
+    /// Adds a layer to the model
+    ///
+    /// Supports method chaining pattern
+    ///
+    /// # Arguments
+    ///
+    /// * `layer` - The layer to add to the model
+    ///
+    /// # Returns
+    ///
+    /// Mutable reference to self for method chaining
     pub fn add<L: 'static + Layer>(&mut self, layer: L) -> &mut Self {
         self.layers.push(Box::new(layer));
         self
     }
 
-    // 配置优化器和损失函数
+    /// Configures the optimizer and loss function for the model
+    ///
+    /// # Arguments
+    ///
+    /// * `optimizer` - The optimizer to use for training
+    /// * `loss` - The loss function to use for training
+    ///
+    /// # Returns
+    ///
+    /// Mutable reference to self for method chaining
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,
@@ -33,21 +53,29 @@ impl Sequential {
         self
     }
 
-    // 简化的训练过程，依次执行前向传播、损失计算、反向传播与参数更新
+    /// Trains the model on the provided data
+    ///
+    /// Executes the forward pass, loss calculation, backward pass, and parameter updates
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - Input tensor containing training data
+    /// * `y` - Target tensor containing expected outputs
+    /// * `epochs` - Number of training epochs to perform
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) {
         for epoch in 0..epochs {
             println!("Epoch {}", epoch + 1);
-            // 前向传播
+            // Forward pass
             let mut output = x.clone();
             for layer in &mut self.layers {
                 output = layer.forward(&output);
             }
-            // 计算损失
+            // Calculate loss
             let loss_value = self.loss.as_ref().unwrap().compute_loss(y, &output);
             println!("Loss: {}", loss_value);
-            // 计算损失函数对输出的梯度
+            // Calculate gradient of loss with respect to output
             let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output);
-            // 反向传播和参数更新（逆序遍历各层）
+            // Backward pass and parameter updates (iterate through layers in reverse)
             for layer in self.layers.iter_mut().rev() {
                 grad = layer.backward(&grad);
                 if let Some(ref mut optimizer) = self.optimizer {
@@ -57,7 +85,17 @@ impl Sequential {
         }
     }
 
-    // predict 方法：仅执行前向传播，返回预测结果
+    /// Generates predictions for the input data
+    ///
+    /// Only performs forward pass without any training
+    ///
+    /// # Arguments
+    ///
+    /// * `x` - Input tensor containing data to predict on
+    ///
+    /// # Returns
+    ///
+    /// Tensor containing the model's predictions
     pub fn predict(&mut self, x: &Tensor) -> Tensor {
         let mut output = x.clone();
         for layer in &mut self.layers {
@@ -66,9 +104,9 @@ impl Sequential {
         output
     }
 
-    // summary 方法：打印模型中每一层的基本信息
-    // summary 方法：以表格形式打印模型各层信息及参数统计
-    // summary 方法：以表格形式打印模型各层信息及参数统计
+    /// Prints a summary of the model's structure
+    ///
+    /// Displays each layer's information and parameter statistics in a tabular format
     pub fn summary(&self) {
         let col1_width = 33;
         let col2_width = 24;
@@ -92,7 +130,7 @@ impl Sequential {
         );
         let mut total_params = 0;
         for (i, layer) in self.layers.iter().enumerate() {
-            // 为每一层生成名称，第一层命名为 "dense"，之后依次 "dense_1", "dense_2", ...
+            // Generate name for each layer: first layer is named "dense", then "dense_1", "dense_2", etc.
             let layer_name = if i == 0 {
                 "dense".to_string()
             } else {
@@ -118,7 +156,7 @@ impl Sequential {
             " Total params: {} ({} B)",
             total_params,
             total_params * 4
-        ); // 使用f32，每个参数 4 字节
+        ); // Using f32, each parameter is 4 bytes
         println!(
             " Trainable params: {} ({} B)",
             total_params,
