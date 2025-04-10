@@ -71,7 +71,7 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
 - **Neural Network(initial implementation) | 神经网络(初步实现)**:
 
   - model | 模型:
-    - Sequential
+    - Sequential | 顺序模型
 
   - Layer | 层:
     - Dense | 全连接层
@@ -84,9 +84,15 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
     - Sparse Categorical Cross Entropy | 稀疏分类交叉熵
 
   - Optimizer | 优化器:
-    - SGD
-    - Adam
-    - RMSprop
+    - SGD | 随机梯度下降
+    - Adam | 自适应矩估计
+    - RMSprop | 均方根传播
+
+  - Activation Function | 激活函数:
+    - ReLU | 修正线性单元（线性整流函数）
+    - Tanh | 双曲正切函数
+    - Sigmoid | 逻辑函数
+    - Softmax | 归一化指数函数
 
 ## Vision | 愿景
 While the library is in its early stages, Rust AI aims to evolve into a comprehensive crate that includes:
