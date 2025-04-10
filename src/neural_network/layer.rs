@@ -98,7 +98,7 @@ impl Layer for Dense {
     ///
     /// # Arguments
     ///
-    /// * `grad_output` - Gradient tensor from the next layer with shape [batch_size, output_dim]
+    /// * `grad_output` - Gradient tensor from the next layer with shape \[batch_size, output_dim\]
     ///
     /// # Returns
     ///
