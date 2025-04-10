@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.5.0] - 2025-4-10
+### Added
+- Add activation functions support to `Dense` layer
+
 ## [v0.4.0] - 2025-4-9
 ### Added
 - Add RMSprop optimizer support to the neural network

@@ -32,21 +32,22 @@ pub struct Dense {
     pub cache_weights: Option<Array2<f32>>,
     /// RMSprop optimizer cache for bias
     pub cache_bias: Option<Array2<f32>>,
+    // 激活相关字段
+    pub activation: Option<Activation>,
+    pub activation_output: Option<Array2<f32>>, // 保存激活后的输出
 }
 
 impl Dense {
-    /// Creates a new Dense layer with the specified dimensions.
-    ///
-    /// # Arguments
-    ///
-    /// * `input_dim` - Number of input features
-    /// * `output_dim` - Number of output features
-    ///
-    /// # Returns
-    ///
-    /// A new Dense layer with randomly initialized weights and zero bias
+    /// 默认不使用激活函数
     pub fn new(input_dim: usize, output_dim: usize) -> Self {
-        // Initialize weights with uniform distribution [-0.05, 0.05], bias initialized to 0
+        Self::new_with_activation(input_dim, output_dim, None)
+    }
+    /// 带激活函数的构造函数
+    pub fn new_with_activation(
+        input_dim: usize,
+        output_dim: usize,
+        activation: Option<Activation>,
+    ) -> Self {
         let weights = Array::random((input_dim, output_dim), Uniform::new(-0.05, 0.05));
         let bias = Array::zeros((1, output_dim));
         Self {
@@ -57,6 +58,8 @@ impl Dense {
             input_cache: None,
             grad_weights: None,
             grad_bias: None,
+            activation,
+            activation_output: None,
             m_weights: None,
             v_weights: None,
             m_bias: None,
@@ -72,7 +75,7 @@ impl Layer for Dense {
     ///
     /// # Arguments
     ///
-    /// * `input` - Input tensor with shape [batch_size, input_dim]
+    /// * `input` - Input tensor with shape \[batch_size, input_dim\]
     ///
     /// # Returns
     ///
@@ -80,11 +83,15 @@ impl Layer for Dense {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Input shape is [batch_size, input_dim]
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
-        // Cache the input for backpropagation gradient calculation
         self.input_cache = Some(input_2d.clone());
-        // Compute linear transformation: output = input.dot(weights) + bias (using broadcasting for bias)
-        let output = input_2d.dot(&self.weights) + &self.bias;
-        output.into_dyn()
+        let z = input_2d.dot(&self.weights) + &self.bias;
+        if let Some(act) = &self.activation {
+            let a = Activation::apply_activation(&z, act);
+            self.activation_output = Some(a.clone());
+            a.into_dyn()
+        } else {
+            z.into_dyn()
+        }
     }
 
     /// Performs backward propagation through the dense layer.
@@ -98,20 +105,30 @@ impl Layer for Dense {
     /// Gradient tensor to be passed to the previous layer
     fn backward(&mut self, grad_output: &Tensor) -> Tensor {
         // Convert gradient to 2D array with shape [batch_size, output_dim]
-        let grad_output_2d = grad_output.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
-        // Get the input from cache with shape [batch_size, input_dim]
-        let input = self.input_cache.take().expect("Forward must be called before backward");
-
-        // Calculate gradient with respect to weights: dW = input.T.dot(grad_output)
-        let grad_w = input.t().dot(&grad_output_2d);
-        // Calculate gradient with respect to bias: db = sum(grad_output, axis=0), keep 2D shape
-        let grad_b = grad_output_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
-        // Store the calculated gradients for parameter updates
+        let mut grad_upstream = grad_output
+            .clone()
+            .into_dimensionality::<ndarray::Ix2>()
+            .unwrap();
+        // 如果使用了激活函数，则计算链式法则：dL/dz = (dActivation/dz) ⊙ dL/da
+        if let Some(act) = &self.activation {
+            if *act == Activation::Softmax {
+                let a = self.activation_output.take().expect("前向传播未运行");
+                grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
+            } else {
+                let a = self.activation_output.take().expect("前向传播未运行");
+                let deriv = Activation::activation_derivative(&a, act);
+                grad_upstream = deriv * &grad_upstream;
+            }
+        }
+        // 计算梯度：权重梯度 = input^T dot grad_upstream
+        let input = self.input_cache.take().expect("前向传播未运行");
+        let grad_w = input.t().dot(&grad_upstream);
+        // 偏置梯度：对每一行求和，保持二维
+        let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
         self.grad_weights = Some(grad_w);
         self.grad_bias = Some(grad_b);
-
-        // Calculate gradient with respect to input: dX = grad_output.dot(weights.T)
-        let grad_input = grad_output_2d.dot(&self.weights.t());
+        // 计算传递给上一层的梯度
+        let grad_input = grad_upstream.dot(&self.weights.t());
         grad_input.into_dyn()
     }
 

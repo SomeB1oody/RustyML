@@ -12,7 +12,7 @@ pub use loss_function::*;
 pub use layer::*;
 pub use sequential::*;
 
-use ndarray::ArrayD;
+use ndarray::{ArrayD, Array2, Axis};
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network.
 pub type Tensor = ArrayD<f32>;
@@ -147,4 +147,63 @@ pub trait Optimizer {
     ///
     /// * `layer` - The layer whose parameters should be updated
     fn update(&mut self, layer: &mut dyn Layer);
+}
+
+
+/// 激活函数枚举，支持 ReLU、Tanh、Sigmoid、Softmax
+#[derive(Debug, PartialEq)]
+pub enum Activation {
+    ReLU,
+    Tanh,
+    Sigmoid,
+    Softmax,
+}
+
+impl Activation {
+    /// 激活函数：前向应用
+    pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
+        match activation {
+            Activation::ReLU => z.mapv(|x| if x > 0.0 { x } else { 0.0 }),
+            Activation::Sigmoid => z.mapv(|x| 1.0 / (1.0 + (-x).exp())),
+            Activation::Tanh => z.mapv(|x| x.tanh()),
+            Activation::Softmax => {
+                let mut out = z.clone();
+                // 对每一行做 softmax
+                for mut row in out.outer_iter_mut() {
+                    let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                    row.map_inplace(|x| *x = (*x - max_val).exp());
+                    let sum = row.sum();
+                    row.map_inplace(|x| *x /= sum);
+                }
+                out
+            }
+        }
+    }
+
+    /// 针对 ReLU、Sigmoid、Tanh激活函数返回导数（假设输入为激活后的输出）
+    /// Softmax 的梯度在后向传播中单独处理
+    pub fn activation_derivative(activation_output: &Array2<f32>, activation: &Activation) -> Array2<f32> {
+        match activation {
+            Activation::ReLU => activation_output.mapv(|x| if x > 0.0 { 1.0 } else { 0.0 }),
+            Activation::Sigmoid => activation_output.mapv(|a| a * (1.0 - a)),
+            Activation::Tanh => activation_output.mapv(|a| 1.0 - a * a),
+            Activation::Softmax => Array2::ones(activation_output.dim()),
+        }
+    }
+
+    /// Softmax 的后向传播：对于每一行，计算
+    /// new_grad\[i\] = a\[i\] * (upstream\[i\] - sum_j(a\[j\]*upstream\[j\]))
+    pub fn softmax_backward(a: &Array2<f32>, upstream: &Array2<f32>) -> Array2<f32> {
+        let mut result = Array2::<f32>::zeros(a.raw_dim());
+        for (mut out_row, (a_row, up_row)) in result
+            .axis_iter_mut(Axis(0))
+            .zip(a.axis_iter(Axis(0)).zip(upstream.axis_iter(Axis(0))))
+        {
+            let dot = a_row.iter().zip(up_row.iter()).map(|(&ai, &gi)| ai * gi).sum::<f32>();
+            for (j, r) in out_row.iter_mut().enumerate() {
+                *r = a_row[j] * (up_row[j] - dot);
+            }
+        }
+        result
+    }
 }
