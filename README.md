@@ -70,8 +70,8 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
 
 - **Neural Network(initial implementation) | 神经网络(初步实现)**:
 
-- model | 模型:
-  - Sequential
+  - model | 模型:
+    - Sequential
 
   - Layer | 层:
     - Dense | 全连接层
