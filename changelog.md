@@ -5,6 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.5.0] - 2025-4-11
+### Added
+- Added getter methods for accessing key properties
+
+### Changed
+- Replaced public fields with private ones in `Dense`, `Adam`, and `RMSprop` structs to improve encapsulation.
+
 ## [v0.5.0] - 2025-4-10
 ### Added
 - Add activation functions support to `Dense` layer

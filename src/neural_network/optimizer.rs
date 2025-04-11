@@ -43,15 +43,15 @@ impl Optimizer for SGD {
 /// of the gradients.
 pub struct Adam {
     /// Learning rate controlling the size of parameter updates.
-    pub learning_rate: f32,
+    learning_rate: f32,
     /// Exponential decay rate for the first moment estimates.
-    pub beta1: f32,
+    beta1: f32,
     /// Exponential decay rate for the second moment estimates.
-    pub beta2: f32,
+    beta2: f32,
     /// Small constant added for numerical stability.
-    pub epsilon: f32,
+    epsilon: f32,
     /// Current timestep, incremented with each update.
-    pub t: u64,
+    t: u64,
 }
 
 impl Adam {
@@ -96,11 +96,11 @@ impl Optimizer for Adam {
 /// using a moving average of squared gradients.
 pub struct RMSprop {
     /// Learning rate controlling the size of parameter updates.
-    pub learning_rate: f32,
+    learning_rate: f32,
     /// Decay rate for the moving average of squared gradients.
-    pub rho: f32,
+    rho: f32,
     /// Small constant added for numerical stability.
-    pub epsilon: f32,
+    epsilon: f32,
 }
 
 impl RMSprop {

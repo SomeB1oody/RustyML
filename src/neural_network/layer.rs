@@ -7,38 +7,75 @@ use ndarray_rand::rand_distr::Uniform;
 /// and calculates and stores gradients during backward pass.
 pub struct Dense {
     /// Input dimension size
-    pub input_dim: usize,
+    input_dim: usize,
     /// Output dimension size
-    pub output_dim: usize,
+    output_dim: usize,
     /// Weight matrix with shape (input_dim, output_dim)
-    pub weights: Array2<f32>,
+    weights: Array2<f32>,
     /// Bias vector with shape (1, output_dim)
-    pub bias: Array2<f32>,
+    bias: Array2<f32>,
     /// Cache of the input from forward pass for use in backward pass
-    pub input_cache: Option<Array2<f32>>,
+    input_cache: Option<Array2<f32>>,
     /// Stored weight gradients
-    pub grad_weights: Option<Array2<f32>>,
+    grad_weights: Option<Array2<f32>>,
     /// Stored bias gradients
-    pub grad_bias: Option<Array2<f32>>,
+    grad_bias: Option<Array2<f32>>,
     /// Adam optimizer state: first moment for weights
-    pub m_weights: Option<Array2<f32>>,
+    m_weights: Option<Array2<f32>>,
     /// Adam optimizer state: second moment for weights
-    pub v_weights: Option<Array2<f32>>,
+    v_weights: Option<Array2<f32>>,
     /// Adam optimizer state: first moment for bias
-    pub m_bias: Option<Array2<f32>>,
+    m_bias: Option<Array2<f32>>,
     /// Adam optimizer state: second moment for bias
-    pub v_bias: Option<Array2<f32>>,
+    v_bias: Option<Array2<f32>>,
     /// RMSprop optimizer cache for weights
-    pub cache_weights: Option<Array2<f32>>,
+    cache_weights: Option<Array2<f32>>,
     /// RMSprop optimizer cache for bias
-    pub cache_bias: Option<Array2<f32>>,
+    cache_bias: Option<Array2<f32>>,
     /// Activation function for the layer
-    pub activation: Option<Activation>,
+    activation: Option<Activation>,
     /// Cached output after activation for use in backward pass
-    pub activation_output: Option<Array2<f32>>,
+    activation_output: Option<Array2<f32>>,
 }
 
 impl Dense {
+    /// Returns the input dimension of the layer
+    ///
+    /// This specifies the number of features expected in the input data
+    pub fn get_input_dim(&self) -> usize {
+        self.input_dim
+    }
+
+    /// Returns the output dimension of the layer
+    ///
+    /// This specifies the number of neurons in the layer, which determines
+    /// the dimension of the output data
+    pub fn get_output_dim(&self) -> usize {
+        self.output_dim
+    }
+
+    /// Returns a clone of the weight matrix
+    ///
+    /// The weight matrix has dimensions [input_dim, output_dim]
+    /// This returns a copy to prevent external modification of internal weights
+    pub fn get_weights(&self) -> Array2<f32> {
+        self.weights.clone()
+    }
+
+    /// Returns a reference to the bias vector
+    ///
+    /// The bias vector has dimensions [1, output_dim]
+    pub fn get_bias(&self) -> &Array2<f32> {
+        &self.bias
+    }
+
+    /// Returns a reference to the activation function used by this layer, if any
+    ///
+    /// Returns None if no activation function is set
+    pub fn get_activation(&self) -> Option<&Activation> {
+        self.activation.as_ref()
+    }
+
     /// Default constructor without activation function
     pub fn new(input_dim: usize, output_dim: usize) -> Self {
         Self::new_with_activation(input_dim, output_dim, None)
