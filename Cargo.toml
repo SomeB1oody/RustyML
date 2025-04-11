@@ -9,6 +9,7 @@ homepage = "https://github.com/SomeB1oody/RustyML"
 readme = "README.md"
 keywords = ["machine-learning", "ML", "Deep-learning", "DL", "AI"]
 repository = "https://github.com/SomeB1oody/RustyML"
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 ndarray = { version = "0.16.1", features = ["rayon"] }
