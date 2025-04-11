@@ -150,7 +150,7 @@ pub trait Optimizer {
 }
 
 
-/// 激活函数枚举，支持 ReLU、Tanh、Sigmoid、Softmax
+/// Activation function enum, supporting ReLU, Tanh, Sigmoid, and Softmax
 #[derive(Debug, PartialEq)]
 pub enum Activation {
     ReLU,
@@ -160,7 +160,16 @@ pub enum Activation {
 }
 
 impl Activation {
-    /// 激活函数：前向应用
+    /// Forward application of activation functions
+    ///
+    /// Applies the specified activation function to the input tensor.
+    ///
+    /// # Arguments
+    /// * `z` - Input tensor to apply activation function to
+    /// * `activation` - The activation function to apply
+    ///
+    /// # Returns
+    /// A new tensor with the activation function applied
     pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
         match activation {
             Activation::ReLU => z.mapv(|x| if x > 0.0 { x } else { 0.0 }),
@@ -168,7 +177,7 @@ impl Activation {
             Activation::Tanh => z.mapv(|x| x.tanh()),
             Activation::Softmax => {
                 let mut out = z.clone();
-                // 对每一行做 softmax
+                // Apply softmax to each row
                 for mut row in out.outer_iter_mut() {
                     let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
                     row.map_inplace(|x| *x = (*x - max_val).exp());
@@ -180,8 +189,17 @@ impl Activation {
         }
     }
 
-    /// 针对 ReLU、Sigmoid、Tanh激活函数返回导数（假设输入为激活后的输出）
-    /// Softmax 的梯度在后向传播中单独处理
+    /// Computes derivatives for ReLU, Sigmoid, and Tanh activation functions
+    ///
+    /// Returns the derivative of the activation function given the activated output.
+    /// For Softmax, the gradient is handled separately in backward propagation.
+    ///
+    /// # Arguments
+    /// * `activation_output` - The output after activation function has been applied
+    /// * `activation` - The activation function whose derivative to compute
+    ///
+    /// # Returns
+    /// A tensor containing the derivative values
     pub fn activation_derivative(activation_output: &Array2<f32>, activation: &Activation) -> Array2<f32> {
         match activation {
             Activation::ReLU => activation_output.mapv(|x| if x > 0.0 { 1.0 } else { 0.0 }),
@@ -191,8 +209,17 @@ impl Activation {
         }
     }
 
-    /// Softmax 的后向传播：对于每一行，计算
+    /// Backward propagation for Softmax activation
+    ///
+    /// For each row, computes:
     /// new_grad\[i\] = a\[i\] * (upstream\[i\] - sum_j(a\[j\]*upstream\[j\]))
+    ///
+    /// # Arguments
+    /// * `a` - The output from the softmax activation
+    /// * `upstream` - The gradient flowing from the next layer
+    ///
+    /// # Returns
+    /// The gradient with respect to the input of the softmax function
     pub fn softmax_backward(a: &Array2<f32>, upstream: &Array2<f32>) -> Array2<f32> {
         let mut result = Array2::<f32>::zeros(a.raw_dim());
         for (mut out_row, (a_row, up_row)) in result

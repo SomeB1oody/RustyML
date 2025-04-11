@@ -32,17 +32,18 @@ pub struct Dense {
     pub cache_weights: Option<Array2<f32>>,
     /// RMSprop optimizer cache for bias
     pub cache_bias: Option<Array2<f32>>,
-    // 激活相关字段
+    /// Activation function for the layer
     pub activation: Option<Activation>,
-    pub activation_output: Option<Array2<f32>>, // 保存激活后的输出
+    /// Cached output after activation for use in backward pass
+    pub activation_output: Option<Array2<f32>>,
 }
 
 impl Dense {
-    /// 默认不使用激活函数
+    /// Default constructor without activation function
     pub fn new(input_dim: usize, output_dim: usize) -> Self {
         Self::new_with_activation(input_dim, output_dim, None)
     }
-    /// 带激活函数的构造函数
+    /// Constructor with activation function
     pub fn new_with_activation(
         input_dim: usize,
         output_dim: usize,
@@ -109,25 +110,25 @@ impl Layer for Dense {
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
-        // 如果使用了激活函数，则计算链式法则：dL/dz = (dActivation/dz) ⊙ dL/da
+        // If activation function is used, apply chain rule: dL/dz = (dActivation/dz) ⊙ dL/da
         if let Some(act) = &self.activation {
             if *act == Activation::Softmax {
-                let a = self.activation_output.take().expect("前向传播未运行");
+                let a = self.activation_output.take().expect("Forward pass has not been run");
                 grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
             } else {
-                let a = self.activation_output.take().expect("前向传播未运行");
+                let a = self.activation_output.take().expect("Forward pass has not been run");
                 let deriv = Activation::activation_derivative(&a, act);
                 grad_upstream = deriv * &grad_upstream;
             }
         }
-        // 计算梯度：权重梯度 = input^T dot grad_upstream
-        let input = self.input_cache.take().expect("前向传播未运行");
+        // Calculate gradients: weight gradient = input^T dot grad_upstream
+        let input = self.input_cache.take().expect("Forward pass has not been run");
         let grad_w = input.t().dot(&grad_upstream);
-        // 偏置梯度：对每一行求和，保持二维
+        // Bias gradient: sum across each row, keeping two dimensions
         let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
         self.grad_weights = Some(grad_w);
         self.grad_bias = Some(grad_b);
-        // 计算传递给上一层的梯度
+        // Calculate gradient to pass to previous layer
         let grad_input = grad_upstream.dot(&self.weights.t());
         grad_input.into_dyn()
     }

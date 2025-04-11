@@ -165,26 +165,26 @@ fn rmsprop_test() {
 
 #[test]
 fn with_activation_test() {
-    // 构造形状为 (batch_size=2, input_dim=4) 的输入张量，以及目标张量 (batch_size=2, output_dim=3)
+    // Create input tensor with shape (batch_size=2, input_dim=4) and target tensor (batch_size=2, output_dim=3)
     let x = Array::ones((2, 4)).into_dyn();
     let y = Array::ones((2, 1)).into_dyn();
 
-    // 构建模型：示例中使用 Dense 层并指定激活函数（例如使用 ReLU 或 Softmax）
-    // 这里第一层采用 Sigmoid 激活，第二层采用 Softmax 激活（你可以根据需要修改）
+    // Build model: using Dense layers with specified activation functions (such as ReLU or Softmax)
+    // Here we use Sigmoid activation for the first layer and Softmax for the second layer (you can modify as needed)
     let mut model = Sequential::new();
     model.add(Dense::new_with_activation(4, 3, Some(Activation::Sigmoid)))
         .add(Dense::new_with_activation(3, 1, Some(Activation::Softmax)));
 
-    // 选择优化器，例如 RMSprop、Adam 或 SGD，这里选择 RMSprop 作为示例
+    // Choose an optimizer, e.g., RMSprop, Adam or SGD - using RMSprop as an example here
     model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
-    // 打印模型结构
+    // Print model structure
     model.summary();
 
-    // 训练模型（这里只做简单迭代示例）
+    // Train the model (simple iteration example)
     model.fit(&x, &y, 3);
 
-    // 使用 predict 得到输出
+    // Get output using predict
     let prediction = model.predict(&x);
     println!("Prediction: {:?}", prediction);
 }
