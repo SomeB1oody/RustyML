@@ -1,5 +1,4 @@
 use ndarray::ArrayView1;
-use crate::ModelError;
 use statrs::distribution::{Discrete, Hypergeometric};
 use std::collections::HashMap;
 
@@ -14,7 +13,7 @@ use std::collections::HashMap;
 /// * `y_pred` - An `ArrayView1<f64>` containing the predicted values
 ///
 /// # Returns
-/// * `f64` - The mean squared error value
+/// * `f64` - The mean squared error value (return 0.0 if input array is empty)
 ///
 /// # Panics
 /// * Panics if the two arrays have different lengths
@@ -30,9 +29,14 @@ use std::collections::HashMap;
 /// let mse = mean_squared_error(actual.view(), predicted.view());
 /// // MSE = ((3.0-2.5)² + (-0.5-0.0)² + (2.0-2.1)² + (7.0-7.8)²) / 4
 /// //    = (0.25 + 0.25 + 0.01 + 0.64) / 4 ≈ 0.2875
+/// println!("{}", mse);
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
 pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f64 {
+    if y_true.len() != y_pred.len() {
+        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", y_true.len(), y_pred.len());
+    }
+
     let n = y_true.len();
 
     // Handle edge case
@@ -64,8 +68,10 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 /// * `targets` - A slice of f64 values containing the actual/target values
 ///
 /// # Returns
-/// - `Ok(f64)` - The RMSE as a f64 value on success
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+/// * `f64` - The RMSE as a f64 value on success(return 0.0 if input array is empty)
+///
+/// # Panics
+/// * Panics if the two arrays have different lengths
 ///
 /// # Examples
 ///
@@ -75,29 +81,22 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 ///
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
-/// let rmse = root_mean_squared_error(predictions.view(), targets.view()).unwrap();
+/// let rmse = root_mean_squared_error(predictions.view(), targets.view());
 /// // RMSE = sqrt(((2-1)^2 + (3-2)^2 + (4-3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
 pub fn root_mean_squared_error(
     predictions: ArrayView1<f64>,
     targets: ArrayView1<f64>
-) -> Result<f64, ModelError> {
+) -> f64 {
     // Check if inputs are empty
-    if predictions.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays cannot be empty".to_string()
-        ));
+    if predictions.is_empty() || targets.is_empty() {
+        return 0.0;
     }
 
     // Check if arrays have matching lengths
     if predictions.len() != targets.len() {
-        return Err(ModelError::InputValidationError(
-            format!(
-                "Prediction and target arrays must have the same length. Predicted: {}, Actual: {}",
-                predictions.len(), targets.len()
-            )
-        ));
+        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predictions.len(), targets.len());
     }
 
     // Use zip_fold_while for efficient calculation with early error detection
@@ -115,9 +114,9 @@ pub fn root_mean_squared_error(
     // Take square root for RMSE
     // Handle potential numerical issues that might cause slightly negative values
     if mse < 0.0 && mse > -f64::EPSILON {
-        Ok(0.0)
+        0.0
     } else {
-        Ok(mse.sqrt())
+        mse.sqrt()
     }
 }
 
@@ -132,8 +131,10 @@ pub fn root_mean_squared_error(
 /// * `targets` - An `ArrayView1<f64>` containing the actual/target values
 ///
 /// # Returns
-/// - `Ok(f64)` - The MAE as a f64 value on success
-/// - `Err(ModelError::InputValidationError)` - If input validation fails
+/// * `f64` - The MAE as a f64 value on success(return 0.0 if input array is empty)
+///
+/// # Panics
+/// * Panics if the two arrays have different lengths
 ///
 /// # Examples
 ///
@@ -143,29 +144,22 @@ pub fn root_mean_squared_error(
 ///
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
-/// let mae = mean_absolute_error(predictions.view(), targets.view()).unwrap();
+/// let mae = mean_absolute_error(predictions.view(), targets.view());
 /// // MAE = (|2-1| + |3-2| + |4-3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
 pub fn mean_absolute_error(
     predictions: ArrayView1<f64>,
     targets: ArrayView1<f64>
-) -> Result<f64, ModelError> {
+) -> f64 {
     // Check if inputs are empty
-    if predictions.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays cannot be empty".to_string()
-        ));
+    if predictions.is_empty() || targets.is_empty() {
+        return 0.0;
     }
 
     // Check if arrays have matching lengths
     if predictions.len() != targets.len() {
-        return Err(ModelError::InputValidationError(
-            format!(
-                "Prediction and target arrays must have the same length. Predicted: {}, Actual: {}",
-                predictions.len(), targets.len()
-            )
-        ));
+        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predictions.len(), targets.len());
     }
 
     // Calculate sum of absolute errors in a single pass
@@ -180,7 +174,7 @@ pub fn mean_absolute_error(
     // Calculate mean absolute error
     let mae = sum_absolute_errors / predictions.len() as f64;
 
-    Ok(mae)
+    mae
 }
 
 /// Calculate the R-squared (coefficient of determination) score
@@ -194,8 +188,10 @@ pub fn mean_absolute_error(
 /// * `actual` - `ArrayView1<f64>` of actual/target values
 ///
 /// # Returns
-///  - `Ok(f64)` - R-squared value, typically ranges from 0 to 1
-///  - `Err(ModelError::InputValidationError)` - If input validation fails
+///  * `f64` - R-squared value, typically ranges from 0 to 1(return 0.0 if input array is empty)
+///
+/// # Panics
+/// * Panics if the two arrays have different lengths
 ///
 /// # Notes
 /// - Returns 0 if SST is 0 (when all actual values are identical)
@@ -211,28 +207,21 @@ pub fn mean_absolute_error(
 ///
 /// let predicted = array![2.0, 3.0, 4.0];
 /// let actual = array![1.0, 3.0, 5.0];
-/// let r2 = r2_score(predicted.view(), actual.view()).unwrap();
+/// let r2 = r2_score(predicted.view(), actual.view());
 /// // For actual values [1,3,5], mean=3, SSE = 1+0+1 = 2, SST = 4+0+4 = 8, so R2 = 1 - (2/8) = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
 pub fn r2_score(
     predicted: ArrayView1<f64>,
     actual: ArrayView1<f64>
-) -> Result<f64, ModelError> {
+) -> f64 {
     // Validate inputs first
     if predicted.is_empty() || actual.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays cannot be empty".to_string()
-        ));
+        return 0.0;
     }
 
     if predicted.len() != actual.len() {
-        return Err(ModelError::InputValidationError(
-            format!(
-                "Predicted and actual arrays must have the same length. Predicted: {}, Actual: {}",
-                predicted.len(), actual.len()
-            )
-        ));
+        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
     }
 
     // Calculate mean of actual values
@@ -252,10 +241,10 @@ pub fn r2_score(
 
     // Prevent division by zero (when all actual values are identical)
     if sst < 1e-10 {  // Using small epsilon for numerical stability
-        return Ok(0.0);
+        return 0.0;
     }
 
-    Ok(1.0 - (sse / sst))
+    1.0 - (sse / sst)
 }
 
 /// # Confusion Matrix for binary classification evaluation
@@ -287,7 +276,7 @@ pub fn r2_score(
 /// let actual = arr1(&[1.0, 0.0, 1.0, 0.0, 1.0]);
 ///
 /// // Create confusion matrix
-/// let cm = ConfusionMatrix::new(predicted.view(), actual.view()).unwrap();
+/// let cm = ConfusionMatrix::new(predicted.view(), actual.view());
 ///
 /// // Calculate performance metrics
 /// println!("Accuracy: {:.2}", cm.accuracy());
@@ -331,19 +320,18 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - A new confusion matrix if input arrays have the same length
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    pub fn new(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Result<Self, ModelError> {
+    /// * `Self` - A new confusion matrix if input arrays have the same length
+    ///
+    /// # Panics
+    /// * Panics if the two arrays have different lengths
+    /// * Panics if input array is empty
+    pub fn new(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Self {
         if predicted.len() != actual.len() {
-            return Err(ModelError::InputValidationError(
-                format!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len())
-            ));
+            panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
         }
 
         if predicted.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input arrays must not be empty".to_string()
-            ))
+            panic!("Input arrays must not be empty");
         }
 
         let mut tp = 0;
@@ -364,7 +352,7 @@ impl ConfusionMatrix {
             }
         }
 
-        Ok(Self { tp, fp, tn, fn_ })
+        Self { tp, fp, tn, fn_ }
     }
 
     /// Get the components of the confusion matrix
@@ -510,8 +498,11 @@ impl ConfusionMatrix {
 /// * `actual` - Array of actual class labels
 ///
 /// # Returns
-/// - `Ok(f64)` - The accuracy score between 0.0 and 1.0
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+/// * `f64` - The accuracy score between 0.0 and 1.0
+///
+/// # Panics
+/// * Panics if the two arrays have different lengths
+/// * Panics if input array is empty
 ///
 /// # Examples
 ///
@@ -521,22 +512,18 @@ impl ConfusionMatrix {
 ///
 /// let predicted = array![0.0, 1.0, 1.0];
 /// let actual = array![0.0, 0.0, 1.0];
-/// let acc = accuracy(predicted.view(), actual.view()).unwrap();
+/// let acc = accuracy(predicted.view(), actual.view());
 ///
 /// // Two out of three predictions are correct: accuracy = 2/3 ≈ 0.6666666666666667
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
-pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Result<f64, ModelError> {
+pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     if predicted.len() != actual.len() {
-        return Err(ModelError::InputValidationError(
-            format!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len())
-        ));
+        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
     }
 
-    if predicted.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays must not be empty".to_string()
-        ))
+    if predicted.is_empty() || actual.is_empty() {
+        panic!("Input arrays must not be empty");
     }
 
     let correct_predictions = predicted
@@ -545,7 +532,7 @@ pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Result<f
         .filter(|&(p, a)| (p - a).abs() < f64::EPSILON)
         .count();
 
-    Ok(correct_predictions as f64 / predicted.len() as f64)
+    correct_predictions as f64 / predicted.len() as f64
 }
 
 /// Constructs a contingency matrix from two label arrays and returns:
@@ -684,14 +671,15 @@ fn expected_mutual_information(
 /// - sqrt represents the square root function
 ///
 /// # Parameters
-///
 /// * `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
 /// * `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
+/// * `f64` - The NMI score as a float between 0 and 1
 ///
-/// - `Ok(f64)` - The NMI score as a float between 0 and 1
-/// - `Err(ModelError::InputValidationError)` - If the input arrays have different lengths
+/// # Panics
+/// * Panics if the two arrays have different lengths
+/// * Panics if input array is empty
 ///
 /// # Examples
 ///
@@ -702,20 +690,16 @@ fn expected_mutual_information(
 /// let true_labels = array![0, 0, 1, 1, 2, 2];
 /// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view()).unwrap();
+/// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view());
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
-pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> Result<f64, ModelError> {
+pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
     if labels_true.len() != labels_pred.len() {
-        return Err(ModelError::InputValidationError(
-            format!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len())
-        ));
+        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len());
     }
 
-    if labels_true.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays cannot be empty".to_string()
-        ))
+    if labels_true.is_empty() || labels_pred.is_empty() {
+        panic!("Input arrays cannot be empty");
     }
 
     let n = labels_true.len();
@@ -728,9 +712,9 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
     if h_true * h_pred == 0.0 {
-        Ok(0.0)
+        0.0
     } else {
-        Ok(mi / (h_true * h_pred).sqrt())
+        mi / (h_true * h_pred).sqrt()
     }
 }
 
@@ -758,8 +742,11 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The AMI score, typically between -1 and 1
-/// - `Err(ModelError::InputValidationError)` - If the input arrays have different lengths
+/// * `f64` - The AMI score, typically between -1 and 1
+///
+/// # Panics
+/// * Panics if the two arrays have different lengths
+/// * Panics if input array is empty
 ///
 /// # Examples
 ///
@@ -770,20 +757,16 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
 /// let true_labels = array![0, 0, 1, 1, 2, 2];
 /// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let ami = adjusted_mutual_info(true_labels.view(), pred_labels.view()).unwrap();
+/// let ami = adjusted_mutual_info(true_labels.view(), pred_labels.view());
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
-pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> Result<f64, ModelError> {
+pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
     if labels_true.len() != labels_pred.len() {
-        return Err(ModelError::InputValidationError(
-            format!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len())
-        ));
+        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len());
     }
 
-    if labels_true.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays cannot be empty".to_string()
-        ))
+    if labels_true.is_empty() || labels_pred.is_empty() {
+        panic!("Input arrays cannot be empty");
     }
 
     let n = labels_true.len();
@@ -798,9 +781,9 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
     let emi = expected_mutual_information(&row_sums, &col_sums, n);
     let denominator = ((h_true + h_pred) / 2.0) - emi;
     if denominator.abs() < 1e-10 {
-        Ok(1.0)
+        1.0
     } else {
-        Ok((mi - emi) / denominator)
+        (mi - emi) / denominator
     }
 }
 
@@ -817,9 +800,12 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// * `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
 ///
 /// # Returns
+/// * `f64` - The AUC-ROC value between 0.0 and 1.0
 ///
-/// - `Ok(f64)` - The AUC-ROC value between 0.0 and 1.0
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+/// # Panics
+/// * Panics if the two arrays have different lengths
+/// * Panics if input array is empty
+/// * Panics if there are no positive or negative samples
 ///
 /// # Example
 ///
@@ -829,7 +815,7 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 ///
 /// let scores = array![0.1, 0.4, 0.35, 0.8];
 /// let labels = array![false, true, false, true];
-/// let auc = calculate_auc(scores.view(), labels.view()).unwrap();
+/// let auc = calculate_auc(scores.view(), labels.view());
 /// println!("AUC-ROC: {}", auc);
 /// ```
 ///
@@ -838,16 +824,12 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// The implementation handles tied scores by assigning average ranks to tied elements.
 /// It implements the AUC calculation based on the Mann-Whitney U statistic, which is
 /// mathematically equivalent to the area under the ROC curve.
-pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> Result<f64, ModelError> {
+pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> f64 {
     if scores.len() != labels.len() {
-        return Err(ModelError::InputValidationError(
-            format!("Input arrays must have the same length. Scores: {}, Labels: {}", scores.len(), labels.len())
-        ))
+        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", scores.len(), labels.len());
     }
-    if scores.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input arrays must have at least one element".to_string()
-        ))
+    if scores.is_empty() || labels.is_empty() {
+        panic!("Input arrays cannot be empty");
     }
 
     // Pack the (score, label) pairs into a vector
@@ -892,13 +874,11 @@ pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> Resul
 
     // If there are no positive or negative samples, AUC cannot be calculated
     if pos_count == 0 || neg_count == 0 {
-        return Err(ModelError::InputValidationError(
-            "Cannot calculate AUC without both positive and negative samples.".to_string()
-        ));
+        panic!("AUC cannot be calculated because there are no positive or negative samples");
     }
 
     // Compute the Mann–Whitney U statistic
     let u = sum_positive_ranks - (pos_count as f64 * (pos_count as f64 + 1.0) / 2.0);
     // AUC is equal to the U statistic divided by (n_positive * n_negative)
-    Ok(u / (pos_count as f64 * neg_count as f64))
+    u / (pos_count as f64 * neg_count as f64)
 }

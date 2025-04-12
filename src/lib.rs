@@ -235,7 +235,7 @@ mod utility_test;
 /// let predicted = Array1::from(vec![1.0, 0.0, 1.0, 1.0, 0.0]);
 /// let actual = Array1::from(vec![1.0, 0.0, 0.0, 1.0, 1.0]);
 ///
-/// let cm = ConfusionMatrix::new(predicted.view(), actual.view()).unwrap();
+/// let cm = ConfusionMatrix::new(predicted.view(), actual.view());
 /// println!("{}", cm.summary());
 /// ```
 pub mod metric;
