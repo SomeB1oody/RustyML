@@ -518,7 +518,7 @@ pub fn estimate_bandwidth(
 ) -> f64 {
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
-        panic!("quantile should be in range ]0, 1[");
+        panic!("quantile should be in range [0, 1]");
     }
 
     let (n_samples_total, _) = x.dim();
