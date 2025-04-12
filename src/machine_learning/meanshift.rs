@@ -503,7 +503,7 @@ impl MeanShift {
 /// The bandwidth is estimated based on the pairwise distances between a subset of points.
 ///
 /// # Parameters
-/// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+/// * `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
 /// * `quantile` - The quantile of the pairwise distances to use as the bandwidth.
 /// * `n_samples` - The number of samples to use for the distance calculation.
 /// * `random_state` - Seed for random number generation.
