@@ -1,5 +1,4 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
-use ndarray_linalg::{Eig, Inverse};
 use crate::ModelError;
 use rayon::prelude::*;
 
@@ -156,7 +155,7 @@ impl LDA {
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        // Extract unique classes from y using ndarray (first convert to Vec, then dedup, then convert to Array1)
+        // Extract unique class labels from y
         let mut classes_vec: Vec<i32> = y.iter().copied().collect();
         classes_vec.sort();
         classes_vec.dedup();
@@ -171,34 +170,26 @@ impl LDA {
         let n_classes = self.classes.as_ref().unwrap().len();
         let classes = self.classes.as_ref().unwrap();
 
-        // Parallel calculation of each class's prior probability and mean
+        // Calculate prior probabilities and means for each class in parallel
         let class_stats: Vec<(usize, f64, Array1<f64>, Vec<usize>)> = classes.iter().enumerate()
             .map(|(i, &class)| {
-                // Find indices of samples belonging to the current class
-                let indices: Vec<usize> = y
-                    .indexed_iter()
+                let indices: Vec<usize> = y.indexed_iter()
                     .filter(|&(_, &val)| val == class)
                     .map(|(idx, _)| idx)
                     .collect();
-
                 let n_class = indices.len();
                 let prior = n_class as f64 / n_samples as f64;
                 let class_data = x.select(Axis(0), &indices);
-
                 let mean_row = class_data.mean_axis(Axis(0))
                     .expect("Error computing class mean");
-
                 (i, prior, mean_row, indices)
             })
             .collect();
 
-        // Extract prior probabilities and means from computed results
+        // Extract prior probabilities and means
         let mut priors_vec = Vec::with_capacity(n_classes);
         let mut means_mat = Array2::<f64>::zeros((n_classes, n_features));
-
-        // Store indices for each class for further calculations
         let mut class_indices = Vec::with_capacity(n_classes);
-
         for (i, prior, mean_row, indices) in class_stats {
             priors_vec.push(prior);
             means_mat.row_mut(i).assign(&mean_row);
@@ -208,13 +199,11 @@ impl LDA {
         self.priors = Some(Array1::from_vec(priors_vec));
         self.means = Some(means_mat);
 
-        // Parallel computation of the within-class scatter matrix (Sw)
+        // Calculate within-class scatter matrix (Sw) in parallel
         let sw_parts: Vec<Array2<f64>> = class_indices.par_iter()
             .map(|(i, indices)| {
                 let class_data = x.select(Axis(0), indices);
                 let class_mean = &self.means.as_ref().unwrap().row(*i);
-
-                // For this class, compute the scatter matrix part in parallel
                 class_data.outer_iter()
                     .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, row| {
                         let diff = &row - class_mean;
@@ -224,19 +213,24 @@ impl LDA {
             })
             .collect();
 
-        // Combine all classes' scatter matrices
         let sw = sw_parts.into_iter()
             .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, matrix| acc + matrix);
 
-        // Covariance matrix estimation: cov = Sw / (n_samples - n_classes)
+        // Estimate covariance matrix: cov = Sw / (n_samples - n_classes)
         let cov = sw / ((n_samples - n_classes) as f64);
-        self.cov_inv = Some(cov.inv()?);
+
+        // Convert cov from ndarray to nalgebra DMatrix and calculate its inverse
+        let cov_slice = cov.as_slice().ok_or("Failed to convert cov to slice")?;
+        let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
+        let cov_inv_mat = cov_mat.try_inverse().ok_or("Failed to invert covariance matrix")?;
+        let cov_inv_arr = Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec())?;
+        self.cov_inv = Some(cov_inv_arr);
 
         // Calculate overall mean of x
         let overall_mean = x.mean_axis(Axis(0))
             .ok_or(ModelError::ProcessingError("Error computing overall mean".to_string()))?;
 
-        // Parallel computation of the between-class scatter matrix (Sb)
+        // Calculate between-class scatter matrix (Sb) in parallel
         let sb_parts: Vec<Array2<f64>> = classes.iter().enumerate()
             .collect::<Vec<_>>()
             .par_iter()
@@ -247,37 +241,40 @@ impl LDA {
                 count * diff_col.dot(&diff_col.t())
             })
             .collect();
-
-        // Combine between-class scatter matrices from all classes
         let sb = sb_parts.into_iter()
             .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, matrix| acc + matrix);
 
-        // Solve the generalized eigenvalue problem: cov_inv * Sb
+        // Solve generalized eigenvalue problem: calculate a_mat = cov_inv * Sb
         let cov_inv = self.cov_inv.as_ref().unwrap();
         let a_mat = cov_inv.dot(&sb);
-        let (eigenvalues_complex, eigenvectors_complex) = a_mat.eig()?;
-        let eigenvalues = eigenvalues_complex.mapv(|c| c.re);
-        let eigenvectors = eigenvectors_complex.mapv(|c| c.re);
+        // Symmetrize a_mat to ensure symmetric eigendecomposition: a_sym = (a_mat + a_mat^T)/2
+        let a_sym = (a_mat.clone() + a_mat.t()) * 0.5;
+        let a_slice = a_sym.as_slice().ok_or("Failed to convert a_sym to slice")?;
+        let a_dmat = nalgebra::DMatrix::from_row_slice(n_features, n_features, a_slice);
+        let sym_eigen = nalgebra::SymmetricEigen::new(a_dmat);
 
-        // Sort eigenvalue-index pairs in descending order
-        let mut eig_pairs: Vec<(usize, f64)> = eigenvalues
-            .iter()
+        // Convert eigenvalues and eigenvectors from nalgebra to ndarray format
+        let eigenvalues = Array1::from_vec(sym_eigen.eigenvalues.as_slice().to_vec());
+        let eigenvectors = Array2::from_shape_vec((n_features, n_features), sym_eigen.eigenvectors.as_slice().to_vec())?;
+
+        // Sort indices by eigenvalues in descending order
+        let mut eig_pairs: Vec<(usize, f64)> = eigenvalues.iter()
             .enumerate()
             .map(|(i, &val)| (i, val))
             .collect();
-        eig_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        eig_pairs.par_sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        // Maximum dimension for LDA is n_classes - 1
+        // LDA's maximum dimensionality is n_classes - 1
         let max_components = if n_classes > 1 { n_classes - 1 } else { 1 };
         let mut w = Array2::<f64>::zeros((n_features, max_components));
         for (j, &(i, _)) in eig_pairs.iter().take(max_components).enumerate() {
-            let vec = eigenvectors.column(i).to_owned();
+            // Use each column i of eigenvectors as a projection vector
+            let vec = eigenvectors.slice(s![.., i]).to_owned();
             w.column_mut(j).assign(&vec);
         }
         self.projection = Some(w);
 
         println!("LDA model training finished");
-
         Ok(self)
     }
 

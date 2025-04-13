@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.5.0] - 2025-4-13
+### Changed
+- Replace `ndarray-linalg` with `nalgebra` for `PCA`, `LDA`, and `KernelPCA`
+
 ## [v0.5.0] - 2025-4-12
 ### Changed
 - Refactor metrics API to remove `Result` usage and add panics

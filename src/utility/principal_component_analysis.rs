@@ -1,6 +1,5 @@
-use ndarray::{Array1, Array2, ArrayView2};
+use ndarray::{Array1, Array2, ArrayView2, Axis};
 use std::error::Error;
-use ndarray_linalg::Eigh;
 use crate::ModelError;
 use rayon::prelude::*;
 
@@ -174,17 +173,18 @@ impl PCA {
     /// - Sorts components by explained variance
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn Error>> {
         use crate::machine_learning::preliminary_check;
-
         preliminary_check(x, None)?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        if self.n_components <= 0 {
-            return Err(Box::new(ModelError::InputValidationError("Number of components must be positive.".to_string())));
+        if self.n_components == 0 {
+            return Err(Box::new(ModelError::InputValidationError(
+                "Number of components must be positive.".to_string(),
+            )));
         }
 
-        // Calculate mean using parallel iteration
+        // Calculate feature means in parallel
         let mean: Array1<f64> = (0..n_features)
             .into_par_iter()
             .map(|i| x.column(i).mean().unwrap_or(0.0))
@@ -194,46 +194,62 @@ impl PCA {
         // Center the data in parallel
         let mut x_centered = x.to_owned();
         x_centered
-            .axis_iter_mut(ndarray::Axis(0))
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
-            .enumerate()
-            .for_each(|(_, mut row)| {
+            .for_each(|mut row| {
                 for j in 0..n_features {
                     row[j] -= mean[j];
                 }
             });
 
-        // Calculate covariance matrix
-        let cov = x_centered.t().dot(&x_centered) / (n_samples as f64 - 1.0);
+        // Use SVD for computation (no need to compute covariance matrix first)
+        // Convert ndarray data to nalgebra DMatrix
+        let x_slice = x_centered
+            .as_slice()
+            .ok_or("Failed to convert x_centered to slice")?;
+        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
 
-        // Calculate eigenvalues and eigenvectors
-        let (eigvals, eigvecs) = cov.eigh(ndarray_linalg::UPLO::Upper)?;
+        // Compute SVD, requesting singular values and right singular vectors
+        let svd = nalgebra::SVD::new(x_mat, true, true);
+        let s_vals = svd.singular_values; // Length is min(n_samples, n_features)
+        let m = s_vals.len();
+        // Number of principal components to keep: not exceeding the available singular values
+        let n_components = self.n_components.min(m);
 
-        // Sort by eigenvalue in descending order
-        let mut indices: Vec<usize> = (0..eigvals.len()).collect();
-        indices.sort_by(|&a, &b| eigvals[b].partial_cmp(&eigvals[a]).unwrap());
+        // Get the right singular vector matrix V^T as principal components. Each row of V^T is a principal component
+        let v_t = svd.v_t.ok_or("SVD did not compute V^T")?;
+        let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| {
+            v_t.row(i)[j]
+        });
 
-        // Get top n_components eigenvectors
-        let n = self.n_components.min(n_features);
-        let mut components = Array2::<f64>::zeros((n, n_features));
-        let mut explained_variance = Array1::<f64>::zeros(n);
-        let mut singular_values = Array1::<f64>::zeros(n);
+        // Calculate explained variance using singular values: eigenvalue = (singular_value^2) / (n_samples - 1)
+        let mut explained_variance = Array1::<f64>::zeros(n_components);
+        let mut singular_values = Array1::<f64>::zeros(n_components);
+        let values: Vec<(usize, f64, f64)> = (0..n_components)
+            .into_par_iter()
+            .map(|i| {
+                let s_val = s_vals[i];
+                let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
+                (i, exp_var, s_val)
+            })
+            .collect();
 
-        for i in 0..n {
-            let idx = indices[i];
-            explained_variance[i] = eigvals[idx];
-            singular_values[i] = eigvals[idx].sqrt() * ((n_samples as f64 - 1.0).sqrt());
-
-            let mut row = components.row_mut(i);
-            for (j, &val) in eigvecs.column(idx).iter().enumerate() {
-                row[j] = val;
-            }
+        for (i, exp_var, s_val) in values {
+            explained_variance[i] = exp_var;
+            singular_values[i] = s_val;
         }
 
-        // Calculate explained variance ratio
-        let total_var = eigvals.sum();
-        let explained_variance_ratio = explained_variance.map(|&v| v / total_var);
 
+        // Total variance: calculated using all singular values (note: when n_features > n_samples, remaining features have variance of 0)
+        let s_vals_vec: Vec<f64> = s_vals.iter().cloned().collect();
+        let total_variance: f64 = s_vals_vec.par_iter()
+            .map(|&s| s * s)
+            .sum::<f64>() / ((n_samples - 1) as f64);
+
+        // Calculate explained variance ratio
+        let explained_variance_ratio = explained_variance.map(|v| v / total_variance);
+
+        // Save results to the struct
         self.components = Some(components);
         self.mean = Some(mean);
         self.explained_variance = Some(explained_variance);
@@ -323,7 +339,7 @@ impl PCA {
         let n_features = mean.len();
 
         x_restored
-            .axis_chunks_iter_mut(ndarray::Axis(0), 1)
+            .axis_chunks_iter_mut(Axis(0), 1)
             .into_par_iter()
             .for_each(|mut chunk| {
                 for j in 0..n_features {

@@ -1,5 +1,4 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
-use ndarray_linalg::eigh::Eigh;
 pub use crate::machine_learning::svc::KernelType;
 use crate::ModelError;
 use rayon::prelude::*;
@@ -261,13 +260,11 @@ impl KernelPCA {
         }
 
         let n_samples = x.nrows();
-        // Save a clone of the training data
+        // Save training data
         self.x_fit = Some(x.to_owned());
 
-        // Calculate the kernel matrix: k_matrix[i, j] = kernel(x[i], x[j])
+        // Calculate kernel matrix: k_matrix[i, j] = kernel(x[i], x[j])
         let mut k_matrix = Array2::<f64>::zeros((n_samples, n_samples));
-
-        // Use Rayon to compute kernel values for upper triangular matrix in parallel, avoiding direct modification of k_matrix in closure
         let kernel_vals: Vec<((usize, usize), f64)> = (0..n_samples)
             .into_par_iter()
             .flat_map(|i| {
@@ -280,22 +277,19 @@ impl KernelPCA {
             })
             .collect();
 
-        // Fill the kernel matrix
         for ((i, j), k_val) in kernel_vals {
             k_matrix[[i, j]] = k_val;
             k_matrix[[j, i]] = k_val;
         }
 
-        // Calculate row means and total mean
+        // Calculate mean for each row and the overall mean
         let row_means = k_matrix.mean_axis(Axis(1)).unwrap();
         let total_mean = k_matrix.mean().unwrap();
         self.row_means = Some(row_means.clone());
         self.total_mean = Some(total_mean);
 
-        // Center the k_matrix: k_centered[i,j] = k_matrix[i,j] - row_means[i] - row_means[j] + total_mean
+        // Center the kernel matrix: k_centered[i,j] = k_matrix[i,j] - row_means[i] - row_means[j] + total_mean
         let mut k_centered = k_matrix.clone();
-
-        // Similarly avoid direct modification of k_centered in parallel closure
         let centered_vals: Vec<((usize, usize), f64)> = (0..n_samples)
             .into_par_iter()
             .flat_map(|i| {
@@ -308,45 +302,46 @@ impl KernelPCA {
             })
             .collect();
 
-        // Fill the centered matrix
         for ((i, j), centered_val) in centered_vals {
             k_centered[[i, j]] = centered_val;
         }
 
-        // Perform eigendecomposition on the centered kernel matrix (use eigh for symmetric matrices)
-        let eig_result = k_centered.eigh(ndarray_linalg::UPLO::Lower)?;
-        let eigenvalues_all = eig_result.0;
-        let eigenvectors_all = eig_result.1; // Each column is an eigenvector
+        // Perform eigenvalue decomposition on the centered kernel matrix
+        let k_centered_slice = k_centered
+            .as_slice()
+            .ok_or("Failed to convert k_centered to slice")?;
+        let k_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, k_centered_slice);
+        let sym_eigen = nalgebra::SymmetricEigen::new(k_mat);
 
-        // Collect and map eigenvalues and eigenvectors in parallel
-        let mut eig_pairs: Vec<(f64, Array1<f64>)> = eigenvalues_all
-            .iter()
-            .cloned()
-            .zip(eigenvectors_all.columns())
-            .par_bridge() // Convert to parallel iterator
-            .map(|(val, vec)| (val, vec.to_owned()))
+        // Convert eigenvalues and eigenvectors from nalgebra into Vec and create (eigenvalue, eigenvector) pairs
+        let mut eig_pairs: Vec<(f64, Vec<f64>)> = (0..n_samples)
+            .map(|i| {
+                let eigenvalue = sym_eigen.eigenvalues[i];
+                let eigenvector = sym_eigen.eigenvectors.column(i).iter().cloned().collect::<Vec<f64>>();
+                (eigenvalue, eigenvector)
+            })
             .collect();
 
-        // Sorting is still sequential since parallel sorting might be unstable
+        // Sort (eigenvalue, eigenvector) pairs by eigenvalue in descending order
         eig_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
-        // Select the top n_components eigenvalues and corresponding eigenvectors, and normalize them
+        // Select the top n_components eigenvalues and corresponding eigenvectors, and normalize the eigenvectors
         let mut selected_eigenvalues = Array1::<f64>::zeros(self.n_components);
         let mut selected_eigenvectors = Array2::<f64>::zeros((n_samples, self.n_components));
-
-        // This part could also be parallelized, but since n_components is typically small, parallel benefit is limited
         for i in 0..self.n_components {
-            selected_eigenvalues[i] = eig_pairs[i].0;
-            // If the eigenvalue is large enough, normalize: normalized_vec = eigenvector / sqrt(eigenvalue)
-            let norm_factor = if eig_pairs[i].0 > 1e-10 { eig_pairs[i].0.sqrt() } else { 1.0 };
-            let normalized_vec = &eig_pairs[i].1 / norm_factor;
-            selected_eigenvectors.column_mut(i).assign(&normalized_vec);
+            let (val, ref vec) = eig_pairs[i];
+            selected_eigenvalues[i] = val;
+            // When eigenvalue is large enough, normalize: normalized_vec = eigenvector / sqrt(eigenvalue)
+            let norm_factor = if val > 1e-10 { val.sqrt() } else { 1.0 };
+            let normalized_vec: Vec<f64> = vec.iter().map(|&v| v / norm_factor).collect();
+            for j in 0..n_samples {
+                selected_eigenvectors[[j, i]] = normalized_vec[j];
+            }
         }
 
         self.eigenvalues = Some(selected_eigenvalues);
         self.eigenvectors = Some(selected_eigenvectors);
 
-        // Return the projection of training data in the new space (each row corresponds to n_components features of a sample)
         Ok(self)
     }
 

@@ -1,5 +1,4 @@
 use ndarray::{Array1, ArrayView1, ArrayView2};
-use ndarray_linalg::Norm;
 use rand::seq::SliceRandom;
 use rand::rng;
 use crate::ModelError;
@@ -391,7 +390,8 @@ impl LinearSVC {
             }
 
             // Convergence check
-            let weight_diff = (&weights - &prev_weights).norm_l2() / weights.len() as f64;
+            let diff = &weights - &prev_weights;
+            let weight_diff = diff.iter().map(|&x| x * x).sum::<f64>().sqrt() / weights.len() as f64;
             let bias_diff = if self.fit_intercept { (bias - prev_bias).abs() } else { 0.0 };
 
             if weight_diff < self.tol && bias_diff < self.tol {

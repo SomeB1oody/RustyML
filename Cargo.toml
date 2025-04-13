@@ -14,7 +14,7 @@ categories = ["mathematics", "science", "algorithms"]
 [dependencies]
 ndarray = { version = "0.16.1", features = ["rayon"] }
 rand = "0.9.0"
-ndarray-linalg = { version = "0.17.0", default-features = false, features = ["openblas-static"] }
+nalgebra = "0.33.2"
 statrs = "0.18.0"
 rand_distr = "0.5.1"
 rayon = "1.10.0"
