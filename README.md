@@ -124,7 +124,7 @@ While the library is in its early stages, Rust AI aims to evolve into a comprehe
 ## Dependencies | 依赖
 - [ndarray](https://crates.io/crates/ndarray) (0.16.1): N-dimensional array library for Rust | Rust的N维数组库
 - [rand](https://crates.io/crates/rand) (0.9.0): Random number generators and other randomness functionality for Rust | Rust的随机数生成器和其他随机性功能
-- [ndarray-linalg](https://crates.io/crates/ndarray-linalg)(0.17.0): Linear algebra package for rust-ndarray | 给 Rust ndarray使用的线性代数包
+- [nalgebra](https://crates.io/crates/nalgebra) (0.33.2): General-purpose linear algebra library with transformations and statically-sized or dynamically-sized matrices | 通用线性代数库，具有变换和静态大小或动态大小的矩阵
 - [statrs](https://crates.io/crates/statrs)(0.18.0): A host of statistical utilities for Rust scientific computing | Rust 科学计算的一整套统计工具
 - [rand_distr](https://crates.io/crates/rand_distr)(0.5.1) Sampling from random number distributions | 从随机数分布中采样
 - [rayon](https://crates.io/crates/rayon)(1.10.0) a data-parallelism library for Rust | Rust的数据并行库
