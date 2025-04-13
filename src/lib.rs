@@ -309,7 +309,7 @@ pub mod dataset;
 /// ```
 ///
 /// Each submodule contains specialized components:
-/// - `layer`: Different neural network layers (Dense, Activation, Dropout, etc.)
+/// - `layer`: Different neural network layers (Dense, Activation, etc.)
 /// - `loss_function`: Various loss functions (MSE, CrossEntropy, etc.)
 /// - `optimizer`: Parameter optimization algorithms (SGD, Adam, RMSProp, etc.)
 /// - `sequential`: Sequential model for creating feed-forward neural networks
