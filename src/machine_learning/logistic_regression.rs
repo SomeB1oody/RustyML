@@ -8,12 +8,12 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `weights` - Model weights vector, None before training
-/// * `fit_intercept` - Whether to use intercept term (bias)
-/// * `learning_rate` - Controls gradient descent step size
-/// * `max_iter` - Maximum number of iterations for gradient descent
-/// * `tol` - Convergence tolerance, stops iteration when loss change is smaller than this value
-/// * `n_iter` - Actual number of iterations the algorithm ran for after fitting, None before training
+/// - `weights` - Model weights vector, None before training
+/// - `fit_intercept` - Whether to use intercept term (bias)
+/// - `learning_rate` - Controls gradient descent step size
+/// - `max_iter` - Maximum number of iterations for gradient descent
+/// - `tol` - Convergence tolerance, stops iteration when loss change is smaller than this value
+/// - `n_iter` - Actual number of iterations the algorithm ran for after fitting, None before training
 ///
 /// ## Examples
 ///
@@ -82,10 +82,10 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// * `fit_intercept` - Whether to add intercept term (bias)
-    /// * `learning_rate` - Learning rate for gradient descent
-    /// * `max_iterations` - Maximum number of iterations
-    /// * `tolerance` - Convergence tolerance, stops when loss change is below this value
+    /// - `fit_intercept` - Whether to add intercept term (bias)
+    /// - `learning_rate` - Learning rate for gradient descent
+    /// - `max_iterations` - Maximum number of iterations
+    /// - `tolerance` - Convergence tolerance, stops when loss change is below this value
     ///
     /// # Returns
     ///
@@ -357,12 +357,11 @@ impl LogisticRegression {
     ///
     /// This is a convenience method that combines `fit` and `predict` operations in a single call.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `train_x` - Training features as a 2D array where each row represents a sample
-    ///               and each column represents a feature
-    /// * `train_y` - Target values as a 1D array corresponding to the training samples
-    /// * `test_x` - Test features for which predictions are to be made
+    /// - `train_x` - Training features as a 2D array where each row represents a sample and each column represents a feature
+    /// - `train_y` - Target values as a 1D array corresponding to the training samples
+    /// - `test_x` - Test features for which predictions are to be made
     ///
     /// # Returns
     ///
@@ -383,14 +382,18 @@ impl LogisticRegression {
 /// This function transforms the input feature matrix into a new feature matrix containing
 /// polynomial combinations of the input features up to the specified degree.
 ///
-/// # Arguments
+/// # Parameters
 ///
-/// * `x` - Input feature matrix with shape (n_samples, n_features)
-/// * `degree` - The maximum degree of polynomial features to generate
+/// - `x` - Input feature matrix with shape (n_samples, n_features)
+/// - `degree` - The maximum degree of polynomial features to generate
+///
+/// # Returns
+///
+/// * `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 ///
 /// # Examples
 /// Following codes show how this function works with `LogisticRegression`:
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::machine_learning::logistic_regression::{generate_polynomial_features, LogisticRegression};
 ///
@@ -406,10 +409,6 @@ impl LogisticRegression {
 /// let mut model = LogisticRegression::default();
 /// model.fit(poly_training_x.view(), training_y.view()).unwrap();
 /// ```
-///
-/// # Returns
-///
-/// * `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2<f64> {
     let (n_samples, n_features) = x.dim();
 

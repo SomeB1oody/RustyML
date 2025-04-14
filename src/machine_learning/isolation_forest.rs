@@ -12,14 +12,14 @@ use rayon::prelude::*;
 /// It builds an ensemble of Isolation Trees that recursively partition the data space, and anomalies are points that require fewer partitions to isolate.
 ///
 /// # Fields
-/// * `trees` - A vector of Isolation Trees, where each tree is a recursive Node structure. These trees collectively form the forest and are used for anomaly detection.
-/// * `n_estimators` - The number of base estimators (trees) in the ensemble. More trees generally improve the robustness of the model but increase computation time.
-/// * `max_samples` - The number of samples to draw from the dataset to train each tree. If less than the total dataset size, this creates diversity among trees. Smaller subsamples lead to more diverse trees but might miss global patterns.
-/// * `max_depth` - Maximum depth limit for each tree. By default, this is set to ceil(log2(max_samples)), which is optimal for isolation trees. Limited depth prevents overfitting on noisy data.
-/// * `random_state` - Optional seed for the random number generator. Setting this enables reproducible results across different runs.
+///
+/// - `trees` - A vector of Isolation Trees, where each tree is a recursive Node structure. These trees collectively form the forest and are used for anomaly detection.
+/// - `n_estimators` - The number of base estimators (trees) in the ensemble. More trees generally improve the robustness of the model but increase computation time.
+/// - `max_samples` - The number of samples to draw from the dataset to train each tree. If less than the total dataset size, this creates diversity among trees. Smaller subsamples lead to more diverse trees but might miss global patterns.
+/// - `max_depth` - Maximum depth limit for each tree. By default, this is set to ceil(log2(max_samples)), which is optimal for isolation trees. Limited depth prevents overfitting on noisy data.
+/// - `random_state` - Optional seed for the random number generator. Setting this enables reproducible results across different runs.
 ///
 /// # Example
-///
 /// ```rust
 /// use rustyml::machine_learning::isolation_forest::IsolationForest;
 /// use ndarray::Array2;
@@ -80,13 +80,15 @@ impl IsolationForest {
     /// Creates a new IsolationForest
     ///
     /// # Parameters
-    /// * `n_estimators` - Number of trees
-    /// * `max_samples` - Number of subsamples per tree
-    /// * `max_depth` - Maximum depth (optional, if None it's automatically set to ceil(log2(max_samples)))
-    /// * `random_state` - Random seed (optional)
+    ///
+    /// - `n_estimators` - Number of trees
+    /// - `max_samples` - Number of subsamples per tree
+    /// - `max_depth` - Maximum depth (optional, if None it's automatically set to ceil(log2(max_samples)))
+    /// - `random_state` - Random seed (optional)
     ///
     /// # Returns
-    /// A new IsolationForest instance
+    ///
+    /// * `Self` - A new IsolationForest instance
     pub fn new(n_estimators: usize, max_samples: usize, max_depth: Option<usize>, random_state: Option<u64>) -> Self {
         let computed_max_depth = max_depth.unwrap_or_else(|| {
             (max_samples as f64).log2().ceil() as usize
@@ -154,9 +156,11 @@ impl IsolationForest {
     /// (each row is a sample, each column is a feature)
     ///
     /// # Parameters
+    ///
     /// * `x` - 2D array of input data samples
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - Trained instance
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError>{
@@ -217,13 +221,15 @@ impl IsolationForest {
     /// Recursively constructs an Isolation Tree
     ///
     /// # Parameters
-    /// * `x` - Current node data (sample matrix)
-    /// * `current_depth` - Current depth
-    /// * `max_depth` - Maximum allowed depth
-    /// * `rng` - Random number generator
+    ///
+    /// - `x` - Current node data (sample matrix)
+    /// - `current_depth` - Current depth
+    /// - `max_depth` - Maximum allowed depth
+    /// - `rng` - Random number generator
     ///
     /// # Returns
-    /// * `Box(Node)` - A new node 
+    ///
+    /// * `Box(Node)` - A new node
     ///
     /// If sample count <= 1 or max_depth is reached, returns a leaf node
     /// where the value represents the number of samples in that node
@@ -275,12 +281,14 @@ impl IsolationForest {
     /// Calculates the path length of a sample in a single tree
     ///
     /// # Parameters
-    /// * `node` - Current tree node
-    /// * `sample` - Sample data
-    /// * `current_depth` - Current depth in the tree
+    ///
+    /// - `node` - Current tree node
+    /// - `sample` - Sample data
+    /// - `current_depth` - Current depth in the tree
     ///
     /// # Returns
-    /// Path length of the sample
+    ///
+    /// * `f64` - Path length of the sample
     ///
     /// Recursively traverses the tree. If a leaf node is reached,
     /// returns the current depth plus the adjustment factor c(n)
@@ -313,9 +321,11 @@ impl IsolationForest {
     /// Calculates the anomaly score for a single sample
     ///
     /// # Parameters
+    ///
     /// * `sample` - Input sample as a slice of features
     ///
     /// # Returns
+    ///
     /// - `Ok(f64)` - Anomaly score between 0 and 1, where higher values indicate more anomalous samples
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     ///
@@ -378,9 +388,11 @@ impl IsolationForest {
     /// (each score corresponds to one sample)
     ///
     /// # Parameters
+    ///
     /// * `x` - 2D array of samples to predict
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)` - Array of anomaly scores for each input sample
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
@@ -405,9 +417,11 @@ impl IsolationForest {
     /// Fits the model and performs anomaly detection in one step
     ///
     /// # Parameters
+    ///
     /// * `x` - Input data, a 2D array where each row represents a sample
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)` - If successful, returns anomaly scores for each sample
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation

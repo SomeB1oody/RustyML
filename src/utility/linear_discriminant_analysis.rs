@@ -7,14 +7,14 @@ use rayon::prelude::*;
 /// A classifier and dimensionality reduction technique that projects data onto a lower-dimensional space while maintaining class separability.
 ///
 /// ## Fields
-/// * `classes` - Array of unique class labels from training data
-/// * `priors` - Prior probabilities for each class
-/// * `means` - Mean vectors for each class
-/// * `cov_inv` - Inverse of the common covariance matrix
-/// * `projection` - Projection matrix for dimensionality reduction
+///
+/// - `classes` - Array of unique class labels from training data
+/// - `priors` - Prior probabilities for each class
+/// - `means` - Mean vectors for each class
+/// - `cov_inv` - Inverse of the common covariance matrix
+/// - `projection` - Projection matrix for dimensionality reduction
 ///
 /// ## Examples
-///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::linear_discriminant_analysis::LDA;
@@ -77,6 +77,7 @@ impl LDA {
     /// Returns an error if the model has not been fitted
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<i32>)` - Array of class labels
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn get_classes(&self) -> Result<&Array1<i32>, ModelError> {
@@ -88,6 +89,7 @@ impl LDA {
     /// Returns an error if the model has not been fitted
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<f64>)` - Array of prior probabilities
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn get_priors(&self) -> Result<&Array1<f64>, ModelError> {
@@ -99,6 +101,7 @@ impl LDA {
     /// Returns an error if the model has not been fitted
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array2<f64>)` - Matrix of mean vectors
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn get_means(&self) -> Result<&Array2<f64>, ModelError> {
@@ -110,6 +113,7 @@ impl LDA {
     /// Returns an error if the model has not been fitted
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array2<f64>)` - Inverse covariance matrix
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn get_cov_inv(&self) -> Result<&Array2<f64>, ModelError> {
@@ -121,6 +125,7 @@ impl LDA {
     /// Returns an error if the model has not been fitted
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array2<f64>)` - Projection matrix
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn get_projection(&self) -> Result<&Array2<f64>, ModelError> {
@@ -133,10 +138,12 @@ impl LDA {
     /// dimensionality reduction.
     ///
     /// # Parameters
-    /// * `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
-    /// * `y` - Class labels corresponding to each sample, shape: (n_samples,)
+    ///
+    /// - `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
+    /// - `y` - Class labels corresponding to each sample, shape: (n_samples,)
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - Reference to self
     /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>) -> Result<&mut Self, Box<dyn std::error::Error>> {
@@ -281,9 +288,11 @@ impl LDA {
     /// Predicts class labels for new samples using the trained model
     ///
     /// # Parameters
+    ///
     /// * `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<i32>)` - Array of predicted class labels
     /// - `Err(ModelError::InputValidationError)` - If input does not match the expectation
     /// - `Err(ModelError::NotFitted)` - If not fitted
@@ -325,10 +334,12 @@ impl LDA {
     /// Transforms data using the trained projection matrix for dimensionality reduction
     ///
     /// # Parameters
-    /// * `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
-    /// * `n_components` - Number of dimensions after reduction (must be in \[1, n_classes - 1\])
+    ///
+    /// - `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
+    /// - `n_components` - Number of dimensions after reduction (must be in \[1, n_classes - 1\])
     ///
     /// # Returns
+    ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn transform(&self, x: ArrayView2<f64>, n_components: usize) -> Result<Array2<f64>, ModelError> {
@@ -349,11 +360,13 @@ impl LDA {
     /// Fits the model and transforms the data in one step
     ///
     /// # Parameters
-    /// * `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
-    /// * `y` - Class labels corresponding to each sample, shape: (n_samples,)
-    /// * `n_components` - Number of dimensions after reduction
+    ///
+    /// - `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
+    /// - `y` - Class labels corresponding to each sample, shape: (n_samples,)
+    /// - `n_components` - Number of dimensions after reduction
     ///
     /// # Returns
+    ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
     pub fn fit_transform(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>, n_components: usize) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
@@ -364,12 +377,14 @@ impl LDA {
     /// Calculates the discriminant score for classification
     ///
     /// # Parameters
-    /// * `x` - Feature vector of a sample, shape: (n_features,)
-    /// * `mean` - Mean vector of a class, shape: (n_features,)
-    /// * `prior` - Prior probability of a class
-    /// * `cov_inv` - Inverse of the common covariance matrix
+    ///
+    /// - `x` - Feature vector of a sample, shape: (n_features,)
+    /// - `mean` - Mean vector of a class, shape: (n_features,)
+    /// - `prior` - Prior probability of a class
+    /// - `cov_inv` - Inverse of the common covariance matrix
     ///
     /// # Returns
+    ///
     /// * `f64` - Discriminant score
     fn discriminant_score(
         &self,

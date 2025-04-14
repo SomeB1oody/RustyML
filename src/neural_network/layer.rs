@@ -111,7 +111,7 @@ impl Dense {
 impl Layer for Dense {
     /// Performs forward propagation through the dense layer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `input` - Input tensor with shape \[batch_size, input_dim\]
     ///
@@ -134,7 +134,7 @@ impl Layer for Dense {
 
     /// Performs backward propagation through the dense layer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `grad_output` - Gradient tensor from the next layer with shape \[batch_size, output_dim\]
     ///
@@ -201,7 +201,7 @@ impl Layer for Dense {
 
     /// Updates layer parameters using Stochastic Gradient Descent.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `lr` - Learning rate for parameter updates
     fn update_parameters_sgd(&mut self, lr: f32) {
@@ -213,13 +213,13 @@ impl Layer for Dense {
 
     /// Updates layer parameters using the Adam optimization algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `lr` - Learning rate for parameter updates
-    /// * `beta1` - Exponential decay rate for first moment estimates
-    /// * `beta2` - Exponential decay rate for second moment estimates
-    /// * `epsilon` - Small constant for numerical stability
-    /// * `t` - Current iteration count
+    /// - `lr` - Learning rate for parameter updates
+    /// - `beta1` - Exponential decay rate for first moment estimates
+    /// - `beta2` - Exponential decay rate for second moment estimates
+    /// - `epsilon` - Small constant for numerical stability
+    /// - `t` - Current iteration count
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Initialize Adam state if not already initialized
         if self.m_weights.is_none() {
@@ -257,11 +257,11 @@ impl Layer for Dense {
 
     /// Updates layer parameters using the RMSprop optimization algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `lr` - Learning rate for parameter updates
-    /// * `rho` - Decay rate for moving average of squared gradients
-    /// * `epsilon` - Small constant for numerical stability
+    /// - `lr` - Learning rate for parameter updates
+    /// - `rho` - Decay rate for moving average of squared gradients
+    /// - `epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             // Initialize RMSprop caches with zeros if not already initialized

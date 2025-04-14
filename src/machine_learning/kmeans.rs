@@ -13,18 +13,17 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `n_clusters` - Number of clusters to form
-/// * `max_iter` - Maximum number of iterations for a single run
-/// * `tol` - Tolerance for declaring convergence
-/// * `random_seed` - Optional seed for random number generation
-/// * `centroids` - Computed cluster centers after fitting
-/// * `labels` - Cluster labels for training data after fitting
-/// * `inertia` - Sum of squared distances to the closest centroid after fitting
-/// * `n_iter` - Number of iterations the algorithm ran for after fitting
+/// - `n_clusters` - Number of clusters to form
+/// - `max_iter` - Maximum number of iterations for a single run
+/// - `tol` - Tolerance for declaring convergence
+/// - `random_seed` - Optional seed for random number generation
+/// - `centroids` - Computed cluster centers after fitting
+/// - `labels` - Cluster labels for training data after fitting
+/// - `inertia` - Sum of squared distances to the closest centroid after fitting
+/// - `n_iter` - Number of iterations the algorithm ran for after fitting
 ///
 /// ## Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::{array, Array2};
 /// use rustyml::machine_learning::kmeans::KMeans;
 ///
@@ -88,12 +87,12 @@ impl Default for KMeans {
 impl KMeans {
     /// Creates a new KMeans instance with the specified parameters.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `n_clusters` - Number of clusters to form
-    /// * `max_iter` - Maximum number of iterations for the algorithm
-    /// * `tol` - Convergence tolerance, the algorithm stops when the centroids move less than this value
-    /// * `random_seed` - Optional seed for random number generation to ensure reproducibility
+    /// - `n_clusters` - Number of clusters to form
+    /// - `max_iter` - Maximum number of iterations for the algorithm
+    /// - `tol` - Convergence tolerance, the algorithm stops when the centroids move less than this value
+    /// - `random_seed` - Optional seed for random number generation to ensure reproducibility
     ///
     /// # Returns
     ///
@@ -210,7 +209,7 @@ impl KMeans {
 
     /// Finds the closest centroid to a given data point and returns its index and distance.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `x` - Data point as a 2D array view
     ///
@@ -239,7 +238,7 @@ impl KMeans {
 
     /// Initializes cluster centroids using random selection from the data points.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `data` - Training data as a 2D array
     fn init_centroids(&mut self, data: ArrayView2<f64>) {
@@ -305,7 +304,7 @@ impl KMeans {
     ///
     /// This method computes cluster centroids and assigns each data point to its closest centroid.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `data` - Training data as a 2D array where each row is a sample
     ///
@@ -417,7 +416,7 @@ impl KMeans {
 
     /// Predicts the closest cluster for each sample in the input data.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `data` - New data points for which to predict cluster assignments
     ///
@@ -448,7 +447,7 @@ impl KMeans {
     ///
     /// This is equivalent to calling `fit` followed by `predict`, but more efficient.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `data` - Training data as a 2D array
     ///

@@ -8,18 +8,17 @@ use crate::ModelError;
 ///
 /// # Parameters
 ///
-/// * `x` - Feature matrix with shape (n_samples, n_features)
-/// * `y` - Target values with shape (n_samples,)
-/// * `test_size` - Size of the test set, default is 0.3 (30%)
-/// * `random_state` - Random seed, default is None
+/// - `x` - Feature matrix with shape (n_samples, n_features)
+/// - `y` - Target values with shape (n_samples,)
+/// - `test_size` - Size of the test set, default is 0.3 (30%)
+/// - `random_state` - Random seed, default is None
 ///
 /// # Returns
 ///
 /// Returns a tuple `(x_train, x_test, y_train, y_test)`
 ///
 /// # Example
-///
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::train_test_split::train_test_split;
 ///

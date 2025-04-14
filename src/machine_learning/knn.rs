@@ -8,8 +8,8 @@ use rayon::prelude::*;
 ///
 /// # Variants
 /// 
-/// * `Uniform` - Each neighbor is weighted equally
-/// * `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
+/// - `Uniform` - Each neighbor is weighted equally
+/// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
 #[derive(Debug,Clone, PartialEq)]
 pub enum WeightingStrategy {
     /// All neighbors are weighted equally regardless of their distance to the query point.
@@ -29,14 +29,13 @@ pub enum WeightingStrategy {
 ///
 /// ## Fields
 ///
-/// * `k` - Number of neighbors to consider for classification
-/// * `x_train` - Training data features as a 2D array
-/// * `y_train` - Training data labels/targets
-/// * `weights` - Weight function for neighbor votes. Options: Uniform, Distance
-/// * `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(p=3)
+/// - `k` - Number of neighbors to consider for classification
+/// - `x_train` - Training data features as a 2D array
+/// - `y_train` - Training data labels/targets
+/// - `weights` - Weight function for neighbor votes. Options: Uniform, Distance
+/// - `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(p=3)
 ///
 /// ## Examples
-///
 /// ```rust
 /// use ndarray::{array, Array1, Array2};
 /// use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
@@ -80,9 +79,9 @@ pub struct KNN<T> {
 
 impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
     /// Creates a new KNN classifier with default parameters:
-    /// * k = 5
-    /// * weights = Uniform
-    /// * metric = Euclidean
+    /// - k = 5
+    /// - weights = Uniform
+    /// - metric = Euclidean
     fn default() -> Self {
         KNN {
             k: 5,
@@ -97,11 +96,11 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
 impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// Creates a new KNN classifier with the specified parameters
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `k` - Number of neighbors to use for classification
-    /// * `weights` - Weighting strategy for neighbor votes (Uniform or Distance)
-    /// * `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
+    /// - `k` - Number of neighbors to use for classification
+    /// - `weights` - Weighting strategy for neighbor votes (Uniform or Distance)
+    /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
     ///
     /// # Returns
     ///
@@ -138,7 +137,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     ///
     /// # Returns
     ///
-    /// * `&Metric` - A reference to the Metric enum used by this instance
+    /// * `&DistanceCalculationMetric` - A reference to the Metric enum used by this instance
     pub fn get_metric(&self) -> &Metric {
         &self.metric
     }
@@ -171,12 +170,13 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
     /// Fits the KNN classifier to the training data
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - Training features as a 2D array (samples × features)
-    /// * `y` - Training targets/labels as a 1D array
+    /// - `x` - Training features as a 2D array (samples × features)
+    /// - `y` - Training targets/labels as a 1D array
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - The instance
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     /// 
@@ -205,7 +205,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
     /// Predicts the class labels for the provided data points
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `x` - Data points to classify as a 2D array (samples × features)
     ///
@@ -235,10 +235,10 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
     /// Calculates the distance between two points based on the selected metric
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `a` - First point as a 1D array
-    /// * `b` - Second point as a 1D array
+    /// - `a` - First point as a 1D array
+    /// - `b` - Second point as a 1D array
     ///
     /// # Returns
     ///
@@ -258,11 +258,11 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
     /// Predicts the class for a single data point
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - The data point to classify as a 1D array
-    /// * `x_train` - Training data features
-    /// * `y_train` - Training data labels
+    /// - `x` - The data point to classify as a 1D array
+    /// - `x_train` - Training data features
+    /// - `y_train` - Training data labels
     ///
     /// # Returns
     ///
@@ -328,12 +328,14 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// This is a convenience method that combines the `fit` and `predict` steps into one operation.
     ///
     /// # Parameters
-    /// * `x_train` - The training feature matrix with shape (n_samples, n_features)
-    /// * `y_train` - The training target values
-    /// * `x_test` - The test feature matrix with shape (n_samples, n_features)
+    ///
+    /// - `x_train` - The training feature matrix with shape (n_samples, n_features)
+    /// - `y_train` - The training target values
+    /// - `x_test` - The test feature matrix with shape (n_samples, n_features)
     ///
     /// # Returns
-    /// * `Ok(Array1<T>)` - Array of predicted values
+    ///
+    /// - `Ok(Array1<T>)` - Array of predicted values
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
     pub fn fit_predict(&mut self, 
                        x_train: ArrayView2<f64>,

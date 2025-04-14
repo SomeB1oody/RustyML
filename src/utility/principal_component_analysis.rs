@@ -11,12 +11,12 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `n_components` - Number of principal components to keep in the model
-/// * `components` - Principal axes in feature space, representing the directions of maximum variance Shape is (n_components, n_features)
-/// * `mean` - Mean of each feature in the training data, used for centering
-/// * `explained_variance` - Amount of variance explained by each component
-/// * `explained_variance_ratio` - Percentage of variance explained by each component
-/// * `singular_values` - Singular values corresponding to each component
+/// - `n_components` - Number of principal components to keep in the model
+/// - `components` - Principal axes in feature space, representing the directions of maximum variance Shape is (n_components, n_features)
+/// - `mean` - Mean of each feature in the training data, used for centering
+/// - `explained_variance` - Amount of variance explained by each component
+/// - `explained_variance_ratio` - Percentage of variance explained by each component
+/// - `singular_values` - Singular values corresponding to each component
 ///
 /// ## Examples
 ///
@@ -52,10 +52,10 @@ use rayon::prelude::*;
 ///
 /// # Common use cases
 ///
-/// * Dimensionality reduction: Reduce high-dimensional data to a lower-dimensional space
-/// * Data visualization: Project data to 2 or 3 dimensions for visualization
-/// * Feature extraction: Extract the most important features from the dataset
-/// * Noise filtering: Remove noise by discarding components with low variance
+/// - Dimensionality reduction: Reduce high-dimensional data to a lower-dimensional space
+/// - Data visualization: Project data to 2 or 3 dimensions for visualization
+/// - Feature extraction: Extract the most important features from the dataset
+/// - Noise filtering: Remove noise by discarding components with low variance
 #[derive(Debug, Clone)]
 pub struct PCA {
     n_components: usize,
@@ -268,11 +268,8 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `Result<Array2<f64>, Box<dyn Error>>` - The transformed data if successful
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the model hasn't been fitted yet
+    /// - `Ok(Array2<f64>)` - The transformed data if successful
+    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
     pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
@@ -311,7 +308,8 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `Result<Array2<f64>, Box<dyn Error>>` - The transformed data if successful
+    /// - `Ok(Array2<f64>)` - The transformed data if successful
+    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
     pub fn fit_transform(&mut self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         self.fit(x)?;
         self.transform(x)
@@ -325,11 +323,8 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `Result<Array2<f64>, Box<dyn Error>>` - The reconstructed data in original space
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the model hasn't been fitted yet
+    /// - `Ok(Array2<f64>)` - The reconstructed data in original space
+    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
     pub fn inverse_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         let components = self.components.as_ref().ok_or("PCA model not fitted yet")?;
         let mean = self.mean.as_ref().ok_or("PCA model not fitted yet")?;

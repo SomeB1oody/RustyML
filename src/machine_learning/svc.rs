@@ -8,18 +8,17 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `kernel` - Kernel function type that transforms input data to higher dimensions
-/// * `regularization_param` - Regularization parameter C, controls the trade-off between maximizing the margin and minimizing the classification error
-/// * `alphas` - Lagrange multipliers for the dual optimization problem
-/// * `support_vectors` - Training samples that define the decision boundary
-/// * `support_vector_labels` - Class labels corresponding to the support vectors
-/// * `bias` - Intercept term in the decision function
-/// * `tol` - Tolerance for stopping criterion
-/// * `max_iter` - Maximum number of iterations for the optimization algorithm
-/// * `eps` - Small value for numerical stability in calculations
+/// - `kernel` - Kernel function type that transforms input data to higher dimensions
+/// - `regularization_param` - Regularization parameter C, controls the trade-off between maximizing the margin and minimizing the classification error
+/// - `alphas` - Lagrange multipliers for the dual optimization problem
+/// - `support_vectors` - Training samples that define the decision boundary
+/// - `support_vector_labels` - Class labels corresponding to the support vectors
+/// - `bias` - Intercept term in the decision function
+/// - `tol` - Tolerance for stopping criterion
+/// - `max_iter` - Maximum number of iterations for the optimization algorithm
+/// - `eps` - Small value for numerical stability in calculations
 ///
 /// ## Example
-///
 /// ```rust
 /// use rustyml::machine_learning::svc::{SVC, KernelType};
 /// use ndarray::{Array2, Array1};
@@ -128,12 +127,14 @@ impl SVC {
     /// Creates a new Support Vector Classifier (SVC) with specified parameters
     ///
     /// # Parameters
-    /// * `kernel` - The kernel type to use for the algorithm
-    /// * `regularization_param` - The regularization parameter (C) that trades off margin size and training error
-    /// * `tol` - Tolerance for the stopping criterion
-    /// * `max_iter` - Maximum number of iterations for the optimization algorithm
+    ///
+    /// - `kernel` - The kernel type to use for the algorithm
+    /// - `regularization_param` - The regularization parameter (C) that trades off margin size and training error
+    /// - `tol` - Tolerance for the stopping criterion
+    /// - `max_iter` - Maximum number of iterations for the optimization algorithm
     ///
     /// # Returns
+    ///
     /// * `Self` - A new SVC instance with the specified parameters
     pub fn new(
         kernel: KernelType,
@@ -158,6 +159,7 @@ impl SVC {
     /// Returns the kernel type used by this SVC instance
     ///
     /// # Returns
+    ///
     /// * `&KernelType` - A reference to the kernel type
     pub fn get_kernel(&self) -> &KernelType {
         &self.kernel
@@ -166,6 +168,7 @@ impl SVC {
     /// Returns the regularization parameter (C) used by this SVC instance
     ///
     /// # Returns
+    ///
     /// * `f64` - The regularization parameter value
     pub fn get_regularization_param(&self) -> f64 {
         self.regularization_param
@@ -174,6 +177,7 @@ impl SVC {
     /// Returns the Lagrange multipliers (alphas) from the fitted model
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<f64>)` - The array of Lagrange multipliers if the model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn get_alphas(&self) -> Result<&Array1<f64>, ModelError> {
@@ -186,6 +190,7 @@ impl SVC {
     /// Returns the support vectors from the fitted model
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array2<f64>)` - The matrix of support vectors if the model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn get_support_vectors(&self) -> Result<&Array2<f64>, ModelError> {
@@ -198,6 +203,7 @@ impl SVC {
     /// Returns the labels of the support vectors from the fitted model
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<f64>)` - The array of support vector labels if the model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn get_support_vector_labels(&self) -> Result<&Array1<f64>, ModelError> {
@@ -210,6 +216,7 @@ impl SVC {
     /// Returns the bias term (intercept) from the fitted model
     ///
     /// # Returns
+    ///
     /// - `Ok(f64)` - The bias term if the model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn get_bias(&self) -> Result<f64, ModelError> {
@@ -222,6 +229,7 @@ impl SVC {
     /// Returns the tolerance parameter used by this SVC instance
     ///
     /// # Returns
+    ///
     /// * `f64` - The tolerance parameter value
     pub fn get_tol(&self) -> f64 {
         self.tol
@@ -230,6 +238,7 @@ impl SVC {
     /// Returns the maximum number of iterations parameter used by this SVC instance
     ///
     /// # Returns
+    ///
     /// * `usize` - The maximum number of iterations
     pub fn get_max_iter(&self) -> usize {
         self.max_iter
@@ -238,6 +247,7 @@ impl SVC {
     /// Returns the epsilon parameter used for numerical stability
     ///
     /// # Returns
+    ///
     /// * `f64` - The epsilon value
     pub fn get_eps(&self) -> f64 {
         self.eps
@@ -246,6 +256,7 @@ impl SVC {
     /// Returns the epsilon parameter used for numerical stability
     ///
     /// # Returns
+    ///
     /// - `Ok(usize)` - number of iterations the algorithm ran for after fitting
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn get_n_iter(&self) -> Result<usize, ModelError> {
@@ -258,10 +269,12 @@ impl SVC {
     /// Calculates the kernel function value between two vectors
     ///
     /// # Parameters
-    /// * `x1` - First input vector
-    /// * `x2` - Second input vector
+    ///
+    /// - `x1` - First input vector
+    /// - `x2` - Second input vector
     ///
     /// # Returns
+    ///
     /// * `f64` - The kernel function value between the two input vectors
     fn kernel_function(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
         match self.kernel {
@@ -289,9 +302,11 @@ impl SVC {
     /// Computes the kernel matrix (Gram matrix) for the given data
     ///
     /// # Parameters
+    ///
     /// * `x` - Input data matrix where each row is a sample
     ///
     /// # Returns
+    ///
     /// * `Array2<f64>` - The computed kernel matrix
     fn compute_kernel_matrix(&self, x: ArrayView2<f64>) -> Array2<f64> {
         let n_samples = x.nrows();
@@ -324,10 +339,12 @@ impl SVC {
     /// Fits the SVC model to the training data
     ///
     /// # Parameters
-    /// * `x` - Training data matrix where each row is a sample
-    /// * `y` - Target labels (should be +1 or -1)
+    ///
+    /// - `x` - Training data matrix where each row is a sample
+    /// - `y` - Target labels (should be +1 or -1)
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - The fitted model (for method chaining)
     /// - `Err(ModelError)` - If there's an error during fitting
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
@@ -450,14 +467,16 @@ impl SVC {
     /// Examines an example for potential optimization as part of the SMO algorithm
     ///
     /// # Parameters
-    /// * `i2` - Index of example to examine
-    /// * `alphas` - Current alpha values
-    /// * `kernel_matrix` - Pre-computed kernel matrix
-    /// * `y` - Target labels
-    /// * `b` - Current bias term
-    /// * `error_cache` - Cached error values
+    ///
+    /// - `i2` - Index of example to examine
+    /// - `alphas` - Current alpha values
+    /// - `kernel_matrix` - Pre-computed kernel matrix
+    /// - `y` - Target labels
+    /// - `b` - Current bias term
+    /// - `error_cache` - Cached error values
     ///
     /// # Returns
+    ///
     /// * `usize` - Number of alpha values changed (0 or 1)
     fn examine_example(
         &self,
@@ -515,12 +534,14 @@ impl SVC {
     /// Selects the second alpha for joint optimization in SMO
     ///
     /// # Parameters
-    /// * `i2` - Index of the first alpha
-    /// * `e2` - Error value for the first alpha
-    /// * `alphas` - Current alpha values
-    /// * `error_cache` - Cached error values
+    ///
+    /// - `i2` - Index of the first alpha
+    /// - `e2` - Error value for the first alpha
+    /// - `alphas` - Current alpha values
+    /// - `error_cache` - Cached error values
     ///
     /// # Returns
+    ///
     /// * `usize` - Index of the selected second alpha
     fn select_second_alpha(
         &self,
@@ -552,15 +573,17 @@ impl SVC {
     /// Updates a pair of alpha values in the SMO algorithm
     ///
     /// # Parameters
-    /// * `i1` - Index of first alpha to update
-    /// * `i2` - Index of second alpha to update
-    /// * `alphas` - Current alpha values
-    /// * `kernel_matrix` - Pre-computed kernel matrix
-    /// * `y` - Target labels
-    /// * `b` - Current bias term (updated in place)
-    /// * `error_cache` - Cached error values (updated in place)
+    ///
+    /// - `i1` - Index of first alpha to update
+    /// - `i2` - Index of second alpha to update
+    /// - `alphas` - Current alpha values
+    /// - `kernel_matrix` - Pre-computed kernel matrix
+    /// - `y` - Target labels
+    /// - `b` - Current bias term (updated in place)
+    /// - `error_cache` - Cached error values (updated in place)
     ///
     /// # Returns
+    ///
     /// * `bool` - `true` if the alpha values were changed, `false` otherwise
     fn take_step(
         &self,
@@ -670,11 +693,12 @@ impl SVC {
     /// Updates the error cache after changes to alpha values
     ///
     /// # Parameters
-    /// * `alphas` - Current alpha values
-    /// * `kernel_matrix` - Pre-computed kernel matrix
-    /// * `y` - Target labels
-    /// * `b` - Current bias term
-    /// * `error_cache` - Error cache to update
+    ///
+    /// - `alphas` - Current alpha values
+    /// - `kernel_matrix` - Pre-computed kernel matrix
+    /// - `y` - Target labels
+    /// - `b` - Current bias term
+    /// - `error_cache` - Error cache to update
     fn update_error_cache(
         &self,
         alphas: &Array1<f64>,
@@ -694,13 +718,15 @@ impl SVC {
     /// Calculates the decision function value for a single training example
     ///
     /// # Parameters
-    /// * `i` - Index of the example
-    /// * `alphas` - Alpha values
-    /// * `kernel_matrix` - Pre-computed kernel matrix
-    /// * `y` - Target labels
-    /// * `b` - Bias term
+    ///
+    /// - `i` - Index of the example
+    /// - `alphas` - Alpha values
+    /// - `kernel_matrix` - Pre-computed kernel matrix
+    /// - `y` - Target labels
+    /// - `b` - Bias term
     ///
     /// # Returns
+    ///
     /// * `f64` - The decision function value
     fn decision_function_internal(
         &self,
@@ -725,9 +751,11 @@ impl SVC {
     /// Predicts class labels for samples in X
     ///
     /// # Parameters
+    ///
     /// * `x` - The input samples, where each row is a sample
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
@@ -779,9 +807,11 @@ impl SVC {
     /// Computes the decision function values for samples in X
     ///
     /// # Parameters
+    ///
     /// * `x` - The input samples, where each row is a sample
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)` - The decision function values
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn decision_function(&self, x: &Array2<f64>) -> Result<Array1<f64>, ModelError> {

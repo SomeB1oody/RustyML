@@ -12,7 +12,7 @@ pub struct SGD {
 impl SGD {
     /// Creates a new SGD optimizer with the specified learning rate.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `learning_rate` - Step size for parameter updates
     ///
@@ -57,12 +57,12 @@ pub struct Adam {
 impl Adam {
     /// Creates a new Adam optimizer with the specified parameters.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `learning_rate` - Step size for parameter updates
-    /// * `beta1` - Decay rate for the first moment estimates (typically 0.9)
-    /// * `beta2` - Decay rate for the second moment estimates (typically 0.999)
-    /// * `epsilon` - Small constant for numerical stability (typically 1e-8)
+    /// - `learning_rate` - Step size for parameter updates
+    /// - `beta1` - Decay rate for the first moment estimates (typically 0.9)
+    /// - `beta2` - Decay rate for the second moment estimates (typically 0.999)
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
     ///
     /// # Returns
     ///
@@ -106,11 +106,11 @@ pub struct RMSprop {
 impl RMSprop {
     /// Creates a new RMSprop optimizer with the specified parameters.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `learning_rate` - Step size for parameter updates
-    /// * `rho` - Decay rate for moving average of squared gradients (typically 0.9)
-    /// * `epsilon` - Small constant for numerical stability (typically 1e-8)
+    /// - `learning_rate` - Step size for parameter updates
+    /// - `rho` - Decay rate for moving average of squared gradients (typically 0.9)
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
     ///
     /// # Returns
     ///
@@ -127,7 +127,7 @@ impl RMSprop {
 impl Optimizer for RMSprop {
     /// Updates the layer parameters using the RMSprop algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {

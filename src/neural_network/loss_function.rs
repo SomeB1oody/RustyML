@@ -14,10 +14,10 @@ impl MeanSquaredError {
 impl LossFunction for MeanSquaredError {
     /// Computes the Mean Squared Error between predicted and true values
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values
-    /// * `y_pred` - Tensor with predicted values
+    /// - `y_true` - Tensor with ground truth values
+    /// - `y_pred` - Tensor with predicted values
     ///
     /// # Returns
     ///
@@ -36,10 +36,10 @@ impl LossFunction for MeanSquaredError {
 
     /// Computes the gradient of Mean Squared Error with respect to predictions
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values
-    /// * `y_pred` - Tensor with predicted values
+    /// - `y_true` - Tensor with ground truth values
+    /// - `y_pred` - Tensor with predicted values
     ///
     /// # Returns
     ///
@@ -67,10 +67,10 @@ impl MeanAbsoluteError {
 impl LossFunction for MeanAbsoluteError {
     /// Computes the Mean Absolute Error between predicted and true values
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values
-    /// * `y_pred` - Tensor with predicted values
+    /// - `y_true` - Tensor with ground truth values
+    /// - `y_pred` - Tensor with predicted values
     ///
     /// # Returns
     ///
@@ -83,10 +83,10 @@ impl LossFunction for MeanAbsoluteError {
 
     /// Computes the gradient of Mean Absolute Error with respect to predictions
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values
-    /// * `y_pred` - Tensor with predicted values
+    /// - `y_true` - Tensor with ground truth values
+    /// - `y_pred` - Tensor with predicted values
     ///
     /// # Returns
     ///
@@ -110,10 +110,10 @@ impl BinaryCrossEntropy {
 impl LossFunction for BinaryCrossEntropy {
     /// Computes the Binary Cross Entropy loss between predicted and true values
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values (0 or 1)
-    /// * `y_pred` - Tensor with predicted probabilities in range \[0,1\]
+    /// - `y_true` - Tensor with ground truth values (0 or 1)
+    /// - `y_pred` - Tensor with predicted probabilities in range \[0,1\]
     ///
     /// # Returns
     ///
@@ -135,8 +135,8 @@ impl LossFunction for BinaryCrossEntropy {
     ///
     /// # Arguments
     ///
-    /// * `y_true` - Tensor with ground truth values (0 or 1)
-    /// * `y_pred` - Tensor with predicted probabilities in range \[0,1\]
+    /// - `y_true` - Tensor with ground truth values (0 or 1)
+    /// - `y_pred` - Tensor with predicted probabilities in range \[0,1\]
     ///
     /// # Returns
     ///
@@ -167,10 +167,10 @@ impl CategoricalCrossEntropy {
 impl LossFunction for CategoricalCrossEntropy {
     /// Computes the Categorical Cross Entropy loss between predicted and true values
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values in one-hot encoding
-    /// * `y_pred` - Tensor with predicted probabilities for each class
+    /// - `y_true` - Tensor with ground truth values in one-hot encoding
+    /// - `y_pred` - Tensor with predicted probabilities for each class
     ///
     /// # Returns
     ///
@@ -190,10 +190,10 @@ impl LossFunction for CategoricalCrossEntropy {
 
     /// Computes the gradient of Categorical Cross Entropy with respect to predictions
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with ground truth values in one-hot encoding
-    /// * `y_pred` - Tensor with predicted probabilities for each class
+    /// - `y_true` - Tensor with ground truth values in one-hot encoding
+    /// - `y_pred` - Tensor with predicted probabilities for each class
     ///
     /// # Returns
     ///
@@ -226,10 +226,10 @@ impl LossFunction for SparseCategoricalCrossEntropy {
     /// Computes the Sparse Categorical Cross Entropy loss between predicted values
     /// and class indices
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with class indices as ground truth
-    /// * `y_pred` - Tensor with predicted probabilities for each class
+    /// - `y_true` - Tensor with class indices as ground truth
+    /// - `y_pred` - Tensor with predicted probabilities for each class
     ///
     /// # Returns
     ///
@@ -261,10 +261,10 @@ impl LossFunction for SparseCategoricalCrossEntropy {
 
     /// Computes the gradient of Sparse Categorical Cross Entropy with respect to predictions
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor with class indices as ground truth
-    /// * `y_pred` - Tensor with predicted probabilities for each class
+    /// - `y_true` - Tensor with class indices as ground truth
+    /// - `y_pred` - Tensor with predicted probabilities for each class
     ///
     /// # Returns
     ///

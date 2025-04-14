@@ -10,19 +10,20 @@ use rayon::prelude::*;
 /// a location in a two or three-dimensional map.
 ///
 /// # Fields
-/// * `perplexity` - Controls the balance between preserving local and global structure. Higher values consider more points as neighbors. Default is 30.0.
-/// * `learning_rate` - Step size for gradient descent. Default is 200.0.
-/// * `n_iter` - Maximum number of iterations for optimization. Default is 1000.
-/// * `dim` - The dimension of the embedded space. Typically 2 or 3 for visualization.
-/// * `random_state` - Seed for random number generation to ensure reproducibility. Default is 42.
-/// * `early_exaggeration` - Factor to multiply early embeddings to encourage tight cluster formation. Default is 12.0.
-/// * `exaggeration_iter` - Number of iterations to use early exaggeration. Default is n_iter/12.
-/// * `initial_momentum` - Initial momentum coefficient for gradient updates. Default is 0.5.
-/// * `final_momentum` - Final momentum coefficient for gradient updates. Default is 0.8.
-/// * `momentum_switch_iter` - Iteration at which momentum changes from initial to final value. Default is n_iter/3.
+///
+/// - `perplexity` - Controls the balance between preserving local and global structure. Higher values consider more points as neighbors. Default is 30.0.
+/// - `learning_rate` - Step size for gradient descent. Default is 200.0.
+/// - `n_iter` - Maximum number of iterations for optimization. Default is 1000.
+/// - `dim` - The dimension of the embedded space. Typically 2 or 3 for visualization.
+/// - `random_state` - Seed for random number generation to ensure reproducibility. Default is 42.
+/// - `early_exaggeration` - Factor to multiply early embeddings to encourage tight cluster formation. Default is 12.0.
+/// - `exaggeration_iter` - Number of iterations to use early exaggeration. Default is n_iter/12.
+/// - `initial_momentum` - Initial momentum coefficient for gradient updates. Default is 0.5.
+/// - `final_momentum` - Final momentum coefficient for gradient updates. Default is 0.8.
+/// - `momentum_switch_iter` - Iteration at which momentum changes from initial to final value. Default is n_iter/3.
 ///
 /// # Example
-/// ```
+/// ```rust
 /// use ndarray::Array2;
 /// use rustyml::utility::t_sne::TSNE;
 ///
@@ -73,18 +74,20 @@ impl TSNE {
     /// Creates a new TSNE instance with specified parameters.
     ///
     /// # Parameters
-    /// * `perplexity` - Controls the effective number of neighbors. Higher means more neighbors.
-    /// * `learning_rate` - Step size for gradient descent updates.
-    /// * `n_iter` - Maximum number of optimization iterations.
-    /// * `dim` - Dimensionality of the embedding space.
-    /// * `random_state` - Seed for random number generation.
-    /// * `early_exaggeration` - Factor to multiply probabilities in early iterations.
-    /// * `exaggeration_iter` - Number of iterations to apply early exaggeration.
-    /// * `initial_momentum` - Initial momentum coefficient.
-    /// * `final_momentum` - Final momentum coefficient.
-    /// * `momentum_switch_iter` - Iteration at which momentum switches from initial to final.
+    ///
+    /// - `perplexity` - Controls the effective number of neighbors. Higher means more neighbors.
+    /// - `learning_rate` - Step size for gradient descent updates.
+    /// - `n_iter` - Maximum number of optimization iterations.
+    /// - `dim` - Dimensionality of the embedding space.
+    /// - `random_state` - Seed for random number generation.
+    /// - `early_exaggeration` - Factor to multiply probabilities in early iterations.
+    /// - `exaggeration_iter` - Number of iterations to apply early exaggeration.
+    /// - `initial_momentum` - Initial momentum coefficient.
+    /// - `final_momentum` - Final momentum coefficient.
+    /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final.
     ///
     /// # Returns
+    ///
     /// * `Self` - A new TSNE instance.
     pub fn new(
         perplexity: Option<f64>,
@@ -223,9 +226,11 @@ impl TSNE {
     /// Performs t-SNE dimensionality reduction on input data.
     ///
     /// # Parameters
+    ///
     /// * `x` - Input data matrix where each row represents a sample in high-dimensional space.
     ///
     /// # Returns
+    ///
     /// * `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
@@ -465,13 +470,15 @@ impl TSNE {
 /// perplexity of the conditional probability distribution match the target value.
 ///
 /// # Parameters
-/// * `distances` - Vector of squared Euclidean distances from a point to all others.
-/// * `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
+///
+/// - `distances` - Vector of squared Euclidean distances from a point to all others.
+/// - `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
 ///
 /// # Returns
+///
 /// * `(Array1<f64>, f64)` - A tuple containing:
-///   * The normalized probability distribution
-///   * The found sigma value that achieves the target perplexity
+///   - The normalized probability distribution
+///   - The found sigma value that achieves the target perplexity
 fn binary_search_sigma(distances: ArrayView1<f64>, target_perplexity: f64) -> (Array1<f64>, f64) {
     let tol = 1e-5;
     let mut sigma_min: f64 = 1e-20;

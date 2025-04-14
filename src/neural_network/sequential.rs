@@ -21,7 +21,7 @@ impl Sequential {
     ///
     /// Supports method chaining pattern
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `layer` - The layer to add to the model
     ///
@@ -35,10 +35,10 @@ impl Sequential {
 
     /// Configures the optimizer and loss function for the model
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `optimizer` - The optimizer to use for training
-    /// * `loss` - The loss function to use for training
+    /// - `optimizer` - The optimizer to use for training
+    /// - `loss` - The loss function to use for training
     ///
     /// # Returns
     ///
@@ -57,11 +57,11 @@ impl Sequential {
     ///
     /// Executes the forward pass, loss calculation, backward pass, and parameter updates
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - Input tensor containing training data
-    /// * `y` - Target tensor containing expected outputs
-    /// * `epochs` - Number of training epochs to perform
+    /// - `x` - Input tensor containing training data
+    /// - `y` - Target tensor containing expected outputs
+    /// - `epochs` - Number of training epochs to perform
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) {
         for epoch in 0..epochs {
             println!("Epoch {}", epoch + 1);
@@ -89,7 +89,7 @@ impl Sequential {
     ///
     /// Only performs forward pass without any training
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `x` - Input tensor containing data to predict on
     ///

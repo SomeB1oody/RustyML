@@ -15,15 +15,14 @@ use rand::SeedableRng;
 ///
 /// # Fields
 ///
-/// * `bandwidth` - The kernel bandwidth parameter that determines the search radius. Larger values lead to fewer clusters.
-/// * `max_iter` - Maximum number of iterations to prevent infinite loops.
-/// * `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
-/// * `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
-/// * `cluster_all` - Whether to assign all points to clusters, including potential noise.
+/// - `bandwidth` - The kernel bandwidth parameter that determines the search radius. Larger values lead to fewer clusters.
+/// - `max_iter` - Maximum number of iterations to prevent infinite loops.
+/// - `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
+/// - `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
+/// - `cluster_all` - Whether to assign all points to clusters, including potential noise.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::meanshift::MeanShift;
 /// use ndarray::Array2;
 ///
@@ -44,10 +43,9 @@ use rand::SeedableRng;
 /// ```
 ///
 /// # Notes
-///
-/// * If unsure about an appropriate bandwidth value, use the `estimate_bandwidth` function.
-/// * The bandwidth parameter significantly affects algorithm performance and should be chosen carefully based on data characteristics.
-/// * For large datasets, setting `bin_seeding = true` can improve performance.
+/// - If unsure about an appropriate bandwidth value, use the `estimate_bandwidth` function.
+/// - The bandwidth parameter significantly affects algorithm performance and should be chosen carefully based on data characteristics.
+/// - For large datasets, setting `bin_seeding = true` can improve performance.
 #[derive(Debug, Clone)]
 pub struct MeanShift {
     /// Bandwidth parameter that controls the kernel width
@@ -87,11 +85,12 @@ impl MeanShift {
     /// Creates a new MeanShift instance with the specified parameters.
     ///
     /// # Parameters
-    /// * `bandwidth` - The bandwidth parameter that determines the size of the kernel.
-    /// * `max_iter` - The maximum number of iterations for the mean shift algorithm.
-    /// * `tol` - The convergence threshold for the algorithm.
-    /// * `bin_seeding` - Whether to use bin seeding for initialization.
-    /// * `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
+    ///
+    /// - `bandwidth` - The bandwidth parameter that determines the size of the kernel.
+    /// - `max_iter` - The maximum number of iterations for the mean shift algorithm.
+    /// - `tol` - The convergence threshold for the algorithm.
+    /// - `bin_seeding` - Whether to use bin seeding for initialization.
+    /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
     ///
     /// # Returns
     /// * `Self` - A new MeanShift instance.
@@ -118,7 +117,8 @@ impl MeanShift {
     /// Gets the cluster centers found by the algorithm.
     ///
     /// # Returns
-    /// * `Ok(Array2<f64>)` - A Result containing the cluster centers as a ndarray `Array2<f64>`
+    ///
+    /// - `Ok(Array2<f64>)` - A Result containing the cluster centers as a ndarray `Array2<f64>`
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_cluster_centers(&self) -> Result<Array2<f64>, ModelError> {
         match self.cluster_centers.as_ref() {
@@ -130,6 +130,7 @@ impl MeanShift {
     /// Gets the cluster labels assigned to each data point.
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<usize>)` - A Result containing the cluster labels as a ndarray `Array1<usize>`
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_labels(&self) -> Result<Array1<usize>, ModelError> {
@@ -142,6 +143,7 @@ impl MeanShift {
     /// Gets the number of iterations the algorithm performed.
     ///
     /// # Returns
+    ///
     /// - `Ok(usize)` - A Result containing the number of iterations or an error
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_n_iter(&self) -> Result<usize, ModelError> {
@@ -154,6 +156,7 @@ impl MeanShift {
     /// Gets the number of samples per cluster center.
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<usize>)` - A Result containing the number of samples per center as a ndarray `Array1<usize>`
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_n_samples_per_center(&self) -> Result<Array1<usize>, ModelError> {
@@ -166,6 +169,7 @@ impl MeanShift {
     /// Gets the bandwidth parameter value.
     ///
     /// # Returns
+    ///
     /// * `f64` - The bandwidth value.
     pub fn get_bandwidth(&self) -> f64 {
         self.bandwidth
@@ -174,6 +178,7 @@ impl MeanShift {
     /// Gets the maximum number of iterations.
     ///
     /// # Returns
+    ///
     /// * `usize` - The maximum number of iterations.
     pub fn get_max_iter(&self) -> usize {
         self.max_iter
@@ -182,6 +187,7 @@ impl MeanShift {
     /// Gets the convergence tolerance.
     ///
     /// # Returns
+    ///
     /// * `f64` - The tolerance value.
     pub fn get_tol(&self) -> f64 {
         self.tol
@@ -190,6 +196,7 @@ impl MeanShift {
     /// Gets the bin seeding setting.
     ///
     /// # Returns
+    ///
     /// * `bool` - A boolean indicating whether bin seeding is enabled.
     pub fn get_bin_seeding(&self) -> bool {
         self.bin_seeding
@@ -198,6 +205,7 @@ impl MeanShift {
     /// Gets the cluster_all setting.
     ///
     /// # Returns
+    ///
     /// * `bool` - A boolean indicating whether all points are assigned to clusters.
     pub fn get_cluster_all(&self) -> bool {
         self.cluster_all
@@ -209,10 +217,10 @@ impl MeanShift {
     /// and then uses the `squared_euclidean_distance` function to calculate
     /// the distance between them.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - First vector as a 1D array
-    /// * `y` - Second vector as a 1D array
+    /// - `x` - First vector as a 1D array
+    /// - `y` - Second vector as a 1D array
     ///
     /// # Returns
     ///
@@ -227,9 +235,11 @@ impl MeanShift {
     /// Fits the MeanShift clustering model to the input data.
     ///
     /// # Parameters
+    ///
     /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - A mutable reference to the fitted model
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
@@ -388,9 +398,11 @@ impl MeanShift {
     /// Predicts cluster labels for the input data.
     ///
     /// # Parameters
+    ///
     /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
@@ -431,9 +443,11 @@ impl MeanShift {
     /// Fits the model to the input data and predicts cluster labels.
     ///
     /// # Parameters
+    ///
     /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
     pub fn fit_predict(&mut self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
@@ -444,9 +458,11 @@ impl MeanShift {
     /// Generates initial seeds for the clustering algorithm using binning.
     ///
     /// # Parameters
+    ///
     /// * `x` - The input data as a ndarray Array2<f64> where each row is a sample.
     ///
     /// # Returns
+    ///
     /// * `Vec<usize>` - A vector of indices representing the initial seed points.
     fn get_bin_seeds(&self, x: ArrayView2<f64>) -> Vec<usize> {
         let n_samples = x.shape()[0];
@@ -503,12 +519,14 @@ impl MeanShift {
 /// The bandwidth is estimated based on the pairwise distances between a subset of points.
 ///
 /// # Parameters
-/// * `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
-/// * `quantile` - The quantile of the pairwise distances to use as the bandwidth.
-/// * `n_samples` - The number of samples to use for the distance calculation.
-/// * `random_state` - Seed for random number generation.
+///
+/// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
+/// - `quantile` - The quantile of the pairwise distances to use as the bandwidth.
+/// - `n_samples` - The number of samples to use for the distance calculation.
+/// - `random_state` - Seed for random number generation.
 ///
 /// # Returns
+///
 /// * `f64` - The estimated bandwidth.
 pub fn estimate_bandwidth(
     x: ArrayView2<f64>,

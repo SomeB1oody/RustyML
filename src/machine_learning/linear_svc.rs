@@ -10,6 +10,7 @@ use rayon::prelude::*;
 /// Supports L1 and L2 regularization for preventing overfitting.
 ///
 /// ## Fields
+///
 /// - `weights` - Weight coefficients for each feature
 /// - `bias` - Bias term (intercept) of the model
 /// - `max_iter` - Maximum number of iterations for the optimizer
@@ -21,13 +22,14 @@ use rayon::prelude::*;
 /// - `n_iter` - Number of iterations that were actually performed during training
 ///
 /// ## Features
+///
 /// - Binary classification
 /// - Stochastic gradient descent optimization
 /// - L1 or L2 regularization
 /// - Configurable convergence tolerance
 ///
 /// ## Example
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_svc::*;
 /// use rustyml::utility::train_test_split::train_test_split;
@@ -107,6 +109,7 @@ pub struct LinearSVC {
 /// Different regularization types can lead to different model characteristics.
 ///
 /// ## Variants
+///
 /// - `L1`: Lasso regularization that can lead to sparse models (many weights become zero)
 /// - `L2`: Ridge regularization that generally performs better for most problems
 #[derive(Debug, Clone)]
@@ -121,6 +124,7 @@ impl Default for LinearSVC {
     /// Creates a new LinearSVC with default parameters.
     ///
     /// ## Default values
+    ///
     /// - `weights`: None (not trained)
     /// - `bias`: None (not trained)
     /// - `max_iter`: 1000
@@ -152,6 +156,7 @@ impl LinearSVC {
     /// Creates a new LinearSVC instance with custom parameters.
     ///
     /// # Parameters
+    ///
     /// - `max_iter`: Maximum number of iterations for the optimizer
     /// - `learning_rate`: Step size for gradient descent updates
     /// - `regularization_param`: Strength of regularization (higher = stronger)
@@ -185,6 +190,7 @@ impl LinearSVC {
     /// Returns the weight coefficients of the trained model.
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<f64>)`: Reference to weight coefficients if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_weights(&self) -> Result<&Array1<f64>, ModelError> {
@@ -197,6 +203,7 @@ impl LinearSVC {
     /// Returns the bias term (intercept) of the trained model.
     ///
     /// # Returns
+    ///
     /// - `Ok(f64)`: Bias value if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_bias(&self) -> Result<f64, ModelError> {
@@ -209,6 +216,7 @@ impl LinearSVC {
     /// Returns the number of iterations performed during training.
     ///
     /// # Returns
+    ///
     /// - `Ok(usize)`: Number of iterations if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_n_iter(&self) -> Result<usize, ModelError> {
@@ -221,6 +229,7 @@ impl LinearSVC {
     /// Returns the maximum number of iterations.
     ///
     /// # Returns
+    ///
     /// * `usize` - Maximum iterations the model will use during training
     pub fn get_max_iter(&self) -> usize {
         self.max_iter
@@ -229,6 +238,7 @@ impl LinearSVC {
     /// Returns the learning rate.
     ///
     /// # Returns
+    ///
     /// * `f64` - Current learning rate value
     pub fn get_learning_rate(&self) -> f64 {
         self.learning_rate
@@ -237,6 +247,7 @@ impl LinearSVC {
     /// Returns the regularization parameter.
     ///
     /// # Returns
+    ///
     /// * `f64` - Current regularization strength value
     pub fn get_regularization_param(&self) -> f64 {
         self.regularization_param
@@ -245,6 +256,7 @@ impl LinearSVC {
     /// Returns the regularization penalty type.
     ///
     /// # Returns
+    ///
     /// * `&PenaltyType` - Reference to the current penalty type (L1 or L2)
     pub fn get_penalty(&self) -> &PenaltyType {
         &self.penalty
@@ -253,6 +265,7 @@ impl LinearSVC {
     /// Returns whether the model uses an intercept/bias term.
     ///
     /// # Returns
+    ///
     /// * `bool` - `true` if the model uses a bias term, `false` otherwise
     pub fn get_fit_intercept(&self) -> bool {
         self.fit_intercept
@@ -261,6 +274,7 @@ impl LinearSVC {
     /// Returns the convergence tolerance.
     ///
     /// # Returns
+    ///
     /// * `f64` - Current tolerance value
     pub fn get_tol(&self) -> f64 {
         self.tol
@@ -274,10 +288,12 @@ impl LinearSVC {
     /// - Convergence is detected based on tolerance
     ///
     /// # Parameters
+    ///
     /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
     /// - `y`: Target values as a 1D array (should contain only 0.0 and 1.0 values)
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)`: Reference to self if training succeeds
     /// - `Err(ModelError)`: Error if validation fails or training encounters problems
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
@@ -414,9 +430,11 @@ impl LinearSVC {
     /// Predicts the class for each sample in the provided data.
     ///
     /// # Parameters
+    ///
     /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)`: Array of predictions (0.0 or 1.0) for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
@@ -438,9 +456,11 @@ impl LinearSVC {
     /// and the magnitude indicates confidence (distance from the decision boundary).
     ///
     /// # Parameters
+    ///
     /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {

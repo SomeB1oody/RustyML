@@ -10,12 +10,13 @@ use rayon::prelude::*;
 /// without requiring the number of clusters to be specified beforehand.
 ///
 /// ## Fields
-/// * `eps` - Neighborhood radius used to find neighbors
-/// * `min_samples` - Minimum number of neighbors required to form a core point
-/// * `metric` - Distance metric, options: Euclidean, Manhattan, Minkowski(p=3)
+///
+/// - `eps` - Neighborhood radius used to find neighbors
+/// - `min_samples` - Minimum number of neighbors required to form a core point
+/// - `metric` - Distance metric, options: Euclidean, Manhattan, Minkowski(p=3)
 ///
 /// ## Examples
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::dbscan::DBSCAN;
 /// use ndarray::Array2;
 /// use rustyml::machine_learning::DistanceCalculationMetric;
@@ -42,9 +43,9 @@ pub struct DBSCAN {
 
 impl Default for DBSCAN {
     /// Creates a DBSCAN instance with default parameters:
-    /// * eps = 0.5
-    /// * min_samples = 5
-    /// * metric = Euclidean
+    /// - eps = 0.5
+    /// - min_samples = 5
+    /// - metric = Euclidean
     fn default() -> Self {
         DBSCAN {
             eps: 0.5,
@@ -60,11 +61,13 @@ impl DBSCAN {
     /// Creates a new DBSCAN instance with specified parameters
     ///
     /// # Parameters
+    ///
     /// * `eps` - Neighborhood radius used to find neighbors
     /// * `min_samples` - Minimum number of neighbors required to form a core point
     /// * `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
     ///
     /// # Returns
+    ///
     /// * `Self` - A new DBSCAN instance with the specified parameters
     pub fn new(eps: f64, min_samples: usize, metric: Metric) -> Self {
         DBSCAN {
@@ -79,6 +82,7 @@ impl DBSCAN {
     /// Returns the epsilon (neighborhood radius) parameter value
     ///
     /// # Returns
+    ///
     /// * `f64` - The current epsilon value
     pub fn get_eps(&self) -> f64 {
         self.eps
@@ -87,6 +91,7 @@ impl DBSCAN {
     /// Returns the minimum samples parameter value
     ///
     /// # Returns
+    ///
     /// * `usize` - The current minimum samples threshold
     pub fn get_min_samples(&self) -> usize {
         self.min_samples
@@ -104,6 +109,7 @@ impl DBSCAN {
     /// Returns the cluster labels assigned to each sample
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<i32>)` - Array of cluster labels if model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_labels(&self) -> Result<&Array1<i32>, ModelError> {
@@ -120,6 +126,7 @@ impl DBSCAN {
     /// distance `eps` of themselves.
     ///
     /// # Returns
+    ///
     /// - `Ok(&Array1<usize>)` - Array of indices of core samples if model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_core_sample_indices(&self) -> Result<&Array1<usize>, ModelError> {
@@ -133,13 +140,16 @@ impl DBSCAN {
     /// Performs DBSCAN clustering on the input data
     ///
     /// # Parameters
+    ///
     /// * `data` - Input data as a 2D array where each row is a sample
     ///
     /// # Returns
+    ///
     /// - `Ok(&mut Self)` - The trained instance
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     ///
     /// # Notes
+    ///
     /// After fitting, cluster labels can be accessed via `get_labels()` method.
     /// Labels of -1 indicate noise points (outliers).
     pub fn fit(&mut self, data: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
@@ -240,14 +250,17 @@ impl DBSCAN {
     /// Predicts cluster labels for new data points based on trained model
     ///
     /// # Parameters
-    /// * `data` - Original data array that was used for training
-    /// * `new_data` - New data points to classify
+    ///
+    /// - `data` - Original data array that was used for training
+    /// - `new_data` - New data points to classify
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<i32>)` - Array of predicted cluster labels
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     ///
     /// # Notes
+    ///
     /// New points are assigned to the nearest cluster if they are within `eps` distance
     /// of a core point, otherwise they are labeled as noise (-1)
     pub fn predict(&self, trained_data: ArrayView2<f64>, new_data: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
@@ -302,13 +315,16 @@ impl DBSCAN {
     /// Performs clustering and returns the labels in one step
     ///
     /// # Parameters
+    ///
     /// * `data` - Input data as a 2D array where each row is a sample
     ///
     /// # Returns
+    ///
     /// - `Ok(Array1<i32>)` - Array of cluster labels for each sample
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
     ///
     /// # Notes
+    ///
     /// This is equivalent to calling `fit()` followed by `get_labels()`,
     /// but more convenient when you don't need to reuse the model.
     pub fn fit_predict(&mut self, data: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {

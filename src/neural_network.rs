@@ -25,7 +25,7 @@ pub type Tensor = ArrayD<f32>;
 pub trait Layer {
     /// Performs forward propagation through the layer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `input` - The input tensor to the layer
     ///
@@ -36,7 +36,7 @@ pub trait Layer {
 
     /// Performs backward propagation through the layer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `grad_output` - The gradient tensor from the next layer
     ///
@@ -74,7 +74,7 @@ pub trait Layer {
 
     /// Updates the layer parameters using Stochastic Gradient Descent.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `_lr` - Learning rate for parameter updates
     fn update_parameters_sgd(&mut self, _lr: f32) {
@@ -83,24 +83,24 @@ pub trait Layer {
 
     /// Updates the layer parameters using Adam optimizer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `_lr` - Learning rate for parameter updates
-    /// * `_beta1` - Exponential decay rate for the first moment estimates
-    /// * `_beta2` - Exponential decay rate for the second moment estimates
-    /// * `_epsilon` - Small constant for numerical stability
-    /// * `_t` - Current training iteration
+    /// - `_lr` - Learning rate for parameter updates
+    /// - `_beta1` - Exponential decay rate for the first moment estimates
+    /// - `_beta2` - Exponential decay rate for the second moment estimates
+    /// - `_epsilon` - Small constant for numerical stability
+    /// - `_t` - Current training iteration
     fn update_parameters_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _epsilon: f32, _t: u64) {
         // Default implementation does nothing
     }
 
     /// Updates the layer parameters using RMSprop optimizer.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `_lr` - Learning rate for parameter updates
-    /// * `_rho` - Decay rate for moving average of squared gradients
-    /// * `_epsilon` - Small constant for numerical stability
+    /// - `_lr` - Learning rate for parameter updates
+    /// - `_rho` - Decay rate for moving average of squared gradients
+    /// - `_epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
         // Default implementation does nothing
     }
@@ -113,10 +113,10 @@ pub trait Layer {
 pub trait LossFunction {
     /// Computes the loss between true and predicted values.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor containing the ground truth values
-    /// * `y_pred` - Tensor containing the predicted values
+    /// - `y_true` - Tensor containing the ground truth values
+    /// - `y_pred` - Tensor containing the predicted values
     ///
     /// # Returns
     ///
@@ -125,10 +125,10 @@ pub trait LossFunction {
 
     /// Computes the gradient of the loss with respect to the predictions.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `y_true` - Tensor containing the ground truth values
-    /// * `y_pred` - Tensor containing the predicted values
+    /// - `y_true` - Tensor containing the ground truth values
+    /// - `y_pred` - Tensor containing the predicted values
     ///
     /// # Returns
     ///
@@ -143,7 +143,7 @@ pub trait LossFunction {
 pub trait Optimizer {
     /// Updates the parameters of a layer according to the optimization algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `layer` - The layer whose parameters should be updated
     fn update(&mut self, layer: &mut dyn Layer);
@@ -164,9 +164,10 @@ impl Activation {
     ///
     /// Applies the specified activation function to the input tensor.
     ///
-    /// # Arguments
-    /// * `z` - Input tensor to apply activation function to
-    /// * `activation` - The activation function to apply
+    /// # Parameters
+    ///
+    /// - `z` - Input tensor to apply activation function to
+    /// - `activation` - The activation function to apply
     ///
     /// # Returns
     /// A new tensor with the activation function applied
@@ -194,9 +195,10 @@ impl Activation {
     /// Returns the derivative of the activation function given the activated output.
     /// For Softmax, the gradient is handled separately in backward propagation.
     ///
-    /// # Arguments
-    /// * `activation_output` - The output after activation function has been applied
-    /// * `activation` - The activation function whose derivative to compute
+    /// # Parameters
+    ///
+    /// - `activation_output` - The output after activation function has been applied
+    /// - `activation` - The activation function whose derivative to compute
     ///
     /// # Returns
     /// A tensor containing the derivative values
@@ -214,9 +216,10 @@ impl Activation {
     /// For each row, computes:
     /// new_grad\[i\] = a\[i\] * (upstream\[i\] - sum_j(a\[j\]*upstream\[j\]))
     ///
-    /// # Arguments
-    /// * `a` - The output from the softmax activation
-    /// * `upstream` - The gradient flowing from the next layer
+    /// # Parameters
+    ///
+    /// - `a` - The output from the softmax activation
+    /// - `upstream` - The gradient flowing from the next layer
     ///
     /// # Returns
     /// The gradient with respect to the input of the softmax function

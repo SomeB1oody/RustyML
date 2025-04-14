@@ -11,17 +11,16 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `kernel` - The kernel function type used to compute the kernel matrix
-/// * `n_components` - The number of components to extract
-/// * `eigenvalues` - Eigenvalues in descending order (available after fitting)
-/// * `eigenvectors` - Corresponding normalized eigenvectors (available after fitting)
-/// * `x_fit` - Training data, used for subsequent transformation of new data
-/// * `row_means` - Mean of each row in the training kernel matrix (used for centering)
-/// * `total_mean` - Overall mean of the training kernel matrix
+/// - `kernel` - The kernel function type used to compute the kernel matrix
+/// - `n_components` - The number of components to extract
+/// - `eigenvalues` - Eigenvalues in descending order (available after fitting)
+/// - `eigenvectors` - Corresponding normalized eigenvectors (available after fitting)
+/// - `x_fit` - Training data, used for subsequent transformation of new data
+/// - `row_means` - Mean of each row in the training kernel matrix (used for centering)
+/// - `total_mean` - Overall mean of the training kernel matrix
 ///
 /// ## Example
-///
-/// ```
+/// ```rust
 /// use ndarray::{Array2, arr2};
 /// use rustyml::utility::kernel_pca::{KernelPCA, KernelType};
 ///
@@ -73,9 +72,9 @@ pub struct KernelPCA {
 ///
 /// # Parameters
 ///
-/// * `x` - First feature vector
-/// * `y` - Second feature vector
-/// * `kernel` - Kernel type configuration
+/// - `x` - First feature vector
+/// - `y` - Second feature vector
+/// - `kernel` - Kernel type configuration
 ///
 /// # Returns
 ///
@@ -119,8 +118,8 @@ impl KernelPCA {
     ///
     /// # Parameters
     ///
-    /// * `kernel` - The kernel function type to use
-    /// * `n_components` - The number of components to extract
+    /// - `kernel` - The kernel function type to use
+    /// - `n_components` - The number of components to extract
     ///
     /// # Returns
     ///
@@ -233,14 +232,6 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` - containing the transformed training data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - Input data is empty
-    /// - n_components is 0
-    /// - n_components is greater than the number of samples
-    /// - Eigendecomposition fails
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn std::error::Error>> {
         if x.is_empty() {
             return Err(Box::new(ModelError::InputValidationError("Input data cannot be empty".to_string())));
@@ -439,10 +430,6 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` - containing the transformed data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if fit() or transform() fails
     pub fn fit_transform(&mut self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         self.fit(x)?;
         match self.transform(x) {

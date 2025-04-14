@@ -10,17 +10,16 @@ use rayon::prelude::*;
 ///
 /// ## Fields
 ///
-/// * `coefficients` - Model coefficients (slopes), None before training
-/// * `intercept` - Model intercept, None before training
-/// * `fit_intercept` - Whether to include an intercept term in the model
-/// * `learning_rate` - Learning rate for gradient descent
-/// * `max_iter` - Maximum number of iterations for gradient descent
-/// * `tol` - Convergence tolerance
-/// * `n_iter` - Number of iterations the algorithm ran for after fitting
+/// - `coefficients` - Model coefficients (slopes), None before training
+/// - `intercept` - Model intercept, None before training
+/// - `fit_intercept` - Whether to include an intercept term in the model
+/// - `learning_rate` - Learning rate for gradient descent
+/// - `max_iter` - Maximum number of iterations for gradient descent
+/// - `tol` - Convergence tolerance
+/// - `n_iter` - Number of iterations the algorithm ran for after fitting
 ///
 /// ## Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::linear_regression::LinearRegression;
 /// use ndarray::{Array1, Array2, array};
 ///
@@ -103,7 +102,7 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// Returns `true` if the model includes an intercept term, `false` otherwise
+    /// * `bool` - Returns `true` if the model includes an intercept term, `false` otherwise
     pub fn get_fit_intercept(&self) -> bool {
         self.fit_intercept
     }
@@ -114,7 +113,7 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// The current learning rate value
+    /// * `f64` - The current learning rate value
     pub fn get_learning_rate(&self) -> f64 {
         self.learning_rate
     }
@@ -123,7 +122,7 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// The maximum number of iterations for the gradient descent algorithm
+    /// * `usize` - The maximum number of iterations for the gradient descent algorithm
     pub fn get_max_iter(&self) -> usize {
         self.max_iter
     }
@@ -136,7 +135,7 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// The current convergence tolerance value
+    /// * `f64` - The current convergence tolerance value
     pub fn get_tol(&self) -> f64 {
         self.tol
     }
@@ -183,10 +182,12 @@ impl LinearRegression {
     /// Fits the linear regression model using gradient descent
     ///
     /// # Parameters
-    /// * `x` - Feature matrix, each row is a sample, each column is a feature
-    /// * `y` - Target variable vector
     ///
-    /// # Return Value
+    /// - `x` - Feature matrix, each row is a sample, each column is a feature
+    /// - `y` - Target variable vector
+    ///
+    /// # Returns
+    ///
     /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
@@ -281,9 +282,11 @@ impl LinearRegression {
     /// Makes predictions using the trained model
     ///
     /// # Parameters
+    ///
     /// * `x` - Prediction data, each row is a sample, each column is a feature
     ///
-    /// # Return Value
+    /// # Returns
+    ///
     /// - `Ok(Vec<f64>)` - A vector of predictions
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If number of features does not match training data
@@ -317,14 +320,13 @@ impl LinearRegression {
     ///
     /// This is a convenience method that combines the `fit` and `predict` methods into one call.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - The input features matrix where each inner vector represents a training example
-    /// * `y` - The target values corresponding to each training example
+    /// - `x` - The input features matrix where each inner vector represents a training example
+    /// - `y` - The target values corresponding to each training example
     ///
     /// # Returns
     ///
-    /// A Result containing either:
     /// - `Ok(Vec<f64>)` - The predicted values for the input data
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
     pub fn fit_predict(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<Array1<f64>, ModelError> {
