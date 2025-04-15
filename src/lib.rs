@@ -14,7 +14,9 @@ pub enum ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ModelError::NotFitted => write!(f, "Model has not been fitted. Parameters are unavailable."),
+            ModelError::NotFitted => {
+                write!(f, "Model has not been fitted. Parameters are unavailable.")
+            }
             ModelError::InputValidationError(msg) => write!(f, "Input validation error: {}", msg),
             ModelError::TreeError(msg) => write!(f, "Tree structure error: {}", msg),
             ModelError::ProcessingError(msg) => write!(f, "Processing error: {}", msg),
@@ -46,7 +48,7 @@ impl std::error::Error for ModelError {}
 /// - Calculates the Mean Squared Error (MSE) of a set of values
 /// - Calculates the leaf node adjustment factor c(n)
 /// - Calculates the standard deviation of a set of values
-/// 
+///
 /// These functions are particularly useful for regression model evaluation and
 /// performance assessment in machine learning applications.
 ///
@@ -294,7 +296,7 @@ pub mod dataset;
 /// model.summary();
 ///
 /// // Train the model
-/// model.fit(&x, &y, 3);
+/// model.fit(&x, &y, 3).unwrap();
 ///
 /// // Use predict for forward propagation prediction
 /// let prediction = model.predict(&x);

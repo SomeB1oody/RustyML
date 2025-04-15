@@ -1,18 +1,19 @@
-/// Module that contains optimization algorithms for neural network training.
-pub mod optimizer;
-/// Module that contains loss function implementations.
-pub mod loss_function;
 /// Module that contains neural network layer implementations.
 pub mod layer;
+/// Module that contains loss function implementations.
+pub mod loss_function;
+/// Module that contains optimization algorithms for neural network training.
+pub mod optimizer;
 /// Module that contains implementations for sequential model architecture.
 pub mod sequential;
 
-pub use optimizer::*;
-pub use loss_function::*;
 pub use layer::*;
+pub use loss_function::*;
+pub use optimizer::*;
 pub use sequential::*;
 
-use ndarray::{ArrayD, Array2, Axis};
+use crate::ModelError;
+use ndarray::{Array2, ArrayD, Axis};
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network.
 pub type Tensor = ArrayD<f32>;
@@ -43,7 +44,7 @@ pub trait Layer {
     /// # Returns
     ///
     /// The gradient tensor to be passed to the previous layer
-    fn backward(&mut self, grad_output: &Tensor) -> Tensor;
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError>;
 
     /// Returns the type name of the layer (e.g., "Dense").
     ///
@@ -90,7 +91,14 @@ pub trait Layer {
     /// - `_beta2` - Exponential decay rate for the second moment estimates
     /// - `_epsilon` - Small constant for numerical stability
     /// - `_t` - Current training iteration
-    fn update_parameters_adam(&mut self, _lr: f32, _beta1: f32, _beta2: f32, _epsilon: f32, _t: u64) {
+    fn update_parameters_adam(
+        &mut self,
+        _lr: f32,
+        _beta1: f32,
+        _beta2: f32,
+        _epsilon: f32,
+        _t: u64,
+    ) {
         // Default implementation does nothing
     }
 
@@ -149,7 +157,6 @@ pub trait Optimizer {
     fn update(&mut self, layer: &mut dyn Layer);
 }
 
-
 /// Activation function enum, supporting ReLU, Tanh, Sigmoid, and Softmax
 #[derive(Debug, PartialEq)]
 pub enum Activation {
@@ -202,7 +209,10 @@ impl Activation {
     ///
     /// # Returns
     /// A tensor containing the derivative values
-    pub fn activation_derivative(activation_output: &Array2<f32>, activation: &Activation) -> Array2<f32> {
+    pub fn activation_derivative(
+        activation_output: &Array2<f32>,
+        activation: &Activation,
+    ) -> Array2<f32> {
         match activation {
             Activation::ReLU => activation_output.mapv(|x| if x > 0.0 { 1.0 } else { 0.0 }),
             Activation::Sigmoid => activation_output.mapv(|a| a * (1.0 - a)),
@@ -229,7 +239,11 @@ impl Activation {
             .axis_iter_mut(Axis(0))
             .zip(a.axis_iter(Axis(0)).zip(upstream.axis_iter(Axis(0))))
         {
-            let dot = a_row.iter().zip(up_row.iter()).map(|(&ai, &gi)| ai * gi).sum::<f32>();
+            let dot = a_row
+                .iter()
+                .zip(up_row.iter())
+                .map(|(&ai, &gi)| ai * gi)
+                .sum::<f32>();
             for (j, r) in out_row.iter_mut().enumerate() {
                 *r = a_row[j] * (up_row[j] - dot);
             }

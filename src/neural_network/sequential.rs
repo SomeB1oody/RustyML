@@ -62,7 +62,7 @@ impl Sequential {
     /// - `x` - Input tensor containing training data
     /// - `y` - Target tensor containing expected outputs
     /// - `epochs` - Number of training epochs to perform
-    pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) {
+    pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<&mut Self, ModelError> {
         for epoch in 0..epochs {
             println!("Epoch {}", epoch + 1);
             // Forward pass
@@ -77,12 +77,17 @@ impl Sequential {
             let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output);
             // Backward pass and parameter updates (iterate through layers in reverse)
             for layer in self.layers.iter_mut().rev() {
-                grad = layer.backward(&grad);
+                grad = match layer.backward(&grad) {
+                    Ok(grad) => grad,
+                    Err(e) => return Err(e),
+                };
                 if let Some(ref mut optimizer) = self.optimizer {
                     optimizer.update(&mut **layer);
                 }
             }
         }
+
+        Ok(self)
     }
 
     /// Generates predictions for the input data
@@ -152,11 +157,7 @@ impl Sequential {
             "─".repeat(col2_width),
             "─".repeat(col3_width)
         );
-        println!(
-            " Total params: {} ({} B)",
-            total_params,
-            total_params * 4
-        ); // Using f32, each parameter is 4 bytes
+        println!(" Total params: {} ({} B)", total_params, total_params * 4); // Using f32, each parameter is 4 bytes
         println!(
             " Trainable params: {} ({} B)",
             total_params,

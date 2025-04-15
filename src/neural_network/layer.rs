@@ -141,7 +141,7 @@ impl Layer for Dense {
     /// # Returns
     ///
     /// Gradient tensor to be passed to the previous layer
-    fn backward(&mut self, grad_output: &Tensor) -> Tensor {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Convert gradient to 2D array with shape [batch_size, output_dim]
         let mut grad_upstream = grad_output
             .clone()
@@ -150,16 +150,31 @@ impl Layer for Dense {
         // If activation function is used, apply chain rule: dL/dz = (dActivation/dz) ⊙ dL/da
         if let Some(act) = &self.activation {
             if *act == Activation::Softmax {
-                let a = self.activation_output.take().expect("Forward pass has not been run");
+                let a = match self.activation_output.take() {
+                    Some(a) => a,
+                    None => Err(ModelError::ProcessingError(String::from(
+                        "Forward pass has not been run",
+                    )))?,
+                };
                 grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
             } else {
-                let a = self.activation_output.take().expect("Forward pass has not been run");
+                let a = match self.activation_output.take() {
+                    Some(a) => a,
+                    None => Err(ModelError::ProcessingError(String::from(
+                        "Forward pass has not been run",
+                    )))?,
+                };
                 let deriv = Activation::activation_derivative(&a, act);
                 grad_upstream = deriv * &grad_upstream;
             }
         }
         // Calculate gradients: weight gradient = input^T dot grad_upstream
-        let input = self.input_cache.take().expect("Forward pass has not been run");
+        let input = match self.input_cache.take() {
+            Some(input) => input,
+            None => Err(ModelError::ProcessingError(String::from(
+                "Forward pass has not been run",
+            )))?,
+        };
         let grad_w = input.t().dot(&grad_upstream);
         // Bias gradient: sum across each row, keeping two dimensions
         let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -167,7 +182,7 @@ impl Layer for Dense {
         self.grad_bias = Some(grad_b);
         // Calculate gradient to pass to previous layer
         let grad_input = grad_upstream.dot(&self.weights.t());
-        grad_input.into_dyn()
+        Ok(grad_input.into_dyn())
     }
 
     /// Returns the type of this layer.
@@ -233,8 +248,14 @@ impl Layer for Dense {
         let m_b = self.m_bias.as_mut().unwrap();
         let v_b = self.v_bias.as_mut().unwrap();
 
-        let grad_w = self.grad_weights.as_ref().expect("Adam: grad_weights not calculated");
-        let grad_b = self.grad_bias.as_ref().expect("Adam: grad_bias not calculated");
+        let grad_w = self
+            .grad_weights
+            .as_ref()
+            .expect("Adam: grad_weights not calculated");
+        let grad_b = self
+            .grad_bias
+            .as_ref()
+            .expect("Adam: grad_bias not calculated");
 
         // Update first moment (momentum)
         *m_w = m_w.mapv(|x| x * beta1) + &(grad_w * (1.0 - beta1));
@@ -278,7 +299,8 @@ impl Layer for Dense {
                 *cache_b = cache_b.mapv(|x| x * rho) + &(grad_b.mapv(|x| x * x) * (1.0 - rho));
             }
             if let Some(ref cache_w) = self.cache_weights {
-                self.weights = &self.weights - &(lr * grad_w / &(cache_w.mapv(f32::sqrt) + epsilon));
+                self.weights =
+                    &self.weights - &(lr * grad_w / &(cache_w.mapv(f32::sqrt) + epsilon));
             }
             if let Some(ref cache_b) = self.cache_bias {
                 self.bias = &self.bias - &(lr * grad_b / &(cache_b.mapv(f32::sqrt) + epsilon));
