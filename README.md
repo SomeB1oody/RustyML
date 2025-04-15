@@ -2,6 +2,15 @@
 A comprehensive machine learning and deep learning library written in pure Rust.
 一个用纯Rust编写的全面机器学习和深度学习库。
 
+[![Rust Version](https://img.shields.io/badge/Rust-2024_version-blue)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
+[![ndarray](https://img.shields.io/badge/ndrarray-0.16.1-blue)](https://crates.io/crates/ndarray)
+[![rand](https://img.shields.io/badge/rand-0.9.0-blue)](https://crates.io/crates/rand)
+[![nalgebra](https://img.shields.io/badge/nalgebra-0.33.2-blue)](https://crates.io/crates/nalgebra)
+[![statrs](https://img.shields.io/badge/statrs-0.18.0-blue)](https://crates.io/crates/statrs)
+[![rand_distr](https://img.shields.io/badge/rand_distr-0.5.1-blue)](https://crates.io/crates/rand_distr)
+[![rayon](https://img.shields.io/badge/rayon-1.10.0-blue)](https://crates.io/crates/rayon)
+
 ## Overview | 概述
 Rust AI aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages with foundational components, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
 Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，只实现了基础组件，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
@@ -121,14 +130,6 @@ While the library is in its early stages, Rust AI aims to evolve into a comprehe
     - Performance metrics | 性能指标
     - Visualization helpers | 可视化辅助工具
 
-## Dependencies | 依赖
-- [ndarray](https://crates.io/crates/ndarray) (0.16.1): N-dimensional array library for Rust | Rust的N维数组库
-- [rand](https://crates.io/crates/rand) (0.9.0): Random number generators and other randomness functionality for Rust | Rust的随机数生成器和其他随机性功能
-- [nalgebra](https://crates.io/crates/nalgebra) (0.33.2): General-purpose linear algebra library with transformations and statically-sized or dynamically-sized matrices | 通用线性代数库，具有变换和静态大小或动态大小的矩阵
-- [statrs](https://crates.io/crates/statrs)(0.18.0): A host of statistical utilities for Rust scientific computing | Rust 科学计算的一整套统计工具
-- [rand_distr](https://crates.io/crates/rand_distr)(0.5.1) Sampling from random number distributions | 从随机数分布中采样
-- [rayon](https://crates.io/crates/rayon)(1.10.0) a data-parallelism library for Rust | Rust的数据并行库
-
 ## Getting Started | 开始使用
 Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
@@ -181,8 +182,6 @@ Contributions are welcome! If you're interested in helping build a robust machin
 3. Provide feedback on the API design | 提供API设计的反馈意见
 4. Help with documentation and examples | 帮助完善文档和示例
 
-## License | 许可证
-[MIT - License](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 ## Authors | 作者
 - SomeB1oody (stanyin64@gmail.com)
 
