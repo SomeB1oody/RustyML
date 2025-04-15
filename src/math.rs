@@ -8,15 +8,16 @@ use crate::ModelError;
 /// differences between each actual value and the mean of all values.
 ///
 /// # Parameters
+/// 
 /// * `values` - An ndarray `ArrayView1<f64>` of observed values
 ///
 /// # Returns
+/// 
 /// - `Ok(f64)` - The Sum of Square Total (SST)
 /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::sum_of_square_total;
 /// use ndarray::array;
 ///
@@ -42,16 +43,17 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 /// Calculate the sum of squared errors
 ///
 /// # Parameters
+/// 
 /// * `predicted` - Predicted values vector (y') as ndarray `ArrayView1<f64>`
 /// * `actual` - Actual values vector (y) as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
+/// 
 /// - `Ok(f64)` - Sum of squared errors sum((predicted_i - actual_i)^2)
 /// - `Err(ModelError::InputValidationError)` if input does not match expectation
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::sum_of_squared_errors;
 /// use ndarray::array;
 ///
@@ -89,19 +91,21 @@ pub fn sum_of_squared_errors(predicted: ArrayView1<f64>, actual: ArrayView1<f64>
 /// It is defined as: σ(z) = 1 / (1 + e^(-z))
 ///
 /// # Parameters
+/// 
 /// * `z` - The input value (can be any real number)
 ///
 /// # Returns
+/// 
 /// * A value between 0 and 1, representing the sigmoid of the input
 ///
 /// # Mathematical properties
+/// 
 /// * sigmoid(0) = 0.5
 /// * As z approaches positive infinity, sigmoid(z) approaches 1
 /// * As z approaches negative infinity, sigmoid(z) approaches 0
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::sigmoid;
 ///
 /// let value = sigmoid(0.0);
@@ -118,16 +122,17 @@ pub fn sigmoid(z: f64) -> f64 {
 /// applying sigmoid to raw predictions before calculating loss.
 ///
 /// # Parameters
+/// 
 /// * `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
 /// * `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
 ///
 /// # Returns
+/// 
 /// - `Ok(f64)` - Average logistic regression loss
 /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::logistic_loss;
 /// use ndarray::array;
 ///
@@ -171,15 +176,15 @@ pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) ->
 /// Calculate the squared Euclidean distance between two vectors
 ///
 /// # Parameters
-/// * `x1` - First vector as ndarray `ArrayView1<f64>`
-/// * `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// 
+/// - `x1` - First vector as ndarray `ArrayView1<f64>`
+/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
 /// * `f64` - The squared Euclidean distance between x1 and x2
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::squared_euclidean_distance_row;
 ///
@@ -203,15 +208,14 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 /// of two 1D arrays, representing the Manhattan (L1) distance.
 ///
 /// # Parameters
-/// * `x1` - First vector as ndarray `ArrayView1<f64>`
-/// * `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// - `x1` - First vector as ndarray `ArrayView1<f64>`
+/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
 /// * `f64` - The Manhattan distance between x1 and x2
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::manhattan_distance_row;
 ///
@@ -235,16 +239,15 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 /// representing the Minkowski distance with parameter p.
 ///
 /// # Parameters
-/// * `x1` - First vector as ndarray `ArrayView1<f64>`
-/// * `x2` - Second vector as ndarray `ArrayView1<f64>`
-/// * `p` - The order of the norm (p ≥ 1.0)
+/// - `x1` - First vector as ndarray `ArrayView1<f64>`
+/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// - `p` - The order of the norm (p ≥ 1.0)
 ///
 /// # Returns
 /// * `f64` - The Minkowski distance between x1 and x2
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::minkowski_distance_row;
 ///
@@ -272,18 +275,19 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 /// like ID3 and C4.5. It quantifies the uncertainty or randomness in the data distribution.
 ///
 /// # Parameters
+/// 
 /// * `y` - An `ArrayView1<f64>` of values representing class labels
 ///
 /// # Returns
+/// 
 /// * The entropy value of the given dataset. Lower values indicate more homogeneous data.
 ///
 /// # Notes
-/// * The function handles floating point labels by rounding to 3 decimal places for counting.
-/// * Returns 0.0 for empty datasets.
+/// - The function handles floating point labels by rounding to 3 decimal places for counting.
+/// - Returns 0.0 for empty datasets.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::entropy;
 ///
@@ -329,18 +333,20 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 /// in the subset. It is commonly used in decision tree algorithms like CART.
 ///
 /// # Parameters
+/// 
 /// * `y` - An `ArrayView1<f64>` of values representing class labels
 ///
 /// # Returns
-/// * The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
+/// 
+/// * `f64` - The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
 ///
 /// # Notes
-/// * The function handles floating point labels by rounding to 3 decimal places for counting.
-/// * Returns 0.0 for empty datasets.
+/// 
+/// - The function handles floating point labels by rounding to 3 decimal places for counting.
+/// - Returns 0.0 for empty datasets.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::gini;
 ///
@@ -383,19 +389,20 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// like ID3 and C4.5 to select the best feature for splitting.
 ///
 /// # Parameters
-/// * `y` - An `ArrayView1<f64>` representing class labels in the parent node
-/// * `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
-/// * `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
+/// 
+/// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
+/// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
+/// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
 ///
 /// # Returns
+/// 
 /// * The information gain value. Higher values indicate a more useful split.
 ///
 /// # Notes
-/// * This function uses the entropy function to calculate impurity at each node.
+/// This function uses the entropy function to calculate impurity at each node.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::information_gain;
 ///
@@ -443,20 +450,22 @@ pub fn information_gain(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: Ar
 /// normalize information gain by the entropy of the split itself.
 ///
 /// # Parameters
-/// * `y` - An `ArrayView1<f64>` representing class labels in the parent node
-/// * `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
-/// * `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
+/// 
+/// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
+/// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
+/// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
 ///
 /// # Returns
+/// 
 /// * The gain ratio value. Higher values indicate a more useful split.
 ///
 /// # Notes
-/// * Returns 0.0 if the split information is zero to avoid division by zero.
-/// * This function uses the information_gain function as part of its calculation.
+/// 
+/// - Returns 0.0 if the split information is zero to avoid division by zero.
+/// - This function uses the information_gain function as part of its calculation.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::gain_ratio;
 ///
@@ -518,14 +527,15 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
 /// and the mean of all values. It represents the variance of the dataset.
 ///
 /// # Arguments
+/// 
 /// * `y` - An `ArrayView1<f64>` of values for which to calculate the MSE
 ///
 /// # Returns
+/// 
 /// * `f64` - The mean squared error as a f64 value, returns 0.0 if the input array is empty
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::variance;
 ///
@@ -560,18 +570,20 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
 /// Calculates the leaf node adjustment factor c(n)
 ///
 /// # Parameters
+/// 
 /// * `n` - Number of samples
 ///
 /// # Returns
+/// 
 /// * `f64` - The adjustment factor
 ///
 /// # Notes
+/// 
 /// Formula: c(n) = 2 * (H(n-1)) - (2*(n-1)/n)
 /// where H(n-1) can be approximated by ln(n-1) + gamma, gamma is Euler's constant
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::average_path_length_factor;
 ///
 /// let factor = average_path_length_factor(10.0);
@@ -603,14 +615,15 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// Calculates the standard deviation of a set of values
 ///
 /// # Parameters
+/// 
 /// * `values` - An `ArrayView1<f64>` of values
 ///
 /// # Returns
+/// 
 /// * `f64` - The population standard deviation. Returns 0.0 if the array is empty or contains only one element.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::math::standard_deviation;
 ///

@@ -2,11 +2,12 @@
 ///
 /// This enum defines common distance metrics that can be used in clustering algorithms,
 /// nearest neighbor searches, and other applications where distance between points is relevant.
+/// 
 /// # Variants
 ///
-/// * `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
-/// * `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
-/// * `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (not implemented in this enum).
+/// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
+/// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
+/// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (not implemented in this enum).
 #[derive(Debug, Clone, PartialEq)]
 pub enum DistanceCalculationMetric {
     /// Euclidean distance (L2 norm) - the straight-line distance between two points.
@@ -31,8 +32,7 @@ pub enum DistanceCalculationMetric {
 /// * Maximum iteration limit for optimization
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_regression::LinearRegression;
 ///
@@ -62,16 +62,15 @@ pub mod linear_regression;
 ///
 /// # Features
 ///
-/// * Binary classification using gradient descent optimization
-/// * Configurable intercept term (bias)
-/// * Adjustable learning rate and convergence tolerance
-/// * Maximum iteration limit to prevent excessive computation
-/// * Probability estimation via sigmoid function
-/// * Polynomial feature transformation support
+/// - Binary classification using gradient descent optimization
+/// - Configurable intercept term (bias)
+/// - Adjustable learning rate and convergence tolerance
+/// - Maximum iteration limit to prevent excessive computation
+/// - Probability estimation via sigmoid function
+/// - Polynomial feature transformation support
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::logistic_regression::LogisticRegression;
 ///
@@ -103,16 +102,15 @@ pub mod logistic_regression;
 ///
 /// # Features
 ///
-/// * Configurable number of clusters (k)
-/// * Centroid initialization using random selection
-/// * Iterative optimization with customizable maximum iterations
-/// * Early stopping based on convergence tolerance
-/// * Optional random seed for reproducible results
-/// * Calculation of cluster inertia (within-cluster sum of squared distances)
+/// - Configurable number of clusters (k)
+/// - Centroid initialization using random selection
+/// - Iterative optimization with customizable maximum iterations
+/// - Early stopping based on convergence tolerance
+/// - Optional random seed for reproducible results
+/// - Calculation of cluster inertia (within-cluster sum of squared distances)
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::Array2;
 /// use rustyml::machine_learning::kmeans::KMeans;
 ///
@@ -161,20 +159,19 @@ pub mod kmeans;
 ///
 /// # Features
 ///
-/// * Configurable number of neighbors (k)
-/// * Multiple distance metric options through the `Metric` enum
-/// * Two weighting strategies: uniform and distance-based
-/// * Support for any hashable and equatable label type
-/// * Efficient prediction for single and multiple test samples
+/// - Configurable number of neighbors (k)
+/// - Multiple distance metric options through the `Metric` enum
+/// - Two weighting strategies: uniform and distance-based
+/// - Support for any hashable and equatable label type
+/// - Efficient prediction for single and multiple test samples
 ///
 /// # Weighting Strategies
 ///
-/// * `Uniform` - All neighbors contribute equally to the prediction
-/// * `Distance` - Closer neighbors contribute more than distant ones, weighted by inverse distance
+/// - `Uniform` - All neighbors contribute equally to the prediction
+/// - `Distance` - Closer neighbors contribute more than distant ones, weighted by inverse distance
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
 /// use rustyml::machine_learning::DistanceCalculationMetric as Metric;
@@ -219,16 +216,15 @@ pub mod knn;
 ///
 /// # Features
 ///
-/// * Automatic discovery of cluster centers without specifying cluster count
-/// * Bandwidth parameter to control cluster size
-/// * Optional bin seeding for improved performance on large datasets
-/// * Configurable convergence tolerance and maximum iterations
-/// * Option to assign all points to clusters or leave some as outliers
-/// * Automatic bandwidth estimation via `estimate_bandwidth` function
+/// - Automatic discovery of cluster centers without specifying cluster count
+/// - Bandwidth parameter to control cluster size
+/// - Optional bin seeding for improved performance on large datasets
+/// - Configurable convergence tolerance and maximum iterations
+/// - Option to assign all points to clusters or leave some as outliers
+/// - Automatic bandwidth estimation via `estimate_bandwidth` function
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::Array2;
 /// use rustyml::machine_learning::meanshift::{MeanShift, estimate_bandwidth};
 ///
@@ -285,22 +281,21 @@ pub mod meanshift;
 ///
 /// # Features
 ///
-/// * Discovers clusters of arbitrary shape
-/// * Automatically identifies outliers as noise points
-/// * Does not require specifying the number of clusters a priori
-/// * Configurable distance metric through the `Metric` enum
-/// * Customizable density parameters via `eps` and `min_samples`
-/// * Efficient prediction for new data points based on trained model
+/// - Discovers clusters of arbitrary shape
+/// - Automatically identifies outliers as noise points
+/// - Does not require specifying the number of clusters a priori
+/// - Configurable distance metric through the `Metric` enum
+/// - Customizable density parameters via `eps` and `min_samples`
+/// - Efficient prediction for new data points based on trained model
 ///
 /// # Parameters
 ///
-/// * `eps` - The maximum distance between two samples for them to be considered as in the same neighborhood
-/// * `min_samples` - The minimum number of samples in a neighborhood for a point to be considered a core point
-/// * `metric` - The distance metric to use for finding neighbors
+/// - `eps` - The maximum distance between two samples for them to be considered as in the same neighborhood
+/// - `min_samples` - The minimum number of samples in a neighborhood for a point to be considered a core point
+/// - `metric` - The distance metric to use for finding neighbors
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::Array2;
 /// use rustyml::machine_learning::dbscan::DBSCAN;
 /// use rustyml::machine_learning::DistanceCalculationMetric as Metric;
@@ -369,34 +364,34 @@ pub mod dbscan;
 ///
 /// # Features
 ///
-/// * Multiple decision tree algorithms: ID3, C4.5, and CART
-/// * Support for both classification and regression tasks
-/// * Customizable tree parameters (depth, minimum samples, etc.)
-/// * Probability predictions for classification
-/// * Categorical feature support
-/// * Configurable splitting criteria
-/// * Tree structure visualization
+/// - Multiple decision tree algorithms: ID3, C4.5, and CART
+/// - Support for both classification and regression tasks
+/// - Customizable tree parameters (depth, minimum samples, etc.)
+/// - Probability predictions for classification
+/// - Categorical feature support
+/// - Configurable splitting criteria
+/// - Tree structure visualization
 ///
 /// # Decision Tree Algorithms
 ///
-/// * `ID3` - Iterative Dichotomiser 3, uses information gain for splitting
-/// * `C45` - An extension of ID3 that uses gain ratio and can handle continuous attributes
-/// * `CART` - Classification And Regression Trees, uses Gini impurity (classification) or MSE (regression)
+/// - `ID3` - Iterative Dichotomiser 3, uses information gain for splitting
+/// - `C45` - An extension of ID3 that uses gain ratio and can handle continuous attributes
+/// - `CART` - Classification And Regression Trees, uses Gini impurity (classification) or MSE (regression)
 ///
 /// # Parameters
 ///
 /// The tree behavior can be customized through `DecisionTreeParams`:
 ///
-/// * `max_depth` - Maximum depth of the tree (None for unlimited)
-/// * `min_samples_split` - Minimum samples required to split an internal node
-/// * `min_samples_leaf` - Minimum samples required in a leaf node
-/// * `min_impurity_decrease` - Minimum impurity decrease required for splitting
-/// * `random_state` - Seed for random number generator (for reproducibility)
+/// - `max_depth` - Maximum depth of the tree (None for unlimited)
+/// - `min_samples_split` - Minimum samples required to split an internal node
+/// - `min_samples_leaf` - Minimum samples required in a leaf node
+/// - `min_impurity_decrease` - Minimum impurity decrease required for splitting
+/// - `random_state` - Seed for random number generator (for reproducibility)
 ///
 /// # Examples
-///
+/// 
 /// ## Classification Example
-/// ```
+/// ``` rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::decision_tree::{DecisionTree, Algorithm, DecisionTreeParams};
 ///
@@ -432,7 +427,7 @@ pub mod dbscan;
 /// ```
 ///
 /// ## Regression Example
-/// ```
+/// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::decision_tree::{DecisionTree, Algorithm};
 ///
@@ -451,21 +446,21 @@ pub mod dbscan;
 /// # Tree Structure
 ///
 /// The decision tree is composed of `Node` structures which can be either:
-/// * Internal nodes with a feature index and threshold (or categories for categorical features)
-/// * Leaf nodes with a prediction value and optional class/probability information
+/// - Internal nodes with a feature index and threshold (or categories for categorical features)
+/// - Leaf nodes with a prediction value and optional class/probability information
 ///
 /// # Performance Considerations
 ///
-/// * Decision trees are prone to overfitting, especially with deep trees
-/// * The `max_depth` parameter can help control overfitting
-/// * Training time increases with dataset size and feature count
-/// * Trees can handle both numerical and categorical data without preprocessing
+/// - Decision trees are prone to overfitting, especially with deep trees
+/// - The `max_depth` parameter can help control overfitting
+/// - Training time increases with dataset size and feature count
+/// - Trees can handle both numerical and categorical data without preprocessing
 ///
 /// # References
 ///
-/// * Quinlan, J. R. (1986). Induction of decision trees. Machine learning, 1(1), 81-106.
-/// * Quinlan, J. R. (1993). C4.5: Programs for Machine Learning. Morgan Kaufmann.
-/// * Breiman, L., Friedman, J., Stone, C. J., & Olshen, R. A. (1984). Classification and
+/// - Quinlan, J. R. (1986). Induction of decision trees. Machine learning, 1(1), 81-106.
+/// - Quinlan, J. R. (1993). C4.5: Programs for Machine Learning. Morgan Kaufmann.
+/// - Breiman, L., Friedman, J., Stone, C. J., & Olshen, R. A. (1984). Classification and
 ///   regression trees. CRC press.
 pub mod decision_tree;
 
@@ -478,24 +473,23 @@ pub mod decision_tree;
 ///
 /// # Features
 ///
-/// * Efficient anomaly detection without requiring a labeled training set
-/// * Configurable number of trees (estimators) in the ensemble
-/// * Support for different sample sizes through `max_samples` parameter
-/// * Adjustable tree height through `max_depth` parameter
-/// * Anomaly score calculation for each data point
-/// * Binary anomaly prediction (normal/anomaly) based on a contamination threshold
-/// * Randomized feature selection for improved robustness
+/// - Efficient anomaly detection without requiring a labeled training set
+/// - Configurable number of trees (estimators) in the ensemble
+/// - Support for different sample sizes through `max_samples` parameter
+/// - Adjustable tree height through `max_depth` parameter
+/// - Anomaly score calculation for each data point
+/// - Binary anomaly prediction (normal/anomaly) based on a contamination threshold
+/// - Randomized feature selection for improved robustness
 ///
 /// # Parameters
 ///
-/// * `n_estimators` - Number of isolation trees in the ensemble
-/// * `max_samples` - Number of samples to draw for each tree
-/// * `contamination` - Expected proportion of anomalies in the dataset
-/// * `max_depth` - Maximum depth of the isolation trees (None for unlimited)
-/// * `random_state` - Seed for random number generation (for reproducibility)
+/// - `n_estimators` - Number of isolation trees in the ensemble
+/// - `max_samples` - Number of samples to draw for each tree
+/// - `contamination` - Expected proportion of anomalies in the dataset
+/// - `max_depth` - Maximum depth of the isolation trees (None for unlimited)
+/// - `random_state` - Seed for random number generation (for reproducibility)
 ///
 /// # Examples
-///
 /// ```rust
 /// use rustyml::machine_learning::isolation_forest::IsolationForest;
 /// use ndarray::Array2;
@@ -531,11 +525,11 @@ pub mod decision_tree;
 ///
 /// # Performance Considerations
 ///
-/// * The algorithm excels with high-dimensional data where distance-based methods struggle
-/// * Performs well when anomalies are isolated points rather than small clusters
-/// * Subsampling makes it efficient for large datasets
-/// * Time complexity is roughly O(t * n * log(n)) where t is the number of trees and n is sample size
-/// * More trees generally improve stability but increase computation cost
+/// - The algorithm excels with high-dimensional data where distance-based methods struggle
+/// - Performs well when anomalies are isolated points rather than small clusters
+/// - Subsampling makes it efficient for large datasets
+/// - Time complexity is roughly O(t * n * log(n)) where t is the number of trees and n is sample size
+/// - More trees generally improve stability but increase computation cost
 ///
 /// # References
 ///
@@ -562,8 +556,7 @@ pub mod isolation_forest;
 /// - Support for binary classification tasks
 ///
 /// ## Example
-///
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::svc::{SVC, KernelType};
 /// use ndarray::{Array1, Array2};
 ///
@@ -613,8 +606,7 @@ pub mod svc;
 /// - Provides access to model parameters and convergence information
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::linear_svc::{LinearSVC, PenaltyType};
 /// use ndarray::{Array1, Array2};
 ///
@@ -655,7 +647,6 @@ pub mod linear_svc;
 /// - Statistical classification based on the Bayes rule
 ///
 /// ## Example
-///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::linear_discriminant_analysis::LDA;

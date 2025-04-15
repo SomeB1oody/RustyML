@@ -18,7 +18,6 @@ use ndarray::{Array1, Array2};
 /// - Access to components, singular values, and other PCA attributes
 ///
 /// ## Example
-///
 /// ```rust
 /// use ndarray::Array2;
 /// use rustyml::utility::principal_component_analysis::PCA;
@@ -67,7 +66,6 @@ pub mod principal_component_analysis;
 /// - Input validation to ensure data consistency
 ///
 /// ## Example
-///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::train_test_split::train_test_split;
@@ -108,8 +106,7 @@ pub mod train_test_split;
 /// - Access to eigenvalues and eigenvectors of the kernel matrix
 ///
 /// ## Example Usage
-///
-/// ```
+/// ```rust
 /// use rustyml::utility::kernel_pca::{KernelPCA, KernelType};
 /// use ndarray::Array2;
 ///
@@ -152,7 +149,6 @@ pub mod kernel_pca;
 /// - Statistical classification based on the Bayes rule
 ///
 /// ## Example
-///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::linear_discriminant_analysis::LDA;
@@ -192,7 +188,6 @@ pub mod linear_discriminant_analysis;
 /// low-dimensional embedding and the high-dimensional data.
 ///
 /// ## Example
-///
 /// ```rust
 /// use ndarray::Array2;
 /// use rustyml::utility::t_sne::TSNE;

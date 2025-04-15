@@ -1,5 +1,4 @@
 /// # Title: Iris Plants Database
-/// Updated Sept 21 by C.Blake - Added discrepency information
 ///
 /// # Sources:
 /// (a) Creator: R.A. Fisher
@@ -85,8 +84,7 @@ pub mod iris;
 /// - `load_diabetes()`: Loads the diabetes dataset and returns features and targets.
 ///
 /// ## Example
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::diabetes;
 ///
 /// let (features, targets) = diabetes::load_diabetes();

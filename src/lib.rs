@@ -51,8 +51,7 @@ impl std::error::Error for ModelError {}
 /// performance assessment in machine learning applications.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::math::sum_of_squared_errors;
 /// use ndarray::array;
 ///
@@ -101,8 +100,7 @@ mod math_module_test;
 /// - **generate_polynomial_features**: Creates polynomial features for enhancing model complexity
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::machine_learning::linear_regression::LinearRegression;
 /// use ndarray::{Array1, Array2, array};
 ///
@@ -141,8 +139,7 @@ mod machine_learning_test;
 /// allowing users to import multiple items with a single `use` statement.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// // Import all common items
 /// use rustyml::prelude::*;
 ///
@@ -171,8 +168,7 @@ pub mod prelude;
 ///   dimensionality reduction and feature extraction.
 ///
 /// ## Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::utility::principal_component_analysis::PCA;
 /// use ndarray::{Array2, arr2};
 ///
@@ -200,9 +196,9 @@ mod utility_test;
 ///
 /// The module offers several metrics for evaluating regression models:
 ///
-/// * `root_mean_squared_error` - Calculates the square root of the mean of squared differences between predicted and actual values
-/// * `mean_absolute_error` - Calculates the mean of absolute differences between predicted and actual values
-/// * `r2_score` - Calculates the coefficient of determination (R²) that measures how well a model explains the variance in the target variable
+/// - `root_mean_squared_error` - Calculates the square root of the mean of squared differences between predicted and actual values
+/// - `mean_absolute_error` - Calculates the mean of absolute differences between predicted and actual values
+/// - `r2_score` - Calculates the coefficient of determination (R²) that measures how well a model explains the variance in the target variable
 ///
 /// ## Classification Metrics
 ///
@@ -218,8 +214,7 @@ mod utility_test;
 ///   - F1 score
 ///
 /// ## Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::*;
 /// use ndarray::{Array1, array};
 ///
@@ -251,12 +246,11 @@ mod metric_module_test;
 ///
 /// ## Available Datasets
 ///
-/// * `iris` - The famous Iris flower dataset containing measurements for three species of iris
-/// * `diabetes` - The diabetes dataset for regression analysis
+/// - `iris` - The famous Iris flower dataset containing measurements for three species of iris
+/// - `diabetes` - The diabetes dataset for regression analysis
 ///
 /// ## Usage Example
-///
-/// ```
+/// ``` rust
 /// use rustyml::dataset::iris;
 ///
 /// // Load the iris dataset
@@ -282,8 +276,7 @@ pub mod dataset;
 /// - `Tensor`: Type alias for n-dimensional arrays used throughout the module
 ///
 /// ## Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::neural_network::*;
 /// use ndarray::Array;
 ///

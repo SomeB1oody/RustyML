@@ -9,18 +9,20 @@ use std::collections::HashMap;
 /// between the estimated values and the actual values.
 ///
 /// # Parameters
-/// * `y_true` - An `ArrayView1<f64>` containing the ground truth (correct) values
-/// * `y_pred` - An `ArrayView1<f64>` containing the predicted values
+/// 
+/// - `y_true` - An `ArrayView1<f64>` containing the ground truth (correct) values
+/// - `y_pred` - An `ArrayView1<f64>` containing the predicted values
 ///
 /// # Returns
+/// 
 /// * `f64` - The mean squared error value (return 0.0 if input array is empty)
 ///
 /// # Panics
+/// 
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::metric::mean_squared_error;
 ///
@@ -64,18 +66,20 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 /// has the same units as the original data, making it more interpretable.
 ///
 /// # Arguments
-/// * `predictions` - A slice of f64 values containing the predicted values
-/// * `targets` - A slice of f64 values containing the actual/target values
+/// 
+/// - `predictions` - A slice of f64 values containing the predicted values
+/// - `targets` - A slice of f64 values containing the actual/target values
 ///
 /// # Returns
+/// 
 /// * `f64` - The RMSE as a f64 value on success(return 0.0 if input array is empty)
 ///
 /// # Panics
+/// 
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::root_mean_squared_error;
 /// use ndarray::array;
 ///
@@ -127,18 +131,20 @@ pub fn root_mean_squared_error(
 /// between predicted and target values.
 ///
 /// # Arguments
-/// * `predictions` - An `ArrayView1<f64>` containing the predicted values
-/// * `targets` - An `ArrayView1<f64>` containing the actual/target values
+/// 
+/// - `predictions` - An `ArrayView1<f64>` containing the predicted values
+/// - `targets` - An `ArrayView1<f64>` containing the actual/target values
 ///
 /// # Returns
+/// 
 /// * `f64` - The MAE as a f64 value on success(return 0.0 if input array is empty)
 ///
 /// # Panics
+/// 
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::metric::mean_absolute_error;
 ///
@@ -184,24 +190,27 @@ pub fn mean_absolute_error(
 /// where SSE is the sum of squared errors and SST is the total sum of squares.
 ///
 /// # Parameters
-/// * `predicted` - `ArrayView1<f64>` of predicted values
-/// * `actual` - `ArrayView1<f64>` of actual/target values
+/// 
+/// - `predicted` - `ArrayView1<f64>` of predicted values
+/// - `actual` - `ArrayView1<f64>` of actual/target values
 ///
 /// # Returns
+/// 
 ///  * `f64` - R-squared value, typically ranges from 0 to 1(return 0.0 if input array is empty)
 ///
 /// # Panics
+/// 
 /// * Panics if the two arrays have different lengths
 ///
 /// # Notes
+/// 
 /// - Returns 0 if SST is 0 (when all actual values are identical)
 /// - R-squared can theoretically be negative, indicating that the model performs worse
 ///   than simply predicting the mean of the target variable
 /// - A value close to 1 indicates a good fit
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use ndarray::array;
 /// use rustyml::metric::r2_score;
 ///
@@ -255,10 +264,10 @@ pub fn r2_score(
 ///
 /// ## Fields
 ///
-/// * `tp` - True Positive: The number of correct positive predictions when the actual class is positive
-/// * `fp` - False Positive: The number of incorrect positive predictions when the actual class is negative (Type I error)
-/// * `tn` - True Negative: The number of correct negative predictions when the actual class is negative
-/// * `fn_` - False Negative: The number of incorrect negative predictions when the actual class is positive (Type II error)
+/// - `tp` - True Positive: The number of correct positive predictions when the actual class is positive
+/// - `fp` - False Positive: The number of incorrect positive predictions when the actual class is negative (Type I error)
+/// - `tn` - True Negative: The number of correct negative predictions when the actual class is negative
+/// - `fn_` - False Negative: The number of incorrect negative predictions when the actual class is positive (Type II error)
 ///
 /// ## Performance Metrics
 ///
@@ -266,8 +275,7 @@ pub fn r2_score(
 /// accuracy, precision, recall, specificity, and F1 score.
 ///
 /// ## Example
-///
-/// ```
+/// ```rust
 /// use ndarray::arr1;
 /// use rustyml::metric::ConfusionMatrix;
 ///
@@ -315,16 +323,17 @@ impl ConfusionMatrix {
     ///
     /// # Parameters
     ///
-    /// * `predicted` - Array of predicted labels, values >= 0.5 are considered positive class
-    /// * `actual` - Array of actual labels, values >= 0.5 are considered positive class
+    /// - `predicted` - Array of predicted labels, values >= 0.5 are considered positive class
+    /// - `actual` - Array of actual labels, values >= 0.5 are considered positive class
     ///
     /// # Returns
     ///
     /// * `Self` - A new confusion matrix if input arrays have the same length
     ///
     /// # Panics
-    /// * Panics if the two arrays have different lengths
-    /// * Panics if input array is empty
+    /// 
+    /// - Panics if the two arrays have different lengths
+    /// - Panics if input array is empty
     pub fn new(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Self {
         if predicted.len() != actual.len() {
             panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
@@ -360,10 +369,10 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// A tuple containing the four basic components of the confusion matrix:
-    /// * `tp` - True Positive count
-    /// * `fp` - False Positive count
-    /// * `tn` - True Negative count
-    /// * `fn_` - False Negative count
+    /// - `tp` - True Positive count
+    /// - `fp` - False Positive count
+    /// - `tn` - True Negative count
+    /// - `fn_` - False Negative count
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
     }
@@ -494,19 +503,21 @@ impl ConfusionMatrix {
 /// For multi-class classification, values should be numeric class labels.
 ///
 /// # Parameters
-/// * `predicted` - Array of predicted class labels
-/// * `actual` - Array of actual class labels
+/// 
+/// - `predicted` - Array of predicted class labels
+/// - `actual` - Array of actual class labels
 ///
 /// # Returns
+/// 
 /// * `f64` - The accuracy score between 0.0 and 1.0
 ///
 /// # Panics
-/// * Panics if the two arrays have different lengths
-/// * Panics if input array is empty
+/// 
+/// - Panics if the two arrays have different lengths
+/// - Panics if input array is empty
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::accuracy;
 /// use ndarray::array;
 ///
@@ -671,19 +682,21 @@ fn expected_mutual_information(
 /// - sqrt represents the square root function
 ///
 /// # Parameters
-/// * `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
-/// * `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
+/// 
+/// - `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
+/// - `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
+/// 
 /// * `f64` - The NMI score as a float between 0 and 1
 ///
 /// # Panics
-/// * Panics if the two arrays have different lengths
-/// * Panics if input array is empty
+/// 
+/// - Panics if the two arrays have different lengths
+/// - Panics if input array is empty
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::normalized_mutual_info;
 /// use ndarray::array;
 ///
@@ -737,20 +750,20 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
 ///
 /// # Parameters
 ///
-/// * `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
-/// * `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
+/// - `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
+/// - `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
 ///
 /// * `f64` - The AMI score, typically between -1 and 1
 ///
 /// # Panics
-/// * Panics if the two arrays have different lengths
-/// * Panics if input array is empty
+/// 
+/// - Panics if the two arrays have different lengths
+/// - Panics if input array is empty
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::adjusted_mutual_info;
 /// use ndarray::array;
 ///
@@ -796,20 +809,21 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 ///
 /// # Parameters
 ///
-/// * `scores` - An array of predicted scores or probabilities for each sample
-/// * `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
+/// - `scores` - An array of predicted scores or probabilities for each sample
+/// - `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
 ///
 /// # Returns
+/// 
 /// * `f64` - The AUC-ROC value between 0.0 and 1.0
 ///
 /// # Panics
-/// * Panics if the two arrays have different lengths
-/// * Panics if input array is empty
-/// * Panics if there are no positive or negative samples
+/// 
+/// - Panics if the two arrays have different lengths
+/// - Panics if input array is empty
+/// - Panics if there are no positive or negative samples
 ///
 /// # Example
-///
-/// ```
+/// ```rust
 /// use rustyml::metric::calculate_auc;
 /// use ndarray::array;
 ///
