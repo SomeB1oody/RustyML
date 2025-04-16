@@ -177,7 +177,7 @@ impl Activation {
     /// - `activation` - The activation function to apply
     ///
     /// # Returns
-    /// A new tensor with the activation function applied
+    /// * `Array2<f32>` - A new tensor with the activation function applied
     pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
         match activation {
             Activation::ReLU => z.mapv(|x| if x > 0.0 { x } else { 0.0 }),
@@ -208,7 +208,7 @@ impl Activation {
     /// - `activation` - The activation function whose derivative to compute
     ///
     /// # Returns
-    /// A tensor containing the derivative values
+    /// * `Array2<f32>` - A tensor containing the derivative values
     pub fn activation_derivative(
         activation_output: &Array2<f32>,
         activation: &Activation,
@@ -232,7 +232,8 @@ impl Activation {
     /// - `upstream` - The gradient flowing from the next layer
     ///
     /// # Returns
-    /// The gradient with respect to the input of the softmax function
+    ///
+    /// * `Array2<f32>` - The gradient with respect to the input of the softmax function
     pub fn softmax_backward(a: &Array2<f32>, upstream: &Array2<f32>) -> Array2<f32> {
         let mut result = Array2::<f32>::zeros(a.raw_dim());
         for (mut out_row, (a_row, up_row)) in result
