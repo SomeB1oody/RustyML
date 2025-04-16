@@ -13,7 +13,7 @@ pub use optimizer::*;
 pub use sequential::*;
 
 use crate::ModelError;
-use ndarray::{Array2, ArrayD, Axis};
+use ndarray::{Array2, ArrayD, Axis, Zip};
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network.
 pub type Tensor = ArrayD<f32>;
@@ -179,18 +179,43 @@ impl Activation {
     /// # Returns
     /// * `Array2<f32>` - A new tensor with the activation function applied
     pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
+        use rayon::prelude::*;
+
         match activation {
-            Activation::ReLU => z.mapv(|x| if x > 0.0 { x } else { 0.0 }),
-            Activation::Sigmoid => z.mapv(|x| 1.0 / (1.0 + (-x).exp())),
-            Activation::Tanh => z.mapv(|x| x.tanh()),
+            Activation::ReLU => {
+                let mut result = z.clone();
+                result.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
+                result
+            }
+            Activation::Sigmoid => {
+                let mut result = z.clone();
+                result.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
+                result
+            }
+            Activation::Tanh => {
+                let mut result = z.clone();
+                result.par_mapv_inplace(|x| x.tanh());
+                result
+            }
             Activation::Softmax => {
                 let mut out = z.clone();
-                // Apply softmax to each row
-                for mut row in out.outer_iter_mut() {
-                    let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                    row.map_inplace(|x| *x = (*x - max_val).exp());
-                    let sum = row.sum();
-                    row.map_inplace(|x| *x /= sum);
+
+                if out.nrows() > 1 {
+                    out.axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .for_each(|mut row| {
+                            let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                            row.mapv_inplace(|x| (x - max_val).exp());
+                            let sum = row.sum();
+                            row.mapv_inplace(|x| x / sum);
+                        });
+                } else {
+                    for mut row in out.outer_iter_mut() {
+                        let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                        row.map_inplace(|x| *x = (*x - max_val).exp());
+                        let sum = row.sum();
+                        row.map_inplace(|x| *x /= sum);
+                    }
                 }
                 out
             }
@@ -236,19 +261,22 @@ impl Activation {
     /// * `Array2<f32>` - The gradient with respect to the input of the softmax function
     pub fn softmax_backward(a: &Array2<f32>, upstream: &Array2<f32>) -> Array2<f32> {
         let mut result = Array2::<f32>::zeros(a.raw_dim());
-        for (mut out_row, (a_row, up_row)) in result
-            .axis_iter_mut(Axis(0))
-            .zip(a.axis_iter(Axis(0)).zip(upstream.axis_iter(Axis(0))))
-        {
-            let dot = a_row
-                .iter()
-                .zip(up_row.iter())
-                .map(|(&ai, &gi)| ai * gi)
-                .sum::<f32>();
-            for (j, r) in out_row.iter_mut().enumerate() {
-                *r = a_row[j] * (up_row[j] - dot);
-            }
-        }
+
+        Zip::from(result.axis_iter_mut(Axis(0)))
+            .and(a.axis_iter(Axis(0)))
+            .and(upstream.axis_iter(Axis(0)))
+            .par_for_each(|mut out_row, a_row, up_row| {
+                let dot = a_row
+                    .iter()
+                    .zip(up_row.iter())
+                    .map(|(&ai, &gi)| ai * gi)
+                    .sum::<f32>();
+
+                for (j, r) in out_row.iter_mut().enumerate() {
+                    *r = a_row[j] * (up_row[j] - dot);
+                }
+            });
+
         result
     }
 }

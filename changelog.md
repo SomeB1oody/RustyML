@@ -5,11 +5,15 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.5.0] - 2025-4-15
+## [v0.5.1] - 2025-4-16
+### Changed
+- Optimize neural network computations with parallelism
+
+## [v0.5.1] - 2025-4-15
 ### Changed
 - `ModelError` is used in the neural network implementation
 
-## [v0.5.0] - 2025-4-14
+## [v0.5.1] - 2025-4-14
 ### Changed
 - Standardize documentation comments across modules
 

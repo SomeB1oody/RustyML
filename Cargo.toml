@@ -1,6 +1,6 @@
 [package]
 name = "rustyml"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
 description = "A high-performance machine learning library in pure Rust, offering statistical utilities, ML algorithms, and future support for neural networks and transformer architectures."
