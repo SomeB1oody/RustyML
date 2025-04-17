@@ -4,8 +4,16 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;
 
-/// Dense layer struct: automatically initializes weights and bias,
-/// and calculates and stores gradients during backward pass.
+/// Dense (Fully Connected) layer implementation for neural networks.
+///
+/// This layer performs a linear transformation of the input data using a weight matrix and bias vector,
+/// optionally followed by an activation function. The transformation is defined as: output = activation(input * weights + bias).
+///
+/// The Dense layer automatically initializes weights using Xavier/Glorot initialization to maintain proper variance
+/// across network layers, helping prevent vanishing/exploding gradients problems. Bias values are initialized to zeros.
+///
+/// During training, this layer stores necessary intermediate values for backpropagation and supports
+/// multiple optimization algorithms including SGD, Adam, and RMSprop.
 pub struct Dense {
     /// Input dimension size
     input_dim: usize,
@@ -40,48 +48,65 @@ pub struct Dense {
 }
 
 impl Dense {
-    /// Returns the input dimension of the layer
+    /// Gets the input dimension of the layer.
     ///
-    /// This specifies the number of features expected in the input data
+    /// # Returns
+    ///
+    /// * `usize` - The number of features expected in the input data
     pub fn get_input_dim(&self) -> usize {
         self.input_dim
     }
 
-    /// Returns the output dimension of the layer
+    /// Gets the output dimension of the layer.
     ///
-    /// This specifies the number of neurons in the layer, which determines
-    /// the dimension of the output data
+    /// # Returns
+    ///
+    /// * `usize` - The number of neurons in the layer, determining the output dimensions
     pub fn get_output_dim(&self) -> usize {
         self.output_dim
     }
 
-    /// Returns a clone of the weight matrix
+    /// Gets the weight matrix of the layer.
     ///
-    /// The weight matrix has dimensions [input_dim, output_dim]
-    /// This returns a copy to prevent external modification of internal weights
-    pub fn get_weights(&self) -> Array2<f32> {
-        self.weights.clone()
+    /// # Returns
+    ///
+    /// * `&Array2<f32>` - A clone of the weight matrix with dimensions \[input_dim, output_dim\]
+    pub fn get_weights(&self) -> &Array2<f32> {
+        &self.weights
     }
 
-    /// Returns a reference to the bias vector
+    /// Gets the bias vector of the layer.
     ///
-    /// The bias vector has dimensions [1, output_dim]
+    /// # Returns
+    ///
+    /// * `&Array2<f32>` - A reference to the bias vector with dimensions \[1, output_dim\]
     pub fn get_bias(&self) -> &Array2<f32> {
         &self.bias
     }
 
-    /// Returns a reference to the activation function used by this layer, if any
+    /// Gets the activation function of the layer.
     ///
-    /// Returns None if no activation function is set
+    /// # Returns
+    ///
+    /// `Option<&Activation>` - A reference to the activation function, or None if not set
     pub fn get_activation(&self) -> Option<&Activation> {
         self.activation.as_ref()
     }
 
-    /// Default constructor without activation function
+    /// Creates a new dense layer without activation function.
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - A new Dense layer instance with specified dimensions
     pub fn new(input_dim: usize, output_dim: usize) -> Self {
         Self::new_with_activation(input_dim, output_dim, None)
     }
-    /// Constructor with activation function
+
+    /// Creates a new dense layer with the specified activation function.
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - A new Dense layer instance with specified dimensions and activation
     pub fn new_with_activation(
         input_dim: usize,
         output_dim: usize,
@@ -118,7 +143,7 @@ impl Layer for Dense {
     ///
     /// # Returns
     ///
-    /// Output tensor after linear transformation
+    /// * `Tensor` - Output tensor after linear transformation
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Input shape is [batch_size, input_dim]
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
@@ -141,7 +166,8 @@ impl Layer for Dense {
     ///
     /// # Returns
     ///
-    /// Gradient tensor to be passed to the previous layer
+    /// * `Ok(Tensor)` - Gradient tensor to be passed to the previous layer
+    /// * `Err(ModelError)` - If something goes wrong while running
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Convert gradient to 2D array with shape [batch_size, output_dim]
         let mut grad_upstream = grad_output
@@ -244,7 +270,7 @@ impl Layer for Dense {
     ///
     /// # Returns
     ///
-    /// String slice indicating the layer type
+    /// * `&str` - String slice indicating the layer type
     fn layer_type(&self) -> &str {
         "Dense"
     }
@@ -253,7 +279,7 @@ impl Layer for Dense {
     ///
     /// # Returns
     ///
-    /// String representation of the output shape as "(None, output_dim)"
+    /// * `String` - String representation of the output shape as "(None, output_dim)"
     fn output_shape(&self) -> String {
         // Returns only (None, output_dim)
         format!("(None, {})", self.output_dim)
@@ -263,7 +289,7 @@ impl Layer for Dense {
     ///
     /// # Returns
     ///
-    /// Sum of all weights and bias parameters
+    /// * `usize` - Sum of all weights and bias parameters
     fn param_count(&self) -> usize {
         // Parameter count = number of weight parameters + number of bias parameters
         self.input_dim * self.output_dim + self.output_dim

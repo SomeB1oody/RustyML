@@ -27,7 +27,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// Mutable reference to self for method chaining
+    /// * `&mut Self` - Mutable reference to self for method chaining
     pub fn add<L: 'static + Layer>(&mut self, layer: L) -> &mut Self {
         self.layers.push(Box::new(layer));
         self
@@ -42,7 +42,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// Mutable reference to self for method chaining
+    /// * `&mut Self` - Mutable reference to self for method chaining
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,
@@ -100,7 +100,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// Tensor containing the model's predictions
+    /// * `Tensor` - Tensor containing the model's predictions
     pub fn predict(&mut self, x: &Tensor) -> Tensor {
         let mut output = x.clone();
         for layer in &mut self.layers {

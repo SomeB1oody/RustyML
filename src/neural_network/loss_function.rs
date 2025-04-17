@@ -21,7 +21,7 @@ impl LossFunction for MeanSquaredError {
     ///
     /// # Returns
     ///
-    /// Average of squared differences between predictions and ground truth
+    /// `f32` - Average of squared differences between predictions and ground truth
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
@@ -43,7 +43,7 @@ impl LossFunction for MeanSquaredError {
     ///
     /// # Returns
     ///
-    /// Gradient tensor for backpropagation
+    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
@@ -74,7 +74,7 @@ impl LossFunction for MeanAbsoluteError {
     ///
     /// # Returns
     ///
-    /// Average of absolute differences between predictions and ground truth
+    /// * `f32` - Average of absolute differences between predictions and ground truth
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         let diff = y_pred - y_true;
         let abs_diff = diff.mapv(|x| x.abs());
@@ -90,10 +90,18 @@ impl LossFunction for MeanAbsoluteError {
     ///
     /// # Returns
     ///
-    /// Gradient tensor for backpropagation
+    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         let n = y_true.len() as f32;
-        (y_pred - y_true).mapv(|x| if x > 0.0 { 1.0/n } else if x < 0.0 { -1.0/n } else { 0.0 })
+        (y_pred - y_true).mapv(|x| {
+            if x > 0.0 {
+                1.0 / n
+            } else if x < 0.0 {
+                -1.0 / n
+            } else {
+                0.0
+            }
+        })
     }
 }
 
@@ -117,7 +125,7 @@ impl LossFunction for BinaryCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Binary cross entropy loss value
+    /// * `f32` - Binary cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -140,7 +148,7 @@ impl LossFunction for BinaryCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Gradient tensor for backpropagation
+    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -174,7 +182,7 @@ impl LossFunction for CategoricalCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Categorical cross entropy loss value
+    /// * `f32` - Categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -197,7 +205,7 @@ impl LossFunction for CategoricalCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Gradient tensor for backpropagation
+    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -233,7 +241,7 @@ impl LossFunction for SparseCategoricalCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Sparse categorical cross entropy loss value
+    /// * `f32` - Sparse categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -268,7 +276,7 @@ impl LossFunction for SparseCategoricalCrossEntropy {
     ///
     /// # Returns
     ///
-    /// Gradient tensor for backpropagation
+    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));

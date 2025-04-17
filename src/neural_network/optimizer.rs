@@ -18,7 +18,7 @@ impl SGD {
     ///
     /// # Returns
     ///
-    /// A new SGD optimizer instance
+    /// * `Self` - A new SGD optimizer instance
     pub fn new(learning_rate: f32) -> Self {
         Self { learning_rate }
     }
@@ -27,7 +27,7 @@ impl SGD {
 impl Optimizer for SGD {
     /// Updates the layer parameters using the SGD algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {
@@ -66,7 +66,7 @@ impl Adam {
     ///
     /// # Returns
     ///
-    /// A new Adam optimizer instance
+    /// * `Self` - A new Adam optimizer instance
     pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Self {
         Self {
             learning_rate,
@@ -81,12 +81,18 @@ impl Adam {
 impl Optimizer for Adam {
     /// Updates the layer parameters using the Adam algorithm.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {
         self.t += 1; // Increment step count with each update
-        layer.update_parameters_adam(self.learning_rate, self.beta1, self.beta2, self.epsilon, self.t);
+        layer.update_parameters_adam(
+            self.learning_rate,
+            self.beta1,
+            self.beta2,
+            self.epsilon,
+            self.t,
+        );
     }
 }
 
