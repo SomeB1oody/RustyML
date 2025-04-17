@@ -316,7 +316,7 @@ impl Layer for Dense {
         *m_w = m_w.mapv(|x| x * beta1) + &(grad_w * (1.0 - beta1));
         *m_b = m_b.mapv(|x| x * beta1) + &(grad_b * (1.0 - beta1));
 
-        // Update second moment (accumulated squared gradients), using elementwise square
+        // Update second moment (accumulated squared gradients)
         *v_w = v_w.mapv(|x| x * beta2) + &(grad_w.mapv(|x| x * x) * (1.0 - beta2));
         *v_b = v_b.mapv(|x| x * beta2) + &(grad_b.mapv(|x| x * x) * (1.0 - beta2));
 
@@ -326,7 +326,7 @@ impl Layer for Dense {
         let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
         let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
 
-        // Update parameters: w = w - lr * m_hat / (sqrt(v_hat) + epsilon)
+        // Update parameters
         self.weights = &self.weights - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
         self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
     }

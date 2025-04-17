@@ -200,7 +200,7 @@ impl Activation {
             Activation::Softmax => {
                 let mut out = z.clone();
 
-                if out.nrows() > 1 {
+                if out.nrows() > 8 {
                     out.axis_iter_mut(Axis(0))
                         .into_par_iter()
                         .for_each(|mut row| {
