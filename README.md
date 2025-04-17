@@ -2,10 +2,10 @@
 A comprehensive machine learning and deep learning library written in pure Rust.
 一个用纯Rust编写的全面机器学习和深度学习库。
 
-[![Rust Version](https://img.shields.io/badge/Rust-2024_version-blue)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
+[![Rust Version](https://img.shields.io/badge/Rust-2024_version-brown)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 [![ndarray](https://img.shields.io/badge/ndrarray-0.16.1-blue)](https://crates.io/crates/ndarray)
-[![rand](https://img.shields.io/badge/rand-0.9.0-blue)](https://crates.io/crates/rand)
+[![rand](https://img.shields.io/badge/rand-0.9.1-blue)](https://crates.io/crates/rand)
 [![nalgebra](https://img.shields.io/badge/nalgebra-0.33.2-blue)](https://crates.io/crates/nalgebra)
 [![statrs](https://img.shields.io/badge/statrs-0.18.0-blue)](https://crates.io/crates/statrs)
 [![rand_distr](https://img.shields.io/badge/rand_distr-0.5.1-blue)](https://crates.io/crates/rand_distr)
