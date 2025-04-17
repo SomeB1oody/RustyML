@@ -68,10 +68,20 @@ pub trait Layer {
     ///
     /// # Returns
     ///
-    /// The count of parameters as a usize
+    /// The count of parameters as an usize
     fn param_count(&self) -> usize {
         0
     }
+
+    /// Updates the layer parameters during training.
+    ///
+    /// This method provides a generic parameter update mechanism that can be
+    /// overridden by specific layer implementations. By default, it does nothing.
+    ///
+    /// # Parameters
+    ///
+    /// * `_lr` - Learning rate for parameter updates
+    fn update_parameters(&mut self, _lr: f32) {}
 
     /// Updates the layer parameters using Stochastic Gradient Descent.
     ///
