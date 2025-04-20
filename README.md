@@ -84,6 +84,7 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
 
   - Layer | 层:
     - Dense | 全连接层
+    - SimpleRNN(without LSTM) | 简单循环神经网络(没有LSTM)
 
   - Loss function | 损失计算函数:
     - Mean Squared Error | 均方误差
