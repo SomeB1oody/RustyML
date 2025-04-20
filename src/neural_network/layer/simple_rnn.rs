@@ -11,16 +11,9 @@ use ndarray_rand::rand_distr::Uniform;
 /// supports various activation functions, with tanh as the default.
 ///
 /// # Dimensions
+///
 /// - Input shape: (batch_size, timesteps, input_dim)
 /// - Output shape: (batch_size, units)
-///
-/// # Fields
-/// - `input_dim`: Number of input features
-/// - `units`: Number of output units (neurons)
-/// - `kernel`: Weight matrix connecting inputs to the recurrent layer
-/// - `recurrent_kernel`: Weight matrix connecting previous hidden states to the current state
-/// - `bias`: Bias vector for the layer
-/// - `activation`: Activation function to use (default: tanh)
 pub struct SimpleRNN {
     /// Number of input features
     input_dim: usize,
@@ -76,25 +69,29 @@ pub struct SimpleRNN {
 impl SimpleRNN {
     /// Creates a new SimpleRNN layer with the specified dimensions and tanh activation.
     ///
-    /// # Arguments
-    /// * `input_dim` - The size of each input sample
-    /// * `units` - The dimensionality of the output space
+    /// # Parameters
+    ///
+    /// - `input_dim` - The size of each input sample
+    /// - `units` - The dimensionality of the output space
     ///
     /// # Returns
-    /// A new SimpleRNN instance with tanh activation
+    ///
+    /// * `Self` - A new SimpleRNN instance with tanh activation
     pub fn new(input_dim: usize, units: usize) -> Self {
         Self::new_with_activation(input_dim, units, Activation::Tanh)
     }
 
     /// Creates a new SimpleRNN layer with the specified dimensions and activation function.
     ///
-    /// # Arguments
-    /// * `input_dim` - The size of each input sample
-    /// * `units` - The dimensionality of the output space
-    /// * `activation` - The activation function to use
+    /// # Parameters
+    ///
+    /// - `input_dim` - The size of each input sample
+    /// - `units` - The dimensionality of the output space
+    /// - `activation` - The activation function to use
     ///
     /// # Returns
-    /// A new SimpleRNN instance with the specified activation
+    ///
+    /// * `Self` - A new SimpleRNN instance with the specified activation
     pub fn new_with_activation(input_dim: usize, units: usize, activation: Activation) -> Self {
         let kernel = Array::random((input_dim, units), Uniform::new(-0.05, 0.05));
         let recurrent_kernel = Array::random((units, units), Uniform::new(-0.05, 0.05));
@@ -127,11 +124,13 @@ impl SimpleRNN {
 impl Layer for SimpleRNN {
     /// Performs the forward pass for the SimpleRNN layer.
     ///
-    /// # Arguments
+    /// # Parameters
+    ///
     /// * `input` - Input tensor with shape (batch, timesteps, input_dim)
     ///
     /// # Returns
-    /// Output tensor with shape (batch, units) containing the final hidden state
+    ///
+    /// * `Tensor` - Output tensor with shape (batch, units) containing the final hidden state
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Input shape=(batch, timesteps, input_dim)
         let x3 = input.clone().into_dimensionality::<ndarray::Ix3>().unwrap();
@@ -157,12 +156,14 @@ impl Layer for SimpleRNN {
     ///
     /// Implements backpropagation through time (BPTT) algorithm for the RNN layer.
     ///
-    /// # Arguments
+    /// # Parameters
+    ///
     /// * `grad_output` - Gradient tensor from the next layer with shape (batch, units)
     ///
     /// # Returns
-    /// * `Result<Tensor, ModelError>` - Gradient tensor with respect to the input with shape (batch, timesteps, input_dim),
-    ///   or an error if forward pass has not been run
+    ///
+    /// - `OK(Tensor)` - Gradient tensor with respect to the input with shape (batch, timesteps, input_dim)
+    /// - `Err(ModelError::ProcessingError)` - Error if the forward pass has not been run
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         let grad_h_t = grad_output
             .clone()
@@ -220,7 +221,8 @@ impl Layer for SimpleRNN {
     /// Returns the layer type identifier.
     ///
     /// # Returns
-    /// The string "SimpleRNN"
+    ///
+    /// * `&str` - The string "SimpleRNN"
     fn layer_type(&self) -> &str {
         "SimpleRNN"
     }
@@ -228,7 +230,8 @@ impl Layer for SimpleRNN {
     /// Returns a string representation of the layer's output shape.
     ///
     /// # Returns
-    /// A string in the format "(None, units)" where units is the number of output neurons
+    ///
+    /// * `String` - A string in the format "(None, units)" where units is the number of output neurons
     fn output_shape(&self) -> String {
         format!("(None, {})", self.units)
     }
@@ -236,14 +239,16 @@ impl Layer for SimpleRNN {
     /// Calculates the total number of trainable parameters in the layer.
     ///
     /// # Returns
-    /// The total number of trainable parameters
+    ///
+    /// * `usize` - The total number of trainable parameters
     fn param_count(&self) -> usize {
         self.input_dim * self.units + self.units * self.units + self.units
     }
 
     /// Updates the layer parameters using standard gradient descent.
     ///
-    /// # Arguments
+    /// # Parameters
+    ///
     /// * `lr` - Learning rate for the update
     fn update_parameters(&mut self, lr: f32) {
         if let (Some(gk), Some(grk), Some(gb)) = (
@@ -259,12 +264,13 @@ impl Layer for SimpleRNN {
 
     /// Updates the layer parameters using the Adam optimizer.
     ///
-    /// # Arguments
-    /// * `lr` - Learning rate
-    /// * `b1` - Exponential decay rate for the first moment estimates (typically 0.9)
-    /// * `b2` - Exponential decay rate for the second moment estimates (typically 0.999)
-    /// * `eps` - Small constant for numerical stability
-    /// * `t` - Current iteration number
+    /// # Parameters
+    ///
+    /// - `lr` - Learning rate
+    /// - `b1` - Exponential decay rate for the first moment estimates (typically 0.9)
+    /// - `b2` - Exponential decay rate for the second moment estimates (typically 0.999)
+    /// - `eps` - Small constant for numerical stability
+    /// - `t` - Current iteration number
     fn update_parameters_adam(&mut self, lr: f32, b1: f32, b2: f32, eps: f32, t: u64) {
         // Same Adam implementation as in Dense, but for kernel/recurrent_kernel/bias
         if self.m_kernel.is_none() {
@@ -311,10 +317,11 @@ impl Layer for SimpleRNN {
 
     /// Updates the layer parameters using the RMSprop optimizer.
     ///
-    /// # Arguments
-    /// * `lr` - Learning rate
-    /// * `rho` - Decay rate (typically 0.9)
-    /// * `eps` - Small constant for numerical stability
+    /// # Parameters
+    ///
+    /// - `lr` - Learning rate
+    /// - `rho` - Decay rate (typically 0.9)
+    /// - `eps` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, eps: f32) {
         if let (Some(gk), Some(grk), Some(gb)) = (
             &self.grad_kernel,
