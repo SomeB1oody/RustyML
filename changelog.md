@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.5.1] - 2025-4-21
+### Changed
+- Refactor optimizer implementations into separate files
+
 ## [v0.5.1] - 2025-4-20
 ### Changed
 - Refactor loss functions into separate modules
@@ -89,7 +93,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Add variance calculation in math module
 - Add MSE calculation in metric module
 - Print info after training completes for `fit` functions of struct `LDA`, `SVC`, `LinearSVC` and `PCA`
-- Integrate Rayon for parallel computation across modules (**7s faster** in `cargo test`!!!)
+- Integrate Rayon for parallel computation across modules (**7 s faster** in `cargo test`!!!)
 
 ### Changed
 - Refactor functions in math module and metric module to use `ArrayView1` for improved efficiency
