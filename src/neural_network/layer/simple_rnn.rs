@@ -141,9 +141,13 @@ impl Layer for SimpleRNN {
         let mut hs = Vec::with_capacity(timesteps + 1);
         hs.push(h_prev.clone());
 
+        // Time steps loop is still sequential
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+
+            // Matrix multiplication here can be parallelized internally
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
+
             let h_t = Activation::apply_activation(&z, &self.activation);
             hs.push(h_t.clone());
             h_prev = h_t;
