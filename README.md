@@ -136,7 +136,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = "0.5.0"
+rustyml = "0.5.1"
 ```
 Example usage | 使用示例:
 ``` rust
