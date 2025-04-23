@@ -155,23 +155,7 @@ impl Layer for Dense {
 
         if let Some(act) = &self.activation {
             // Apply activation function in parallel
-            let mut a = z.clone();
-
-            // Choose appropriate parallel mapping based on activation function type
-            match act {
-                Activation::ReLU => {
-                    a.par_mapv_inplace(|v| if v > 0.0 { v } else { 0.0 });
-                }
-                Activation::Sigmoid => {
-                    a.par_mapv_inplace(|v| 1.0 / (1.0 + (-v).exp()));
-                }
-                Activation::Tanh => {
-                    a.par_mapv_inplace(|v| v.tanh());
-                }
-                _ => {
-                    a = Activation::apply_activation(&z, act);
-                }
-            }
+            let a = Activation::apply_activation(&z, act);
 
             self.activation_output = Some(a.clone());
             a.into_dyn()
