@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.5.1] - 2025-4-23
+### Changed
+- Modularize activation functions into a separate module
+
 ## [v0.5.1] - 2025-4-22
 ### Changed
 - Optimize activation functions with parallel processing
