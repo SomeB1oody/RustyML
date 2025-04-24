@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add regularization support to linear and logistic regression
 
+### Changed
+- Refactor `KernelType` into machine_learning module
+
 ## [v0.5.1] - 2025-4-23
 ### Changed
 - Modularize activation functions into a separate module

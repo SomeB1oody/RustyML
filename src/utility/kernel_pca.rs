@@ -1,6 +1,6 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
-pub use crate::machine_learning::svc::KernelType;
 use crate::ModelError;
+pub use crate::machine_learning::KernelType;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use rayon::prelude::*;
 
 /// # A Kernel Principal Component Analysis implementation.
@@ -58,11 +58,11 @@ use rayon::prelude::*;
 pub struct KernelPCA {
     kernel: KernelType,
     n_components: usize,
-    eigenvalues: Option<Array1<f64>>,    // Eigenvalues in descending order
-    eigenvectors: Option<Array2<f64>>,   // Corresponding normalized eigenvectors, each column is an eigenvector
-    x_fit: Option<Array2<f64>>,          // Training data, used for subsequent transformation of new data
-    row_means: Option<Array1<f64>>,      // Mean of each row in the training kernel matrix (used for centering)
-    total_mean: Option<f64>,             // Overall mean of the training kernel matrix
+    eigenvalues: Option<Array1<f64>>, // Eigenvalues in descending order
+    eigenvectors: Option<Array2<f64>>, // Corresponding normalized eigenvectors, each column is an eigenvector
+    x_fit: Option<Array2<f64>>, // Training data, used for subsequent transformation of new data
+    row_means: Option<Array1<f64>>, // Mean of each row in the training kernel matrix (used for centering)
+    total_mean: Option<f64>,        // Overall mean of the training kernel matrix
 }
 
 /// Calculates the kernel value between two samples based on the specified kernel type.
@@ -82,14 +82,16 @@ pub struct KernelPCA {
 pub fn compute_kernel(x: &ArrayView1<f64>, y: &ArrayView1<f64>, kernel: &KernelType) -> f64 {
     match kernel {
         KernelType::Linear => x.dot(y),
-        KernelType::Poly { degree, gamma, coef0 } => {
-            (gamma * x.dot(y) + coef0).powi(*degree as i32)
-        },
+        KernelType::Poly {
+            degree,
+            gamma,
+            coef0,
+        } => (gamma * x.dot(y) + coef0).powi(*degree as i32),
         KernelType::RBF { gamma } => {
             let diff = x - y;
             let norm_sq = diff.dot(&diff);
             (-gamma * norm_sq).exp()
-        },
+        }
         KernelType::Sigmoid { gamma, coef0 } => (gamma * x.dot(y) + coef0).tanh(),
     }
 }
@@ -234,19 +236,23 @@ impl KernelPCA {
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn std::error::Error>> {
         if x.is_empty() {
-            return Err(Box::new(ModelError::InputValidationError("Input data cannot be empty".to_string())));
+            return Err(Box::new(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            )));
         }
 
         if self.n_components <= 0 {
-            return Err(Box::new(ModelError::InputValidationError(
-                format!("n_components={} must be greater than 0", self.n_components)
-            )));
+            return Err(Box::new(ModelError::InputValidationError(format!(
+                "n_components={} must be greater than 0",
+                self.n_components
+            ))));
         }
 
         if x.nrows() < self.n_components {
             return Err(Box::new(ModelError::InputValidationError(format!(
                 "n_components={} must be less than the number of samples={}",
-                self.n_components, x.nrows()
+                self.n_components,
+                x.nrows()
             ))));
         }
 
@@ -308,7 +314,12 @@ impl KernelPCA {
         let mut eig_pairs: Vec<(f64, Vec<f64>)> = (0..n_samples)
             .map(|i| {
                 let eigenvalue = sym_eigen.eigenvalues[i];
-                let eigenvector = sym_eigen.eigenvectors.column(i).iter().cloned().collect::<Vec<f64>>();
+                let eigenvector = sym_eigen
+                    .eigenvectors
+                    .column(i)
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<f64>>();
                 (eigenvalue, eigenvector)
             })
             .collect();
@@ -354,7 +365,11 @@ impl KernelPCA {
     /// Returns an error if the model hasn't been fitted
     pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         // Model must be fitted first
-        if self.x_fit.is_none() || self.eigenvectors.is_none() || self.row_means.is_none() || self.total_mean.is_none() {
+        if self.x_fit.is_none()
+            || self.eigenvectors.is_none()
+            || self.row_means.is_none()
+            || self.total_mean.is_none()
+        {
             return Err(Box::new(ModelError::NotFitted));
         }
         let x_fit = self.x_fit.as_ref().unwrap();
@@ -430,7 +445,10 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` - containing the transformed data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    pub fn fit_transform(&mut self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+    pub fn fit_transform(
+        &mut self,
+        x: ArrayView2<f64>,
+    ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         self.fit(x)?;
         match self.transform(x) {
             Ok(transformed) => Ok(transformed),

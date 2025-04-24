@@ -752,3 +752,16 @@ pub enum RegularizationType {
     /// L2 regularization (Ridge) with the specified regularization strength coefficient
     L2(f64),
 }
+
+/// Kernel function types for Support Vector Machine
+#[derive(Debug, Clone)]
+pub enum KernelType {
+    /// Linear kernel: K(x, y) = x·y
+    Linear,
+    /// Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
+    Poly { degree: u32, gamma: f64, coef0: f64 },
+    /// Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
+    RBF { gamma: f64 },
+    /// Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
+    Sigmoid { gamma: f64, coef0: f64 },
+}

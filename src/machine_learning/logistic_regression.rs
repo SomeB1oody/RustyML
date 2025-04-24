@@ -447,6 +447,7 @@ impl LogisticRegression {
 /// * `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 ///
 /// # Examples
+///
 /// Following codes show how this function works with `LogisticRegression`:
 /// ```rust
 /// use ndarray::array;

@@ -1,6 +1,6 @@
 pub use crate::machine_learning::dbscan::DBSCAN;
 
-pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
+pub use crate::machine_learning::{DistanceCalculationMetric, KernelType, RegularizationType};
 
 pub use crate::machine_learning::decision_tree::{Algorithm, DecisionTree, DecisionTreeParams};
 
@@ -24,7 +24,7 @@ pub use crate::utility::principal_component_analysis::PCA;
 
 pub use crate::metric::{ConfusionMatrix, accuracy, mean_squared_error, r2_score};
 
-pub use crate::machine_learning::svc::{KernelType, SVC};
+pub use crate::machine_learning::svc::SVC;
 
 pub use crate::utility::train_test_split::train_test_split;
 

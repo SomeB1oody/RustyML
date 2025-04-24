@@ -1,5 +1,6 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
+pub use super::KernelType;
 use crate::ModelError;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
 /// # Support Vector Machine Classifier
@@ -85,19 +86,6 @@ pub struct SVC {
     n_iter: Option<usize>,
 }
 
-/// Kernel function types for Support Vector Machine
-#[derive(Debug, Clone)]
-pub enum KernelType {
-    /// Linear kernel: K(x, y) = x·y
-    Linear,
-    /// Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
-    Poly { degree: u32, gamma: f64, coef0: f64 },
-    /// Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
-    RBF { gamma: f64 },
-    /// Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-    Sigmoid { gamma: f64, coef0: f64 },
-}
-
 impl Default for SVC {
     /// Creates an SVC instance with default parameters
     ///
@@ -122,7 +110,6 @@ impl Default for SVC {
     }
 }
 
-
 impl SVC {
     /// Creates a new Support Vector Classifier (SVC) with specified parameters
     ///
@@ -136,12 +123,7 @@ impl SVC {
     /// # Returns
     ///
     /// * `Self` - A new SVC instance with the specified parameters
-    pub fn new(
-        kernel: KernelType,
-        regularization_param: f64,
-        tol: f64,
-        max_iter: usize
-    ) -> Self {
+    pub fn new(kernel: KernelType, regularization_param: f64, tol: f64, max_iter: usize) -> Self {
         SVC {
             kernel,
             regularization_param,
@@ -282,7 +264,11 @@ impl SVC {
                 // K(x, y) = x·y
                 x1.dot(&x2)
             }
-            KernelType::Poly { degree, gamma, coef0 } => {
+            KernelType::Poly {
+                degree,
+                gamma,
+                coef0,
+            } => {
                 // K(x, y) = (gamma·x·y + coef0)^degree
                 (gamma * x1.dot(&x2) + coef0).powf(degree as f64)
             }
@@ -350,7 +336,7 @@ impl SVC {
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
         if x.nrows() != y.len() {
             return Err(ModelError::InputValidationError(
-                "x and y have different number of rows".to_string()
+                "x and y have different number of rows".to_string(),
             ));
         }
 
@@ -360,25 +346,25 @@ impl SVC {
         // Ensure labels are +1 and -1
         if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
             return Err(ModelError::InputValidationError(
-                "labels can only be either 1.0 or -1.0".to_string()
+                "labels can only be either 1.0 or -1.0".to_string(),
             ));
         }
 
         if self.regularization_param <= 0.0 {
             return Err(ModelError::InputValidationError(
-                "regularization parameter must be positive".to_string()
+                "regularization parameter must be positive".to_string(),
             ));
         }
 
         if self.tol <= 0.0 {
             return Err(ModelError::InputValidationError(
-                "tolerance must be positive".to_string()
+                "tolerance must be positive".to_string(),
             ));
         }
 
         if self.max_iter <= 0 {
             return Err(ModelError::InputValidationError(
-                "maximum number of iterations must be positive".to_string()
+                "maximum number of iterations must be positive".to_string(),
             ));
         }
 
@@ -408,13 +394,27 @@ impl SVC {
             if examine_all {
                 // Iterate through all samples
                 for i in 0..n_samples {
-                    num_changed_alphas += self.examine_example(i, &mut alphas, &kernel_matrix, y, &mut b, &mut error_cache);
+                    num_changed_alphas += self.examine_example(
+                        i,
+                        &mut alphas,
+                        &kernel_matrix,
+                        y,
+                        &mut b,
+                        &mut error_cache,
+                    );
                 }
             } else {
                 // Iterate through non-boundary alpha values
                 for i in 0..n_samples {
                     if alphas[i] > 0.0 && alphas[i] < self.regularization_param {
-                        num_changed_alphas += self.examine_example(i, &mut alphas, &kernel_matrix, y, &mut b, &mut error_cache);
+                        num_changed_alphas += self.examine_example(
+                            i,
+                            &mut alphas,
+                            &kernel_matrix,
+                            y,
+                            &mut b,
+                            &mut error_cache,
+                        );
                     }
                 }
             }
@@ -439,7 +439,7 @@ impl SVC {
         let n_support_vectors = support_vector_indices.len();
         if n_support_vectors == 0 {
             return Err(ModelError::InputValidationError(
-                "no support vectors found".to_string()
+                "no support vectors found".to_string(),
             ));
         }
 
@@ -493,7 +493,8 @@ impl SVC {
         let r2 = e2 * y2;
 
         // Check KKT conditions
-        if (r2 < -self.tol && alpha2 < self.regularization_param) || (r2 > self.tol && alpha2 > 0.0) {
+        if (r2 < -self.tol && alpha2 < self.regularization_param) || (r2 > self.tol && alpha2 > 0.0)
+        {
             // Find second alpha
             // First try the one that maximally violates KKT conditions
             let mut i1 = self.select_second_alpha(i2, e2, alphas, error_cache);
@@ -563,7 +564,7 @@ impl SVC {
             })
             .reduce(
                 || (i2, 0.0), // Default to i2 if no better candidate is found
-                |a, b| if b.1 > a.1 { b } else { a }
+                |a, b| if b.1 > a.1 { b } else { a },
             );
 
         // Return the index of the alpha that maximizes |E1-E2|
@@ -611,7 +612,8 @@ impl SVC {
         let (l, h) = if y1 != y2 {
             (
                 0.0f64.max(alpha2_old - alpha1_old),
-                self.regularization_param.min(self.regularization_param + alpha2_old - alpha1_old),
+                self.regularization_param
+                    .min(self.regularization_param + alpha2_old - alpha1_old),
             )
         } else {
             (
@@ -648,8 +650,10 @@ impl SVC {
             let f2 = y2 * (e2 + *b) - s * alpha1_old * k12 - alpha2_old * k22;
             let l1 = alpha1_old + s * (alpha2_old - l);
             let h1 = alpha1_old + s * (alpha2_old - h);
-            let obj_l = l1 * f1 + l * f2 + 0.5 * l1 * l1 * k11 + 0.5 * l * l * k22 + s * l * l1 * k12;
-            let obj_h = h1 * f1 + h * f2 + 0.5 * h1 * h1 * k11 + 0.5 * h * h * k22 + s * h * h1 * k12;
+            let obj_l =
+                l1 * f1 + l * f2 + 0.5 * l1 * l1 * k11 + 0.5 * l * l * k22 + s * l * l1 * k12;
+            let obj_h =
+                h1 * f1 + h * f2 + 0.5 * h1 * h1 * k11 + 0.5 * h * h * k22 + s * h * h1 * k12;
 
             if obj_l < obj_h - self.eps {
                 alpha2_new = l;
@@ -669,8 +673,10 @@ impl SVC {
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
         // Update bias
-        let b1 = *b + e1 + y1 * (alpha1_new - alpha1_old) * k11 + y2 * (alpha2_new - alpha2_old) * k12;
-        let b2 = *b + e2 + y1 * (alpha1_new - alpha1_old) * k12 + y2 * (alpha2_new - alpha2_old) * k22;
+        let b1 =
+            *b + e1 + y1 * (alpha1_new - alpha1_old) * k11 + y2 * (alpha2_new - alpha2_old) * k12;
+        let b2 =
+            *b + e2 + y1 * (alpha1_new - alpha1_old) * k12 + y2 * (alpha2_new - alpha2_old) * k22;
 
         if alpha1_new > 0.0 && alpha1_new < self.regularization_param {
             *b = b1;
@@ -708,7 +714,8 @@ impl SVC {
         error_cache: &mut Array1<f64>,
     ) {
         // Use zip_with_index for parallel updates
-        error_cache.indexed_iter_mut()
+        error_cache
+            .indexed_iter_mut()
             .par_bridge()
             .for_each(|(i, error)| {
                 *error = self.decision_function_internal(i, alphas, kernel_matrix, y, b);
@@ -740,8 +747,9 @@ impl SVC {
         let indices: Vec<usize> = (0..alphas.len()).collect();
 
         // Compute sum in parallel
-        let sum: f64 = indices.par_iter()
-            .filter(|&&j| alphas[j] > 0.0)  // Only consider non-zero alphas
+        let sum: f64 = indices
+            .par_iter()
+            .filter(|&&j| alphas[j] > 0.0) // Only consider non-zero alphas
             .map(|&j| alphas[j] * y[j] * kernel_matrix[[i, j]])
             .sum();
 
@@ -760,7 +768,10 @@ impl SVC {
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
         // Check if the model has been fitted
-        if self.support_vectors.is_none() || self.support_vector_labels.is_none() || self.alphas.is_none() {
+        if self.support_vectors.is_none()
+            || self.support_vector_labels.is_none()
+            || self.alphas.is_none()
+        {
             return Err(ModelError::NotFitted);
         }
 
@@ -780,15 +791,18 @@ impl SVC {
         let indices: Vec<usize> = (0..n_samples).collect();
 
         // Calculate predictions in parallel
-        let results: Vec<(usize, f64)> = indices.par_iter()
+        let results: Vec<(usize, f64)> = indices
+            .par_iter()
             .map(|&i| {
                 // Compute the decision value
                 let decision_value = (0..support_vectors.nrows())
                     .map(|j| {
-                        alphas[j] * support_vector_labels[j] *
-                            self.kernel_function(x.row(i), support_vectors.row(j))
+                        alphas[j]
+                            * support_vector_labels[j]
+                            * self.kernel_function(x.row(i), support_vectors.row(j))
                     })
-                    .sum::<f64>() + bias;
+                    .sum::<f64>()
+                    + bias;
 
                 // Convert to class label
                 let prediction = if decision_value >= 0.0 { 1.0 } else { -1.0 };
@@ -816,7 +830,10 @@ impl SVC {
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     pub fn decision_function(&self, x: &Array2<f64>) -> Result<Array1<f64>, ModelError> {
         // Check if the model has been fitted
-        if self.support_vectors.is_none() || self.support_vector_labels.is_none() || self.alphas.is_none() {
+        if self.support_vectors.is_none()
+            || self.support_vector_labels.is_none()
+            || self.alphas.is_none()
+        {
             return Err(ModelError::NotFitted);
         }
 
@@ -833,15 +850,17 @@ impl SVC {
         let alphas = self.alphas.as_ref().unwrap();
 
         // Parallel computation on each element of decision_values
-        decision_values.axis_iter_mut(ndarray::Axis(0))
+        decision_values
+            .axis_iter_mut(ndarray::Axis(0))
             .into_par_iter()
             .enumerate()
             .for_each(|(i, mut val)| {
                 let x_i = x.row(i);
                 let sum = (0..support_vectors.nrows())
                     .map(|j| {
-                        alphas[j] * support_vector_labels[j] *
-                            self.kernel_function(x_i, support_vectors.row(j))
+                        alphas[j]
+                            * support_vector_labels[j]
+                            * self.kernel_function(x_i, support_vectors.row(j))
                     })
                     .sum::<f64>();
 
