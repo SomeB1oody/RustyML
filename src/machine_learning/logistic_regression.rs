@@ -1,5 +1,6 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, s, Axis};
+pub use super::RegularizationType;
 use crate::ModelError;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
 /// # Logistic Regression model implementation
@@ -14,6 +15,7 @@ use rayon::prelude::*;
 /// - `max_iter` - Maximum number of iterations for gradient descent
 /// - `tol` - Convergence tolerance, stops iteration when loss change is smaller than this value
 /// - `n_iter` - Actual number of iterations the algorithm ran for after fitting, None before training
+/// - `regularization_type` - Regularization type and strength
 ///
 /// ## Examples
 ///
@@ -62,6 +64,8 @@ pub struct LogisticRegression {
     tol: f64,
     /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
+    /// Type of regularization to apply (L1, L2 or None)
+    regularization_type: Option<RegularizationType>,
 }
 
 impl Default for LogisticRegression {
@@ -73,6 +77,7 @@ impl Default for LogisticRegression {
             max_iter: 100,
             tol: 1e-4,
             n_iter: None,
+            regularization_type: None,
         }
     }
 }
@@ -90,18 +95,21 @@ impl LogisticRegression {
     /// # Returns
     ///
     /// * `Self` - An untrained logistic regression model instance
-    pub fn new(fit_intercept: bool,
-               learning_rate: f64,
-               max_iterations: usize,
-               tolerance: f64,
+    pub fn new(
+        fit_intercept: bool,
+        learning_rate: f64,
+        max_iterations: usize,
+        tolerance: f64,
+        regularization_type: Option<RegularizationType>,
     ) -> Self {
         LogisticRegression {
             weights: None,
             fit_intercept,
             learning_rate,
             max_iter: max_iterations,
-            tol : tolerance,
+            tol: tolerance,
             n_iter: None,
+            regularization_type,
         }
     }
 
@@ -187,8 +195,8 @@ impl LogisticRegression {
     /// - `Ok(&mut Self)` - A mutable reference to the trained model, allowing for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        use crate::math::{sigmoid, logistic_loss};
         use super::preliminary_check;
+        use crate::math::{logistic_loss, sigmoid};
 
         // Preliminary check
         preliminary_check(x, Some(y))?;
@@ -207,9 +215,10 @@ impl LogisticRegression {
         let (n_samples, mut n_features) = x.dim();
         for (i, y_val) in y.iter().enumerate() {
             if y_val.is_nan() || y_val.is_infinite() {
-                return Err(ModelError::InputValidationError(
-                    format!("Target vector contains NaN or infinite values, at index {}", i),
-                ));
+                return Err(ModelError::InputValidationError(format!(
+                    "Target vector contains NaN or infinite values, at index {}",
+                    i
+                )));
             }
         }
         if self.max_iter <= 0 {
@@ -256,13 +265,58 @@ impl LogisticRegression {
             // Calculate prediction errors
             let errors = sigmoid_preds - y;
             // Calculate gradients
-            let gradients = x_train_view.t().dot(&errors) / n_samples as f64;
+            let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
+
+            if let Some(reg_type) = &self.regularization_type {
+                // Skip bias term (if present)
+                let start_idx = if self.fit_intercept { 1 } else { 0 };
+
+                match reg_type {
+                    // L1 regularization (LASSO)
+                    RegularizationType::L1(regularization_strength) => {
+                        for i in start_idx..n_features {
+                            let sign = if weights[i] > 0.0 {
+                                1.0
+                            } else if weights[i] < 0.0 {
+                                -1.0
+                            } else {
+                                0.0
+                            };
+                            gradients[i] += regularization_strength * sign / n_samples as f64;
+                        }
+                    }
+                    // L2 regularization (Ridge)
+                    RegularizationType::L2(regularization_strength) => {
+                        for i in start_idx..n_features {
+                            gradients[i] += regularization_strength * weights[i] / n_samples as f64;
+                        }
+                    }
+                }
+            }
+
             // Update weights
             weights = &weights - self.learning_rate * &gradients;
 
             // Calculate loss
             let raw_preds = x_train_view.dot(&weights);
-            let cost = logistic_loss(raw_preds.view(), y.view())?;
+            let mut cost = logistic_loss(raw_preds.view(), y.view())?;
+
+            if let Some(reg_type) = &self.regularization_type {
+                let start_idx = if self.fit_intercept { 1 } else { 0 };
+
+                match reg_type {
+                    RegularizationType::L1(regularization_strength) => {
+                        let l1_penalty: f64 =
+                            weights.slice(s![start_idx..]).mapv(|w| w.abs()).sum();
+                        cost += regularization_strength * l1_penalty / n_samples as f64;
+                    }
+                    RegularizationType::L2(regularization_strength) => {
+                        let l2_penalty: f64 = weights.slice(s![start_idx..]).mapv(|w| w * w).sum();
+                        cost += regularization_strength * l2_penalty / (2.0 * n_samples as f64);
+                    }
+                }
+            }
+
             final_cost = cost;
 
             // Check convergence condition
@@ -367,10 +421,11 @@ impl LogisticRegression {
     ///
     /// - `Ok(Array1<i32>)` - Predicted class labels for the test samples
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(&mut self, 
-                       train_x: ArrayView2<f64>,
-                       train_y: ArrayView1<f64>,
-                       test_x: ArrayView2<f64>
+    pub fn fit_predict(
+        &mut self,
+        train_x: ArrayView2<f64>,
+        train_y: ArrayView1<f64>,
+        test_x: ArrayView2<f64>,
     ) -> Result<Array1<i32>, ModelError> {
         self.fit(train_x, train_y)?;
         Ok(self.predict(test_x)?)
@@ -455,7 +510,7 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
             degree: usize,
             current_degree: usize,
             start_feature: usize,
-            combination: &mut Vec<usize>
+            combination: &mut Vec<usize>,
         ) {
             // If we've reached the target degree, compute the feature value
             if current_degree == degree {
@@ -482,8 +537,15 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
             for j in start_feature..n_features {
                 combination.push(j);
                 add_combinations(
-                    x, result, col_idx, n_samples, n_features,
-                    degree, current_degree + 1, j, combination
+                    x,
+                    result,
+                    col_idx,
+                    n_samples,
+                    n_features,
+                    degree,
+                    current_degree + 1,
+                    j,
+                    combination,
                 );
                 combination.pop();
             }
@@ -491,7 +553,17 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
 
         // Generate combinations for each degree
         for d in 2..=degree {
-            add_combinations(x, &mut result, &mut col_idx, n_samples, n_features, d, 0, 0, &mut vec![]);
+            add_combinations(
+                x,
+                &mut result,
+                &mut col_idx,
+                n_samples,
+                n_features,
+                d,
+                0,
+                0,
+                &mut vec![],
+            );
         }
     }
 

@@ -2,7 +2,7 @@
 ///
 /// This enum defines common distance metrics that can be used in clustering algorithms,
 /// nearest neighbor searches, and other applications where distance between points is relevant.
-/// 
+///
 /// # Variants
 ///
 /// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
@@ -35,9 +35,10 @@ pub enum DistanceCalculationMetric {
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_regression::LinearRegression;
+/// use rustyml::machine_learning::RegularizationType;
 ///
 /// // Create a new linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6);
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
 ///
 /// // Example data
 /// let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
@@ -75,7 +76,7 @@ pub mod linear_regression;
 /// use rustyml::machine_learning::logistic_regression::LogisticRegression;
 ///
 /// // Create a new logistic regression model
-/// let mut model = LogisticRegression::new(true, 0.1, 1000, 1e-5);
+/// let mut model = LogisticRegression::new(true, 0.1, 1000, 1e-5, None);
 ///
 /// // Example data (features and binary labels)
 /// let x = Array2::from_shape_vec((4, 2), vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0]).unwrap();
@@ -389,7 +390,7 @@ pub mod dbscan;
 /// - `random_state` - Seed for random number generator (for reproducibility)
 ///
 /// # Examples
-/// 
+///
 /// ## Classification Example
 /// ``` rust
 /// use ndarray::{Array1, Array2};
@@ -691,20 +692,23 @@ pub mod linear_discriminant_analysis;
 ///
 /// - `Ok(())` - If all validation checks pass
 /// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
-pub fn preliminary_check(x: ndarray::ArrayView2<f64>,
-                     y: Option<ndarray::ArrayView1<f64>>
+pub fn preliminary_check(
+    x: ndarray::ArrayView2<f64>,
+    y: Option<ndarray::ArrayView1<f64>>,
 ) -> Result<(), crate::ModelError> {
     if x.nrows() == 0 {
         return Err(crate::ModelError::InputValidationError(
-            "Input data is empty".to_string()));
+            "Input data is empty".to_string(),
+        ));
     }
 
     for (i, row) in x.outer_iter().enumerate() {
         for (j, &val) in row.iter().enumerate() {
             if val.is_nan() || val.is_infinite() {
-                return Err(crate::ModelError::InputValidationError(
-                    format!("Input data contains NaN or infinite value at position [{}][{}]",
-                            i, j)));
+                return Err(crate::ModelError::InputValidationError(format!(
+                    "Input data contains NaN or infinite value at position [{}][{}]",
+                    i, j
+                )));
             }
         }
     }
@@ -712,15 +716,39 @@ pub fn preliminary_check(x: ndarray::ArrayView2<f64>,
     if let Some(y) = y {
         if y.len() == 0 {
             return Err(crate::ModelError::InputValidationError(
-                "Target vector is empty".to_string()));
+                "Target vector is empty".to_string(),
+            ));
         }
 
         if y.len() != x.nrows() {
-            return Err(crate::ModelError::InputValidationError(
-                format!("Input data and target vector have different lengths, x columns: {}, y length: {}",
-                    x.nrows(), y.len()
-                )));
+            return Err(crate::ModelError::InputValidationError(format!(
+                "Input data and target vector have different lengths, x columns: {}, y length: {}",
+                x.nrows(),
+                y.len()
+            )));
         }
     }
     Ok(())
+}
+
+/// Represents different types of regularization techniques used in machine learning models.
+///
+/// Regularization helps prevent overfitting by adding a penalty term to the model's loss function
+/// during training. This enum defines common regularization approaches that can be applied to
+/// various learning algorithms.
+///
+/// # Variants
+///
+/// - `L1` - L1 regularization (Lasso) that adds the sum of absolute values of parameters
+///   multiplied by the specified coefficient. Promotes sparse solutions by driving some
+///   parameters to exactly zero.
+/// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
+///   multiplied by the specified coefficient. Discourages large parameter values but
+///   typically does not produce sparse solutions.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegularizationType {
+    /// L1 regularization (Lasso) with the specified regularization strength coefficient
+    L1(f64),
+    /// L2 regularization (Ridge) with the specified regularization strength coefficient
+    L2(f64),
 }

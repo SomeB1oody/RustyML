@@ -1,5 +1,6 @@
-use crate::{math, ModelError};
-use ndarray::{Array1, ArrayView2, ArrayView1};
+pub use super::RegularizationType;
+use crate::{ModelError, math};
+use ndarray::{Array1, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
 /// # Linear Regression model implementation
@@ -17,14 +18,15 @@ use rayon::prelude::*;
 /// - `max_iter` - Maximum number of iterations for gradient descent
 /// - `tol` - Convergence tolerance
 /// - `n_iter` - Number of iterations the algorithm ran for after fitting
+/// - `regularization_type` - Regularization type and strength
 ///
 /// ## Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::LinearRegression;
+/// use rustyml::machine_learning::linear_regression::*;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Create a linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6);
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
 ///
 /// // Prepare training data
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -63,6 +65,8 @@ pub struct LinearRegression {
     tol: f64,
     /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
+    /// Regularization type and strength
+    regularization_type: Option<RegularizationType>,
 }
 
 impl Default for LinearRegression {
@@ -75,6 +79,7 @@ impl Default for LinearRegression {
             max_iter: 1000,
             tol: 1e-5,
             n_iter: None,
+            regularization_type: None,
         }
     }
 }
@@ -86,6 +91,7 @@ impl LinearRegression {
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
+        regularization_type: Option<RegularizationType>,
     ) -> Self {
         LinearRegression {
             coefficients: None,
@@ -95,6 +101,7 @@ impl LinearRegression {
             max_iter: max_iterations,
             tol: tolerance,
             n_iter: None,
+            regularization_type,
         }
     }
 
@@ -179,6 +186,18 @@ impl LinearRegression {
         }
     }
 
+    /// Returns a reference to the regularization type of the model
+    ///
+    /// This method provides access to the regularization configuration of the model,
+    /// which can be None (no regularization), L1 (LASSO), or L2 (Ridge).
+    ///
+    /// # Returns
+    ///
+    /// * `&Option<RegularizationType>` - A reference to the regularization type, which will be None if no regularization is applied
+    pub fn get_regularization_type(&self) -> &Option<RegularizationType> {
+        &self.regularization_type
+    }
+
     /// Fits the linear regression model using gradient descent
     ///
     /// # Parameters
@@ -201,7 +220,7 @@ impl LinearRegression {
 
         // Initialize parameters
         let mut weights = Array1::<f64>::zeros(n_features); // Initialize weights to zero
-        let mut intercept = 0.0;                 // Initialize intercept to zero
+        let mut intercept = 0.0; // Initialize intercept to zero
 
         let mut prev_cost = f64::INFINITY;
         let mut final_cost = prev_cost;
@@ -213,7 +232,8 @@ impl LinearRegression {
             n_iter += 1;
 
             // Calculate predictions using parallel iterator
-            let predictions: Array1<f64> = (0..n_samples).into_par_iter()
+            let predictions: Array1<f64> = (0..n_samples)
+                .into_par_iter()
                 .map(|i| {
                     let row = x.row(i);
                     let pred = row.dot(&weights) + if self.fit_intercept { intercept } else { 0.0 };
@@ -224,11 +244,23 @@ impl LinearRegression {
 
             // Calculate mean squared error
             let sse = math::sum_of_squared_errors(predictions.view(), y.view())?;
-            let cost = sse / (2.0 * n_samples as f64); // Mean squared error divided by 2
+
+            let regularization_term = match &self.regularization_type {
+                None => 0.0,
+                Some(RegularizationType::L1(alpha)) => {
+                    alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
+                }
+                Some(RegularizationType::L2(alpha)) => {
+                    alpha * weights.iter().map(|w| w.powi(2)).sum::<f64>() / 2.0
+                }
+            };
+
+            let cost = sse / (2.0 * n_samples as f64) + regularization_term; // Mean squared error divided by 2
             final_cost = cost;
 
             // Calculate gradients in parallel
-            let gradients_result: (Array1<f64>, f64) = (0..n_samples).into_par_iter()
+            let gradients_result: (Array1<f64>, f64) = (0..n_samples)
+                .into_par_iter()
                 .map(|i| {
                     let error = predictions[i] - y[i];
                     let row = x.row(i);
@@ -246,12 +278,26 @@ impl LinearRegression {
                     |(mut acc_w, acc_i), (w_grad, i_grad)| {
                         acc_w += &w_grad;
                         (acc_w, acc_i + i_grad)
-                    }
+                    },
                 );
 
             // Extract and normalize gradients
-            let gradients = gradients_result.0 / (n_samples as f64);
+            let mut gradients = gradients_result.0 / (n_samples as f64);
             let intercept_gradient = gradients_result.1 / (n_samples as f64);
+
+            match &self.regularization_type {
+                None => {}
+                Some(RegularizationType::L1(alpha)) => {
+                    for i in 0..n_features {
+                        gradients[i] += alpha * weights[i].signum();
+                    }
+                }
+                Some(RegularizationType::L2(alpha)) => {
+                    for i in 0..n_features {
+                        gradients[i] += alpha * weights[i];
+                    }
+                }
+            }
 
             // Update parameters
             weights -= &(&gradients * self.learning_rate);
@@ -273,8 +319,10 @@ impl LinearRegression {
         self.n_iter = Some(n_iter);
 
         // print training info
-        println!("Linear regression model training finished at iteration {}, cost: {}",
-                 n_iter, final_cost);
+        println!(
+            "Linear regression model training finished at iteration {}, cost: {}",
+            n_iter, final_cost
+        );
 
         Ok(self)
     }
@@ -299,13 +347,15 @@ impl LinearRegression {
         let intercept = self.intercept.unwrap_or(0.0);
 
         if x.ncols() != coeffs.len() {
-            return Err(ModelError::InputValidationError(
-                format!("Number of features does not match training data, x columns: {}, coefficients: {}",
-                        x.ncols(), coeffs.len())
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, coefficients: {}",
+                x.ncols(),
+                coeffs.len()
+            )));
         }
 
-        let predictions = (0..x.nrows()).into_par_iter()
+        let predictions = (0..x.nrows())
+            .into_par_iter()
             .map(|i| {
                 let row = x.row(i);
                 intercept + row.dot(coeffs)
@@ -329,7 +379,11 @@ impl LinearRegression {
     ///
     /// - `Ok(Vec<f64>)` - The predicted values for the input data
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn fit_predict(
+        &mut self,
+        x: ArrayView2<f64>,
+        y: ArrayView1<f64>,
+    ) -> Result<Array1<f64>, ModelError> {
         self.fit(x, y)?;
         Ok(self.predict(x)?)
     }

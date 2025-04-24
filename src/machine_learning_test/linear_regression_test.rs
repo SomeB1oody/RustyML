@@ -6,7 +6,10 @@ use ndarray::{Array1, Array2};
 fn test_default_constructor() {
     let model = LinearRegression::default();
 
-    assert!(matches!(model.get_coefficients(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        model.get_coefficients(),
+        Err(ModelError::NotFitted)
+    ));
     assert!(matches!(model.get_intercept(), Err(ModelError::NotFitted)));
     assert!(matches!(model.get_n_iter(), Err(ModelError::NotFitted)));
     // Check if default values meet expectations
@@ -18,7 +21,7 @@ fn test_default_constructor() {
 
 #[test]
 fn test_new_constructor() {
-    let model = LinearRegression::new(false, 0.01, 1000, 1e-5);
+    let model = LinearRegression::new(false, 0.01, 1000, 1e-5, None);
     assert!(!model.get_fit_intercept());
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_max_iter(), 1000);
@@ -48,7 +51,7 @@ fn test_fit_and_predict() {
     let x = Array2::from_shape_vec((4, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
-    let mut model = LinearRegression::new(true, 0.01, 10000, 1e-8);
+    let mut model = LinearRegression::new(true, 0.01, 10000, 1e-8, None);
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
@@ -60,7 +63,8 @@ fn test_fit_and_predict() {
 
     // Test predictions
     let test_x_vec = vec![vec![5.0], vec![6.0]];
-    let test_x = Array2::from_shape_vec((2, 1), test_x_vec.into_iter().flatten().collect()).unwrap();
+    let test_x =
+        Array2::from_shape_vec((2, 1), test_x_vec.into_iter().flatten().collect()).unwrap();
     let predictions = model.predict(test_x.view()).unwrap();
 
     assert!((predictions[0] - 11.0).abs() < 0.2);
@@ -92,7 +96,7 @@ fn test_multivariate_regression() {
     let y = Array1::from_vec(y_vec);
 
     // Create model and train
-    let mut model = LinearRegression::new(true, 0.005, 20000, 1e-10);
+    let mut model = LinearRegression::new(true, 0.005, 20000, 1e-10, None);
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
@@ -102,25 +106,38 @@ fn test_multivariate_regression() {
     println!("Learned coefficients: {:?}", coefficients);
     println!("Learned intercept: {}", intercept);
 
-    assert!((coefficients[0] - 2.0).abs() < 0.2,
-            "First coefficient {} differs too much from expected 2.0", coefficients[0]);
-    assert!((coefficients[1] - 3.0).abs() < 0.2,
-            "Second coefficient {} differs too much from expected 3.0", coefficients[1]);
-    assert!((intercept - 1.0).abs() < 0.2,
-            "Intercept {} differs too much from expected 1.0", intercept);
+    assert!(
+        (coefficients[0] - 2.0).abs() < 0.2,
+        "First coefficient {} differs too much from expected 2.0",
+        coefficients[0]
+    );
+    assert!(
+        (coefficients[1] - 3.0).abs() < 0.2,
+        "Second coefficient {} differs too much from expected 3.0",
+        coefficients[1]
+    );
+    assert!(
+        (intercept - 1.0).abs() < 0.2,
+        "Intercept {} differs too much from expected 1.0",
+        intercept
+    );
 
     // Test predictions
-    let test_x_vec = vec![
-        vec![5.0, 5.0],
-        vec![2.0, 4.0],
-    ];
-    let test_x = Array2::from_shape_vec((2, 2), test_x_vec.into_iter().flatten().collect()).unwrap();
+    let test_x_vec = vec![vec![5.0, 5.0], vec![2.0, 4.0]];
+    let test_x =
+        Array2::from_shape_vec((2, 2), test_x_vec.into_iter().flatten().collect()).unwrap();
     let predictions = model.predict(test_x.view()).unwrap();
 
-    assert!((predictions[0] - 26.0).abs() < 0.5,
-            "Prediction {} differs too much from expected 26.0", predictions[0]);
-    assert!((predictions[1] - 17.0).abs() < 0.5,
-            "Prediction {} differs too much from expected 17.0", predictions[1]);
+    assert!(
+        (predictions[0] - 26.0).abs() < 0.5,
+        "Prediction {} differs too much from expected 26.0",
+        predictions[0]
+    );
+    assert!(
+        (predictions[1] - 17.0).abs() < 0.5,
+        "Prediction {} differs too much from expected 17.0",
+        predictions[1]
+    );
 }
 
 #[test]
@@ -133,7 +150,7 @@ fn test_no_intercept() {
     let x = Array2::from_shape_vec((4, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
-    let mut model = LinearRegression::new(false, 0.01, 10000, 1e-8);
+    let mut model = LinearRegression::new(false, 0.01, 10000, 1e-8, None);
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficient is close to expected value (around 2.0)
@@ -150,12 +167,10 @@ fn test_no_intercept() {
 #[test]
 fn test_linear_regression_fit_predict() {
     // Create a simple linear regression model instance
-    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6);
+    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
 
     // Create simple training data
-    let x_vec = vec![
-        vec![1.0], vec![2.0], vec![3.0], vec![4.0], vec![5.0]
-    ];
+    let x_vec = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0], vec![5.0]];
     let y_vec = vec![5.0, 7.0, 9.0, 11.0, 13.0];
 
     // 将Vec转换为ndarray的Array
@@ -169,8 +184,12 @@ fn test_linear_regression_fit_predict() {
     assert_eq!(predictions.len(), y.len());
 
     for i in 0..y.len() {
-        assert!((predictions[i] - y[i]).abs() < 0.5,
-                "Prediction {} differs too much from actual value {}", predictions[i], y[i]);
+        assert!(
+            (predictions[i] - y[i]).abs() < 0.5,
+            "Prediction {} differs too much from actual value {}",
+            predictions[i],
+            y[i]
+        );
     }
 
     // Additional check for model parameters
@@ -178,8 +197,14 @@ fn test_linear_regression_fit_predict() {
     let intercept = model.get_intercept().unwrap();
 
     // Verify coefficient is close to 2 and intercept is close to 3
-    assert!((coefficients[0] - 2.0).abs() < 0.5,
-            "Coefficient {} differs too much from expected value 2.0", coefficients[0]);
-    assert!((intercept - 3.0).abs() < 0.5,
-            "Intercept {} differs too much from expected value 3.0", intercept);
+    assert!(
+        (coefficients[0] - 2.0).abs() < 0.5,
+        "Coefficient {} differs too much from expected value 2.0",
+        coefficients[0]
+    );
+    assert!(
+        (intercept - 3.0).abs() < 0.5,
+        "Intercept {} differs too much from expected value 3.0",
+        intercept
+    );
 }

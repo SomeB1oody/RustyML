@@ -66,7 +66,7 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
 
 - **Utilities | 工具**:
   - PCA(Principal Component Analysis) | 主成分分析
-  - standardize data($\mu = 0$, $\sigma = 1$) | 标准化数据(确保均值$\mu = 0$, 协方差$\sigma = 1$)
+  - standardize data($\mu = 0$, $\sigma = 1$) | 标准化数据(确保均值 $\mu = 0$ , 协方差 $\sigma = 1$ )
   - Split dataset for training and dataset for test | 分离训练集和测试集
   - LDA(Linear Discriminant Analysis) | 线性判别分析
   - t-Distributed Stochastic Neighbor Embedding (t-SNE) | t分布随机邻域嵌入
@@ -140,11 +140,11 @@ rustyml = "0.5.1"
 ```
 Example usage | 使用示例:
 ``` rust
-use rustyml::machine_learning::linear_regression::LinearRegression;
+use rustyml::machine_learning::linear_regression::*;
 use ndarray::{Array1, Array2, array};
 
 // Create a linear regression model
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6);
+let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
 
 // Prepare training data
 let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];

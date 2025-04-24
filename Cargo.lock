@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "rustyml"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "approx",
  "nalgebra",

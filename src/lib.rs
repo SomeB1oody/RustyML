@@ -103,11 +103,11 @@ mod math_module_test;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::LinearRegression;
+/// use rustyml::machine_learning::linear_regression::*;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Create a linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6);
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
 ///
 /// // Prepare training data
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
