@@ -1,5 +1,6 @@
 pub use super::RegularizationType;
 use crate::ModelError;
+pub use crate::traits::RegressorCommonGetterFunctions;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
@@ -82,6 +83,30 @@ impl Default for LogisticRegression {
     }
 }
 
+impl RegressorCommonGetterFunctions for LogisticRegression {
+    fn get_fit_intercept(&self) -> bool {
+        self.fit_intercept
+    }
+    fn get_learning_rate(&self) -> f64 {
+        self.learning_rate
+    }
+    fn get_max_iterations(&self) -> usize {
+        self.max_iter
+    }
+    fn get_tolerance(&self) -> f64 {
+        self.tol
+    }
+    fn get_actual_iterations(&self) -> Result<usize, ModelError> {
+        match &self.n_iter {
+            Some(n_iter) => Ok(*n_iter),
+            None => Err(ModelError::NotFitted),
+        }
+    }
+    fn get_regularization_type(&self) -> &Option<RegularizationType> {
+        &self.regularization_type
+    }
+}
+
 impl LogisticRegression {
     /// Creates a new logistic regression model with specified parameters
     ///
@@ -113,48 +138,6 @@ impl LogisticRegression {
         }
     }
 
-    /// Gets the current setting for fitting the intercept term
-    ///
-    /// # Returns
-    ///
-    /// * `bool` - Returns `true` if the model includes an intercept term, `false` otherwise
-    pub fn get_fit_intercept(&self) -> bool {
-        self.fit_intercept
-    }
-
-    /// Gets the current learning rate
-    ///
-    /// The learning rate controls the step size in each iteration of gradient descent.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The current learning rate value
-    pub fn get_learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-
-    /// Gets the maximum number of iterations
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The maximum number of iterations for the gradient descent algorithm
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
-
-    /// Gets the convergence tolerance threshold
-    ///
-    /// The convergence tolerance is used to determine when to stop the training process.
-    /// Training stops when the change in the loss function between consecutive iterations
-    /// is less than this value.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The current convergence tolerance value
-    pub fn get_tol(&self) -> f64 {
-        self.tol
-    }
-
     /// Returns the model weights
     ///
     /// # Returns
@@ -164,19 +147,6 @@ impl LogisticRegression {
     pub fn get_weights(&self) -> Result<&Array1<f64>, ModelError> {
         match &self.weights {
             Some(weights) => Ok(weights),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Get number of iterations the algorithm ran for after fitting
-    ///
-    /// # Returns
-    ///
-    /// - `usize` - number of iterations the algorithm ran for after fitting
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match self.n_iter {
-            Some(n_iter) => Ok(n_iter),
             None => Err(ModelError::NotFitted),
         }
     }

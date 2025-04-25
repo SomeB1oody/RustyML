@@ -11,12 +11,15 @@ fn test_default_constructor() {
         Err(ModelError::NotFitted)
     ));
     assert!(matches!(model.get_intercept(), Err(ModelError::NotFitted)));
-    assert!(matches!(model.get_n_iter(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        model.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
     // Check if default values meet expectations
     assert_eq!(model.get_fit_intercept(), true); // Assuming default is true
     assert!(model.get_learning_rate() > 0.0);
-    assert!(model.get_max_iter() > 0);
-    assert!(model.get_tol() > 0.0);
+    assert!(model.get_max_iterations() > 0);
+    assert!(model.get_tolerance() > 0.0);
 }
 
 #[test]
@@ -24,9 +27,12 @@ fn test_new_constructor() {
     let model = LinearRegression::new(false, 0.01, 1000, 1e-5, None);
     assert!(!model.get_fit_intercept());
     assert_eq!(model.get_learning_rate(), 0.01);
-    assert_eq!(model.get_max_iter(), 1000);
-    assert_eq!(model.get_tol(), 1e-5);
-    assert!(matches!(model.get_n_iter(), Err(ModelError::NotFitted)));
+    assert_eq!(model.get_max_iterations(), 1000);
+    assert_eq!(model.get_tolerance(), 1e-5);
+    assert!(matches!(
+        model.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
 }
 
 #[test]

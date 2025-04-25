@@ -29,3 +29,5 @@ pub use crate::machine_learning::svc::SVC;
 pub use crate::utility::train_test_split::train_test_split;
 
 pub use crate::neural_network::*;
+
+pub use crate::traits::*;

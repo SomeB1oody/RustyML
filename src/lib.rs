@@ -312,3 +312,4 @@ pub mod neural_network;
 
 #[cfg(test)]
 mod neural_network_test;
+pub mod traits;

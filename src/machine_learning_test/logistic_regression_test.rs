@@ -8,9 +8,12 @@ fn test_default_constructor() {
 
     assert_eq!(model.get_fit_intercept(), true);
     assert_eq!(model.get_learning_rate(), 0.01);
-    assert_eq!(model.get_max_iter(), 100);
-    assert_eq!(model.get_tol(), 1e-4);
-    assert!(matches!(model.get_n_iter(), Err(ModelError::NotFitted)));
+    assert_eq!(model.get_max_iterations(), 100);
+    assert_eq!(model.get_tolerance(), 1e-4);
+    assert!(matches!(
+        model.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
     assert!(matches!(model.get_weights(), Err(ModelError::NotFitted)));
 }
 
@@ -20,9 +23,12 @@ fn test_new_constructor() {
 
     assert_eq!(model.get_fit_intercept(), false);
     assert_eq!(model.get_learning_rate(), 0.05);
-    assert_eq!(model.get_max_iter(), 200);
-    assert_eq!(model.get_tol(), 1e-5);
-    assert!(matches!(model.get_n_iter(), Err(ModelError::NotFitted)));
+    assert_eq!(model.get_max_iterations(), 200);
+    assert_eq!(model.get_tolerance(), 1e-5);
+    assert!(matches!(
+        model.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
     assert!(matches!(model.get_weights(), Err(ModelError::NotFitted)));
 }
 

@@ -1,4 +1,5 @@
 pub use super::RegularizationType;
+pub use crate::traits::RegressorCommonGetterFunctions;
 use crate::{ModelError, math};
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rayon::prelude::*;
@@ -84,6 +85,30 @@ impl Default for LinearRegression {
     }
 }
 
+impl RegressorCommonGetterFunctions for LinearRegression {
+    fn get_fit_intercept(&self) -> bool {
+        self.fit_intercept
+    }
+    fn get_learning_rate(&self) -> f64 {
+        self.learning_rate
+    }
+    fn get_max_iterations(&self) -> usize {
+        self.max_iter
+    }
+    fn get_tolerance(&self) -> f64 {
+        self.tol
+    }
+    fn get_actual_iterations(&self) -> Result<usize, ModelError> {
+        match &self.n_iter {
+            Some(n_iter) => Ok(*n_iter),
+            None => Err(ModelError::NotFitted),
+        }
+    }
+    fn get_regularization_type(&self) -> &Option<RegularizationType> {
+        &self.regularization_type
+    }
+}
+
 impl LinearRegression {
     /// Creates a new linear regression model with custom parameters
     pub fn new(
@@ -103,48 +128,6 @@ impl LinearRegression {
             n_iter: None,
             regularization_type,
         }
-    }
-
-    /// Gets the current setting for fitting the intercept term
-    ///
-    /// # Returns
-    ///
-    /// * `bool` - Returns `true` if the model includes an intercept term, `false` otherwise
-    pub fn get_fit_intercept(&self) -> bool {
-        self.fit_intercept
-    }
-
-    /// Gets the current learning rate
-    ///
-    /// The learning rate controls the step size in each iteration of gradient descent.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The current learning rate value
-    pub fn get_learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-
-    /// Gets the maximum number of iterations
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The maximum number of iterations for the gradient descent algorithm
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
-
-    /// Gets the convergence tolerance threshold
-    ///
-    /// The convergence tolerance is used to determine when to stop the training process.
-    /// Training stops when the change in the loss function between consecutive iterations
-    /// is less than this value.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The current convergence tolerance value
-    pub fn get_tol(&self) -> f64 {
-        self.tol
     }
 
     /// Returns the model coefficients if the model has been fitted
@@ -171,31 +154,6 @@ impl LinearRegression {
             Some(intercept) => Ok(intercept),
             None => Err(ModelError::NotFitted),
         }
-    }
-
-    /// Returns the actual number of iterations performed during the last model fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(usize)` - The number of iterations if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match self.n_iter {
-            Some(n_iter) => Ok(n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Returns a reference to the regularization type of the model
-    ///
-    /// This method provides access to the regularization configuration of the model,
-    /// which can be None (no regularization), L1 (LASSO), or L2 (Ridge).
-    ///
-    /// # Returns
-    ///
-    /// * `&Option<RegularizationType>` - A reference to the regularization type, which will be None if no regularization is applied
-    pub fn get_regularization_type(&self) -> &Option<RegularizationType> {
-        &self.regularization_type
     }
 
     /// Fits the linear regression model using gradient descent
