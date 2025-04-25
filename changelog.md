@@ -5,9 +5,9 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.6.0] - 2025-4-24
+## [v0.6.0] - 2025-4-25
 ### Changed
-Refactor regressors to use shared `RegressorCommonGetterFunctions` trait
+- Refactor regressors to use shared `RegressorCommonGetterFunctions` trait
 
 ## [v0.6.0] - 2025-4-24
 ### Added
