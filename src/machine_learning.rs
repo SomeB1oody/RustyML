@@ -608,7 +608,7 @@ pub mod svc;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_svc::{LinearSVC, PenaltyType};
+/// use rustyml::machine_learning::linear_svc::*;
 /// use ndarray::{Array1, Array2};
 ///
 /// // Create a new Linear SVC model
@@ -616,7 +616,7 @@ pub mod svc;
 ///     1000,            // max_iter
 ///     0.01,            // learning_rate
 ///     0.1,             // regularization_param
-///     PenaltyType::L2, // penalty
+///     RegularizationType::L2(0.0), // penalty, number here means nothing
 ///     true,            // fit_intercept
 ///     1e-4,            // tolerance
 /// );

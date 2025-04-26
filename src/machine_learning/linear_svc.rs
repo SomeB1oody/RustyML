@@ -1,7 +1,8 @@
-use ndarray::{Array1, ArrayView1, ArrayView2};
-use rand::seq::SliceRandom;
-use rand::rng;
 use crate::ModelError;
+pub use crate::machine_learning::RegularizationType;
+use ndarray::{Array1, ArrayView1, ArrayView2};
+use rand::rng;
+use rand::seq::SliceRandom;
 use rayon::prelude::*;
 
 /// # Linear Support Vector Classifier (LinearSVC)
@@ -39,7 +40,7 @@ use rayon::prelude::*;
 ///     1000,                // max_iter
 ///     0.001,               // learning_rate
 ///     1.0,                 // regularization_param
-///     PenaltyType::L2,     // penalty type
+///     RegularizationType::L2(0.0),     // penalty type, number here means nothing
 ///     true,                // fit_intercept
 ///     1e-4                 // tolerance
 /// );
@@ -88,7 +89,7 @@ pub struct LinearSVC {
 
     /// Regularization type: L1 or L2.
     /// L1 can produce sparse models, L2 typically works better for most problems.
-    penalty: PenaltyType,
+    penalty: RegularizationType,
 
     /// Whether to calculate and use an intercept/bias term.
     /// If false, the decision boundary passes through origin.
@@ -101,23 +102,6 @@ pub struct LinearSVC {
     /// Number of iterations that were actually performed during training.
     /// `None` if model is not trained yet.
     n_iter: Option<usize>,
-}
-
-/// # Penalty Type for Regularization
-///
-/// Defines the type of regularization to apply during model training.
-/// Different regularization types can lead to different model characteristics.
-///
-/// ## Variants
-///
-/// - `L1`: Lasso regularization that can lead to sparse models (many weights become zero)
-/// - `L2`: Ridge regularization that generally performs better for most problems
-#[derive(Debug, Clone)]
-pub enum PenaltyType {
-    /// L1 (Lasso) regularization which can zero out some coefficients completely
-    L1,
-    /// L2 (Ridge) regularization which penalizes large coefficients but rarely zeros them out
-    L2,
 }
 
 impl Default for LinearSVC {
@@ -144,7 +128,7 @@ impl Default for LinearSVC {
             max_iter: 1000,
             learning_rate: 0.001,
             regularization_param: 1.0,
-            penalty: PenaltyType::L2,
+            penalty: RegularizationType::L2(0.0), // the number here means nothing
             fit_intercept: true,
             tol: 1e-4,
             n_iter: None,
@@ -170,7 +154,7 @@ impl LinearSVC {
         max_iter: usize,
         learning_rate: f64,
         regularization_param: f64,
-        penalty: PenaltyType,
+        penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
     ) -> Self {
@@ -257,8 +241,8 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// * `&PenaltyType` - Reference to the current penalty type (L1 or L2)
-    pub fn get_penalty(&self) -> &PenaltyType {
+    /// * `&RegularizationType` - Reference to the current penalty type (L1 or L2)
+    pub fn get_penalty(&self) -> &RegularizationType {
         &self.penalty
     }
 
@@ -298,33 +282,39 @@ impl LinearSVC {
     /// - `Err(ModelError)`: Error if validation fails or training encounters problems
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
         if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(
-                format!("Input data size mismatch: x.shape={}, y.shape={}", x.nrows(), y.len())
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "Input data size mismatch: x.shape={}, y.shape={}",
+                x.nrows(),
+                y.len()
+            )));
         }
 
         if self.max_iter <= 0 {
-            return Err(ModelError::InputValidationError(
-                format!("max_iter must be greater than 0, got {}", self.max_iter)
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "max_iter must be greater than 0, got {}",
+                self.max_iter
+            )));
         }
 
         if self.learning_rate <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                format!("learning_rate must be greater than 0.0, got {}", self.learning_rate)
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "learning_rate must be greater than 0.0, got {}",
+                self.learning_rate
+            )));
         }
 
         if self.regularization_param <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                format!("regularization_param must be greater than 0.0, got {}", self.regularization_param)
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "regularization_param must be greater than 0.0, got {}",
+                self.regularization_param
+            )));
         }
 
         if self.tol <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                format!("tol must be greater than 0.0, got {}", self.tol)
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "tol must be greater than 0.0, got {}",
+                self.tol
+            )));
         }
 
         let n_samples = x.nrows();
@@ -388,16 +378,24 @@ impl LinearSVC {
 
                 // Apply regularization and learning rate
                 match self.penalty {
-                    PenaltyType::L2 => {
-                        weights = &weights * (1.0 - self.learning_rate * self.regularization_param) +
-                            &(weight_update * (self.learning_rate / batch_indices.len() as f64));
-                    },
-                    PenaltyType::L1 => {
+                    RegularizationType::L2(_) => {
+                        weights = &weights * (1.0 - self.learning_rate * self.regularization_param)
+                            + &(weight_update * (self.learning_rate / batch_indices.len() as f64));
+                    }
+                    RegularizationType::L1(_) => {
                         // L1 regularization subgradient update
-                        weights = &weights - &(weights.mapv(|w| if w > 0.0 { 1.0 } else if w < 0.0 { -1.0 } else { 0.0 }) *
-                            (self.learning_rate * self.regularization_param)) +
-                            &(weight_update * (self.learning_rate / batch_indices.len() as f64));
-                    },
+                        weights = &weights
+                            - &(weights.mapv(|w| {
+                                if w > 0.0 {
+                                    1.0
+                                } else if w < 0.0 {
+                                    -1.0
+                                } else {
+                                    0.0
+                                }
+                            }) * (self.learning_rate * self.regularization_param))
+                            + &(weight_update * (self.learning_rate / batch_indices.len() as f64));
+                    }
                 }
 
                 if self.fit_intercept {
@@ -407,8 +405,13 @@ impl LinearSVC {
 
             // Convergence check
             let diff = &weights - &prev_weights;
-            let weight_diff = diff.iter().map(|&x| x * x).sum::<f64>().sqrt() / weights.len() as f64;
-            let bias_diff = if self.fit_intercept { (bias - prev_bias).abs() } else { 0.0 };
+            let weight_diff =
+                diff.iter().map(|&x| x * x).sum::<f64>().sqrt() / weights.len() as f64;
+            let bias_diff = if self.fit_intercept {
+                (bias - prev_bias).abs()
+            } else {
+                0.0
+            };
 
             if weight_diff < self.tol && bias_diff < self.tol {
                 break;
@@ -464,7 +467,7 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        let weights = match self.weights.as_ref(){
+        let weights = match self.weights.as_ref() {
             Some(w) => w,
             None => return Err(ModelError::NotFitted),
         };

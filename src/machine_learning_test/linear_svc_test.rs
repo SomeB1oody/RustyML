@@ -1,5 +1,5 @@
-use crate::machine_learning::linear_svc::*;
 use crate::ModelError;
+use crate::machine_learning::linear_svc::*;
 use ndarray::{arr1, arr2};
 
 #[test]
@@ -13,18 +13,18 @@ fn test_default() {
 #[test]
 fn test_new() {
     let model = LinearSVC::new(
-        100,           // max_iter
-        0.01,          // learning_rate
-        0.1,           // regularization_param
-        PenaltyType::L2, // penalty
-        true,          // fit_intercept
-        1e-4,          // tol
+        100,                         // max_iter
+        0.01,                        // learning_rate
+        0.1,                         // regularization_param
+        RegularizationType::L2(0.0), // penalty
+        true,                        // fit_intercept
+        1e-4,                        // tol
     );
 
     assert_eq!(model.get_max_iter(), 100);
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_regularization_param(), 0.1);
-    assert!(matches!(model.get_penalty(), PenaltyType::L2));
+    assert!(matches!(model.get_penalty(), RegularizationType::L2(0.0)));
     assert!(model.get_fit_intercept());
     assert_eq!(model.get_tol(), 1e-4);
 }
@@ -59,18 +59,16 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
 
     // Corresponding labels
     let y = arr1(&[
-        1.0, -1.0, 1.0, -1.0,
-        1.0, -1.0, 1.0, -1.0,
-        1.0, -1.0, 1.0, -1.0,
+        1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0,
     ]);
 
     let mut model = LinearSVC::new(
-        10000,           // max_iter
-        0.1,            // learning_rate
-        1.0,           // regularization_param
-        PenaltyType::L2, // penalty
-        true,           // fit_intercept
-        1e-4,           // tol
+        10000,                       // max_iter
+        0.1,                         // learning_rate
+        1.0,                         // regularization_param
+        RegularizationType::L2(0.0), // penalty
+        true,                        // fit_intercept
+        1e-4,                        // tol
     );
 
     // Fit the model
@@ -93,18 +91,17 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
         }
     }
 
-    println!("Correct predictions: {}/{}", correct_count, predictions.len());
+    println!(
+        "Correct predictions: {}/{}",
+        correct_count,
+        predictions.len()
+    );
 
     // Expect higher accuracy with larger dataset
     assert!(correct_count >= 6); // Require at least 6/12 correct
 
     // Create some new test data points
-    let x_test = arr2(&[
-        [1.2, 0.8],
-        [0.8, -1.7],
-        [-0.9, 1.1],
-        [-1.8, -0.9],
-    ]);
+    let x_test = arr2(&[[1.2, 0.8], [0.8, -1.7], [-0.9, 1.1], [-1.8, -0.9]]);
 
     // Expected labels
     let y_expected = arr1(&[1.0, -1.0, 1.0, -1.0]);
@@ -120,7 +117,11 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
         }
     }
 
-    println!("Test set correct predictions: {}/{}", test_correct, test_predictions.len());
+    println!(
+        "Test set correct predictions: {}/{}",
+        test_correct,
+        test_predictions.len()
+    );
     assert!(test_correct >= 2); // Require at least 2/4 correct
 
     Ok(())
@@ -129,10 +130,7 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
 #[test]
 fn test_decision_function() -> Result<(), ModelError> {
     // Create a simple dataset
-    let x = arr2(&[
-        [2.0, 2.0],
-        [-2.0, -2.0],
-    ]);
+    let x = arr2(&[[2.0, 2.0], [-2.0, -2.0]]);
 
     let y = arr1(&[1.0, -1.0]);
 
@@ -152,22 +150,13 @@ fn test_decision_function() -> Result<(), ModelError> {
 #[test]
 fn test_different_penalties() {
     // Test with L1 penalty
-    let mut model_l1 = LinearSVC::new(
-        100, 0.01, 0.1, PenaltyType::L1, true, 1e-4
-    );
+    let mut model_l1 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L1(0.0), true, 1e-4);
 
     // Test with L2 penalty
-    let mut model_l2 = LinearSVC::new(
-        100, 0.01, 0.1, PenaltyType::L2, true, 1e-4
-    );
+    let mut model_l2 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L1(0.0), true, 1e-4);
 
     // Simple dataset
-    let x = arr2(&[
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [-1.0, 0.0],
-        [0.0, -1.0],
-    ]);
+    let x = arr2(&[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]);
 
     let y = arr1(&[1.0, 1.0, -1.0, -1.0]);
 
@@ -198,10 +187,7 @@ fn test_fit_with_invalid_data() {
     let mut model = LinearSVC::default();
 
     // Test with mismatched dimensions
-    let x = arr2(&[
-        [1.0, 2.0],
-        [3.0, 4.0],
-    ]);
+    let x = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
 
     // y has 3 samples but x has only 2
     let y = arr1(&[1.0, -1.0, 1.0]);
