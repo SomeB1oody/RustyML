@@ -1,3 +1,4 @@
+/// Module that contains activation function implementations.
 pub mod activation;
 /// Module that contains neural network layer implementations.
 pub mod layer;
