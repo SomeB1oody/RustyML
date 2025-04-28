@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.0] - 2025-4-28
+### Changed
+Refactor traits in neural_network module definitions into traits module
+
 ## [v0.6.0] - 2025-4-27
 ### Added
 - Add doc comment for traits module

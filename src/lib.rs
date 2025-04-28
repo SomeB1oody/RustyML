@@ -316,11 +316,13 @@ mod neural_network_test;
 /// # Module containing trait definitions for machine learning model interfaces.
 ///
 /// This module defines traits that establish common interfaces for various machine learning models,
-/// particularly focused on regression algorithms. These traits provide standardized methods for
-/// accessing and manipulating model parameters and behaviors.
+/// particularly focused on regression algorithms and neural networks. These traits provide
+/// standardized methods for accessing and manipulating model parameters and behaviors.
 ///
 /// ## Main traits:
 ///
-/// * `RegressorCommonGetterFunctions` - Defines a common interface for accessing regression model parameters
-///   such as learning rate, regularization type, and convergence settings.
+/// - `RegressorCommonGetterFunctions` - Defines a common interface for accessing regression model parameters such as learning rate, regularization type, and convergence settings.
+/// - `Layer` - Defines the core functionality that all neural network layers must implement, including forward and backward propagation and parameter updates.
+/// - `LossFunction` - Provides an interface for computing loss values and gradients in neural networks.
+/// - `Optimizer` - Defines methods for updating model parameters during training according to specific optimization algorithms.
 pub mod traits;

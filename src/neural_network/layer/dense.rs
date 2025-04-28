@@ -199,7 +199,7 @@ impl Layer for Dense {
                     )))?,
                 };
 
-                // Parallel calculation of element-wise multiplication of activation function derivative and gradient
+                // calculation of element-wise multiplication of activation function derivative and gradient
                 let deriv = Activation::activation_derivative(&a, act);
                 let mut result = deriv.clone();
 
