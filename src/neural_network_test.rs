@@ -208,3 +208,27 @@ fn test_simple_rnn_layer() {
     let pred = model.predict(&x);
     println!("SimpleRnn prediction:\n{:#?}\n", pred);
 }
+
+#[test]
+fn test_lstm_layer() {
+    // Create input with batch_size=2, timesteps=5, input_dim=4,
+    // and target with batch_size=2, units=3 (same dimension as the last hidden state)
+    let x = Array::ones((2, 5, 4)).into_dyn();
+    let y = Array::ones((2, 3)).into_dyn();
+
+    // Build model: one SimpleRnn layer with tanh activation
+    let mut model = Sequential::new();
+    model
+        .add(LSTM::new(4, 3, Activation::Tanh))
+        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+
+    // Print structure
+    model.summary();
+
+    // Train for 1 epoch
+    model.fit(&x, &y, 1).unwrap();
+
+    // Predict
+    let pred = model.predict(&x);
+    println!("LSTM prediction:\n{:#?}\n", pred);
+}
