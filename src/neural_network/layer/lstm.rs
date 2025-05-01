@@ -356,71 +356,21 @@ impl Layer for LSTM {
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
-        let x3 = match self.input_cache.take() {
-            Some(x3) => x3,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let hs = match self.hidden_cache.take() {
-            Some(hs) => hs,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let cs = match self.cell_cache.take() {
-            Some(cs) => cs,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let gis = match self.gate_i_cache.take() {
-            Some(gis) => gis,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let gfs = match self.gate_f_cache.take() {
-            Some(gfs) => gfs,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let gcs = match self.gate_c_cache.take() {
-            Some(gcs) => gcs,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
-        let gos = match self.gate_o_cache.take() {
-            Some(gos) => gos,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
+        fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
+            cache
+                .take()
+                .ok_or_else(|| ModelError::ProcessingError(error_msg.to_string()))
+        }
 
-        let c_activateds = match self.cell_activated_cache.take() {
-            Some(c_activateds) => c_activateds,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run".to_string(),
-                ));
-            }
-        };
+        let error_msg = "Forward pass has not been run";
+        let x3 = take_cache(&mut self.input_cache, error_msg)?;
+        let hs = take_cache(&mut self.hidden_cache, error_msg)?;
+        let cs = take_cache(&mut self.cell_cache, error_msg)?;
+        let gis = take_cache(&mut self.gate_i_cache, error_msg)?;
+        let gfs = take_cache(&mut self.gate_f_cache, error_msg)?;
+        let gcs = take_cache(&mut self.gate_c_cache, error_msg)?;
+        let gos = take_cache(&mut self.gate_o_cache, error_msg)?;
+        let c_activateds = take_cache(&mut self.cell_activated_cache, error_msg)?;
 
         // Process the gradient of the last time step, if it's softmax, special handling is needed
         if self.activation == Activation::Softmax {
