@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.0] - 2025-5-1
+### Added
+- Add detailed documentation and examples to neural network layers
+
 ## [v0.6.0] - 2025-4-30
 ### Added
 - Add doc comment for `LSTM`

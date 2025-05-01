@@ -15,6 +15,60 @@ use rayon::prelude::*;
 ///
 /// During training, this layer stores necessary intermediate values for backpropagation and supports
 /// multiple optimization algorithms including SGD, Adam, and RMSprop.
+///
+/// # Dimensions
+///
+/// - Input shape: (batch_size, input_dim)
+/// - Output shape: (batch_size, output_dim)
+///
+/// # Fields
+/// ## Core fields
+/// - `input_dim` - Input dimension size
+/// - `output_dim` - Output dimension size
+/// - `weights` - Weight matrix with shape (input_dim, output_dim)
+/// - `bias` - Bias vector with shape (1, output_dim)
+/// - `activation` - Activation function for the layer
+/// - `activation_output` - Cached output after activation for use in backward pass
+///
+/// ## Cache
+/// - `input_cache` - Cache of the input from forward pass for use in backward pass
+/// - `grad_weights` - Stored weight gradients
+/// - `grad_bias` - Stored bias gradients
+///
+/// ## Adam states
+/// - `m_weights` - Adam optimizer state: first moment for weights
+/// - `v_weights` - Adam optimizer state: second moment for weights
+/// - `m_bias` - Adam optimizer state: first moment for bias
+/// - `v_bias` - Adam optimizer state: second moment for bias
+///
+/// ## RMSprop states
+/// - `cache_weights` - RMSprop optimizer cache for weights
+/// - `cache_bias` - RMSprop optimizer cache for bias
+///
+/// # Example
+/// ```rust
+/// use ndarray::Array;
+/// use rustyml::prelude::*;
+///
+/// // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
+/// let x = Array::ones((2, 4)).into_dyn();
+/// let y = Array::ones((2, 1)).into_dyn();
+///
+/// // Build the model
+/// let mut model = Sequential::new();
+/// model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+/// model.compile(SGD::new(0.01), MeanSquaredError::new());
+///
+/// // Print model structure (summary)
+/// model.summary();
+///
+/// // Train the model
+/// model.fit(&x, &y, 3).unwrap();
+///
+/// // Use predict for forward propagation prediction
+/// let prediction = model.predict(&x);
+/// println!("Prediction results: {:?}", prediction);
+/// ```
 pub struct Dense {
     /// Input dimension size
     input_dim: usize,

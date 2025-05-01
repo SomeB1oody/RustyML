@@ -14,6 +14,64 @@ use ndarray_rand::rand_distr::Uniform;
 ///
 /// - Input shape: (batch_size, timesteps, input_dim)
 /// - Output shape: (batch_size, units)
+///
+/// # Fields
+/// ## Core fields
+/// - `input_dim` - Number of input features
+/// - `units` - Number of output units (neurons)
+/// - `kernel` - Weight matrix connecting inputs to the recurrent layer (shape: input_dim, units)
+/// - `recurrent_kernel` - Weight matrix connecting previous hidden states to the current state (shape: units, units)
+/// - `bias` - Bias vector for the layer (shape: 1, units)
+/// - `activation` - Activation function to use (default: tanh)
+///
+/// ## Cache
+/// - `input_cache` - Cache of input tensors from forward pass (shape: batch, timesteps, input_dim)
+/// - `hidden_state_cache` - Cache of hidden states from forward pass (length = timesteps+1)
+///
+/// ## Gradients
+/// - `grad_kernel` - Gradient of the kernel weights
+/// - `grad_recurrent_kernel` - Gradient of the recurrent kernel weights
+/// - `grad_bias` - Gradient of the bias
+///
+/// ## Adam states
+/// - `m_kernel` - First moment vector for kernel in Adam optimizer
+/// - `v_kernel` - Second moment vector for kernel in Adam optimizer
+/// - `m_recurrent_kernel` - First moment vector for recurrent kernel in Adam optimizer
+/// - `v_recurrent_kernel` - Second moment vector for recurrent kernel in Adam optimizer
+/// - `m_bias` - First moment vector for bias in Adam optimizer
+/// - `v_bias` - Second moment vector for bias in Adam optimizer
+///
+/// ## RMSprop cache
+/// - `cache_kernel` - RMSprop cache for kernel
+/// - `cache_recurrent_kernel` - RMSprop cache for recurrent kernel
+/// - `cache_bias` - RMSprop cache for bias
+///
+/// # Example
+/// ```rust
+/// use ndarray::Array;
+/// use rustyml::prelude::*;
+///
+/// // Create input with batch_size=2, timesteps=5, input_dim=4,
+/// // and target with batch_size=2, units=3 (same dimension as the last hidden state)
+/// let x = Array::ones((2, 5, 4)).into_dyn();
+/// let y = Array::ones((2, 3)).into_dyn();
+///
+/// // Build model: one SimpleRnn layer with tanh activation
+/// let mut model = Sequential::new();
+/// model
+/// .add(SimpleRNN::new_with_activation(4, 3, Activation::Tanh))
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+/// // Print structure
+/// model.summary();
+///
+/// // Train for 1 epoch
+/// model.fit(&x, &y, 1).unwrap();
+///
+/// // Predict
+/// let pred = model.predict(&x);
+/// println!("SimpleRnn prediction:\n{:#?}\n", pred);
+/// ```
 pub struct SimpleRNN {
     /// Number of input features
     input_dim: usize,

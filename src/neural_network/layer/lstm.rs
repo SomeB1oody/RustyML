@@ -6,7 +6,7 @@ use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::distributions::uniform::Uniform;
 
-/// # LSTM (Long Short-Term Memory) neural network layer implementation.
+/// LSTM (Long Short-Term Memory) neural network layer implementation.
 ///
 /// A Long Short-Term Memory layer is a type of recurrent neural network (RNN) layer
 /// that is capable of learning long-term dependencies. It uses gates to control
@@ -19,8 +19,13 @@ use ndarray_rand::rand::distributions::uniform::Uniform;
 /// - Cell gate (c): Generates candidate values to add to the cell state
 /// - Output gate (o): Controls what part of the cell state is output
 ///
+/// # Dimensions
+///
+/// - Input shape: (batch_size, timesteps, input_dim)
+/// - Output shape: (batch_size, timesteps, units)
+///
 /// # Fields
-/// ## Core parameters
+/// ## Core fields
 /// - `input_dim` - Dimensionality of the input features
 /// - `units` - Number of LSTM units/neurons in the layer
 /// - `activation` - Activation function applied to the output
@@ -46,6 +51,33 @@ use ndarray_rand::rand::distributions::uniform::Uniform;
 /// ## Optimizer-specific fields
 /// - Adam optimizer fields (`m_*`, `v_*`): First and second moment estimates
 /// - RMSprop optimizer fields (`cache_*`): Moving average of squared gradients
+///
+/// # Example
+/// ```rust
+/// use ndarray::Array;
+/// use rustyml::neural_network::*;
+///
+/// // Create input with batch_size=2, timesteps=5, input_dim=4,
+/// // and target with batch_size=2, units=3 (same dimension as the last hidden state)
+/// let x = Array::ones((2, 5, 4)).into_dyn();
+/// let y = Array::ones((2, 3)).into_dyn();
+///
+/// // Build model: one SimpleRnn layer with tanh activation
+/// let mut model = Sequential::new();
+/// model
+/// .add(LSTM::new(4, 3, Activation::Tanh))
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+/// // Print structure
+/// model.summary();
+///
+/// // Train for 1 epoch
+/// model.fit(&x, &y, 1).unwrap();
+///
+/// // Predict
+/// let pred = model.predict(&x);
+/// println!("LSTM prediction:\n{:#?}\n", pred);
+/// ```
 pub struct LSTM {
     pub input_dim: usize,
     pub units: usize,
