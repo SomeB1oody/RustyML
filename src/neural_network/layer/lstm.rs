@@ -83,8 +83,30 @@ pub struct LSTM {
     activation: Activation,
 }
 
-/// Represents a gate unit in LSTM
-pub struct Gate {
+/// Represents a gate unit in a Long Short-Term Memory (LSTM) neural network layer.
+///
+/// In LSTM architecture, gates control the flow of information through the cell state.
+/// Each gate consists of weight matrices, biases, and various caches for training and
+/// optimization purposes.
+///
+/// # Gates in LSTM
+/// The LSTM implementation uses four types of gates:
+/// - Input gate: Controls when new information is added to cell state
+/// - Forget gate: Controls what information is discarded from cell state
+/// - Cell gate: Generates candidate values to add to the cell state
+/// - Output gate: Controls what part of the cell state is output
+///
+/// # Parameters
+/// - `kernel`: Weight matrix applied to the input
+/// - `recurrent_kernel`: Weight matrix applied to the previous hidden state
+/// - `bias`: Bias term added to the weighted inputs
+///
+/// # Caches and Optimization States
+/// - `gate_cache`: Stores gate activation values during forward propagation
+/// - `grad_*`: Stores gradients for backpropagation
+/// - `m_*` and `v_*`: Momentum and velocity for Adam optimization
+/// - `cache_*`: Accumulating gradients for RMSprop optimization
+struct Gate {
     // Weight matrix
     kernel: Array2<f32>,
     // Recurrent weight matrix
@@ -115,7 +137,22 @@ pub struct Gate {
 }
 
 impl Gate {
-    /// Creates a new Gate instance
+    /// Creates a new Gate instance for use in an LSTM layer.
+    ///
+    /// This function initializes a gate unit with weight matrices, biases, and various caches
+    /// needed for forward/backward propagation and optimization during training.
+    ///
+    /// # Arguments
+    ///
+    /// - `input_dim` - The dimensionality of the input features. Determines the number of rows in the kernel matrix.
+    /// - `units` - The number of LSTM units (output dimensionality). Determines the number of columns in weight matrices and the size of the bias vector.
+    ///
+    /// # Returns
+    ///
+    /// `Self` - A new `Gate` instance with:
+    /// - Randomly initialized weight matrices using a uniform distribution between -0.05 and 0.05
+    /// - Bias vector initialized to zeros
+    /// - All caches and optimization states initialized to `None`
     pub fn new(input_dim: usize, units: usize) -> Self {
         fn rand_mat(r: usize, c: usize) -> Array2<f32> {
             Array::random((r, c), Uniform::new(-0.05, 0.05))
