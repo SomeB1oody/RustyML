@@ -6,11 +6,49 @@ use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::distributions::uniform::Uniform;
 
+/// # LSTM (Long Short-Term Memory) neural network layer implementation.
+///
+/// A Long Short-Term Memory layer is a type of recurrent neural network (RNN) layer
+/// that is capable of learning long-term dependencies. It uses gates to control
+/// the flow of information and mitigate the vanishing gradient problem.
+///
+/// # Structure
+/// The LSTM cell contains four gates:
+/// - Input gate (i): Controls when new information is added to cell state
+/// - Forget gate (f): Controls what information is discarded from cell state
+/// - Cell gate (c): Generates candidate values to add to the cell state
+/// - Output gate (o): Controls what part of the cell state is output
+///
+/// # Fields
+/// ## Core parameters
+/// - `input_dim` - Dimensionality of the input features
+/// - `units` - Number of LSTM units/neurons in the layer
+/// - `activation` - Activation function applied to the output
+///
+/// ## Weight matrices
+/// - `kernel_*` - Weight matrices for input connections (shape: input_dim × units)
+/// - `recurrent_kernel_*` - Weight matrices for recurrent connections (shape: units × units)
+/// - `bias_*` - Bias vectors (shape: 1 × units)
+///
+/// ## Cache fields
+/// These fields store intermediate values needed for backpropagation:
+/// - `input_cache` - Cached input tensor (shape: batch × timesteps × input_dim)
+/// - `hidden_cache` - Cached hidden states for each timestep (length: timesteps+1)
+/// - `cell_cache` - Cached cell states for each timestep (length: timesteps+1)
+/// - `gate_*_cache` - Cached gate activations for each timestep (length: timesteps)
+///
+/// ## Gradient fields
+/// These fields store gradients for parameter updates:
+/// - `grad_kernel_*` - Gradients for kernel weights
+/// - `grad_recurrent_kernel_*` - Gradients for recurrent weights
+/// - `grad_bias_*` - Gradients for bias values
+///
+/// ## Optimizer-specific fields
+/// - Adam optimizer fields (`m_*`, `v_*`): First and second moment estimates
+/// - RMSprop optimizer fields (`cache_*`): Moving average of squared gradients
 pub struct LSTM {
-    // 维度
     pub input_dim: usize,
     pub units: usize,
-    // 权重
     pub kernel_i: Array2<f32>, // (input_dim, units)
     pub kernel_f: Array2<f32>,
     pub kernel_c: Array2<f32>,
@@ -19,13 +57,11 @@ pub struct LSTM {
     pub recurrent_kernel_f: Array2<f32>,
     pub recurrent_kernel_c: Array2<f32>,
     pub recurrent_kernel_o: Array2<f32>,
-    // 偏置
     pub bias_i: Array2<f32>, // (1, units)
     pub bias_f: Array2<f32>,
     pub bias_c: Array2<f32>,
     pub bias_o: Array2<f32>,
 
-    // 缓存
     pub input_cache: Option<Array3<f32>>, // (batch, timesteps, input_dim)
     pub hidden_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
     pub cell_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
@@ -34,7 +70,6 @@ pub struct LSTM {
     pub gate_c_cache: Option<Vec<Array2<f32>>>,
     pub gate_o_cache: Option<Vec<Array2<f32>>>,
 
-    // 梯度
     pub grad_kernel_i: Option<Array2<f32>>,
     pub grad_kernel_f: Option<Array2<f32>>,
     pub grad_kernel_c: Option<Array2<f32>>,
@@ -48,7 +83,6 @@ pub struct LSTM {
     pub grad_bias_c: Option<Array2<f32>>,
     pub grad_bias_o: Option<Array2<f32>>,
 
-    // Adam 状态
     pub m_kernel_i: Option<Array2<f32>>,
     pub v_kernel_i: Option<Array2<f32>>,
     pub m_kernel_f: Option<Array2<f32>>,
@@ -74,7 +108,6 @@ pub struct LSTM {
     pub m_bias_o: Option<Array2<f32>>,
     pub v_bias_o: Option<Array2<f32>>,
 
-    // RMSprop 缓存
     pub cache_kernel_i: Option<Array2<f32>>,
     pub cache_kernel_f: Option<Array2<f32>>,
     pub cache_kernel_c: Option<Array2<f32>>,
@@ -88,11 +121,21 @@ pub struct LSTM {
     pub cache_bias_c: Option<Array2<f32>>,
     pub cache_bias_o: Option<Array2<f32>>,
 
-    // 激活
     pub activation: Activation,
 }
 
 impl LSTM {
+    /// Creates a new Long Short-Term Memory (LSTM) layer.
+    ///
+    /// # Arguments
+    ///
+    /// - `input_dim` - The dimensionality of the input features.
+    /// - `units` - The number of LSTM units (output dimensionality).
+    /// - `activation` - The activation function to use for the output.
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - A new LSTM instance with initialized weights and biases. All weights are randomly initialized using a uniform distribution between -0.05 and 0.05, and all biases are initialized to zeros.
     pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
         fn rand_mat(r: usize, c: usize) -> Array2<f32> {
             Array::random((r, c), Uniform::new(-0.05, 0.05))
@@ -193,7 +236,7 @@ impl Layer for LSTM {
 
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned();
-            // 四个门
+            // Four gates
             let i_t = (x_t.dot(&self.kernel_i) + h_t.dot(&self.recurrent_kernel_i) + &self.bias_i)
                 .mapv(|z| 1.0 / (1.0 + (-z).exp()));
             let f_t = (x_t.dot(&self.kernel_f) + h_t.dot(&self.recurrent_kernel_f) + &self.bias_f)
@@ -204,11 +247,11 @@ impl Layer for LSTM {
             let o_t = (x_t.dot(&self.kernel_o) + h_t.dot(&self.recurrent_kernel_o) + &self.bias_o)
                 .mapv(|z| 1.0 / (1.0 + (-z).exp()));
 
-            // 更新
+            // Update
             c_t = &f_t * &c_t + &i_t * &c_bar;
             let h_new = &o_t * &c_t.mapv(|z| z.tanh());
 
-            // 缓存
+            // Cache
             gis.push(i_t.clone());
             gfs.push(f_t.clone());
             gcs.push(c_bar.clone());
@@ -319,15 +362,15 @@ impl Layer for LSTM {
             let h_prev = &hs[t];
             let x_t = x3.index_axis(Axis(1), t).to_owned();
 
-            // o 门
+            // o
             let d_o = &grad_h * &c_prev.mapv(|z| z.tanh()) * &o_t.mapv(|v| v * (1.0 - v));
-            // cell 传递
+            // cell
             let d_c = &grad_h * o_t * &c_prev.mapv(|z| 1.0 - z * z) + &grad_c;
-            // f 门
+            // f
             let d_f = &d_c * c_prev * &f_t.mapv(|v| v * (1.0 - v));
-            // i 门
+            // i
             let d_i = &d_c * c_bar * &i_t.mapv(|v| v * (1.0 - v));
-            // c_bar 门
+            // c_bar
             let d_cbar = &d_c * i_t * &c_bar.mapv(|z| 1.0 - z * z);
 
             // accumulate
@@ -427,7 +470,7 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // 初始化一阶矩 m_* 和二阶矩 v_* 为 0
+        // Initialize first moment (m_*) and second moment (v_*) to zeros
         if self.m_kernel_i.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
@@ -460,7 +503,7 @@ impl Layer for LSTM {
             self.v_bias_o = Some(Array2::zeros(db));
         }
 
-        // helper 更新单个门
+        // Helper function to update a single gate
         fn update_gate(
             w: &mut Array2<f32>,  // kernel
             rk: &mut Array2<f32>, // recurrent kernel
@@ -480,7 +523,7 @@ impl Layer for LSTM {
             epsilon: f32,
             t: u64,
         ) {
-            // 更新一阶、二阶矩
+            // Update first and second moments
             *m_w = m_w.mapv(|x| x * beta1) + &(gw * (1.0 - beta1));
             *v_w = v_w.mapv(|x| x * beta2) + &(gw.mapv(|x| x * x) * (1.0 - beta2));
             *m_r = m_r.mapv(|x| x * beta1) + &(gr * (1.0 - beta1));
@@ -488,7 +531,7 @@ impl Layer for LSTM {
             *m_b = m_b.mapv(|x| x * beta1) + &(gb * (1.0 - beta1));
             *v_b = v_b.mapv(|x| x * beta2) + &(gb.mapv(|x| x * x) * (1.0 - beta2));
 
-            // 偏差修正
+            // Bias correction
             let m_hat_w = m_w.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
             let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
             let m_hat_r = m_r.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
@@ -496,13 +539,13 @@ impl Layer for LSTM {
             let m_hat_b = m_b.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
             let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
 
-            // 更新参数
+            // Update parameters
             *w = &*w - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
             *rk = &*rk - &(lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon));
             *b = &*b - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
         }
 
-        // 分别对四个门做更新
+        // Update each of the four gates separately
         update_gate(
             &mut self.kernel_i,
             &mut self.recurrent_kernel_i,
@@ -582,7 +625,7 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // 初始化 cache_* 为 0
+        // Initialize cache_* to zeros
         if self.cache_kernel_i.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
@@ -601,7 +644,7 @@ impl Layer for LSTM {
             self.cache_bias_o = Some(Array2::zeros(db));
         }
 
-        // helper 更新
+        // Helper function for update
         fn update_gate_rms(
             w: &mut Array2<f32>,
             rk: &mut Array2<f32>,
