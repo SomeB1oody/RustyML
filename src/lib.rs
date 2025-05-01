@@ -288,8 +288,8 @@ pub mod dataset;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3))
-/// .add(Dense::new(3, 1));
+/// model.add(Dense::new(4, 3, Activation::ReLU))
+/// .add(Dense::new(3, 1, Activation::ReLU));
 /// model.compile(SGD::new(0.01), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)

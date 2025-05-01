@@ -56,7 +56,7 @@ use rayon::prelude::*;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+/// model.add(Dense::new(4, 3, Activation::ReLU)).add(Dense::new(3, 1, Activation::ReLU));
 /// model.compile(SGD::new(0.01), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
@@ -97,7 +97,7 @@ pub struct Dense {
     /// RMSprop optimizer cache for bias
     cache_bias: Option<Array2<f32>>,
     /// Activation function for the layer
-    activation: Option<Activation>,
+    activation: Activation,
     /// Cached output after activation for use in backward pass
     activation_output: Option<Array2<f32>>,
 }
@@ -144,8 +144,8 @@ impl Dense {
     /// # Returns
     ///
     /// `Option<&Activation>` - A reference to the activation function, or None if not set
-    pub fn get_activation(&self) -> Option<&Activation> {
-        self.activation.as_ref()
+    pub fn get_activation(&self) -> &Activation {
+        &self.activation
     }
 
     /// Creates a new dense layer without activation function.
@@ -153,20 +153,7 @@ impl Dense {
     /// # Returns
     ///
     /// * `Self` - A new Dense layer instance with specified dimensions
-    pub fn new(input_dim: usize, output_dim: usize) -> Self {
-        Self::new_with_activation(input_dim, output_dim, None)
-    }
-
-    /// Creates a new dense layer with the specified activation function.
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - A new Dense layer instance with specified dimensions and activation
-    pub fn new_with_activation(
-        input_dim: usize,
-        output_dim: usize,
-        activation: Option<Activation>,
-    ) -> Self {
+    pub fn new(input_dim: usize, output_dim: usize, activation: Activation) -> Self {
         let weights = Array::random((input_dim, output_dim), Uniform::new(-0.05, 0.05));
         let bias = Array::zeros((1, output_dim));
         Self {
@@ -198,15 +185,9 @@ impl Layer for Dense {
         // Use dot operation (ndarray itself will use parallel computation when rayon feature is enabled)
         let z = input_2d.dot(&self.weights) + &self.bias;
 
-        if let Some(act) = &self.activation {
-            // Apply activation function in parallel
-            let a = Activation::apply_activation(&z, act);
-
-            self.activation_output = Some(a.clone());
-            a.into_dyn()
-        } else {
-            z.into_dyn()
-        }
+        let a = Activation::apply_activation(&z, &self.activation);
+        self.activation_output = Some(a.clone());
+        a.into_dyn()
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -216,36 +197,33 @@ impl Layer for Dense {
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        // If activation function is used, apply chain rule: dL/dz = (dActivation/dz) ⊙ dL/da
-        if let Some(act) = &self.activation {
-            if *act == Activation::Softmax {
-                let a = match self.activation_output.take() {
-                    Some(a) => a,
-                    None => Err(ModelError::ProcessingError(String::from(
-                        "Forward pass has not been run",
-                    )))?,
-                };
-                grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
-            } else {
-                let a = match self.activation_output.take() {
-                    Some(a) => a,
-                    None => Err(ModelError::ProcessingError(String::from(
-                        "Forward pass has not been run",
-                    )))?,
-                };
+        if self.activation == Activation::Softmax {
+            let a = match self.activation_output.take() {
+                Some(a) => a,
+                None => Err(ModelError::ProcessingError(String::from(
+                    "Forward pass has not been run",
+                )))?,
+            };
+            grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
+        } else {
+            let a = match self.activation_output.take() {
+                Some(a) => a,
+                None => Err(ModelError::ProcessingError(String::from(
+                    "Forward pass has not been run",
+                )))?,
+            };
 
-                // calculation of element-wise multiplication of activation function derivative and gradient
-                let deriv = Activation::activation_derivative(&a, act);
-                let mut result = deriv.clone();
+            // calculation of element-wise multiplication of activation function derivative and gradient
+            let deriv = Activation::activation_derivative(&a, &self.activation);
+            let mut result = deriv.clone();
 
-                // Use parallel iterator for element-wise multiplication
-                result.par_mapv_inplace(|v| v * grad_upstream[[0, 0]]);
-                for ((i, j), val) in result.indexed_iter_mut() {
-                    *val = deriv[[i, j]] * grad_upstream[[i, j]];
-                }
-
-                grad_upstream = result;
+            // Use parallel iterator for element-wise multiplication
+            result.par_mapv_inplace(|v| v * grad_upstream[[0, 0]]);
+            for ((i, j), val) in result.indexed_iter_mut() {
+                *val = deriv[[i, j]] * grad_upstream[[i, j]];
             }
+
+            grad_upstream = result;
         }
 
         // Get input cache

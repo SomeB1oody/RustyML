@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add detailed documentation and examples to neural network layers
 
+### Changed
+- Refactor layers to enforce explicit activation usage
+
 ## [v0.6.0] - 2025-4-30
 ### Added
 - Add doc comment for `LSTM`

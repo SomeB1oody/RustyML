@@ -9,7 +9,9 @@ fn mse_test() {
 
     // Build the model
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Print model structure (summary)
@@ -31,7 +33,9 @@ fn mae_test() {
 
     // Build the model
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(SGD::new(0.01), MeanAbsoluteError::new());
 
     // Print model structure (summary)
@@ -53,7 +57,9 @@ fn binary_cross_entropy_test() {
 
     // Build the model
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(SGD::new(0.01), BinaryCrossEntropy::new());
 
     // Print model structure (summary)
@@ -75,7 +81,9 @@ fn categorical_cross_entropy_test() {
 
     // Build the model
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(SGD::new(0.01), CategoricalCrossEntropy::new());
 
     // Print model structure (summary)
@@ -100,7 +108,9 @@ fn sparse_categorical_cross_entropy_test() {
 
     // Build the model, note that the second Dense layer must use Dense::new(3, 3) because it's a multi-class task
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 3));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 3, Activation::ReLU));
     model.compile(SGD::new(0.01), SparseCategoricalCrossEntropy::new());
 
     // Print model structure (summary)
@@ -122,7 +132,9 @@ fn adam_test() {
 
     // Build the model: add two Dense layers, use Adam optimizer (learning rate, beta1, beta2, epsilon) with MSE loss function
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -144,7 +156,9 @@ fn rmsprop_test() {
 
     // Build the model, add two Dense layers; choose RMSprop optimizer when compiling
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3)).add(Dense::new(3, 1));
+    model
+        .add(Dense::new(4, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::ReLU));
     model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure (summary)
@@ -168,8 +182,8 @@ fn with_activation_test() {
     // Here we use Sigmoid activation for the first layer and Softmax for the second layer (you can modify as needed)
     let mut model = Sequential::new();
     model
-        .add(Dense::new_with_activation(4, 3, Some(Activation::Sigmoid)))
-        .add(Dense::new_with_activation(3, 1, Some(Activation::Softmax)));
+        .add(Dense::new(4, 3, Activation::Sigmoid))
+        .add(Dense::new(3, 1, Activation::Softmax));
 
     // Choose an optimizer, e.g., RMSprop, Adam or SGD - using RMSprop as an example here
     model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());

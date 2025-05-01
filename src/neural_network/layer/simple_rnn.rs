@@ -120,7 +120,7 @@ pub struct SimpleRNN {
     /// RMSprop cache for bias
     cache_bias: Option<Array2<f32>>,
 
-    /// Activation function to use (default: tanh)
+    /// Activation function to use
     activation: Activation,
 }
 

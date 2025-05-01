@@ -29,6 +29,7 @@ use ndarray_rand::rand::distributions::uniform::Uniform;
 /// - `input_dim` - Dimensionality of the input features
 /// - `units` - Number of LSTM units/neurons in the layer
 /// - `activation` - Activation function applied to the output
+/// - `cell_activated_cache` - Cache for storing activated cell states
 ///
 /// ## Weight matrices
 /// - `kernel_*` - Weight matrices for input connections (shape: input_dim × units)
@@ -79,81 +80,82 @@ use ndarray_rand::rand::distributions::uniform::Uniform;
 /// println!("LSTM prediction:\n{:#?}\n", pred);
 /// ```
 pub struct LSTM {
-    pub input_dim: usize,
-    pub units: usize,
-    pub kernel_i: Array2<f32>, // (input_dim, units)
-    pub kernel_f: Array2<f32>,
-    pub kernel_c: Array2<f32>,
-    pub kernel_o: Array2<f32>,
-    pub recurrent_kernel_i: Array2<f32>, // (units, units)
-    pub recurrent_kernel_f: Array2<f32>,
-    pub recurrent_kernel_c: Array2<f32>,
-    pub recurrent_kernel_o: Array2<f32>,
-    pub bias_i: Array2<f32>, // (1, units)
-    pub bias_f: Array2<f32>,
-    pub bias_c: Array2<f32>,
-    pub bias_o: Array2<f32>,
+    input_dim: usize,
+    units: usize,
+    kernel_i: Array2<f32>, // (input_dim, units)
+    kernel_f: Array2<f32>,
+    kernel_c: Array2<f32>,
+    kernel_o: Array2<f32>,
+    recurrent_kernel_i: Array2<f32>, // (units, units)
+    recurrent_kernel_f: Array2<f32>,
+    recurrent_kernel_c: Array2<f32>,
+    recurrent_kernel_o: Array2<f32>,
+    bias_i: Array2<f32>, // (1, units)
+    bias_f: Array2<f32>,
+    bias_c: Array2<f32>,
+    bias_o: Array2<f32>,
 
-    pub input_cache: Option<Array3<f32>>, // (batch, timesteps, input_dim)
-    pub hidden_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
-    pub cell_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
-    pub gate_i_cache: Option<Vec<Array2<f32>>>, // len = timesteps
-    pub gate_f_cache: Option<Vec<Array2<f32>>>,
-    pub gate_c_cache: Option<Vec<Array2<f32>>>,
-    pub gate_o_cache: Option<Vec<Array2<f32>>>,
+    input_cache: Option<Array3<f32>>, // (batch, timesteps, input_dim)
+    hidden_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
+    cell_cache: Option<Vec<Array2<f32>>>, // len = timesteps+1
+    gate_i_cache: Option<Vec<Array2<f32>>>, // len = timesteps
+    gate_f_cache: Option<Vec<Array2<f32>>>,
+    gate_c_cache: Option<Vec<Array2<f32>>>,
+    gate_o_cache: Option<Vec<Array2<f32>>>,
 
-    pub grad_kernel_i: Option<Array2<f32>>,
-    pub grad_kernel_f: Option<Array2<f32>>,
-    pub grad_kernel_c: Option<Array2<f32>>,
-    pub grad_kernel_o: Option<Array2<f32>>,
-    pub grad_recurrent_kernel_i: Option<Array2<f32>>,
-    pub grad_recurrent_kernel_f: Option<Array2<f32>>,
-    pub grad_recurrent_kernel_c: Option<Array2<f32>>,
-    pub grad_recurrent_kernel_o: Option<Array2<f32>>,
-    pub grad_bias_i: Option<Array2<f32>>,
-    pub grad_bias_f: Option<Array2<f32>>,
-    pub grad_bias_c: Option<Array2<f32>>,
-    pub grad_bias_o: Option<Array2<f32>>,
+    grad_kernel_i: Option<Array2<f32>>,
+    grad_kernel_f: Option<Array2<f32>>,
+    grad_kernel_c: Option<Array2<f32>>,
+    grad_kernel_o: Option<Array2<f32>>,
+    grad_recurrent_kernel_i: Option<Array2<f32>>,
+    grad_recurrent_kernel_f: Option<Array2<f32>>,
+    grad_recurrent_kernel_c: Option<Array2<f32>>,
+    grad_recurrent_kernel_o: Option<Array2<f32>>,
+    grad_bias_i: Option<Array2<f32>>,
+    grad_bias_f: Option<Array2<f32>>,
+    grad_bias_c: Option<Array2<f32>>,
+    grad_bias_o: Option<Array2<f32>>,
 
-    pub m_kernel_i: Option<Array2<f32>>,
-    pub v_kernel_i: Option<Array2<f32>>,
-    pub m_kernel_f: Option<Array2<f32>>,
-    pub v_kernel_f: Option<Array2<f32>>,
-    pub m_kernel_c: Option<Array2<f32>>,
-    pub v_kernel_c: Option<Array2<f32>>,
-    pub m_kernel_o: Option<Array2<f32>>,
-    pub v_kernel_o: Option<Array2<f32>>,
-    pub m_recurrent_kernel_i: Option<Array2<f32>>,
-    pub v_recurrent_kernel_i: Option<Array2<f32>>,
-    pub m_recurrent_kernel_f: Option<Array2<f32>>,
-    pub v_recurrent_kernel_f: Option<Array2<f32>>,
-    pub m_recurrent_kernel_c: Option<Array2<f32>>,
-    pub v_recurrent_kernel_c: Option<Array2<f32>>,
-    pub m_recurrent_kernel_o: Option<Array2<f32>>,
-    pub v_recurrent_kernel_o: Option<Array2<f32>>,
-    pub m_bias_i: Option<Array2<f32>>,
-    pub v_bias_i: Option<Array2<f32>>,
-    pub m_bias_f: Option<Array2<f32>>,
-    pub v_bias_f: Option<Array2<f32>>,
-    pub m_bias_c: Option<Array2<f32>>,
-    pub v_bias_c: Option<Array2<f32>>,
-    pub m_bias_o: Option<Array2<f32>>,
-    pub v_bias_o: Option<Array2<f32>>,
+    m_kernel_i: Option<Array2<f32>>,
+    v_kernel_i: Option<Array2<f32>>,
+    m_kernel_f: Option<Array2<f32>>,
+    v_kernel_f: Option<Array2<f32>>,
+    m_kernel_c: Option<Array2<f32>>,
+    v_kernel_c: Option<Array2<f32>>,
+    m_kernel_o: Option<Array2<f32>>,
+    v_kernel_o: Option<Array2<f32>>,
+    m_recurrent_kernel_i: Option<Array2<f32>>,
+    v_recurrent_kernel_i: Option<Array2<f32>>,
+    m_recurrent_kernel_f: Option<Array2<f32>>,
+    v_recurrent_kernel_f: Option<Array2<f32>>,
+    m_recurrent_kernel_c: Option<Array2<f32>>,
+    v_recurrent_kernel_c: Option<Array2<f32>>,
+    m_recurrent_kernel_o: Option<Array2<f32>>,
+    v_recurrent_kernel_o: Option<Array2<f32>>,
+    m_bias_i: Option<Array2<f32>>,
+    v_bias_i: Option<Array2<f32>>,
+    m_bias_f: Option<Array2<f32>>,
+    v_bias_f: Option<Array2<f32>>,
+    m_bias_c: Option<Array2<f32>>,
+    v_bias_c: Option<Array2<f32>>,
+    m_bias_o: Option<Array2<f32>>,
+    v_bias_o: Option<Array2<f32>>,
 
-    pub cache_kernel_i: Option<Array2<f32>>,
-    pub cache_kernel_f: Option<Array2<f32>>,
-    pub cache_kernel_c: Option<Array2<f32>>,
-    pub cache_kernel_o: Option<Array2<f32>>,
-    pub cache_recurrent_kernel_i: Option<Array2<f32>>,
-    pub cache_recurrent_kernel_f: Option<Array2<f32>>,
-    pub cache_recurrent_kernel_c: Option<Array2<f32>>,
-    pub cache_recurrent_kernel_o: Option<Array2<f32>>,
-    pub cache_bias_i: Option<Array2<f32>>,
-    pub cache_bias_f: Option<Array2<f32>>,
-    pub cache_bias_c: Option<Array2<f32>>,
-    pub cache_bias_o: Option<Array2<f32>>,
+    cache_kernel_i: Option<Array2<f32>>,
+    cache_kernel_f: Option<Array2<f32>>,
+    cache_kernel_c: Option<Array2<f32>>,
+    cache_kernel_o: Option<Array2<f32>>,
+    cache_recurrent_kernel_i: Option<Array2<f32>>,
+    cache_recurrent_kernel_f: Option<Array2<f32>>,
+    cache_recurrent_kernel_c: Option<Array2<f32>>,
+    cache_recurrent_kernel_o: Option<Array2<f32>>,
+    cache_bias_i: Option<Array2<f32>>,
+    cache_bias_f: Option<Array2<f32>>,
+    cache_bias_c: Option<Array2<f32>>,
+    cache_bias_o: Option<Array2<f32>>,
 
-    pub activation: Activation,
+    activation: Activation,
+    cell_activated_cache: Option<Vec<Array2<f32>>>,
 }
 
 impl LSTM {
@@ -244,6 +246,7 @@ impl LSTM {
             cache_bias_c: None,
             cache_bias_o: None,
             activation,
+            cell_activated_cache: None,
         }
     }
 }
@@ -260,6 +263,7 @@ impl Layer for LSTM {
         let mut gfs = Vec::with_capacity(timesteps);
         let mut gcs = Vec::with_capacity(timesteps);
         let mut gos = Vec::with_capacity(timesteps);
+        let mut c_activateds = Vec::with_capacity(timesteps);
 
         let mut h_t = Array2::<f32>::zeros((batch, self.units));
         let mut c_t = Array2::<f32>::zeros((batch, self.units));
@@ -268,20 +272,27 @@ impl Layer for LSTM {
 
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned();
-            // Four gates
-            let i_t = (x_t.dot(&self.kernel_i) + h_t.dot(&self.recurrent_kernel_i) + &self.bias_i)
-                .mapv(|z| 1.0 / (1.0 + (-z).exp()));
-            let f_t = (x_t.dot(&self.kernel_f) + h_t.dot(&self.recurrent_kernel_f) + &self.bias_f)
-                .mapv(|z| 1.0 / (1.0 + (-z).exp()));
-            let c_bar =
-                (x_t.dot(&self.kernel_c) + h_t.dot(&self.recurrent_kernel_c) + &self.bias_c)
-                    .mapv(|z| z.tanh());
-            let o_t = (x_t.dot(&self.kernel_o) + h_t.dot(&self.recurrent_kernel_o) + &self.bias_o)
-                .mapv(|z| 1.0 / (1.0 + (-z).exp()));
 
-            // Update
+            // Calculate gate intermediate values
+            let i_pre = x_t.dot(&self.kernel_i) + h_t.dot(&self.recurrent_kernel_i) + &self.bias_i;
+            let f_pre = x_t.dot(&self.kernel_f) + h_t.dot(&self.recurrent_kernel_f) + &self.bias_f;
+            let c_pre = x_t.dot(&self.kernel_c) + h_t.dot(&self.recurrent_kernel_c) + &self.bias_c;
+            let o_pre = x_t.dot(&self.kernel_o) + h_t.dot(&self.recurrent_kernel_o) + &self.bias_o;
+
+            // Apply activation functions
+            let i_t = Activation::apply_activation(&i_pre, &self.activation);
+            let f_t = Activation::apply_activation(&f_pre, &self.activation);
+            let c_bar = Activation::apply_activation(&c_pre, &self.activation);
+            let o_t = Activation::apply_activation(&o_pre, &self.activation);
+
+            // Update cell state and hidden state
             c_t = &f_t * &c_t + &i_t * &c_bar;
-            let h_new = &o_t * &c_t.mapv(|z| z.tanh());
+
+            // 计算激活后的cell状态并缓存
+            let c_activated = Activation::apply_activation(&c_t, &self.activation);
+            c_activateds.push(c_activated.clone());
+
+            let h_new = &o_t * &c_activated;
 
             // Cache
             gis.push(i_t.clone());
@@ -299,6 +310,7 @@ impl Layer for LSTM {
         self.gate_f_cache = Some(gfs);
         self.gate_c_cache = Some(gcs);
         self.gate_o_cache = Some(gos);
+        self.cell_activated_cache = Some(c_activateds);
 
         h_t.into_dyn()
     }
@@ -365,6 +377,20 @@ impl Layer for LSTM {
             }
         };
 
+        let c_activateds = match self.cell_activated_cache.take() {
+            Some(c_activateds) => c_activateds,
+            None => {
+                return Err(ModelError::ProcessingError(
+                    "Forward pass has not been run".to_string(),
+                ));
+            }
+        };
+
+        // Process the gradient of the last time step, if it's softmax, special handling is needed
+        if self.activation == Activation::Softmax {
+            grad_h = Activation::softmax_backward(&hs[hs.len() - 1], &grad_h);
+        }
+
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
@@ -393,17 +419,26 @@ impl Layer for LSTM {
             let c_prev = &cs[t];
             let h_prev = &hs[t];
             let x_t = x3.index_axis(Axis(1), t).to_owned();
+            let c_activated = &c_activateds[t];
+
+            // Apply activation function derivative to c_prev of the current time step
+            let c_act_deriv = if self.activation == Activation::Softmax {
+                Activation::softmax_backward(c_activated, &Array::ones(c_activated.dim()))
+            } else {
+                Activation::activation_derivative(c_activated, &self.activation)
+            };
 
             // o
-            let d_o = &grad_h * &c_prev.mapv(|z| z.tanh()) * &o_t.mapv(|v| v * (1.0 - v));
+            let d_o =
+                &grad_h * c_activated * Activation::activation_derivative(o_t, &self.activation);
             // cell
-            let d_c = &grad_h * o_t * &c_prev.mapv(|z| 1.0 - z * z) + &grad_c;
+            let d_c = &grad_h * o_t * c_act_deriv + &grad_c;
             // f
-            let d_f = &d_c * c_prev * &f_t.mapv(|v| v * (1.0 - v));
+            let d_f = &d_c * c_prev * Activation::activation_derivative(f_t, &self.activation);
             // i
-            let d_i = &d_c * c_bar * &i_t.mapv(|v| v * (1.0 - v));
+            let d_i = &d_c * c_bar * Activation::activation_derivative(i_t, &self.activation);
             // c_bar
-            let d_cbar = &d_c * i_t * &c_bar.mapv(|z| 1.0 - z * z);
+            let d_cbar = &d_c * i_t * Activation::activation_derivative(c_bar, &self.activation);
 
             // accumulate
             grad_kernel_i = grad_kernel_i + &x_t.t().dot(&d_i);
