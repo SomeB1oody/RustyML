@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Refactor layers to enforce explicit activation usage
+- Optimize LSTM computations with parallel processing using Rayon
 
 ## [v0.6.0] - 2025-4-30
 ### Added

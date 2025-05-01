@@ -5,6 +5,7 @@ use crate::traits::Layer;
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::distributions::uniform::Uniform;
+use rayon::prelude::*;
 
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 ///
@@ -273,22 +274,57 @@ impl Layer for LSTM {
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned();
 
-            // Calculate gate intermediate values
-            let i_pre = x_t.dot(&self.kernel_i) + h_t.dot(&self.recurrent_kernel_i) + &self.bias_i;
-            let f_pre = x_t.dot(&self.kernel_f) + h_t.dot(&self.recurrent_kernel_f) + &self.bias_f;
-            let c_pre = x_t.dot(&self.kernel_c) + h_t.dot(&self.recurrent_kernel_c) + &self.bias_c;
-            let o_pre = x_t.dot(&self.kernel_o) + h_t.dot(&self.recurrent_kernel_o) + &self.bias_o;
+            // Calculate gate intermediate values in parallel
+            let ((i_pre, f_pre), (c_pre, o_pre)) = rayon::join(
+                || {
+                    rayon::join(
+                        || {
+                            x_t.dot(&self.kernel_i)
+                                + h_t.dot(&self.recurrent_kernel_i)
+                                + &self.bias_i
+                        },
+                        || {
+                            x_t.dot(&self.kernel_f)
+                                + h_t.dot(&self.recurrent_kernel_f)
+                                + &self.bias_f
+                        },
+                    )
+                },
+                || {
+                    rayon::join(
+                        || {
+                            x_t.dot(&self.kernel_c)
+                                + h_t.dot(&self.recurrent_kernel_c)
+                                + &self.bias_c
+                        },
+                        || {
+                            x_t.dot(&self.kernel_o)
+                                + h_t.dot(&self.recurrent_kernel_o)
+                                + &self.bias_o
+                        },
+                    )
+                },
+            );
 
-            // Apply activation functions
-            let i_t = Activation::apply_activation(&i_pre, &self.activation);
-            let f_t = Activation::apply_activation(&f_pre, &self.activation);
-            let c_bar = Activation::apply_activation(&c_pre, &self.activation);
-            let o_t = Activation::apply_activation(&o_pre, &self.activation);
+            // Apply activation functions in parallel
+            let ((i_t, f_t), (c_bar, o_t)) = rayon::join(
+                || {
+                    rayon::join(
+                        || Activation::apply_activation(&i_pre, &self.activation),
+                        || Activation::apply_activation(&f_pre, &self.activation),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || Activation::apply_activation(&c_pre, &self.activation),
+                        || Activation::apply_activation(&o_pre, &self.activation),
+                    )
+                },
+            );
 
             // Update cell state and hidden state
             c_t = &f_t * &c_t + &i_t * &c_bar;
 
-            // 计算激活后的cell状态并缓存
             let c_activated = Activation::apply_activation(&c_t, &self.activation);
             c_activateds.push(c_activated.clone());
 
@@ -433,29 +469,53 @@ impl Layer for LSTM {
                 &grad_h * c_activated * Activation::activation_derivative(o_t, &self.activation);
             // cell
             let d_c = &grad_h * o_t * c_act_deriv + &grad_c;
-            // f
-            let d_f = &d_c * c_prev * Activation::activation_derivative(f_t, &self.activation);
-            // i
-            let d_i = &d_c * c_bar * Activation::activation_derivative(i_t, &self.activation);
-            // c_bar
-            let d_cbar = &d_c * i_t * Activation::activation_derivative(c_bar, &self.activation);
 
-            // accumulate
-            grad_kernel_i = grad_kernel_i + &x_t.t().dot(&d_i);
-            grad_rk_i = grad_rk_i + &h_prev.t().dot(&d_i);
-            grad_b_i = grad_b_i + &d_i.sum_axis(Axis(0)).insert_axis(Axis(0));
+            // Calculate gradient components in parallel
+            let (d_f, (d_i, d_cbar)) = rayon::join(
+                || &d_c * c_prev * Activation::activation_derivative(f_t, &self.activation),
+                || {
+                    rayon::join(
+                        || &d_c * c_bar * Activation::activation_derivative(i_t, &self.activation),
+                        || &d_c * i_t * Activation::activation_derivative(c_bar, &self.activation),
+                    )
+                },
+            );
 
-            grad_kernel_f = grad_kernel_f + &x_t.t().dot(&d_f);
-            grad_rk_f = grad_rk_f + &h_prev.t().dot(&d_f);
-            grad_b_f = grad_b_f + &d_f.sum_axis(Axis(0)).insert_axis(Axis(0));
+            // Define a function to compute gradients
+            fn compute_gradients(
+                x_t: &Array2<f32>,
+                h_prev: &Array2<f32>,
+                delta: &Array2<f32>,
+            ) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
+                let kernel_grad = x_t.t().dot(delta);
+                let rk_grad = h_prev.t().dot(delta);
+                let b_grad = delta.sum_axis(Axis(0)).insert_axis(Axis(0));
+                (kernel_grad, rk_grad, b_grad)
+            }
 
-            grad_kernel_c = grad_kernel_c + &x_t.t().dot(&d_cbar);
-            grad_rk_c = grad_rk_c + &h_prev.t().dot(&d_cbar);
-            grad_b_c = grad_b_c + &d_cbar.sum_axis(Axis(0)).insert_axis(Axis(0));
+            // Compute gradients for all gates in parallel
+            let gates_data = [
+                (&d_i, &mut grad_kernel_i, &mut grad_rk_i, &mut grad_b_i),
+                (&d_f, &mut grad_kernel_f, &mut grad_rk_f, &mut grad_b_f),
+                (&d_cbar, &mut grad_kernel_c, &mut grad_rk_c, &mut grad_b_c),
+                (&d_o, &mut grad_kernel_o, &mut grad_rk_o, &mut grad_b_o),
+            ];
 
-            grad_kernel_o = grad_kernel_o + &x_t.t().dot(&d_o);
-            grad_rk_o = grad_rk_o + &h_prev.t().dot(&d_o);
-            grad_b_o = grad_b_o + &d_o.sum_axis(Axis(0)).insert_axis(Axis(0));
+            // Process all gates in parallel using rayon
+            let results = gates_data
+                .iter()
+                .map(|(delta, _, _, _)| *delta)
+                .collect::<Vec<_>>()
+                .par_iter()
+                .map(|delta| compute_gradients(&x_t, &h_prev, *delta))
+                .collect::<Vec<_>>();
+
+            // Accumulate results
+            for (i, (kernel_grad, rk_grad, b_grad)) in results.iter().enumerate() {
+                *gates_data[i].1 = &*gates_data[i].1 + kernel_grad;
+                *gates_data[i].2 = &*gates_data[i].2 + rk_grad;
+                *gates_data[i].3 = &*gates_data[i].3 + b_grad;
+            }
 
             // propagate to x and h_prev and c_prev
             let dx = d_i.dot(&self.kernel_i.t())
@@ -590,26 +650,72 @@ impl Layer for LSTM {
             epsilon: f32,
             t: u64,
         ) {
-            // Update first and second moments
-            *m_w = m_w.mapv(|x| x * beta1) + &(gw * (1.0 - beta1));
-            *v_w = v_w.mapv(|x| x * beta2) + &(gw.mapv(|x| x * x) * (1.0 - beta2));
-            *m_r = m_r.mapv(|x| x * beta1) + &(gr * (1.0 - beta1));
-            *v_r = v_r.mapv(|x| x * beta2) + &(gr.mapv(|x| x * x) * (1.0 - beta2));
-            *m_b = m_b.mapv(|x| x * beta1) + &(gb * (1.0 - beta1));
-            *v_b = v_b.mapv(|x| x * beta2) + &(gb.mapv(|x| x * x) * (1.0 - beta2));
+            // Parallel update of Adam optimizer state variables
+            fn update_adam_param(
+                m: &mut Array2<f32>,
+                v: &mut Array2<f32>,
+                g: &Array2<f32>,
+                beta1: f32,
+                beta2: f32,
+            ) {
+                let (m_updated, v_updated) = rayon::join(
+                    || m.mapv(|x| x * beta1) + &(g * (1.0 - beta1)),
+                    || v.mapv(|x| x * beta2) + &(g.mapv(|x| x * x) * (1.0 - beta2)),
+                );
 
-            // Bias correction
-            let m_hat_w = m_w.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
-            let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
-            let m_hat_r = m_r.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
-            let v_hat_r = v_r.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
-            let m_hat_b = m_b.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
-            let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+                *m = m_updated;
+                *v = v_updated;
+            }
 
-            // Update parameters
-            *w = &*w - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
-            *rk = &*rk - &(lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon));
-            *b = &*b - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
+            rayon::join(
+                || {
+                    rayon::join(
+                        || update_adam_param(&mut *m_w, &mut *v_w, &gw, beta1, beta2),
+                        || update_adam_param(&mut *m_r, &mut *v_r, &gr, beta1, beta2),
+                    )
+                },
+                || update_adam_param(&mut *m_b, &mut *v_b, &gb, beta1, beta2),
+            );
+
+            // Parallel calculation of bias
+            fn compute_bias_corrected(
+                m: &Array2<f32>,
+                v: &Array2<f32>,
+                beta1: f32,
+                beta2: f32,
+                t: u64,
+            ) -> (Array2<f32>, Array2<f32>) {
+                rayon::join(
+                    || m.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
+                    || v.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
+                )
+            }
+
+            let (((m_hat_w, v_hat_w), (m_hat_r, v_hat_r)), (m_hat_b, v_hat_b)) = rayon::join(
+                || {
+                    rayon::join(
+                        || compute_bias_corrected(&m_w, &v_w, beta1, beta2, t),
+                        || compute_bias_corrected(&m_r, &v_r, beta1, beta2, t),
+                    )
+                },
+                || compute_bias_corrected(&m_b, &v_b, beta1, beta2, t),
+            );
+
+            // Update parameters in parallel
+            let (w_update, (rk_update, b_update)) = rayon::join(
+                || lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon),
+                || {
+                    rayon::join(
+                        || lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon),
+                        || lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon),
+                    )
+                },
+            );
+
+            rayon::join(
+                || *w = &*w - &w_update,
+                || rayon::join(|| *rk = &*rk - &rk_update, || *b = &*b - &b_update),
+            );
         }
 
         // Update each of the four gates separately
@@ -726,13 +832,41 @@ impl Layer for LSTM {
             rho: f32,
             epsilon: f32,
         ) {
-            *cache_w = cache_w.mapv(|x| x * rho) + &(gw.mapv(|x| x * x) * (1.0 - rho));
-            *cache_r = cache_r.mapv(|x| x * rho) + &(gr.mapv(|x| x * x) * (1.0 - rho));
-            *cache_b = cache_b.mapv(|x| x * rho) + &(gb.mapv(|x| x * x) * (1.0 - rho));
+            // Update cache in parallel
+            fn update_rmsprop_cache(cache: &mut Array2<f32>, g: &Array2<f32>, rho: f32) {
+                *cache = cache.mapv(|x| x * rho) + &(g.mapv(|x| x * x) * (1.0 - rho));
+            }
 
-            *w = &*w - &(lr * gw / &(cache_w.mapv(f32::sqrt) + epsilon));
-            *rk = &*rk - &(lr * gr / &(cache_r.mapv(f32::sqrt) + epsilon));
-            *b = &*b - &(lr * gb / &(cache_b.mapv(f32::sqrt) + epsilon));
+            rayon::join(
+                || {
+                    rayon::join(
+                        || update_rmsprop_cache(&mut *cache_w, &gw, rho),
+                        || update_rmsprop_cache(&mut *cache_r, &gr, rho),
+                    )
+                },
+                || update_rmsprop_cache(&mut *cache_b, &gb, rho),
+            );
+
+            // Update parameters in parallel
+            fn update_rmsprop_param(
+                param: &mut Array2<f32>,
+                grad: &Array2<f32>,
+                cache: &Array2<f32>,
+                lr: f32,
+                epsilon: f32,
+            ) {
+                *param = &*param - &(lr * grad / &(cache.mapv(f32::sqrt) + epsilon));
+            }
+
+            rayon::join(
+                || {
+                    rayon::join(
+                        || update_rmsprop_param(&mut *w, &gw, &cache_w, lr, epsilon),
+                        || update_rmsprop_param(&mut *rk, &gr, &cache_r, lr, epsilon),
+                    )
+                },
+                || update_rmsprop_param(&mut *b, &gb, &cache_b, lr, epsilon),
+            );
         }
 
         update_gate_rms(
