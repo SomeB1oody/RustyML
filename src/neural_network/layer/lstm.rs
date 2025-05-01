@@ -356,6 +356,7 @@ impl Layer for LSTM {
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
+
         fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
             cache
                 .take()

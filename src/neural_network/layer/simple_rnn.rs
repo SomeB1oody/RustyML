@@ -210,18 +210,17 @@ impl Layer for SimpleRNN {
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
-        let x3 = match self.input_cache.take() {
-            Some(x3) => x3,
-            None => Err(ModelError::ProcessingError(String::from(
-                "Forward pass has not been run",
-            )))?,
-        };
-        let hs = match self.hidden_state_cache.take() {
-            Some(x3) => x3,
-            None => Err(ModelError::ProcessingError(String::from(
-                "Forward pass has not been run",
-            )))?,
-        };
+
+        fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
+            cache
+                .take()
+                .ok_or_else(|| ModelError::ProcessingError(error_msg.to_string()))
+        }
+
+        let error_msg = "Forward pass has not been run";
+        let x3 = take_cache(&mut self.input_cache, error_msg)?;
+        let hs = take_cache(&mut self.hidden_state_cache, error_msg)?;
+
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
