@@ -136,15 +136,6 @@ impl Dense {
 }
 
 impl Layer for Dense {
-    /// Performs forward propagation through the dense layer.
-    ///
-    /// # Parameters
-    ///
-    /// * `input` - Input tensor with shape \[batch_size, input_dim\]
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - Output tensor after linear transformation
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Input shape is [batch_size, input_dim]
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
@@ -164,16 +155,6 @@ impl Layer for Dense {
         }
     }
 
-    /// Performs backward propagation through the dense layer.
-    ///
-    /// # Parameters
-    ///
-    /// * `grad_output` - Gradient tensor from the next layer with shape \[batch_size, output_dim\]
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Tensor)` - Gradient tensor to be passed to the previous layer
-    /// * `Err(ModelError)` - If something goes wrong while running
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Convert gradient to 2D array with shape [batch_size, output_dim]
         let mut grad_upstream = grad_output
@@ -272,40 +253,20 @@ impl Layer for Dense {
         Ok(grad_input.into_dyn())
     }
 
-    /// Returns the type of this layer.
-    ///
-    /// # Returns
-    ///
-    /// * `&str` - String slice indicating the layer type
     fn layer_type(&self) -> &str {
         "Dense"
     }
 
-    /// Returns a string describing the output shape of this layer.
-    ///
-    /// # Returns
-    ///
-    /// * `String` - String representation of the output shape as "(None, output_dim)"
     fn output_shape(&self) -> String {
         // Returns only (None, output_dim)
         format!("(None, {})", self.output_dim)
     }
 
-    /// Returns the total number of trainable parameters in the layer.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - Sum of all weights and bias parameters
     fn param_count(&self) -> usize {
         // Parameter count = number of weight parameters + number of bias parameters
         self.input_dim * self.output_dim + self.output_dim
     }
 
-    /// Updates layer parameters using Stochastic Gradient Descent.
-    ///
-    /// # Parameters
-    ///
-    /// * `lr` - Learning rate for parameter updates
     fn update_parameters_sgd(&mut self, lr: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             self.weights = &self.weights - &(lr * grad_w);
@@ -313,15 +274,6 @@ impl Layer for Dense {
         }
     }
 
-    /// Updates layer parameters using the Adam optimization algorithm.
-    ///
-    /// # Parameters
-    ///
-    /// - `lr` - Learning rate for parameter updates
-    /// - `beta1` - Exponential decay rate for first moment estimates
-    /// - `beta2` - Exponential decay rate for second moment estimates
-    /// - `epsilon` - Small constant for numerical stability
-    /// - `t` - Current iteration count
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Initialize Adam state if not already initialized
         if self.m_weights.is_none() {
@@ -363,13 +315,6 @@ impl Layer for Dense {
         self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
     }
 
-    /// Updates layer parameters using the RMSprop optimization algorithm.
-    ///
-    /// # Parameters
-    ///
-    /// - `lr` - Learning rate for parameter updates
-    /// - `rho` - Decay rate for moving average of squared gradients
-    /// - `epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             // Initialize RMSprop caches with zeros if not already initialized

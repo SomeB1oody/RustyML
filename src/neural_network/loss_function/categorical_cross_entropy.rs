@@ -11,16 +11,6 @@ impl CategoricalCrossEntropy {
 }
 
 impl LossFunction for CategoricalCrossEntropy {
-    /// Computes the Categorical Cross Entropy loss between predicted and true values
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with ground truth values in one-hot encoding
-    /// - `y_pred` - Tensor with predicted probabilities for each class
-    ///
-    /// # Returns
-    ///
-    /// * `f32` - Categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -34,16 +24,6 @@ impl LossFunction for CategoricalCrossEntropy {
         -losses.sum() / n
     }
 
-    /// Computes the gradient of Categorical Cross Entropy with respect to predictions
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with ground truth values in one-hot encoding
-    /// - `y_pred` - Tensor with predicted probabilities for each class
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));

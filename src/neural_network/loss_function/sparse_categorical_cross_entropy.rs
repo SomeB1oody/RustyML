@@ -13,17 +13,6 @@ impl SparseCategoricalCrossEntropy {
 }
 
 impl LossFunction for SparseCategoricalCrossEntropy {
-    /// Computes the Sparse Categorical Cross Entropy loss between predicted values
-    /// and class indices
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with class indices as ground truth
-    /// - `y_pred` - Tensor with predicted probabilities for each class
-    ///
-    /// # Returns
-    ///
-    /// * `f32` - Sparse categorical cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -49,16 +38,6 @@ impl LossFunction for SparseCategoricalCrossEntropy {
         total_loss / batch_size as f32
     }
 
-    /// Computes the gradient of Sparse Categorical Cross Entropy with respect to predictions
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with class indices as ground truth
-    /// - `y_pred` - Tensor with predicted probabilities for each class
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in a numerically stable range
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));

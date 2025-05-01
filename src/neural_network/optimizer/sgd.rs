@@ -25,11 +25,6 @@ impl SGD {
 }
 
 impl Optimizer for SGD {
-    /// Updates the layer parameters using the SGD algorithm.
-    ///
-    /// # Parameters
-    ///
-    /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {
         // Directly call the layer's parameter update method
         layer.update_parameters_sgd(self.learning_rate);

@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add doc comment for `LSTM`
 
+### Removed
+- Remove redundant method documentation comments
+
 ## [v0.6.0] - 2025-4-29
 ### Added
 - Add LSTM layer initial implementation and associated tests

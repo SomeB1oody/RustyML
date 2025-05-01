@@ -43,11 +43,6 @@ impl Adam {
 }
 
 impl Optimizer for Adam {
-    /// Updates the layer parameters using the Adam algorithm.
-    ///
-    /// # Parameters
-    ///
-    /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {
         self.t += 1; // Increment step count with each update
         layer.update_parameters_adam(

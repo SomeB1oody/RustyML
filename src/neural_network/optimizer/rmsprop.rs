@@ -35,11 +35,6 @@ impl RMSprop {
 }
 
 impl Optimizer for RMSprop {
-    /// Updates the layer parameters using the RMSprop algorithm.
-    ///
-    /// # Parameters
-    ///
-    /// * `layer` - The layer whose parameters will be updated
     fn update(&mut self, layer: &mut dyn Layer) {
         layer.update_parameters_rmsprop(self.learning_rate, self.rho, self.epsilon);
     }

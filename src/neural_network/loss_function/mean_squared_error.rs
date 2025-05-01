@@ -11,16 +11,6 @@ impl MeanSquaredError {
 }
 
 impl LossFunction for MeanSquaredError {
-    /// Computes the Mean Squared Error between predicted and true values
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with ground truth values
-    /// - `y_pred` - Tensor with predicted values
-    ///
-    /// # Returns
-    ///
-    /// `f32` - Average of squared differences between predictions and ground truth
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
@@ -33,16 +23,6 @@ impl LossFunction for MeanSquaredError {
         squared_diff.sum() / n
     }
 
-    /// Computes the gradient of Mean Squared Error with respect to predictions
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with ground truth values
-    /// - `y_pred` - Tensor with predicted values
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;

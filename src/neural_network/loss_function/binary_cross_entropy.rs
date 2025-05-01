@@ -11,16 +11,6 @@ impl BinaryCrossEntropy {
 }
 
 impl LossFunction for BinaryCrossEntropy {
-    /// Computes the Binary Cross Entropy loss between predicted and true values
-    ///
-    /// # Parameters
-    ///
-    /// - `y_true` - Tensor with ground truth values (0 or 1)
-    /// - `y_pred` - Tensor with predicted probabilities in range \[0,1\]
-    ///
-    /// # Returns
-    ///
-    /// * `f32` - Binary cross entropy loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
@@ -34,16 +24,6 @@ impl LossFunction for BinaryCrossEntropy {
         -losses.sum() / n
     }
 
-    /// Computes the gradient of Binary Cross Entropy with respect to predictions
-    ///
-    /// # Arguments
-    ///
-    /// - `y_true` - Tensor with ground truth values (0 or 1)
-    /// - `y_pred` - Tensor with predicted probabilities in range \[0,1\]
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - Gradient tensor for backpropagation
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in range (0,1) to avoid numerical issues
         let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
