@@ -209,7 +209,7 @@ fn test_simple_rnn_layer() {
     // Build model: one SimpleRnn layer with tanh activation
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new_with_activation(4, 3, Activation::Tanh))
+        .add(SimpleRNN::new(4, 3, Activation::Tanh))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print structure

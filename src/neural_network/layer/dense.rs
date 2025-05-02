@@ -1,4 +1,5 @@
 use crate::ModelError;
+use crate::neural_network::optimizer::*;
 use crate::neural_network::{Activation, Layer, Tensor};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::RandomExt;
@@ -36,10 +37,7 @@ use rayon::prelude::*;
 /// - `grad_bias` - Stored bias gradients
 ///
 /// ## Adam states
-/// - `m_weights` - Adam optimizer state: first moment for weights
-/// - `v_weights` - Adam optimizer state: second moment for weights
-/// - `m_bias` - Adam optimizer state: first moment for bias
-/// - `v_bias` - Adam optimizer state: second moment for bias
+/// - `adam_states` - Adam optimizer states for weights and biases
 ///
 /// ## RMSprop states
 /// - `cache_weights` - RMSprop optimizer cache for weights
@@ -84,14 +82,8 @@ pub struct Dense {
     grad_weights: Option<Array2<f32>>,
     /// Stored bias gradients
     grad_bias: Option<Array2<f32>>,
-    /// Adam optimizer state: first moment for weights
-    m_weights: Option<Array2<f32>>,
-    /// Adam optimizer state: second moment for weights
-    v_weights: Option<Array2<f32>>,
-    /// Adam optimizer state: first moment for bias
-    m_bias: Option<Array2<f32>>,
-    /// Adam optimizer state: second moment for bias
-    v_bias: Option<Array2<f32>>,
+    /// Adam optimizer states for weights and biases
+    adam_states: Option<AdamStates>,
     /// RMSprop optimizer cache for weights
     cache_weights: Option<Array2<f32>>,
     /// RMSprop optimizer cache for bias
@@ -166,10 +158,7 @@ impl Dense {
             grad_bias: None,
             activation,
             activation_output: None,
-            m_weights: None,
-            v_weights: None,
-            m_bias: None,
-            v_bias: None,
+            adam_states: None,
             cache_weights: None,
             cache_bias: None,
         }
@@ -307,44 +296,28 @@ impl Layer for Dense {
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize Adam state if not already initialized
-        if self.m_weights.is_none() {
-            self.m_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
-            self.v_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
-            self.m_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
-            self.v_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
+        // Initialize Adam states (if not already initialized)
+        if self.adam_states.is_none() {
+            let dims_w = (self.input_dim, self.output_dim);
+            let dims_b = (1, self.output_dim);
+
+            self.adam_states = Some(AdamStates::new(
+                dims_w, None, // No recurrent weights
+                dims_b,
+            ));
         }
-        let m_w = self.m_weights.as_mut().unwrap();
-        let v_w = self.v_weights.as_mut().unwrap();
-        let m_b = self.m_bias.as_mut().unwrap();
-        let v_b = self.v_bias.as_mut().unwrap();
 
-        let grad_w = self
-            .grad_weights
-            .as_ref()
-            .expect("Adam: grad_weights not calculated");
-        let grad_b = self
-            .grad_bias
-            .as_ref()
-            .expect("Adam: grad_bias not calculated");
+        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
+            let adam_states = self.adam_states.as_mut().unwrap();
+            let (w_update, _, b_update) = adam_states.update_parameter(
+                grad_w, None, // No recurrent weights
+                grad_b, beta1, beta2, epsilon, t, lr,
+            );
 
-        // Update first moment (momentum)
-        *m_w = m_w.mapv(|x| x * beta1) + &(grad_w * (1.0 - beta1));
-        *m_b = m_b.mapv(|x| x * beta1) + &(grad_b * (1.0 - beta1));
-
-        // Update second moment (accumulated squared gradients)
-        *v_w = v_w.mapv(|x| x * beta2) + &(grad_w.mapv(|x| x * x) * (1.0 - beta2));
-        *v_b = v_b.mapv(|x| x * beta2) + &(grad_b.mapv(|x| x * x) * (1.0 - beta2));
-
-        // Calculate bias-corrected estimates
-        let m_hat_w = m_w.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
-        let m_hat_b = m_b.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
-        let v_hat_w = v_w.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
-        let v_hat_b = v_b.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
-
-        // Update parameters
-        self.weights = &self.weights - &(lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon));
-        self.bias = &self.bias - &(lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon));
+            // Apply updates
+            self.weights = &self.weights - &w_update;
+            self.bias = &self.bias - &b_update;
+        }
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {

@@ -1,6 +1,7 @@
 use crate::ModelError;
 pub use crate::neural_network::Tensor;
 pub use crate::neural_network::activation::Activation;
+use crate::neural_network::optimizer::*;
 use crate::traits::Layer;
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::RandomExt;
@@ -96,16 +97,14 @@ pub struct LSTM {
 /// - Cell gate: Generates candidate values to add to the cell state
 /// - Output gate: Controls what part of the cell state is output
 ///
-/// # Parameters
+/// # Fields
 /// - `kernel`: Weight matrix applied to the input
 /// - `recurrent_kernel`: Weight matrix applied to the previous hidden state
 /// - `bias`: Bias term added to the weighted inputs
+/// - `gate_cache`: Forward propagation cache
+/// - `grad_*`: Gradients
+/// - `adam_states`: Adam optimizer states
 ///
-/// # Caches and Optimization States
-/// - `gate_cache`: Stores gate activation values during forward propagation
-/// - `grad_*`: Stores gradients for backpropagation
-/// - `m_*` and `v_*`: Momentum and velocity for Adam optimization
-/// - `cache_*`: Accumulating gradients for RMSprop optimization
 struct Gate {
     // Weight matrix
     kernel: Array2<f32>,
@@ -123,12 +122,7 @@ struct Gate {
     grad_bias: Option<Array2<f32>>,
 
     // Adam optimizer states
-    m_kernel: Option<Array2<f32>>,
-    v_kernel: Option<Array2<f32>>,
-    m_recurrent_kernel: Option<Array2<f32>>,
-    v_recurrent_kernel: Option<Array2<f32>>,
-    m_bias: Option<Array2<f32>>,
-    v_bias: Option<Array2<f32>>,
+    adam_states: Option<AdamStates>,
 
     // RMSprop optimizer cache
     cache_kernel: Option<Array2<f32>>,
@@ -167,12 +161,7 @@ impl Gate {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            m_kernel: None,
-            v_kernel: None,
-            m_recurrent_kernel: None,
-            v_recurrent_kernel: None,
-            m_bias: None,
-            v_bias: None,
+            adam_states: None,
             cache_kernel: None,
             cache_recurrent_kernel: None,
             cache_bias: None,
@@ -478,126 +467,38 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize Adam optimizer state variables for all gates
-        if self.input_gate.m_kernel.is_none() {
+        // Initialize AdamStates structure if not already initialized
+        if self.input_gate.adam_states.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
             let db = (1, self.units);
 
-            // Helper function: Initialize Adam state for a gate
-            fn init_gate_adam_state(
-                gate: &mut Gate,
-                dk: (usize, usize),
-                dr: (usize, usize),
-                db: (usize, usize),
-            ) {
-                gate.m_kernel = Some(Array2::zeros(dk));
-                gate.v_kernel = Some(Array2::zeros(dk));
-                gate.m_recurrent_kernel = Some(Array2::zeros(dr));
-                gate.v_recurrent_kernel = Some(Array2::zeros(dr));
-                gate.m_bias = Some(Array2::zeros(db));
-                gate.v_bias = Some(Array2::zeros(db));
-            }
-
-            // Initialize Adam state for all gates
-            init_gate_adam_state(&mut self.input_gate, dk, dr, db);
-            init_gate_adam_state(&mut self.forget_gate, dk, dr, db);
-            init_gate_adam_state(&mut self.cell_gate, dk, dr, db);
-            init_gate_adam_state(&mut self.output_gate, dk, dr, db);
+            // Initialize Adam states for all gates
+            self.input_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.forget_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.cell_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.output_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
         }
 
-        // Helper function for updating a single gate's parameters
+        // Helper function to update individual gate parameters
         fn update_gate(gate: &mut Gate, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
             if let (Some(gk), Some(grk), Some(gb)) = (
                 &gate.grad_kernel,
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                let m_w = gate.m_kernel.as_mut().unwrap();
-                let v_w = gate.v_kernel.as_mut().unwrap();
-                let m_r = gate.m_recurrent_kernel.as_mut().unwrap();
-                let v_r = gate.v_recurrent_kernel.as_mut().unwrap();
-                let m_b = gate.m_bias.as_mut().unwrap();
-                let v_b = gate.v_bias.as_mut().unwrap();
+                let adam = gate.adam_states.as_mut().unwrap();
+                let (w_update, rk_update, b_update) =
+                    adam.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
 
-                // Parallel update of Adam optimizer state variables
-                fn update_adam_param(
-                    m: &mut Array2<f32>,
-                    v: &mut Array2<f32>,
-                    g: &Array2<f32>,
-                    beta1: f32,
-                    beta2: f32,
-                ) {
-                    let (m_updated, v_updated) = rayon::join(
-                        || m.mapv(|x| x * beta1) + &(g * (1.0 - beta1)),
-                        || v.mapv(|x| x * beta2) + &(g.mapv(|x| x * x) * (1.0 - beta2)),
-                    );
-
-                    *m = m_updated;
-                    *v = v_updated;
-                }
-
-                // Parallel update of all parameter states
-                rayon::join(
-                    || {
-                        rayon::join(
-                            || update_adam_param(m_w, v_w, gk, beta1, beta2),
-                            || update_adam_param(m_r, v_r, grk, beta1, beta2),
-                        )
-                    },
-                    || update_adam_param(m_b, v_b, gb, beta1, beta2),
-                );
-
-                // Calculate bias correction
-                fn compute_bias_corrected(
-                    m: &Array2<f32>,
-                    v: &Array2<f32>,
-                    beta1: f32,
-                    beta2: f32,
-                    t: u64,
-                ) -> (Array2<f32>, Array2<f32>) {
-                    rayon::join(
-                        || m.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
-                        || v.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
-                    )
-                }
-
-                // Parallel computation of bias correction for all parameters
-                let (((m_hat_w, v_hat_w), (m_hat_r, v_hat_r)), (m_hat_b, v_hat_b)) = rayon::join(
-                    || {
-                        rayon::join(
-                            || compute_bias_corrected(m_w, v_w, beta1, beta2, t),
-                            || compute_bias_corrected(m_r, v_r, beta1, beta2, t),
-                        )
-                    },
-                    || compute_bias_corrected(m_b, v_b, beta1, beta2, t),
-                );
-
-                // Parallel computation of parameter update values
-                let (w_update, (rk_update, b_update)) = rayon::join(
-                    || lr * &m_hat_w / &(v_hat_w.mapv(f32::sqrt) + epsilon),
-                    || {
-                        rayon::join(
-                            || lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon),
-                            || lr * &m_hat_b / &(v_hat_b.mapv(f32::sqrt) + epsilon),
-                        )
-                    },
-                );
-
-                // Parallel application of parameter updates
-                rayon::join(
-                    || gate.kernel = &gate.kernel - &w_update,
-                    || {
-                        rayon::join(
-                            || gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update,
-                            || gate.bias = &gate.bias - &b_update,
-                        )
-                    },
-                );
+                // Apply parameter updates
+                gate.kernel = &gate.kernel - &w_update;
+                gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update.unwrap();
+                gate.bias = &gate.bias - &b_update;
             }
         }
 
-        // Apply parameter updates to each gate
+        // Apply parameter updates for each gate
         update_gate(&mut self.input_gate, lr, beta1, beta2, epsilon, t);
         update_gate(&mut self.forget_gate, lr, beta1, beta2, epsilon, t);
         update_gate(&mut self.cell_gate, lr, beta1, beta2, epsilon, t);

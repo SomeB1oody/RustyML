@@ -1,4 +1,5 @@
 use crate::ModelError;
+use crate::neural_network::optimizer::*;
 use crate::neural_network::{Activation, Layer, Tensor};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::RandomExt;
@@ -34,12 +35,7 @@ use ndarray_rand::rand_distr::Uniform;
 /// - `grad_bias` - Gradient of the bias
 ///
 /// ## Adam states
-/// - `m_kernel` - First moment vector for kernel in Adam optimizer
-/// - `v_kernel` - Second moment vector for kernel in Adam optimizer
-/// - `m_recurrent_kernel` - First moment vector for recurrent kernel in Adam optimizer
-/// - `v_recurrent_kernel` - Second moment vector for recurrent kernel in Adam optimizer
-/// - `m_bias` - First moment vector for bias in Adam optimizer
-/// - `v_bias` - Second moment vector for bias in Adam optimizer
+/// - `adam_states` - AdamStates containing moment vectors for all parameters
 ///
 /// ## RMSprop cache
 /// - `cache_kernel` - RMSprop cache for kernel
@@ -59,7 +55,7 @@ use ndarray_rand::rand_distr::Uniform;
 /// // Build model: one SimpleRnn layer with tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new_with_activation(4, 3, Activation::Tanh))
+/// .add(SimpleRNN::new(4, 3, Activation::Tanh))
 /// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
 /// // Print structure
@@ -98,19 +94,8 @@ pub struct SimpleRNN {
     /// Gradient of the bias
     grad_bias: Option<Array2<f32>>,
 
-    // Adam states
-    /// First moment vector for kernel in Adam optimizer
-    m_kernel: Option<Array2<f32>>,
-    /// Second moment vector for kernel in Adam optimizer
-    v_kernel: Option<Array2<f32>>,
-    /// First moment vector for recurrent kernel in Adam optimizer
-    m_recurrent_kernel: Option<Array2<f32>>,
-    /// Second moment vector for recurrent kernel in Adam optimizer
-    v_recurrent_kernel: Option<Array2<f32>>,
-    /// First moment vector for bias in Adam optimizer
-    m_bias: Option<Array2<f32>>,
-    /// Second moment vector for bias in Adam optimizer
-    v_bias: Option<Array2<f32>>,
+    /// AdamStates containing moment vectors for all parameters
+    adam_states: Option<AdamStates>,
 
     // RMSprop cache
     /// RMSprop cache for kernel
@@ -125,20 +110,6 @@ pub struct SimpleRNN {
 }
 
 impl SimpleRNN {
-    /// Creates a new SimpleRNN layer with the specified dimensions and tanh activation.
-    ///
-    /// # Parameters
-    ///
-    /// - `input_dim` - The size of each input sample
-    /// - `units` - The dimensionality of the output space
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - A new SimpleRNN instance with tanh activation
-    pub fn new(input_dim: usize, units: usize) -> Self {
-        Self::new_with_activation(input_dim, units, Activation::Tanh)
-    }
-
     /// Creates a new SimpleRNN layer with the specified dimensions and activation function.
     ///
     /// # Parameters
@@ -150,7 +121,7 @@ impl SimpleRNN {
     /// # Returns
     ///
     /// * `Self` - A new SimpleRNN instance with the specified activation
-    pub fn new_with_activation(input_dim: usize, units: usize, activation: Activation) -> Self {
+    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
         let kernel = Array::random((input_dim, units), Uniform::new(-0.05, 0.05));
         let recurrent_kernel = Array::random((units, units), Uniform::new(-0.05, 0.05));
         let bias = Array::zeros((1, units));
@@ -165,12 +136,7 @@ impl SimpleRNN {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            m_kernel: None,
-            v_kernel: None,
-            m_recurrent_kernel: None,
-            v_recurrent_kernel: None,
-            m_bias: None,
-            v_bias: None,
+            adam_states: None,
             cache_kernel: None,
             cache_recurrent_kernel: None,
             cache_bias: None,
@@ -282,48 +248,30 @@ impl Layer for SimpleRNN {
         }
     }
 
-    fn update_parameters_adam(&mut self, lr: f32, b1: f32, b2: f32, eps: f32, t: u64) {
-        // Same Adam implementation as in Dense, but for kernel/recurrent_kernel/bias
-        if self.m_kernel.is_none() {
+    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
+        // Initialize Adam states (if not already initialized)
+        if self.adam_states.is_none() {
             let dims_k = (self.input_dim, self.units);
             let dims_r = (self.units, self.units);
-            self.m_kernel = Some(Array2::zeros(dims_k));
-            self.v_kernel = Some(Array2::zeros(dims_k));
-            self.m_recurrent_kernel = Some(Array2::zeros(dims_r));
-            self.v_recurrent_kernel = Some(Array2::zeros(dims_r));
-            self.m_bias = Some(Array2::zeros((1, self.units)));
-            self.v_bias = Some(Array2::zeros((1, self.units)));
+            let dims_b = (1, self.units);
+
+            self.adam_states = Some(AdamStates::new(dims_k, Some(dims_r), dims_b));
         }
-        let m_k = self.m_kernel.as_mut().unwrap();
-        let v_k = self.v_kernel.as_mut().unwrap();
-        let m_rk = self.m_recurrent_kernel.as_mut().unwrap();
-        let v_rk = self.v_recurrent_kernel.as_mut().unwrap();
-        let m_b = self.m_bias.as_mut().unwrap();
-        let v_b = self.v_bias.as_mut().unwrap();
 
-        let gk = self.grad_kernel.as_ref().unwrap();
-        let grk = self.grad_recurrent_kernel.as_ref().unwrap();
-        let gb = self.grad_bias.as_ref().unwrap();
+        if let (Some(gk), Some(grk), Some(gb)) = (
+            &self.grad_kernel,
+            &self.grad_recurrent_kernel,
+            &self.grad_bias,
+        ) {
+            let adam_states = self.adam_states.as_mut().unwrap();
+            let (w_update, rk_update, b_update) =
+                adam_states.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
 
-        *m_k = m_k.mapv(|x| x * b1) + &(gk * (1.0 - b1));
-        *m_rk = m_rk.mapv(|x| x * b1) + &(grk * (1.0 - b1));
-        *m_b = m_b.mapv(|x| x * b1) + &(gb * (1.0 - b1));
-
-        *v_k = v_k.mapv(|x| x * b2) + &(gk.mapv(|x| x * x) * (1.0 - b2));
-        *v_rk = v_rk.mapv(|x| x * b2) + &(grk.mapv(|x| x * x) * (1.0 - b2));
-        *v_b = v_b.mapv(|x| x * b2) + &(gb.mapv(|x| x * x) * (1.0 - b2));
-
-        let mhat_k = m_k.mapv(|x| x / (1.0 - b1.powi(t as i32)));
-        let mhat_rk = m_rk.mapv(|x| x / (1.0 - b1.powi(t as i32)));
-        let mhat_b = m_b.mapv(|x| x / (1.0 - b1.powi(t as i32)));
-        let vhat_k = v_k.mapv(|x| x / (1.0 - b2.powi(t as i32)));
-        let vhat_rk = v_rk.mapv(|x| x / (1.0 - b2.powi(t as i32)));
-        let vhat_b = v_b.mapv(|x| x / (1.0 - b2.powi(t as i32)));
-
-        self.kernel = &self.kernel - &(lr * &mhat_k / &(vhat_k.mapv(f32::sqrt) + eps));
-        self.recurrent_kernel =
-            &self.recurrent_kernel - &(lr * &mhat_rk / &(vhat_rk.mapv(f32::sqrt) + eps));
-        self.bias = &self.bias - &(lr * &mhat_b / &(vhat_b.mapv(f32::sqrt) + eps));
+            // Apply updates
+            self.kernel = &self.kernel - &w_update;
+            self.recurrent_kernel = &self.recurrent_kernel - &rk_update.unwrap();
+            self.bias = &self.bias - &b_update;
+        }
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, eps: f32) {

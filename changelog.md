@@ -13,6 +13,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Refactor layers to enforce explicit activation usage
 - Optimize LSTM computations with parallel processing using Rayon
 - Refactor LSTM to consolidate gate logic into reusable structures
+- Refactor Adam optimizer state management into `AdamStates`
 
 ## [v0.6.0] - 2025-4-30
 ### Added
