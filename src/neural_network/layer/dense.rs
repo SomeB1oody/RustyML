@@ -40,8 +40,7 @@ use rayon::prelude::*;
 /// - `adam_states` - Adam optimizer states for weights and biases
 ///
 /// ## RMSprop states
-/// - `cache_weights` - RMSprop optimizer cache for weights
-/// - `cache_bias` - RMSprop optimizer cache for bias
+/// - `rmsprop_cache` - RMSprop optimizer cache for weights and biases
 ///
 /// # Example
 /// ```rust
@@ -84,10 +83,8 @@ pub struct Dense {
     grad_bias: Option<Array2<f32>>,
     /// Adam optimizer states for weights and biases
     adam_states: Option<AdamStates>,
-    /// RMSprop optimizer cache for weights
-    cache_weights: Option<Array2<f32>>,
-    /// RMSprop optimizer cache for bias
-    cache_bias: Option<Array2<f32>>,
+    /// RMSprop optimizer cache
+    rmsprop_cache: Option<RMSpropCache>,
     /// Activation function for the layer
     activation: Activation,
     /// Cached output after activation for use in backward pass
@@ -159,8 +156,7 @@ impl Dense {
             activation,
             activation_output: None,
             adam_states: None,
-            cache_weights: None,
-            cache_bias: None,
+            rmsprop_cache: None,
         }
     }
 }
@@ -322,25 +318,27 @@ impl Layer for Dense {
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            // Initialize RMSprop caches with zeros if not already initialized
-            if self.cache_weights.is_none() {
-                self.cache_weights = Some(Array2::<f32>::zeros((self.input_dim, self.output_dim)));
+            // Initialize RMSprop cache if it doesn't exist
+            if self.rmsprop_cache.is_none() {
+                self.rmsprop_cache = Some(RMSpropCache::new(
+                    (self.input_dim, self.output_dim),
+                    None,
+                    (1, self.output_dim),
+                ));
             }
-            if self.cache_bias.is_none() {
-                self.cache_bias = Some(Array2::<f32>::zeros((1, self.output_dim)));
-            }
-            if let Some(ref mut cache_w) = self.cache_weights {
-                *cache_w = cache_w.mapv(|x| x * rho) + &(grad_w.mapv(|x| x * x) * (1.0 - rho));
-            }
-            if let Some(ref mut cache_b) = self.cache_bias {
-                *cache_b = cache_b.mapv(|x| x * rho) + &(grad_b.mapv(|x| x * x) * (1.0 - rho));
-            }
-            if let Some(ref cache_w) = self.cache_weights {
-                self.weights =
-                    &self.weights - &(lr * grad_w / &(cache_w.mapv(f32::sqrt) + epsilon));
-            }
-            if let Some(ref cache_b) = self.cache_bias {
-                self.bias = &self.bias - &(lr * grad_b / &(cache_b.mapv(f32::sqrt) + epsilon));
+
+            if let Some(ref mut cache) = self.rmsprop_cache {
+                cache.update_parameters(
+                    &mut self.weights,
+                    None,
+                    &mut self.bias,
+                    grad_w,
+                    None,
+                    grad_b,
+                    rho,
+                    lr,
+                    epsilon,
+                );
             }
         }
     }

@@ -38,9 +38,7 @@ use ndarray_rand::rand_distr::Uniform;
 /// - `adam_states` - AdamStates containing moment vectors for all parameters
 ///
 /// ## RMSprop cache
-/// - `cache_kernel` - RMSprop cache for kernel
-/// - `cache_recurrent_kernel` - RMSprop cache for recurrent kernel
-/// - `cache_bias` - RMSprop cache for bias
+/// - `rmsprop_cache` - RMSprop cache for optimization
 ///
 /// # Example
 /// ```rust
@@ -97,13 +95,8 @@ pub struct SimpleRNN {
     /// AdamStates containing moment vectors for all parameters
     adam_states: Option<AdamStates>,
 
-    // RMSprop cache
-    /// RMSprop cache for kernel
-    cache_kernel: Option<Array2<f32>>,
-    /// RMSprop cache for recurrent kernel
-    cache_recurrent_kernel: Option<Array2<f32>>,
-    /// RMSprop cache for bias
-    cache_bias: Option<Array2<f32>>,
+    /// RMSprop cache for optimization
+    rmsprop_cache: Option<RMSpropCache>,
 
     /// Activation function to use
     activation: Activation,
@@ -137,9 +130,7 @@ impl SimpleRNN {
             grad_recurrent_kernel: None,
             grad_bias: None,
             adam_states: None,
-            cache_kernel: None,
-            cache_recurrent_kernel: None,
-            cache_bias: None,
+            rmsprop_cache: None,
             activation,
         }
     }
@@ -280,27 +271,28 @@ impl Layer for SimpleRNN {
             &self.grad_recurrent_kernel,
             &self.grad_bias,
         ) {
-            if self.cache_kernel.is_none() {
-                self.cache_kernel = Some(Array2::zeros((self.input_dim, self.units)));
+            // Initialize RMSprop cache if it doesn't exist
+            if self.rmsprop_cache.is_none() {
+                self.rmsprop_cache = Some(RMSpropCache::new(
+                    (self.input_dim, self.units),
+                    Some((self.units, self.units)),
+                    (1, self.units),
+                ));
             }
-            if self.cache_recurrent_kernel.is_none() {
-                self.cache_recurrent_kernel = Some(Array2::zeros((self.units, self.units)));
-            }
-            if self.cache_bias.is_none() {
-                self.cache_bias = Some(Array2::zeros((1, self.units)));
-            }
-            let ck = self.cache_kernel.as_mut().unwrap();
-            let crk = self.cache_recurrent_kernel.as_mut().unwrap();
-            let cb = self.cache_bias.as_mut().unwrap();
 
-            *ck = ck.mapv(|x| x * rho) + &(gk.mapv(|x| x * x) * (1.0 - rho));
-            *crk = crk.mapv(|x| x * rho) + &(grk.mapv(|x| x * x) * (1.0 - rho));
-            *cb = cb.mapv(|x| x * rho) + &(gb.mapv(|x| x * x) * (1.0 - rho));
-
-            self.kernel = &self.kernel - &(lr * gk / &(ck.mapv(f32::sqrt) + eps));
-            self.recurrent_kernel =
-                &self.recurrent_kernel - &(lr * grk / &(crk.mapv(f32::sqrt) + eps));
-            self.bias = &self.bias - &(lr * gb / &(cb.mapv(f32::sqrt) + eps));
+            if let Some(ref mut cache) = self.rmsprop_cache {
+                cache.update_parameters(
+                    &mut self.kernel,
+                    Some(&mut self.recurrent_kernel),
+                    &mut self.bias,
+                    gk,
+                    Some(grk),
+                    gb,
+                    rho,
+                    lr,
+                    eps,
+                );
+            }
         }
     }
 }

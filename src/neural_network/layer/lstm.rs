@@ -104,6 +104,7 @@ pub struct LSTM {
 /// - `gate_cache`: Forward propagation cache
 /// - `grad_*`: Gradients
 /// - `adam_states`: Adam optimizer states
+/// - `rmsprop_cache`: RMSprop optimizer cache
 ///
 struct Gate {
     // Weight matrix
@@ -125,9 +126,7 @@ struct Gate {
     adam_states: Option<AdamStates>,
 
     // RMSprop optimizer cache
-    cache_kernel: Option<Array2<f32>>,
-    cache_recurrent_kernel: Option<Array2<f32>>,
-    cache_bias: Option<Array2<f32>>,
+    rmsprop_cache: Option<RMSpropCache>,
 }
 
 impl Gate {
@@ -162,9 +161,7 @@ impl Gate {
             grad_recurrent_kernel: None,
             grad_bias: None,
             adam_states: None,
-            cache_kernel: None,
-            cache_recurrent_kernel: None,
-            cache_bias: None,
+            rmsprop_cache: None,
         }
     }
 }
@@ -506,94 +503,56 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // Initialize RMSprop caches for all gates to zero
-        if self.input_gate.cache_kernel.is_none() {
+        // Initialize RMSprop cache if it doesn't exist
+        if self.input_gate.rmsprop_cache.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
             let db = (1, self.units);
 
-            // Helper function: Initialize RMSprop cache for a gate
-            fn init_gate_rmsprop_cache(
-                gate: &mut Gate,
-                dk: (usize, usize),
-                dr: (usize, usize),
-                db: (usize, usize),
-            ) {
-                gate.cache_kernel = Some(Array2::zeros(dk));
-                gate.cache_recurrent_kernel = Some(Array2::zeros(dr));
-                gate.cache_bias = Some(Array2::zeros(db));
-            }
-
             // Initialize RMSprop cache for all gates
-            init_gate_rmsprop_cache(&mut self.input_gate, dk, dr, db);
-            init_gate_rmsprop_cache(&mut self.forget_gate, dk, dr, db);
-            init_gate_rmsprop_cache(&mut self.cell_gate, dk, dr, db);
-            init_gate_rmsprop_cache(&mut self.output_gate, dk, dr, db);
+            self.input_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
+            self.forget_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
+            self.cell_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
+            self.output_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
         }
 
-        // Define helper function for updating parameters of a single gate
+        // Update parameters for each gate
         fn update_gate_rms(gate: &mut Gate, lr: f32, rho: f32, epsilon: f32) {
             if let (Some(gk), Some(grk), Some(gb)) = (
                 &gate.grad_kernel,
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                let cache_w = gate.cache_kernel.as_mut().unwrap();
-                let cache_r = gate.cache_recurrent_kernel.as_mut().unwrap();
-                let cache_b = gate.cache_bias.as_mut().unwrap();
-
-                // Parallel function for updating caches
-                fn update_rmsprop_cache(cache: &mut Array2<f32>, g: &Array2<f32>, rho: f32) {
-                    *cache = cache.mapv(|x| x * rho) + &(g.mapv(|x| x * x) * (1.0 - rho));
+                if let Some(ref mut cache) = gate.rmsprop_cache {
+                    cache.update_parameters(
+                        &mut gate.kernel,
+                        Some(&mut gate.recurrent_kernel),
+                        &mut gate.bias,
+                        gk,
+                        Some(grk),
+                        gb,
+                        rho,
+                        lr,
+                        epsilon,
+                    );
                 }
-
-                // Parallel update of all caches
-                rayon::join(
-                    || {
-                        rayon::join(
-                            || update_rmsprop_cache(cache_w, gk, rho),
-                            || update_rmsprop_cache(cache_r, grk, rho),
-                        )
-                    },
-                    || update_rmsprop_cache(cache_b, gb, rho),
-                );
-
-                // Parallel function for updating parameters
-                fn update_rmsprop_param(
-                    param: &mut Array2<f32>,
-                    grad: &Array2<f32>,
-                    cache: &Array2<f32>,
-                    lr: f32,
-                    epsilon: f32,
-                ) {
-                    *param = &*param - &(lr * grad / &(cache.mapv(f32::sqrt) + epsilon));
-                }
-
-                // Parallel update of all parameters
-                rayon::join(
-                    || {
-                        rayon::join(
-                            || update_rmsprop_param(&mut gate.kernel, gk, cache_w, lr, epsilon),
-                            || {
-                                update_rmsprop_param(
-                                    &mut gate.recurrent_kernel,
-                                    grk,
-                                    cache_r,
-                                    lr,
-                                    epsilon,
-                                )
-                            },
-                        )
-                    },
-                    || update_rmsprop_param(&mut gate.bias, gb, cache_b, lr, epsilon),
-                );
             }
         }
 
-        // Apply RMSprop update to each gate
-        update_gate_rms(&mut self.input_gate, lr, rho, epsilon);
-        update_gate_rms(&mut self.forget_gate, lr, rho, epsilon);
-        update_gate_rms(&mut self.cell_gate, lr, rho, epsilon);
-        update_gate_rms(&mut self.output_gate, lr, rho, epsilon);
+        // Apply RMSprop updates to all gates
+        rayon::join(
+            || {
+                rayon::join(
+                    || update_gate_rms(&mut self.input_gate, lr, rho, epsilon),
+                    || update_gate_rms(&mut self.forget_gate, lr, rho, epsilon),
+                )
+            },
+            || {
+                rayon::join(
+                    || update_gate_rms(&mut self.cell_gate, lr, rho, epsilon),
+                    || update_gate_rms(&mut self.output_gate, lr, rho, epsilon),
+                )
+            },
+        );
     }
 }
