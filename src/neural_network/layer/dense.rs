@@ -286,8 +286,10 @@ impl Layer for Dense {
 
     fn update_parameters_sgd(&mut self, lr: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            self.weights = &self.weights - &(lr * grad_w);
-            self.bias = &self.bias - &(lr * grad_b);
+            rayon::join(
+                || self.weights = &self.weights - &(grad_w * lr),
+                || self.bias = &self.bias - &(grad_b * lr),
+            );
         }
     }
 

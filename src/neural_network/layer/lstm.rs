@@ -442,7 +442,7 @@ impl Layer for LSTM {
         4 * (self.input_dim * self.units + self.units * self.units + self.units)
     }
 
-    fn update_parameters(&mut self, lr: f32) {
+    fn update_parameters_sgd(&mut self, lr: f32) {
         // Create a helper function to update gate parameters
         fn update_gate_parameters(gate: &mut Gate, lr: f32) {
             if let (Some(gk), Some(grk), Some(gb)) = (
@@ -457,10 +457,20 @@ impl Layer for LSTM {
         }
 
         // Use the helper function to update parameters for each gate
-        update_gate_parameters(&mut self.input_gate, lr);
-        update_gate_parameters(&mut self.forget_gate, lr);
-        update_gate_parameters(&mut self.cell_gate, lr);
-        update_gate_parameters(&mut self.output_gate, lr);
+        rayon::join(
+            || {
+                rayon::join(
+                    || update_gate_parameters(&mut self.input_gate, lr),
+                    || update_gate_parameters(&mut self.forget_gate, lr),
+                )
+            },
+            || {
+                rayon::join(
+                    || update_gate_parameters(&mut self.cell_gate, lr),
+                    || update_gate_parameters(&mut self.output_gate, lr),
+                )
+            },
+        );
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {

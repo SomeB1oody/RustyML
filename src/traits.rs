@@ -112,24 +112,12 @@ pub trait Layer {
         0
     }
 
-    /// Updates the layer parameters during training.
-    ///
-    /// This method provides a generic parameter update mechanism that can be
-    /// overridden by specific layer implementations. By default, it does nothing.
-    ///
-    /// # Parameters
-    ///
-    /// * `_lr` - Learning rate for parameter updates
-    fn update_parameters(&mut self, _lr: f32) {}
-
     /// Updates the layer parameters using Stochastic Gradient Descent.
     ///
     /// # Parameters
     ///
     /// * `_lr` - Learning rate for parameter updates
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // Default implementation does nothing
-    }
+    fn update_parameters_sgd(&mut self, _lr: f32) {}
 
     /// Updates the layer parameters using Adam optimizer.
     ///
@@ -148,7 +136,6 @@ pub trait Layer {
         _epsilon: f32,
         _t: u64,
     ) {
-        // Default implementation does nothing
     }
 
     /// Updates the layer parameters using RMSprop optimizer.
@@ -158,9 +145,7 @@ pub trait Layer {
     /// - `_lr` - Learning rate for parameter updates
     /// - `_rho` - Decay rate for moving average of squared gradients
     /// - `_epsilon` - Small constant for numerical stability
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // Default implementation does nothing
-    }
+    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {}
 }
 
 /// Defines the interface for loss functions used in neural network training.

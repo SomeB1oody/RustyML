@@ -227,15 +227,21 @@ impl Layer for SimpleRNN {
         self.input_dim * self.units + self.units * self.units + self.units
     }
 
-    fn update_parameters(&mut self, lr: f32) {
+    fn update_parameters_sgd(&mut self, lr: f32) {
         if let (Some(gk), Some(grk), Some(gb)) = (
             &self.grad_kernel,
             &self.grad_recurrent_kernel,
             &self.grad_bias,
         ) {
-            self.kernel = &self.kernel - &(lr * gk);
-            self.recurrent_kernel = &self.recurrent_kernel - &(lr * grk);
-            self.bias = &self.bias - &(lr * gb);
+            rayon::join(
+                || {
+                    rayon::join(
+                        || self.kernel = &self.kernel - &(lr * gk),
+                        || self.recurrent_kernel = &self.recurrent_kernel - &(lr * grk),
+                    )
+                },
+                || self.bias = &self.bias - &(lr * gb),
+            );
         }
     }
 
