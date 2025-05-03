@@ -63,6 +63,18 @@ impl Sequential {
     /// - `y` - Target tensor containing expected outputs
     /// - `epochs` - Number of training epochs to perform
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<&mut Self, ModelError> {
+        if self.optimizer.is_none() {
+            return Err(ModelError::InputValidationError(
+                "Optimizer not specified".to_string(),
+            ));
+        }
+
+        if self.layers.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Layers not specified".to_string(),
+            ));
+        }
+
         for epoch in 0..epochs {
             println!("Epoch {}", epoch + 1);
             // Forward pass
