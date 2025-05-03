@@ -14,6 +14,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Removed
 - Remove method `update_parameters` in `Layer` trait
+- Remove getter methods from Dense layer
 
 ## [v0.6.0] - 2025-5-2
 ### Changed

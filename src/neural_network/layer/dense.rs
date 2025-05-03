@@ -92,51 +92,6 @@ pub struct Dense {
 }
 
 impl Dense {
-    /// Gets the input dimension of the layer.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of features expected in the input data
-    pub fn get_input_dim(&self) -> usize {
-        self.input_dim
-    }
-
-    /// Gets the output dimension of the layer.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of neurons in the layer, determining the output dimensions
-    pub fn get_output_dim(&self) -> usize {
-        self.output_dim
-    }
-
-    /// Gets the weight matrix of the layer.
-    ///
-    /// # Returns
-    ///
-    /// * `&Array2<f32>` - A clone of the weight matrix with dimensions \[input_dim, output_dim\]
-    pub fn get_weights(&self) -> &Array2<f32> {
-        &self.weights
-    }
-
-    /// Gets the bias vector of the layer.
-    ///
-    /// # Returns
-    ///
-    /// * `&Array2<f32>` - A reference to the bias vector with dimensions \[1, output_dim\]
-    pub fn get_bias(&self) -> &Array2<f32> {
-        &self.bias
-    }
-
-    /// Gets the activation function of the layer.
-    ///
-    /// # Returns
-    ///
-    /// `Option<&Activation>` - A reference to the activation function, or None if not set
-    pub fn get_activation(&self) -> &Activation {
-        &self.activation
-    }
-
     /// Creates a new dense layer without activation function.
     ///
     /// # Returns
