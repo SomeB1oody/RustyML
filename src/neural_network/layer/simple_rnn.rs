@@ -28,17 +28,12 @@ use ndarray_rand::rand_distr::Uniform;
 /// ## Cache
 /// - `input_cache` - Cache of input tensors from forward pass (shape: batch, timesteps, input_dim)
 /// - `hidden_state_cache` - Cache of hidden states from forward pass (length = timesteps+1)
+/// - `optimizer_cache` - Cache for optimizer
 ///
 /// ## Gradients
 /// - `grad_kernel` - Gradient of the kernel weights
 /// - `grad_recurrent_kernel` - Gradient of the recurrent kernel weights
 /// - `grad_bias` - Gradient of the bias
-///
-/// ## Adam states
-/// - `adam_states` - AdamStates containing moment vectors for all parameters
-///
-/// ## RMSprop cache
-/// - `rmsprop_cache` - RMSprop cache for optimization
 ///
 /// # Example
 /// ```rust
@@ -92,11 +87,8 @@ pub struct SimpleRNN {
     /// Gradient of the bias
     grad_bias: Option<Array2<f32>>,
 
-    /// AdamStates containing moment vectors for all parameters
-    adam_states: Option<AdamStates>,
-
-    /// RMSprop cache for optimization
-    rmsprop_cache: Option<RMSpropCache>,
+    /// Cache for optimizer
+    optimizer_cache: OptimizerCache,
 
     /// Activation function to use
     activation: Activation,
@@ -129,8 +121,10 @@ impl SimpleRNN {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            adam_states: None,
-            rmsprop_cache: None,
+            optimizer_cache: OptimizerCache {
+                adam_states: None,
+                rmsprop_cache: None,
+            },
             activation,
         }
     }
@@ -247,12 +241,12 @@ impl Layer for SimpleRNN {
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Initialize Adam states (if not already initialized)
-        if self.adam_states.is_none() {
+        if self.optimizer_cache.adam_states.is_none() {
             let dims_k = (self.input_dim, self.units);
             let dims_r = (self.units, self.units);
             let dims_b = (1, self.units);
 
-            self.adam_states = Some(AdamStates::new(dims_k, Some(dims_r), dims_b));
+            self.optimizer_cache.adam_states = Some(AdamStates::new(dims_k, Some(dims_r), dims_b));
         }
 
         if let (Some(gk), Some(grk), Some(gb)) = (
@@ -260,7 +254,7 @@ impl Layer for SimpleRNN {
             &self.grad_recurrent_kernel,
             &self.grad_bias,
         ) {
-            let adam_states = self.adam_states.as_mut().unwrap();
+            let adam_states = self.optimizer_cache.adam_states.as_mut().unwrap();
             let (w_update, rk_update, b_update) =
                 adam_states.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
 
@@ -278,15 +272,15 @@ impl Layer for SimpleRNN {
             &self.grad_bias,
         ) {
             // Initialize RMSprop cache if it doesn't exist
-            if self.rmsprop_cache.is_none() {
-                self.rmsprop_cache = Some(RMSpropCache::new(
+            if self.optimizer_cache.rmsprop_cache.is_none() {
+                self.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
                     (self.input_dim, self.units),
                     Some((self.units, self.units)),
                     (1, self.units),
                 ));
             }
 
-            if let Some(ref mut cache) = self.rmsprop_cache {
+            if let Some(ref mut cache) = self.optimizer_cache.rmsprop_cache {
                 cache.update_parameters(
                     &mut self.kernel,
                     Some(&mut self.recurrent_kernel),

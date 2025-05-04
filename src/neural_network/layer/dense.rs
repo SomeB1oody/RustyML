@@ -35,12 +35,7 @@ use rayon::prelude::*;
 /// - `input_cache` - Cache of the input from forward pass for use in backward pass
 /// - `grad_weights` - Stored weight gradients
 /// - `grad_bias` - Stored bias gradients
-///
-/// ## Adam states
-/// - `adam_states` - Adam optimizer states for weights and biases
-///
-/// ## RMSprop states
-/// - `rmsprop_cache` - RMSprop optimizer cache for weights and biases
+/// - `optimizer_cache` - Cache for optimizer
 ///
 /// # Example
 /// ```rust
@@ -81,10 +76,8 @@ pub struct Dense {
     grad_weights: Option<Array2<f32>>,
     /// Stored bias gradients
     grad_bias: Option<Array2<f32>>,
-    /// Adam optimizer states for weights and biases
-    adam_states: Option<AdamStates>,
-    /// RMSprop optimizer cache
-    rmsprop_cache: Option<RMSpropCache>,
+    /// Cache for optimizer
+    optimizer_cache: OptimizerCache,
     /// Activation function for the layer
     activation: Activation,
     /// Cached output after activation for use in backward pass
@@ -110,8 +103,10 @@ impl Dense {
             grad_bias: None,
             activation,
             activation_output: None,
-            adam_states: None,
-            rmsprop_cache: None,
+            optimizer_cache: OptimizerCache {
+                adam_states: None,
+                rmsprop_cache: None,
+            },
         }
     }
 }
@@ -250,18 +245,18 @@ impl Layer for Dense {
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Initialize Adam states (if not already initialized)
-        if self.adam_states.is_none() {
+        if self.optimizer_cache.adam_states.is_none() {
             let dims_w = (self.input_dim, self.output_dim);
             let dims_b = (1, self.output_dim);
 
-            self.adam_states = Some(AdamStates::new(
+            self.optimizer_cache.adam_states = Some(AdamStates::new(
                 dims_w, None, // No recurrent weights
                 dims_b,
             ));
         }
 
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            let adam_states = self.adam_states.as_mut().unwrap();
+            let adam_states = self.optimizer_cache.adam_states.as_mut().unwrap();
             let (w_update, _, b_update) = adam_states.update_parameter(
                 grad_w, None, // No recurrent weights
                 grad_b, beta1, beta2, epsilon, t, lr,
@@ -276,15 +271,15 @@ impl Layer for Dense {
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
             // Initialize RMSprop cache if it doesn't exist
-            if self.rmsprop_cache.is_none() {
-                self.rmsprop_cache = Some(RMSpropCache::new(
+            if self.optimizer_cache.rmsprop_cache.is_none() {
+                self.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
                     (self.input_dim, self.output_dim),
                     None,
                     (1, self.output_dim),
                 ));
             }
 
-            if let Some(ref mut cache) = self.rmsprop_cache {
+            if let Some(ref mut cache) = self.optimizer_cache.rmsprop_cache {
                 cache.update_parameters(
                     &mut self.weights,
                     None,

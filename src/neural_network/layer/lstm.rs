@@ -98,35 +98,32 @@ pub struct LSTM {
 /// - Output gate: Controls what part of the cell state is output
 ///
 /// # Fields
-/// - `kernel`: Weight matrix applied to the input
-/// - `recurrent_kernel`: Weight matrix applied to the previous hidden state
-/// - `bias`: Bias term added to the weighted inputs
-/// - `gate_cache`: Forward propagation cache
-/// - `grad_*`: Gradients
-/// - `adam_states`: Adam optimizer states
-/// - `rmsprop_cache`: RMSprop optimizer cache
-///
+/// - `kernel` - Weight matrix applied to the input
+/// - `recurrent_kernel` - Weight matrix applied to the previous hidden state
+/// - `bias` - Bias term added to the weighted inputs
+/// - `gate_cache` - Forward propagation cache
+/// - `grad_*` - Gradients
+/// - `adam_states` - Adam optimizer states
+/// - `rmsprop_cache` - RMSprop optimizer cache
+/// - `optimizer_cache` - Cache for optimizer
 struct Gate {
-    // Weight matrix
+    /// Weight matrix applied to the input
     kernel: Array2<f32>,
-    // Recurrent weight matrix
+    /// Weight matrix applied to the previous hidden state
     recurrent_kernel: Array2<f32>,
-    // Bias
+    /// Bias term added to the weighted inputs
     bias: Array2<f32>,
 
-    // Forward propagation cache
+    /// Forward propagation cache
     gate_cache: Option<Vec<Array2<f32>>>,
 
-    // Gradients
+    /// Gradients
     grad_kernel: Option<Array2<f32>>,
     grad_recurrent_kernel: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
 
-    // Adam optimizer states
-    adam_states: Option<AdamStates>,
-
-    // RMSprop optimizer cache
-    rmsprop_cache: Option<RMSpropCache>,
+    /// Cache for optimizer
+    optimizer_cache: OptimizerCache,
 }
 
 impl Gate {
@@ -160,8 +157,10 @@ impl Gate {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            adam_states: None,
-            rmsprop_cache: None,
+            optimizer_cache: OptimizerCache {
+                adam_states: None,
+                rmsprop_cache: None,
+            },
         }
     }
 }
@@ -475,16 +474,16 @@ impl Layer for LSTM {
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Initialize AdamStates structure if not already initialized
-        if self.input_gate.adam_states.is_none() {
+        if self.input_gate.optimizer_cache.adam_states.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
             let db = (1, self.units);
 
             // Initialize Adam states for all gates
-            self.input_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.forget_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.cell_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.output_gate.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.input_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.forget_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.cell_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
+            self.output_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
         }
 
         // Helper function to update individual gate parameters
@@ -494,7 +493,7 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                let adam = gate.adam_states.as_mut().unwrap();
+                let adam = gate.optimizer_cache.adam_states.as_mut().unwrap();
                 let (w_update, rk_update, b_update) =
                     adam.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
 
@@ -514,16 +513,20 @@ impl Layer for LSTM {
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
         // Initialize RMSprop cache if it doesn't exist
-        if self.input_gate.rmsprop_cache.is_none() {
+        if self.input_gate.optimizer_cache.rmsprop_cache.is_none() {
             let dk = (self.input_dim, self.units);
             let dr = (self.units, self.units);
             let db = (1, self.units);
 
             // Initialize RMSprop cache for all gates
-            self.input_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
-            self.forget_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
-            self.cell_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
-            self.output_gate.rmsprop_cache = Some(RMSpropCache::new(dk, Some(dr), db));
+            self.input_gate.optimizer_cache.rmsprop_cache =
+                Some(RMSpropCache::new(dk, Some(dr), db));
+            self.forget_gate.optimizer_cache.rmsprop_cache =
+                Some(RMSpropCache::new(dk, Some(dr), db));
+            self.cell_gate.optimizer_cache.rmsprop_cache =
+                Some(RMSpropCache::new(dk, Some(dr), db));
+            self.output_gate.optimizer_cache.rmsprop_cache =
+                Some(RMSpropCache::new(dk, Some(dr), db));
         }
 
         // Update parameters for each gate
@@ -533,7 +536,7 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                if let Some(ref mut cache) = gate.rmsprop_cache {
+                if let Some(ref mut cache) = gate.optimizer_cache.rmsprop_cache {
                     cache.update_parameters(
                         &mut gate.kernel,
                         Some(&mut gate.recurrent_kernel),
