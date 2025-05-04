@@ -6,6 +6,15 @@ pub use adam::*;
 pub use rmsprop::*;
 pub use sgd::*;
 
+/// Cache structure for storing optimization algorithm states.
+///
+/// This structure maintains the state information required by different optimization algorithms
+/// between iterations. It can store states for Adam optimizer and RMSprop optimizer simultaneously.
+///
+/// # Fields
+///
+/// - `adam_states` - Optional cache storage for Adam optimizer states (momentum and velocity terms)
+/// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages
 pub struct OptimizerCache {
     pub adam_states: Option<AdamStates>,
     pub rmsprop_cache: Option<RMSpropCache>,
