@@ -1,4 +1,5 @@
 use crate::ModelError;
+use crate::neural_network::layer::{LayerWeight, SimpleRNNLayerWeight};
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{Activation, Layer, Tensor};
 use ndarray::{Array, Array2, Array3, Axis};
@@ -294,5 +295,13 @@ impl Layer for SimpleRNN {
                 );
             }
         }
+    }
+
+    fn get_weights(&self) -> LayerWeight {
+        LayerWeight::SimpleRNN(SimpleRNNLayerWeight {
+            kernel: &self.kernel,
+            recurrent_kernel: &self.recurrent_kernel,
+            bias: &self.bias,
+        })
     }
 }

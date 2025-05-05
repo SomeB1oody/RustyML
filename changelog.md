@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.6.0] - 2025-5-3
+## [v0.6.0] - 2025-5-5
+### Added
+- Add `get_weights` method across layers and `LayerWeight` enum
+
+## [v0.6.0] - 2025-5-4
 ### Changed
 - Refactor optimizer state handling with unified cache
 

@@ -1,6 +1,7 @@
 use crate::ModelError;
 use crate::machine_learning::RegularizationType;
 use crate::neural_network::Tensor;
+use crate::neural_network::layer::LayerWeight;
 
 pub trait RegressorCommonGetterFunctions {
     /// Gets the current setting for fitting the intercept term
@@ -146,6 +147,22 @@ pub trait Layer {
     /// - `_rho` - Decay rate for moving average of squared gradients
     /// - `_epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {}
+
+    /// Returns a map of all weights in the layer.
+    ///
+    /// This method provides access to all weight matrices and bias vectors used by the LSTM layer.
+    /// The weights are organized by gate (input, forget, cell, output) and by their role
+    /// (kernel, recurrent_kernel, bias) within each gate.
+    ///
+    /// # Returns
+    ///
+    /// * A `LayerWeight` enum containing:
+    ///   - `LayerWeight::Dense` for Dense layers with weight and bias
+    ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
+    ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
+    fn get_weights(&self) -> LayerWeight {
+        LayerWeight::Empty // default is empty
+    }
 }
 
 /// Defines the interface for loss functions used in neural network training.

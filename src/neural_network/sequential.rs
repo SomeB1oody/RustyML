@@ -177,4 +177,25 @@ impl Sequential {
         );
         println!(" Non-trainable params: 0 (0 B)");
     }
+
+    /// Returns all the weights from each layer in the model.
+    ///
+    /// This method collects the weights from all layers in the sequential model and returns them
+    /// as a vector of `LayerWeight` enums. Each `LayerWeight` contains references to the weight
+    /// matrices and bias vectors of its corresponding layer.
+    ///
+    /// # Returns
+    ///
+    /// * `Vec<LayerWeight>` - A vector containing weight references for each layer in the model.
+    ///   The type of each `LayerWeight` depends on the layer type:
+    ///   - `LayerWeight::Dense` for Dense layers with weight and bias
+    ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
+    ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
+    pub fn get_weights(&self) -> Vec<LayerWeight> {
+        let mut weights = Vec::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            weights.push(layer.get_weights());
+        }
+        weights
+    }
 }

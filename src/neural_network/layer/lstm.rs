@@ -1,6 +1,7 @@
 use crate::ModelError;
 pub use crate::neural_network::Tensor;
 pub use crate::neural_network::activation::Activation;
+use crate::neural_network::layer::{LSTMGateWeight, LSTMLayerWeight, LayerWeight};
 use crate::neural_network::optimizer::*;
 use crate::traits::Layer;
 use ndarray::{Array, Array2, Array3, Axis};
@@ -567,5 +568,30 @@ impl Layer for LSTM {
                 )
             },
         );
+    }
+
+    fn get_weights(&self) -> LayerWeight {
+        LayerWeight::LSTM(LSTMLayerWeight {
+            input: LSTMGateWeight {
+                kernel: &self.input_gate.kernel,
+                recurrent_kernel: &self.input_gate.recurrent_kernel,
+                bias: &self.input_gate.bias,
+            },
+            forget: LSTMGateWeight {
+                kernel: &self.forget_gate.kernel,
+                recurrent_kernel: &self.forget_gate.recurrent_kernel,
+                bias: &self.forget_gate.bias,
+            },
+            cell: LSTMGateWeight {
+                kernel: &self.cell_gate.kernel,
+                recurrent_kernel: &self.cell_gate.recurrent_kernel,
+                bias: &self.cell_gate.bias,
+            },
+            output: LSTMGateWeight {
+                kernel: &self.output_gate.kernel,
+                recurrent_kernel: &self.output_gate.recurrent_kernel,
+                bias: &self.output_gate.bias,
+            },
+        })
     }
 }

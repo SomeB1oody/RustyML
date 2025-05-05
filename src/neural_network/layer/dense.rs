@@ -1,4 +1,5 @@
 use crate::ModelError;
+use crate::neural_network::layer::{DenseLayerWeight, LayerWeight};
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{Activation, Layer, Tensor};
 use ndarray::{Array, Array2, Axis};
@@ -293,5 +294,12 @@ impl Layer for Dense {
                 );
             }
         }
+    }
+
+    fn get_weights(&self) -> LayerWeight {
+        LayerWeight::Dense(DenseLayerWeight {
+            weight: &self.weights,
+            bias: &self.bias,
+        })
     }
 }
