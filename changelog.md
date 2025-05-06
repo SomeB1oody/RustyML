@@ -59,7 +59,7 @@ Refactor traits in neural_network module definitions into traits module
 
 ## [v0.6.0] - 2025-4-26
 ### Changed
-Refactor `LinearSVC` to use `RegularizationType` for penalties
+- Refactor `LinearSVC` to use `RegularizationType` for penalties
 
 ## [v0.6.0] - 2025-4-25
 ### Changed
