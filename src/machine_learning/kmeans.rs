@@ -1,9 +1,9 @@
+use crate::ModelError;
 use ndarray::{Array1, Array2, ArrayView2};
 use rand::Rng;
 use rand::SeedableRng;
-use std::ops::AddAssign;
-use crate::ModelError;
 use rayon::prelude::*;
+use std::ops::AddAssign;
 
 /// # KMeans clustering algorithm implementation.
 ///
@@ -97,10 +97,11 @@ impl KMeans {
     /// # Returns
     ///
     /// * `KMeans` - A new KMeans instance with the specified configuration
-    pub fn new(n_clusters: usize,
-               max_iterations: usize,
-               tolerance: f64,
-               random_seed: Option<u64>
+    pub fn new(
+        n_clusters: usize,
+        max_iterations: usize,
+        tolerance: f64,
+        random_seed: Option<u64>,
     ) -> Self {
         KMeans {
             n_clusters,
@@ -375,7 +376,7 @@ impl KMeans {
             for (idx, count) in counts.iter().enumerate() {
                 if *count > 0 {
                     let count_f = *count as f64;
-                    new_centroids.row_mut(idx).mapv_inplace(|x| x / count_f);
+                    new_centroids.row_mut(idx).par_mapv_inplace(|x| x / count_f);
                 }
             }
 
@@ -425,12 +426,13 @@ impl KMeans {
     /// - `Array1<usize>` - An array of cluster indices for each input data point
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, data: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
-        if self.centroids.is_none(){
+        if self.centroids.is_none() {
             return Err(ModelError::NotFitted);
         }
         let n_features = data.shape()[1];
 
-        let labels: Vec<usize> = data.outer_iter()
+        let labels: Vec<usize> = data
+            .outer_iter()
             .into_par_iter()
             .map(|sample| {
                 let sample_shaped = sample.to_shape((1, n_features)).unwrap();

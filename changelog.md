@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.1] - 2025-5-7
+### Changed
+- Use parallelized computation for performance improvement
+
 ## [v0.6.1] - 2025-5-6
 ### Added
 - Add Conv2D layer(initial implementation) support to neural_network module

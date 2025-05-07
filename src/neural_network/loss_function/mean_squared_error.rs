@@ -12,11 +12,8 @@ impl MeanSquaredError {
 
 impl LossFunction for MeanSquaredError {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
-        // Calculate the difference between predictions and ground truth
-        let diff = y_pred - y_true;
-
         // Calculate the squared difference
-        let squared_diff = &diff.mapv(|x| x * x);
+        let squared_diff = (y_pred - y_true).mapv(|x| x * x);
 
         // Calculate the mean (sum divided by number of elements)
         let n = squared_diff.len() as f32;
@@ -29,6 +26,10 @@ impl LossFunction for MeanSquaredError {
 
         // Gradient is 2 times the difference divided by sample count
         let n = diff.len() as f32;
-        diff.mapv(|x| 2.0 * x / n)
+
+        let mut result = diff.clone();
+        result.par_mapv_inplace(|x| 2.0 * x / n);
+
+        result
     }
 }

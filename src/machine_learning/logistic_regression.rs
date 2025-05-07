@@ -367,9 +367,7 @@ impl LogisticRegression {
             let mut predictions = x.dot(weights);
 
             // sigmoid
-            predictions.par_iter_mut().for_each(|val| {
-                *val = sigmoid(*val);
-            });
+            predictions.par_mapv_inplace(|x| sigmoid(x));
 
             Ok(predictions)
         } else {

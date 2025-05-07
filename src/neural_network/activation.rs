@@ -81,12 +81,16 @@ impl Activation {
         activation_output: &Array2<f32>,
         activation: &Activation,
     ) -> Array2<f32> {
+        let mut result = activation_output.clone();
+
         match activation {
-            Activation::ReLU => activation_output.mapv(|x| if x > 0.0 { 1.0 } else { 0.0 }),
-            Activation::Sigmoid => activation_output.mapv(|a| a * (1.0 - a)),
-            Activation::Tanh => activation_output.mapv(|a| 1.0 - a * a),
-            Activation::Softmax => Array2::ones(activation_output.dim()),
+            Activation::ReLU => result.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 }),
+            Activation::Sigmoid => result.par_mapv_inplace(|a| a * (1.0 - a)),
+            Activation::Tanh => result.par_mapv_inplace(|a| 1.0 - a * a),
+            Activation::Softmax => return Array2::ones(activation_output.dim()),
         }
+
+        result
     }
 
     /// Backward propagation for Softmax activation

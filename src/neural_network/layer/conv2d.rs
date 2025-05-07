@@ -118,19 +118,13 @@ impl Conv2D {
         if let Some(activation) = &self.activation {
             match activation {
                 Activation::ReLU => {
-                    for i in x.iter_mut() {
-                        *i = i.max(0.0);
-                    }
+                    x.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
                 }
                 Activation::Sigmoid => {
-                    for i in x.iter_mut() {
-                        *i = 1.0 / (1.0 + (-*i).exp());
-                    }
+                    x.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
                 }
                 Activation::Tanh => {
-                    for i in x.iter_mut() {
-                        *i = i.tanh();
-                    }
+                    x.par_mapv_inplace(|x| x.tanh());
                 }
                 Activation::Softmax => panic!("Cannot use Softmax for convolution"),
             }
@@ -144,21 +138,13 @@ impl Conv2D {
         if let Some(activation) = &self.activation {
             match activation {
                 Activation::ReLU => {
-                    for i in result.iter_mut() {
-                        *i = if *i > 0.0 { 1.0 } else { 0.0 };
-                    }
+                    result.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 });
                 }
                 Activation::Sigmoid => {
-                    for i in result.iter_mut() {
-                        let sigmoid_val = 1.0 / (1.0 + (-*i).exp());
-                        *i = sigmoid_val * (1.0 - sigmoid_val);
-                    }
+                    result.par_mapv_inplace(|a| a * (1.0 - a));
                 }
                 Activation::Tanh => {
-                    for i in result.iter_mut() {
-                        let tanh_val = i.tanh();
-                        *i = 1.0 - tanh_val * tanh_val;
-                    }
+                    result.par_mapv_inplace(|a| 1.0 - a * a);
                 }
                 Activation::Softmax => panic!("Cannot use Softmax for convolution"),
             }

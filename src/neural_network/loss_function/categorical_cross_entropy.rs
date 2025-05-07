@@ -13,7 +13,8 @@ impl CategoricalCrossEntropy {
 impl LossFunction for CategoricalCrossEntropy {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
-        let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
+        let mut y_pred_clipped = y_pred.clone();
+        y_pred_clipped.par_mapv_inplace(|x| x.max(1e-7).min(1.0 - 1e-7));
 
         // Calculate multi-class cross entropy: -Σ[y_true * log(y_pred)]
         // Here y_true must be one-hot encoded
@@ -26,7 +27,8 @@ impl LossFunction for CategoricalCrossEntropy {
 
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
         // Ensure predictions are in a numerically stable range
-        let y_pred_clipped = y_pred.mapv(|x| x.max(1e-7).min(1.0 - 1e-7));
+        let mut y_pred_clipped = y_pred.clone();
+        y_pred_clipped.par_mapv_inplace(|x| x.max(1e-7).min(1.0 - 1e-7));
 
         // Multi-class cross entropy gradient is -y_true / y_pred
         let grad = -y_true / &y_pred_clipped;

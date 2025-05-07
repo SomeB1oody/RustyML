@@ -1,10 +1,10 @@
-use ndarray::{Array1, Array2, ArrayView2, ArrayView1};
-use rand::seq::SliceRandom;
-use rand::rng;
-use std::collections::HashMap;
 use crate::ModelError;
-use rayon::prelude::*;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rand::SeedableRng;
+use rand::rng;
+use rand::seq::SliceRandom;
+use rayon::prelude::*;
+use std::collections::HashMap;
 
 /// Mean Shift clustering algorithm implementation.
 ///
@@ -70,16 +70,9 @@ pub struct MeanShift {
 
 impl Default for MeanShift {
     fn default() -> Self {
-        Self::new(
-            1.0,
-            None,
-            None,
-            None,
-            None,
-        )
+        Self::new(1.0, None, None, None, None)
     }
 }
-
 
 impl MeanShift {
     /// Creates a new MeanShift instance with the specified parameters.
@@ -244,15 +237,21 @@ impl MeanShift {
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
         if self.bandwidth <= 0.0 {
-            return Err(ModelError::InputValidationError("bandwidth must be positive".to_string()));
+            return Err(ModelError::InputValidationError(
+                "bandwidth must be positive".to_string(),
+            ));
         }
 
         if self.max_iter <= 0 {
-            return Err(ModelError::InputValidationError("max_iter must be positive".to_string()));
+            return Err(ModelError::InputValidationError(
+                "max_iter must be positive".to_string(),
+            ));
         }
 
         if self.tol <= 0.0 {
-            return Err(ModelError::InputValidationError("tol must be positive".to_string()));
+            return Err(ModelError::InputValidationError(
+                "tol must be positive".to_string(),
+            ));
         }
 
         use super::preliminary_check;
@@ -276,53 +275,61 @@ impl MeanShift {
         };
 
         // Process mean shift for each seed point in parallel
-        let centers: Vec<Array1<f64>> = seeds.par_iter().map(|&seed_idx| {
-            let mut center = x.row(seed_idx).to_owned();
-            let mut completed_iterations = 0;
+        let centers: Vec<Array1<f64>> = seeds
+            .par_iter()
+            .map(|&seed_idx| {
+                let mut center = x.row(seed_idx).to_owned();
+                let mut completed_iterations = 0;
 
-            loop {
-                let mut new_center = Array1::zeros(n_features);
-                let mut weight_sum = 0.0;
+                loop {
+                    let mut new_center = Array1::zeros(n_features);
+                    let mut weight_sum = 0.0;
 
-                // Calculate distances and weights in parallel
-                let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
-                let weights: Vec<(usize, f64)> = (0..n_samples).into_par_iter().map(|i| {
-                    let point = x.row(i).to_owned();
-                    let dist = self.calculate_distance(center.view(), point.view());
-                    let weight = (-gamma * dist).exp();
-                    (i, weight)
-                }).collect();
+                    // Calculate distances and weights in parallel
+                    let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
+                    let weights: Vec<(usize, f64)> = (0..n_samples)
+                        .into_par_iter()
+                        .map(|i| {
+                            let point = x.row(i).to_owned();
+                            let dist = self.calculate_distance(center.view(), point.view());
+                            let weight = (-gamma * dist).exp();
+                            (i, weight)
+                        })
+                        .collect();
 
-                // Calculate weighted average (this part is harder to parallelize due to accumulation)
-                for (i, weight) in weights {
-                    if weight > 0.0 {
-                        let point = x.row(i);
-                        for j in 0..n_features {
-                            new_center[j] += point[j] * weight;
+                    // Calculate weighted average (this part is harder to parallelize due to accumulation)
+                    for (i, weight) in weights {
+                        if weight > 0.0 {
+                            let point = x.row(i);
+                            for j in 0..n_features {
+                                new_center[j] += point[j] * weight;
+                            }
+                            weight_sum += weight;
                         }
-                        weight_sum += weight;
+                    }
+
+                    // Normalize
+                    if weight_sum > 0.0 {
+                        new_center.par_mapv_inplace(|x| x / weight_sum);
+                    }
+
+                    // Check convergence
+                    let shift = self
+                        .calculate_distance(center.view(), new_center.view())
+                        .sqrt();
+                    center = new_center;
+
+                    completed_iterations += 1;
+
+                    if shift < self.tol || completed_iterations >= self.max_iter {
+                        // The actual iteration count will be set later
+                        break;
                     }
                 }
 
-                // Normalize
-                if weight_sum > 0.0 {
-                    new_center.mapv_inplace(|x| x / weight_sum);
-                }
-
-                // Check convergence
-                let shift = self.calculate_distance(center.view(), new_center.view()).sqrt();
-                center = new_center;
-
-                completed_iterations += 1;
-
-                if shift < self.tol || completed_iterations >= self.max_iter {
-                    // The actual iteration count will be set later
-                    break;
-                }
-            }
-
-            center
-        }).collect();
+                center
+            })
+            .collect();
 
         // Record max iterations (simplified handling)
         self.n_iter = Some(self.max_iter);
@@ -335,13 +342,16 @@ impl MeanShift {
             let mut is_unique = true;
 
             for (i, unique_center) in unique_centers.iter().enumerate() {
-                let distance = self.calculate_distance(center.view(), unique_center.view()).sqrt();
+                let distance = self
+                    .calculate_distance(center.view(), unique_center.view())
+                    .sqrt();
                 if distance < self.bandwidth {
                     // Update existing center (weighted average)
                     let count = center_counts[i];
                     let new_count = count + 1;
-                    let updated_center = unique_centers[i].clone() * (count as f64 / new_count as f64) +
-                        center.clone() * (1.0 / new_count as f64);
+                    let updated_center = unique_centers[i].clone()
+                        * (count as f64 / new_count as f64)
+                        + center.clone() * (1.0 / new_count as f64);
                     unique_centers[i] = updated_center;
                     center_counts[i] = new_count;
                     is_unique = false;
@@ -363,34 +373,40 @@ impl MeanShift {
         }
 
         // Assign cluster labels to each data point in parallel
-        let labels: Vec<usize> = (0..n_samples).into_par_iter().map(|i| {
-            let point = x.row(i).to_owned();
-            let mut min_dist = f64::INFINITY;
-            let mut label = 0;
+        let labels: Vec<usize> = (0..n_samples)
+            .into_par_iter()
+            .map(|i| {
+                let point = x.row(i).to_owned();
+                let mut min_dist = f64::INFINITY;
+                let mut label = 0;
 
-            for (j, center) in unique_centers.iter().enumerate() {
-                let dist = self.calculate_distance(point.view(), center.view());
-                if dist < min_dist {
-                    min_dist = dist;
-                    label = j;
+                for (j, center) in unique_centers.iter().enumerate() {
+                    let dist = self.calculate_distance(point.view(), center.view());
+                    if dist < min_dist {
+                        min_dist = dist;
+                        label = j;
+                    }
                 }
-            }
 
-            // If not cluster_all and distance is too far, mark as outlier
-            if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
-                n_clusters // Use n_clusters as outlier label
-            } else {
-                label
-            }
-        }).collect();
+                // If not cluster_all and distance is too far, mark as outlier
+                if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
+                    n_clusters // Use n_clusters as outlier label
+                } else {
+                    label
+                }
+            })
+            .collect();
 
         self.cluster_centers = Some(cluster_centers);
         self.labels = Some(Array1::from(labels));
         self.n_samples_per_center = Some(Array1::from(center_counts));
 
         // Print training info
-        println!("Mean shift model training finished at iteration {}, number of clusters: {}",
-                 self.n_iter.unwrap_or(0), n_clusters);
+        println!(
+            "Mean shift model training finished at iteration {}, number of clusters: {}",
+            self.n_iter.unwrap_or(0),
+            n_clusters
+        );
 
         Ok(self)
     }
@@ -407,32 +423,34 @@ impl MeanShift {
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
         if let Some(centers) = &self.cluster_centers {
-
             let n_samples = x.shape()[0];
             let n_clusters = centers.shape()[0];
 
             // Process all samples in parallel
-            let labels: Vec<usize> = (0..n_samples).into_par_iter().map(|i| {
-                let point = x.row(i).to_owned();
-                let mut min_dist = f64::INFINITY;
-                let mut label = 0;
+            let labels: Vec<usize> = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let point = x.row(i).to_owned();
+                    let mut min_dist = f64::INFINITY;
+                    let mut label = 0;
 
-                for j in 0..n_clusters {
-                    let center = centers.row(j).to_owned();
-                    let dist = self.calculate_distance(point.view(), center.view());
-                    if dist < min_dist {
-                        min_dist = dist;
-                        label = j;
+                    for j in 0..n_clusters {
+                        let center = centers.row(j).to_owned();
+                        let dist = self.calculate_distance(point.view(), center.view());
+                        if dist < min_dist {
+                            min_dist = dist;
+                            label = j;
+                        }
                     }
-                }
 
-                // If not cluster_all and distance is too far, mark as outlier
-                if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
-                    n_clusters // Use n_clusters as outlier label
-                } else {
-                    label
-                }
-            }).collect();
+                    // If not cluster_all and distance is too far, mark as outlier
+                    if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
+                        n_clusters // Use n_clusters as outlier label
+                    } else {
+                        label
+                    }
+                })
+                .collect();
 
             Ok(Array1::from(labels))
         } else {
@@ -469,7 +487,8 @@ impl MeanShift {
         let n_features = x.shape()[1];
 
         // Calculate min and max for each feature in parallel
-        let (mins, _): (Vec<f64>, Vec<f64>) = (0..n_features).into_par_iter()
+        let (mins, _): (Vec<f64>, Vec<f64>) = (0..n_features)
+            .into_par_iter()
             .map(|j| {
                 let col = x.column(j);
                 let min = col.fold(f64::INFINITY, |a, &b| a.min(b));
@@ -532,7 +551,7 @@ pub fn estimate_bandwidth(
     x: ArrayView2<f64>,
     quantile: Option<f64>,
     n_samples: Option<usize>,
-    random_state: Option<u64>
+    random_state: Option<u64>,
 ) -> f64 {
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
@@ -547,7 +566,7 @@ pub fn estimate_bandwidth(
         None => {
             let mut thread_rng = rand::rng();
             rand::rngs::StdRng::from_rng(&mut thread_rng)
-        },
+        }
     };
 
     // If we have fewer samples than requested, use all samples
@@ -569,17 +588,19 @@ pub fn estimate_bandwidth(
 
     // Create all possible pairs of indices (i,j) where i < j
     let pairs: Vec<(usize, usize)> = (0..n_samples)
-        .flat_map(|i| ((i+1)..n_samples).map(move |j| (i, j)))
+        .flat_map(|i| ((i + 1)..n_samples).map(move |j| (i, j)))
         .collect();
 
     // Compute distances between all pairs of points in parallel
-    let distances: Vec<f64> = pairs.par_iter()
+    let distances: Vec<f64> = pairs
+        .par_iter()
         .map(|&(i, j)| {
             let point_i = x_samples.row(i);
             let point_j = x_samples.row(j);
 
             // Euclidean distance
-            point_i.iter()
+            point_i
+                .iter()
                 .zip(point_j.iter())
                 .map(|(&a, &b)| (a - b).powi(2))
                 .sum::<f64>()
