@@ -147,11 +147,11 @@ impl Sequential {
         );
         let mut total_params = 0;
         for (i, layer) in self.layers.iter().enumerate() {
-            // Generate name for each layer: first layer is named "dense", then "dense_1", "dense_2", etc.
+            // Generate name for each layer: first layer is named "Layer", then "Layer_1", "Layer_2", etc.
             let layer_name = if i == 0 {
-                "dense".to_string()
+                "Layer".to_string()
             } else {
-                format!("dense_{}", i)
+                format!("Layer_{}", i)
             };
             let out_shape = layer.output_shape();
             let param_count = layer.param_count();

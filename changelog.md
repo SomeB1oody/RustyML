@@ -6,6 +6,9 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.6.1] - 2025-5-6
+### Changed
+- Rename layer naming convention in Sequential model
+
 ### Removed
 - Remove some default implementations in `Layer` trait
 
