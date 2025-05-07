@@ -118,7 +118,7 @@ pub trait Layer {
     /// # Parameters
     ///
     /// * `_lr` - Learning rate for parameter updates
-    fn update_parameters_sgd(&mut self, _lr: f32) {}
+    fn update_parameters_sgd(&mut self, _lr: f32);
 
     /// Updates the layer parameters using Adam optimizer.
     ///
@@ -136,8 +136,7 @@ pub trait Layer {
         _beta2: f32,
         _epsilon: f32,
         _t: u64,
-    ) {
-    }
+    );
 
     /// Updates the layer parameters using RMSprop optimizer.
     ///
@@ -146,7 +145,7 @@ pub trait Layer {
     /// - `_lr` - Learning rate for parameter updates
     /// - `_rho` - Decay rate for moving average of squared gradients
     /// - `_epsilon` - Small constant for numerical stability
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {}
+    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32);
 
     /// Returns a map of all weights in the layer.
     ///
@@ -160,9 +159,7 @@ pub trait Layer {
     ///   - `LayerWeight::Dense` for Dense layers with weight and bias
     ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
-    fn get_weights(&self) -> LayerWeight {
-        LayerWeight::Empty // default is empty
-    }
+    fn get_weights(&self) -> LayerWeight;
 }
 
 /// Defines the interface for loss functions used in neural network training.
