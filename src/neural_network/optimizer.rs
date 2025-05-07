@@ -15,6 +15,7 @@ pub use sgd::*;
 ///
 /// - `adam_states` - Optional cache storage for Adam optimizer states (momentum and velocity terms)
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages
+#[derive(Debug, Clone, Default)]
 pub struct OptimizerCache {
     pub adam_states: Option<AdamStates>,
     pub rmsprop_cache: Option<RMSpropCache>,

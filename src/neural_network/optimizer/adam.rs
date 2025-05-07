@@ -71,6 +71,7 @@ impl Optimizer for Adam {
 /// - `v_recurrent` - Second moment vector for recurrent parameters (if applicable)
 /// - `m_bias` - First moment vector for bias parameters
 /// - `v_bias` - Second moment vector for bias parameters
+#[derive(Debug, Clone, Default)]
 pub struct AdamStates {
     pub m: Array2<f32>,
     pub v: Array2<f32>,

@@ -53,6 +53,7 @@ impl Optimizer for RMSprop {
 /// - `cache`: Moving average of squared gradients for main weight parameters.
 /// - `cache_recurrent`: Optional moving average of squared gradients for recurrent weight parameters. This is used in recurrent neural networks like RNN, LSTM, and GRU.
 /// - `bias`: Moving average of squared gradients for bias parameters.
+#[derive(Debug, Clone, Default)]
 pub struct RMSpropCache {
     pub cache: Array2<f32>,
     pub cache_recurrent: Option<Array2<f32>>,
