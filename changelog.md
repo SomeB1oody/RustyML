@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.1] - 2025-5-6
+### Removed
+- Remove some default implementations in `Layer` trait
+
 ## [v0.6.0] - 2025-5-5
 ### Added
 - Add `get_weights` method across layers and `LayerWeight` enum
