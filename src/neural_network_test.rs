@@ -1,6 +1,5 @@
 use crate::neural_network::*;
 use ndarray::prelude::*;
-
 #[test]
 fn mse_test() {
     // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
@@ -274,4 +273,33 @@ fn test_get_weights() {
         );
         println!("SimpleRNN layer bias: {:?}", rnn_weights.bias);
     }
+}
+
+#[test]
+fn conv2d_test() {
+    // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
+    let x = Array::ones((1, 1, 2, 4)).into_dyn();
+    let y = Array::ones((2, 1)).into_dyn();
+
+    // Build the model
+    let mut model = Sequential::new();
+    model.add(Conv2D::new(
+        1,
+        (2, 2),
+        vec![1, 1, 2, 4],
+        (1, 1),
+        PaddingType::Same,
+        Some(Activation::ReLU),
+    ));
+    model.compile(SGD::new(0.01), MeanSquaredError::new());
+
+    // Print model structure (summary)
+    model.summary();
+
+    // Train the model
+    model.fit(&x, &y, 3).unwrap();
+
+    // Use predict for forward propagation prediction
+    let prediction = model.predict(&x);
+    println!("Prediction results: {:?}", prediction);
 }
