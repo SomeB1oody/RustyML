@@ -205,98 +205,50 @@ impl Conv2D {
         output
     }
 
-    // 初始化优化器缓存
-    fn init_optimizer_cache(&mut self) {
-        if self.optimizer_cache.is_none() {
-            // 创建空的优化器缓存二维数组
-            let mut cache_array = Array2::default((2, 1));
+    fn initialize_optimizer_cache() -> Array2<OptimizerCache> {
+        // 创建空的优化器缓存二维数组
+        let mut cache_array = Array2::default((2, 1));
 
-            // 为每个位置设置 OptimizerCache 结构
-            for i in 0..2 {
-                cache_array[[i, 0]] = OptimizerCache {
-                    adam_states: None,
-                    rmsprop_cache: None,
-                };
-            }
-
-            self.optimizer_cache = Some(cache_array);
+        // 为每个位置设置 OptimizerCache 结构
+        for i in 0..2 {
+            cache_array[[i, 0]] = OptimizerCache {
+                adam_states: None,
+                rmsprop_cache: None,
+            };
         }
+
+        cache_array
     }
 
-    // 获取扁平化的权重和梯度
-    fn get_flattened_params(
-        &self,
-        weight_grads: &Array4<f32>,
-        bias_grads: &Array2<f32>,
-    ) -> ((Array2<f32>, Array2<f32>), (Array2<f32>, Array2<f32>)) {
+    fn flatten_weights_and_bias(
+        weights: &Array4<f32>,
+        weights_gradients: &Array4<f32>,
+        bias: &Array2<f32>,
+        bias_gradients: &Array2<f32>,
+    ) -> (Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>) {
+        // 创建一个辅助函数来处理扁平化操作
+        let flatten_array = |arr: &[f32], len: usize| -> Array2<f32> {
+            Array2::from_shape_vec((len, 1), arr.par_iter().cloned().collect()).unwrap()
+        };
+
         // 并行扁平化权重和梯度
         let (weights_flat, weight_grads_flat) = rayon::join(
+            || flatten_array(weights.as_slice().unwrap(), weights.len()),
             || {
-                Array2::from_shape_vec(
-                    (self.weights.len(), 1),
-                    self.weights.par_iter().cloned().collect(),
+                flatten_array(
+                    weights_gradients.as_slice().unwrap(),
+                    weights_gradients.len(),
                 )
-                .unwrap()
-            },
-            || {
-                Array2::from_shape_vec(
-                    (self.weights.len(), 1),
-                    weight_grads.par_iter().cloned().collect(),
-                )
-                .unwrap()
             },
         );
 
         // 并行扁平化偏置和偏置梯度
         let (bias_flat, bias_grads_flat) = rayon::join(
-            || {
-                Array2::from_shape_vec(
-                    (self.bias.len(), 1),
-                    self.bias.par_iter().cloned().collect(),
-                )
-                .unwrap()
-            },
-            || {
-                Array2::from_shape_vec(
-                    (self.bias.len(), 1),
-                    bias_grads.par_iter().cloned().collect(),
-                )
-                .unwrap()
-            },
+            || flatten_array(bias.as_slice().unwrap(), bias.len()),
+            || flatten_array(bias_gradients.as_slice().unwrap(), bias_gradients.len()),
         );
 
-        (
-            (weights_flat, weight_grads_flat),
-            (bias_flat, bias_grads_flat),
-        )
-    }
-
-    // 获取权重和偏置的缓存引用
-    fn get_cache_refs(&mut self) -> (&mut OptimizerCache, &mut OptimizerCache) {
-        let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
-
-        // 使用 unsafe 代码块获取不同的可变引用
-        unsafe {
-            let optimizer_cache_ptr = optimizer_cache.as_ptr() as *mut OptimizerCache;
-
-            (
-                &mut *optimizer_cache_ptr,        // 获取 weight_cache 指针
-                &mut *optimizer_cache_ptr.add(1), // 获取 bias_cache 指针
-            )
-        }
-    }
-
-    // 更新原始权重和偏置数组
-    fn update_original_params(&mut self, weights_flat: &Array2<f32>, bias_flat: &Array2<f32>) {
-        // 将更新后的权重拷贝回原始权重数组
-        for (i, &val) in weights_flat.iter().enumerate() {
-            self.weights.as_slice_mut().unwrap()[i] = val;
-        }
-
-        // 将更新后的偏置拷贝回原始偏置数组
-        for (i, &val) in bias_flat.iter().enumerate() {
-            self.bias.as_slice_mut().unwrap()[i] = val;
-        }
+        (weights_flat, weight_grads_flat, bias_flat, bias_grads_flat)
     }
 }
 
@@ -509,55 +461,19 @@ impl Layer for Conv2D {
         {
             // 初始化 Adam 状态（如果尚未初始化）
             if self.optimizer_cache.is_none() {
-                // 创建空的优化器缓存二维数组
-                let mut cache_array = Array2::default((2, 1));
-
-                // 为每个位置设置 OptimizerCache 结构
-                for i in 0..2 {
-                    cache_array[[i, 0]] = OptimizerCache {
-                        adam_states: None,
-                        rmsprop_cache: None,
-                    };
-                }
+                let cache_array = Self::initialize_optimizer_cache();
 
                 self.optimizer_cache = Some(cache_array);
             }
 
-            // 并行扁平化权重和梯度
-            let (mut weights_flat, weight_grads_flat) = rayon::join(
-                || {
-                    Array2::from_shape_vec(
-                        (self.weights.len(), 1),
-                        self.weights.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-                || {
-                    Array2::from_shape_vec(
-                        (self.weights.len(), 1),
-                        weight_grads.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-            );
-
-            // 并行扁平化偏置和偏置梯度
-            let (mut bias_flat, bias_grads_flat) = rayon::join(
-                || {
-                    Array2::from_shape_vec(
-                        (self.bias.len(), 1),
-                        self.bias.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-                || {
-                    Array2::from_shape_vec(
-                        (self.bias.len(), 1),
-                        bias_grads.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-            );
+            // 扁平化
+            let (mut weights_flat, weight_grads_flat, mut bias_flat, bias_grads_flat) =
+                Self::flatten_weights_and_bias(
+                    &self.weights,
+                    &weight_grads,
+                    &self.bias,
+                    &bias_grads,
+                );
 
             let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
 
@@ -651,55 +567,19 @@ impl Layer for Conv2D {
         {
             // 初始化或获取优化器缓存
             if self.optimizer_cache.is_none() {
-                // 创建空的优化器缓存二维数组
-                let mut cache_array = Array2::default((2, 1));
-
-                // 为每个位置设置 OptimizerCache 结构
-                for i in 0..2 {
-                    cache_array[[i, 0]] = OptimizerCache {
-                        adam_states: None,
-                        rmsprop_cache: None,
-                    };
-                }
+                let cache_array = Self::initialize_optimizer_cache();
 
                 self.optimizer_cache = Some(cache_array);
             }
 
-            // 并行扁平化权重和梯度
-            let (mut weights_flat, weight_grads_flat) = rayon::join(
-                || {
-                    Array2::from_shape_vec(
-                        (self.weights.len(), 1),
-                        self.weights.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-                || {
-                    Array2::from_shape_vec(
-                        (self.weights.len(), 1),
-                        weight_grads.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-            );
-
-            // 并行扁平化偏置和偏置梯度
-            let (mut bias_flat, bias_grads_flat) = rayon::join(
-                || {
-                    Array2::from_shape_vec(
-                        (self.bias.len(), 1),
-                        self.bias.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-                || {
-                    Array2::from_shape_vec(
-                        (self.bias.len(), 1),
-                        bias_grads.par_iter().cloned().collect(),
-                    )
-                    .unwrap()
-                },
-            );
+            // 扁平化
+            let (mut weights_flat, weight_grads_flat, mut bias_flat, bias_grads_flat) =
+                Self::flatten_weights_and_bias(
+                    &self.weights,
+                    &weight_grads,
+                    &self.bias,
+                    &bias_grads,
+                );
 
             let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
 
