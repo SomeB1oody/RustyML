@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Use parallelized computation for performance improvement
+- Replaced multiple optimizer-specific fields with a unified `optimizer_cache` structure
 
 ## [v0.6.1] - 2025-5-6
 ### Added

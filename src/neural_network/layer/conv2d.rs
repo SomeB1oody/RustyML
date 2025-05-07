@@ -1,6 +1,7 @@
 use super::Conv2DLayerWeight;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::layer::LayerWeight;
+use crate::neural_network::optimizer::*;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::{Array2, Array3, Array4, ArrayD, Axis};
@@ -12,37 +13,19 @@ pub enum PaddingType {
     Same,
 }
 
-/// 表示捲積層的結構體
 pub struct Conv2D {
-    /// 濾波器數量
     filters: usize,
-    /// 濾波器大小 (height, width)
     kernel_size: (usize, usize),
-    /// 步長 (height, width)
     strides: (usize, usize),
-    /// 填充類型：'valid' 或 'same'
     padding: PaddingType,
-    /// 捲積核權重
     weights: Array4<f32>,
-    /// 偏置
     bias: Array2<f32>,
-    /// 激活函數
     activation: Option<Activation>,
-    /// 輸入數據的暫存
     input_cache: Option<Tensor>,
-    /// 輸入形狀
     input_shape: Vec<usize>,
-    /// 梯度累積 - 用於優化算法
     weight_gradients: Option<Array4<f32>>,
     bias_gradients: Option<Array2<f32>>,
-    // Adam 優化器參數
-    m_weights: Option<Array4<f32>>,
-    v_weights: Option<Array4<f32>>,
-    m_biases: Option<Array2<f32>>,
-    v_biases: Option<Array2<f32>>,
-    // RMSprop 優化器參數
-    cache_weights: Option<Array4<f32>>,
-    cache_biases: Option<Array2<f32>>,
+    optimizer_cache: Option<Array2<OptimizerCache>>,
 }
 
 impl Conv2D {
@@ -82,12 +65,7 @@ impl Conv2D {
             input_shape,
             weight_gradients: None,
             bias_gradients: None,
-            m_weights: None,
-            v_weights: None,
-            m_biases: None,
-            v_biases: None,
-            cache_weights: None,
-            cache_biases: None,
+            optimizer_cache: None,
         }
     }
 
@@ -225,6 +203,100 @@ impl Conv2D {
         }
 
         output
+    }
+
+    // 初始化优化器缓存
+    fn init_optimizer_cache(&mut self) {
+        if self.optimizer_cache.is_none() {
+            // 创建空的优化器缓存二维数组
+            let mut cache_array = Array2::default((2, 1));
+
+            // 为每个位置设置 OptimizerCache 结构
+            for i in 0..2 {
+                cache_array[[i, 0]] = OptimizerCache {
+                    adam_states: None,
+                    rmsprop_cache: None,
+                };
+            }
+
+            self.optimizer_cache = Some(cache_array);
+        }
+    }
+
+    // 获取扁平化的权重和梯度
+    fn get_flattened_params(
+        &self,
+        weight_grads: &Array4<f32>,
+        bias_grads: &Array2<f32>,
+    ) -> ((Array2<f32>, Array2<f32>), (Array2<f32>, Array2<f32>)) {
+        // 并行扁平化权重和梯度
+        let (weights_flat, weight_grads_flat) = rayon::join(
+            || {
+                Array2::from_shape_vec(
+                    (self.weights.len(), 1),
+                    self.weights.par_iter().cloned().collect(),
+                )
+                .unwrap()
+            },
+            || {
+                Array2::from_shape_vec(
+                    (self.weights.len(), 1),
+                    weight_grads.par_iter().cloned().collect(),
+                )
+                .unwrap()
+            },
+        );
+
+        // 并行扁平化偏置和偏置梯度
+        let (bias_flat, bias_grads_flat) = rayon::join(
+            || {
+                Array2::from_shape_vec(
+                    (self.bias.len(), 1),
+                    self.bias.par_iter().cloned().collect(),
+                )
+                .unwrap()
+            },
+            || {
+                Array2::from_shape_vec(
+                    (self.bias.len(), 1),
+                    bias_grads.par_iter().cloned().collect(),
+                )
+                .unwrap()
+            },
+        );
+
+        (
+            (weights_flat, weight_grads_flat),
+            (bias_flat, bias_grads_flat),
+        )
+    }
+
+    // 获取权重和偏置的缓存引用
+    fn get_cache_refs(&mut self) -> (&mut OptimizerCache, &mut OptimizerCache) {
+        let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
+
+        // 使用 unsafe 代码块获取不同的可变引用
+        unsafe {
+            let optimizer_cache_ptr = optimizer_cache.as_ptr() as *mut OptimizerCache;
+
+            (
+                &mut *optimizer_cache_ptr,        // 获取 weight_cache 指针
+                &mut *optimizer_cache_ptr.add(1), // 获取 bias_cache 指针
+            )
+        }
+    }
+
+    // 更新原始权重和偏置数组
+    fn update_original_params(&mut self, weights_flat: &Array2<f32>, bias_flat: &Array2<f32>) {
+        // 将更新后的权重拷贝回原始权重数组
+        for (i, &val) in weights_flat.iter().enumerate() {
+            self.weights.as_slice_mut().unwrap()[i] = val;
+        }
+
+        // 将更新后的偏置拷贝回原始偏置数组
+        for (i, &val) in bias_flat.iter().enumerate() {
+            self.bias.as_slice_mut().unwrap()[i] = val;
+        }
     }
 }
 
@@ -435,52 +507,141 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化動量和方差（如果未初始化）
-            if self.m_weights.is_none() {
-                self.m_weights = Some(Array4::zeros(self.weights.dim()));
-                self.v_weights = Some(Array4::zeros(self.weights.dim()));
-                self.m_biases = Some(Array2::zeros(self.bias.dim()));
-                self.v_biases = Some(Array2::zeros(self.bias.dim()));
-            }
+            // 初始化 Adam 状态（如果尚未初始化）
+            if self.optimizer_cache.is_none() {
+                // 创建空的优化器缓存二维数组
+                let mut cache_array = Array2::default((2, 1));
 
-            let correction1 = 1.0 - beta1.powi(t as i32);
-            let correction2 = 1.0 - beta2.powi(t as i32);
-
-            // 更新權重
-            if let (Some(m_weights), Some(v_weights)) = (&mut self.m_weights, &mut self.v_weights) {
-                for i in 0..self.weights.len() {
-                    let grad = weight_grads.as_slice().unwrap()[i];
-                    let m = &mut m_weights.as_slice_mut().unwrap()[i];
-                    let v = &mut v_weights.as_slice_mut().unwrap()[i];
-
-                    *m = beta1 * *m + (1.0 - beta1) * grad;
-                    *v = beta2 * *v + (1.0 - beta2) * grad * grad;
-
-                    let m_corrected = *m / correction1;
-                    let v_corrected = *v / correction2;
-
-                    self.weights.as_slice_mut().unwrap()[i] -=
-                        lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                // 为每个位置设置 OptimizerCache 结构
+                for i in 0..2 {
+                    cache_array[[i, 0]] = OptimizerCache {
+                        adam_states: None,
+                        rmsprop_cache: None,
+                    };
                 }
+
+                self.optimizer_cache = Some(cache_array);
             }
 
-            // 更新偏置
-            if let (Some(m_biases), Some(v_biases)) = (&mut self.m_biases, &mut self.v_biases) {
-                for i in 0..self.bias.len() {
-                    let grad = bias_grads.as_slice().unwrap()[i];
-                    let m = &mut m_biases.as_slice_mut().unwrap()[i];
-                    let v = &mut v_biases.as_slice_mut().unwrap()[i];
+            // 并行扁平化权重和梯度
+            let (mut weights_flat, weight_grads_flat) = rayon::join(
+                || {
+                    Array2::from_shape_vec(
+                        (self.weights.len(), 1),
+                        self.weights.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+                || {
+                    Array2::from_shape_vec(
+                        (self.weights.len(), 1),
+                        weight_grads.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+            );
 
-                    *m = beta1 * *m + (1.0 - beta1) * grad;
-                    *v = beta2 * *v + (1.0 - beta2) * grad * grad;
+            // 并行扁平化偏置和偏置梯度
+            let (mut bias_flat, bias_grads_flat) = rayon::join(
+                || {
+                    Array2::from_shape_vec(
+                        (self.bias.len(), 1),
+                        self.bias.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+                || {
+                    Array2::from_shape_vec(
+                        (self.bias.len(), 1),
+                        bias_grads.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+            );
 
-                    let m_corrected = *m / correction1;
-                    let v_corrected = *v / correction2;
+            let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
 
-                    self.bias.as_slice_mut().unwrap()[i] -=
-                        lr * m_corrected / (v_corrected.sqrt() + epsilon);
-                }
-            }
+            // 使用 unsafe 代码块获取不同的可变引用
+            let (bias_cache, weight_cache) = unsafe {
+                let optimizer_cache_ptr = optimizer_cache.as_ptr() as *mut OptimizerCache;
+
+                (
+                    &mut *optimizer_cache_ptr.add(1), // 获取 bias_cache 指针
+                    &mut *optimizer_cache_ptr,        // 获取 weight_cache 指针
+                )
+            };
+
+            // 并行处理权重和偏置更新
+            rayon::join(
+                || {
+                    // 初始化权重的 Adam 状态（如果尚未初始化）
+                    if weight_cache.adam_states.is_none() {
+                        let dims_w = (self.weights.len(), 1); // 扁平化权重维度
+                        let dims_b = (0, 0); // 占位符，不会使用
+
+                        weight_cache.adam_states = Some(AdamStates::new(
+                            dims_w, None, // 无递归权重
+                            dims_b,
+                        ));
+                    }
+
+                    // 使用 AdamStates 更新参数
+                    if let Some(ref mut adam_states) = weight_cache.adam_states {
+                        let (w_update, _, _) = adam_states.update_parameter(
+                            &weight_grads_flat,
+                            None,                   // 无递归梯度
+                            &Array2::zeros((0, 0)), // 占位符
+                            beta1,
+                            beta2,
+                            epsilon,
+                            t,
+                            lr,
+                        );
+
+                        // 应用更新到扁平化权重
+                        weights_flat = weights_flat - w_update;
+
+                        // 将更新后的权重拷贝回原始权重数组
+                        for (i, &val) in weights_flat.iter().enumerate() {
+                            self.weights.as_slice_mut().unwrap()[i] = val;
+                        }
+                    }
+                },
+                || {
+                    // 初始化偏置的 Adam 状态（如果尚未初始化）
+                    if bias_cache.adam_states.is_none() {
+                        let dims_w = (0, 0); // 占位符，不会使用
+                        let dims_b = (self.bias.len(), 1); // 扁平化偏置维度
+
+                        bias_cache.adam_states = Some(AdamStates::new(
+                            dims_w, None, // 无递归权重
+                            dims_b,
+                        ));
+                    }
+
+                    // 使用 AdamStates 更新参数
+                    if let Some(ref mut adam_states) = bias_cache.adam_states {
+                        let (_, _, b_update) = adam_states.update_parameter(
+                            &Array2::zeros((0, 0)), // 占位符
+                            None,                   // 无递归梯度
+                            &bias_grads_flat,
+                            beta1,
+                            beta2,
+                            epsilon,
+                            t,
+                            lr,
+                        );
+
+                        // 应用更新到扁平化偏置
+                        bias_flat = bias_flat - b_update;
+
+                        // 将更新后的偏置拷贝回原始偏置数组
+                        for (i, &val) in bias_flat.iter().enumerate() {
+                            self.bias.as_slice_mut().unwrap()[i] = val;
+                        }
+                    }
+                },
+            );
         }
     }
 
@@ -488,35 +649,131 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化快取（如果未初始化）
-            if self.cache_weights.is_none() {
-                self.cache_weights = Some(Array4::zeros(self.weights.dim()));
-                self.cache_biases = Some(Array2::zeros(self.bias.dim()));
-            }
+            // 初始化或获取优化器缓存
+            if self.optimizer_cache.is_none() {
+                // 创建空的优化器缓存二维数组
+                let mut cache_array = Array2::default((2, 1));
 
-            // 更新權重
-            if let Some(cache_weights) = &mut self.cache_weights {
-                for i in 0..self.weights.len() {
-                    let grad = weight_grads.as_slice().unwrap()[i];
-                    let cache = &mut cache_weights.as_slice_mut().unwrap()[i];
-
-                    *cache = rho * *cache + (1.0 - rho) * grad * grad;
-
-                    self.weights.as_slice_mut().unwrap()[i] -= lr * grad / (cache.sqrt() + epsilon);
+                // 为每个位置设置 OptimizerCache 结构
+                for i in 0..2 {
+                    cache_array[[i, 0]] = OptimizerCache {
+                        adam_states: None,
+                        rmsprop_cache: None,
+                    };
                 }
+
+                self.optimizer_cache = Some(cache_array);
             }
 
-            // 更新偏置
-            if let Some(cache_biases) = &mut self.cache_biases {
-                for i in 0..self.bias.len() {
-                    let grad = bias_grads.as_slice().unwrap()[i];
-                    let cache = &mut cache_biases.as_slice_mut().unwrap()[i];
+            // 并行扁平化权重和梯度
+            let (mut weights_flat, weight_grads_flat) = rayon::join(
+                || {
+                    Array2::from_shape_vec(
+                        (self.weights.len(), 1),
+                        self.weights.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+                || {
+                    Array2::from_shape_vec(
+                        (self.weights.len(), 1),
+                        weight_grads.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+            );
 
-                    *cache = rho * *cache + (1.0 - rho) * grad * grad;
+            // 并行扁平化偏置和偏置梯度
+            let (mut bias_flat, bias_grads_flat) = rayon::join(
+                || {
+                    Array2::from_shape_vec(
+                        (self.bias.len(), 1),
+                        self.bias.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+                || {
+                    Array2::from_shape_vec(
+                        (self.bias.len(), 1),
+                        bias_grads.par_iter().cloned().collect(),
+                    )
+                    .unwrap()
+                },
+            );
 
-                    self.bias.as_slice_mut().unwrap()[i] -= lr * grad / (cache.sqrt() + epsilon);
-                }
-            }
+            let optimizer_cache = self.optimizer_cache.as_mut().unwrap();
+
+            // 使用 unsafe 获取不同元素的可变引用
+            let (bias_cache, weight_cache) = unsafe {
+                let optimizer_cache_ptr = optimizer_cache.as_ptr() as *mut OptimizerCache;
+                (
+                    &mut *optimizer_cache_ptr.add(1), // 获取 bias_cache 指针
+                    &mut *optimizer_cache_ptr,        // 获取 weight_cache 指针
+                )
+            };
+
+            // 然后并行处理
+            rayon::join(
+                || {
+                    // 处理权重的RMSprop缓存
+                    if weight_cache.rmsprop_cache.is_none() {
+                        weight_cache.rmsprop_cache = Some(RMSpropCache::new(
+                            (self.weights.len(), 1), // 权重维度
+                            None,                    // 无递归权重
+                            (1, 1),                  // 占位符
+                        ));
+                    }
+
+                    // 使用RMSpropCache更新参数 (权重部分)
+                    if let Some(ref mut rmsprop_cache) = weight_cache.rmsprop_cache {
+                        rmsprop_cache.update_parameters(
+                            &mut weights_flat,          // 主权重参数
+                            None,                       // 无递归权重
+                            &mut Array2::zeros((1, 1)), // 占位符，不会使用
+                            &weight_grads_flat,         // 主权重梯度
+                            None,                       // 无递归梯度
+                            &Array2::zeros((1, 1)),     // 占位符，不会使用
+                            rho,
+                            lr,
+                            epsilon,
+                        );
+
+                        // 将更新后的权重拷贝回原始权重数组
+                        for (i, &val) in weights_flat.iter().enumerate() {
+                            self.weights.as_slice_mut().unwrap()[i] = val;
+                        }
+                    }
+                },
+                || {
+                    // 处理偏置的RMSprop缓存
+                    if bias_cache.rmsprop_cache.is_none() {
+                        bias_cache.rmsprop_cache = Some(RMSpropCache::new(
+                            (1, 1),               // 占位符
+                            None,                 // 无递归权重
+                            (self.bias.len(), 1), // 偏置维度
+                        ));
+                    }
+
+                    if let Some(ref mut rmsprop_cache) = bias_cache.rmsprop_cache {
+                        rmsprop_cache.update_parameters(
+                            &mut Array2::zeros((1, 1)), // 占位符，不会使用
+                            None,                       // 无递归权重
+                            &mut bias_flat,             // 偏置参数
+                            &Array2::zeros((1, 1)),     // 占位符，不会使用
+                            None,                       // 无递归梯度
+                            &bias_grads_flat,           // 偏置梯度
+                            rho,
+                            lr,
+                            epsilon,
+                        );
+
+                        // 将更新后的偏置拷贝回原始偏置数组
+                        for (i, &val) in bias_flat.iter().enumerate() {
+                            self.bias.as_slice_mut().unwrap()[i] = val;
+                        }
+                    }
+                },
+            );
         }
     }
 
