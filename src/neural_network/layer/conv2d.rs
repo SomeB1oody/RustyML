@@ -8,11 +8,92 @@ use ndarray::{Array2, Array3, Array4, ArrayD, Axis};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 
+/// Defines the padding method used in convolutional layers.
+///
+/// The padding type determines how the input is padded before applying convolution:
+/// - `Valid`: No padding is applied, which reduces the output dimensions.
+/// - `Same`: Padding is added to preserve the input spatial dimensions in the output.
 pub enum PaddingType {
+    /// No padding is applied. The convolution is only computed where the filter
+    /// fully overlaps with the input, resulting in an output with reduced dimensions.
     Valid,
+
+    /// Padding is added around the input to ensure that the output has the same
+    /// spatial dimensions as the input (when stride is 1). This is done by adding
+    /// zeros around the borders of the input.
     Same,
 }
 
+/// A 2D convolutional layer for neural networks.
+///
+/// This layer applies a convolution operation to input data, which is a fundamental
+/// operation in convolutional neural networks (CNNs). It's particularly effective for
+/// processing data with grid-like topology, such as images.
+///
+/// # Fields
+///
+/// - `filters` - Number of convolution filters (output channels).
+/// - `kernel_size` - Size of the convolution kernel as (height, width).
+/// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
+/// - `padding` - Type of padding to apply (`Valid` or `Same`).
+/// - `weights` - 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\].
+/// - `bias` - 2D array of bias values with shape \[1, filters\].
+/// - `activation` - Optional activation function applied after the convolution.
+/// - `input_cache` - Cached input from the forward pass, used during backpropagation.
+/// - `input_shape` - Shape of the input tensor.
+/// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
+/// - `bias_gradients` - Gradients for the biases, computed during backpropagation.
+/// - `optimizer_cache` - Cache for optimizer-specific state (e.g., momentum values for Adam).
+///
+/// # Shape Information
+///
+/// Input shape: \[batch_size, channels, height, width\]
+/// Output shape: \[batch_size, filters, output_height, output_width\]
+///
+/// The output dimensions (output_height, output_width) depend on:
+/// - Input dimensions
+/// - Kernel size
+/// - Stride values
+/// - Padding type
+///
+/// # Example
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::Array4;
+///
+/// // Create a simple 4D input tensor: [batch_size, channels, height, width]
+/// // Batch size=2, 1 input channel, 5x5 pixels
+/// let x = Array4::ones((2, 1, 5, 5)).into_dyn();
+///
+/// // Create target tensor - assuming we'll have 3 filters with output size 3x3
+/// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
+///
+/// // Build model: add a Conv2D layer with 3 filters and 3x3 kernel
+/// let mut model = Sequential::new();
+/// model
+///     .add(Conv2D::new(
+///         3,                      // Number of filters
+///         (3, 3),                 // Kernel size
+///         vec![2, 1, 5, 5],       // Input shape
+///         (1, 1),                 // Stride
+///         PaddingType::Valid,     // No padding
+///         Some(Activation::ReLU), // ReLU activation function
+///     ))
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+/// // Print model structure
+/// model.summary();
+///
+/// // Train the model (run a few epochs)
+/// model.fit(&x, &y, 3).unwrap();
+///
+/// // Use predict for forward propagation prediction
+/// let prediction = model.predict(&x);
+/// println!("Convolution layer prediction results: {:?}", prediction);
+///
+/// // Check if output shape is correct - should be [2, 3, 3, 3]
+/// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
+/// ```
 pub struct Conv2D {
     filters: usize,
     kernel_size: (usize, usize),
@@ -29,7 +110,25 @@ pub struct Conv2D {
 }
 
 impl Conv2D {
-    /// 創建新的捲積層
+    /// Creates a new 2D convolutional layer with the specified parameters.
+    ///
+    /// # Parameters
+    ///
+    /// - `filters` - Number of convolution filters (output channels).
+    /// - `kernel_size` - Size of the convolution kernel as (height, width).
+    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\].
+    /// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
+    /// - `padding` - Type of padding to apply (`Valid` or `Same`).
+    /// - `activation` - Optional activation function to apply after the convolution.
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - A new `Conv2D` layer instance with randomly initialized weights.
+    ///
+    /// # Notes
+    ///
+    /// Weights are initialized from a normal distribution with mean 0.0 and standard
+    /// deviation 0.1. Biases are initialized to zeros.
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -41,16 +140,16 @@ impl Conv2D {
         let mut rng = rand::rng();
         let normal = Normal::new(0.0, 0.1).unwrap();
 
-        // 形狀為 [batch_size, channels, height, width]
+        // Shape is [batch_size, channels, height, width]
         let channels = input_shape[1];
 
-        // 初始化權重
+        // Initialize weights
         let mut weights = Array4::zeros((filters, channels, kernel_size.0, kernel_size.1));
         for i in weights.iter_mut() {
             *i = normal.sample(&mut rng) as f32;
         }
 
-        // 初始化偏置
+        // Initialize biases
         let bias = Array2::zeros((1, filters));
 
         Conv2D {
@@ -72,7 +171,23 @@ impl Conv2D {
         }
     }
 
-    /// 計算輸出形狀
+    /// Calculates the output shape of the convolutional layer based on input dimensions.
+    ///
+    /// This function determines the spatial dimensions of the output tensor based on:
+    /// - Input dimensions
+    /// - Kernel size
+    /// - Stride values
+    /// - Padding type
+    ///
+    /// # Parameters
+    ///
+    /// * `input_shape` - A slice containing the shape of the input tensor in the format
+    ///   \[batch_size, channels, height, width\].
+    ///
+    /// # Returns
+    ///
+    /// A vector containing the calculated output shape in the format
+    /// \[batch_size, filters, output_height, output_width\].
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let input_height = input_shape[2];
@@ -94,7 +209,18 @@ impl Conv2D {
         vec![batch_size, self.filters, output_height, output_width]
     }
 
-    /// 應用激活函數
+    /// Applies the activation function to the tensor in-place.
+    ///
+    /// If an activation function is specified for this layer, this method applies it
+    /// element-wise to the input tensor using parallel processing.
+    ///
+    /// # Parameters
+    ///
+    /// * `x` - A mutable reference to the tensor to which the activation function will be applied.
+    ///
+    /// # Panics
+    ///
+    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
     fn apply_activation(&self, x: &mut Tensor) {
         if let Some(activation) = &self.activation {
             match activation {
@@ -112,7 +238,21 @@ impl Conv2D {
         }
     }
 
-    /// 計算激活函數的導數
+    /// Calculates the derivative of the activation function at the given output values.
+    ///
+    /// This function is used during backpropagation to compute gradients.
+    ///
+    /// # Parameters
+    ///
+    /// * `output` - A reference to the tensor containing the output values of the forward pass.
+    ///
+    /// # Returns
+    ///
+    /// * `Tensor` - A new tensor containing the activation function derivatives calculated element-wise.
+    ///
+    /// # Panics
+    ///
+    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
     fn activation_derivative(&self, output: &Tensor) -> Tensor {
         let mut result = output.clone();
 
@@ -134,25 +274,38 @@ impl Conv2D {
         result
     }
 
-    /// 執行捲積操作
+    /// Performs the convolution operation on the input tensor.
+    ///
+    /// This method implements the core convolution algorithm with optimizations:
+    /// - Parallel batch processing using Rayon
+    /// - Boundary condition pre-checking
+    /// - Memory access pattern optimization
+    ///
+    /// # Parameters
+    ///
+    /// * `input` - A reference to the input tensor with shape \[batch_size, channels, height, width\].
+    ///
+    /// # Returns
+    ///
+    /// * `Tensor` - A new tensor containing the result of the convolution operation with shape \[batch_size, filters, output_height, output_width\].
     fn convolve(&self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let in_channels = input_shape[1];
         let output_shape = self.calculate_output_shape(input_shape);
 
-        // 預先分配輸出數組
+        // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());
 
-        // 创建批次处理的结果向量
+        // Create vector for batch processing results
         let results: Vec<_> = (0..batch_size)
             .into_par_iter()
             .map(|b| {
-                // 创建这个批次的输出部分
+                // Create output portion for this batch
                 let mut batch_output =
                     Array3::zeros((self.filters, output_shape[2], output_shape[3]));
 
-                // 每個批次的計算
+                // Computation for each batch
                 for f in 0..self.filters {
                     for i in 0..output_shape[2] {
                         let i_base = i * self.strides.0;
@@ -161,8 +314,8 @@ impl Conv2D {
                             let j_base = j * self.strides.1;
                             let mut sum = 0.0;
 
-                            // 捲積核的計算
-                            // 預先檢查邊界條件
+                            // Convolution kernel calculation
+                            // Pre-check boundary conditions
                             let max_ki = input_shape[2]
                                 .saturating_sub(i_base)
                                 .min(self.kernel_size.0);
@@ -171,7 +324,7 @@ impl Conv2D {
                                 .min(self.kernel_size.1);
 
                             for c in 0..in_channels {
-                                // 使用連續內存訪問模式
+                                // Use contiguous memory access pattern
                                 for ki in 0..max_ki {
                                     let i_pos = i_base + ki;
 
@@ -183,7 +336,7 @@ impl Conv2D {
                                 }
                             }
 
-                            // 更新批次输出
+                            // Update batch output
                             sum += self.bias[[0, f]];
                             batch_output[[f, i, j]] = sum;
                         }
@@ -194,7 +347,7 @@ impl Conv2D {
             })
             .collect();
 
-        // 將每個批次的結果合併到最終輸出
+        // Merge results from each batch into final output
         for (b, batch_output) in results {
             for f in 0..self.filters {
                 for i in 0..output_shape[2] {
@@ -211,13 +364,13 @@ impl Conv2D {
 
 impl Layer for Conv2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 保存輸入以便反向傳播
+        // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // 執行捲積操作
+        // Perform convolution operation
         let mut output = self.convolve(input);
 
-        // 應用激活函數
+        // Apply activation function
         self.apply_activation(&mut output);
 
         output
@@ -230,10 +383,10 @@ impl Layer for Conv2D {
             let channels = input_shape[1];
             let grad_shape = grad_output.shape();
 
-            // 計算激活函數的導數
+            // Calculate derivatives of the activation function
             let activation_grad = self.activation_derivative(grad_output);
 
-            // 使用 rayon 並行處理元素乘法
+            // Use rayon for parallel element-wise multiplication
             let mut gradient = activation_grad.clone();
             if let (Some(grad_slice), Some(act_slice), Some(out_slice)) = (
                 gradient.as_slice_mut(),
@@ -247,17 +400,17 @@ impl Layer for Conv2D {
                         *g = a * o;
                     });
             } else {
-                // 回退到循環實現
+                // Fallback to loop implementation
                 for (i, v) in activation_grad.iter().enumerate() {
                     gradient.as_slice_mut().unwrap()[i] = v * grad_output.as_slice().unwrap()[i];
                 }
             }
 
-            // 初始化權重和偏置的梯度
+            // Initialize gradients for weights and biases
             let mut weight_grads = Array4::zeros(self.weights.dim());
             let mut bias_grads = Array2::zeros((1, self.filters));
 
-            // 並行計算偏置梯度
+            // Calculate bias gradients in parallel
             bias_grads
                 .axis_iter_mut(Axis(1))
                 .into_par_iter()
@@ -274,18 +427,18 @@ impl Layer for Conv2D {
                     *bias.first_mut().unwrap() = sum;
                 });
 
-            // 使用並行計算優化權重梯度計算
+            // Optimize weight gradient calculation using parallel computation
             weight_grads
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
                 .enumerate()
                 .for_each(|(f, mut filter_grad)| {
-                    // 對每個過濾器並行處理
+                    // Process each filter in parallel
                     for c in 0..channels {
                         for h in 0..self.kernel_size.0 {
                             for w in 0..self.kernel_size.1 {
                                 let mut sum = 0.0;
-                                // 預先檢查邊界條件，減少條件檢查次數
+                                // Pre-check boundary conditions to reduce conditional checks
                                 for b in 0..batch_size {
                                     for i in 0..grad_shape[2] {
                                         let i_pos = i * self.strides.0 + h;
@@ -308,18 +461,18 @@ impl Layer for Conv2D {
                     }
                 });
 
-            // 保存梯度以便優化
+            // Save gradients for optimization
             self.weight_gradients = Some(weight_grads);
             self.bias_gradients = Some(bias_grads);
 
-            // 並行計算輸入梯度
+            // Calculate input gradients in parallel
             let mut input_gradients = ArrayD::zeros(input.dim());
 
-            // 使用分批並行處理，並收集結果
+            // Use batch-wise parallel processing and collect results
             let local_results: Vec<_> = (0..batch_size)
                 .into_par_iter()
                 .map(|b| {
-                    // 為每個批次創建局部梯度
+                    // Create local gradients for each batch
                     let mut local_gradients =
                         Array3::zeros([channels, input_shape[2], input_shape[3]]);
 
@@ -331,12 +484,12 @@ impl Layer for Conv2D {
                                 for f in 0..self.filters {
                                     for h in 0..self.kernel_size.0 {
                                         for w in 0..self.kernel_size.1 {
-                                            // 檢查索引是否有效
+                                            // Check if indices are valid
                                             if i >= h && j >= w {
                                                 let grad_i = (i - h) / self.strides.0;
                                                 let grad_j = (j - w) / self.strides.1;
 
-                                                // 檢查計算出的梯度位置是否有效
+                                                // Check if calculated gradient position is valid
                                                 if grad_i < grad_shape[2]
                                                     && grad_j < grad_shape[3]
                                                     && (i - h) % self.strides.0 == 0
@@ -359,7 +512,7 @@ impl Layer for Conv2D {
                 })
                 .collect();
 
-            // 在主線程中合併結果
+            // Merge results in the main thread
             for (b, local_gradients) in local_results {
                 for c in 0..channels {
                     for i in 0..input_shape[2] {
@@ -414,7 +567,7 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化動量和方差（如果未初始化）
+            // Initialize momentum and variance (if not initialized)
             if self.optimizer_cache.adam_states.is_none() {
                 self.optimizer_cache.adam_states = Some(AdamStatesFEX {
                     m: Array4::zeros(self.weights.dim()),
@@ -427,7 +580,7 @@ impl Layer for Conv2D {
             let correction1 = 1.0 - beta1.powi(t as i32);
             let correction2 = 1.0 - beta2.powi(t as i32);
 
-            // 更新權重
+            // Update weights
             if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
                 for i in 0..self.weights.len() {
                     let grad = weight_grads.as_slice().unwrap()[i];
@@ -444,7 +597,7 @@ impl Layer for Conv2D {
                         lr * m_corrected / (v_corrected.sqrt() + epsilon);
                 }
 
-                // 更新偏置
+                // Update biases
                 for i in 0..self.bias.len() {
                     let grad = bias_grads.as_slice().unwrap()[i];
                     let m = &mut adam_states.m_bias.as_slice_mut().unwrap()[i];
@@ -467,7 +620,7 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化快取（如果未初始化）
+            // Initialize cache (if not initialized)
             if self.optimizer_cache.rmsprop_cache.is_none() {
                 self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheFEX {
                     cache: Array4::zeros(self.weights.dim()),
@@ -475,7 +628,7 @@ impl Layer for Conv2D {
                 });
             }
 
-            // 更新權重
+            // Update weights
             if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
                 for i in 0..self.weights.len() {
                     let grad = weight_grads.as_slice().unwrap()[i];
@@ -486,7 +639,7 @@ impl Layer for Conv2D {
                     self.weights.as_slice_mut().unwrap()[i] -= lr * grad / (cache.sqrt() + epsilon);
                 }
 
-                // 更新偏置
+                // Update biases
                 for i in 0..self.bias.len() {
                     let grad = bias_grads.as_slice().unwrap()[i];
                     let cache = &mut rmsprop_cache.bias.as_slice_mut().unwrap()[i];

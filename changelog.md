@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.6.1] - 2025-5-8
 ### Added
 - Add complete test function for `Conv2D`
+- Add comprehensive docstrings for Conv2D layer and methods
 
 ## [v0.6.1] - 2025-5-7
 ### Added
