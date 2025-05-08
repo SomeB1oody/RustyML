@@ -400,15 +400,13 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 更新權重
-            for (w, wg) in self.weights.iter_mut().zip(weight_grads.iter()) {
-                *w -= lr * wg;
-            }
-
-            // 更新偏置
-            for (b, bg) in self.bias.iter_mut().zip(bias_grads.iter()) {
-                *b -= lr * bg;
-            }
+            SGD::update_sgd_parameters(
+                self.weights.as_slice_mut().unwrap(),
+                weight_grads.as_slice().unwrap(),
+                self.bias.as_slice_mut().unwrap(),
+                bias_grads.as_slice().unwrap(),
+                lr,
+            )
         }
     }
 

@@ -450,9 +450,15 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                gate.kernel = &gate.kernel - &(lr * gk);
-                gate.recurrent_kernel = &gate.recurrent_kernel - &(lr * grk);
-                gate.bias = &gate.bias - &(lr * gb);
+                SGD::update_sgd_parameters_rnn(
+                    &mut gate.kernel,
+                    gk,
+                    &mut gate.recurrent_kernel,
+                    grk,
+                    &mut gate.bias,
+                    gb,
+                    lr,
+                );
             }
         }
 
