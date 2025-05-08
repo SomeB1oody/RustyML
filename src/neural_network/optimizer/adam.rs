@@ -1,5 +1,5 @@
 use crate::neural_network::{Layer, Optimizer};
-use ndarray::Array2;
+use ndarray::{Array2, Array4};
 
 /// Adam optimizer implementation.
 ///
@@ -218,4 +218,13 @@ impl AdamStates {
         *m = m_updated;
         *v = v_updated;
     }
+}
+
+/// Stores and manages optimization state for the Adam optimizer algorithm(For Feature Extraction Layers)
+#[derive(Debug, Clone, Default)]
+pub struct AdamStatesFEX {
+    pub m: Array4<f32>,
+    pub v: Array4<f32>,
+    pub m_bias: Array2<f32>,
+    pub v_bias: Array2<f32>,
 }

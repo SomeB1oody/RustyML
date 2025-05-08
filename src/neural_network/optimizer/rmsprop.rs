@@ -1,5 +1,5 @@
 use crate::neural_network::{Layer, Optimizer};
-use ndarray::Array2;
+use ndarray::{Array2, Array4};
 
 /// RMSprop optimizer implementation.
 ///
@@ -144,4 +144,11 @@ impl RMSpropCache {
         // Update bias parameters
         Self::update_param(bias_param, bias_grad, &mut self.bias, rho, lr, epsilon);
     }
+}
+
+/// Cache structure for the RMSprop optimization algorithm(For Feature Extraction Layers)
+#[derive(Debug, Clone, Default)]
+pub struct RMSpropCacheFEX {
+    pub cache: Array4<f32>,
+    pub bias: Array2<f32>,
 }

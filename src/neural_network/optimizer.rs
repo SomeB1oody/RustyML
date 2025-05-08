@@ -20,3 +20,10 @@ pub struct OptimizerCache {
     pub adam_states: Option<AdamStates>,
     pub rmsprop_cache: Option<RMSpropCache>,
 }
+
+/// Cache structure for storing optimization algorithm states(For Feature Extraction Layers)
+#[derive(Debug, Clone, Default)]
+pub struct OptimizerCacheFEX {
+    pub adam_states: Option<AdamStatesFEX>,
+    pub rmsprop_cache: Option<RMSpropCacheFEX>,
+}
