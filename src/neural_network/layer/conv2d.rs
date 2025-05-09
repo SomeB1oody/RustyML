@@ -106,7 +106,7 @@ pub struct Conv2D {
     input_shape: Vec<usize>,
     weight_gradients: Option<Array4<f32>>,
     bias_gradients: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCacheFEX,
+    optimizer_cache: OptimizerCacheFEL,
 }
 
 impl Conv2D {
@@ -164,7 +164,7 @@ impl Conv2D {
             input_shape,
             weight_gradients: None,
             bias_gradients: None,
-            optimizer_cache: OptimizerCacheFEX {
+            optimizer_cache: OptimizerCacheFEL {
                 adam_states: None,
                 rmsprop_cache: None,
             },

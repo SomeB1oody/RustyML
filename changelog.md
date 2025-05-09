@@ -5,10 +5,14 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.1] - 2025-5-9
+### Changed
+- Rename `OptimizerCacheFEX` to `OptimizerCacheFEL` (FEL stands for feature extraction layer)
+
 ## [v0.6.1] - 2025-5-8
 ### Added
 - Add complete test function for `Conv2D`
-- Add comprehensive docstrings for Conv2D layer and methods
+- Add comprehensive docstrings for `Conv2D` layer and methods
 
 ## [v0.6.1] - 2025-5-7
 ### Added
