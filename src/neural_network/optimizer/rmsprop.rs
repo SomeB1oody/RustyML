@@ -146,9 +146,21 @@ impl RMSpropCache {
     }
 }
 
-/// Cache structure for the RMSprop optimization algorithm(For Feature Extraction Layers)
+/// Cache structure for the RMSprop optimization algorithm for Feature Extraction Layers (FEL).
+///
+/// This specialized cache is designed for convolutional neural networks and other architectures
+/// that use multi-dimensional tensors for feature extraction. Unlike the standard RMSprop cache,
+/// this variant works with 4D arrays typically used in convolutional layers (batch_size, channels,
+/// height, width).
+///
+/// # Fields
+///
+/// - `cache`: Moving average of squared gradients for 4D weight parameters. Typically stores values for
+///   convolutional kernels or other multi-dimensional feature extraction parameters.
+/// - `bias`: Moving average of squared gradients for bias parameters, which remain 2D even in
+///   convolutional contexts.
 #[derive(Debug, Clone, Default)]
-pub struct RMSpropCacheFEX {
+pub struct RMSpropCacheFEL {
     pub cache: Array4<f32>,
     pub bias: Array2<f32>,
 }

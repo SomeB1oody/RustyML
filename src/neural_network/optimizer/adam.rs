@@ -220,9 +220,22 @@ impl AdamStates {
     }
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm(For Feature Extraction Layers)
+/// Stores and manages optimization state for the Adam optimizer algorithm for Feature Extraction Layers (FEL).
+///
+/// This struct is specifically designed to handle the optimization state for layers involved in feature extraction,
+/// which typically deal with 4D tensors (e.g., convolutional layers). It maintains the first and second moment
+/// estimates (moving averages of gradients and squared gradients) for weights and biases used in the Adam
+/// optimization algorithm.
+///
+/// # Fields
+///
+/// - `m` - First moment tensor (moving average of gradients) for main parameters, stored as a 4D array
+///   to accommodate convolutional filter dimensions
+/// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 4D array
+/// - `m_bias` - First moment matrix for bias parameters
+/// - `v_bias` - Second moment matrix for bias parameters
 #[derive(Debug, Clone, Default)]
-pub struct AdamStatesFEX {
+pub struct AdamStatesFEL {
     pub m: Array4<f32>,
     pub v: Array4<f32>,
     pub m_bias: Array2<f32>,

@@ -569,7 +569,7 @@ impl Layer for Conv2D {
         {
             // Initialize momentum and variance (if not initialized)
             if self.optimizer_cache.adam_states.is_none() {
-                self.optimizer_cache.adam_states = Some(AdamStatesFEX {
+                self.optimizer_cache.adam_states = Some(AdamStatesFEL {
                     m: Array4::zeros(self.weights.dim()),
                     v: Array4::zeros(self.weights.dim()),
                     m_bias: Array2::zeros(self.bias.dim()),
@@ -622,7 +622,7 @@ impl Layer for Conv2D {
         {
             // Initialize cache (if not initialized)
             if self.optimizer_cache.rmsprop_cache.is_none() {
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheFEX {
+                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheFEL {
                     cache: Array4::zeros(self.weights.dim()),
                     bias: Array2::zeros(self.bias.dim()),
                 });

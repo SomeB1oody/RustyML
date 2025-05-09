@@ -33,6 +33,6 @@ pub struct OptimizerCache {
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages for feature extraction layers
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheFEL {
-    pub adam_states: Option<AdamStatesFEX>,
-    pub rmsprop_cache: Option<RMSpropCacheFEX>,
+    pub adam_states: Option<AdamStatesFEL>,
+    pub rmsprop_cache: Option<RMSpropCacheFEL>,
 }
