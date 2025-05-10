@@ -1,11 +1,13 @@
 pub mod conv2d;
 pub mod dense;
 pub mod lstm;
+pub mod max_pooling_2d;
 pub mod simple_rnn;
 
 pub use conv2d::*;
 pub use dense::*;
 pub use lstm::*;
+pub use max_pooling_2d::*;
 pub use simple_rnn::*;
 
 pub enum LayerWeight<'a> {
