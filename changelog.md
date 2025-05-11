@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.1] - 2025-5-11
+### Added
+- Add detailed documentation and usage example for `MaxPooling2D`
+
 ## [v0.6.1] - 2025-5-10
 ### Added
 - Add `MaxPooling2D` layer initial implementation

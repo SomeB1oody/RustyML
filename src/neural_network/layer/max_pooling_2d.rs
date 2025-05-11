@@ -3,18 +3,69 @@ use crate::traits::Layer;
 use ndarray::ArrayD;
 use rayon::prelude::*;
 
-/// 定义最大池化操作的结构体，用于在2D数据上执行最大池化。
+/// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 ///
-/// 最大池化是CNN中常用的下采样技术，通过在每个池窗口中选择最大值来减小
-/// 特征图的空间尺寸，从而减少计算量并控制过拟合。
+/// Max pooling is a common downsampling technique in CNNs that reduces
+/// the spatial dimensions of feature maps by selecting the maximum value in each pooling window,
+/// thereby reducing computation and controlling overfitting.
 ///
-/// # 字段
+/// # Fields
 ///
-/// - `pool_size` - 池化窗口的大小，表示为(高度, 宽度)。
-/// - `strides` - 池化操作的步长，表示为(垂直步长, 水平步长)。
-/// - `input_shape` - 输入张量的形状。
-/// - `input_cache` - 缓存的输入数据，用于反向传播。
-/// - `max_positions` - 记录最大值位置的缓存，用于反向传播。
+/// - `pool_size` - Size of the pooling window, expressed as (height, width).
+/// - `strides` - Stride of the pooling operation, expressed as (vertical stride, horizontal stride).
+/// - `input_shape` - Shape of the input tensor.
+/// - `input_cache` - Cached input data, used for backpropagation.
+/// - `max_positions` - Cache of maximum value positions, used for backpropagation.
+///
+/// # Example
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::Array4;
+///
+/// // Create a simple 4D input tensor: [batch_size, channels, height, width]
+/// // Batch size=2, 3 input channels, 6x6 pixels
+/// let mut input_data = Array4::zeros((2, 3, 6, 6));
+///
+/// // Set some specific values so we can predict the max pooling result
+/// for b in 0..2 {
+///     for c in 0..3 {
+///         for i in 0..6 {
+///             for j in 0..6 {
+///                 // Create input data with an easily observable pattern
+///                 input_data[[b, c, i, j]] = (i * j) as f32 + b as f32 * 0.1 + c as f32 * 0.01;
+///             }
+///         }
+///     }
+/// }
+///
+/// let x = input_data.clone().into_dyn();
+///
+/// // Test using MaxPooling2D in a model
+/// let mut model = Sequential::new();
+/// model
+///     .add(MaxPooling2D::new(
+///         (2, 2),           // Pool window size
+///         vec![2, 3, 6, 6], // Input shape
+///         None,             // Use default stride (2,2)
+///     ))
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+/// // Create target tensor - corresponding to the pooled shape
+/// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
+///
+/// // Print model structure
+/// model.summary();
+///
+/// // Train the model (run a few epochs)
+/// model.fit(&x, &y, 3).unwrap();
+///
+/// // Use predict for forward propagation prediction
+/// let prediction = model.predict(&x);
+/// println!("MaxPooling2D prediction results: {:?}", prediction);
+///
+/// // Check if output shape is correct
+/// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
+/// ```
 pub struct MaxPooling2D {
     pool_size: (usize, usize),
     strides: (usize, usize),
@@ -24,23 +75,23 @@ pub struct MaxPooling2D {
 }
 
 impl MaxPooling2D {
-    /// 创建一个新的2D最大池化层。
+    /// Creates a new 2D max pooling layer.
     ///
-    /// # 参数
+    /// # Parameters
     ///
-    /// - `pool_size` - 池化窗口的大小，表示为(高度, 宽度)。
-    /// - `input_shape` - 输入张量的形状，格式为\[batch_size, channels, height, width\]。
-    /// - `strides` - 池化操作的步长，表示为(垂直步长, 水平步长)。如果为None，则使用与pool_size相同的值。
+    /// - `pool_size` - Size of the pooling window, expressed as (height, width).
+    /// - `input_shape` - Shape of the input tensor, in format \[batch_size, channels, height, width\].
+    /// - `strides` - Stride of the pooling operation, expressed as (vertical stride, horizontal stride). If None, uses the same value as pool_size.
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// * `Self` - 一个新的MaxPooling2D层实例。
+    /// * `Self` - A new instance of the MaxPooling2D layer.
     pub fn new(
         pool_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize)>,
     ) -> Self {
-        // 如果未指定步长，则使用与池化大小相同的步长
+        // If stride is not specified, use the same stride as pool size
         let strides = strides.unwrap_or(pool_size);
 
         MaxPooling2D {
@@ -52,66 +103,66 @@ impl MaxPooling2D {
         }
     }
 
-    /// 计算最大池化层的输出形状。
+    /// Calculates the output shape of the max pooling layer.
     ///
-    /// # 参数
+    /// # Parameters
     ///
-    /// * `input_shape` - 输入张量的形状，格式为\[batch_size, channels, height, width\]。
+    /// * `input_shape` - Shape of the input tensor, in format \[batch_size, channels, height, width\].
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// 一个包含计算出的输出形状的向量，格式为\[batch_size, channels, output_height, output_width\]。
+    /// A vector containing the calculated output shape, in format \[batch_size, channels, output_height, output_width\].
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let channels = input_shape[1];
         let input_height = input_shape[2];
         let input_width = input_shape[3];
 
-        // 计算输出的高度和宽度
+        // Calculate the height and width of the output
         let output_height = (input_height - self.pool_size.0) / self.strides.0 + 1;
         let output_width = (input_width - self.pool_size.1) / self.strides.1 + 1;
 
         vec![batch_size, channels, output_height, output_width]
     }
 
-    /// 执行最大池化操作。
+    /// Performs max pooling operation.
     ///
-    /// # 参数
+    /// # Parameters
     ///
-    /// * `input` - 输入张量，形状为\[batch_size, channels, height, width\]。
+    /// * `input` - Input tensor with shape \[batch_size, channels, height, width\].
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// * `(Tensor, Vec<(usize, usize, usize, usize)>)` - 池化操作的结果和最大值的位置。
+    /// * `(Tensor, Vec<(usize, usize, usize, usize)>)` - Result of the pooling operation and positions of maximum values.
     fn max_pool(&self, input: &Tensor) -> (Tensor, Vec<(usize, usize, usize, usize)>) {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let channels = input_shape[1];
         let output_shape = self.calculate_output_shape(input_shape);
 
-        // 预分配输出数组
+        // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());
-        // 存储最大值位置的向量
+        // Vector to store positions of maximum values
         let mut max_positions = Vec::new();
 
-        // 为每个批次和通道并行处理
+        // Process each batch and channel in parallel
         let results: Vec<_> = (0..batch_size)
             .into_par_iter()
             .flat_map(|b| {
-                // 在这里克隆 output_shape，避免所有权移动问题
+                // Clone output_shape here to avoid ownership movement issues
                 let output_shape_clone = output_shape.clone();
                 (0..channels).into_par_iter().map(move |c| {
                     let mut batch_channel_output = Vec::new();
                     let mut batch_channel_positions = Vec::new();
 
-                    // 对每个输出位置执行池化
+                    // Perform pooling for each output position
                     for i in 0..output_shape_clone[2] {
                         let i_start = i * self.strides.0;
 
                         for j in 0..output_shape_clone[3] {
                             let j_start = j * self.strides.1;
 
-                            // 在池化窗口中查找最大值
+                            // Find maximum value in pooling window
                             let mut max_val = f32::NEG_INFINITY;
                             let mut max_pos = (0, 0);
 
@@ -145,7 +196,7 @@ impl MaxPooling2D {
             })
             .collect();
 
-        // 将结果合并到输出张量中
+        // Merge results into output tensor
         for ((b, c), (outputs, positions)) in results {
             for (i, j, val) in outputs {
                 output[[b, c, i, j]] = val;
@@ -159,13 +210,13 @@ impl MaxPooling2D {
 
 impl Layer for MaxPooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 保存输入用于反向传播
+        // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // 执行最大池化操作
+        // Perform max pooling operation
         let (output, max_positions) = self.max_pool(input);
 
-        // 存储最大值位置用于反向传播
+        // Store maximum value positions for backpropagation
         self.max_positions = Some(max_positions);
 
         output
@@ -175,20 +226,20 @@ impl Layer for MaxPooling2D {
         if let (Some(input), Some(max_positions)) = (&self.input_cache, &self.max_positions) {
             let grad_shape = grad_output.shape();
 
-            // 初始化输入梯度，形状与输入相同
+            // Initialize input gradients with same shape as input
             let mut input_gradients = ArrayD::zeros(input.dim());
 
-            // 创建一个包含更新位置和值的向量
+            // Create a vector containing update positions and values
             let gradient_updates: Vec<_> = max_positions
                 .par_iter()
                 .filter_map(|&(b, c, i, j)| {
-                    // 计算对应的输出梯度索引
+                    // Calculate corresponding output gradient index
                     let out_i = i / self.strides.0;
                     let out_j = j / self.strides.1;
 
-                    // 确保索引在有效范围内
+                    // Ensure indices are within valid range
                     if out_i < grad_shape[2] && out_j < grad_shape[3] {
-                        // 返回索引和梯度值
+                        // Return index and gradient value
                         Some(((b, c, i, j), grad_output[[b, c, out_i, out_j]]))
                     } else {
                         None
@@ -196,7 +247,7 @@ impl Layer for MaxPooling2D {
                 })
                 .collect();
 
-            // 顺序应用梯度更新
+            // Apply gradient updates sequentially
             for ((b, c, i, j), grad_val) in gradient_updates {
                 input_gradients[[b, c, i, j]] = grad_val;
             }
@@ -222,13 +273,13 @@ impl Layer for MaxPooling2D {
     }
 
     fn param_count(&self) -> usize {
-        // 池化层没有可训练参数
+        // Pooling layer has no trainable parameters
         0
     }
 
-    // 池化层没有可训练参数，因此这些方法不做任何事情
+    // Pooling layer has no trainable parameters, so these methods do nothing
     fn update_parameters_sgd(&mut self, _lr: f32) {
-        // 最大池化层没有参数需要更新
+        // Max pooling layer has no parameters to update
     }
 
     fn update_parameters_adam(
@@ -239,15 +290,15 @@ impl Layer for MaxPooling2D {
         _epsilon: f32,
         _t: u64,
     ) {
-        // 最大池化层没有参数需要更新
+        // Max pooling layer has no parameters to update
     }
 
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // 最大池化层没有参数需要更新
+        // Max pooling layer has no parameters to update
     }
 
     fn get_weights(&self) -> super::LayerWeight {
-        // 最大池化层没有权重
+        // Max pooling layer has no weights
         super::LayerWeight::Empty
     }
 }
