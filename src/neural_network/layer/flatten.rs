@@ -3,42 +3,42 @@ use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::IxDyn;
 
-/// 将4D张量展平为2D张量的层。
+/// A layer that flattens a 4D tensor into a 2D tensor.
 ///
-/// 该层通常用于卷积网络中，将特征提取层（如卷积层或池化层）的输出转换为
-/// 密集层（全连接层）可以处理的格式。
+/// This layer is typically used in convolutional networks to transform the output of feature extraction layers
+/// (such as convolutional or pooling layers) into a format that can be processed by dense (fully connected) layers.
 ///
-/// # 输入形状
+/// # Input Shape
 ///
-/// 输入是一个4D张量，形状为 \[batch_size, channels, height, width\]
+/// Input is a 4D tensor with shape \[batch_size, channels, height, width\]
 ///
-/// # 输出形状
+/// # Output Shape
 ///
-/// 输出是一个2D张量，形状为 \[batch_size, channels * height * width\]
+/// Output is a 2D tensor with shape \[batch_size, channels * height * width\]
 ///
-/// # 示例
+/// # Example
 ///
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array4;
 ///
-/// // 创建一个4D输入张量: [batch_size, channels, height, width]
-/// // 批量大小=2，3个通道，每个4x4像素
+/// // Create a 4D input tensor: [batch_size, channels, height, width]
+/// // Batch size=2, 3 channels, each 4x4 pixels
 /// let x = Array4::ones((2, 3, 4, 4)).into_dyn();
 ///
-/// // 构建包含Flatten层的模型
+/// // Build a model containing a Flatten layer
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Flatten::new(vec![2, 3, 4, 4]))
 ///     .compile(SGD::new(0.01), MeanSquaredError::new());
 ///
-/// // 查看模型结构
+/// // View model structure
 /// model.summary();
 ///
-/// // 前向传播
+/// // Forward propagation
 /// let flattened = model.predict(&x);
 ///
-/// // 检查输出形状 - 应该是 [2, 48]
+/// // Check output shape - should be [2, 48]
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
 pub struct Flatten {
@@ -47,17 +47,17 @@ pub struct Flatten {
 }
 
 impl Flatten {
-    /// 创建一个新的Flatten层。
+    /// Creates a new Flatten layer.
     ///
-    /// # 参数
+    /// # Parameters
     ///
-    /// * `input_shape` - 输入张量的形状，格式为 \[batch_size, channels, height, width\]
+    /// * `input_shape` - The shape of the input tensor, format is \[batch_size, channels, height, width\]
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// * `Self` - 一个新的`Flatten`层实例
+    /// * `Self` - A new `Flatten` layer instance
     pub fn new(input_shape: Vec<usize>) -> Self {
-        assert_eq!(input_shape.len(), 4, "输入形状必须是4维的");
+        assert_eq!(input_shape.len(), 4, "Input shape must be 4-dimensional");
 
         let batch_size = input_shape[0];
         let flattened_features = input_shape[1..].iter().product();
@@ -72,14 +72,14 @@ impl Flatten {
 
 impl Layer for Flatten {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 保存输入以便反向传播
+        // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
 
-        // 创建新形状
+        // Create new shape
         let output = input.clone();
         output
             .into_shape_with_order(IxDyn(&[batch_size, flattened_features]))
@@ -90,7 +90,7 @@ impl Layer for Flatten {
         if let Some(input) = &self.input_cache {
             let input_shape = input.shape().to_vec();
 
-            // 将梯度重塑回输入形状
+            // Reshape gradient back to input shape
             let reshaped_grad = grad_output
                 .clone()
                 .into_shape_with_order(IxDyn(&input_shape))
@@ -98,7 +98,9 @@ impl Layer for Flatten {
 
             Ok(reshaped_grad)
         } else {
-            Err(ModelError::ProcessingError("前向传播尚未运行".to_string()))
+            Err(ModelError::ProcessingError(
+                "Forward pass has not been run yet".to_string(),
+            ))
         }
     }
 
@@ -111,12 +113,12 @@ impl Layer for Flatten {
     }
 
     fn param_count(&self) -> usize {
-        // Flatten层没有可训练参数
+        // Flatten layer has no trainable parameters
         0
     }
 
     fn update_parameters_sgd(&mut self, _lr: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_adam(
@@ -127,15 +129,15 @@ impl Layer for Flatten {
         _epsilon: f32,
         _t: u64,
     ) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn get_weights(&self) -> LayerWeight {
-        // Flatten层没有权重
+        // Flatten layer has no weights
         LayerWeight::Empty
     }
 }
