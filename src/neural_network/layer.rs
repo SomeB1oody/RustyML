@@ -1,3 +1,4 @@
+pub mod average_pooling;
 pub mod conv2d;
 pub mod dense;
 pub mod flatten;
@@ -5,6 +6,7 @@ pub mod lstm;
 pub mod max_pooling_2d;
 pub mod simple_rnn;
 
+pub use average_pooling::*;
 pub use conv2d::*;
 pub use dense::*;
 pub use flatten::*;

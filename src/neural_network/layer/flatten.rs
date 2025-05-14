@@ -16,6 +16,11 @@ use ndarray::IxDyn;
 ///
 /// Output is a 2D tensor with shape \[batch_size, channels * height * width\]
 ///
+/// # Fields
+///
+/// - `output_shape` - the output shape of the layer, in the format \[batch_size, channels * height * width\]
+/// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
+///
 /// # Example
 ///
 /// ```rust

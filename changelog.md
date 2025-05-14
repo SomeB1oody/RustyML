@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.1] - 2025-5-14
+### Added
+- Add `AveragePooling` layer implementation and corresponding tests
+
 ## [v0.6.1] - 2025-5-13
 ### Added
 - Update comments and documentation in `Flatten` layer
