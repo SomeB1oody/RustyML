@@ -7,6 +7,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ## [v0.6.1] - 2025-5-14
 ### Added
+- Add detailed comments and example to `AveragePooling` layer
+
+## [v0.6.1] - 2025-5-14
+### Added
 - Add `AveragePooling` layer implementation and corresponding tests
 
 ## [v0.6.1] - 2025-5-13

@@ -26,6 +26,59 @@ use rayon::prelude::*;
 /// - `strides` - Stride of the pooling operation as (height, width)
 /// - `input_shape` - Shape of the input tensor
 /// - `input_cache` - Cached input tensor from forward pass, used in backpropagation
+///
+/// # Example
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::Array4;
+/// use approx::assert_relative_eq;
+///
+/// // Create a simple input tensor: [batch_size, channels, height, width]
+/// // Batch size=2, 3 input channels, each channel is 4x4 pixels
+/// let mut input_data = Array4::zeros((2, 3, 4, 4));
+///
+///  // Set test data to make average pooling results predictable
+///  for b in 0..2 {
+///     for c in 0..3 {
+///         for i in 0..4 {
+///             for j in 0..4 {
+///                 input_data[[b, c, i, j]] = (i + j) as f32;
+///             }
+///         }
+///     }
+///  }
+///
+///  let x = input_data.clone().into_dyn();
+///
+///  // Test AveragePooling with Sequential model
+///  let mut model = Sequential::new();
+///  model
+///  .add(AveragePooling::new(
+///  (2, 2),           // Pooling window size
+///  (2, 2),           // Stride
+///  vec![2, 3, 4, 4], // Input shape
+///  ))
+///  .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+///  // Output shape should be [2, 3, 2, 2]
+///  let output = model.predict(&x);
+///  assert_eq!(output.shape(), &[2, 3, 2, 2]);
+///
+///  // Verify correctness of pooling results
+///  // For a 2x2 window with stride 2, we expect the result to be the average of the elements in the window
+///  for b in 0..2 {
+///     for c in 0..3 {
+///         // First window (0,0), (0,1), (1,0), (1,1) -> average should be (0+1+1+2)/4 = 1.0
+///         assert_relative_eq!(output[[b, c, 0, 0]], 1.0);
+///         // Second window (0,2), (0,3), (1,2), (1,3) -> average should be (2+3+3+4)/4 = 3.0
+///         assert_relative_eq!(output[[b, c, 0, 1]], 3.0);
+///         // Third window (2,0), (2,1), (3,0), (3,1) -> average should be (2+3+3+4)/4 = 3.0
+///         assert_relative_eq!(output[[b, c, 1, 0]], 3.0);
+///         // Fourth window (2,2), (2,3), (3,2), (3,3) -> average should be (4+5+5+6)/4 = 5.0
+///         assert_relative_eq!(output[[b, c, 1, 1]], 5.0);
+///     }
+///  }
+/// ```
 pub struct AveragePooling {
     pool_size: (usize, usize),
     strides: (usize, usize),
@@ -95,26 +148,26 @@ impl AveragePooling {
         let channels = input_shape[1];
         let output_shape = self.calculate_output_shape(input_shape);
 
-        // 预先分配输出数组
+        // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());
 
-        // 并行处理每个批次和通道
+        // Process each batch and channel in parallel
         let results: Vec<_> = (0..batch_size)
             .into_par_iter()
             .flat_map(|b| {
-                // 克隆output_shape以避免所有权移动问题
+                // Clone output_shape to avoid ownership movement issues
                 let output_shape_clone = output_shape.clone();
                 (0..channels).into_par_iter().map(move |c| {
                     let mut batch_channel_output = Vec::new();
 
-                    // 对每个输出位置执行池化
+                    // Perform pooling for each output position
                     for i in 0..output_shape_clone[2] {
                         let i_start = i * self.strides.0;
 
                         for j in 0..output_shape_clone[3] {
                             let j_start = j * self.strides.1;
 
-                            // 计算池化窗口内的平均值
+                            // Calculate average value within the pooling window
                             let mut sum = 0.0;
                             let mut count = 0;
 
@@ -135,7 +188,7 @@ impl AveragePooling {
                                 }
                             }
 
-                            // 计算平均值，避免除零错误
+                            // Calculate average, avoiding division by zero
                             let avg_val = if count > 0 { sum / count as f32 } else { 0.0 };
                             batch_channel_output.push((i, j, avg_val));
                         }
@@ -146,7 +199,7 @@ impl AveragePooling {
             })
             .collect();
 
-        // 将结果合并到输出张量中
+        // Merge results into the output tensor
         for ((b, c), outputs) in results {
             for (i, j, val) in outputs {
                 output[[b, c, i, j]] = val;
@@ -159,10 +212,10 @@ impl AveragePooling {
 
 impl Layer for AveragePooling {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 保存输入用于反向传播
+        // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // 执行平均池化
+        // Perform average pooling
         self.avg_pool(input)
     }
 
@@ -172,17 +225,17 @@ impl Layer for AveragePooling {
             let batch_size = input_shape[0];
             let channels = input_shape[1];
 
-            // 初始化输入梯度为零
+            // Initialize input gradient to zero
             let mut input_grad = ArrayD::zeros(input_shape.to_vec());
 
-            // 从输出梯度形状中获取输出尺寸
+            // Get output dimensions from the output gradient shape
             let output_shape = grad_output.shape();
 
-            // 提前复制需要在闭包中使用的成员变量
+            // Copy member variables needed in closures
             let pool_size = self.pool_size;
             let strides = self.strides;
 
-            // 对每个批次和通道并行处理
+            // Process each batch and channel in parallel
             let results: Vec<_> = (0..batch_size)
                 .into_par_iter()
                 .flat_map(|b| {
@@ -190,27 +243,27 @@ impl Layer for AveragePooling {
                         let mut batch_channel_grad: ArrayD<f32> =
                             ArrayD::zeros(input_shape.to_vec());
 
-                        // 对每个输出位置
+                        // For each output position
                         for i in 0..output_shape[2] {
-                            let i_start = i * strides.0; // 使用复制的变量，而不是self.strides
+                            let i_start = i * strides.0; // Use copied variable instead of self.strides
 
                             for j in 0..output_shape[3] {
-                                let j_start = j * strides.1; // 使用复制的变量，而不是self.strides
+                                let j_start = j * strides.1; // Use copied variable instead of self.strides
 
-                                // 获取当前输出梯度
+                                // Get current output gradient
                                 let grad = grad_output[[b, c, i, j]];
 
-                                // 计算池化窗口中实际元素的数量（考虑边界）
+                                // Calculate the actual number of elements in the pooling window (considering boundaries)
                                 let mut count = 0;
                                 for di in 0..pool_size.0 {
-                                    // 使用复制的变量，而不是self.pool_size
+                                    // Use copied variable instead of self.pool_size
                                     let i_pos = i_start + di;
                                     if i_pos >= input_shape[2] {
                                         continue;
                                     }
 
                                     for dj in 0..pool_size.1 {
-                                        // 使用复制的变量，而不是self.pool_size
+                                        // Use copied variable instead of self.pool_size
                                         let j_pos = j_start + dj;
                                         if j_pos >= input_shape[3] {
                                             continue;
@@ -220,19 +273,19 @@ impl Layer for AveragePooling {
                                     }
                                 }
 
-                                // 将梯度平均分配给所有参与计算的输入元素
+                                // Distribute gradient evenly to all input elements that participated in the calculation
                                 let grad_per_element =
                                     if count > 0 { grad / count as f32 } else { 0.0 };
 
                                 for di in 0..pool_size.0 {
-                                    // 使用复制的变量，而不是self.pool_size
+                                    // Use copied variable instead of self.pool_size
                                     let i_pos = i_start + di;
                                     if i_pos >= input_shape[2] {
                                         continue;
                                     }
 
                                     for dj in 0..pool_size.1 {
-                                        // 使用复制的变量，而不是self.pool_size
+                                        // Use copied variable instead of self.pool_size
                                         let j_pos = j_start + dj;
                                         if j_pos >= input_shape[3] {
                                             continue;
@@ -250,7 +303,7 @@ impl Layer for AveragePooling {
                 })
                 .collect();
 
-            // 合并所有批次和通道的梯度
+            // Merge gradients from all batches and channels
             for ((b, c), grad) in results {
                 for i in 0..input_shape[2] {
                     for j in 0..input_shape[3] {
@@ -280,12 +333,12 @@ impl Layer for AveragePooling {
     }
 
     fn param_count(&self) -> usize {
-        // 平均池化层没有可训练参数
+        // Average pooling layer has no trainable parameters
         0
     }
 
     fn update_parameters_sgd(&mut self, _lr: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_adam(
@@ -296,15 +349,15 @@ impl Layer for AveragePooling {
         _epsilon: f32,
         _t: u64,
     ) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn get_weights(&self) -> LayerWeight {
-        // 平均池化层没有权重
+        // Average pooling layer has no weights
         LayerWeight::Empty
     }
 }
