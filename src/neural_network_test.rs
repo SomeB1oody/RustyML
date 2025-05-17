@@ -632,7 +632,7 @@ fn average_pooling_basic_test() {
     // Test AveragePooling with Sequential model
     let mut model = Sequential::new();
     model
-        .add(AveragePooling::new(
+        .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
             (2, 2),           // Stride
             vec![2, 3, 4, 4], // Input shape
@@ -680,7 +680,7 @@ fn average_pooling_non_even_input_test() {
     // Pooling window size (3,3), stride (2,2)
     let mut model = Sequential::new();
     model
-        .add(AveragePooling::new(
+        .add(AveragePooling2D::new(
             (3, 3),           // Pooling window size
             (2, 2),           // Stride
             vec![2, 3, 5, 5], // Input shape
@@ -715,7 +715,7 @@ fn average_pooling_different_strides_test() {
     // Pooling with stride (1,1)
     let mut model = Sequential::new();
     model
-        .add(AveragePooling::new(
+        .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
             (1, 1),           // Stride
             vec![1, 1, 6, 6], // Input shape
@@ -741,7 +741,7 @@ fn average_pooling_backprop_test() {
     // Create model and train
     let mut model = Sequential::new();
     model
-        .add(AveragePooling::new(
+        .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
             (2, 2),           // Stride
             vec![2, 2, 4, 4], // Input shape

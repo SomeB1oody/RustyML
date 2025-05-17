@@ -53,7 +53,7 @@ use rayon::prelude::*;
 ///  // Test AveragePooling with Sequential model
 ///  let mut model = Sequential::new();
 ///  model
-///  .add(AveragePooling::new(
+///  .add(AveragePooling2D::new(
 ///  (2, 2),           // Pooling window size
 ///  (2, 2),           // Stride
 ///  vec![2, 3, 4, 4], // Input shape
@@ -79,14 +79,14 @@ use rayon::prelude::*;
 ///     }
 ///  }
 /// ```
-pub struct AveragePooling {
+pub struct AveragePooling2D {
     pool_size: (usize, usize),
     strides: (usize, usize),
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
 }
 
-impl AveragePooling {
+impl AveragePooling2D {
     /// Creates a new AveragePooling layer.
     ///
     /// # Parameters
@@ -109,7 +109,7 @@ impl AveragePooling {
             "Input shape must be 4-dimensional for AveragePooling"
         );
 
-        AveragePooling {
+        AveragePooling2D {
             pool_size,
             strides,
             input_shape,
@@ -210,7 +210,7 @@ impl AveragePooling {
     }
 }
 
-impl Layer for AveragePooling {
+impl Layer for AveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
