@@ -2,6 +2,7 @@ pub mod average_pooling_2d;
 pub mod conv2d;
 pub mod dense;
 pub mod flatten;
+pub mod global_average_pooling;
 pub mod global_max_pooling_2d;
 pub mod lstm;
 pub mod max_pooling_2d;
@@ -11,6 +12,7 @@ pub use average_pooling_2d::*;
 pub use conv2d::*;
 pub use dense::*;
 pub use flatten::*;
+pub use global_average_pooling::*;
 pub use global_max_pooling_2d::*;
 pub use lstm::*;
 pub use max_pooling_2d::*;
@@ -96,8 +98,8 @@ pub struct LSTMLayerWeight<'a> {
 ///
 /// # Fields
 ///
-/// * `weight` - 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
-/// * `bias` - Bias vector with shape (1, output_channels)
+/// - `weight` - 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
+/// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv2DLayerWeight<'a> {
     pub weight: &'a ndarray::Array4<f32>,
     pub bias: &'a ndarray::Array2<f32>,
