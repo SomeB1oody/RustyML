@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Refactor `GlobalAveragePooling2D` with improved comments and docs
+- Refactor global max pooling to leverage parallel processing
 
 ## [v0.6.1] - 2025-5-20
 ### Added

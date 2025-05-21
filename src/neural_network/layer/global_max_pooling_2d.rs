@@ -3,6 +3,7 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layer::LayerWeight;
 use crate::traits::Layer;
 use ndarray::{Array, IxDyn};
+use rayon::prelude::*;
 
 /// Global Max Pooling Layer
 ///
@@ -78,12 +79,18 @@ impl Layer for GlobalMaxPooling2D {
         let height = input.shape()[2];
         let width = input.shape()[3];
 
-        // Perform global max pooling for each sample and each channel
+        // Create result tensor and storage for maximum value positions
         let mut result = Array::zeros(IxDyn(&[batch_size, channels]));
-        let mut max_positions = Vec::with_capacity(batch_size * channels);
 
-        for b in 0..batch_size {
-            for c in 0..channels {
+        // Create index collection representing all (batch, channel) combinations
+        let indices: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c)))
+            .collect();
+
+        // Process each (batch, channel) combination in parallel
+        let max_results: Vec<((usize, usize), f32, (usize, usize))> = indices
+            .par_iter()
+            .map(|&(b, c)| {
                 let mut max_val = f32::NEG_INFINITY;
                 let mut max_h = 0;
                 let mut max_w = 0;
@@ -100,12 +107,16 @@ impl Layer for GlobalMaxPooling2D {
                     }
                 }
 
-                // Save max value position for backpropagation
-                max_positions.push((max_h, max_w));
+                ((b, c), max_val, (max_h, max_w))
+            })
+            .collect();
 
-                // Place the maximum value into the result tensor
-                result[[b, c]] = max_val;
-            }
+        // Fill output tensor and position records using parallel computation results
+        let mut max_positions = Vec::with_capacity(batch_size * channels);
+
+        for ((b, c), max_val, (max_h, max_w)) in max_results {
+            result[[b, c]] = max_val;
+            max_positions.push((max_h, max_w));
         }
 
         self.max_positions = Some(max_positions);
@@ -113,7 +124,7 @@ impl Layer for GlobalMaxPooling2D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        // Check if there is a valid input cache
+        // Check if input cache is valid
         let input = match &self.input_cache {
             Some(input) => input,
             None => {
@@ -123,7 +134,7 @@ impl Layer for GlobalMaxPooling2D {
             }
         };
 
-        // Check if there are valid maximum value position records
+        // Check if maximum value position records are valid
         let max_positions = match &self.max_positions {
             Some(positions) => positions,
             None => {
@@ -139,18 +150,27 @@ impl Layer for GlobalMaxPooling2D {
         let height = input.shape()[2];
         let width = input.shape()[3];
 
-        // Create a gradient tensor with the same shape as the input, initialized with zeros
+        // Create a gradient tensor with the same shape as input, initialized to zero
         let mut grad_input = Array::zeros(IxDyn(&[batch_size, channels, height, width]));
 
-        // Only pass gradients at the maximum value position of each channel
-        let mut idx = 0;
-        for b in 0..batch_size {
-            for c in 0..channels {
+        // Create index collection representing all (batch, channel) combinations
+        let indices: Vec<(usize, usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c, b * channels + c)))
+            .collect();
+
+        // Process gradients for each (batch, channel) combination in parallel
+        let grad_results: Vec<(usize, usize, usize, usize, f32)> = indices
+            .par_iter()
+            .map(|&(b, c, idx)| {
                 let (max_h, max_w) = max_positions[idx];
-                // Pass the gradient value to the position of the maximum value in the original input
-                grad_input[[b, c, max_h, max_w]] = grad_output[[b, c]];
-                idx += 1;
-            }
+                let grad_value = grad_output[[b, c]];
+                (b, c, max_h, max_w, grad_value)
+            })
+            .collect();
+
+        // Fill gradient tensor
+        for (b, c, max_h, max_w, grad_value) in grad_results {
+            grad_input[[b, c, max_h, max_w]] = grad_value;
         }
 
         Ok(grad_input)
