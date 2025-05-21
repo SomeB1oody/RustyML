@@ -15,8 +15,8 @@ use rayon::prelude::*;
 ///
 /// # Fields
 ///
-/// * `input_shape` - Stores the shape of the input tensor during forward propagation.
-/// * `input_cache` - Caches the input tensor for backward propagation.
+/// - `input_shape` - Stores the shape of the input tensor during forward propagation.
+/// - `input_cache` - Caches the input tensor for backward propagation.
 ///
 /// # Example
 /// ```rust

@@ -6,6 +6,9 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.6.1] - 2025-5-21
+### Added
+- Add tests for `GlobalAveragePooling2D` layer
+
 ### Changed
 - Refactor `GlobalAveragePooling2D` with improved comments and docs
 
