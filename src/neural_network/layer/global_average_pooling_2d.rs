@@ -3,42 +3,43 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layer::LayerWeight;
 use crate::traits::Layer;
 use ndarray::{Array, IxDyn};
+use rayon::prelude::*;
 
 /// Global Average Pooling 2D Layer
 ///
-/// 对输入张量的空间维度（高度和宽度）执行全局平均池化操作。
-/// 输入张量形状应为 `[batch_size, channels, height, width]`，
-/// 输出张量形状将为 `[batch_size, channels]`。
+/// Performs global average pooling operation on the spatial dimensions (height and width) of the input tensor.
+/// Input tensor shape should be `[batch_size, channels, height, width]`,
+/// output tensor shape will be `[batch_size, channels]`.
 ///
-/// 该层没有可训练参数。
+/// This layer has no trainable parameters.
 ///
-/// # 字段
+/// # Fields
 ///
-/// * `input_shape` - 在前向传播过程中存储输入张量的形状。
-/// * `input_cache` - 缓存输入张量用于反向传播。
+/// * `input_shape` - Stores the shape of the input tensor during forward propagation.
+/// * `input_cache` - Caches the input tensor for backward propagation.
 ///
-/// # 示例
+/// # Example
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///
-/// // 创建一个包含多个层的Sequential模型
+/// // Create a Sequential model with multiple layers
 /// let mut model = Sequential::new();
 ///
-/// // 添加一个GlobalAveragePooling2D层
+/// // Add a GlobalAveragePooling2D layer
 /// model.add(GlobalAveragePooling2D::new());
 ///
-/// // 创建测试输入张量: [batch_size, channels, height, width]
+/// // Create test input tensor: [batch_size, channels, height, width]
 /// let input_data = Array::from_elem(IxDyn(&[3, 4, 5, 5]), 1.0);
 ///
-/// // 前向传播
+/// // Forward propagation
 /// let output = model.predict(&input_data);
 ///
-/// // 检查输出形状 - 应该是 [3, 4]
+/// // Check output shape - should be [3, 4]
 /// assert_eq!(output.shape(), &[3, 4]);
 ///
-/// // 由于所有输入值均为1.0，所有输出值也应为1.0
+/// // Since all input values are 1.0, all output values should also be 1.0
 /// for b in 0..3 {
 ///     for c in 0..4 {
 ///         assert_relative_eq!(output[[b, c]], 1.0);
@@ -51,11 +52,11 @@ pub struct GlobalAveragePooling2D {
 }
 
 impl GlobalAveragePooling2D {
-    /// 创建全局平均池化层的新实例
+    /// Creates a new instance of global average pooling layer
     ///
-    /// # 返回
+    /// # Returns
     ///
-    /// 一个新的 `GlobalAveragePooling2D` 实例
+    /// A new `GlobalAveragePooling2D` instance
     pub fn new() -> Self {
         GlobalAveragePooling2D {
             input_shape: Vec::new(),
@@ -66,7 +67,7 @@ impl GlobalAveragePooling2D {
 
 impl Layer for GlobalAveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // 保存输入形状并缓存输入用于反向传播
+        // Save input shape and cache input for backpropagation
         self.input_shape = input.shape().to_vec();
         self.input_cache = Some(input.clone());
 
@@ -74,32 +75,38 @@ impl Layer for GlobalAveragePooling2D {
         let channels = input.shape()[1];
         let height = input.shape()[2];
         let width = input.shape()[3];
-        let spatial_size = height * width;
+        let spatial_size = (height * width) as f32;
 
-        // 对每个样本和每个通道执行全局平均池化
+        // Create result array
         let mut result = Array::zeros(IxDyn(&[batch_size, channels]));
 
-        for b in 0..batch_size {
-            for c in 0..channels {
-                let mut sum = 0.0;
+        let indices: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c)))
+            .collect();
 
-                // 计算每个通道中所有值的总和
+        let avgs: Vec<f32> = indices
+            .par_iter()
+            .map(|&(b, c)| {
+                let mut sum = 0.0;
                 for h in 0..height {
                     for w in 0..width {
                         sum += input[[b, c, h, w]];
                     }
                 }
+                sum / spatial_size
+            })
+            .collect();
 
-                // 将平均值放入结果张量
-                result[[b, c]] = sum / (spatial_size as f32);
-            }
+        // Fill the calculated results into the result tensor
+        for (i, &(b, c)) in indices.iter().enumerate() {
+            result[[b, c]] = avgs[i];
         }
 
         result
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        // 检查是否有有效的输入缓存
+        // Check if there is a valid input cache
         let input = match &self.input_cache {
             Some(input) => input,
             None => {
@@ -109,30 +116,38 @@ impl Layer for GlobalAveragePooling2D {
             }
         };
 
-        // 获取输入维度
+        // Get input dimensions
         let batch_size = input.shape()[0];
         let channels = input.shape()[1];
         let height = input.shape()[2];
         let width = input.shape()[3];
         let spatial_size = height * width;
-
-        // 创建一个与输入形状相同的梯度张量，初始化为零
-        let mut grad_input = Array::zeros(IxDyn(&[batch_size, channels, height, width]));
-
-        // 将梯度均匀分布到每个空间位置
         let scale_factor = 1.0 / (spatial_size as f32);
 
-        for b in 0..batch_size {
-            for c in 0..channels {
-                let grad = grad_output[[b, c]] * scale_factor;
+        // Create a collection containing all indices
+        let indices: Vec<(usize, usize, usize, usize)> = (0..batch_size)
+            .flat_map(|b| {
+                (0..channels).flat_map(move |c| {
+                    (0..height).flat_map(move |h| (0..width).map(move |w| (b, c, h, w)))
+                })
+            })
+            .collect();
 
-                // 将相同的梯度值分配给每个空间位置
-                for h in 0..height {
-                    for w in 0..width {
-                        grad_input[[b, c, h, w]] = grad;
-                    }
-                }
-            }
+        // Create gradient tensor using into_par_iter().map().collect() pattern
+        let grad_values: Vec<(usize, usize, usize, usize, f32)> = indices
+            .into_par_iter()
+            .map(|(b, c, h, w)| {
+                let grad = grad_output[[b, c]] * scale_factor;
+                (b, c, h, w, grad)
+            })
+            .collect();
+
+        // Create and fill gradient tensor
+        let mut grad_input = Array::zeros(IxDyn(&[batch_size, channels, height, width]));
+
+        // Fill the calculated results into the gradient tensor
+        for (b, c, h, w, grad) in grad_values {
+            grad_input[[b, c, h, w]] = grad;
         }
 
         Ok(grad_input)
@@ -150,11 +165,11 @@ impl Layer for GlobalAveragePooling2D {
     }
 
     fn param_count(&self) -> usize {
-        0 // GlobalAveragePooling2D层没有可训练参数
+        0 // GlobalAveragePooling2D layer has no trainable parameters
     }
 
     fn update_parameters_sgd(&mut self, _lr: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_adam(
@@ -165,15 +180,15 @@ impl Layer for GlobalAveragePooling2D {
         _epsilon: f32,
         _t: u64,
     ) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // 没有参数需要更新
+        // No parameters to update
     }
 
     fn get_weights(&self) -> LayerWeight {
-        // 返回空的LayerWeight，因为没有权重
+        // Return empty LayerWeight as there are no weights
         LayerWeight::Empty
     }
 }
