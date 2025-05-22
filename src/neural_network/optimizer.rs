@@ -1,5 +1,8 @@
+/// Adam optimizer implementation
 pub mod adam;
+/// RMSprop optimizer implementation
 pub mod rmsprop;
+/// Stochastic Gradient Descent (SGD) optimizer.
 pub mod sgd;
 
 pub use adam::*;

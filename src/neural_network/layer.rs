@@ -1,11 +1,20 @@
+/// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
+/// A 2D convolutional layer for neural networks.
 pub mod conv2d;
+/// Dense (Fully Connected) layer implementation for neural networks.
 pub mod dense;
+/// A layer that flattens a 4D tensor into a 2D tensor.
 pub mod flatten;
+/// Global Average Pooling 2D Layer
 pub mod global_average_pooling_2d;
+/// Global Max Pooling Layer
 pub mod global_max_pooling_2d;
+/// LSTM (Long Short-Term Memory) neural network layer implementation.
 pub mod lstm;
+/// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 pub mod max_pooling_2d;
+/// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 pub mod simple_rnn;
 
 pub use average_pooling_2d::*;
