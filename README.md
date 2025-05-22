@@ -86,6 +86,7 @@ Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充
     - Dense | 全连接层
     - SimpleRNN(without LSTM) | 简单循环神经网络(没有LSTM)
     - LSTM | 长短期记忆循环神经网络
+    - Feature Extraction Layers (Convolution, Pooling) | 特征提取层(卷积, 池化)
 
   - Loss function | 损失计算函数:
     - Mean Squared Error | 均方误差
@@ -137,7 +138,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = "0.6.0"
+rustyml = "0.6.1"
 ```
 Example usage | 使用示例:
 ``` rust
