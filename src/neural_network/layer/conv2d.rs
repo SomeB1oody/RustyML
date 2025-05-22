@@ -580,37 +580,85 @@ impl Layer for Conv2D {
             let correction1 = 1.0 - beta1.powi(t as i32);
             let correction2 = 1.0 - beta2.powi(t as i32);
 
-            // Update weights
+            // Update weights and biases using a closure to avoid code duplication
             if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
-                for i in 0..self.weights.len() {
-                    let grad = weight_grads.as_slice().unwrap()[i];
-                    let m = &mut adam_states.m.as_slice_mut().unwrap()[i];
-                    let v = &mut adam_states.v.as_slice_mut().unwrap()[i];
+                // Define a closure for updating parameters with Adam algorithm
+                let update_adam =
+                    |params: &mut [f32], grads: &[f32], m: &mut [f32], v: &mut [f32]| {
+                        params
+                            .par_iter_mut()
+                            .zip(grads.par_iter())
+                            .zip(m.par_iter_mut())
+                            .zip(v.par_iter_mut())
+                            .for_each(|(((param, &grad), m_val), v_val)| {
+                                // Update momentum and variance
+                                *m_val = beta1 * *m_val + (1.0 - beta1) * grad;
+                                *v_val = beta2 * *v_val + (1.0 - beta2) * grad * grad;
 
-                    *m = beta1 * *m + (1.0 - beta1) * grad;
-                    *v = beta2 * *v + (1.0 - beta2) * grad * grad;
+                                // Calculate corrected momentum and variance
+                                let m_corrected = *m_val / correction1;
+                                let v_corrected = *v_val / correction2;
 
-                    let m_corrected = *m / correction1;
-                    let v_corrected = *v / correction2;
+                                // Update parameter
+                                *param -= lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                            });
+                    };
 
-                    self.weights.as_slice_mut().unwrap()[i] -=
-                        lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                // Update weights using parallel computation
+                if let (Some(weight_slice), Some(weight_grad_slice), Some(m_slice), Some(v_slice)) = (
+                    self.weights.as_slice_mut(),
+                    weight_grads.as_slice(),
+                    adam_states.m.as_slice_mut(),
+                    adam_states.v.as_slice_mut(),
+                ) {
+                    update_adam(weight_slice, weight_grad_slice, m_slice, v_slice);
+                } else {
+                    // If slices cannot be obtained, use original sequential implementation as fallback
+                    for i in 0..self.weights.len() {
+                        let grad = weight_grads.as_slice().unwrap()[i];
+                        let m = &mut adam_states.m.as_slice_mut().unwrap()[i];
+                        let v = &mut adam_states.v.as_slice_mut().unwrap()[i];
+
+                        *m = beta1 * *m + (1.0 - beta1) * grad;
+                        *v = beta2 * *v + (1.0 - beta2) * grad * grad;
+
+                        let m_corrected = *m / correction1;
+                        let v_corrected = *v / correction2;
+
+                        self.weights.as_slice_mut().unwrap()[i] -=
+                            lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                    }
                 }
 
-                // Update biases
-                for i in 0..self.bias.len() {
-                    let grad = bias_grads.as_slice().unwrap()[i];
-                    let m = &mut adam_states.m_bias.as_slice_mut().unwrap()[i];
-                    let v = &mut adam_states.v_bias.as_slice_mut().unwrap()[i];
+                // Use parallel computation to update biases
+                if let (
+                    Some(bias_slice),
+                    Some(bias_grad_slice),
+                    Some(m_bias_slice),
+                    Some(v_bias_slice),
+                ) = (
+                    self.bias.as_slice_mut(),
+                    bias_grads.as_slice(),
+                    adam_states.m_bias.as_slice_mut(),
+                    adam_states.v_bias.as_slice_mut(),
+                ) {
+                    update_adam(bias_slice, bias_grad_slice, m_bias_slice, v_bias_slice);
+                } else {
+                    // If slices cannot be obtained, use original sequential implementation as fallback
+                    for i in 0..self.bias.len() {
+                        let grad = bias_grads.as_slice().unwrap()[i];
+                        let m = &mut adam_states.m_bias.as_slice_mut().unwrap()[i];
+                        let v = &mut adam_states.v_bias.as_slice_mut().unwrap()[i];
 
-                    *m = beta1 * *m + (1.0 - beta1) * grad;
-                    *v = beta2 * *v + (1.0 - beta2) * grad * grad;
+                        *m = beta1 * *m + (1.0 - beta1) * grad;
+                        *v = beta2 * *v + (1.0 - beta2) * grad * grad;
 
-                    let m_corrected = *m / correction1;
-                    let v_corrected = *v / correction2;
+                        let m_corrected = *m / correction1;
+                        let v_corrected = *v / correction2;
 
-                    self.bias.as_slice_mut().unwrap()[i] -=
-                        lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                        self.bias.as_slice_mut().unwrap()[i] -=
+                            lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                    }
                 }
             }
         }
@@ -620,7 +668,7 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // Initialize cache (if not initialized)
+            // Initialize cache (if not initialized yet)
             if self.optimizer_cache.rmsprop_cache.is_none() {
                 self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheFEL {
                     cache: Array4::zeros(self.weights.dim()),
@@ -628,25 +676,59 @@ impl Layer for Conv2D {
                 });
             }
 
-            // Update weights
+            // Create a generic RMSprop update closure
+            let update_rmsprop = |params: &mut [f32], grads: &[f32], cache: &mut [f32]| {
+                params
+                    .par_iter_mut()
+                    .zip(grads.par_iter())
+                    .zip(cache.par_iter_mut())
+                    .for_each(|((param, &grad), cache_val)| {
+                        // Update cache
+                        *cache_val = rho * *cache_val + (1.0 - rho) * grad * grad;
+                        // Update parameters
+                        *param -= lr * grad / (cache_val.sqrt() + epsilon);
+                    });
+            };
+
             if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
-                for i in 0..self.weights.len() {
-                    let grad = weight_grads.as_slice().unwrap()[i];
-                    let cache = &mut rmsprop_cache.cache.as_slice_mut().unwrap()[i];
+                // Update weights
+                if let (Some(weight_slice), Some(weight_grad_slice), Some(cache_slice)) = (
+                    self.weights.as_slice_mut(),
+                    weight_grads.as_slice(),
+                    rmsprop_cache.cache.as_slice_mut(),
+                ) {
+                    // Use closure to update weights
+                    update_rmsprop(weight_slice, weight_grad_slice, cache_slice);
+                } else {
+                    // Fallback to original loop implementation
+                    for i in 0..self.weights.len() {
+                        let grad = weight_grads.as_slice().unwrap()[i];
+                        let cache = &mut rmsprop_cache.cache.as_slice_mut().unwrap()[i];
 
-                    *cache = rho * *cache + (1.0 - rho) * grad * grad;
-
-                    self.weights.as_slice_mut().unwrap()[i] -= lr * grad / (cache.sqrt() + epsilon);
+                        *cache = rho * *cache + (1.0 - rho) * grad * grad;
+                        self.weights.as_slice_mut().unwrap()[i] -=
+                            lr * grad / (cache.sqrt() + epsilon);
+                    }
                 }
 
                 // Update biases
-                for i in 0..self.bias.len() {
-                    let grad = bias_grads.as_slice().unwrap()[i];
-                    let cache = &mut rmsprop_cache.bias.as_slice_mut().unwrap()[i];
+                if let (Some(bias_slice), Some(bias_grad_slice), Some(bias_cache_slice)) = (
+                    self.bias.as_slice_mut(),
+                    bias_grads.as_slice(),
+                    rmsprop_cache.bias.as_slice_mut(),
+                ) {
+                    // Use the same closure to update biases
+                    update_rmsprop(bias_slice, bias_grad_slice, bias_cache_slice);
+                } else {
+                    // Fallback to original loop implementation
+                    for i in 0..self.bias.len() {
+                        let grad = bias_grads.as_slice().unwrap()[i];
+                        let cache = &mut rmsprop_cache.bias.as_slice_mut().unwrap()[i];
 
-                    *cache = rho * *cache + (1.0 - rho) * grad * grad;
-
-                    self.bias.as_slice_mut().unwrap()[i] -= lr * grad / (cache.sqrt() + epsilon);
+                        *cache = rho * *cache + (1.0 - rho) * grad * grad;
+                        self.bias.as_slice_mut().unwrap()[i] -=
+                            lr * grad / (cache.sqrt() + epsilon);
+                    }
                 }
             }
         }

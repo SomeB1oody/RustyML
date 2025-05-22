@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add doc comments for modules
 
+### Changed
+- Optimize parameter updates of struct `Conv2D` with parallelization
+
 ## [v0.6.1] - 2025-5-21
 ### Added
 - Add tests for `GlobalAveragePooling2D` layer
