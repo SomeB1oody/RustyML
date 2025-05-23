@@ -1,3 +1,4 @@
+pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
 /// A 2D convolutional layer for neural networks.
@@ -17,6 +18,7 @@ pub mod max_pooling_2d;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 pub mod simple_rnn;
 
+pub use average_pooling_1d::*;
 pub use average_pooling_2d::*;
 pub use conv2d::*;
 pub use dense::*;
