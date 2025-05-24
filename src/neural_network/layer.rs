@@ -1,3 +1,4 @@
+/// 1D Average Pooling layer for neural networks.
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
