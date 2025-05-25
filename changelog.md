@@ -5,6 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.2] - 2025-5-25
+### Added
+- Add more test functions for neural network
+
+### Changed
+- move all test functions to `test` module
+
 ## [v0.6.2] - 2025-5-24
 ### Changed
 - Refactor and document `AveragePooling1D` module

@@ -1,6 +1,6 @@
+use crate::utility::t_sne::*;
 use approx::assert_relative_eq;
 use ndarray::{Array2, Axis};
-use crate::utility::t_sne::*;
 
 #[test]
 fn test_tsne_default() {
@@ -29,7 +29,7 @@ fn test_tsne_new() {
         Some(50),
         Some(0.3),
         Some(0.9),
-        Some(200)
+        Some(200),
     );
 
     assert_eq!(tsne.get_perplexity(), 50.0);
@@ -56,7 +56,7 @@ fn test_tsne_partial_params() {
         None,
         None,
         None,
-        None
+        None,
     );
 
     assert_eq!(tsne.get_perplexity(), 40.0);
@@ -78,7 +78,18 @@ fn test_fit_transform_dimensions() {
     let output_dim = 2;
 
     let x = Array2::<f64>::ones((n_samples, n_features));
-    let tsne = TSNE::new(None, None, Some(10), output_dim, None, None, None, None, None, None);
+    let tsne = TSNE::new(
+        None,
+        None,
+        Some(10),
+        output_dim,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let result = tsne.fit_transform(x.view());
     assert!(result.is_ok());
@@ -95,12 +106,34 @@ fn test_fit_transform_validation() {
     let x = Array2::<f64>::ones((n_samples, n_features));
 
     // Test invalid perplexity
-    let tsne_invalid_perplexity = TSNE::new(Some(-1.0), None, None, 2, None, None, None, None, None, None);
+    let tsne_invalid_perplexity = TSNE::new(
+        Some(-1.0),
+        None,
+        None,
+        2,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let result = tsne_invalid_perplexity.fit_transform(x.view());
     assert!(result.is_err());
 
     // Test invalid learning_rate
-    let tsne_invalid_lr = TSNE::new(None, Some(-0.1), None, 2, None, None, None, None, None, None);
+    let tsne_invalid_lr = TSNE::new(
+        None,
+        Some(-0.1),
+        None,
+        2,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let result = tsne_invalid_lr.fit_transform(x.view());
     assert!(result.is_err());
 
@@ -110,7 +143,8 @@ fn test_fit_transform_validation() {
     assert!(result.is_err());
 
     // Test invalid momentum
-    let tsne_invalid_momentum = TSNE::new(None, None, None, 2, None, None, None, Some(1.5), None, None);
+    let tsne_invalid_momentum =
+        TSNE::new(None, None, None, 2, None, None, None, Some(1.5), None, None);
     let result = tsne_invalid_momentum.fit_transform(x.view());
     assert!(result.is_err());
 }
@@ -122,7 +156,18 @@ fn test_result_is_zero_mean() {
     let output_dim = 2;
 
     let x = Array2::<f64>::ones((n_samples, n_features));
-    let tsne = TSNE::new(None, None, Some(10), output_dim, Some(42), None, None, None, None, None);
+    let tsne = TSNE::new(
+        None,
+        None,
+        Some(10),
+        output_dim,
+        Some(42),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let result = tsne.fit_transform(x.view()).unwrap();
 
@@ -141,8 +186,30 @@ fn test_reproducibility() {
     let x = Array2::<f64>::ones((n_samples, n_features));
 
     // Using the same random seed should produce the same results
-    let tsne1 = TSNE::new(None, None, Some(10), 2, Some(42), None, None, None, None, None);
-    let tsne2 = TSNE::new(None, None, Some(10), 2, Some(42), None, None, None, None, None);
+    let tsne1 = TSNE::new(
+        None,
+        None,
+        Some(10),
+        2,
+        Some(42),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let tsne2 = TSNE::new(
+        None,
+        None,
+        Some(10),
+        2,
+        Some(42),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let result1 = tsne1.fit_transform(x.view()).unwrap();
     let result2 = tsne2.fit_transform(x.view()).unwrap();
@@ -153,7 +220,18 @@ fn test_reproducibility() {
     }
 
     // Using different random seeds should produce different results
-    let tsne3 = TSNE::new(None, None, Some(10), 2, Some(24), None, None, None, None, None);
+    let tsne3 = TSNE::new(
+        None,
+        None,
+        Some(10),
+        2,
+        Some(24),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
     let result3 = tsne3.fit_transform(x.view()).unwrap();
 
     // At least one value should be different

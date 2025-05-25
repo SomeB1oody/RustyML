@@ -1,5 +1,5 @@
-use crate::utility::linear_discriminant_analysis::LDA;
 use crate::ModelError;
+use crate::utility::linear_discriminant_analysis::LDA;
 use approx::assert_relative_eq;
 use ndarray::{Array1, Array2, arr1, arr2, s};
 
@@ -118,8 +118,8 @@ fn test_predict() {
 
     // Test data
     let x_test = arr2(&[
-        [1.2, 2.2],  // Should be predicted as class 0
-        [5.2, 4.8],  // Should be predicted as class 1
+        [1.2, 2.2], // Should be predicted as class 0
+        [5.2, 4.8], // Should be predicted as class 1
     ]);
 
     let mut lda = LDA::new();
@@ -132,10 +132,16 @@ fn test_predict() {
 
     // Test prediction on unfitted model
     let lda_unfitted = LDA::new();
-    assert!(matches!(lda_unfitted.predict(x_test.view()), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        lda_unfitted.predict(x_test.view()),
+        Err(ModelError::NotFitted)
+    ));
 
     // Test empty input
-    assert!(matches!(lda.predict(Array2::<f64>::zeros((0, 2)).view()), Err(_)));
+    assert!(matches!(
+        lda.predict(Array2::<f64>::zeros((0, 2)).view()),
+        Err(_)
+    ));
 }
 
 #[test]
@@ -180,7 +186,10 @@ fn test_transform() {
 
     // Test unfitted model
     let lda_unfitted = LDA::new();
-    assert!(matches!(lda_unfitted.transform(x.view(), 1), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        lda_unfitted.transform(x.view(), 1),
+        Err(ModelError::NotFitted)
+    ));
 }
 
 #[test]
@@ -212,6 +221,10 @@ fn test_fit_transform() {
     // Transformed data should match separate transform call
     let transformed_separate = lda.transform(x.view(), 1).unwrap();
     for i in 0..transformed.len() {
-        assert_relative_eq!(transformed[[i, 0]], transformed_separate[[i, 0]], epsilon = 1e-10);
+        assert_relative_eq!(
+            transformed[[i, 0]],
+            transformed_separate[[i, 0]],
+            epsilon = 1e-10
+        );
     }
 }

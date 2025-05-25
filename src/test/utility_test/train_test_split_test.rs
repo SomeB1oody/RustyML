@@ -1,10 +1,14 @@
+use crate::ModelError;
 use crate::utility::train_test_split::*;
 use ndarray::{Array1, Array2};
-use crate::ModelError;
 
 #[test]
 fn test_train_test_split_valid_input() {
-    let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
+    let x = Array2::from_shape_vec(
+        (5, 2),
+        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    )
+    .unwrap();
     let y = Array1::from(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
 
     let result = train_test_split(x.clone(), y.clone(), Some(0.4), Some(42));
@@ -14,12 +18,16 @@ fn test_train_test_split_valid_input() {
 
     // Verify split sizes
     assert_eq!(x_train.nrows(), 3); // 5 * (1-0.4) = 3
-    assert_eq!(x_test.nrows(), 2);  // 5 * 0.4 = 2
+    assert_eq!(x_test.nrows(), 2); // 5 * 0.4 = 2
     assert_eq!(y_train.len(), 3);
     assert_eq!(y_test.len(), 2);
 
     // Verify all original data is included in the split
-    let all_x_rows = x_train.rows().into_iter().chain(x_test.rows().into_iter()).collect::<Vec<_>>();
+    let all_x_rows = x_train
+        .rows()
+        .into_iter()
+        .chain(x_test.rows().into_iter())
+        .collect::<Vec<_>>();
     let all_y_values = y_train.iter().chain(y_test.iter()).collect::<Vec<_>>();
 
     assert_eq!(all_x_rows.len(), 5);
@@ -72,7 +80,11 @@ fn test_different_random_states_give_different_splits() {
 
 #[test]
 fn test_error_different_sample_sizes() {
-    let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
+    let x = Array2::from_shape_vec(
+        (5, 2),
+        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    )
+    .unwrap();
     let y = Array1::from(vec![0.0, 1.0, 0.0]); // Only 3 samples while x has 5
 
     let result = train_test_split(x, y, Some(0.4), Some(42));
@@ -87,7 +99,11 @@ fn test_error_different_sample_sizes() {
 
 #[test]
 fn test_error_invalid_test_size() {
-    let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
+    let x = Array2::from_shape_vec(
+        (5, 2),
+        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    )
+    .unwrap();
     let y = Array1::from(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
 
     // Test too small test_size
@@ -116,10 +132,15 @@ fn test_small_dataset() {
 
 #[test]
 fn test_consistent_x_y_split() {
-    let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
+    let x = Array2::from_shape_vec(
+        (5, 2),
+        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+    )
+    .unwrap();
     let y = Array1::from(vec![100.0, 200.0, 300.0, 400.0, 500.0]); // Use different values for easier validation
 
-    let (x_train, x_test, y_train, y_test) = train_test_split(x.clone(), y.clone(), Some(0.4), Some(42)).unwrap();
+    let (x_train, x_test, y_train, y_test) =
+        train_test_split(x.clone(), y.clone(), Some(0.4), Some(42)).unwrap();
 
     // Verify that x and y splits are consistent (rows from x and corresponding values from y
     // should go together into either train or test set)

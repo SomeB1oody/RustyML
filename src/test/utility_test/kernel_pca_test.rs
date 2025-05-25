@@ -1,8 +1,8 @@
-use crate::utility::kernel_pca::{KernelPCA, compute_kernel};
-use crate::machine_learning::svc::KernelType;
 use crate::ModelError;
-use ndarray::{Array2, ArrayView1};
+use crate::machine_learning::svc::KernelType;
+use crate::utility::kernel_pca::{KernelPCA, compute_kernel};
 use approx::assert_abs_diff_eq;
+use ndarray::{Array2, ArrayView1};
 
 #[test]
 fn test_kernel_pca_default() {
@@ -55,7 +55,11 @@ fn test_compute_kernel_rbf() {
 fn test_compute_kernel_poly() {
     let x = ArrayView1::from(&[1.0, 2.0]);
     let y = ArrayView1::from(&[3.0, 4.0]);
-    let kernel = KernelType::Poly { degree: 2, gamma: 1.0, coef0: 0.0 };
+    let kernel = KernelType::Poly {
+        degree: 2,
+        gamma: 1.0,
+        coef0: 0.0,
+    };
 
     let result = compute_kernel(&x, &y, &kernel);
     assert_eq!(result, 121.0); // (1*3 + 2*4)^2 = 11^2 = 121
@@ -65,7 +69,10 @@ fn test_compute_kernel_poly() {
 fn test_compute_kernel_sigmoid() {
     let x = ArrayView1::from(&[1.0, 2.0]);
     let y = ArrayView1::from(&[3.0, 4.0]);
-    let kernel = KernelType::Sigmoid { gamma: 1.0, coef0: 0.0 };
+    let kernel = KernelType::Sigmoid {
+        gamma: 1.0,
+        coef0: 0.0,
+    };
 
     let result = compute_kernel(&x, &y, &kernel);
     assert_abs_diff_eq!(result, 11.0_f64.tanh(), epsilon = 1e-10);
@@ -76,7 +83,10 @@ fn test_getters_not_fitted() {
     let kpca = KernelPCA::default();
 
     assert!(matches!(kpca.get_eigenvalues(), Err(ModelError::NotFitted)));
-    assert!(matches!(kpca.get_eigenvectors(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        kpca.get_eigenvectors(),
+        Err(ModelError::NotFitted)
+    ));
     assert!(matches!(kpca.get_x_fit(), Err(ModelError::NotFitted)));
     assert!(matches!(kpca.get_row_means(), Err(ModelError::NotFitted)));
     assert!(matches!(kpca.get_total_mean(), Err(ModelError::NotFitted)));
@@ -114,12 +124,13 @@ fn test_fit_invalid_inputs() {
 #[test]
 fn test_fit_simple_case() {
     let mut kpca = KernelPCA::new(KernelType::Linear, 2);
-    let data = Array2::from_shape_vec((4, 3), vec![
-        1.0, 2.0, 3.0,
-        4.0, 5.0, 6.0,
-        7.0, 8.0, 9.0,
-        10.0, 11.0, 12.0
-    ]).unwrap();
+    let data = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
+    )
+    .unwrap();
 
     let result = kpca.fit(data.view());
     assert!(result.is_ok());
@@ -146,12 +157,13 @@ fn test_transform_not_fitted() {
 #[test]
 fn test_fit_transform() {
     let mut kpca = KernelPCA::new(KernelType::Linear, 2);
-    let data = Array2::from_shape_vec((4, 3), vec![
-        1.0, 2.0, 3.0,
-        4.0, 5.0, 6.0,
-        7.0, 8.0, 9.0,
-        10.0, 11.0, 12.0
-    ]).unwrap();
+    let data = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
+    )
+    .unwrap();
 
     let result = kpca.fit_transform(data.view());
     assert!(result.is_ok());
@@ -164,22 +176,20 @@ fn test_fit_transform() {
 #[test]
 fn test_fit_and_transform() {
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2);
-    let train_data = Array2::from_shape_vec((4, 3), vec![
-        1.0, 2.0, 3.0,
-        4.0, 5.0, 6.0,
-        7.0, 8.0, 9.0,
-        10.0, 11.0, 12.0
-    ]).unwrap();
+    let train_data = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
+    )
+    .unwrap();
 
     // First fit
     let fit_result = kpca.fit(train_data.view());
     assert!(fit_result.is_ok());
 
     // Then transform new data
-    let test_data = Array2::from_shape_vec((2, 3), vec![
-        2.0, 3.0, 4.0,
-        5.0, 6.0, 7.0
-    ]).unwrap();
+    let test_data = Array2::from_shape_vec((2, 3), vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0]).unwrap();
 
     let transform_result = kpca.transform(test_data.view());
     assert!(transform_result.is_ok());
@@ -195,16 +205,24 @@ fn test_different_kernel_types() {
     let kernels = vec![
         KernelType::Linear,
         KernelType::RBF { gamma: 0.1 },
-        KernelType::Poly { degree: 2, gamma: 0.1, coef0: 1.0 },
-        KernelType::Sigmoid { gamma: 0.1, coef0: 1.0 }
+        KernelType::Poly {
+            degree: 2,
+            gamma: 0.1,
+            coef0: 1.0,
+        },
+        KernelType::Sigmoid {
+            gamma: 0.1,
+            coef0: 1.0,
+        },
     ];
 
-    let data = Array2::from_shape_vec((4, 3), vec![
-        1.0, 2.0, 3.0,
-        4.0, 5.0, 6.0,
-        7.0, 8.0, 9.0,
-        10.0, 11.0, 12.0
-    ]).unwrap();
+    let data = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
+    )
+    .unwrap();
 
     for kernel in kernels {
         let mut kpca = KernelPCA::new(kernel, 2);

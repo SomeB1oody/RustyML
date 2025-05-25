@@ -4,12 +4,7 @@ use ndarray::{arr1, arr2};
 #[test]
 fn test_svc_constructor() {
     // Test basic constructor
-    let svc = SVC::new(
-        KernelType::Linear,
-        1.0,
-        0.001,
-        100
-    );
+    let svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100);
 
     assert_eq!(svc.get_regularization_param(), 1.0);
     assert_eq!(svc.get_tol(), 0.001);
@@ -30,8 +25,8 @@ fn test_svc_default() {
     match svc.get_kernel() {
         KernelType::RBF { gamma } => {
             assert!((gamma - 0.1).abs() < 1e-10);
-        },
-        _ => panic!("Expected RBF kernel with gamma=1.0")
+        }
+        _ => panic!("Expected RBF kernel with gamma=1.0"),
     }
     assert_eq!(svc.get_regularization_param(), 1.0);
     assert_eq!(svc.get_tol(), 0.001);
@@ -153,18 +148,33 @@ fn test_error_handling() {
 fn test_different_kernels() {
     // Create various kernel types
     let poly_svc = SVC::new(
-        KernelType::Poly { degree: 3, gamma: 0.1, coef0: 0.0 },
-        1.0, 0.001, 100
+        KernelType::Poly {
+            degree: 3,
+            gamma: 0.1,
+            coef0: 0.0,
+        },
+        1.0,
+        0.001,
+        100,
     );
 
     let sigmoid_svc = SVC::new(
-        KernelType::Sigmoid { gamma: 0.1, coef0: 0.0 },
-        1.0, 0.001, 100
+        KernelType::Sigmoid {
+            gamma: 0.1,
+            coef0: 0.0,
+        },
+        1.0,
+        0.001,
+        100,
     );
 
     // Ensure kernel types are correctly matched
     match poly_svc.get_kernel() {
-        KernelType::Poly { degree, gamma, coef0 } => {
+        KernelType::Poly {
+            degree,
+            gamma,
+            coef0,
+        } => {
             assert_eq!(*degree, 3);
             assert!((*gamma - 0.1).abs() < 1e-10);
             assert!((*coef0 - 0.0).abs() < 1e-10);
@@ -184,12 +194,7 @@ fn test_different_kernels() {
 #[test]
 fn test_decision_function() {
     // Test decision function after fit
-    let x = arr2(&[
-        [1.0, 2.0],
-        [2.0, 3.0],
-        [-1.0, -2.0],
-        [-2.0, -3.0],
-    ]);
+    let x = arr2(&[[1.0, 2.0], [2.0, 3.0], [-1.0, -2.0], [-2.0, -3.0]]);
 
     let y = arr1(&[1.0, 1.0, -1.0, -1.0]);
 

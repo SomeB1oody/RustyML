@@ -1,7 +1,7 @@
-use crate::machine_learning::dbscan::*;
-use ndarray::{arr2, Array2};
 use crate::ModelError;
 use crate::machine_learning::DistanceCalculationMetric as Metric;
+use crate::machine_learning::dbscan::*;
+use ndarray::{Array2, arr2};
 
 #[test]
 fn test_new() {
@@ -81,9 +81,9 @@ fn test_fit_simple_data() {
         }
     }
 
-    assert!(cluster_count >= 2);  // At least two clusters
-    assert!(has_noise);  // Should have noise points
-    assert!(!core_indices.is_empty());  // Should have core points
+    assert!(cluster_count >= 2); // At least two clusters
+    assert!(has_noise); // Should have noise points
+    assert!(!core_indices.is_empty()); // Should have core points
 }
 
 #[test]
@@ -97,9 +97,9 @@ fn test_predict() {
     ]);
 
     let new_data = arr2(&[
-        [1.0, 2.1],  // Should belong to first cluster
-        [10.1, 10.0],  // Should belong to second cluster
-        [5.0, 5.0],  // Should be noise
+        [1.0, 2.1],   // Should belong to first cluster
+        [10.1, 10.0], // Should belong to second cluster
+        [5.0, 5.0],   // Should be noise
     ]);
 
     let mut dbscan = DBSCAN::new(0.5, 2, Metric::Euclidean);
@@ -130,14 +130,9 @@ fn test_fit_predict() {
 
 #[test]
 fn test_predict_before_fit() {
-    let data = arr2(&[
-        [1.0, 2.0],
-        [1.1, 2.2],
-    ]);
+    let data = arr2(&[[1.0, 2.0], [1.1, 2.2]]);
 
-    let new_data = arr2(&[
-        [1.0, 2.1],
-    ]);
+    let new_data = arr2(&[[1.0, 2.1]]);
 
     let dbscan = DBSCAN::new(0.5, 2, Metric::Euclidean);
     match dbscan.predict(data.view(), new_data.view()) {

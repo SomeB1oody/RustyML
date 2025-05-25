@@ -1,7 +1,7 @@
-use ndarray::{arr2, Array2};
-use std::error::Error;
 use crate::utility::principal_component_analysis::*;
 use crate::utility::standardize;
+use ndarray::{Array2, arr2};
+use std::error::Error;
 
 // Helper function for approximate equality checks
 fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {
@@ -33,11 +33,7 @@ fn test_pca_default() {
 
 #[test]
 fn test_standardize() {
-    let data = arr2(&[
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [7.0, 8.0, 9.0],
-    ]);
+    let data = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
 
     let standardized = standardize(&data);
 
@@ -200,7 +196,7 @@ fn test_variance_explained_properties() -> Result<(), Box<dyn Error>> {
 
     // Check that variance ratios are sorted in descending order
     for i in 1..variance_ratio.len() {
-        assert!(variance_ratio[i-1] >= variance_ratio[i]);
+        assert!(variance_ratio[i - 1] >= variance_ratio[i]);
     }
 
     Ok(())
@@ -208,9 +204,9 @@ fn test_variance_explained_properties() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_pca_with_random_data() -> Result<(), Box<dyn Error>> {
+    use rand::SeedableRng;
     use rand::distr::{Distribution, Uniform};
     use rand::rngs::StdRng;
-    use rand::SeedableRng;
 
     // Create a deterministic random number generator
     let mut rng = StdRng::seed_from_u64(42);

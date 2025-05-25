@@ -1,7 +1,7 @@
-use ndarray::{Array2, arr2};
-use rand::prelude::*;
-use rand::SeedableRng;
 use crate::machine_learning::meanshift::*;
+use ndarray::{Array2, arr2};
+use rand::SeedableRng;
+use rand::prelude::*;
 
 fn create_test_data() -> Array2<f64> {
     // Create a simple test dataset with three clusters
@@ -93,8 +93,8 @@ fn test_meanshift_predict() {
     // Create some new test points
     let test_points = arr2(&[
         [-15.0, -15.0], // Should belong to the first cluster
-        [5.0, 5.0],   // Should belong to the second cluster
-        [25.0, 25.0]    // Should belong to the third cluster
+        [5.0, 5.0],     // Should belong to the second cluster
+        [25.0, 25.0],   // Should belong to the third cluster
     ]);
 
     let predictions = ms.predict(test_points.view()).unwrap();

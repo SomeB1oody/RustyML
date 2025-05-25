@@ -1,6 +1,6 @@
 use crate::math::*;
-use ndarray::{array, Array, Array1};
 use approx::assert_relative_eq;
+use ndarray::{Array, Array1, array};
 
 #[test]
 fn test_sum_of_square_total() {
@@ -28,17 +28,26 @@ fn test_sum_of_squared_errors() {
     // SSE = (1-1.2)² + (2-1.8)² + (3-3.3)² + (4-3.9)²
     // SSE = 0.04 + 0.04 + 0.09 + 0.01 = 0.18
     let expected = 0.18;
-    assert!((sum_of_squared_errors(predicted.view(), actual.view()).unwrap() - expected).abs() < 0.0001);
+    assert!(
+        (sum_of_squared_errors(predicted.view(), actual.view()).unwrap() - expected).abs() < 0.0001
+    );
 
     // Case with perfect prediction
     let perfect_prediction = array![5.0, 10.0, 15.0];
     let actual_values = array![5.0, 10.0, 15.0];
-    assert!((sum_of_squared_errors(perfect_prediction.view(), actual_values.view()).unwrap() - 0.0).abs() < f64::EPSILON);
+    assert!(
+        (sum_of_squared_errors(perfect_prediction.view(), actual_values.view()).unwrap() - 0.0)
+            .abs()
+            < f64::EPSILON
+    );
 
     // Empty arrays case
     let empty_pred = Array::from(Vec::<f64>::new());
     let empty_actual = Array::from(Vec::<f64>::new());
-    assert!(matches!(sum_of_squared_errors(empty_pred.view(), empty_actual.view()), Err(_)));
+    assert!(matches!(
+        sum_of_squared_errors(empty_pred.view(), empty_actual.view()),
+        Err(_)
+    ));
 }
 
 #[test]
@@ -73,11 +82,11 @@ fn test_sigmoid() {
 #[test]
 fn test_logistic_loss() {
     // Test case 1: Very good predictions
-    let predictions1 = array![10.0, -10.0];  // Very confident predictions
-    let labels1 = array![1.0, 0.0];          // Actual labels
+    let predictions1 = array![10.0, -10.0]; // Very confident predictions
+    let labels1 = array![1.0, 0.0]; // Actual labels
     let loss1 = logistic_loss(predictions1.view(), labels1.view()).unwrap();
     println!("Loss1: {}", loss1);
-    assert!(loss1 < 0.01);  // Loss should be small
+    assert!(loss1 < 0.01); // Loss should be small
 
     // Test case 2: Completely wrong predictions
     let predictions2 = array![10.0, -10.0];
@@ -275,34 +284,36 @@ fn test_gini_unbalanced() {
 
 #[test]
 fn test_information_gain() {
-    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];  // 3 zeros, 3 ones
-    let left = array![0.0, 0.0, 0.0];                   // 3 zeros
-    let right = array![1.0, 1.0, 1.0];                  // 3 ones
+    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; // 3 zeros, 3 ones
+    let left = array![0.0, 0.0, 0.0]; // 3 zeros
+    let right = array![1.0, 1.0, 1.0]; // 3 ones
 
     // Parent entropy = 1.0
     // Left child entropy = 0.0
     // Right child entropy = 0.0
     // Information gain = 1.0 - (3/6)*0.0 - (3/6)*0.0 = 1.0
-    assert!((information_gain(parent.view(), left.view(), right.view()) - 1.0).abs() < f64::EPSILON);
+    assert!(
+        (information_gain(parent.view(), left.view(), right.view()) - 1.0).abs() < f64::EPSILON
+    );
 }
 
 #[test]
 fn test_information_gain_no_improvement() {
-    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];  // 3 zeros, 3 ones
-    let left = array![0.0, 0.0, 1.0];                   // 2 zeros, 1 one
-    let right = array![0.0, 1.0, 1.0];                  // 1 zero, 2 ones
+    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; // 3 zeros, 3 ones
+    let left = array![0.0, 0.0, 1.0]; // 2 zeros, 1 one
+    let right = array![0.0, 1.0, 1.0]; // 1 zero, 2 ones
 
     // Left and right child nodes have similar entropy distribution to parent
     // So information gain should be close to 0
     let gain = information_gain(parent.view(), left.view(), right.view());
-    assert!(gain < 0.1);  // Allow for small error
+    assert!(gain < 0.1); // Allow for small error
 }
 
 #[test]
 fn test_gain_ratio() {
-    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];  // 3 zeros, 3 ones
-    let left = array![0.0, 0.0, 0.0];                   // 3 zeros
-    let right = array![1.0, 1.0, 1.0];                  // 3 ones
+    let parent = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; // 3 zeros, 3 ones
+    let left = array![0.0, 0.0, 0.0]; // 3 zeros
+    let right = array![1.0, 1.0, 1.0]; // 3 ones
 
     // Information gain = 1.0
     // Split info = -(0.5*log2(0.5) + 0.5*log2(0.5)) = 1.0
@@ -314,8 +325,8 @@ fn test_gain_ratio() {
 fn test_gain_ratio_zero_split_info() {
     // Test case where split info is zero
     let parent = array![0.0, 0.0, 1.0, 1.0];
-    let left = array![0.0, 0.0, 1.0, 1.0];  // All samples in left node
-    let right: Array1<f64> = array![];         // Right node empty
+    let left = array![0.0, 0.0, 1.0, 1.0]; // All samples in left node
+    let right: Array1<f64> = array![]; // Right node empty
 
     // Split info should be 0, function should return 0
     assert_eq!(gain_ratio(parent.view(), left.view(), right.view()), 0.0);

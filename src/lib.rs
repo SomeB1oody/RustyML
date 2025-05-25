@@ -66,9 +66,6 @@ impl std::error::Error for ModelError {}
 /// ```
 pub mod math;
 
-#[cfg(test)]
-mod math_module_test;
-
 /// Module `machine_learning` provides implementations of various machine learning algorithms and models.
 ///
 /// This module includes a collection of supervised and unsupervised learning algorithms
@@ -132,9 +129,6 @@ mod math_module_test;
 /// ```
 pub mod machine_learning;
 
-#[cfg(test)]
-mod machine_learning_test;
-
 /// A convenience module that re-exports the most commonly used types and traits from this crate.
 ///
 /// This module provides a single import point for frequently used items from this library's machine learning modules,
@@ -189,9 +183,6 @@ pub mod prelude;
 /// ```
 pub mod utility;
 
-#[cfg(test)]
-mod utility_test;
-
 /// # This module provides implementation of common evaluation metrics used in statistical analysis and machine learning models.
 ///
 /// ## Regression Metrics
@@ -236,9 +227,6 @@ mod utility_test;
 /// println!("{}", cm.summary());
 /// ```
 pub mod metric;
-
-#[cfg(test)]
-mod metric_module_test;
 
 /// # This module provides access to common datasets used for testing and benchmarking machine learning algorithms
 ///
@@ -310,9 +298,6 @@ pub mod dataset;
 /// - `sequential`: Sequential model for creating feed-forward neural networks
 pub mod neural_network;
 
-#[cfg(test)]
-mod neural_network_test;
-
 /// # Module containing trait definitions for machine learning model interfaces.
 ///
 /// This module defines traits that establish common interfaces for various machine learning models,
@@ -326,3 +311,6 @@ mod neural_network_test;
 /// - `LossFunction` - Provides an interface for computing loss values and gradients in neural networks.
 /// - `Optimizer` - Defines methods for updating model parameters during training according to specific optimization algorithms.
 pub mod traits;
+
+#[cfg(test)]
+mod test;

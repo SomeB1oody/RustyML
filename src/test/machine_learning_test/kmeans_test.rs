@@ -1,8 +1,8 @@
+use crate::ModelError;
 use crate::machine_learning::kmeans::*;
 use ndarray::{Array1, Array2};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
-use crate::ModelError;
+use rand::{Rng, SeedableRng};
 
 // Helper function: Create a simple test dataset
 fn create_test_data() -> Array2<f64> {
@@ -37,15 +37,26 @@ fn test_new_and_default() {
     assert!(matches!(kmeans.get_inertia(), Err(ModelError::NotFitted)));
     assert!(matches!(kmeans.get_n_iter(), Err(ModelError::NotFitted)));
 
-
     // Test default method
     let default_kmeans = KMeans::default();
 
     // Verify default parameters
-    assert!(matches!(default_kmeans.get_centroids(), Err(ModelError::NotFitted)));
-    assert!(matches!(default_kmeans.get_labels(), Err(ModelError::NotFitted)));
-    assert!(matches!(default_kmeans.get_inertia(), Err(ModelError::NotFitted)));
-    assert!(matches!(default_kmeans.get_n_iter(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        default_kmeans.get_centroids(),
+        Err(ModelError::NotFitted)
+    ));
+    assert!(matches!(
+        default_kmeans.get_labels(),
+        Err(ModelError::NotFitted)
+    ));
+    assert!(matches!(
+        default_kmeans.get_inertia(),
+        Err(ModelError::NotFitted)
+    ));
+    assert!(matches!(
+        default_kmeans.get_n_iter(),
+        Err(ModelError::NotFitted)
+    ));
 }
 
 #[test]
@@ -94,7 +105,7 @@ fn test_predict() {
     correct_count = 0;
 
     for i in 10..20 {
-        if predictions[i] == expected_second_half[i-10] {
+        if predictions[i] == expected_second_half[i - 10] {
             correct_count += 1;
         }
     }

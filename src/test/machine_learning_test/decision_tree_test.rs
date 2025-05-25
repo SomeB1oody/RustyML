@@ -1,5 +1,5 @@
 use crate::machine_learning::decision_tree::*;
-use ndarray::{arr1, arr2, Array2, Array1};
+use ndarray::{Array1, Array2, arr1, arr2};
 
 #[test]
 fn test_decision_tree_new() {
@@ -76,7 +76,7 @@ fn test_fit_predict_classifier() {
     let sample = &[1.0, 1.0];
     let pred = dt.predict_one(sample).unwrap();
     assert_eq!(pred, 1.0);
-    
+
     // print tree
     println!("{}", dt.generate_tree_structure().unwrap());
 }
@@ -84,9 +84,7 @@ fn test_fit_predict_classifier() {
 #[test]
 fn test_fit_predict_regressor() {
     // Create a simple regression dataset
-    let x = arr2(&[
-        [1.0], [2.0], [3.0], [4.0], [5.0], [6.0]
-    ]);
+    let x = arr2(&[[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]]);
     let y = arr1(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
     // Create regressor
@@ -153,9 +151,7 @@ fn test_predict_proba() {
 
 #[test]
 fn test_different_algorithms() {
-    let x = arr2(&[
-        [1.0, 1.0], [1.0, 2.0], [2.0, 1.0], [2.0, 2.0]
-    ]);
+    let x = arr2(&[[1.0, 1.0], [1.0, 2.0], [2.0, 1.0], [2.0, 2.0]]);
     let y = arr1(&[0.0, 0.0, 1.0, 1.0]);
 
     // Test ID3 algorithm
@@ -184,8 +180,14 @@ fn test_different_algorithms() {
 #[test]
 fn test_max_depth_parameter() {
     let x = arr2(&[
-        [1.0, 1.0], [1.0, 2.0], [2.0, 1.0], [2.0, 2.0],
-        [3.0, 3.0], [3.0, 4.0], [4.0, 3.0], [4.0, 4.0],
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [2.0, 1.0],
+        [2.0, 2.0],
+        [3.0, 3.0],
+        [3.0, 4.0],
+        [4.0, 3.0],
+        [4.0, 4.0],
     ]);
     let y = arr1(&[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
 
@@ -244,32 +246,44 @@ fn test_node_creation() {
     // Test leaf node creation
     let leaf = Node::new_leaf(1.5, Some(0), Some(vec![0.8, 0.2]));
     match leaf.node_type {
-        NodeType::Leaf { value, class, probabilities } => {
+        NodeType::Leaf {
+            value,
+            class,
+            probabilities,
+        } => {
             assert_eq!(value, 1.5);
             assert_eq!(class, Some(0));
             assert_eq!(probabilities, Some(vec![0.8, 0.2]));
-        },
+        }
         _ => panic!("Expected a leaf node"),
     }
 
     // Test internal node creation
     let internal = Node::new_internal(1, 0.5);
     match internal.node_type {
-        NodeType::Internal { feature_index, threshold, categories } => {
+        NodeType::Internal {
+            feature_index,
+            threshold,
+            categories,
+        } => {
             assert_eq!(feature_index, 1);
             assert_eq!(threshold, 0.5);
             assert_eq!(categories, None);
-        },
+        }
         _ => panic!("Expected an internal node"),
     }
 
     // Test categorical node creation
     let categorical = Node::new_categorical(2, vec!["A".to_string(), "B".to_string()]);
     match categorical.node_type {
-        NodeType::Internal { feature_index, threshold: _, categories } => {
+        NodeType::Internal {
+            feature_index,
+            threshold: _,
+            categories,
+        } => {
             assert_eq!(feature_index, 2);
             assert_eq!(categories, Some(vec!["A".to_string(), "B".to_string()]));
-        },
+        }
         _ => panic!("Expected an internal categorical node"),
     }
 }
@@ -298,7 +312,9 @@ fn test_decision_tree_fit_predict() {
     let mut tree = DecisionTree::new(Algorithm::CART, true, None);
 
     // Use fit_predict method to train and predict
-    let predictions = tree.fit_predict(x_train.view(), y_train.view(), x_test.view()).unwrap();
+    let predictions = tree
+        .fit_predict(x_train.view(), y_train.view(), x_test.view())
+        .unwrap();
 
     // Verify prediction results
     assert_eq!(predictions.len(), 2);
@@ -325,7 +341,11 @@ fn test_decision_tree_with_custom_params() {
 
     // Create simple dataset
     let x_train = Array2::from(vec![
-        [1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [4.0, 5.0], [5.0, 6.0]
+        [1.0, 2.0],
+        [2.0, 3.0],
+        [3.0, 4.0],
+        [4.0, 5.0],
+        [5.0, 6.0],
     ]);
     let y_train = Array1::from(vec![0.0, 0.0, 1.0, 1.0, 1.0]);
     let x_test = Array2::from(vec![[2.5, 3.5], [4.5, 5.5]]);
@@ -334,7 +354,9 @@ fn test_decision_tree_with_custom_params() {
     let mut tree = DecisionTree::new(Algorithm::ID3, true, Some(params));
 
     // Train and predict
-    let predictions = tree.fit_predict(x_train.view(), y_train.view(), x_test.view()).unwrap();
+    let predictions = tree
+        .fit_predict(x_train.view(), y_train.view(), x_test.view())
+        .unwrap();
 
     // Verify prediction results length
     assert_eq!(predictions.len(), 2);

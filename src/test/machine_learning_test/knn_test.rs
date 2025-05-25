@@ -1,7 +1,7 @@
-use ndarray::{Array1, Array2, array};
-use crate::machine_learning::knn::*;
 use crate::ModelError;
 use crate::machine_learning::DistanceCalculationMetric as Metric;
+use crate::machine_learning::knn::*;
+use ndarray::{Array1, Array2, array};
 
 // Test default initialization of KNN
 #[test]
@@ -29,15 +29,13 @@ fn test_knn_fit() {
     let mut knn: KNN<i32> = KNN::default();
 
     // Create simple training data
-    let x_train = Array2::<f64>::from_shape_vec((7, 2), vec![
-        1.0, 2.0,
-        2.0, 3.0,
-        3.0, 4.0,
-        4.0, 5.0,
-        5.0, 6.0,
-        6.0, 7.0,
-        7.0, 8.0,
-    ]).unwrap();
+    let x_train = Array2::<f64>::from_shape_vec(
+        (7, 2),
+        vec![
+            1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0, 6.0, 7.0, 7.0, 8.0,
+        ],
+    )
+    .unwrap();
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1, 1, 1, 1]);
 
@@ -69,12 +67,16 @@ fn test_knn_predict_euclidean_uniform() {
     let mut knn: KNN<i32> = KNN::new(1, WeightingStrategy::Uniform, Metric::Euclidean);
 
     // Training data: 2D points
-    let x_train = Array2::<f64>::from_shape_vec((4, 2), vec![
-        1.0, 1.0,  // Class 0
-        2.0, 2.0,  // Class 0
-        5.0, 5.0,  // Class 1
-        6.0, 6.0,  // Class 1
-    ]).unwrap();
+    let x_train = Array2::<f64>::from_shape_vec(
+        (4, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            2.0, 2.0, // Class 0
+            5.0, 5.0, // Class 1
+            6.0, 6.0, // Class 1
+        ],
+    )
+    .unwrap();
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
 
@@ -97,12 +99,16 @@ fn test_knn_predict_manhattan() {
     let mut knn: KNN<i32> = KNN::new(1, WeightingStrategy::Uniform, Metric::Manhattan);
 
     // Training data: 2D points
-    let x_train = Array2::<f64>::from_shape_vec((4, 2), vec![
-        1.0, 1.0,  // Class 0
-        2.0, 2.0,  // Class 0
-        5.0, 5.0,  // Class 1
-        6.0, 6.0,  // Class 1
-    ]).unwrap();
+    let x_train = Array2::<f64>::from_shape_vec(
+        (4, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            2.0, 2.0, // Class 0
+            5.0, 5.0, // Class 1
+            6.0, 6.0, // Class 1
+        ],
+    )
+    .unwrap();
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
 
@@ -120,13 +126,17 @@ fn test_knn_with_k3() {
     let mut knn: KNN<i32> = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
 
     // Training data: 2D points
-    let x_train = Array2::<f64>::from_shape_vec((5, 2), vec![
-        1.0, 1.0,  // Class 0
-        1.5, 1.5,  // Class 0
-        2.0, 2.0,  // Class 0
-        5.0, 5.0,  // Class 1
-        6.0, 6.0,  // Class 1
-    ]).unwrap();
+    let x_train = Array2::<f64>::from_shape_vec(
+        (5, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            1.5, 1.5, // Class 0
+            2.0, 2.0, // Class 0
+            5.0, 5.0, // Class 1
+            6.0, 6.0, // Class 1
+        ],
+    )
+    .unwrap();
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1]);
 
@@ -145,14 +155,18 @@ fn test_knn_distance_weights() {
     let mut knn: KNN<i32> = KNN::new(3, WeightingStrategy::Distance, Metric::Euclidean);
 
     // Training data: 2D points
-    let x_train = Array2::<f64>::from_shape_vec((6, 2), vec![
-        1.0, 1.0,  // Class 0
-        8.0, 8.0,  // Class 0 (far from test point)
-        9.0, 9.0,  // Class 0 (far from test point)
-        3.9, 3.9,  // Class 1 (close to test point)
-        4.1, 4.1,  // Class 1 (close to test point)
-        5.0, 5.0,  // Class 1 (relatively close to test point)
-    ]).unwrap();
+    let x_train = Array2::<f64>::from_shape_vec(
+        (6, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            8.0, 8.0, // Class 0 (far from test point)
+            9.0, 9.0, // Class 0 (far from test point)
+            3.9, 3.9, // Class 1 (close to test point)
+            4.1, 4.1, // Class 1 (close to test point)
+            5.0, 5.0, // Class 1 (relatively close to test point)
+        ],
+    )
+    .unwrap();
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
 
@@ -171,7 +185,10 @@ fn test_knn_empty_train() {
     let knn: KNN<i32> = KNN::default();
 
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![1.0, 1.0]).unwrap();
-    assert!(matches!(knn.predict(x_test.view()), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        knn.predict(x_test.view()),
+        Err(ModelError::NotFitted)
+    ));
 }
 
 // Test with string labels instead of integers
@@ -180,27 +197,28 @@ fn test_knn_string_labels() {
     let mut knn: KNN<String> = KNN::new(2, WeightingStrategy::Uniform, Metric::Euclidean);
 
     // Create simple training data
-    let x_train = Array2::<f64>::from_shape_vec((4, 2), vec![
-        1.0, 1.0,
-        2.0, 2.0,
-        5.0, 5.0,
-        6.0, 6.0,
-    ]).unwrap();
+    let x_train =
+        Array2::<f64>::from_shape_vec((4, 2), vec![1.0, 1.0, 2.0, 2.0, 5.0, 5.0, 6.0, 6.0])
+            .unwrap();
 
     let y_train = Array1::<String>::from_vec(vec![
         "cat".to_string(),
         "cat".to_string(),
         "dog".to_string(),
-        "dog".to_string()
+        "dog".to_string(),
     ]);
 
     knn.fit(x_train.view(), y_train.view()).unwrap();
 
     // Test predictions
-    let x_test = Array2::<f64>::from_shape_vec((2, 2), vec![
-        1.5, 1.5,  // Should be "cat"
-        5.5, 5.5,  // Should be "dog"
-    ]).unwrap();
+    let x_test = Array2::<f64>::from_shape_vec(
+        (2, 2),
+        vec![
+            1.5, 1.5, // Should be "cat"
+            5.5, 5.5, // Should be "dog"
+        ],
+    )
+    .unwrap();
 
     let predictions = knn.predict(x_test.view()).unwrap();
     assert_eq!(predictions, array!["cat".to_string(), "dog".to_string()]);
@@ -213,25 +231,21 @@ fn test_fit_predict() {
 
     // Create training data
     // Features: 2D points
-    let x_train = array![
-            [1.0, 2.0],
-            [2.0, 3.0],
-            [3.0, 4.0],
-            [5.0, 6.0],
-            [6.0, 7.0]
-        ];
+    let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [5.0, 6.0], [6.0, 7.0]];
 
     // Labels: classes 0 and 1
     let y_train = array![0, 0, 0, 1, 1];
 
     // Test data
     let x_test = array![
-            [1.5, 2.5],  // Should be classified as 0 (closer to first 3 points)
-            [5.5, 6.5]   // Should be classified as 1 (closer to last 2 points)
-        ];
+        [1.5, 2.5], // Should be classified as 0 (closer to first 3 points)
+        [5.5, 6.5]  // Should be classified as 1 (closer to last 2 points)
+    ];
 
     // Use fit_predict to get predictions
-    let predictions = knn.fit_predict(x_train.view(), y_train.view(), x_test.view()).unwrap();
+    let predictions = knn
+        .fit_predict(x_train.view(), y_train.view(), x_test.view())
+        .unwrap();
 
     // Verify predictions
     assert_eq!(predictions.len(), 2);
@@ -248,17 +262,15 @@ fn test_fit_predict_empty_data() {
     // Test with empty test data
     let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
 
-    let x_train = array![
-            [1.0, 2.0],
-            [2.0, 3.0],
-            [3.0, 4.0]
-        ];
+    let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
     let y_train = array![0, 0, 1];
 
     // Empty test data
     let x_test = Array2::<f64>::zeros((0, 2));
 
     // Should return empty predictions vector
-    let predictions = knn.fit_predict(x_train.view(), y_train.view(), x_test.view()).unwrap();
+    let predictions = knn
+        .fit_predict(x_train.view(), y_train.view(), x_test.view())
+        .unwrap();
     assert_eq!(predictions.len(), 0);
 }

@@ -1,5 +1,5 @@
 use crate::machine_learning::isolation_forest::IsolationForest;
-use ndarray::{Array2, Array};
+use ndarray::{Array, Array2};
 use rand::Rng;
 
 #[test]
@@ -38,18 +38,14 @@ fn test_isolation_forest_getters() {
 #[test]
 fn test_isolation_forest_fit() {
     // Create a 2D sample data
-    let data = Array2::from_shape_vec((10, 2), vec![
-        0.0, 0.0,
-        0.1, 0.1,
-        0.2, 0.2,
-        0.3, 0.3,
-        0.4, 0.4,
-        0.5, 0.5,
-        0.6, 0.6,
-        0.7, 0.7,
-        0.8, 0.8,
-        10.0, 10.0, // Outlier
-    ]).unwrap();
+    let data = Array2::from_shape_vec(
+        (10, 2),
+        vec![
+            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
+            0.8, 10.0, 10.0, // Outlier
+        ],
+    )
+    .unwrap();
 
     let mut forest = IsolationForest::new(10, 8, Some(5), Some(42));
     forest.fit(data.view()).unwrap();
@@ -64,18 +60,14 @@ fn test_isolation_forest_fit() {
 #[test]
 fn test_isolation_forest_anomaly_score() {
     // Create a 2D sample data with one clear outlier
-    let data = Array2::from_shape_vec((10, 2), vec![
-        0.0, 0.0,
-        0.1, 0.1,
-        0.2, 0.2,
-        0.3, 0.3,
-        0.4, 0.4,
-        0.5, 0.5,
-        0.6, 0.6,
-        0.7, 0.7,
-        0.8, 0.8,
-        10.0, 10.0, // Outlier
-    ]).unwrap();
+    let data = Array2::from_shape_vec(
+        (10, 2),
+        vec![
+            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
+            0.8, 10.0, 10.0, // Outlier
+        ],
+    )
+    .unwrap();
 
     let mut forest = IsolationForest::new(100, 8, Some(8), Some(42));
     forest.fit(data.view()).unwrap();
@@ -95,29 +87,29 @@ fn test_isolation_forest_anomaly_score() {
 #[test]
 fn test_isolation_forest_predict() {
     // Create a 2D sample training data
-    let train_data = Array2::from_shape_vec((10, 2), vec![
-        0.0, 0.0,
-        0.1, 0.1,
-        0.2, 0.2,
-        0.3, 0.3,
-        0.4, 0.4,
-        0.5, 0.5,
-        0.6, 0.6,
-        0.7, 0.7,
-        0.8, 0.8,
-        0.9, 0.9,
-    ]).unwrap();
+    let train_data = Array2::from_shape_vec(
+        (10, 2),
+        vec![
+            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
+            0.8, 0.9, 0.9,
+        ],
+    )
+    .unwrap();
 
     let mut forest = IsolationForest::new(100, 8, Some(8), Some(42));
     forest.fit(train_data.view()).unwrap();
 
     // Create test data with both normal and anomaly points
-    let test_data = Array2::from_shape_vec((4, 2), vec![
-        0.5, 0.5,   // Normal point
-        0.7, 0.7,   // Normal point
-        10.0, 10.0, // Outlier
-        -5.0, -5.0  // Outlier
-    ]).unwrap();
+    let test_data = Array2::from_shape_vec(
+        (4, 2),
+        vec![
+            0.5, 0.5, // Normal point
+            0.7, 0.7, // Normal point
+            10.0, 10.0, // Outlier
+            -5.0, -5.0, // Outlier
+        ],
+    )
+    .unwrap();
 
     // Predict
     let predictions = forest.predict(test_data.view()).unwrap();
@@ -150,13 +142,11 @@ fn test_error_handling() {
 #[test]
 fn test_dimension_validation() {
     // Train on 2D data
-    let train_data = Array2::from_shape_vec((5, 2), vec![
-        0.0, 0.0,
-        0.1, 0.1,
-        0.2, 0.2,
-        0.3, 0.3,
-        0.4, 0.4,
-    ]).unwrap();
+    let train_data = Array2::from_shape_vec(
+        (5, 2),
+        vec![0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4],
+    )
+    .unwrap();
 
     let mut forest = IsolationForest::new(10, 4, Some(5), Some(42));
     forest.fit(train_data.view()).unwrap();
@@ -209,7 +199,8 @@ fn test_fit_predict() {
 
     // We expect 5 outliers to have higher anomaly scores than normal points
     // Let's sort the scores and check the indices
-    let mut score_indices: Vec<(usize, f64)> = scores.iter()
+    let mut score_indices: Vec<(usize, f64)> = scores
+        .iter()
         .enumerate()
         .map(|(i, &score)| (i, score))
         .collect();
