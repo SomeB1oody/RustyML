@@ -14,6 +14,7 @@ pub mod global_average_pooling_2d;
 pub mod global_max_pooling_2d;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 pub mod lstm;
+pub mod max_pooling_1d;
 /// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 pub mod max_pooling_2d;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
@@ -27,6 +28,7 @@ pub use flatten::*;
 pub use global_average_pooling_2d::*;
 pub use global_max_pooling_2d::*;
 pub use lstm::*;
+pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
 pub use simple_rnn::*;
 
