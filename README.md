@@ -12,8 +12,8 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 [![rayon](https://img.shields.io/badge/rayon-1.10.0-blue)](https://crates.io/crates/rayon)
 
 ## Overview | 概述
-Rust AI aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages with foundational components, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
-Rust AI 旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，只实现了基础组件，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
+RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages with foundational components, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
+RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，只实现了基础组件，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
 
 ## Current Features | 当前功能
 - **Mathematical Utilities | 数学工具**:
