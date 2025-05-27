@@ -1,3 +1,4 @@
+use super::calculate_output_shape_2d_pooling;
 use crate::neural_network::layer::LayerWeight;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
@@ -127,10 +128,7 @@ impl AveragePooling2D {
     ///
     /// * `Vec<usize>` - Shape of the output tensor after pooling
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
-        let output_height = (input_shape[2] - self.pool_size.0) / self.strides.0 + 1;
-        let output_width = (input_shape[3] - self.pool_size.1) / self.strides.1 + 1;
-
-        vec![input_shape[0], input_shape[1], output_height, output_width]
+        calculate_output_shape_2d_pooling(input_shape, self.pool_size, self.strides)
     }
 
     /// Performs average pooling operation.

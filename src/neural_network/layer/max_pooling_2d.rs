@@ -1,3 +1,4 @@
+use super::calculate_output_shape_2d_pooling;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::ArrayD;
@@ -113,16 +114,7 @@ impl MaxPooling2D {
     ///
     /// A vector containing the calculated output shape, in format \[batch_size, channels, output_height, output_width\].
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
-        let batch_size = input_shape[0];
-        let channels = input_shape[1];
-        let input_height = input_shape[2];
-        let input_width = input_shape[3];
-
-        // Calculate the height and width of the output
-        let output_height = (input_height - self.pool_size.0) / self.strides.0 + 1;
-        let output_width = (input_width - self.pool_size.1) / self.strides.1 + 1;
-
-        vec![batch_size, channels, output_height, output_width]
+        calculate_output_shape_2d_pooling(input_shape, self.pool_size, self.strides)
     }
 
     /// Performs max pooling operation.

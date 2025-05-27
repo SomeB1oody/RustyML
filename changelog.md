@@ -12,6 +12,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Introduced a shared `compute_output_shape` function to streamline output shape calculations across pooling layers.
+- Centralized 1D and 2D pooling output shape logic into reusable helper functions (`calculate_output_shape_1d_pooling` and `calculate_output_shape_2d_pooling`)
 
 ## [v0.6.2] - 2025-5-26
 ### Added

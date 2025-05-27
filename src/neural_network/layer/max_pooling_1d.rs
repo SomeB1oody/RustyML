@@ -1,7 +1,7 @@
 use super::super::Tensor;
+use super::calculate_output_shape_1d_pooling;
 use crate::ModelError;
 use crate::neural_network::layer::LayerWeight;
-use crate::prelude::layer::compute_output_shape;
 use crate::traits::Layer;
 use ndarray::Array3;
 use rayon::prelude::*;
@@ -113,7 +113,7 @@ impl MaxPooling1D {
         let channels = self.input_shape[1];
         let length = self.input_shape[2];
 
-        compute_output_shape(batch_size, channels, length, self.pool_size, self.stride)
+        calculate_output_shape_1d_pooling(batch_size, channels, length, self.pool_size, self.stride)
     }
 }
 

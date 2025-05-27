@@ -122,10 +122,6 @@ pub struct Conv2DLayerWeight<'a> {
 
 /// Calculate output shape for pooling or convolutional operations
 ///
-/// Computes the output tensor dimensions after applying a pooling or convolutional operation
-/// with the specified parameters. This function follows the standard formula for calculating
-/// the output size of sliding window operations in neural networks.
-///
 /// # Parameters
 ///
 /// - `batch_size` - Number of samples in the batch
@@ -137,7 +133,7 @@ pub struct Conv2DLayerWeight<'a> {
 /// # Returns
 ///
 /// * `Vec<usize>` - A vector containing the dimensions of the output tensor in the format: `[batch_size, channels, output_length]`
-fn compute_output_shape(
+fn calculate_output_shape_1d_pooling(
     batch_size: usize,
     channels: usize,
     length: usize,
@@ -147,4 +143,30 @@ fn compute_output_shape(
     let output_length = (length - pool_size) / stride + 1;
 
     vec![batch_size, channels, output_length]
+}
+
+/// Calculates the output shape of the max pooling layer.
+///
+/// # Parameters
+///
+/// * `input_shape` - Shape of the input tensor, in format \[batch_size, channels, height, width\].
+///
+/// # Returns
+///
+/// * `Vec<usize>` - A vector containing the calculated output shape, in format \[batch_size, channels, output_height, output_width\].
+fn calculate_output_shape_2d_pooling(
+    input_shape: &[usize],
+    pool_size: (usize, usize),
+    strides: (usize, usize),
+) -> Vec<usize> {
+    let batch_size = input_shape[0];
+    let channels = input_shape[1];
+    let input_height = input_shape[2];
+    let input_width = input_shape[3];
+
+    // Calculate the height and width of the output
+    let output_height = (input_height - pool_size.0) / strides.0 + 1;
+    let output_width = (input_width - pool_size.1) / strides.1 + 1;
+
+    vec![batch_size, channels, output_height, output_width]
 }
