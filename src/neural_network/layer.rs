@@ -120,7 +120,7 @@ pub struct Conv2DLayerWeight<'a> {
     pub bias: &'a ndarray::Array2<f32>,
 }
 
-/// Calculate output shape for pooling or convolutional operations
+/// Calculate output shape for 1d pooling layer.
 ///
 /// # Parameters
 ///
@@ -145,7 +145,7 @@ fn calculate_output_shape_1d_pooling(
     vec![batch_size, channels, output_length]
 }
 
-/// Calculates the output shape of the max pooling layer.
+/// Calculates the output shape of the 2d pooling layer.
 ///
 /// # Parameters
 ///
