@@ -14,6 +14,7 @@ pub mod global_average_pooling_2d;
 pub mod global_max_pooling_2d;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 pub mod lstm;
+/// 1D Max Pooling layer for neural networks.
 pub mod max_pooling_1d;
 /// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 pub mod max_pooling_2d;
@@ -117,4 +118,33 @@ pub struct LSTMLayerWeight<'a> {
 pub struct Conv2DLayerWeight<'a> {
     pub weight: &'a ndarray::Array4<f32>,
     pub bias: &'a ndarray::Array2<f32>,
+}
+
+/// Calculate output shape for pooling or convolutional operations
+///
+/// Computes the output tensor dimensions after applying a pooling or convolutional operation
+/// with the specified parameters. This function follows the standard formula for calculating
+/// the output size of sliding window operations in neural networks.
+///
+/// # Parameters
+///
+/// - `batch_size` - Number of samples in the batch
+/// - `channels` - Number of channels (features) in each sample
+/// - `length` - Length of the input along the dimension where pooling/convolution is applied
+/// - `pool_size` - Size of the pooling/convolutional window
+/// - `stride` - Step size for sliding the window across the input
+///
+/// # Returns
+///
+/// * `Vec<usize>` - A vector containing the dimensions of the output tensor in the format: `[batch_size, channels, output_length]`
+fn compute_output_shape(
+    batch_size: usize,
+    channels: usize,
+    length: usize,
+    pool_size: usize,
+    stride: usize,
+) -> Vec<usize> {
+    let output_length = (length - pool_size) / stride + 1;
+
+    vec![batch_size, channels, output_length]
 }

@@ -12,6 +12,7 @@ mod global_max_pooling_2d_test;
 mod layer_weight_test;
 mod loss_function_test;
 mod lstm_test;
+mod max_pooling_1d_test;
 mod max_pooling_2d_test;
 mod optimizer_test;
 mod simple_rnn_test;
