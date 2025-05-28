@@ -1,7 +1,7 @@
-use ndarray::{Array1, Array2, ArrayView2, Axis};
-use std::error::Error;
 use crate::ModelError;
+use ndarray::{Array1, Array2, ArrayView2, Axis};
 use rayon::prelude::*;
+use std::error::Error;
 
 /// # PCA structure for implementing Principal Component Analysis
 ///
@@ -172,8 +172,24 @@ impl PCA {
     /// - Calculates eigenvalues and eigenvectors
     /// - Sorts components by explained variance
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn Error>> {
-        use crate::machine_learning::preliminary_check;
-        preliminary_check(x, None)?;
+        // check if input data is empty
+        if x.nrows() == 0 {
+            return Err(Box::new(ModelError::InputValidationError(
+                "Input data is empty".to_string(),
+            )));
+        }
+
+        // check if input data contains NaN or infinite values
+        for (i, row) in x.outer_iter().enumerate() {
+            for (j, &val) in row.iter().enumerate() {
+                if val.is_nan() || val.is_infinite() {
+                    return Err(Box::new(ModelError::InputValidationError(format!(
+                        "Input data contains NaN or infinite value at position [{}][{}]",
+                        i, j
+                    ))));
+                }
+            }
+        }
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -218,9 +234,7 @@ impl PCA {
 
         // Get the right singular vector matrix V^T as principal components. Each row of V^T is a principal component
         let v_t = svd.v_t.ok_or("SVD did not compute V^T")?;
-        let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| {
-            v_t.row(i)[j]
-        });
+        let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| v_t.row(i)[j]);
 
         // Calculate explained variance using singular values: eigenvalue = (singular_value^2) / (n_samples - 1)
         let mut explained_variance = Array1::<f64>::zeros(n_components);
@@ -239,12 +253,10 @@ impl PCA {
             singular_values[i] = s_val;
         }
 
-
         // Total variance: calculated using all singular values (note: when n_features > n_samples, remaining features have variance of 0)
         let s_vals_vec: Vec<f64> = s_vals.iter().cloned().collect();
-        let total_variance: f64 = s_vals_vec.par_iter()
-            .map(|&s| s * s)
-            .sum::<f64>() / ((n_samples - 1) as f64);
+        let total_variance: f64 =
+            s_vals_vec.par_iter().map(|&s| s * s).sum::<f64>() / ((n_samples - 1) as f64);
 
         // Calculate explained variance ratio
         let explained_variance_ratio = explained_variance.map(|v| v / total_variance);
@@ -258,7 +270,6 @@ impl PCA {
 
         Ok(self)
     }
-
 
     /// Transforms data into principal component space
     ///
@@ -276,7 +287,9 @@ impl PCA {
 
         // Use ndarray's vectorized operations for centering
         // This creates a view instead of cloning the entire array
-        let x_centered = x.view().outer_iter()
+        let x_centered = x
+            .view()
+            .outer_iter()
             .into_par_iter()
             .map(|row| {
                 // Subtract the mean from each row
@@ -291,7 +304,10 @@ impl PCA {
         // Convert the vector collection back to Array2
         let x_centered = Array2::from_shape_vec(
             (x.nrows(), x.ncols()),
-            x_centered.into_iter().flat_map(|row| row.into_iter().collect::<Vec<_>>()).collect()
+            x_centered
+                .into_iter()
+                .flat_map(|row| row.into_iter().collect::<Vec<_>>())
+                .collect(),
         )?;
 
         // Transform to principal component space

@@ -692,7 +692,7 @@ pub mod linear_discriminant_analysis;
 ///
 /// - `Ok(())` - If all validation checks pass
 /// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
-pub fn preliminary_check(
+fn preliminary_check(
     x: ndarray::ArrayView2<f64>,
     y: Option<ndarray::ArrayView1<f64>>,
 ) -> Result<(), crate::ModelError> {

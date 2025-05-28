@@ -9,6 +9,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add `GlobalMaxPooling1D` layer and corresponding tests
 
+### Changed
+- Change function `preliminary_check` from public into private
+- PCA no longer requires `preliminary_check` function and integrates input validation functionality
+
 ## [v0.6.2] - 2025-5-27
 ### Added
 - Add tests for `MaxPooling1D` layer
