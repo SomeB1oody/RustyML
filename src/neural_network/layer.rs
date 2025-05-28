@@ -10,6 +10,8 @@ pub mod dense;
 pub mod flatten;
 /// Global Average Pooling 2D Layer
 pub mod global_average_pooling_2d;
+/// Global Max Pooling 1D Layer
+mod global_max_pooling_1d;
 /// Global Max Pooling Layer
 pub mod global_max_pooling_2d;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
@@ -27,6 +29,7 @@ pub use conv2d::*;
 pub use dense::*;
 pub use flatten::*;
 pub use global_average_pooling_2d::*;
+pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
 pub use lstm::*;
 pub use max_pooling_1d::*;

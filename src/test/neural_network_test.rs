@@ -8,6 +8,7 @@ mod average_pooling_2d_test;
 mod conv2d_test;
 mod flatten_test;
 mod global_average_pooling_2d_test;
+mod global_max_pooling_1d_test;
 mod global_max_pooling_2d_test;
 mod layer_weight_test;
 mod loss_function_test;
