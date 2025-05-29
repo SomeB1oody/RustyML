@@ -8,6 +8,8 @@ pub mod conv2d;
 pub mod dense;
 /// A layer that flattens a 4D tensor into a 2D tensor.
 pub mod flatten;
+/// Global Average Pooling 1D Layer
+pub mod global_average_pooling_1d;
 /// Global Average Pooling 2D Layer
 pub mod global_average_pooling_2d;
 /// Global Max Pooling 1D Layer
@@ -28,6 +30,7 @@ pub use average_pooling_2d::*;
 pub use conv2d::*;
 pub use dense::*;
 pub use flatten::*;
+pub use global_average_pooling_1d::*;
 pub use global_average_pooling_2d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
