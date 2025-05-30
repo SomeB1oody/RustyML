@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.6.2] - 2025-5-30
 ### Changed
 - Refactor tests to reuse `generate_data` function for pooling layers
+- Rename `OptimizerCacheFEL` to `OptimizerCacheConv2D`
 
 ## [v0.6.2] - 2025-5-29
 ### Added

@@ -106,7 +106,7 @@ pub struct Conv2D {
     input_shape: Vec<usize>,
     weight_gradients: Option<Array4<f32>>,
     bias_gradients: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCacheFEL,
+    optimizer_cache: OptimizerCacheConv2D,
 }
 
 impl Conv2D {
@@ -164,7 +164,7 @@ impl Conv2D {
             input_shape,
             weight_gradients: None,
             bias_gradients: None,
-            optimizer_cache: OptimizerCacheFEL {
+            optimizer_cache: OptimizerCacheConv2D {
                 adam_states: None,
                 rmsprop_cache: None,
             },
@@ -569,7 +569,7 @@ impl Layer for Conv2D {
         {
             // Initialize momentum and variance (if not initialized)
             if self.optimizer_cache.adam_states.is_none() {
-                self.optimizer_cache.adam_states = Some(AdamStatesFEL {
+                self.optimizer_cache.adam_states = Some(AdamStatesConv2D {
                     m: Array4::zeros(self.weights.dim()),
                     v: Array4::zeros(self.weights.dim()),
                     m_bias: Array2::zeros(self.bias.dim()),
@@ -670,7 +670,7 @@ impl Layer for Conv2D {
         {
             // Initialize cache (if not initialized yet)
             if self.optimizer_cache.rmsprop_cache.is_none() {
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheFEL {
+                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv2D {
                     cache: Array4::zeros(self.weights.dim()),
                     bias: Array2::zeros(self.bias.dim()),
                 });

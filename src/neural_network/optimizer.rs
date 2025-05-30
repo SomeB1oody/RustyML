@@ -24,10 +24,10 @@ pub struct OptimizerCache {
     pub rmsprop_cache: Option<RMSpropCache>,
 }
 
-/// Cache structure for storing optimization algorithm states for Feature Extraction Layers.
+/// Cache structure for storing optimization algorithm states for Conv2D layer.
 ///
 /// This structure maintains the state information required by different optimization algorithms
-/// between iterations specifically for Feature Extraction (FEX) layers. It can store states for
+/// between iterations specifically for Conv2D layers. It can store states for
 /// Adam optimizer and RMSprop optimizer simultaneously.
 ///
 /// # Fields
@@ -35,7 +35,7 @@ pub struct OptimizerCache {
 /// - `adam_states` - Optional cache storage for Adam optimizer states (momentum and velocity terms) for feature extraction layers
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages for feature extraction layers
 #[derive(Debug, Clone, Default)]
-pub struct OptimizerCacheFEL {
-    pub adam_states: Option<AdamStatesFEL>,
-    pub rmsprop_cache: Option<RMSpropCacheFEL>,
+pub struct OptimizerCacheConv2D {
+    pub adam_states: Option<AdamStatesConv2D>,
+    pub rmsprop_cache: Option<RMSpropCacheConv2D>,
 }

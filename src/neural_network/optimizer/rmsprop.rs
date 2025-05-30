@@ -146,7 +146,7 @@ impl RMSpropCache {
     }
 }
 
-/// Cache structure for the RMSprop optimization algorithm for Feature Extraction Layers (FEL).
+/// Cache structure for the RMSprop optimization algorithm for Conv2D layer.
 ///
 /// This specialized cache is designed for convolutional neural networks and other architectures
 /// that use multi-dimensional tensors for feature extraction. Unlike the standard RMSprop cache,
@@ -160,7 +160,7 @@ impl RMSpropCache {
 /// - `bias`: Moving average of squared gradients for bias parameters, which remain 2D even in
 ///   convolutional contexts.
 #[derive(Debug, Clone, Default)]
-pub struct RMSpropCacheFEL {
+pub struct RMSpropCacheConv2D {
     pub cache: Array4<f32>,
     pub bias: Array2<f32>,
 }
