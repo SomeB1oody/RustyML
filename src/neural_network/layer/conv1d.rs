@@ -6,6 +6,7 @@ use crate::neural_network::{SGD, Tensor};
 use crate::traits::Layer;
 use ndarray::{Array2, Array3};
 use ndarray_rand::RandomExt;
+use rayon::prelude::*;
 
 /// A 1D convolutional layer for neural networks.
 ///
@@ -444,11 +445,11 @@ impl Layer for Conv1D {
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // 确保有梯度可用
+        // Ensure gradients are available
         if let (Some(weight_gradients), Some(bias_gradients)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化 Adam 状态（如果尚未初始化）
+            // Initialize Adam states (if not already initialized)
             if self.optimizer_cache.adam_states.is_none() {
                 use crate::neural_network::optimizer::AdamStatesConv1D;
 
@@ -461,40 +462,57 @@ impl Layer for Conv1D {
             }
 
             if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
-                // 更新权重的一阶和二阶动量
-                adam_states.m = beta1 * &adam_states.m + (1.0 - beta1) * weight_gradients;
-                adam_states.v =
-                    beta1 * &adam_states.v + (1.0 - beta2) * weight_gradients.mapv(|x| x * x);
+                // Compute bias correction factors
+                let bias_correction1 = 1.0 - beta1.powi(t as i32);
+                let bias_correction2 = 1.0 - beta2.powi(t as i32);
 
-                // 更新偏置的一阶和二阶动量
-                adam_states.m_bias = beta1 * &adam_states.m_bias + (1.0 - beta1) * bias_gradients;
-                adam_states.v_bias =
-                    beta1 * &adam_states.v_bias + (1.0 - beta2) * bias_gradients.mapv(|x| x * x);
+                // Define a generic Adam parameter update closure
+                let update_adam =
+                    |params: &mut [f32], grads: &[f32], m: &mut [f32], v: &mut [f32]| {
+                        params
+                            .par_iter_mut()
+                            .zip(grads.par_iter())
+                            .zip(m.par_iter_mut())
+                            .zip(v.par_iter_mut())
+                            .for_each(|(((param, &grad), m_val), v_val)| {
+                                // Update momentum and variance
+                                *m_val = beta1 * *m_val + (1.0 - beta1) * grad;
+                                *v_val = beta2 * *v_val + (1.0 - beta2) * grad * grad;
 
-                // 偏差校正
-                let m_hat_weights = &adam_states.m / (1.0 - beta1.powi(t as i32));
-                let v_hat_weights = &adam_states.v / (1.0 - beta2.powi(t as i32));
+                                // Calculate bias-corrected momentum and variance
+                                let m_corrected = *m_val / bias_correction1;
+                                let v_corrected = *v_val / bias_correction2;
 
-                let m_hat_bias = &adam_states.m_bias / (1.0 - beta1.powi(t as i32));
-                let v_hat_bias = &adam_states.v_bias / (1.0 - beta2.powi(t as i32));
+                                // Update parameter
+                                *param -= lr * m_corrected / (v_corrected.sqrt() + epsilon);
+                            });
+                    };
 
-                // 更新权重参数
-                self.weights = &self.weights
-                    - &(lr * &m_hat_weights / (v_hat_weights.mapv(|x| x.sqrt()) + epsilon));
+                // Update weight parameters
+                update_adam(
+                    self.weights.as_slice_mut().unwrap(),
+                    weight_gradients.as_slice().unwrap(),
+                    adam_states.m.as_slice_mut().unwrap(),
+                    adam_states.v.as_slice_mut().unwrap(),
+                );
 
-                // 更新偏置参数
-                self.bias =
-                    &self.bias - &(lr * &m_hat_bias / (v_hat_bias.mapv(|x| x.sqrt()) + epsilon));
+                // Update bias parameters
+                update_adam(
+                    self.bias.as_slice_mut().unwrap(),
+                    bias_gradients.as_slice().unwrap(),
+                    adam_states.m_bias.as_slice_mut().unwrap(),
+                    adam_states.v_bias.as_slice_mut().unwrap(),
+                );
             }
         }
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // 确保有梯度可用
+        // Ensure gradients are available
         if let (Some(weight_gradients), Some(bias_gradients)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // 初始化 RMSprop 缓存（如果尚未初始化）
+            // Initialize RMSprop cache (if not already initialized)
             if self.optimizer_cache.rmsprop_cache.is_none() {
                 use crate::neural_network::optimizer::RMSpropCacheConv1D;
 
@@ -505,25 +523,42 @@ impl Layer for Conv1D {
             }
 
             if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
-                // 更新权重缓存和参数
-                if let Some(weight_cache) = &mut rmsprop_cache.cache {
-                    // 更新权重的平方梯度移动平均
-                    *weight_cache =
-                        rho * &*weight_cache + (1.0 - rho) * weight_gradients.mapv(|x| x * x);
+                // Define a generic parameter update closure, also handling cache updates
+                let update_parameters = |params: &mut [f32], cache: &mut [f32], grads: &[f32]| {
+                    // Update cache (moving average of squared gradients) in parallel
+                    cache
+                        .par_iter_mut()
+                        .zip(grads.par_iter())
+                        .for_each(|(c, &grad)| {
+                            *c = rho * *c + (1.0 - rho) * grad * grad;
+                        });
 
-                    // 更新权重参数
-                    self.weights = &self.weights
-                        - &(lr * weight_gradients / (weight_cache.mapv(|x| x.sqrt()) + epsilon));
+                    // Update parameters in parallel
+                    params
+                        .par_iter_mut()
+                        .zip(grads.par_iter())
+                        .zip(cache.par_iter())
+                        .for_each(|((param, &grad), &cache_val)| {
+                            *param -= lr * grad / (cache_val.sqrt() + epsilon);
+                        });
+                };
+
+                // Update weight parameters
+                if let Some(weight_cache) = &mut rmsprop_cache.cache {
+                    update_parameters(
+                        self.weights.as_slice_mut().unwrap(),
+                        weight_cache.as_slice_mut().unwrap(),
+                        weight_gradients.as_slice().unwrap(),
+                    );
                 }
 
-                // 更新偏置缓存和参数
+                // Update bias parameters
                 if let Some(bias_cache) = &mut rmsprop_cache.bias {
-                    // 更新偏置的平方梯度移动平均
-                    *bias_cache = rho * &*bias_cache + (1.0 - rho) * bias_gradients.mapv(|x| x * x);
-
-                    // 更新偏置参数
-                    self.bias = &self.bias
-                        - &(lr * bias_gradients / (bias_cache.mapv(|x| x.sqrt()) + epsilon));
+                    update_parameters(
+                        self.bias.as_slice_mut().unwrap(),
+                        bias_cache.as_slice_mut().unwrap(),
+                        bias_gradients.as_slice().unwrap(),
+                    );
                 }
             }
         }

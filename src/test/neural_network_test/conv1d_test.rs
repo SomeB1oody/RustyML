@@ -2,12 +2,12 @@ use super::*;
 
 #[test]
 fn test_conv1d_sequential_with_sgd() {
-    // 创建3D输入张量: [batch_size, channels, length]
+    // Create a 3D input tensor: [batch_size, channels, length]
     let x = Array3::ones((2, 1, 10)).into_dyn();
-    // 创建目标张量 - 假设输出长度为8 (Valid padding)
+    // Create a target tensor - assume output length is 8 (Valid padding)
     let y = Array3::ones((2, 3, 8)).into_dyn();
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model
         .add(Conv1D::new(
@@ -20,18 +20,18 @@ fn test_conv1d_sequential_with_sgd() {
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
-    // 打印模型结构
+    // Print the model structure
     model.summary();
 
-    // 训练模型
+    // Train the model
     let result = model.fit(&x, &y, 3);
     assert!(result.is_ok());
 
-    // 预测
+    // Make predictions
     let prediction = model.predict(&x);
     assert_eq!(prediction.shape(), &[2, 3, 8]);
 
-    // 验证预测结果是非负的（ReLU激活函数）
+    // Verify that the predictions are non-negative (ReLU activation function)
     for value in prediction.iter() {
         assert!(*value >= 0.0);
     }
@@ -39,15 +39,15 @@ fn test_conv1d_sequential_with_sgd() {
 
 #[test]
 fn test_conv1d_sequential_with_rmsprop() {
-    // 创建更复杂的训练数据
+    // Create more complex training data
     let x = Array3::from_shape_fn((3, 2, 8), |(b, c, l)| {
         ((b * 2 + c * 3 + l) as f32).sin() * 0.5
     })
     .into_dyn();
 
-    let y = Array3::zeros((3, 2, 6)).into_dyn(); // Valid padding输出
+    let y = Array3::zeros((3, 2, 6)).into_dyn(); // Valid padding output
 
-    // 构建模型
+    // Build the model
     let mut model = Sequential::new();
     model
         .add(Conv1D::new(
@@ -62,15 +62,15 @@ fn test_conv1d_sequential_with_rmsprop() {
 
     model.summary();
 
-    // 训练模型
+    // Train the model
     let result = model.fit(&x, &y, 4);
     assert!(result.is_ok());
 
-    // 预测
+    // Make predictions
     let prediction = model.predict(&x);
     assert_eq!(prediction.shape(), &[3, 2, 6]);
 
-    // 验证Tanh输出范围在[-1,1]之间
+    // Verify that Tanh output is within [-1, 1]
     for value in prediction.iter() {
         assert!(*value >= -1.0 && *value <= 1.0);
     }
@@ -80,7 +80,7 @@ fn test_conv1d_sequential_with_rmsprop() {
 fn test_conv1d_different_strides() {
     let x = Array3::ones((1, 1, 20)).into_dyn();
 
-    // 测试不同的stride值
+    // Test with different stride values
     let stride_2_conv = Conv1D::new(
         1,
         3,
@@ -101,7 +101,7 @@ fn test_conv1d_different_strides() {
 
 #[test]
 fn test_conv1d_multiple_channels() {
-    // 测试多通道输入
+    // Test multi-channel input
     let x = Array3::from_shape_fn((2, 3, 15), |(b, c, l)| (b + c + l) as f32 * 0.1).into_dyn();
 
     let y = Array3::ones((2, 5, 13)).into_dyn();
@@ -130,11 +130,11 @@ fn test_conv1d_multiple_channels() {
 #[test]
 fn test_conv1d_activation_functions() {
     let x = Array3::from_shape_fn((1, 1, 5), |(_, _, l)| {
-        l as f32 - 2.0 // 产生负值来测试激活函数
+        l as f32 - 2.0 // Generate negative values to test activation functions
     })
     .into_dyn();
 
-    // 测试ReLU激活函数
+    // Test ReLU activation function
     let mut relu_model = Sequential::new();
     relu_model
         .add(Conv1D::new(
@@ -148,12 +148,12 @@ fn test_conv1d_activation_functions() {
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let relu_output = relu_model.predict(&x);
-    // ReLU输出应该都是非负的
+    // ReLU output should be non-negative
     for value in relu_output.iter() {
         assert!(*value >= 0.0);
     }
 
-    // 测试Sigmoid激活函数
+    // Test Sigmoid activation function
     let mut sigmoid_model = Sequential::new();
     sigmoid_model
         .add(Conv1D::new(
@@ -167,7 +167,7 @@ fn test_conv1d_activation_functions() {
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let sigmoid_output = sigmoid_model.predict(&x);
-    // Sigmoid输出应该在[0,1]之间
+    // Sigmoid output should be within [0, 1]
     for value in sigmoid_output.iter() {
         assert!(*value >= 0.0 && *value <= 1.0);
     }
@@ -184,7 +184,7 @@ fn test_conv1d_parameter_count() {
         Activation::ReLU,
     );
 
-    // 参数数量 = weights + bias = (4 * 2 * 3) + (1 * 4) = 24 + 4 = 28
+    // Parameter count = weights + bias = (4 * 2 * 3) + (1 * 4) = 24 + 4 = 28
     assert_eq!(conv1d.param_count(), 28);
 }
 
@@ -201,9 +201,9 @@ fn test_conv1d_softmax_panic() {
             vec![1, 1, 5],
             1,
             PaddingType::Valid,
-            Activation::Softmax, // 这应该导致panic
+            Activation::Softmax, // This should cause a panic
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
-    model.predict(&x); // 这里会触发panic
+    model.predict(&x); // This will trigger the panic
 }
