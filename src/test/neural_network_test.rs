@@ -5,6 +5,7 @@ use ndarray::prelude::*;
 mod activation_test;
 mod average_pooling_1d_test;
 mod average_pooling_2d_test;
+mod conv1d_test;
 mod conv2d_test;
 mod flatten_test;
 mod global_average_pooling_1d_test;

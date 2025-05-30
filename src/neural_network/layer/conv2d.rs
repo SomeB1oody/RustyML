@@ -1,28 +1,11 @@
-use super::Conv2DLayerWeight;
+use super::{Conv2DLayerWeight, LayerWeight, PaddingType};
 use crate::neural_network::activation::Activation;
-use crate::neural_network::layer::LayerWeight;
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::{Array2, Array3, Array4, ArrayD, Axis};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
-
-/// Defines the padding method used in convolutional layers.
-///
-/// The padding type determines how the input is padded before applying convolution:
-/// - `Valid`: No padding is applied, which reduces the output dimensions.
-/// - `Same`: Padding is added to preserve the input spatial dimensions in the output.
-pub enum PaddingType {
-    /// No padding is applied. The convolution is only computed where the filter
-    /// fully overlaps with the input, resulting in an output with reduced dimensions.
-    Valid,
-
-    /// Padding is added around the input to ensure that the output has the same
-    /// spatial dimensions as the input (when stride is 1). This is done by adding
-    /// zeros around the borders of the input.
-    Same,
-}
 
 /// A 2D convolutional layer for neural networks.
 ///

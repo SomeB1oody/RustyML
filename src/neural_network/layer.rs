@@ -2,6 +2,7 @@
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
+pub mod conv1d;
 /// A 2D convolutional layer for neural networks.
 pub mod conv2d;
 /// Dense (Fully Connected) layer implementation for neural networks.
@@ -27,6 +28,7 @@ pub mod simple_rnn;
 
 pub use average_pooling_1d::*;
 pub use average_pooling_2d::*;
+pub use conv1d::*;
 pub use conv2d::*;
 pub use dense::*;
 pub use flatten::*;
@@ -38,6 +40,22 @@ pub use lstm::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
 pub use simple_rnn::*;
+
+/// Defines the padding method used in convolutional layers.
+///
+/// The padding type determines how the input is padded before applying convolution:
+/// - `Valid`: No padding is applied, which reduces the output dimensions.
+/// - `Same`: Padding is added to preserve the input spatial dimensions in the output.
+pub enum PaddingType {
+    /// No padding is applied. The convolution is only computed where the filter
+    /// fully overlaps with the input, resulting in an output with reduced dimensions.
+    Valid,
+
+    /// Padding is added around the input to ensure that the output has the same
+    /// spatial dimensions as the input (when stride is 1). This is done by adding
+    /// zeros around the borders of the input.
+    Same,
+}
 
 /// Container for different types of neural network layer weights
 ///
@@ -57,6 +75,7 @@ pub enum LayerWeight<'a> {
     SimpleRNN(SimpleRNNLayerWeight<'a>),
     LSTM(LSTMLayerWeight<'a>),
     Conv2D(Conv2DLayerWeight<'a>),
+    Conv1D(Conv1DLayerWeight<'a>),
     Empty,
 }
 
@@ -123,6 +142,17 @@ pub struct LSTMLayerWeight<'a> {
 /// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv2DLayerWeight<'a> {
     pub weight: &'a ndarray::Array4<f32>,
+    pub bias: &'a ndarray::Array2<f32>,
+}
+
+/// Weights for a 1D convolutional layer
+///
+/// # Fields
+///
+/// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
+/// - `bias` - Bias vector with shape (1, output_channels)
+pub struct Conv1DLayerWeight<'a> {
+    pub weight: &'a ndarray::Array3<f32>,
     pub bias: &'a ndarray::Array2<f32>,
 }
 

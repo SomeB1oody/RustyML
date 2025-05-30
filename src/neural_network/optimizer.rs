@@ -39,3 +39,13 @@ pub struct OptimizerCacheConv2D {
     pub adam_states: Option<AdamStatesConv2D>,
     pub rmsprop_cache: Option<RMSpropCacheConv2D>,
 }
+
+/// Optimizer cache for 1D convolutional layer
+///
+/// Stores optimizer-specific state for Adam and RMSprop optimizers.
+/// This includes momentum terms and running averages for both weights and bias.
+#[derive(Debug, Clone)]
+pub struct OptimizerCacheConv1D {
+    pub adam_states: Option<AdamStatesConv1D>,
+    pub rmsprop_cache: Option<RMSpropCacheConv1D>,
+}

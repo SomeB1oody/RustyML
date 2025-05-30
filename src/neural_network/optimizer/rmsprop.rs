@@ -1,5 +1,5 @@
 use crate::neural_network::{Layer, Optimizer};
-use ndarray::{Array2, Array4};
+use ndarray::{Array2, Array3, Array4};
 
 /// RMSprop optimizer implementation.
 ///
@@ -163,4 +163,10 @@ impl RMSpropCache {
 pub struct RMSpropCacheConv2D {
     pub cache: Array4<f32>,
     pub bias: Array2<f32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RMSpropCacheConv1D {
+    pub cache: Option<Array3<f32>>,
+    pub bias: Option<Array2<f32>>,
 }
