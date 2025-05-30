@@ -22,17 +22,7 @@ fn test_global_max_pooling_1d_forward() {
     let channels = 3;
     let length = 4;
 
-    // Fill data - sequentially increasing values
-    let mut input_data = Tensor::zeros(IxDyn(&[batch_size, channels, length]));
-
-    // Initialize input data with different values in each channel for testing max value extraction
-    for b in 0..batch_size {
-        for c in 0..channels {
-            for l in 0..length {
-                input_data[[b, c, l]] = (b * 100 + c * 10 + l) as f32;
-            }
-        }
-    }
+    let input_data = generate_data(batch_size, channels, length);
 
     // Create layer and perform forward propagation
     let mut layer = GlobalMaxPooling1D::new();
