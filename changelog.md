@@ -12,6 +12,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor tests to reuse `generate_data` function for pooling layers
 - Rename `OptimizerCacheFEL` to `OptimizerCacheConv2D`
+- Extracted the SGD parameter update logic into a `update_sgd_conv` macro to eliminate redundancy. Updated `Conv1D` and `Conv2D` layers to use the macro.
+- Extracted the Adam parameter update logic into a `update_adam_conv` function to eliminate redundancy. Updated `Conv1D` and `Conv2D` layers to use the new method for weight and bias updates.
 
 ## [v0.6.2] - 2025-5-29
 ### Added
