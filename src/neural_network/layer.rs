@@ -1,3 +1,21 @@
+macro_rules! update_sgd_conv {
+    () => {
+        fn update_parameters_sgd(&mut self, lr: f32) {
+            if let (Some(weight_grads), Some(bias_grads)) =
+                (&self.weight_gradients, &self.bias_gradients)
+            {
+                SGD::update_sgd_parameters(
+                    self.weights.as_slice_mut().unwrap(),
+                    weight_grads.as_slice().unwrap(),
+                    self.bias.as_slice_mut().unwrap(),
+                    bias_grads.as_slice().unwrap(),
+                    lr,
+                )
+            }
+        }
+    };
+}
+
 /// 1D Average Pooling layer for neural networks.
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.

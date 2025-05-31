@@ -430,19 +430,7 @@ impl Layer for Conv1D {
         self.weights.len() + self.bias.len()
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
-        if let (Some(weight_grads), Some(bias_grads)) =
-            (&self.weight_gradients, &self.bias_gradients)
-        {
-            SGD::update_sgd_parameters(
-                self.weights.as_slice_mut().unwrap(),
-                weight_grads.as_slice().unwrap(),
-                self.bias.as_slice_mut().unwrap(),
-                bias_grads.as_slice().unwrap(),
-                lr,
-            )
-        }
-    }
+    update_sgd_conv!();
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
         // Ensure gradients are available
