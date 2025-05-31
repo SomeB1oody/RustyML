@@ -1,3 +1,8 @@
+/// A macro that generates the SGD (Stochastic Gradient Descent) parameter update method for convolutional layers.
+///
+/// This macro creates a standardized `update_parameters_sgd` function that applies SGD updates
+/// to both weights and biases of convolutional layers. The generated function checks for the
+/// presence of gradients and delegates the actual parameter updates to the SGD optimizer.
 macro_rules! update_sgd_conv {
     () => {
         fn update_parameters_sgd(&mut self, lr: f32) {
