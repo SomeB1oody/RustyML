@@ -1,4 +1,4 @@
-use super::{Conv2DLayerWeight, LayerWeight, PaddingType};
+use super::*;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{ModelError, Tensor};
@@ -565,28 +565,6 @@ impl Layer for Conv2D {
 
             // Update weights and biases using a closure to avoid code duplication
             if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
-                // Define a closure for updating parameters with Adam algorithm
-                let update_adam =
-                    |params: &mut [f32], grads: &[f32], m: &mut [f32], v: &mut [f32]| {
-                        params
-                            .par_iter_mut()
-                            .zip(grads.par_iter())
-                            .zip(m.par_iter_mut())
-                            .zip(v.par_iter_mut())
-                            .for_each(|(((param, &grad), m_val), v_val)| {
-                                // Update momentum and variance
-                                *m_val = beta1 * *m_val + (1.0 - beta1) * grad;
-                                *v_val = beta2 * *v_val + (1.0 - beta2) * grad * grad;
-
-                                // Calculate corrected momentum and variance
-                                let m_corrected = *m_val / correction1;
-                                let v_corrected = *v_val / correction2;
-
-                                // Update parameter
-                                *param -= lr * m_corrected / (v_corrected.sqrt() + epsilon);
-                            });
-                    };
-
                 // Update weights using parallel computation
                 if let (Some(weight_slice), Some(weight_grad_slice), Some(m_slice), Some(v_slice)) = (
                     self.weights.as_slice_mut(),
@@ -594,7 +572,18 @@ impl Layer for Conv2D {
                     adam_states.m.as_slice_mut(),
                     adam_states.v.as_slice_mut(),
                 ) {
-                    update_adam(weight_slice, weight_grad_slice, m_slice, v_slice);
+                    update_adam_conv(
+                        weight_slice,
+                        weight_grad_slice,
+                        m_slice,
+                        v_slice,
+                        lr,
+                        beta1,
+                        beta2,
+                        epsilon,
+                        correction1,
+                        correction2,
+                    );
                 } else {
                     // If slices cannot be obtained, use original sequential implementation as fallback
                     for i in 0..self.weights.len() {
@@ -625,7 +614,18 @@ impl Layer for Conv2D {
                     adam_states.m_bias.as_slice_mut(),
                     adam_states.v_bias.as_slice_mut(),
                 ) {
-                    update_adam(bias_slice, bias_grad_slice, m_bias_slice, v_bias_slice);
+                    update_adam_conv(
+                        bias_slice,
+                        bias_grad_slice,
+                        m_bias_slice,
+                        v_bias_slice,
+                        lr,
+                        beta1,
+                        beta2,
+                        epsilon,
+                        correction1,
+                        correction2,
+                    );
                 } else {
                     // If slices cannot be obtained, use original sequential implementation as fallback
                     for i in 0..self.bias.len() {

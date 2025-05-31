@@ -1,6 +1,6 @@
 use crate::ModelError;
 use crate::neural_network::activation::Activation;
-use crate::neural_network::layer::{Conv1DLayerWeight, LayerWeight, PaddingType};
+use crate::neural_network::layer::*;
 use crate::neural_network::optimizer::OptimizerCacheConv1D;
 use crate::neural_network::{SGD, Tensor};
 use crate::traits::Layer;
@@ -466,42 +466,32 @@ impl Layer for Conv1D {
                 let bias_correction1 = 1.0 - beta1.powi(t as i32);
                 let bias_correction2 = 1.0 - beta2.powi(t as i32);
 
-                // Define a generic Adam parameter update closure
-                let update_adam =
-                    |params: &mut [f32], grads: &[f32], m: &mut [f32], v: &mut [f32]| {
-                        params
-                            .par_iter_mut()
-                            .zip(grads.par_iter())
-                            .zip(m.par_iter_mut())
-                            .zip(v.par_iter_mut())
-                            .for_each(|(((param, &grad), m_val), v_val)| {
-                                // Update momentum and variance
-                                *m_val = beta1 * *m_val + (1.0 - beta1) * grad;
-                                *v_val = beta2 * *v_val + (1.0 - beta2) * grad * grad;
-
-                                // Calculate bias-corrected momentum and variance
-                                let m_corrected = *m_val / bias_correction1;
-                                let v_corrected = *v_val / bias_correction2;
-
-                                // Update parameter
-                                *param -= lr * m_corrected / (v_corrected.sqrt() + epsilon);
-                            });
-                    };
-
                 // Update weight parameters
-                update_adam(
+                update_adam_conv(
                     self.weights.as_slice_mut().unwrap(),
                     weight_gradients.as_slice().unwrap(),
                     adam_states.m.as_slice_mut().unwrap(),
                     adam_states.v.as_slice_mut().unwrap(),
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    bias_correction1,
+                    bias_correction2,
                 );
 
                 // Update bias parameters
-                update_adam(
+                update_adam_conv(
                     self.bias.as_slice_mut().unwrap(),
                     bias_gradients.as_slice().unwrap(),
                     adam_states.m_bias.as_slice_mut().unwrap(),
                     adam_states.v_bias.as_slice_mut().unwrap(),
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    bias_correction1,
+                    bias_correction2,
                 );
             }
         }

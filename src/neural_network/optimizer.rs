@@ -44,7 +44,7 @@ pub struct OptimizerCacheConv2D {
 ///
 /// Stores optimizer-specific state for Adam and RMSprop optimizers.
 /// This includes momentum terms and running averages for both weights and bias.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheConv1D {
     pub adam_states: Option<AdamStatesConv1D>,
     pub rmsprop_cache: Option<RMSpropCacheConv1D>,

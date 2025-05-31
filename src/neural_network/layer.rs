@@ -2,6 +2,7 @@
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
+/// A 1D convolutional layer for neural networks.
 pub mod conv1d;
 /// A 2D convolutional layer for neural networks.
 pub mod conv2d;
@@ -205,4 +206,55 @@ fn calculate_output_shape_2d_pooling(
     let output_width = (input_width - pool_size.1) / strides.1 + 1;
 
     vec![batch_size, channels, output_height, output_width]
+}
+
+/// Updates parameters using the Adam optimization algorithm.
+///
+/// This function performs parameter updates using the Adam (Adaptive Moment Estimation) optimizer,
+/// which adapts the learning rate for each parameter using estimates of first and second moments
+/// of the gradients. The implementation uses parallel iteration via Rayon for improved performance.
+///
+/// # Parameters
+///
+/// * `params` - Mutable slice of model parameters to be updated
+/// * `grads` - Slice of gradients corresponding to each parameter
+/// * `m` - Mutable slice for first moment estimates (momentum)
+/// * `v` - Mutable slice for second moment estimates (velocity/variance)
+/// * `lr` - Learning rate for the update step
+/// * `beta1` - Exponential decay rate for the first moment estimates (typically 0.9)
+/// * `beta2` - Exponential decay rate for the second moment estimates (typically 0.999)
+/// * `epsilon` - Small constant for numerical stability
+/// * `bias_correction1` - Bias correction term for first moment estimate
+/// * `bias_correction2` - Bias correction term for second moment estimate
+fn update_adam_conv(
+    params: &mut [f32],
+    grads: &[f32],
+    m: &mut [f32],
+    v: &mut [f32],
+    lr: f32,
+    beta1: f32,
+    beta2: f32,
+    epsilon: f32,
+    bias_correction1: f32,
+    bias_correction2: f32,
+) {
+    use rayon::prelude::*;
+
+    params
+        .par_iter_mut()
+        .zip(grads.par_iter())
+        .zip(m.par_iter_mut())
+        .zip(v.par_iter_mut())
+        .for_each(|(((param, &grad), m_val), v_val)| {
+            // Update momentum and variance
+            *m_val = beta1 * *m_val + (1.0 - beta1) * grad;
+            *v_val = beta2 * *v_val + (1.0 - beta2) * grad * grad;
+
+            // Calculate corrected momentum and variance
+            let m_corrected = *m_val / bias_correction1;
+            let v_corrected = *v_val / bias_correction2;
+
+            // Update parameter
+            *param -= lr * m_corrected / (v_corrected.sqrt() + epsilon);
+        });
 }
