@@ -212,13 +212,13 @@ impl Conv1D {
     fn apply_activation(&self, x: &mut Tensor) {
         match self.activation {
             Activation::ReLU => {
-                x.mapv_inplace(|val| if val > 0.0 { val } else { 0.0 });
+                x.par_mapv_inplace(|val| if val > 0.0 { val } else { 0.0 });
             }
             Activation::Sigmoid => {
-                x.mapv_inplace(|val| 1.0 / (1.0 + (-val).exp()));
+                x.par_mapv_inplace(|val| 1.0 / (1.0 + (-val).exp()));
             }
             Activation::Tanh => {
-                x.mapv_inplace(|val| val.tanh());
+                x.par_mapv_inplace(|val| val.tanh());
             }
             Activation::Softmax => {
                 panic!("Cannot use Softmax activation function for convolutional layers");
@@ -246,13 +246,13 @@ impl Conv1D {
 
         match self.activation {
             Activation::ReLU => {
-                result.mapv_inplace(|val| if val > 0.0 { 1.0 } else { 0.0 });
+                result.par_mapv_inplace(|val| if val > 0.0 { 1.0 } else { 0.0 });
             }
             Activation::Sigmoid => {
-                result.mapv_inplace(|a| a * (1.0 - a));
+                result.par_mapv_inplace(|a| a * (1.0 - a));
             }
             Activation::Tanh => {
-                result.mapv_inplace(|a| 1.0 - a * a);
+                result.par_mapv_inplace(|a| 1.0 - a * a);
             }
             Activation::Softmax => {
                 panic!("Cannot use Softmax activation function for convolutional layers");
@@ -262,7 +262,7 @@ impl Conv1D {
         result
     }
 
-    /// Performs 1D convolution operation.
+    /// Performs 1D convolution operation with parallel processing.
     ///
     /// # Parameters
     ///
@@ -285,29 +285,40 @@ impl Conv1D {
             .into_dimensionality::<ndarray::Ix3>()
             .unwrap();
 
-        for batch in 0..batch_size {
-            for filter in 0..self.filters {
-                for out_pos in 0..output_length {
-                    let start_pos = out_pos * self.stride;
-                    let mut sum = 0.0;
+        // Parallel processing of batches and filters
+        output
+            .axis_iter_mut(ndarray::Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(batch, mut batch_output)| {
+                batch_output
+                    .axis_iter_mut(ndarray::Axis(0))
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(filter, mut filter_output)| {
+                        filter_output.indexed_iter_mut().par_bridge().for_each(
+                            |(out_pos, output_val)| {
+                                let start_pos = out_pos * self.stride;
+                                let mut sum = 0.0;
 
-                    // Convolution operation
-                    for in_channel in 0..self.input_shape[1] {
-                        for kernel_pos in 0..self.kernel_size {
-                            let input_pos = start_pos + kernel_pos;
-                            if input_pos < input_length {
-                                sum += input_3d[[batch, in_channel, input_pos]]
-                                    * self.weights[[filter, in_channel, kernel_pos]];
-                            }
-                        }
-                    }
+                                // Convolution operation
+                                for in_channel in 0..self.input_shape[1] {
+                                    for kernel_pos in 0..self.kernel_size {
+                                        let input_pos = start_pos + kernel_pos;
+                                        if input_pos < input_length {
+                                            sum += input_3d[[batch, in_channel, input_pos]]
+                                                * self.weights[[filter, in_channel, kernel_pos]];
+                                        }
+                                    }
+                                }
 
-                    // Add bias
-                    sum += self.bias[[0, filter]];
-                    output[[batch, filter, out_pos]] = sum;
-                }
-            }
-        }
+                                // Add bias
+                                sum += self.bias[[0, filter]];
+                                *output_val = sum;
+                            },
+                        );
+                    });
+            });
 
         output.into_dyn()
     }
@@ -328,6 +339,7 @@ impl Layer for Conv1D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Retrieve cached input from forward pass
         let input = self.input_cache.as_ref().ok_or_else(|| {
             ModelError::ProcessingError("No cached input for backward pass".to_string())
         })?;
@@ -337,9 +349,8 @@ impl Layer for Conv1D {
         let input_channels = input_shape[1];
         let input_length = input_shape[2];
 
-        // Apply activation gradient if present
+        // Apply activation function derivatives
         let grad_output = grad_output.clone();
-        // Calculate derivatives of the activation function
         let grad_output = self.activation_derivative(&grad_output);
 
         let grad_output_3d = grad_output
@@ -351,7 +362,6 @@ impl Layer for Conv1D {
         // Initialize gradients
         let mut weight_gradients = Array3::zeros(self.weights.dim());
         let mut bias_gradients = Array2::zeros(self.bias.dim());
-
         let mut input_gradients = Array3::zeros((batch_size, input_channels, input_length));
 
         let padded_input = self.apply_padding(input);
@@ -361,26 +371,37 @@ impl Layer for Conv1D {
 
         let output_length = grad_output_3d.shape()[2];
 
-        // Compute gradients
-        for batch in 0..batch_size {
+        // Use parallel processing to compute gradients
+        use std::sync::Mutex;
+        let weight_gradients_mutex = Mutex::new(&mut weight_gradients);
+        let bias_gradients_mutex = Mutex::new(&mut bias_gradients);
+        let input_gradients_mutex = Mutex::new(&mut input_gradients);
+
+        // Parallelize over batches
+        (0..batch_size).into_par_iter().for_each(|batch| {
+            // Create local gradient accumulators for each thread
+            let mut local_weight_gradients = Array3::zeros(self.weights.dim());
+            let mut local_bias_gradients = Array2::zeros(self.bias.dim());
+            let mut local_input_gradients = Array3::zeros((1, input_channels, input_length));
+
             for filter in 0..self.filters {
                 for out_pos in 0..output_length {
                     let grad_val = grad_output_3d[[batch, filter, out_pos]];
                     let start_pos = out_pos * self.stride;
 
-                    // Bias gradient
-                    bias_gradients[[0, filter]] += grad_val;
+                    // Bias gradients
+                    local_bias_gradients[[0, filter]] += grad_val;
 
                     // Weight and input gradients
                     for in_channel in 0..input_channels {
                         for kernel_pos in 0..self.kernel_size {
                             let input_pos = start_pos + kernel_pos;
                             if input_pos < input_3d.shape()[2] {
-                                // Weight gradient
-                                weight_gradients[[filter, in_channel, kernel_pos]] +=
+                                // Weight gradients
+                                local_weight_gradients[[filter, in_channel, kernel_pos]] +=
                                     grad_val * input_3d[[batch, in_channel, input_pos]];
 
-                                // Input gradient (considering padding)
+                                // Input gradients (considering padding)
                                 let original_input_pos = match self.padding {
                                     PaddingType::Valid => input_pos,
                                     PaddingType::Same => {
@@ -399,7 +420,7 @@ impl Layer for Conv1D {
                                 };
 
                                 if original_input_pos < input_length {
-                                    input_gradients[[batch, in_channel, original_input_pos]] +=
+                                    local_input_gradients[[0, in_channel, original_input_pos]] +=
                                         grad_val * self.weights[[filter, in_channel, kernel_pos]];
                                 }
                             }
@@ -407,7 +428,24 @@ impl Layer for Conv1D {
                     }
                 }
             }
-        }
+
+            // Accumulate local gradients into global gradients
+            {
+                let mut global_weight_gradients = weight_gradients_mutex.lock().unwrap();
+                **global_weight_gradients += &local_weight_gradients;
+            }
+            {
+                let mut global_bias_gradients = bias_gradients_mutex.lock().unwrap();
+                **global_bias_gradients += &local_bias_gradients;
+            }
+            {
+                let mut global_input_gradients = input_gradients_mutex.lock().unwrap();
+
+                global_input_gradients
+                    .slice_mut(ndarray::s![batch, .., ..])
+                    .assign(&local_input_gradients.slice(ndarray::s![0, .., ..]));
+            }
+        });
 
         // Store gradients
         self.weight_gradients = Some(weight_gradients);
