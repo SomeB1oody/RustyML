@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.2] - 2025-5-31
+### Added
+- Add `MaxPooling3D` layer and tests
+
 ## [v0.6.2] - 2025-5-30
 ### Added
 - Add `Conv1D` layer implementation and tests

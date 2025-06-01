@@ -47,6 +47,8 @@ pub mod lstm;
 pub mod max_pooling_1d;
 /// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 pub mod max_pooling_2d;
+/// 3D data max pooling Layer.
+mod max_pooling_3d;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 pub mod simple_rnn;
 
@@ -63,6 +65,7 @@ pub use global_max_pooling_2d::*;
 pub use lstm::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
+pub use max_pooling_3d::*;
 pub use simple_rnn::*;
 
 /// Defines the padding method used in convolutional layers.
