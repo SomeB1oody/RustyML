@@ -21,6 +21,15 @@ macro_rules! update_sgd_conv {
     };
 }
 
+/// A macro that generates standard function implementations for neural network layers
+/// without trainable parameters.
+///
+/// This macro expands to implementations of the following functions:
+/// - `param_count`: Returns 0 as the layer has no trainable parameters
+/// - `update_parameters_sgd`: Empty implementation for SGD parameter updates
+/// - `update_parameters_adam`: Empty implementation for Adam parameter updates
+/// - `update_parameters_rmsprop`: Empty implementation for RMSProp parameter updates
+/// - `get_weights`: Returns `LayerWeight::Empty` as the layer has no weights
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
         fn param_count(&self) -> usize {
