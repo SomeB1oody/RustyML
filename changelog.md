@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.2] - 2025-6-1
+### Changed
+- Refactor layers without trainable parameters to use `no_trainable_parameters_layer_functions!` macro
+
 ## [v0.6.2] - 2025-5-31
 ### Added
 - Add `MaxPooling3D` layer and tests

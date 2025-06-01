@@ -319,7 +319,7 @@ impl Layer for AveragePooling2D {
     }
 
     fn layer_type(&self) -> &str {
-        "AveragePooling"
+        "AveragePooling2D"
     }
 
     fn output_shape(&self) -> String {
@@ -330,32 +330,5 @@ impl Layer for AveragePooling2D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        // Average pooling layer has no trainable parameters
-        0
-    }
-
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // No parameters to update
-    }
-
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    ) {
-        // No parameters to update
-    }
-
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // No parameters to update
-    }
-
-    fn get_weights(&self) -> LayerWeight {
-        // Average pooling layer has no weights
-        LayerWeight::Empty
-    }
+    no_trainable_parameters_layer_functions!();
 }

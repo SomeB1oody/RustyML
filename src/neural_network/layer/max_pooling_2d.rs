@@ -1,4 +1,4 @@
-use super::calculate_output_shape_2d_pooling;
+use super::*;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::ArrayD;
@@ -264,33 +264,5 @@ impl Layer for MaxPooling2D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        // Pooling layer has no trainable parameters
-        0
-    }
-
-    // Pooling layer has no trainable parameters, so these methods do nothing
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    ) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn get_weights(&self) -> super::LayerWeight {
-        // Max pooling layer has no weights
-        super::LayerWeight::Empty
-    }
+    no_trainable_parameters_layer_functions!();
 }

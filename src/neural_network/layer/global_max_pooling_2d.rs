@@ -180,38 +180,5 @@ impl Layer for GlobalMaxPooling2D {
         "GlobalMaxPooling2D"
     }
 
-    fn output_shape(&self) -> String {
-        if self.input_shape.is_empty() {
-            return "unknown".to_string();
-        }
-        format!("[{}, {}]", self.input_shape[0], self.input_shape[1])
-    }
-
-    fn param_count(&self) -> usize {
-        0 // GlobalMaxPooling2D layer has no trainable parameters
-    }
-
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // No parameters to update
-    }
-
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    ) {
-        // No parameters to update
-    }
-
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // No parameters to update
-    }
-
-    fn get_weights(&self) -> LayerWeight {
-        // Return empty LayerWeight since there are no weights
-        LayerWeight::Empty
-    }
+    no_trainable_parameters_layer_functions!();
 }

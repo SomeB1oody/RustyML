@@ -231,26 +231,5 @@ impl Layer for MaxPooling1D {
         format!("{:?}", output_shape)
     }
 
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // Pooling layers have no trainable parameters
-    }
-
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    ) {
-        // Pooling layers have no trainable parameters
-    }
-
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // Pooling layers have no trainable parameters
-    }
-
-    fn get_weights(&self) -> LayerWeight {
-        LayerWeight::Empty
-    }
+    no_trainable_parameters_layer_functions!();
 }

@@ -109,9 +109,7 @@ pub trait Layer {
     /// # Returns
     ///
     /// The count of parameters as an usize
-    fn param_count(&self) -> usize {
-        0
-    }
+    fn param_count(&self) -> usize;
 
     /// Updates the layer parameters using Stochastic Gradient Descent.
     ///

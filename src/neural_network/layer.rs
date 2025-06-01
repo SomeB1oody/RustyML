@@ -21,6 +21,39 @@ macro_rules! update_sgd_conv {
     };
 }
 
+macro_rules! no_trainable_parameters_layer_functions {
+    () => {
+        fn param_count(&self) -> usize {
+            // This layer has no trainable parameters
+            0
+        }
+
+        fn update_parameters_sgd(&mut self, _lr: f32) {
+            // This layer have no trainable parameters
+        }
+
+        fn update_parameters_adam(
+            &mut self,
+            _lr: f32,
+            _beta1: f32,
+            _beta2: f32,
+            _epsilon: f32,
+            _t: u64,
+        ) {
+            // This layer have no trainable parameters
+        }
+
+        fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
+            // This layer have no trainable parameters
+        }
+
+        fn get_weights(&self) -> LayerWeight {
+            // This layer has no weights
+            LayerWeight::Empty
+        }
+    };
+}
+
 /// 1D Average Pooling layer for neural networks.
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.

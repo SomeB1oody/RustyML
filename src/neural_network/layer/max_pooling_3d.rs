@@ -293,33 +293,5 @@ impl Layer for MaxPooling3D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        // Pooling layers have no trainable parameters
-        0
-    }
-
-    // Pooling layers have no trainable parameters, so these methods do nothing
-    fn update_parameters_sgd(&mut self, _lr: f32) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    ) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
-        // Max pooling layer has no parameters to update
-    }
-
-    fn get_weights(&self) -> LayerWeight {
-        // Max pooling layer has no weights
-        LayerWeight::Empty
-    }
+    no_trainable_parameters_layer_functions!();
 }
