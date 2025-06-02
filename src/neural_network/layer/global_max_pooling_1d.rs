@@ -158,13 +158,5 @@ impl Layer for GlobalMaxPooling1D {
         "GlobalMaxPooling1D"
     }
 
-    fn output_shape(&self) -> String {
-        if self.input_shape.is_empty() {
-            String::from("Not initialized")
-        } else {
-            format!("({}, {})", self.input_shape[0], self.input_shape[1])
-        }
-    }
-
-    no_trainable_parameters_layer_functions!();
+    layer_functions_avg_pooling!();
 }

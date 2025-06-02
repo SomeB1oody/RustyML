@@ -1,5 +1,5 @@
 use super::super::Tensor;
-use super::calculate_output_shape_1d_pooling;
+use super::*;
 use crate::ModelError;
 use crate::neural_network::layer::LayerWeight;
 use crate::traits::Layer;
@@ -100,17 +100,6 @@ impl AveragePooling1D {
             input_shape,
             input_cache: None,
         }
-    }
-
-    /// Calculate output shape
-    ///
-    /// Computes the output shape based on input shape, pool size, and stride
-    fn compute_output_shape_avg_pooling_1d(&self) -> Vec<usize> {
-        let batch_size = self.input_shape[0];
-        let channels = self.input_shape[1];
-        let length = self.input_shape[2];
-
-        calculate_output_shape_1d_pooling(batch_size, channels, length, self.pool_size, self.stride)
     }
 }
 
@@ -229,10 +218,5 @@ impl Layer for AveragePooling1D {
         "AveragePooling1D"
     }
 
-    fn output_shape(&self) -> String {
-        let output_shape = self.compute_output_shape_avg_pooling_1d();
-        format!("{:?}", output_shape)
-    }
-
-    no_trainable_parameters_layer_functions!();
+    layer_functions_1d_pooling!();
 }

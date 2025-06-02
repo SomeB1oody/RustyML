@@ -12,7 +12,7 @@ fn test_global_max_pooling_1d_creation() {
     assert_eq!(layer.param_count(), 0);
 
     // Verify output shape before initialization
-    assert_eq!(layer.output_shape(), "Not initialized");
+    assert_eq!(layer.output_shape(), "Unknown");
 }
 
 #[test]

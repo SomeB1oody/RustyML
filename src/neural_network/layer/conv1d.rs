@@ -461,7 +461,10 @@ impl Layer for Conv1D {
     fn output_shape(&self) -> String {
         let input_length = self.input_shape[2];
         let output_length = self.calculate_output_length(input_length);
-        format!("[batch_size, {}, {}]", self.filters, output_length)
+        format!(
+            "({}, {}, {})",
+            self.input_shape[0], self.filters, output_length
+        )
     }
 
     fn param_count(&self) -> usize {

@@ -148,12 +148,5 @@ impl Layer for GlobalAveragePooling1D {
         "GlobalAveragePooling1D"
     }
 
-    fn output_shape(&self) -> String {
-        if self.input_shape.is_empty() {
-            return "Unknown".to_string();
-        }
-        format!("[batch_size, {}]", self.input_shape[1])
-    }
-
-    no_trainable_parameters_layer_functions!();
+    layer_functions_avg_pooling!();
 }

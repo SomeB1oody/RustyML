@@ -256,14 +256,5 @@ impl Layer for MaxPooling3D {
         "MaxPooling3D"
     }
 
-    fn output_shape(&self) -> String {
-        let output_shape =
-            calculate_output_shape_3d_pooling(&self.input_shape, self.pool_size, self.strides);
-        format!(
-            "({}, {}, {}, {}, {})",
-            output_shape[0], output_shape[1], output_shape[2], output_shape[3], output_shape[4]
-        )
-    }
-
-    no_trainable_parameters_layer_functions!();
+    layer_functions_3d_pooling!();
 }

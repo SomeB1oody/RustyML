@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add `AveragePooling3D` layer and tests
 
+### Changed
+- Refactor pooling layers to use macros for output shape calculation
+
 ## [v0.6.2] - 2025-6-1
 ### Changed
 - Refactor layers without trainable parameters to use `no_trainable_parameters_layer_functions!` macro

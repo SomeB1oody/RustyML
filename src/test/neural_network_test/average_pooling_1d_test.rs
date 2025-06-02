@@ -205,6 +205,6 @@ fn test_layer_type_and_output_shape() {
     assert_eq!(layer.layer_type(), "AveragePooling1D");
 
     // Test output shape
-    let expected_shape = "[1, 3, 5]"; // (10-2)/2+1 = 5
+    let expected_shape = "(1, 3, 5)"; // (10-2)/2+1 = 5
     assert_eq!(layer.output_shape(), expected_shape);
 }

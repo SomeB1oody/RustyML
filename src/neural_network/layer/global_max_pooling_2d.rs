@@ -180,5 +180,5 @@ impl Layer for GlobalMaxPooling2D {
         "GlobalMaxPooling2D"
     }
 
-    no_trainable_parameters_layer_functions!();
+    layer_functions_avg_pooling!();
 }

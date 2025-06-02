@@ -322,13 +322,5 @@ impl Layer for AveragePooling2D {
         "AveragePooling2D"
     }
 
-    fn output_shape(&self) -> String {
-        let output_shape = self.calculate_output_shape(&self.input_shape);
-        format!(
-            "({}, {}, {}, {})",
-            output_shape[0], output_shape[1], output_shape[2], output_shape[3]
-        )
-    }
-
-    no_trainable_parameters_layer_functions!();
+    layer_functions_2d_pooling!();
 }

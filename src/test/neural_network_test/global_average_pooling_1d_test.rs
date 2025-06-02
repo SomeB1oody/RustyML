@@ -43,7 +43,10 @@ fn test_global_average_pooling_1d_forward() {
     }
 
     // Verify layer's output shape string
-    assert_eq!(layer.output_shape(), format!("[batch_size, {}]", channels));
+    assert_eq!(
+        layer.output_shape(),
+        format!("({}, {})", batch_size, channels)
+    );
 }
 
 #[test]
