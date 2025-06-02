@@ -103,36 +103,6 @@ impl MaxPooling3D {
         }
     }
 
-    /// Calculates the output shape of the 3D max pooling layer.
-    ///
-    /// # Parameters
-    ///
-    /// * `input_shape` - The shape of the input tensor, formatted as \[batch_size, channels, depth, height, width\].
-    ///
-    /// # Returns
-    ///
-    /// A vector containing the calculated output shape, formatted as \[batch_size, channels, output_depth, output_height, output_width\].
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
-        let batch_size = input_shape[0];
-        let channels = input_shape[1];
-        let input_depth = input_shape[2];
-        let input_height = input_shape[3];
-        let input_width = input_shape[4];
-
-        // Calculate the output depth, height, and width
-        let output_depth = (input_depth - self.pool_size.0) / self.strides.0 + 1;
-        let output_height = (input_height - self.pool_size.1) / self.strides.1 + 1;
-        let output_width = (input_width - self.pool_size.2) / self.strides.2 + 1;
-
-        vec![
-            batch_size,
-            channels,
-            output_depth,
-            output_height,
-            output_width,
-        ]
-    }
-
     /// Performs 3D max pooling operation.
     ///
     /// # Parameters
@@ -146,7 +116,8 @@ impl MaxPooling3D {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let channels = input_shape[1];
-        let output_shape = self.calculate_output_shape(input_shape);
+        let output_shape =
+            calculate_output_shape_3d_pooling(input_shape, self.pool_size, self.strides);
 
         // Pre-allocate the output array
         let mut output = ArrayD::zeros(output_shape.clone());
@@ -286,7 +257,8 @@ impl Layer for MaxPooling3D {
     }
 
     fn output_shape(&self) -> String {
-        let output_shape = self.calculate_output_shape(&self.input_shape);
+        let output_shape =
+            calculate_output_shape_3d_pooling(&self.input_shape, self.pool_size, self.strides);
         format!(
             "({}, {}, {}, {}, {})",
             output_shape[0], output_shape[1], output_shape[2], output_shape[3], output_shape[4]

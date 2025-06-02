@@ -67,6 +67,8 @@ macro_rules! no_trainable_parameters_layer_functions {
 pub mod average_pooling_1d;
 /// A 2D average pooling layer for neural networks.
 pub mod average_pooling_2d;
+/// 3D Average Pooling Layer
+pub mod average_pooling_3d;
 /// A 1D convolutional layer for neural networks.
 pub mod conv1d;
 /// A 2D convolutional layer for neural networks.
@@ -96,6 +98,7 @@ pub mod simple_rnn;
 
 pub use average_pooling_1d::*;
 pub use average_pooling_2d::*;
+pub use average_pooling_3d::*;
 pub use conv1d::*;
 pub use conv2d::*;
 pub use dense::*;
@@ -274,6 +277,40 @@ fn calculate_output_shape_2d_pooling(
     let output_width = (input_width - pool_size.1) / strides.1 + 1;
 
     vec![batch_size, channels, output_height, output_width]
+}
+
+/// Calculates the output shape of the 3D layer.
+///
+/// # Parameters
+///
+/// * `input_shape` - The shape of the input tensor, formatted as \[batch_size, channels, depth, height, width\].
+///
+/// # Returns
+///
+/// A vector containing the calculated output shape, formatted as \[batch_size, channels, output_depth, output_height, output_width\].
+fn calculate_output_shape_3d_pooling(
+    input_shape: &[usize],
+    pool_size: (usize, usize, usize),
+    strides: (usize, usize, usize),
+) -> Vec<usize> {
+    let batch_size = input_shape[0];
+    let channels = input_shape[1];
+    let input_depth = input_shape[2];
+    let input_height = input_shape[3];
+    let input_width = input_shape[4];
+
+    // Calculate the output depth, height, and width
+    let output_depth = (input_depth - pool_size.0) / strides.0 + 1;
+    let output_height = (input_height - pool_size.1) / strides.1 + 1;
+    let output_width = (input_width - pool_size.2) / strides.2 + 1;
+
+    vec![
+        batch_size,
+        channels,
+        output_depth,
+        output_height,
+        output_width,
+    ]
 }
 
 /// Updates parameters using the Adam optimization algorithm.
