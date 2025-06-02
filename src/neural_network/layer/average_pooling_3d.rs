@@ -1,6 +1,7 @@
 use super::*;
 use crate::neural_network::{Layer, LayerWeight, ModelError, Tensor};
 use ndarray::{Array, IxDyn};
+use rayon::prelude::*;
 
 /// 3D Average Pooling Layer
 ///
@@ -101,7 +102,7 @@ impl Layer for AveragePooling3D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
 
-        // 缓存输入用于反向传播
+        // Cache input for backpropagation
         self.input_cache = Some(input.clone());
         self.input_shape = input_shape.to_vec();
 
@@ -121,9 +122,17 @@ impl Layer for AveragePooling3D {
 
         let pool_volume = (self.pool_size.0 * self.pool_size.1 * self.pool_size.2) as f32;
 
-        // 执行平均池化
-        for b in 0..batch_size {
-            for c in 0..channels {
+        // Create index pairs for all (batch, channel) combinations
+        let batch_channel_pairs: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c)))
+            .collect();
+
+        // Parallel computation for each (batch, channel) pair
+        let results: Vec<((usize, usize), Vec<((usize, usize, usize), f32)>)> = batch_channel_pairs
+            .into_par_iter()
+            .map(|(b, c)| {
+                let mut local_results = Vec::new();
+
                 for od in 0..output_depth {
                     for oh in 0..output_height {
                         for ow in 0..output_width {
@@ -135,7 +144,7 @@ impl Layer for AveragePooling3D {
                             let end_h = (start_h + self.pool_size.1).min(input_height);
                             let end_w = (start_w + self.pool_size.2).min(input_width);
 
-                            // 计算池化窗口内的平均值
+                            // Calculate average value within the pooling window
                             let mut sum = 0.0;
                             for d in start_d..end_d {
                                 for h in start_h..end_h {
@@ -145,10 +154,20 @@ impl Layer for AveragePooling3D {
                                 }
                             }
 
-                            output[[b, c, od, oh, ow]] = sum / pool_volume;
+                            let pooled_value = sum / pool_volume;
+                            local_results.push(((od, oh, ow), pooled_value));
                         }
                     }
                 }
+
+                ((b, c), local_results)
+            })
+            .collect();
+
+        // Merge results into output tensor
+        for ((b, c), local_results) in results {
+            for ((od, oh, ow), value) in local_results {
+                output[[b, c, od, oh, ow]] = value;
             }
         }
 
@@ -156,10 +175,9 @@ impl Layer for AveragePooling3D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        let input = self
-            .input_cache
-            .as_ref()
-            .ok_or_else(|| ModelError::ProcessingError("前向传播尚未执行".to_string()))?;
+        let input = self.input_cache.as_ref().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run yet".to_string())
+        })?;
 
         let input_shape = input.shape();
         let mut grad_input = Array::zeros(IxDyn(input_shape));
@@ -176,9 +194,17 @@ impl Layer for AveragePooling3D {
 
         let pool_volume = (self.pool_size.0 * self.pool_size.1 * self.pool_size.2) as f32;
 
-        // 将梯度分布回输入张量
-        for b in 0..batch_size {
-            for c in 0..channels {
+        // Create index pairs for all (batch, channel) combinations
+        let batch_channel_pairs: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c)))
+            .collect();
+
+        // Parallel computation of gradient contributions for each (batch, channel) pair
+        let results: Vec<((usize, usize), Vec<((usize, usize, usize), f32)>)> = batch_channel_pairs
+            .into_par_iter()
+            .map(|(b, c)| {
+                let mut local_gradients = Vec::new();
+
                 for od in 0..output_depth {
                     for oh in 0..output_height {
                         for ow in 0..output_width {
@@ -190,19 +216,28 @@ impl Layer for AveragePooling3D {
                             let end_h = (start_h + self.pool_size.1).min(input_height);
                             let end_w = (start_w + self.pool_size.2).min(input_width);
 
-                            // 将梯度平均分配给池化窗口内的所有元素
+                            // Distribute gradient evenly to all elements in the pooling window
                             let grad_value = grad_output[[b, c, od, oh, ow]] / pool_volume;
 
                             for d in start_d..end_d {
                                 for h in start_h..end_h {
                                     for w in start_w..end_w {
-                                        grad_input[[b, c, d, h, w]] += grad_value;
+                                        local_gradients.push(((d, h, w), grad_value));
                                     }
                                 }
                             }
                         }
                     }
                 }
+
+                ((b, c), local_gradients)
+            })
+            .collect();
+
+        // Merge parallel computation results into output gradient tensor
+        for ((b, c), local_gradients) in results {
+            for ((d, h, w), grad_value) in local_gradients {
+                grad_input[[b, c, d, h, w]] += grad_value;
             }
         }
 
