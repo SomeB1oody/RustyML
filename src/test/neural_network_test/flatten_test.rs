@@ -127,3 +127,57 @@ fn test_multiple_layers_with_flatten() {
     // Check output shape
     assert_eq!(prediction.shape(), &[2, 10]);
 }
+
+#[test]
+fn test_flatten_3d() {
+    let input = Array3::ones((2, 10, 5)).into_dyn(); // batch=2, features=10, length=5
+    let mut flatten = Flatten::new(vec![2, 10, 5]);
+
+    let output = flatten.forward(&input);
+    assert_eq!(output.shape(), &[2, 50]); // 10 * 5 = 50
+
+    // Test backward pass
+    let grad_output = Array2::ones((2, 50)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_input = flatten.backward(&grad_output).unwrap();
+    assert_eq!(grad_input.shape(), input.shape());
+}
+
+#[test]
+fn test_flatten_4d() {
+    let input = Array4::ones((2, 3, 4, 4)).into_dyn(); // batch=2, channels=3, height=4, width=4
+    let mut flatten = Flatten::new(vec![2, 3, 4, 4]);
+
+    let output = flatten.forward(&input);
+    assert_eq!(output.shape(), &[2, 48]); // 3 * 4 * 4 = 48
+
+    // Test backward pass
+    let grad_output = Array2::ones((2, 48)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_input = flatten.backward(&grad_output).unwrap();
+    assert_eq!(grad_input.shape(), input.shape());
+}
+
+#[test]
+fn test_flatten_5d() {
+    let input = Array5::ones((2, 3, 4, 8, 8)).into_dyn(); // batch=2, channels=3, depth=4, height=8, width=8
+    let mut flatten = Flatten::new(vec![2, 3, 4, 8, 8]);
+
+    let output = flatten.forward(&input);
+    assert_eq!(output.shape(), &[2, 768]); // 3 * 4 * 8 * 8 = 768
+
+    // Test backward pass
+    let grad_output = Array2::ones((2, 768)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_input = flatten.backward(&grad_output).unwrap();
+    assert_eq!(grad_input.shape(), input.shape());
+}
+
+#[test]
+#[should_panic(expected = "Input shape must be 3D, 4D, or 5D")]
+fn test_invalid_input_shape_2d() {
+    Flatten::new(vec![2, 10]); // 2D input should panic
+}
+
+#[test]
+#[should_panic(expected = "Input shape must be 3D, 4D, or 5D")]
+fn test_invalid_input_shape_6d() {
+    Flatten::new(vec![2, 3, 4, 5, 6, 7]); // 6D input should panic
+}

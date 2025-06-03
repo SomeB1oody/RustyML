@@ -3,22 +3,27 @@ use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
 use ndarray::IxDyn;
 
-/// A layer that flattens a 4D tensor into a 2D tensor.
+/// A layer that flattens a multi-dimensional tensor (3D, 4D, or 5D) into a 2D tensor.
 ///
-/// This layer is typically used in convolutional networks to transform the output of feature extraction layers
+/// This layer is typically used in neural networks to transform the output of feature extraction layers
 /// (such as convolutional or pooling layers) into a format that can be processed by dense (fully connected) layers.
 ///
 /// # Input Shape
 ///
-/// Input is a 4D tensor with shape \[batch_size, channels, height, width\]
+/// - 3D tensor: \[batch_size, features, length\]
+/// - 4D tensor: \[batch_size, channels, height, width\]
+/// - 5D tensor: \[batch_size, channels, depth, height, width\]
 ///
 /// # Output Shape
 ///
-/// Output is a 2D tensor with shape \[batch_size, channels * height * width\]
+/// Output is always a 2D tensor with shape \[batch_size, flattened_features\] where:
+/// - For 3D: flattened_features = features * length
+/// - For 4D: flattened_features = channels * height * width
+/// - For 5D: flattened_features = channels * depth * height * width
 ///
 /// # Fields
 ///
-/// - `output_shape` - the output shape of the layer, in the format \[batch_size, channels * height * width\]
+/// - `output_shape` - the output shape of the layer, in the format \[batch_size, flattened_features\]
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
 /// # Example
@@ -56,13 +61,24 @@ impl Flatten {
     ///
     /// # Parameters
     ///
-    /// * `input_shape` - The shape of the input tensor, format is \[batch_size, channels, height, width\]
+    /// * `input_shape` - The shape of the input tensor. Supported formats:
+    ///   - 3D: \[batch_size, features, length\]
+    ///   - 4D: \[batch_size, channels, height, width\]
+    ///   - 5D: \[batch_size, channels, depth, height, width\]
     ///
     /// # Returns
     ///
     /// * `Self` - A new `Flatten` layer instance
+    ///
+    /// # Panics
+    ///
+    /// Panics if the input shape is not 3D, 4D, or 5D.
     pub fn new(input_shape: Vec<usize>) -> Self {
-        assert_eq!(input_shape.len(), 4, "Input shape must be 4-dimensional");
+        assert!(
+            input_shape.len() >= 3 && input_shape.len() <= 5,
+            "Input shape must be 3D, 4D, or 5D, got {}D",
+            input_shape.len()
+        );
 
         let batch_size = input_shape[0];
         let flattened_features = input_shape[1..].iter().product();
@@ -77,14 +93,21 @@ impl Flatten {
 
 impl Layer for Flatten {
     fn forward(&mut self, input: &Tensor) -> Tensor {
+        // Validate input dimensions
+        let input_shape = input.shape();
+        assert!(
+            input_shape.len() >= 3 && input_shape.len() <= 5,
+            "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
+            input_shape.len()
+        );
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
-        let input_shape = input.shape();
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
 
-        // Create new shape
+        // Create new shape and flatten
         let output = input.clone();
         output
             .into_shape_with_order(IxDyn(&[batch_size, flattened_features]))
@@ -95,11 +118,23 @@ impl Layer for Flatten {
         if let Some(input) = &self.input_cache {
             let input_shape = input.shape().to_vec();
 
+            // Validate gradient output shape
+            let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
+            if grad_output.shape() != expected_grad_shape {
+                return Err(ModelError::ProcessingError(format!(
+                    "Gradient output shape {:?} doesn't match expected shape {:?}",
+                    grad_output.shape(),
+                    expected_grad_shape
+                )));
+            }
+
             // Reshape gradient back to input shape
             let reshaped_grad = grad_output
                 .clone()
                 .into_shape_with_order(IxDyn(&input_shape))
-                .unwrap();
+                .map_err(|e| {
+                    ModelError::ProcessingError(format!("Failed to reshape gradient: {}", e))
+                })?;
 
             Ok(reshaped_grad)
         } else {
