@@ -202,27 +202,27 @@ macro_rules! layer_functions_3d_pooling {
     };
 }
 
-/// A macro that generates standard function implementations for 1D global average pooling layers.
+/// A macro that generates standard function implementations for global pooling layers.
 ///
 /// This macro expands to implementations of:
-/// - `output_shape`: Returns the output shape after global average pooling operations
+/// - `output_shape`: Returns the output shape after global pooling operations
 /// - Standard layer functions for layers without trainable parameters
 ///
-/// Global average pooling reduces the spatial dimension by computing the average across
-/// the entire spatial dimension, resulting in a tensor with shape `[batch_size, channels]`
-/// from an input of shape `[batch_size, channels, length]`.
+/// Global pooling operations reduce the spatial dimensions of the input tensor to a single value
+/// per channel by applying a pooling operation (such as max or average) across all spatial
+/// dimensions. The output shape preserves only the batch size and channel dimensions.
 ///
 /// # Generated Functions
 ///
 /// - `output_shape()`: Returns a formatted string representation of the output dimensions.
-///   The output shape is always `[batch_size, channels]` regardless of the input length,
-///   as global pooling reduces the spatial dimension to a single value per channel.
+///   If the input shape is available, it returns the batch size and number of channels
+///   as `"(batch_size, channels)"`. Otherwise, returns "Unknown".
 /// - All functions from `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
-/// The implementing struct must have the following fields:
-/// - `input_shape: Vec<usize>` - The shape of the input tensor with at least 2 dimensions
+/// The implementing struct must have the following field:
+/// - `input_shape: Vec<usize>` - The shape of the input tensor
 macro_rules! layer_functions_global_pooling {
     () => {
         fn output_shape(&self) -> String {
@@ -261,6 +261,8 @@ mod global_max_pooling_1d;
 pub mod global_max_pooling_2d;
 /// Global Max Pooling 3D Layer
 pub mod global_max_pooling_3d;
+/// Container for different types of neural network layer weights
+pub mod layer_weight;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 pub mod lstm;
 /// 1D Max Pooling layer for neural networks.
@@ -269,6 +271,8 @@ pub mod max_pooling_1d;
 pub mod max_pooling_2d;
 /// 3D data max pooling Layer.
 mod max_pooling_3d;
+/// Defines the padding method used in convolutional layers
+pub mod padding_type;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 pub mod simple_rnn;
 
@@ -284,126 +288,13 @@ pub use global_average_pooling_2d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
 pub use global_max_pooling_3d::*;
+pub use layer_weight::*;
 pub use lstm::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
 pub use max_pooling_3d::*;
+pub use padding_type::*;
 pub use simple_rnn::*;
-
-/// Defines the padding method used in convolutional layers.
-///
-/// The padding type determines how the input is padded before applying convolution:
-/// - `Valid`: No padding is applied, which reduces the output dimensions.
-/// - `Same`: Padding is added to preserve the input spatial dimensions in the output.
-pub enum PaddingType {
-    /// No padding is applied. The convolution is only computed where the filter
-    /// fully overlaps with the input, resulting in an output with reduced dimensions.
-    Valid,
-
-    /// Padding is added around the input to ensure that the output has the same
-    /// spatial dimensions as the input (when stride is 1). This is done by adding
-    /// zeros around the borders of the input.
-    Same,
-}
-
-/// Container for different types of neural network layer weights
-///
-/// This enum serves as a polymorphic container for the weights of various
-/// neural network layer types. Each variant corresponds to a specific layer
-/// type and contains the appropriate weight structure for that layer.
-///
-/// # Variants
-///
-/// - `Dense` - Contains weights for dense (fully connected) layers
-/// - `SimpleRNN` - Contains weights for simple recurrent neural network layers
-/// - `LSTM` - Contains weights for long short-term memory layers
-/// - `Conv2D` - Contains weights for 2D convolutional layers
-/// - `Empty` - Represents a layer with no trainable parameters
-pub enum LayerWeight<'a> {
-    Dense(DenseLayerWeight<'a>),
-    SimpleRNN(SimpleRNNLayerWeight<'a>),
-    LSTM(LSTMLayerWeight<'a>),
-    Conv2D(Conv2DLayerWeight<'a>),
-    Conv1D(Conv1DLayerWeight<'a>),
-    Empty,
-}
-
-/// Weights for a dense (fully connected) neural network layer
-///
-/// # Fields
-///
-/// - `weight` - Weight matrix with shape (input_features, output_features)
-/// - `bias` - Bias vector with shape (1, output_features)
-pub struct DenseLayerWeight<'a> {
-    pub weight: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
-}
-
-/// Weights for a simple recurrent neural network layer
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input features
-/// - `recurrent_kernel` - Weight matrix for recurrent connections
-/// - `bias` - Bias vector
-pub struct SimpleRNNLayerWeight<'a> {
-    pub kernel: &'a ndarray::Array2<f32>,
-    pub recurrent_kernel: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
-}
-
-/// Weights for a single gate in an LSTM layer
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input features
-/// - `recurrent_kernel` - Weight matrix for recurrent connections
-/// - `bias` - Bias vector for the gate
-pub struct LSTMGateWeight<'a> {
-    pub kernel: &'a ndarray::Array2<f32>,
-    pub recurrent_kernel: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
-}
-
-/// Weights for a Long Short-Term Memory (LSTM) layer
-///
-/// Contains weights for the four gates that control information flow in an LSTM cell:
-/// input gate, forget gate, cell gate, and output gate.
-///
-/// # Fields
-///
-/// - `input` - Weights for the input gate, which controls what new information to store
-/// - `forget` - Weights for the forget gate, which controls what information to discard
-/// - `cell` - Weights for the cell gate, which proposes new cell state values
-/// - `output` - Weights for the output gate, which controls what to output
-pub struct LSTMLayerWeight<'a> {
-    pub input: LSTMGateWeight<'a>,
-    pub forget: LSTMGateWeight<'a>,
-    pub cell: LSTMGateWeight<'a>,
-    pub output: LSTMGateWeight<'a>,
-}
-
-/// Weights for a 2D convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
-/// - `bias` - Bias vector with shape (1, output_channels)
-pub struct Conv2DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array4<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
-}
-
-/// Weights for a 1D convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
-/// - `bias` - Bias vector with shape (1, output_channels)
-pub struct Conv1DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array3<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
-}
 
 /// Calculate output shape for 1d pooling layer.
 ///

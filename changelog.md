@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Refactor to use `layer_functions_global_pooling` macro
+- Separate `layer_weight` and `padding_type` into dedicated modules
 
 ## [v0.6.2] - 2025-6-2
 ### Added
