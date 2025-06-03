@@ -223,7 +223,7 @@ macro_rules! layer_functions_3d_pooling {
 ///
 /// The implementing struct must have the following fields:
 /// - `input_shape: Vec<usize>` - The shape of the input tensor with at least 2 dimensions
-macro_rules! layer_functions_avg_pooling {
+macro_rules! layer_functions_global_pooling {
     () => {
         fn output_shape(&self) -> String {
             if !self.input_shape.is_empty() {
@@ -259,6 +259,8 @@ pub mod global_average_pooling_2d;
 mod global_max_pooling_1d;
 /// Global Max Pooling Layer
 pub mod global_max_pooling_2d;
+/// Global Max Pooling 3D Layer
+pub mod global_max_pooling_3d;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 pub mod lstm;
 /// 1D Max Pooling layer for neural networks.
@@ -281,6 +283,7 @@ pub use global_average_pooling_1d::*;
 pub use global_average_pooling_2d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
+pub use global_max_pooling_3d::*;
 pub use lstm::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;

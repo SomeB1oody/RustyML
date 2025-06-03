@@ -157,5 +157,5 @@ impl Layer for GlobalAveragePooling2D {
         "GlobalAveragePooling2D"
     }
 
-    layer_functions_avg_pooling!();
+    layer_functions_global_pooling!();
 }

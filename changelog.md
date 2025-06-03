@@ -5,6 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.2] - 2025-6-3
+### Added
+- Add `GlobalMaxPooling3D` layer and tests
+
+### Changed
+- Refactor to use `layer_functions_global_pooling` macro
+
 ## [v0.6.2] - 2025-6-2
 ### Added
 - Add `AveragePooling3D` layer and tests
