@@ -1,5 +1,5 @@
 use crate::neural_network::{Layer, Optimizer};
-use ndarray::{Array2, Array3, Array4};
+use ndarray::{Array2, Array3, Array4, Array5};
 
 /// RMSprop optimizer implementation.
 ///
@@ -146,6 +146,26 @@ impl RMSpropCache {
     }
 }
 
+/// Cache structure for the RMSprop optimization algorithm for Conv1D layer.
+///
+/// This specialized cache is designed for one-dimensional convolutional neural networks
+/// that process sequential data such as time series or text. It maintains moving averages
+/// of squared gradients for 3D weight parameters typically used in 1D convolutional layers
+/// (batch_size, channels, kernel_size).
+///
+/// # Fields
+///
+/// - `cache`: Optional moving average of squared gradients for 3D weight parameters.
+///   Stores values for 1D convolutional kernels used in sequential feature extraction.
+///   None when the layer has no weight parameters.
+/// - `bias`: Optional moving average of squared gradients for bias parameters.
+///   Remains 2D even in convolutional contexts but can be None when bias is disabled.
+#[derive(Debug, Clone, Default)]
+pub struct RMSpropCacheConv1D {
+    pub cache: Option<Array3<f32>>,
+    pub bias: Option<Array2<f32>>,
+}
+
 /// Cache structure for the RMSprop optimization algorithm for Conv2D layer.
 ///
 /// This specialized cache is designed for convolutional neural networks and other architectures
@@ -165,22 +185,23 @@ pub struct RMSpropCacheConv2D {
     pub bias: Array2<f32>,
 }
 
-/// Cache structure for the RMSprop optimization algorithm for Conv1D layer.
+/// RMSprop optimizer cache for 3D convolutional layers
 ///
-/// This specialized cache is designed for one-dimensional convolutional neural networks
-/// that process sequential data such as time series or text. It maintains moving averages
-/// of squared gradients for 3D weight parameters typically used in 1D convolutional layers
-/// (batch_size, channels, kernel_size).
+/// This structure stores the exponentially decaying averages of squared gradients
+/// required by the RMSprop (Root Mean Square Propagation) optimizer for updating
+/// parameters in 3D convolutional neural network layers. RMSprop adapts the learning
+/// rate for each parameter individually by dividing the gradient by a running average
+/// of the magnitudes of recent gradients for that parameter.
 ///
 /// # Fields
 ///
-/// - `cache`: Optional moving average of squared gradients for 3D weight parameters.
-///   Stores values for 1D convolutional kernels used in sequential feature extraction.
-///   None when the layer has no weight parameters.
-/// - `bias`: Optional moving average of squared gradients for bias parameters.
-///   Remains 2D even in convolutional contexts but can be None when bias is disabled.
+/// - `cache` - 5D array storing the exponentially decaying average of squared gradients
+///   for convolution weights with shape (output_channels, input_channels, kernel_depth,
+///   kernel_height, kernel_width)
+/// - `bias` - 3D array storing the exponentially decaying average of squared gradients
+///   for bias parameters with shape (1, output_channels, 1)
 #[derive(Debug, Clone, Default)]
-pub struct RMSpropCacheConv1D {
-    pub cache: Option<Array3<f32>>,
-    pub bias: Option<Array2<f32>>,
+pub struct RMSpropCacheConv3D {
+    pub cache: Array5<f32>,
+    pub bias: Array3<f32>,
 }

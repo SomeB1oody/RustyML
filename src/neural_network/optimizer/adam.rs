@@ -1,5 +1,5 @@
 use crate::neural_network::{Layer, Optimizer};
-use ndarray::{Array2, Array3, Array4};
+use ndarray::{Array2, Array3, Array4, Array5};
 
 /// Adam optimizer implementation.
 ///
@@ -220,6 +220,28 @@ impl AdamStates {
     }
 }
 
+/// Stores and manages optimization state for the Adam optimizer algorithm for Conv1D layer.
+///
+/// This struct is specifically designed to handle the optimization state for 1D convolutional layers
+/// that process sequential data (e.g., time series, text sequences). It maintains the first and second
+/// moment estimates (moving averages of gradients and squared gradients) for weights and biases used
+/// in the Adam optimization algorithm.
+///
+/// # Fields
+///
+/// - `m` - First moment tensor (moving average of gradients) for main parameters, stored as a 3D array
+///   to accommodate 1D convolutional filter dimensions \[output_channels, input_channels, kernel_size\]
+/// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 3D array
+/// - `m_bias` - First moment matrix for bias parameters
+/// - `v_bias` - Second moment matrix for bias parameters
+#[derive(Debug, Clone, Default)]
+pub struct AdamStatesConv1D {
+    pub m: Array3<f32>,
+    pub v: Array3<f32>,
+    pub m_bias: Array2<f32>,
+    pub v_bias: Array2<f32>,
+}
+
 /// Stores and manages optimization state for the Adam optimizer algorithm for Conv2D layer.
 ///
 /// This struct is specifically designed to handle the optimization state for layers involved in feature extraction,
@@ -242,24 +264,24 @@ pub struct AdamStatesConv2D {
     pub v_bias: Array2<f32>,
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm for Conv1D layer.
+/// Adam optimizer state variables for 3D convolutional layers
 ///
-/// This struct is specifically designed to handle the optimization state for 1D convolutional layers
-/// that process sequential data (e.g., time series, text sequences). It maintains the first and second
-/// moment estimates (moving averages of gradients and squared gradients) for weights and biases used
-/// in the Adam optimization algorithm.
+/// This structure stores the momentum and velocity estimates required by the Adam optimizer
+/// for updating weights and biases in 3D convolutional neural network layers. Adam maintains
+/// exponentially decaying averages of past gradients (first moment) and past squared gradients
+/// (second moment) to adapt the learning rate for each parameter.
 ///
 /// # Fields
 ///
-/// - `m` - First moment tensor (moving average of gradients) for main parameters, stored as a 3D array
-///   to accommodate 1D convolutional filter dimensions \[output_channels, input_channels, kernel_size\]
-/// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 3D array
-/// - `m_bias` - First moment matrix for bias parameters
-/// - `v_bias` - Second moment matrix for bias parameters
+/// - `m` - First moment estimate (momentum) for the 5D convolution weights with shape
+///   (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
+/// - `v` - Second moment estimate (velocity) for the 5D convolution weights with the same shape as `m`
+/// - `m_bias` - First moment estimate for the 3D bias tensor with shape (1, output_channels, 1)
+/// - `v_bias` - Second moment estimate for the 3D bias tensor with the same shape as `m_bias`
 #[derive(Debug, Clone, Default)]
-pub struct AdamStatesConv1D {
-    pub m: Array3<f32>,
-    pub v: Array3<f32>,
-    pub m_bias: Array2<f32>,
-    pub v_bias: Array2<f32>,
+pub struct AdamStatesConv3D {
+    pub m: Array5<f32>,
+    pub v: Array5<f32>,
+    pub m_bias: Array3<f32>,
+    pub v_bias: Array3<f32>,
 }

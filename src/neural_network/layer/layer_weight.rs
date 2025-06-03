@@ -9,14 +9,17 @@
 /// - `Dense` - Contains weights for dense (fully connected) layers
 /// - `SimpleRNN` - Contains weights for simple recurrent neural network layers
 /// - `LSTM` - Contains weights for long short-term memory layers
+/// - `Conv1D` - Contains weights for 1D convolutional layers
 /// - `Conv2D` - Contains weights for 2D convolutional layers
+/// - `Conv3D` - Contains weights for 3D convolutional layers
 /// - `Empty` - Represents a layer with no trainable parameters
 pub enum LayerWeight<'a> {
     Dense(DenseLayerWeight<'a>),
     SimpleRNN(SimpleRNNLayerWeight<'a>),
     LSTM(LSTMLayerWeight<'a>),
-    Conv2D(Conv2DLayerWeight<'a>),
     Conv1D(Conv1DLayerWeight<'a>),
+    Conv2D(Conv2DLayerWeight<'a>),
+    Conv3D(Conv3DLayerWeight<'a>),
     Empty,
 }
 
@@ -75,6 +78,17 @@ pub struct LSTMLayerWeight<'a> {
     pub output: LSTMGateWeight<'a>,
 }
 
+/// Weights for a 1D convolutional layer
+///
+/// # Fields
+///
+/// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
+/// - `bias` - Bias vector with shape (1, output_channels)
+pub struct Conv1DLayerWeight<'a> {
+    pub weight: &'a ndarray::Array3<f32>,
+    pub bias: &'a ndarray::Array2<f32>,
+}
+
 /// Weights for a 2D convolutional layer
 ///
 /// # Fields
@@ -86,13 +100,13 @@ pub struct Conv2DLayerWeight<'a> {
     pub bias: &'a ndarray::Array2<f32>,
 }
 
-/// Weights for a 1D convolutional layer
+/// Weights for a 3D convolutional layer
 ///
 /// # Fields
 ///
-/// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
-/// - `bias` - Bias vector with shape (1, output_channels)
-pub struct Conv1DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array3<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+/// - `weight` - 5D convolution kernel with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
+/// - `bias` - Bias tensor with shape (1, output_channels, 1)
+pub struct Conv3DLayerWeight<'a> {
+    pub weight: &'a ndarray::Array5<f32>,
+    pub bias: &'a ndarray::Array3<f32>,
 }

@@ -247,6 +247,8 @@ pub mod average_pooling_3d;
 pub mod conv1d;
 /// A 2D convolutional layer for neural networks.
 pub mod conv2d;
+/// A 3D convolutional layer for neural networks
+pub mod conv3d;
 /// Dense (Fully Connected) layer implementation for neural networks.
 pub mod dense;
 /// A layer that flattens a 4D tensor into a 2D tensor.
@@ -282,6 +284,7 @@ pub use average_pooling_2d::*;
 pub use average_pooling_3d::*;
 pub use conv1d::*;
 pub use conv2d::*;
+pub use conv3d::*;
 pub use dense::*;
 pub use flatten::*;
 pub use global_average_pooling_1d::*;
