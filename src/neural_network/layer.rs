@@ -255,6 +255,7 @@ pub mod flatten;
 pub mod global_average_pooling_1d;
 /// Global Average Pooling 2D Layer
 pub mod global_average_pooling_2d;
+pub mod global_average_pooling_3d;
 /// Global Max Pooling 1D Layer
 mod global_max_pooling_1d;
 /// Global Max Pooling Layer
@@ -285,6 +286,7 @@ pub use dense::*;
 pub use flatten::*;
 pub use global_average_pooling_1d::*;
 pub use global_average_pooling_2d::*;
+pub use global_average_pooling_3d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
 pub use global_max_pooling_3d::*;
