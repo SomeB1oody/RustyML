@@ -9,6 +9,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add `GlobalMaxPooling3D` layer and tests
 - Add `GlobalAveragePooling3D` layer and tests
+- Add input dimensionality checks for pooling layers
 
 ### Changed
 - Refactor to use `layer_functions_global_pooling` macro

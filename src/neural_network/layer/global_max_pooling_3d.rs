@@ -70,10 +70,12 @@ impl GlobalMaxPooling3D {
 impl Layer for GlobalMaxPooling3D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
+
+        // Verify input is 5D: [batch_size, channels, depth, height, width]
         assert_eq!(
             input_shape.len(),
             5,
-            "Input tensor must be 5-dimensional [batch_size, channels, depth, height, width]"
+            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
         );
 
         // Save input shape and data for backpropagation

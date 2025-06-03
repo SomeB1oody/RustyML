@@ -64,16 +64,18 @@ impl GlobalAveragePooling1D {
     }
 }
 
-impl Default for GlobalAveragePooling1D {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Layer for GlobalAveragePooling1D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Store input shape and cache input for backpropagation
         self.input_shape = input.shape().to_vec();
+
+        // verify input is 3D: [batch_size, channels, length]
+        assert_eq!(
+            self.input_shape.len(),
+            3,
+            "Input shape must be 3-dimensional: [batch_size, channels, length]"
+        );
+
         self.input_cache = Some(input.clone());
 
         // Extract dimensions

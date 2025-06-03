@@ -69,6 +69,14 @@ impl Layer for GlobalAveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Save input shape and cache input for backpropagation
         self.input_shape = input.shape().to_vec();
+
+        // Verify input is 4D: [batch_size, channels, height, width]
+        assert_eq!(
+            self.input_shape.len(),
+            4,
+            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
+        );
+
         self.input_cache = Some(input.clone());
 
         let batch_size = input.shape()[0];

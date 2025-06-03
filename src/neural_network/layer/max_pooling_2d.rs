@@ -92,6 +92,13 @@ impl MaxPooling2D {
         input_shape: Vec<usize>,
         strides: Option<(usize, usize)>,
     ) -> Self {
+        // Verify input is 4D: [batch_size, channels, height, width]
+        assert_eq!(
+            input_shape.len(),
+            4,
+            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
+        );
+
         // If stride is not specified, use the same stride as pool size
         let strides = strides.unwrap_or(pool_size);
 

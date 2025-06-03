@@ -87,6 +87,13 @@ impl AveragePooling3D {
         input_shape: Vec<usize>,
         strides: Option<(usize, usize, usize)>,
     ) -> Self {
+        // Verify input is 5D: [batch_size, channels, depth, height, width]
+        assert_eq!(
+            input_shape.len(),
+            5,
+            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
+        );
+
         let strides = strides.unwrap_or(pool_size);
 
         Self {

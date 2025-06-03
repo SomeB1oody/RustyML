@@ -104,10 +104,11 @@ impl AveragePooling2D {
         strides: (usize, usize),
         input_shape: Vec<usize>,
     ) -> Self {
+        // Verify input is 4D: [batch_size, channels, height, width]
         assert_eq!(
             input_shape.len(),
             4,
-            "Input shape must be 4-dimensional for AveragePooling"
+            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
         );
 
         AveragePooling2D {

@@ -91,6 +91,13 @@ impl MaxPooling3D {
         input_shape: Vec<usize>,
         strides: Option<(usize, usize, usize)>,
     ) -> Self {
+        // Verify input is 5D: [batch_size, channels, depth, height, width]
+        assert_eq!(
+            input_shape.len(),
+            5,
+            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
+        );
+
         // If no stride is specified, use the same stride as the pooling window
         let strides = strides.unwrap_or(pool_size);
 
@@ -114,6 +121,7 @@ impl MaxPooling3D {
     /// * `(Tensor, Vec<(usize, usize, usize, usize, usize)>)` - The result of the pooling operation and the positions of the maximum values.
     fn max_pool(&self, input: &Tensor) -> (Tensor, Vec<(usize, usize, usize, usize, usize)>) {
         let input_shape = input.shape();
+
         let batch_size = input_shape[0];
         let channels = input_shape[1];
         let output_shape =

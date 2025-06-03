@@ -71,6 +71,14 @@ impl Layer for GlobalMaxPooling1D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
         // Store the input shape and cache the input for backpropagation
         self.input_shape = input.shape().to_vec();
+
+        // verify input is 3D: [batch_size, channels, length]
+        assert_eq!(
+            self.input_shape.len(),
+            3,
+            "Input shape must be 3-dimensional: [batch_size, channels, length]"
+        );
+
         self.input_cache = Some(input.clone());
 
         let batch_size = self.input_shape[0];

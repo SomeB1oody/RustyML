@@ -94,6 +94,13 @@ impl AveragePooling1D {
     /// * `stride` - Stride of the pooling operation
     /// * `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
     pub fn new(pool_size: usize, stride: usize, input_shape: Vec<usize>) -> Self {
+        // verify input is 3D: [batch_size, channels, length]
+        assert_eq!(
+            input_shape.len(),
+            3,
+            "Input shape must be 3-dimensional: [batch_size, channels, length]"
+        );
+
         AveragePooling1D {
             pool_size,
             stride,
