@@ -116,6 +116,12 @@ impl Conv1D {
         padding: PaddingType,
         activation: Activation,
     ) -> Self {
+        // verify input is 3D: [batch_size, channels, length]
+        assert_eq!(
+            input_shape.len(),
+            3,
+            "Input tensor must be 5-dimensional: [batch_size, channels, length]"
+        );
         let input_channels = input_shape[1];
 
         // Initialize weights using Xavier initialization

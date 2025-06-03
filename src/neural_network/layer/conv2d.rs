@@ -120,6 +120,13 @@ impl Conv2D {
         padding: PaddingType,
         activation: Option<Activation>,
     ) -> Self {
+        // verify input is 4D: [batch_size, channels, height, width]
+        assert_eq!(
+            input_shape.len(),
+            4,
+            "Input tensor must be 5-dimensional: [batch_size, channels, height, width]"
+        );
+
         let mut rng = rand::rng();
         let normal = Normal::new(0.0, 0.1).unwrap();
 

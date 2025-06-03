@@ -10,6 +10,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Add `GlobalMaxPooling3D` layer and tests
 - Add `GlobalAveragePooling3D` layer and tests
 - Add input dimensionality checks for pooling layers
+- Add `Conv3D` layer and optimizer support
+- Add input dimensionality checks for `Conv1D` and `Conv2D` layers
 
 ### Changed
 - Refactor to use `layer_functions_global_pooling` macro
