@@ -19,6 +19,8 @@ pub enum LayerWeight<'a> {
     LSTM(LSTMLayerWeight<'a>),
     Conv1D(Conv1DLayerWeight<'a>),
     Conv2D(Conv2DLayerWeight<'a>),
+    SeparableConv2DLayer(SeparableConv2DLayerWeight<'a>),
+    DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight<'a>),
     Conv3D(Conv3DLayerWeight<'a>),
     Empty,
 }
@@ -109,4 +111,14 @@ pub struct Conv2DLayerWeight<'a> {
 pub struct Conv3DLayerWeight<'a> {
     pub weight: &'a ndarray::Array5<f32>,
     pub bias: &'a ndarray::Array3<f32>,
+}
+
+pub struct SeparableConv2DLayerWeight<'a> {
+    pub weight: &'a ndarray::Array4<f32>,
+    pub bias: &'a ndarray::Array2<f32>,
+}
+
+pub struct DepthwiseConv2DLayerWeight<'a> {
+    pub weight: &'a ndarray::Array4<f32>,
+    pub bias: &'a ndarray::Array1<f32>,
 }

@@ -1,3 +1,4 @@
+use super::helper_functions::*;
 use crate::ModelError;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::layer::*;

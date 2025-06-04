@@ -290,7 +290,7 @@ fn test_separable_conv2d_get_weights() {
 
     // Verify weight type
     match &weights[0] {
-        LayerWeight::Conv2D(_) => {
+        LayerWeight::SeparableConv2DLayer(_) => {
             // Correct weight type
         }
         _ => panic!("Expected Conv2D weight type"),

@@ -1,4 +1,4 @@
-use super::*;
+use super::helper_functions::*;
 use crate::neural_network::{Layer, LayerWeight, ModelError, Tensor};
 use ndarray::{Array, IxDyn};
 use rayon::prelude::*;

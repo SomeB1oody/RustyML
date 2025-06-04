@@ -1,3 +1,4 @@
+use super::helper_functions::*;
 use super::*;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::optimizer::*;

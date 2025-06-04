@@ -1,4 +1,4 @@
-use super::calculate_output_shape_2d_pooling;
+use super::helper_functions::*;
 use crate::neural_network::layer::LayerWeight;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;

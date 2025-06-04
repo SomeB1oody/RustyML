@@ -251,6 +251,7 @@ pub mod conv2d;
 pub mod conv3d;
 /// Dense (Fully Connected) layer implementation for neural networks.
 pub mod dense;
+pub mod depthwise_conv2d;
 /// A layer that flattens a 4D tensor into a 2D tensor.
 pub mod flatten;
 /// Global Average Pooling 1D Layer
@@ -281,7 +282,7 @@ pub mod padding_type;
 /// A 2D separable convolutional layer for neural networks
 pub mod separable_conv2d;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
-pub mod simple_rnn;
+mod simple_rnn;
 
 pub use average_pooling_1d::*;
 pub use average_pooling_2d::*;
@@ -290,6 +291,7 @@ pub use conv1d::*;
 pub use conv2d::*;
 pub use conv3d::*;
 pub use dense::*;
+pub use depthwise_conv2d::*;
 pub use flatten::*;
 pub use global_average_pooling_1d::*;
 pub use global_average_pooling_2d::*;
@@ -297,7 +299,6 @@ pub use global_average_pooling_3d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
 pub use global_max_pooling_3d::*;
-pub use helper_functions::*;
 pub use layer_weight::*;
 pub use lstm::*;
 pub use max_pooling_1d::*;

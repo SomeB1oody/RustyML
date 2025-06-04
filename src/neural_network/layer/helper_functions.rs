@@ -1,5 +1,5 @@
-use crate::neural_network::Tensor;
-use ndarray::{Array3, ArrayD};
+use crate::neural_network::{PaddingType, Tensor};
+use ndarray::{Array2, Array3, ArrayD, s};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -273,4 +273,126 @@ pub fn update_rmsprop(
             // Update parameters
             *param -= lr * grad / (cache_val.sqrt() + epsilon);
         });
+}
+
+/// Calculates the output height and width for 2D convolution or pooling operations.
+///
+/// This function determines the output dimensions based on input dimensions, kernel size,
+/// stride, and padding type. It supports both 'Valid' and 'Same' padding strategies.
+///
+/// # Parameters
+///
+/// * `padding_type` - Type of padding to apply (Valid or Same)
+/// * `input_height` - Height of the input tensor
+/// * `input_width` - Width of the input tensor
+/// * `kernel_size` - Size of the kernel as a tuple (height, width)
+/// * `strides` - Stride values as a tuple (height_stride, width_stride)
+///
+/// # Returns
+///
+/// A tuple containing the calculated output dimensions (output_height, output_width).
+///
+/// * For `Valid` padding: Dimensions are reduced based on kernel size and stride
+/// * For `Same` padding: Output dimensions are calculated to maintain the input spatial dimensions
+///   divided by the stride
+pub fn calculate_output_height_and_weight(
+    padding_type: PaddingType,
+    input_height: usize,
+    input_width: usize,
+    kernel_size: (usize, usize),
+    strides: (usize, usize),
+) -> (usize, usize) {
+    let (output_height, output_width) = match padding_type {
+        PaddingType::Valid => {
+            let out_height = (input_height - kernel_size.0) / strides.0 + 1;
+            let out_width = (input_width - kernel_size.1) / strides.1 + 1;
+            (out_height, out_width)
+        }
+        PaddingType::Same => {
+            let out_height = (input_height as f32 / strides.0 as f32).ceil() as usize;
+            let out_width = (input_width as f32 / strides.1 as f32).ceil() as usize;
+            (out_height, out_width)
+        }
+    };
+
+    (output_height, output_width)
+}
+
+/// Applies padding to a 2D tensor.
+///
+/// This function adds zero padding to a 2D input tensor to increase its spatial dimensions.
+/// The padding is applied symmetrically around the tensor, with any odd padding values
+/// distributed with more padding on the right/bottom edges.
+///
+/// # Parameters
+///
+/// - `input` - A reference to the 2D input tensor to be padded
+/// - `pad_h` - Total padding to be applied in the height dimension
+/// - `pad_w` - Total padding to be applied in the width dimension
+///
+/// # Returns
+///
+/// * `Array2<f32>` - A new 2D tensor with the specified padding applied
+pub fn pad_tensor_2d(input: &Array2<f32>, pad_h: usize, pad_w: usize) -> Array2<f32> {
+    let (input_height, input_width) = input.dim();
+
+    // Calculate padding for each side
+    let pad_top = pad_h / 2;
+    let pad_left = pad_w / 2;
+
+    // Calculate output dimensions
+    let output_height = input_height + pad_h;
+    let output_width = input_width + pad_w;
+
+    // Create output tensor filled with zeros
+    let mut output = Array2::zeros((output_height, output_width));
+
+    // Copy input data to the center of the output tensor
+    output
+        .slice_mut(s![
+            pad_top..pad_top + input_height,
+            pad_left..pad_left + input_width
+        ])
+        .assign(input);
+
+    output
+}
+
+/// Calculate the output shape for 2D convolution operations
+///
+/// # Parameters
+///
+/// - `input_shape` - Input tensor shape as \[batch_size, channels, height, width\]
+/// - `kernel_size` - Size of the convolution kernel as (height, width)
+/// - `strides` - Stride of the convolution as (height_stride, width_stride)
+/// - `padding` - Padding strategy (Valid or Same)
+///
+/// # Returns
+///
+/// * `Vec<usize>` - Output shape as \[batch_size, channels, output_height, output_width\]
+pub fn calculate_output_shape_2d(
+    input_shape: &[usize],
+    kernel_size: (usize, usize),
+    strides: (usize, usize),
+    padding: &PaddingType,
+) -> Vec<usize> {
+    assert!(
+        input_shape.len() >= 4,
+        "Input shape must have at least 4 dimensions"
+    );
+
+    let batch_size = input_shape[0];
+    let channels = input_shape[1];
+    let input_height = input_shape[2];
+    let input_width = input_shape[3];
+
+    let (output_height, output_width) = calculate_output_height_and_weight(
+        *padding,
+        input_height,
+        input_width,
+        kernel_size,
+        strides,
+    );
+
+    vec![batch_size, channels, output_height, output_width]
 }

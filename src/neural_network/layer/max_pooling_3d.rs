@@ -1,3 +1,4 @@
+use super::helper_functions::*;
 use super::*;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;

@@ -1,3 +1,4 @@
+use super::helper_functions::*;
 use super::*;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::optimizer::*;
@@ -172,7 +173,7 @@ impl SeparableConv2D {
         let input_height = input_shape[2];
         let input_width = input_shape[3];
 
-        let (output_height, output_width) = calculate_ouput_height_and_weight(
+        let (output_height, output_width) = calculate_output_height_and_weight(
             self.padding,
             input_height,
             input_width,
@@ -324,7 +325,7 @@ impl SeparableConv2D {
         let input_height = input_shape[2];
         let input_width = input_shape[3];
 
-        let (output_height, output_width) = calculate_ouput_height_and_weight(
+        let (output_height, output_width) = calculate_output_height_and_weight(
             self.padding,
             input_height,
             input_width,
@@ -768,32 +769,9 @@ impl Layer for SeparableConv2D {
     }
 
     fn get_weights(&self) -> LayerWeight {
-        LayerWeight::Conv2D(Conv2DLayerWeight {
+        LayerWeight::SeparableConv2DLayer(SeparableConv2DLayerWeight {
             weight: &self.depthwise_weights,
             bias: &self.bias,
         })
     }
-}
-
-fn calculate_ouput_height_and_weight(
-    padding_type: PaddingType,
-    input_height: usize,
-    input_width: usize,
-    kernel_size: (usize, usize),
-    strides: (usize, usize),
-) -> (usize, usize) {
-    let (output_height, output_width) = match padding_type {
-        PaddingType::Valid => {
-            let out_height = (input_height - kernel_size.0) / strides.0 + 1;
-            let out_width = (input_width - kernel_size.1) / strides.1 + 1;
-            (out_height, out_width)
-        }
-        PaddingType::Same => {
-            let out_height = (input_height as f32 / strides.0 as f32).ceil() as usize;
-            let out_width = (input_width as f32 / strides.1 as f32).ceil() as usize;
-            (out_height, out_width)
-        }
-    };
-
-    (output_height, output_width)
 }
