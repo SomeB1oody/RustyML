@@ -230,8 +230,6 @@ impl SeparableConv2D {
         let channels = input_shape[1];
         let output_shape = self.calculate_depthwise_output_shape(input_shape);
 
-        let mut output = ArrayD::zeros(output_shape.clone());
-
         // Parallel processing across batches
         let results: Vec<_> = (0..batch_size)
             .into_par_iter()
@@ -279,18 +277,8 @@ impl SeparableConv2D {
             })
             .collect();
 
-        // Merge results
-        for (b, batch_output) in results {
-            for oc in 0..channels * self.depth_multiplier {
-                for i in 0..output_shape[2] {
-                    for j in 0..output_shape[3] {
-                        output[[b, oc, i, j]] = batch_output[[oc, i, j]];
-                    }
-                }
-            }
-        }
-
-        output
+        // Use merge_results function to combine batch results
+        merge_results(output_shape, results, channels * self.depth_multiplier)
     }
 
     /// Performs pointwise convolution (1x1 convolution).
