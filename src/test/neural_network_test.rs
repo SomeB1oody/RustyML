@@ -23,6 +23,7 @@ mod max_pooling_1d_test;
 mod max_pooling_2d_test;
 mod max_pooling_3d_test;
 mod optimizer_test;
+mod separable_conv2d_test;
 mod simple_rnn_test;
 
 fn generate_data(batch_size: usize, channels: usize, length: usize) -> Tensor {

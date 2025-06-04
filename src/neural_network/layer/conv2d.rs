@@ -3,7 +3,7 @@ use crate::neural_network::activation::Activation;
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{ModelError, Tensor};
 use crate::traits::Layer;
-use ndarray::{Array2, Array3, Array4, ArrayD, Axis};
+use ndarray::{Array2, Array3, Array4, Axis};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 
@@ -284,9 +284,6 @@ impl Conv2D {
         let in_channels = input_shape[1];
         let output_shape = self.calculate_output_shape(input_shape);
 
-        // Pre-allocate output array
-        let mut output = ArrayD::zeros(output_shape.clone());
-
         // Create vector for batch processing results
         let results: Vec<_> = (0..batch_size)
             .into_par_iter()
@@ -338,17 +335,7 @@ impl Conv2D {
             .collect();
 
         // Merge results from each batch into final output
-        for (b, batch_output) in results {
-            for f in 0..self.filters {
-                for i in 0..output_shape[2] {
-                    for j in 0..output_shape[3] {
-                        output[[b, f, i, j]] = batch_output[[f, i, j]];
-                    }
-                }
-            }
-        }
-
-        output
+        merge_results(output_shape, results, self.filters)
     }
 }
 
@@ -436,13 +423,19 @@ impl Layer for Conv2D {
                                             continue;
                                         }
 
-                                        for j in 0..grad_shape[3] {
-                                            let j_pos = j * self.strides.1 + w;
-                                            if j_pos < input_shape[3] {
-                                                sum += gradient[[b, f, i, j]]
-                                                    * input[[b, c, i_pos, j_pos]];
-                                            }
-                                        }
+                                        sum += compute_row_gradient_sum(
+                                            &gradient,
+                                            input,
+                                            b,
+                                            f,
+                                            c,
+                                            i,
+                                            i_pos,
+                                            w,
+                                            grad_shape,
+                                            input_shape,
+                                            self.strides.1,
+                                        );
                                     }
                                 }
                                 filter_grad[[c, h, w]] = sum;
@@ -454,9 +447,6 @@ impl Layer for Conv2D {
             // Save gradients for optimization
             self.weight_gradients = Some(weight_grads);
             self.bias_gradients = Some(bias_grads);
-
-            // Calculate input gradients in parallel
-            let mut input_gradients = ArrayD::zeros(input.dim());
 
             // Use batch-wise parallel processing and collect results
             let local_results: Vec<_> = (0..batch_size)
@@ -503,17 +493,11 @@ impl Layer for Conv2D {
                 .collect();
 
             // Merge results in the main thread
-            for (b, local_gradients) in local_results {
-                for c in 0..channels {
-                    for i in 0..input_shape[2] {
-                        for j in 0..input_shape[3] {
-                            input_gradients[[b, c, i, j]] = local_gradients[[c, i, j]];
-                        }
-                    }
-                }
-            }
-
-            Ok(input_gradients)
+            Ok(merge_results(
+                self.input_shape.clone(),
+                local_results,
+                channels,
+            ))
         } else {
             Err(ModelError::ProcessingError(
                 "Forward pass has not been run".to_string(),
@@ -654,20 +638,6 @@ impl Layer for Conv2D {
                 });
             }
 
-            // Create a generic RMSprop update closure
-            let update_rmsprop = |params: &mut [f32], grads: &[f32], cache: &mut [f32]| {
-                params
-                    .par_iter_mut()
-                    .zip(grads.par_iter())
-                    .zip(cache.par_iter_mut())
-                    .for_each(|((param, &grad), cache_val)| {
-                        // Update cache
-                        *cache_val = rho * *cache_val + (1.0 - rho) * grad * grad;
-                        // Update parameters
-                        *param -= lr * grad / (cache_val.sqrt() + epsilon);
-                    });
-            };
-
             if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
                 // Update weights
                 if let (Some(weight_slice), Some(weight_grad_slice), Some(cache_slice)) = (
@@ -676,7 +646,14 @@ impl Layer for Conv2D {
                     rmsprop_cache.cache.as_slice_mut(),
                 ) {
                     // Use closure to update weights
-                    update_rmsprop(weight_slice, weight_grad_slice, cache_slice);
+                    update_rmsprop(
+                        weight_slice,
+                        weight_grad_slice,
+                        cache_slice,
+                        rho,
+                        epsilon,
+                        lr,
+                    );
                 } else {
                     // Fallback to original loop implementation
                     for i in 0..self.weights.len() {
@@ -696,7 +673,14 @@ impl Layer for Conv2D {
                     rmsprop_cache.bias.as_slice_mut(),
                 ) {
                     // Use the same closure to update biases
-                    update_rmsprop(bias_slice, bias_grad_slice, bias_cache_slice);
+                    update_rmsprop(
+                        bias_slice,
+                        bias_grad_slice,
+                        bias_cache_slice,
+                        rho,
+                        epsilon,
+                        lr,
+                    );
                 } else {
                     // Fallback to original loop implementation
                     for i in 0..self.bias.len() {

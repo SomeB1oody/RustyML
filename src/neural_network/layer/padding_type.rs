@@ -3,6 +3,7 @@
 /// The padding type determines how the input is padded before applying convolution:
 /// - `Valid`: No padding is applied, which reduces the output dimensions.
 /// - `Same`: Padding is added to preserve the input spatial dimensions in the output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaddingType {
     /// No padding is applied. The convolution is only computed where the filter
     /// fully overlaps with the input, resulting in an output with reduced dimensions.
