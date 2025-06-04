@@ -129,16 +129,13 @@ While the library is in its early stages, Rust AI aims to evolve into a comprehe
 
 - **Utilities | 实用工具**:
     - Data preprocessing | 数据预处理
-    - Cross-validation | 交叉验证
-    - Performance metrics | 性能指标
-    - Visualization helpers | 可视化辅助工具
 
 ## Getting Started | 开始使用
 Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = "0.6.1"
+rustyml = "0.6.2"
 ```
 Example usage | 使用示例:
 ``` rust
