@@ -1,16 +1,16 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use std::collections::HashMap;
-use crate::ModelError;
 use super::DistanceCalculationMetric as Metric;
+use crate::ModelError;
+use ahash::AHashMap;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
 /// Represents the strategy used for weighting neighbors in KNN algorithm.
 ///
 /// # Variants
-/// 
+///
 /// - `Uniform` - Each neighbor is weighted equally
 /// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
-#[derive(Debug,Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WeightingStrategy {
     /// All neighbors are weighted equally regardless of their distance to the query point.
     Uniform,
@@ -179,9 +179,9 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     ///
     /// - `Ok(&mut Self)` - The instance
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    /// 
+    ///
     /// # Notes
-    /// 
+    ///
     /// KNN is a lazy learning algorithm, and the calculation is done in the prediction phase.
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<T>) -> Result<&mut Self, ModelError> {
         use super::preliminary_check;
@@ -189,12 +189,17 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         preliminary_check(x, None)?;
 
         if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(
-                format!("The number of samples does not match, x columns: {}, y length: {}", x.nrows(), y.len())))
+            return Err(ModelError::InputValidationError(format!(
+                "The number of samples does not match, x columns: {}, y length: {}",
+                x.nrows(),
+                y.len()
+            )));
         }
 
         if x.nrows() < self.k {
-            return Err(ModelError::InputValidationError("The number of samples is less than k".to_string()))
+            return Err(ModelError::InputValidationError(
+                "The number of samples is less than k".to_string(),
+            ));
         }
 
         self.x_train = Some(x.to_owned());
@@ -223,12 +228,13 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
         // Use rayon for parallel prediction
         let predictions: Array1<T> = (0..x.nrows())
-            .into_par_iter()  // Convert to parallel iterator
+            .into_par_iter() // Convert to parallel iterator
             .map(|i| {
                 let sample = x.row(i);
                 self.predict_one(sample, x_train.view(), y_train)
             })
-            .collect::<Vec<T>>().into();
+            .collect::<Vec<T>>()
+            .into();
 
         Ok(predictions)
     }
@@ -243,11 +249,13 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Returns
     ///
     /// * `f64` - The calculated distance between points `a` and `b`
-    /// 
+    ///
     /// # Notes
     /// Minkowski distance with p=3
     fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        use crate::math::{squared_euclidean_distance_row, manhattan_distance_row, minkowski_distance_row};
+        use crate::math::{
+            manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
+        };
 
         match self.metric {
             Metric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
@@ -272,7 +280,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
         // Calculate distances to all training samples in parallel
         let distances: Vec<(f64, usize)> = (0..n_samples)
-            .into_par_iter()  // Convert to parallel iterator
+            .into_par_iter() // Convert to parallel iterator
             .map(|i| {
                 let distance = self.calculate_distance(x, x_train.row(i));
                 (distance, i)
@@ -290,7 +298,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         match self.weights {
             WeightingStrategy::Uniform => {
                 // Count class occurrences
-                let mut class_counts: HashMap<&T, usize> = HashMap::new();
+                let mut class_counts: AHashMap<&T, usize> = AHashMap::new();
                 for &(_, idx) in k_neighbors {
                     let class = &y_train[idx];
                     *class_counts.entry(class).or_insert(0) += 1;
@@ -302,13 +310,17 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
                     .max_by_key(|&(_, &count)| count)
                     .map(|(class, _)| (*class).clone())
                     .unwrap()
-            },
+            }
             WeightingStrategy::Distance => {
                 // Weight by inverse distance
-                let mut class_weights: HashMap<&T, f64> = HashMap::new();
+                let mut class_weights: AHashMap<&T, f64> = AHashMap::new();
                 for &(distance, idx) in k_neighbors {
                     // Avoid division by zero
-                    let weight = if distance > 0.0 { 1.0 / distance } else { f64::MAX };
+                    let weight = if distance > 0.0 {
+                        1.0 / distance
+                    } else {
+                        f64::MAX
+                    };
                     let class = &y_train[idx];
                     *class_weights.entry(class).or_insert(0.0) += weight;
                 }
@@ -319,7 +331,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                     .map(|(class, _)| (*class).clone())
                     .unwrap()
-            },
+            }
         }
     }
 
@@ -337,10 +349,11 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     ///
     /// - `Ok(Array1<T>)` - Array of predicted values
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(&mut self, 
-                       x_train: ArrayView2<f64>,
-                       y_train: ArrayView1<T>,
-                       x_test: ArrayView2<f64>
+    pub fn fit_predict(
+        &mut self,
+        x_train: ArrayView2<f64>,
+        y_train: ArrayView1<T>,
+        x_test: ArrayView2<f64>,
     ) -> Result<Array1<T>, ModelError> {
         self.fit(x_train, y_train)?;
         Ok(self.predict(x_test)?)

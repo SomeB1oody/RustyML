@@ -1,10 +1,10 @@
 use crate::ModelError;
+use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rand::SeedableRng;
 use rand::rng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
-use std::collections::HashMap;
 
 /// Mean Shift clustering algorithm implementation.
 ///
@@ -501,7 +501,7 @@ impl MeanShift {
         let bin_size = self.bandwidth;
 
         // Create thread-safe structures for parallel processing
-        let bins_mutex = std::sync::Mutex::new(HashMap::<Vec<i64>, Vec<usize>>::new());
+        let bins_mutex = std::sync::Mutex::new(AHashMap::<Vec<i64>, Vec<usize>>::new());
 
         // Assign points to bins in parallel
         (0..n_samples).into_par_iter().for_each(|i| {

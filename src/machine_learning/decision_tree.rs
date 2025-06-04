@@ -1,6 +1,6 @@
-use ndarray::{Array1, Array2, s, Axis, ArrayView1, ArrayView2};
-use std::collections::{HashMap, HashSet};
 use crate::ModelError;
+use ahash::{AHashMap, AHashSet};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
 /// Represents different decision tree algorithms that can be used for tree construction.
@@ -139,7 +139,7 @@ pub struct Node {
     pub node_type: NodeType,
     pub left: Option<Box<Node>>,
     pub right: Option<Box<Node>>,
-    pub children: Option<HashMap<String, Box<Node>>>,
+    pub children: Option<AHashMap<String, Box<Node>>>,
 }
 
 impl Node {
@@ -219,7 +219,7 @@ impl Node {
             },
             left: None,
             right: None,
-            children: Some(HashMap::new()),
+            children: Some(AHashMap::new()),
         }
     }
 }
@@ -263,11 +263,15 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Self` - A new, untrained DecisionTree instance configured with the specified settings
-    pub fn new(algorithm: Algorithm, is_classifier: bool, params: Option<DecisionTreeParams>) -> Self {
+    pub fn new(
+        algorithm: Algorithm,
+        is_classifier: bool,
+        params: Option<DecisionTreeParams>,
+    ) -> Self {
         if is_classifier == false && algorithm != Algorithm::CART {
             panic!("Algorithm must be CART for non-classification tasks");
         }
-        
+
         Self {
             algorithm,
             root: None,
@@ -375,7 +379,7 @@ impl DecisionTree {
 
         if self.is_classifier {
             // Calculate number of classes
-            let unique_classes = y.iter().map(|&val| val as usize).collect::<HashSet<_>>();
+            let unique_classes = y.iter().map(|&val| val as usize).collect::<AHashSet<_>>();
             self.n_classes = Some(unique_classes.len());
         }
 
@@ -415,17 +419,25 @@ impl DecisionTree {
     /// - Uses the specified algorithm to find the best feature and threshold for splitting
     /// - Recursively builds left and right subtrees using the provided build_child_tree function
     /// - Creates leaf nodes when stopping criteria are met
-    fn build_tree(&self,
-                  x: ArrayView2<f64>,
-                  y: ArrayView1<f64>,
-                  depth: usize,
-                  algorithm: &str,
-                  build_child_tree: fn(&DecisionTree, ArrayView2<f64>, ArrayView1<f64>, usize, &str) -> Box<Node>
+    fn build_tree(
+        &self,
+        x: ArrayView2<f64>,
+        y: ArrayView1<f64>,
+        depth: usize,
+        algorithm: &str,
+        build_child_tree: fn(
+            &DecisionTree,
+            ArrayView2<f64>,
+            ArrayView1<f64>,
+            usize,
+            &str,
+        ) -> Box<Node>,
     ) -> Box<Node> {
         // Termination conditions
-        if y.is_empty() ||
-            (self.params.max_depth.is_some() && depth >= self.params.max_depth.unwrap()) ||
-            y.len() < self.params.min_samples_split {
+        if y.is_empty()
+            || (self.params.max_depth.is_some() && depth >= self.params.max_depth.unwrap())
+            || y.len() < self.params.min_samples_split
+        {
             let (value, class) = calculate_leaf_value(y.view(), self.is_classifier);
             return Box::new(Node::new_leaf(value, class, None));
         }
@@ -438,7 +450,8 @@ impl DecisionTree {
         }
 
         // Find the best split point, passing algorithm type
-        let (feature_idx, threshold, left_indices, right_indices) = find_best_split(x, y.view(), self.is_classifier, algorithm);
+        let (feature_idx, threshold, left_indices, right_indices) =
+            find_best_split(x, y.view(), self.is_classifier, algorithm);
 
         // If no good split was found
         if left_indices.is_empty() || right_indices.is_empty() {
@@ -456,8 +469,20 @@ impl DecisionTree {
         let mut node = Node::new_internal(feature_idx, threshold);
 
         // Build subtrees using the provided function, and pass algorithm type
-        node.left = Some(build_child_tree(self, left_x.view(), left_y.view(), depth + 1, algorithm));
-        node.right = Some(build_child_tree(self, right_x.view(), right_y.view(), depth + 1, algorithm));
+        node.left = Some(build_child_tree(
+            self,
+            left_x.view(),
+            left_y.view(),
+            depth + 1,
+            algorithm,
+        ));
+        node.right = Some(build_child_tree(
+            self,
+            right_x.view(),
+            right_y.view(),
+            depth + 1,
+            algorithm,
+        ));
 
         Box::new(node)
     }
@@ -495,7 +520,13 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Box<Node>` - A boxed Node representing the root of the constructed (sub)tree
-    fn build_id3_tree_with_algorithm(&self, x: ArrayView2<f64>, y: ArrayView1<f64>, depth: usize, algorithm: &str) -> Box<Node> {
+    fn build_id3_tree_with_algorithm(
+        &self,
+        x: ArrayView2<f64>,
+        y: ArrayView1<f64>,
+        depth: usize,
+        algorithm: &str,
+    ) -> Box<Node> {
         self.build_tree(x, y, depth, algorithm, Self::build_id3_tree_with_algorithm)
     }
 
@@ -532,7 +563,13 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Box<Node>` - A boxed Node representing the root of the constructed (sub)tree
-    fn build_c45_tree_with_algorithm(&self, x: ArrayView2<f64>, y: ArrayView1<f64>, depth: usize, algorithm: &str) -> Box<Node> {
+    fn build_c45_tree_with_algorithm(
+        &self,
+        x: ArrayView2<f64>,
+        y: ArrayView1<f64>,
+        depth: usize,
+        algorithm: &str,
+    ) -> Box<Node> {
         self.build_tree(x, y, depth, algorithm, Self::build_c45_tree_with_algorithm)
     }
 
@@ -552,12 +589,16 @@ impl DecisionTree {
     /// * `Box<Node>` - A boxed Node representing the root of the constructed (sub)tree
     fn build_cart_tree(&self, x: ArrayView2<f64>, y: ArrayView1<f64>, depth: usize) -> Box<Node> {
         // Termination conditions
-        if y.is_empty() ||
-            (self.params.max_depth.is_some() && depth >= self.params.max_depth.unwrap()) ||
-            y.len() < self.params.min_samples_split {
+        if y.is_empty()
+            || (self.params.max_depth.is_some() && depth >= self.params.max_depth.unwrap())
+            || y.len() < self.params.min_samples_split
+        {
             let (value, class) = calculate_leaf_value(y.view(), self.is_classifier);
             let probabilities = if self.is_classifier && self.n_classes.is_some() {
-                Some(calculate_class_probabilities(y.view(), self.n_classes.unwrap()))
+                Some(calculate_class_probabilities(
+                    y.view(),
+                    self.n_classes.unwrap(),
+                ))
             } else {
                 None
             };
@@ -569,7 +610,10 @@ impl DecisionTree {
         if y.iter().all(|&val| val == first_val) {
             let (value, class) = calculate_leaf_value(y.view(), self.is_classifier);
             let probabilities = if self.is_classifier && self.n_classes.is_some() {
-                Some(calculate_class_probabilities(y.view(), self.n_classes.unwrap()))
+                Some(calculate_class_probabilities(
+                    y.view(),
+                    self.n_classes.unwrap(),
+                ))
             } else {
                 None
             };
@@ -577,15 +621,21 @@ impl DecisionTree {
         }
 
         // Find the best split point, explicitly specifying CART algorithm
-        let (feature_idx, threshold, left_indices, right_indices) = find_best_split(x, y.view(), self.is_classifier, "CART");
+        let (feature_idx, threshold, left_indices, right_indices) =
+            find_best_split(x, y.view(), self.is_classifier, "CART");
 
         // If no good split was found
-        if left_indices.is_empty() || right_indices.is_empty() ||
-            left_indices.len() < self.params.min_samples_leaf ||
-            right_indices.len() < self.params.min_samples_leaf {
+        if left_indices.is_empty()
+            || right_indices.is_empty()
+            || left_indices.len() < self.params.min_samples_leaf
+            || right_indices.len() < self.params.min_samples_leaf
+        {
             let (value, class) = calculate_leaf_value(y.view(), self.is_classifier);
             let probabilities = if self.is_classifier && self.n_classes.is_some() {
-                Some(calculate_class_probabilities(y.view(), self.n_classes.unwrap()))
+                Some(calculate_class_probabilities(
+                    y.view(),
+                    self.n_classes.unwrap(),
+                ))
             } else {
                 None
             };
@@ -647,9 +697,8 @@ impl DecisionTree {
             .collect();
 
         // Process predictions in parallel
-        let results: Result<Vec<f64>, ModelError> = rows.par_iter()
-            .map(|row| self.predict_one(row))
-            .collect();
+        let results: Result<Vec<f64>, ModelError> =
+            rows.par_iter().map(|row| self.predict_one(row)).collect();
 
         // Handle results
         match results {
@@ -671,10 +720,11 @@ impl DecisionTree {
     /// - `Result<Array1<f64>, ModelError>` - A 1D array of predictions for the test data if successful
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(&mut self,
-                       x_train: ArrayView2<f64>,
-                       y_train: ArrayView1<f64>,
-                       x_test: ArrayView2<f64>
+    pub fn fit_predict(
+        &mut self,
+        x_train: ArrayView2<f64>,
+        y_train: ArrayView1<f64>,
+        x_test: ArrayView2<f64>,
     ) -> Result<Array1<f64>, ModelError> {
         self.fit(x_train, y_train)?;
         self.predict(x_test)
@@ -697,7 +747,11 @@ impl DecisionTree {
     fn predict_sample(&self, node: &Node, x: &[f64]) -> Result<f64, ModelError> {
         match &node.node_type {
             NodeType::Leaf { value, .. } => Ok(*value),
-            NodeType::Internal { feature_index, threshold, categories } => {
+            NodeType::Internal {
+                feature_index,
+                threshold,
+                categories,
+            } => {
                 if let Some(_) = categories {
                     // Handle categorical features
                     if let Some(children) = &node.children {
@@ -709,11 +763,15 @@ impl DecisionTree {
                             if let Some(left) = &node.left {
                                 self.predict_sample(left, x)
                             } else {
-                                Err(ModelError::TreeError("The classification node is missing a default branch"))
+                                Err(ModelError::TreeError(
+                                    "The classification node is missing a default branch",
+                                ))
                             }
                         }
                     } else {
-                        Err(ModelError::TreeError("The classification node is missing mappings to its child nodes"))
+                        Err(ModelError::TreeError(
+                            "The classification node is missing mappings to its child nodes",
+                        ))
                     }
                 } else {
                     // Handle numerical features
@@ -723,14 +781,18 @@ impl DecisionTree {
                             self.predict_sample(left, x)
                         } else {
                             // This should not happen in a correctly built tree
-                            Err(ModelError::TreeError("Left child node is missing for the internal node"))
+                            Err(ModelError::TreeError(
+                                "Left child node is missing for the internal node",
+                            ))
                         }
                     } else {
                         if let Some(right) = &node.right {
                             self.predict_sample(right, x)
                         } else {
                             // This should not happen in a correctly built tree
-                            Err(ModelError::TreeError("Right child node is missing for the internal node"))
+                            Err(ModelError::TreeError(
+                                "Right child node is missing for the internal node",
+                            ))
                         }
                     }
                 }
@@ -753,13 +815,19 @@ impl DecisionTree {
     /// - `Err(ModelError::TreeError(&str))` - Something wrong with the tree
     pub fn predict_proba(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
         if !self.is_classifier {
-            return Err(ModelError::TreeError("Probabilistic prediction is only applicable to classification problems"));
+            return Err(ModelError::TreeError(
+                "Probabilistic prediction is only applicable to classification problems",
+            ));
         }
 
         let n_samples = x.nrows();
         let n_classes = match self.n_classes {
             Some(n_classes) => n_classes,
-            None => return Err(ModelError::TreeError("The model is not trained correctly and the number of classes is missing")),
+            None => {
+                return Err(ModelError::TreeError(
+                    "The model is not trained correctly and the number of classes is missing",
+                ));
+            }
         };
 
         // Convert data to a collection of rows
@@ -768,7 +836,8 @@ impl DecisionTree {
             .collect();
 
         // Process probability predictions in parallel
-        let results: Result<Vec<Vec<f64>>, ModelError> = rows.par_iter()
+        let results: Result<Vec<Vec<f64>>, ModelError> = rows
+            .par_iter()
             .map(|row| self.predict_proba_one(row))
             .collect();
 
@@ -786,7 +855,7 @@ impl DecisionTree {
                 }
 
                 Ok(probas)
-            },
+            }
             Err(e) => Err(e),
         }
     }
@@ -828,13 +897,17 @@ impl DecisionTree {
     /// - `Err(ModelError::TreeError(&str))` - Something wrong with the tree
     fn predict_proba_sample(&self, node: &Node, x: &[f64]) -> Result<Vec<f64>, ModelError> {
         match &node.node_type {
-            NodeType::Leaf { probabilities, .. } => {
-                match probabilities {
-                    Some(proba) => Ok(proba.clone()),
-                    None => Err(ModelError::TreeError("The leaf node lacks probability information")),
-                }
-            }
-            NodeType::Internal { feature_index, threshold, categories } => {
+            NodeType::Leaf { probabilities, .. } => match probabilities {
+                Some(proba) => Ok(proba.clone()),
+                None => Err(ModelError::TreeError(
+                    "The leaf node lacks probability information",
+                )),
+            },
+            NodeType::Internal {
+                feature_index,
+                threshold,
+                categories,
+            } => {
                 if let Some(_) = categories {
                     // Handle categorical features
                     if let Some(children) = &node.children {
@@ -846,11 +919,15 @@ impl DecisionTree {
                             if let Some(left) = &node.left {
                                 self.predict_proba_sample(left, x)
                             } else {
-                                Err(ModelError::TreeError("The classification node is missing a default branch"))
+                                Err(ModelError::TreeError(
+                                    "The classification node is missing a default branch",
+                                ))
                             }
                         }
                     } else {
-                        Err(ModelError::TreeError("The classification node is missing mappings to its child nodes"))
+                        Err(ModelError::TreeError(
+                            "The classification node is missing mappings to its child nodes",
+                        ))
                     }
                 } else {
                     // Handle numerical features
@@ -859,13 +936,17 @@ impl DecisionTree {
                         if let Some(left) = &node.left {
                             self.predict_proba_sample(left, x)
                         } else {
-                            Err(ModelError::TreeError("Left child node is missing for the internal node"))
+                            Err(ModelError::TreeError(
+                                "Left child node is missing for the internal node",
+                            ))
                         }
                     } else {
                         if let Some(right) = &node.right {
                             self.predict_proba_sample(right, x)
                         } else {
-                            Err(ModelError::TreeError("Right child node is missing for the internal node"))
+                            Err(ModelError::TreeError(
+                                "Right child node is missing for the internal node",
+                            ))
                         }
                     }
                 }
@@ -911,12 +992,13 @@ impl DecisionTree {
                         if children_map.is_empty() {
                             0
                         } else {
-                            children_map.values()
+                            children_map
+                                .values()
                                 .map(|child| self.calculate_tree_depth(child))
                                 .max()
                                 .unwrap_or(0)
                         }
-                    },
+                    }
                     None => 0,
                 };
 
@@ -952,34 +1034,65 @@ impl DecisionTree {
             let connector = if is_last { "└── " } else { "├── " };
 
             match &node.node_type {
-                NodeType::Leaf { value, class, probabilities } => {
-                    output.push_str(&format!("{}{}Leaf: value: {}, class: {:?}, probabilities: {:?}\n",
-                                             prefix, connector, value, class, probabilities));
-                },
-                NodeType::Internal { feature_index, threshold, categories } => {
+                NodeType::Leaf {
+                    value,
+                    class,
+                    probabilities,
+                } => {
+                    output.push_str(&format!(
+                        "{}{}Leaf: value: {}, class: {:?}, probabilities: {:?}\n",
+                        prefix, connector, value, class, probabilities
+                    ));
+                }
+                NodeType::Internal {
+                    feature_index,
+                    threshold,
+                    categories,
+                } => {
                     if let Some(categories) = categories {
                         // For categorical features.
-                        output.push_str(&format!("{}{}Internal (categorical): feature index: {}, categories: {:?}\n",
-                                                 prefix, connector, feature_index, categories));
+                        output.push_str(&format!(
+                            "{}{}Internal (categorical): feature index: {}, categories: {:?}\n",
+                            prefix, connector, feature_index, categories
+                        ));
                         if let Some(children) = &node.children {
-                            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+                            let new_prefix =
+                                format!("{}{}", prefix, if is_last { "    " } else { "│   " });
                             // Sort keys for consistent output.
                             let mut keys: Vec<&String> = children.keys().collect();
                             keys.sort();
                             let child_count = keys.len();
                             for (i, key) in keys.into_iter().enumerate() {
                                 let child = &children[key];
-                                let child_connector = if i == child_count - 1 { "└── " } else { "├── " };
-                                output.push_str(&format!("{}{}Category: {}\n", new_prefix, child_connector, key));
-                                let child_prefix = format!("{}{}", new_prefix, if i == child_count - 1 { "    " } else { "│   " });
+                                let child_connector = if i == child_count - 1 {
+                                    "└── "
+                                } else {
+                                    "├── "
+                                };
+                                output.push_str(&format!(
+                                    "{}{}Category: {}\n",
+                                    new_prefix, child_connector, key
+                                ));
+                                let child_prefix = format!(
+                                    "{}{}",
+                                    new_prefix,
+                                    if i == child_count - 1 {
+                                        "    "
+                                    } else {
+                                        "│   "
+                                    }
+                                );
                                 output.push_str(&build_ascii(child, &child_prefix, true));
                             }
                         }
                     } else {
                         // For numerical features.
-                        output.push_str(&format!("{}{}Internal (numerical): feature index: {}, threshold: {}\n",
-                                                 prefix, connector, feature_index, threshold));
-                        let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+                        output.push_str(&format!(
+                            "{}{}Internal (numerical): feature index: {}, threshold: {}\n",
+                            prefix, connector, feature_index, threshold
+                        ));
+                        let new_prefix =
+                            format!("{}{}", prefix, if is_last { "    " } else { "│   " });
                         if let Some(left) = &node.left {
                             output.push_str(&build_ascii(left, &new_prefix, false));
                         }
@@ -987,12 +1100,12 @@ impl DecisionTree {
                             output.push_str(&build_ascii(right, &new_prefix, true));
                         }
                     }
-                },
+                }
             }
             output
         }
-        
-        let root = match self.root.as_ref(){
+
+        let root = match self.root.as_ref() {
             Some(root) => root,
             None => return Err(ModelError::NotFitted),
         };
@@ -1019,8 +1132,13 @@ impl DecisionTree {
 /// - `f64` - The threshold value for the split
 /// - `Vec<usize>` - Indices of samples going to the left child node
 /// - `Vec<usize>` - Indices of samples going to the right child node
-fn find_best_split(x: ArrayView2<f64>, y: ArrayView1<f64>, is_classifier: bool, algorithm: &str) -> (usize, f64, Vec<usize>, Vec<usize>) {
-    use crate::math::{gini, information_gain, gain_ratio, variance};
+fn find_best_split(
+    x: ArrayView2<f64>,
+    y: ArrayView1<f64>,
+    is_classifier: bool,
+    algorithm: &str,
+) -> (usize, f64, Vec<usize>, Vec<usize>) {
+    use crate::math::{gain_ratio, gini, information_gain, variance};
     use ndarray::Array1;
     use std::sync::Mutex;
 
@@ -1028,11 +1146,11 @@ fn find_best_split(x: ArrayView2<f64>, y: ArrayView1<f64>, is_classifier: bool, 
 
     // Use Mutex to wrap the best result for thread-safe updates during parallel processing
     let best_result = Mutex::new((
-        0,                  // best_feature
-        0.0,                // best_threshold
-        Vec::new(),         // best_left_indices
-        Vec::new(),         // best_right_indices
-        f64::NEG_INFINITY,  // best_criterion
+        0,                 // best_feature
+        0.0,               // best_threshold
+        Vec::new(),        // best_left_indices
+        Vec::new(),        // best_right_indices
+        f64::NEG_INFINITY, // best_criterion
     ));
 
     // Process each feature in parallel
@@ -1045,7 +1163,8 @@ fn find_best_split(x: ArrayView2<f64>, y: ArrayView1<f64>, is_classifier: bool, 
         feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
         // Find potential thresholds (midpoints between adjacent values)
-        let thresholds: Vec<f64> = feature_values.windows(2)
+        let thresholds: Vec<f64> = feature_values
+            .windows(2)
             .map(|w| (w[0] + w[1]) / 2.0)
             .collect();
 
@@ -1078,15 +1197,17 @@ fn find_best_split(x: ArrayView2<f64>, y: ArrayView1<f64>, is_classifier: bool, 
                     "C4.5" => gain_ratio(y, left_y.view(), right_y.view()),
                     _ => {
                         // CART algorithm uses Gini impurity
-                        gini(y) - (left_y.len() as f64 / y.len() as f64) * gini(left_y.view()) -
-                            (right_y.len() as f64 / y.len() as f64) * gini(right_y.view())
+                        gini(y)
+                            - (left_y.len() as f64 / y.len() as f64) * gini(left_y.view())
+                            - (right_y.len() as f64 / y.len() as f64) * gini(right_y.view())
                     }
                 }
             } else {
                 // Regression uses MSE reduction
                 let total_mse = variance(y);
-                let weighted_child_mse = (left_y.len() as f64 / y.len() as f64) * variance(left_y.view()) +
-                    (right_y.len() as f64 / y.len() as f64) * variance(right_y.view());
+                let weighted_child_mse = (left_y.len() as f64 / y.len() as f64)
+                    * variance(left_y.view())
+                    + (right_y.len() as f64 / y.len() as f64) * variance(right_y.view());
                 total_mse - weighted_child_mse
             };
 
@@ -1098,18 +1219,23 @@ fn find_best_split(x: ArrayView2<f64>, y: ArrayView1<f64>, is_classifier: bool, 
                     threshold,
                     left_indices,
                     right_indices,
-                    criterion
+                    criterion,
                 );
             }
         }
     });
 
     // Extract final result from Mutex
-    let (best_feature, best_threshold, best_left_indices, best_right_indices, _) = best_result.into_inner().unwrap();
+    let (best_feature, best_threshold, best_left_indices, best_right_indices, _) =
+        best_result.into_inner().unwrap();
 
-    (best_feature, best_threshold, best_left_indices, best_right_indices)
+    (
+        best_feature,
+        best_threshold,
+        best_left_indices,
+        best_right_indices,
+    )
 }
-
 
 /// Calculates the appropriate leaf node value based on target values
 ///
@@ -1133,7 +1259,7 @@ fn calculate_leaf_value(y: ArrayView1<f64>, is_classifier: bool) -> (f64, Option
 
     if is_classifier {
         // Select the most frequent class as the prediction value
-        let mut class_counts = HashMap::new();
+        let mut class_counts = AHashMap::new();
         for &value in y {
             // Convert floating point to integer representation
             let key = (value * 1000.0).round() as i64; // Preserve 3 decimal places of precision
@@ -1141,7 +1267,8 @@ fn calculate_leaf_value(y: ArrayView1<f64>, is_classifier: bool) -> (f64, Option
         }
 
         // Find the most common class
-        let (most_common_class_key, _) = class_counts.iter()
+        let (most_common_class_key, _) = class_counts
+            .iter()
             .max_by_key(|&(_, count)| count)
             .unwrap_or((&0, &0));
 
@@ -1182,7 +1309,8 @@ fn calculate_class_probabilities(y: ArrayView1<f64>, n_classes: usize) -> Vec<f6
         // Process data in chunks in parallel, then merge results
         let chunk_size = std::cmp::max(1, y.len() / rayon::current_num_threads());
 
-        let counts: Vec<Vec<f64>> = y.axis_chunks_iter(Axis(0), chunk_size)
+        let counts: Vec<Vec<f64>> = y
+            .axis_chunks_iter(Axis(0), chunk_size)
             .into_par_iter()
             .map(|chunk| {
                 let mut local_counts = vec![0.0; n_classes];

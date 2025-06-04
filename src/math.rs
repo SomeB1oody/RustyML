@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use ndarray::ArrayView1;
 use crate::ModelError;
+use ahash::AHashMap;
+use ndarray::ArrayView1;
 
 /// Calculates the Sum of Square Total
 ///
@@ -8,11 +8,11 @@ use crate::ModelError;
 /// differences between each actual value and the mean of all values.
 ///
 /// # Parameters
-/// 
+///
 /// * `values` - An ndarray `ArrayView1<f64>` of observed values
 ///
 /// # Returns
-/// 
+///
 /// - `Ok(f64)` - The Sum of Square Total (SST)
 /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
 ///
@@ -29,7 +29,7 @@ use crate::ModelError;
 pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
     if values.is_empty() {
         return Err(ModelError::InputValidationError(
-            "Cannot calculate sum of square total with empty inputs".to_string()
+            "Cannot calculate sum of square total with empty inputs".to_string(),
         ));
     }
 
@@ -43,12 +43,12 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 /// Calculate the sum of squared errors
 ///
 /// # Parameters
-/// 
+///
 /// * `predicted` - Predicted values vector (y') as ndarray `ArrayView1<f64>`
 /// * `actual` - Actual values vector (y) as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
-/// 
+///
 /// - `Ok(f64)` - Sum of squared errors sum((predicted_i - actual_i)^2)
 /// - `Err(ModelError::InputValidationError)` if input does not match expectation
 ///
@@ -63,22 +63,28 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 /// // (2-1)^2 + (3-3)^2 = 1 + 0 = 1
 /// assert!((sse - 1.0).abs() < 1e-6);
 /// ```
-pub fn sum_of_squared_errors(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Result<f64, ModelError> {
+pub fn sum_of_squared_errors(
+    predicted: ArrayView1<f64>,
+    actual: ArrayView1<f64>,
+) -> Result<f64, ModelError> {
     // Ensure both arrays have the same length
     if predicted.len() != actual.len() {
         return Err(ModelError::InputValidationError(format!(
             "Predicted and actual arrays must have the same length, predicted length: {}, actual length: {}",
-            predicted.len(), actual.len()
-        )))
+            predicted.len(),
+            actual.len()
+        )));
     }
 
     if predicted.is_empty() {
         return Err(ModelError::InputValidationError(
-            "Cannot calculate sum of squared errors with empty inputs".to_string()
+            "Cannot calculate sum of squared errors with empty inputs".to_string(),
         ));
     }
 
-    let sum = predicted.iter().zip(actual.iter())
+    let sum = predicted
+        .iter()
+        .zip(actual.iter())
         .map(|(p, a)| (p - a).powi(2))
         .sum();
 
@@ -91,15 +97,15 @@ pub fn sum_of_squared_errors(predicted: ArrayView1<f64>, actual: ArrayView1<f64>
 /// It is defined as: σ(z) = 1 / (1 + e^(-z))
 ///
 /// # Parameters
-/// 
+///
 /// * `z` - The input value (can be any real number)
 ///
 /// # Returns
-/// 
+///
 /// * A value between 0 and 1, representing the sigmoid of the input
 ///
 /// # Mathematical properties
-/// 
+///
 /// * sigmoid(0) = 0.5
 /// * As z approaches positive infinity, sigmoid(z) approaches 1
 /// * As z approaches negative infinity, sigmoid(z) approaches 0
@@ -122,12 +128,12 @@ pub fn sigmoid(z: f64) -> f64 {
 /// applying sigmoid to raw predictions before calculating loss.
 ///
 /// # Parameters
-/// 
+///
 /// * `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
 /// * `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
 ///
 /// # Returns
-/// 
+///
 /// - `Ok(f64)` - Average logistic regression loss
 /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
 ///
@@ -142,26 +148,34 @@ pub fn sigmoid(z: f64) -> f64 {
 /// // Expected average loss is approximately 0.37778
 /// assert!((loss - 0.37778).abs() < 1e-5);
 /// ```
-pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) -> Result<f64, ModelError> {
+pub fn logistic_loss(
+    logits: ArrayView1<f64>,
+    actual_labels: ArrayView1<f64>,
+) -> Result<f64, ModelError> {
     if logits.len() != actual_labels.len() {
         return Err(ModelError::InputValidationError(format!(
             "Predicted and actual vectors must have the same length, predicted length: {}, actual length: {}",
-            logits.len(), actual_labels.len()
-        )))
+            logits.len(),
+            actual_labels.len()
+        )));
     }
 
     // Validate that all labels are either 0 or 1
-    if actual_labels.iter().any(|&label| label != 0.0 && label != 1.0) {
+    if actual_labels
+        .iter()
+        .any(|&label| label != 0.0 && label != 1.0)
+    {
         return Err(ModelError::InputValidationError(
-            "All labels must be either 0 or 1".to_string()
-        ))
+            "All labels must be either 0 or 1".to_string(),
+        ));
     }
 
     // Using a vectorized approach to calculate log loss
     let n = logits.len() as f64;
 
     // Calculate total loss using zip to iterate through both arrays simultaneously
-    let total_loss = logits.iter()
+    let total_loss = logits
+        .iter()
         .zip(actual_labels.iter())
         .map(|(&x, &y)| {
             // Numerically stable way to calculate log loss:
@@ -176,7 +190,7 @@ pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) ->
 /// Calculate the squared Euclidean distance between two vectors
 ///
 /// # Parameters
-/// 
+///
 /// - `x1` - First vector as ndarray `ArrayView1<f64>`
 /// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 ///
@@ -275,11 +289,11 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 /// like ID3 and C4.5. It quantifies the uncertainty or randomness in the data distribution.
 ///
 /// # Parameters
-/// 
+///
 /// * `y` - An `ArrayView1<f64>` of values representing class labels
 ///
 /// # Returns
-/// 
+///
 /// * The entropy value of the given dataset. Lower values indicate more homogeneous data.
 ///
 /// # Notes
@@ -304,7 +318,7 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 
     // Pre-allocate capacity for the HashMap to avoid frequent reallocations
     // A capacity of 10 is reasonable for most classification problems
-    let mut class_counts = HashMap::with_capacity(10);
+    let mut class_counts = AHashMap::with_capacity(10);
 
     // Use fold operation instead of manual iteration for potential compiler optimizations
     y.fold((), |_, &value| {
@@ -333,15 +347,15 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 /// in the subset. It is commonly used in decision tree algorithms like CART.
 ///
 /// # Parameters
-/// 
+///
 /// * `y` - An `ArrayView1<f64>` of values representing class labels
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
 ///
 /// # Notes
-/// 
+///
 /// - The function handles floating point labels by rounding to 3 decimal places for counting.
 /// - Returns 0.0 for empty datasets.
 ///
@@ -363,7 +377,7 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 
     // Pre-allocate capacity for the HashMap to avoid frequent reallocations
     // A capacity of 10 is reasonable for most classification problems
-    let mut class_counts = HashMap::with_capacity(10);
+    let mut class_counts = AHashMap::with_capacity(10);
 
     // Process all elements in the array with fold operation
     y.fold((), |_, &value| {
@@ -389,13 +403,13 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// like ID3 and C4.5 to select the best feature for splitting.
 ///
 /// # Parameters
-/// 
+///
 /// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
 /// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
 /// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
 ///
 /// # Returns
-/// 
+///
 /// * The information gain value. Higher values indicate a more useful split.
 ///
 /// # Notes
@@ -413,7 +427,11 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// // Entropy(parent)=1.0, Entropy(left)=Entropy(right)=0, so IG = 1.0
 /// assert!((ig - 1.0).abs() < 1e-6);
 /// ```
-pub fn information_gain(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayView1<f64>) -> f64 {
+pub fn information_gain(
+    y: ArrayView1<f64>,
+    left_y: ArrayView1<f64>,
+    right_y: ArrayView1<f64>,
+) -> f64 {
     // Calculate sample counts once
     let n = y.len() as f64;
 
@@ -450,17 +468,17 @@ pub fn information_gain(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: Ar
 /// normalize information gain by the entropy of the split itself.
 ///
 /// # Parameters
-/// 
+///
 /// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
 /// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
 /// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
 ///
 /// # Returns
-/// 
+///
 /// * The gain ratio value. Higher values indicate a more useful split.
 ///
 /// # Notes
-/// 
+///
 /// - Returns 0.0 if the split information is zero to avoid division by zero.
 /// - This function uses the information_gain function as part of its calculation.
 ///
@@ -488,8 +506,10 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
     let n_right = right_y.len() as f64;
 
     // Verify that left and right subsets contain all samples from parent
-    debug_assert!((n_left + n_right - n).abs() < f64::EPSILON,
-                  "The sum of left and right samples should equal parent samples");
+    debug_assert!(
+        (n_left + n_right - n).abs() < f64::EPSILON,
+        "The sum of left and right samples should equal parent samples"
+    );
 
     // Calculate information gain
     let info_gain = information_gain(y, left_y, right_y);
@@ -527,11 +547,11 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
 /// and the mean of all values. It represents the variance of the dataset.
 ///
 /// # Arguments
-/// 
+///
 /// * `y` - An `ArrayView1<f64>` of values for which to calculate the MSE
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The mean squared error as a f64 value, returns 0.0 if the input array is empty
 ///
 /// # Examples
@@ -570,15 +590,15 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
 /// Calculates the leaf node adjustment factor c(n)
 ///
 /// # Parameters
-/// 
+///
 /// * `n` - Number of samples
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The adjustment factor
 ///
 /// # Notes
-/// 
+///
 /// Formula: c(n) = 2 * (H(n-1)) - (2*(n-1)/n)
 /// where H(n-1) can be approximated by ln(n-1) + gamma, gamma is Euler's constant
 ///
@@ -615,11 +635,11 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// Calculates the standard deviation of a set of values
 ///
 /// # Parameters
-/// 
+///
 /// * `values` - An `ArrayView1<f64>` of values
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The population standard deviation. Returns 0.0 if the array is empty or contains only one element.
 ///
 /// # Examples

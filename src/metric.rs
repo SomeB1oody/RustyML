@@ -1,6 +1,6 @@
+use ahash::AHashMap;
 use ndarray::ArrayView1;
 use statrs::distribution::{Discrete, Hypergeometric};
-use std::collections::HashMap;
 
 /// Calculates the Mean Squared Error between predicted and actual values.
 ///
@@ -9,16 +9,16 @@ use std::collections::HashMap;
 /// between the estimated values and the actual values.
 ///
 /// # Parameters
-/// 
+///
 /// - `y_true` - An `ArrayView1<f64>` containing the ground truth (correct) values
 /// - `y_pred` - An `ArrayView1<f64>` containing the predicted values
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The mean squared error value (return 0.0 if input array is empty)
 ///
 /// # Panics
-/// 
+///
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
@@ -36,7 +36,11 @@ use std::collections::HashMap;
 /// ```
 pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f64 {
     if y_true.len() != y_pred.len() {
-        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", y_true.len(), y_pred.len());
+        panic!(
+            "Input arrays must have the same length. Predicted: {}, Actual: {}",
+            y_true.len(),
+            y_pred.len()
+        );
     }
 
     let n = y_true.len();
@@ -66,16 +70,16 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 /// has the same units as the original data, making it more interpretable.
 ///
 /// # Arguments
-/// 
+///
 /// - `predictions` - A slice of f64 values containing the predicted values
 /// - `targets` - A slice of f64 values containing the actual/target values
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The RMSE as a f64 value on success(return 0.0 if input array is empty)
 ///
 /// # Panics
-/// 
+///
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
@@ -89,10 +93,7 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 /// // RMSE = sqrt(((2-1)^2 + (3-2)^2 + (4-3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
-pub fn root_mean_squared_error(
-    predictions: ArrayView1<f64>,
-    targets: ArrayView1<f64>
-) -> f64 {
+pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
         return 0.0;
@@ -100,17 +101,22 @@ pub fn root_mean_squared_error(
 
     // Check if arrays have matching lengths
     if predictions.len() != targets.len() {
-        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predictions.len(), targets.len());
+        panic!(
+            "Prediction and target arrays must have the same length. Predicted: {}, Actual: {}",
+            predictions.len(),
+            targets.len()
+        );
     }
 
     // Use zip_fold_while for efficient calculation with early error detection
-    let sum_squared_errors = predictions
-        .iter()
-        .zip(targets.iter())
-        .fold(0.0, |acc, (&pred, &target)| {
-            let error = pred - target;
-            acc + error * error
-        });
+    let sum_squared_errors =
+        predictions
+            .iter()
+            .zip(targets.iter())
+            .fold(0.0, |acc, (&pred, &target)| {
+                let error = pred - target;
+                acc + error * error
+            });
 
     // Calculate mean squared error
     let mse = sum_squared_errors / predictions.len() as f64;
@@ -131,16 +137,16 @@ pub fn root_mean_squared_error(
 /// between predicted and target values.
 ///
 /// # Arguments
-/// 
+///
 /// - `predictions` - An `ArrayView1<f64>` containing the predicted values
 /// - `targets` - An `ArrayView1<f64>` containing the actual/target values
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The MAE as a f64 value on success(return 0.0 if input array is empty)
 ///
 /// # Panics
-/// 
+///
 /// * Panics if the two arrays have different lengths
 ///
 /// # Examples
@@ -154,10 +160,7 @@ pub fn root_mean_squared_error(
 /// // MAE = (|2-1| + |3-2| + |4-3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
-pub fn mean_absolute_error(
-    predictions: ArrayView1<f64>,
-    targets: ArrayView1<f64>
-) -> f64 {
+pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
         return 0.0;
@@ -165,7 +168,11 @@ pub fn mean_absolute_error(
 
     // Check if arrays have matching lengths
     if predictions.len() != targets.len() {
-        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predictions.len(), targets.len());
+        panic!(
+            "Prediction and target arrays must have the same length. Predicted: {}, Actual: {}",
+            predictions.len(),
+            targets.len()
+        );
     }
 
     // Calculate sum of absolute errors in a single pass
@@ -173,9 +180,7 @@ pub fn mean_absolute_error(
     let sum_absolute_errors = predictions
         .iter()
         .zip(targets.iter())
-        .fold(0.0, |acc, (&pred, &target)| {
-            acc + (pred - target).abs()
-        });
+        .fold(0.0, |acc, (&pred, &target)| acc + (pred - target).abs());
 
     // Calculate mean absolute error
     let mae = sum_absolute_errors / predictions.len() as f64;
@@ -190,20 +195,20 @@ pub fn mean_absolute_error(
 /// where SSE is the sum of squared errors and SST is the total sum of squares.
 ///
 /// # Parameters
-/// 
+///
 /// - `predicted` - `ArrayView1<f64>` of predicted values
 /// - `actual` - `ArrayView1<f64>` of actual/target values
 ///
 /// # Returns
-/// 
+///
 ///  * `f64` - R-squared value, typically ranges from 0 to 1(return 0.0 if input array is empty)
 ///
 /// # Panics
-/// 
+///
 /// * Panics if the two arrays have different lengths
 ///
 /// # Notes
-/// 
+///
 /// - Returns 0 if SST is 0 (when all actual values are identical)
 /// - R-squared can theoretically be negative, indicating that the model performs worse
 ///   than simply predicting the mean of the target variable
@@ -220,36 +225,39 @@ pub fn mean_absolute_error(
 /// // For actual values [1,3,5], mean=3, SSE = 1+0+1 = 2, SST = 4+0+4 = 8, so R2 = 1 - (2/8) = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
-pub fn r2_score(
-    predicted: ArrayView1<f64>,
-    actual: ArrayView1<f64>
-) -> f64 {
+pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     // Validate inputs first
     if predicted.is_empty() || actual.is_empty() {
         return 0.0;
     }
 
     if predicted.len() != actual.len() {
-        panic!("Prediction and target arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
+        panic!(
+            "Prediction and target arrays must have the same length. Predicted: {}, Actual: {}",
+            predicted.len(),
+            actual.len()
+        );
     }
 
     // Calculate mean of actual values
     let actual_mean = actual.mean().unwrap();
 
     // Calculate SSE (Sum of Squared Errors) and SST (Sum of Squares Total) in one pass
-    let (sse, sst) = actual.iter()
-        .zip(predicted.iter())
-        .fold((0.0, 0.0), |(sse_acc, sst_acc), (&act, &pred)| {
+    let (sse, sst) = actual.iter().zip(predicted.iter()).fold(
+        (0.0, 0.0),
+        |(sse_acc, sst_acc), (&act, &pred)| {
             let error = pred - act;
             let deviation = act - actual_mean;
             (
-                sse_acc + error * error,          // Sum of squared errors
-                sst_acc + deviation * deviation   // Sum of squared deviations from mean
+                sse_acc + error * error,         // Sum of squared errors
+                sst_acc + deviation * deviation, // Sum of squared deviations from mean
             )
-        });
+        },
+    );
 
     // Prevent division by zero (when all actual values are identical)
-    if sst < 1e-10 {  // Using small epsilon for numerical stability
+    if sst < 1e-10 {
+        // Using small epsilon for numerical stability
         return 0.0;
     }
 
@@ -331,12 +339,16 @@ impl ConfusionMatrix {
     /// * `Self` - A new confusion matrix if input arrays have the same length
     ///
     /// # Panics
-    /// 
+    ///
     /// - Panics if the two arrays have different lengths
     /// - Panics if input array is empty
     pub fn new(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Self {
         if predicted.len() != actual.len() {
-            panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
+            panic!(
+                "Input arrays must have the same length. Predicted: {}, Actual: {}",
+                predicted.len(),
+                actual.len()
+            );
         }
 
         if predicted.is_empty() {
@@ -487,10 +499,16 @@ impl ConfusionMatrix {
         - Recall: {:.4}\n\
         - Specificity: {:.4}\n\
         - F1 Score: {:.4}",
-            self.tp, self.fn_, self.fp, self.tn,
-            self.accuracy(), self.error_rate(),
-            self.precision(), self.recall(),
-            self.specificity(), self.f1_score()
+            self.tp,
+            self.fn_,
+            self.fp,
+            self.tn,
+            self.accuracy(),
+            self.error_rate(),
+            self.precision(),
+            self.recall(),
+            self.specificity(),
+            self.f1_score()
         )
     }
 }
@@ -503,16 +521,16 @@ impl ConfusionMatrix {
 /// For multi-class classification, values should be numeric class labels.
 ///
 /// # Parameters
-/// 
+///
 /// - `predicted` - Array of predicted class labels
 /// - `actual` - Array of actual class labels
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The accuracy score between 0.0 and 1.0
 ///
 /// # Panics
-/// 
+///
 /// - Panics if the two arrays have different lengths
 /// - Panics if input array is empty
 ///
@@ -530,7 +548,11 @@ impl ConfusionMatrix {
 /// ```
 pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     if predicted.len() != actual.len() {
-        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", predicted.len(), actual.len());
+        panic!(
+            "Input arrays must have the same length. Predicted: {}, Actual: {}",
+            predicted.len(),
+            actual.len()
+        );
     }
 
     if predicted.is_empty() || actual.is_empty() {
@@ -554,8 +576,8 @@ fn contingency_matrix(
     labels_true: &[usize],
     labels_pred: &[usize],
 ) -> (Vec<Vec<usize>>, Vec<usize>, Vec<usize>) {
-    let mut label_to_index_true = HashMap::new();
-    let mut label_to_index_pred = HashMap::new();
+    let mut label_to_index_true = AHashMap::new();
+    let mut label_to_index_pred = AHashMap::new();
     let mut current_index_true = 0;
     let mut current_index_pred = 0;
 
@@ -637,11 +659,7 @@ fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
 ///
 /// EMI = Σ_{i,j} Σ_{k=max(0, a_i+b_j-n)}^{min(a_i, b_j)}
 ///       P(k) * (k/n) * ln((n * k) / (a_i * b_j))
-fn expected_mutual_information(
-    row_sums: &Vec<usize>,
-    col_sums: &Vec<usize>,
-    n: usize,
-) -> f64 {
+fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: usize) -> f64 {
     let mut emi = 0.0;
     // For each pair of clusters (ground truth and predicted)
     for &a_i in row_sums {
@@ -682,16 +700,16 @@ fn expected_mutual_information(
 /// - sqrt represents the square root function
 ///
 /// # Parameters
-/// 
+///
 /// - `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
 /// - `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The NMI score as a float between 0 and 1
 ///
 /// # Panics
-/// 
+///
 /// - Panics if the two arrays have different lengths
 /// - Panics if input array is empty
 ///
@@ -706,9 +724,16 @@ fn expected_mutual_information(
 /// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view());
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
-pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
+pub fn normalized_mutual_info(
+    labels_true: ArrayView1<usize>,
+    labels_pred: ArrayView1<usize>,
+) -> f64 {
     if labels_true.len() != labels_pred.len() {
-        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len());
+        panic!(
+            "Input arrays must have the same length. Predicted: {}, Actual: {}",
+            labels_true.len(),
+            labels_pred.len()
+        );
     }
 
     if labels_true.is_empty() || labels_pred.is_empty() {
@@ -720,7 +745,8 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
     let labels_true_slice: &[usize] = labels_true.as_slice().unwrap();
     let labels_pred_slice: &[usize] = labels_pred.as_slice().unwrap();
 
-    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true_slice, labels_pred_slice);
+    let (contingency, row_sums, col_sums) =
+        contingency_matrix(labels_true_slice, labels_pred_slice);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
@@ -758,7 +784,7 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
 /// * `f64` - The AMI score, typically between -1 and 1
 ///
 /// # Panics
-/// 
+///
 /// - Panics if the two arrays have different lengths
 /// - Panics if input array is empty
 ///
@@ -775,7 +801,11 @@ pub fn normalized_mutual_info(labels_true: ArrayView1<usize>, labels_pred: Array
 /// ```
 pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
     if labels_true.len() != labels_pred.len() {
-        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", labels_true.len(), labels_pred.len());
+        panic!(
+            "Input arrays must have the same length. Predicted: {}, Actual: {}",
+            labels_true.len(),
+            labels_pred.len()
+        );
     }
 
     if labels_true.is_empty() || labels_pred.is_empty() {
@@ -787,7 +817,8 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
     let labels_true_slice: &[usize] = labels_true.as_slice().unwrap();
     let labels_pred_slice: &[usize] = labels_pred.as_slice().unwrap();
 
-    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true_slice, labels_pred_slice);
+    let (contingency, row_sums, col_sums) =
+        contingency_matrix(labels_true_slice, labels_pred_slice);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
@@ -813,11 +844,11 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// - `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
 ///
 /// # Returns
-/// 
+///
 /// * `f64` - The AUC-ROC value between 0.0 and 1.0
 ///
 /// # Panics
-/// 
+///
 /// - Panics if the two arrays have different lengths
 /// - Panics if input array is empty
 /// - Panics if there are no positive or negative samples
@@ -840,14 +871,19 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// mathematically equivalent to the area under the ROC curve.
 pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> f64 {
     if scores.len() != labels.len() {
-        panic!("Input arrays must have the same length. Predicted: {}, Actual: {}", scores.len(), labels.len());
+        panic!(
+            "Input arrays must have the same length. Predicted: {}, Actual: {}",
+            scores.len(),
+            labels.len()
+        );
     }
     if scores.is_empty() || labels.is_empty() {
         panic!("Input arrays cannot be empty");
     }
 
     // Pack the (score, label) pairs into a vector
-    let mut pairs: Vec<(f64, bool)> = scores.iter()
+    let mut pairs: Vec<(f64, bool)> = scores
+        .iter()
         .zip(labels.iter())
         .map(|(s, &l)| (*s, l))
         .collect();
