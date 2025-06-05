@@ -184,46 +184,6 @@ impl SeparableConv2D {
         vec![batch_size, self.filters, output_height, output_width]
     }
 
-    /// Applies the activation function to the tensor in-place.
-    fn apply_activation(&self, x: &mut Tensor) {
-        if let Some(activation) = &self.activation {
-            match activation {
-                Activation::ReLU => {
-                    x.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
-                }
-                Activation::Sigmoid => {
-                    x.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
-                }
-                Activation::Tanh => {
-                    x.par_mapv_inplace(|x| x.tanh());
-                }
-                Activation::Softmax => panic!("Cannot use Softmax for separable convolution"),
-            }
-        }
-    }
-
-    /// Calculates the derivative of the activation function.
-    fn activation_derivative(&self, output: &Tensor) -> Tensor {
-        let mut result = output.clone();
-
-        if let Some(activation) = &self.activation {
-            match activation {
-                Activation::ReLU => {
-                    result.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 });
-                }
-                Activation::Sigmoid => {
-                    result.par_mapv_inplace(|a| a * (1.0 - a));
-                }
-                Activation::Tanh => {
-                    result.par_mapv_inplace(|a| 1.0 - a * a);
-                }
-                Activation::Softmax => panic!("Cannot use Softmax for separable convolution"),
-            }
-        }
-
-        result
-    }
-
     /// Performs depthwise convolution operation.
     fn depthwise_convolve(&self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
@@ -355,7 +315,9 @@ impl Layer for SeparableConv2D {
         let mut output = self.pointwise_convolve(&depthwise_output);
 
         // Apply activation function
-        self.apply_activation(&mut output);
+        if let Some(activation) = &self.activation {
+            apply_activation_conv(activation, &mut output);
+        }
 
         output
     }
@@ -370,8 +332,12 @@ impl Layer for SeparableConv2D {
             let depthwise_shape = depthwise_output.shape();
 
             // Calculate activation gradients
-            let activation_grad = self.activation_derivative(grad_output);
-            let gradient = activation_grad.clone();
+            let mut grad_output = grad_output.to_owned().into_dyn();
+            if let Some(activation) = &self.activation {
+                activation_derivative_conv(activation, &mut grad_output);
+            }
+
+            let gradient = grad_output.clone();
 
             // Initialize gradients
             let mut pointwise_weight_grads = Array4::zeros(self.pointwise_weights.dim());

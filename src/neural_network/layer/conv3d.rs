@@ -3,7 +3,8 @@ use crate::ModelError;
 use crate::neural_network::activation::Activation;
 use crate::neural_network::optimizer::*;
 use crate::neural_network::{Layer, Tensor};
-use ndarray::{Array3, Array5, ArrayView5, Axis, Zip};
+use crate::prelude::layer::helper_functions::*;
+use ndarray::{Array3, Array5, ArrayD, ArrayView5, Axis, Zip};
 use ndarray_rand::RandomExt;
 use rayon::prelude::*;
 
@@ -60,7 +61,7 @@ use rayon::prelude::*;
 ///         vec![2, 1, 8, 8, 8],       // Input shape
 ///         (1, 1, 1),                 // Stride
 ///         PaddingType::Valid,        // No padding
-///         Activation::ReLU,    // ReLU activation function
+///         Some(Activation::ReLU),    // ReLU activation function
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -84,7 +85,7 @@ pub struct Conv3D {
     padding: PaddingType,
     weights: Array5<f32>,
     bias: Array3<f32>,
-    activation: Activation,
+    activation: Option<Activation>,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array5<f32>>,
@@ -113,7 +114,7 @@ impl Conv3D {
         input_shape: Vec<usize>,
         strides: (usize, usize, usize),
         padding: PaddingType,
-        activation: Activation,
+        activation: Option<Activation>,
     ) -> Self {
         // verify input is 5D: [batch_size, channels, depth, height, width]
         assert_eq!(
@@ -273,7 +274,7 @@ impl Conv3D {
 
     /// Computes gradients during backward propagation.
     /// Parallel gradient computation
-    fn compute_gradients(&mut self, input: &Array5<f32>, grad_output: &Array5<f32>) -> Array5<f32> {
+    fn compute_gradients(&mut self, input: &Array5<f32>, grad_output: &ArrayD<f32>) -> Array5<f32> {
         let input_shape = input.shape();
         let grad_shape = grad_output.shape();
         let (batch_size, _, depth, height, width) = (
@@ -426,25 +427,14 @@ impl Layer for Conv3D {
         self.input_cache = Some(input.clone());
 
         // Perform convolution
-        let mut output = self.conv3d(input_array);
+        let mut output = self.conv3d(input_array).into_dyn();
 
         // Apply activation function if specified
-        match self.activation {
-            Activation::ReLU => {
-                output.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
-            }
-            Activation::Sigmoid => {
-                output.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
-            }
-            Activation::Tanh => {
-                output.par_mapv_inplace(|x| x.tanh());
-            }
-            Activation::Softmax => {
-                panic!("Cannot use Softmax for convolution");
-            }
+        if let Some(activation) = &self.activation {
+            apply_activation_conv(activation, &mut output);
         }
 
-        output.into_dyn()
+        output
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -462,32 +452,12 @@ impl Layer for Conv3D {
             .view()
             .into_dimensionality::<ndarray::Ix5>()
             .unwrap()
-            .to_owned();
+            .to_owned()
+            .into_dyn();
 
         // Apply activation function derivative if specified
-        let output = self.conv3d(input_array.view());
-        match self.activation {
-            Activation::Softmax => {
-                panic!("Cannot use Softmax for convolution");
-            }
-            _ => {
-                // Directly compute activation function derivatives in parallel and apply to gradients
-                grad_output_array.zip_mut_with(&output, |grad, &out_val| {
-                    let derivative = match self.activation {
-                        Activation::ReLU => {
-                            if out_val > 0.0 {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
-                        Activation::Sigmoid => out_val * (1.0 - out_val),
-                        Activation::Tanh => 1.0 - out_val * out_val,
-                        _ => 1.0,
-                    };
-                    *grad *= derivative;
-                });
-            }
+        if let Some(activation) = &self.activation {
+            activation_derivative_conv(activation, &mut grad_output_array);
         }
 
         let grad_input = self.compute_gradients(&input_array, &grad_output_array);

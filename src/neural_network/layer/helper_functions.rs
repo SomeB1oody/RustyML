@@ -1,4 +1,4 @@
-use crate::neural_network::{PaddingType, Tensor};
+use crate::neural_network::{Activation, PaddingType, Tensor};
 use ndarray::{Array2, Array3, ArrayD, s};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -395,4 +395,62 @@ pub fn calculate_output_shape_2d(
     );
 
     vec![batch_size, channels, output_height, output_width]
+}
+
+/// Applies the activation function to the tensor in-place(for conv layer).
+///
+/// If an activation function is specified for this layer, this method applies it
+/// element-wise to the input tensor using parallel processing.
+///
+/// # Parameters
+///
+/// - `activation` - Activation type used
+/// - `x` - A mutable reference to the tensor to which the activation function will be applied.
+///
+/// # Panics
+///
+/// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
+pub fn apply_activation_conv(activation: &Activation, x: &mut Tensor) {
+    match activation {
+        Activation::ReLU => {
+            x.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
+        }
+        Activation::Sigmoid => {
+            x.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
+        }
+        Activation::Tanh => {
+            x.par_mapv_inplace(|x| x.tanh());
+        }
+        Activation::Softmax => panic!("Cannot use Softmax for convolution"),
+    }
+}
+
+/// Calculates the derivative of the activation function at the given output values(for conv layer).
+///
+/// This function is used during backpropagation to compute gradients.
+///
+/// # Parameters
+///
+/// * `output` - A reference to the tensor containing the output values of the forward pass.
+///
+/// # Returns
+///
+/// * `Tensor` - A new tensor containing the activation function derivatives calculated element-wise.
+///
+/// # Panics
+///
+/// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
+pub fn activation_derivative_conv(activation: &Activation, output: &mut Tensor) {
+    match activation {
+        Activation::ReLU => {
+            output.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 });
+        }
+        Activation::Sigmoid => {
+            output.par_mapv_inplace(|a| a * (1.0 - a));
+        }
+        Activation::Tanh => {
+            output.par_mapv_inplace(|a| 1.0 - a * a);
+        }
+        Activation::Softmax => panic!("Cannot use Softmax for convolution"),
+    }
 }

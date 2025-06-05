@@ -62,7 +62,7 @@ use rayon::prelude::*;
 ///         vec![2, 1, 10],         // Input shape
 ///         1,                      // Stride
 ///         PaddingType::Valid,     // No padding
-///         Activation::ReLU, // ReLU activation function
+///         Some(Activation::ReLU), // ReLU activation function
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -86,7 +86,7 @@ pub struct Conv1D {
     padding: PaddingType,
     weights: Array3<f32>,
     bias: Array2<f32>,
-    activation: Activation,
+    activation: Option<Activation>,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array3<f32>>,
@@ -115,7 +115,7 @@ impl Conv1D {
         input_shape: Vec<usize>,
         stride: usize,
         padding: PaddingType,
-        activation: Activation,
+        activation: Option<Activation>,
     ) -> Self {
         // verify input is 3D: [batch_size, channels, length]
         assert_eq!(
@@ -159,11 +159,11 @@ impl Conv1D {
     ///
     /// # Parameters
     ///
-    /// - `input_length` - Length of the input sequence
+    /// * `input_length` - Length of the input sequence
     ///
     /// # Returns
     ///
-    /// Output length after convolution
+    /// * `usize` - Output length after convolution
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
             PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,
@@ -202,71 +202,6 @@ impl Conv1D {
                 padded.into_dyn()
             }
         }
-    }
-
-    /// Applies the activation function to the tensor in-place.
-    ///
-    /// If an activation function is specified for this layer, this method applies it
-    /// element-wise to the input tensor using parallel processing.
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - A mutable reference to the tensor to which the activation function will be applied.
-    ///
-    /// # Panics
-    ///
-    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
-    fn apply_activation(&self, x: &mut Tensor) {
-        match self.activation {
-            Activation::ReLU => {
-                x.par_mapv_inplace(|val| if val > 0.0 { val } else { 0.0 });
-            }
-            Activation::Sigmoid => {
-                x.par_mapv_inplace(|val| 1.0 / (1.0 + (-val).exp()));
-            }
-            Activation::Tanh => {
-                x.par_mapv_inplace(|val| val.tanh());
-            }
-            Activation::Softmax => {
-                panic!("Cannot use Softmax activation function for convolutional layers");
-            }
-        }
-    }
-
-    /// Calculates the derivative of the activation function at the given output values.
-    ///
-    /// This function is used during backpropagation to compute gradients.
-    ///
-    /// # Parameters
-    ///
-    /// * `output` - A reference to the tensor containing the output values of the forward pass.
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - A new tensor containing the activation function derivatives calculated element-wise.
-    ///
-    /// # Panics
-    ///
-    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
-    fn activation_derivative(&self, output: &Tensor) -> Tensor {
-        let mut result = output.clone();
-
-        match self.activation {
-            Activation::ReLU => {
-                result.par_mapv_inplace(|val| if val > 0.0 { 1.0 } else { 0.0 });
-            }
-            Activation::Sigmoid => {
-                result.par_mapv_inplace(|a| a * (1.0 - a));
-            }
-            Activation::Tanh => {
-                result.par_mapv_inplace(|a| 1.0 - a * a);
-            }
-            Activation::Softmax => {
-                panic!("Cannot use Softmax activation function for convolutional layers");
-            }
-        }
-
-        result
     }
 
     /// Performs 1D convolution operation with parallel processing.
@@ -340,7 +275,9 @@ impl Layer for Conv1D {
         let mut output = self.conv1d(input);
 
         // Apply activation function
-        self.apply_activation(&mut output);
+        if let Some(activation) = &self.activation {
+            apply_activation_conv(activation, &mut output);
+        }
 
         output
     }
@@ -357,8 +294,10 @@ impl Layer for Conv1D {
         let input_length = input_shape[2];
 
         // Apply activation function derivatives
-        let grad_output = grad_output.clone();
-        let grad_output = self.activation_derivative(&grad_output);
+        let mut grad_output = grad_output.clone();
+        if let Some(ref activation) = self.activation {
+            activation_derivative_conv(activation, &mut grad_output);
+        }
 
         let grad_output_3d = grad_output
             .into_dimensionality::<ndarray::Ix3>()

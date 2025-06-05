@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.6.2] - 2025-6-5 (UTC-7)
+### Added
+- Refactor activation handling for convolutional layers
+
 ## [v0.6.2] - 2025-6-4 (UTC-7)
 ### Added
 - Add `DepthwiseConv2D` layer and related utilities

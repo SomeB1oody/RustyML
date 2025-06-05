@@ -200,71 +200,6 @@ impl Conv2D {
         vec![batch_size, self.filters, output_height, output_width]
     }
 
-    /// Applies the activation function to the tensor in-place.
-    ///
-    /// If an activation function is specified for this layer, this method applies it
-    /// element-wise to the input tensor using parallel processing.
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - A mutable reference to the tensor to which the activation function will be applied.
-    ///
-    /// # Panics
-    ///
-    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
-    fn apply_activation(&self, x: &mut Tensor) {
-        if let Some(activation) = &self.activation {
-            match activation {
-                Activation::ReLU => {
-                    x.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
-                }
-                Activation::Sigmoid => {
-                    x.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
-                }
-                Activation::Tanh => {
-                    x.par_mapv_inplace(|x| x.tanh());
-                }
-                Activation::Softmax => panic!("Cannot use Softmax for convolution"),
-            }
-        }
-    }
-
-    /// Calculates the derivative of the activation function at the given output values.
-    ///
-    /// This function is used during backpropagation to compute gradients.
-    ///
-    /// # Parameters
-    ///
-    /// * `output` - A reference to the tensor containing the output values of the forward pass.
-    ///
-    /// # Returns
-    ///
-    /// * `Tensor` - A new tensor containing the activation function derivatives calculated element-wise.
-    ///
-    /// # Panics
-    ///
-    /// Panics if Softmax activation is used, as it's not suitable for convolutional layers.
-    fn activation_derivative(&self, output: &Tensor) -> Tensor {
-        let mut result = output.clone();
-
-        if let Some(activation) = &self.activation {
-            match activation {
-                Activation::ReLU => {
-                    result.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 });
-                }
-                Activation::Sigmoid => {
-                    result.par_mapv_inplace(|a| a * (1.0 - a));
-                }
-                Activation::Tanh => {
-                    result.par_mapv_inplace(|a| 1.0 - a * a);
-                }
-                Activation::Softmax => panic!("Cannot use Softmax for convolution"),
-            }
-        }
-
-        result
-    }
-
     /// Performs the convolution operation on the input tensor.
     ///
     /// This method implements the core convolution algorithm with optimizations:
@@ -349,7 +284,9 @@ impl Layer for Conv2D {
         let mut output = self.convolve(input);
 
         // Apply activation function
-        self.apply_activation(&mut output);
+        if let Some(activation) = &self.activation {
+            apply_activation_conv(activation, &mut output);
+        }
 
         output
     }
@@ -360,15 +297,18 @@ impl Layer for Conv2D {
             let batch_size = input_shape[0];
             let channels = input_shape[1];
             let grad_shape = grad_output.shape();
+            let mut grad_output = grad_output.clone();
 
             // Calculate derivatives of the activation function
-            let activation_grad = self.activation_derivative(grad_output);
+            if let Some(activation) = &self.activation {
+                activation_derivative_conv(activation, &mut grad_output);
+            }
 
             // Use rayon for parallel element-wise multiplication
-            let mut gradient = activation_grad.clone();
+            let mut gradient = grad_output.clone();
             if let (Some(grad_slice), Some(act_slice), Some(out_slice)) = (
                 gradient.as_slice_mut(),
-                activation_grad.as_slice(),
+                grad_output.as_slice(),
                 grad_output.as_slice(),
             ) {
                 grad_slice
@@ -379,7 +319,7 @@ impl Layer for Conv2D {
                     });
             } else {
                 // Fallback to loop implementation
-                for (i, v) in activation_grad.iter().enumerate() {
+                for (i, v) in grad_output.iter().enumerate() {
                     gradient.as_slice_mut().unwrap()[i] = v * grad_output.as_slice().unwrap()[i];
                 }
             }

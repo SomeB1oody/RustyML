@@ -11,12 +11,12 @@ fn test_conv1d_sequential_with_sgd() {
     let mut model = Sequential::new();
     model
         .add(Conv1D::new(
-            3,                  // filters
-            3,                  // kernel_size
-            vec![2, 1, 10],     // input_shape
-            1,                  // stride
-            PaddingType::Valid, // padding
-            Activation::ReLU,   // activation
+            3,                      // filters
+            3,                      // kernel_size
+            vec![2, 1, 10],         // input_shape
+            1,                      // stride
+            PaddingType::Valid,     // padding
+            Some(Activation::ReLU), // activation
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -51,12 +51,12 @@ fn test_conv1d_sequential_with_rmsprop() {
     let mut model = Sequential::new();
     model
         .add(Conv1D::new(
-            2,                  // filters
-            3,                  // kernel_size
-            vec![3, 2, 8],      // input_shape
-            1,                  // stride
-            PaddingType::Valid, // padding
-            Activation::Tanh,   // activation
+            2,                      // filters
+            3,                      // kernel_size
+            vec![3, 2, 8],          // input_shape
+            1,                      // stride
+            PaddingType::Valid,     // padding
+            Some(Activation::Tanh), // activation
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -87,7 +87,7 @@ fn test_conv1d_different_strides() {
         vec![1, 1, 20],
         2, // stride = 2
         PaddingType::Valid,
-        Activation::ReLU,
+        Some(Activation::ReLU),
     );
 
     let mut model = Sequential::new();
@@ -109,12 +109,12 @@ fn test_conv1d_multiple_channels() {
     let mut model = Sequential::new();
     model
         .add(Conv1D::new(
-            5,                  // filters
-            3,                  // kernel_size
-            vec![2, 3, 15],     // input_shape (3 channels)
-            1,                  // stride
-            PaddingType::Valid, // padding
-            Activation::ReLU,   // activation
+            5,                      // filters
+            3,                      // kernel_size
+            vec![2, 3, 15],         // input_shape (3 channels)
+            1,                      // stride
+            PaddingType::Valid,     // padding
+            Some(Activation::ReLU), // activation
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -143,7 +143,7 @@ fn test_conv1d_activation_functions() {
             vec![1, 1, 5],
             1,
             PaddingType::Valid,
-            Activation::ReLU,
+            Some(Activation::ReLU),
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -162,7 +162,7 @@ fn test_conv1d_activation_functions() {
             vec![1, 1, 5],
             1,
             PaddingType::Valid,
-            Activation::Sigmoid,
+            Some(Activation::Sigmoid),
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -181,7 +181,7 @@ fn test_conv1d_parameter_count() {
         vec![2, 2, 10], // input_shape (2 channels)
         1,
         PaddingType::Valid,
-        Activation::ReLU,
+        Some(Activation::ReLU),
     );
 
     // Parameter count = weights + bias = (4 * 2 * 3) + (1 * 4) = 24 + 4 = 28
@@ -189,7 +189,7 @@ fn test_conv1d_parameter_count() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot use Softmax activation function for convolutional layers")]
+#[should_panic(expected = "Cannot use Softmax for convolution")]
 fn test_conv1d_softmax_panic() {
     let x = Array3::ones((1, 1, 5)).into_dyn();
 
@@ -201,7 +201,7 @@ fn test_conv1d_softmax_panic() {
             vec![1, 1, 5],
             1,
             PaddingType::Valid,
-            Activation::Softmax, // This should cause a panic
+            Some(Activation::Softmax), // This should cause a panic
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 

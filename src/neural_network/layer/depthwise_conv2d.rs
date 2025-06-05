@@ -1,8 +1,8 @@
 use crate::ModelError;
-use crate::neural_network::Tensor;
 use crate::neural_network::layer::helper_functions::*;
 use crate::neural_network::layer::{DepthwiseConv2DLayerWeight, LayerWeight, PaddingType};
 use crate::neural_network::optimizer::*;
+use crate::neural_network::{Activation, Tensor};
 use crate::traits::Layer;
 use ndarray::{Array1, Array2, Array4, s};
 use rayon::prelude::*;
@@ -36,6 +36,24 @@ use rayon::prelude::*;
 /// use rustyml::prelude::*;
 /// use ndarray::prelude::*;
 ///
+/// // Create Sequential model
+/// let mut model = Sequential::new();
+///
+/// // Create and initialize DepthwiseConv2D layer
+/// let mut depthwise_layer = DepthwiseConv2D::new(
+///     3,                     // filters
+///     (2, 2),               // kernel_size
+///     (1, 1),               // strides
+///     PaddingType::Valid,   // padding
+///     Some(Activation::ReLU) // activation
+/// );
+/// depthwise_layer.initialize_weights(3);
+///
+/// // Add layer and compile model
+/// model
+///     .add(depthwise_layer)
+///     .compile(SGD::new(0.01), MeanSquaredError::new());
+///
 /// // Create test input data: [batch_size, channels, height, width]
 /// let batch_size = 1;
 /// let input_channels = 3;
@@ -44,7 +62,7 @@ use rayon::prelude::*;
 ///
 /// let mut input_data = Array4::zeros((batch_size, input_channels, height, width));
 ///
-/// // Set different values for each channel to verify that depthwise convolution processes channels separately
+/// // Set different values for each channel
 /// for c in 0..input_channels {
 ///     for h in 0..height {
 ///         for w in 0..width {
@@ -55,45 +73,35 @@ use rayon::prelude::*;
 ///
 /// let input = input_data.into_dyn();
 ///
-/// // Test DepthwiseConv2D using Sequential model
-/// let mut model = Sequential::new();
-///
-/// // Create layer and initialize weights
-/// let mut depthwise_layer = DepthwiseConv2D::new(
-///     input_channels, // filters must equal input_channels
-///     (2, 2),         // kernel_size
-///     (1, 1),         // strides
-///     PaddingType::Valid,
-/// );
-/// depthwise_layer.initialize_weights(input_channels);
-///
-/// model
-///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01), MeanSquaredError::new());
+/// // Display model structure
+/// model.summary();
 ///
 /// // Forward propagation
 /// let output = model.predict(&input);
 ///
-/// // Check output shape
+/// // Verify output shape
 /// // Input: [1, 3, 4, 4], kernel (2,2), stride (1,1), valid padding
 /// // Output should be: [1, 3, 3, 3]
 /// assert_eq!(output.shape(), &[1, 3, 3, 3]);
 ///
-/// // Print model structure
-/// model.summary();
+/// // Since ReLU activation is used, all output values should be non-negative
+/// for value in output.iter() {
+///     assert!(*value >= 0.0);
+/// }
 /// ```
 pub struct DepthwiseConv2D {
-    pub filters: usize,
-    pub kernel_size: (usize, usize),
-    pub strides: (usize, usize),
-    pub padding: PaddingType,
-    pub weights: Array4<f32>,
-    pub bias: Array1<f32>,
-    pub input: Option<Tensor>,
-    pub input_shape: Vec<usize>,
-    pub weight_gradients: Option<Array4<f32>>,
-    pub bias_gradients: Option<Array1<f32>>,
-    pub optimizer_cache: OptimizerCacheConv2D,
+    filters: usize,
+    kernel_size: (usize, usize),
+    strides: (usize, usize),
+    padding: PaddingType,
+    weights: Array4<f32>,
+    bias: Array1<f32>,
+    activation: Option<Activation>,
+    input: Option<Tensor>,
+    input_shape: Vec<usize>,
+    weight_gradients: Option<Array4<f32>>,
+    bias_gradients: Option<Array1<f32>>,
+    optimizer_cache: OptimizerCacheConv2D,
 }
 
 impl DepthwiseConv2D {
@@ -114,6 +122,7 @@ impl DepthwiseConv2D {
         kernel_size: (usize, usize),
         strides: (usize, usize),
         padding: PaddingType,
+        activation: Option<Activation>,
     ) -> Self {
         let (kernel_height, kernel_width) = kernel_size;
 
@@ -133,7 +142,11 @@ impl DepthwiseConv2D {
             input_shape: Vec::new(),
             weight_gradients: None,
             bias_gradients: None,
-            optimizer_cache: OptimizerCacheConv2D::default(),
+            activation,
+            optimizer_cache: OptimizerCacheConv2D {
+                adam_states: None,
+                rmsprop_cache: None,
+            },
         }
     }
 
@@ -253,7 +266,14 @@ impl Layer for DepthwiseConv2D {
                     });
             });
 
-        output.into_dyn()
+        let mut output = output.into_dyn();
+
+        // Apply activation function
+        if let Some(activation) = &self.activation {
+            apply_activation_conv(activation, &mut output);
+        }
+
+        output
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -262,7 +282,7 @@ impl Layer for DepthwiseConv2D {
         })?;
 
         let input_array = input.view();
-        let grad_output_array = grad_output.view();
+        let mut grad_output_array = grad_output.to_owned().into_dyn();
 
         let (batch_size, channels, input_height, input_width) = (
             input_array.shape()[0],
@@ -277,6 +297,11 @@ impl Layer for DepthwiseConv2D {
             grad_output_array.shape()[2],
             grad_output_array.shape()[3],
         );
+
+        // Apply activation derivative
+        if let Some(activation) = &self.activation {
+            activation_derivative_conv(activation, &mut grad_output_array);
+        }
 
         // Initialize gradients
         let mut weight_grads = Array4::zeros(self.weights.raw_dim());

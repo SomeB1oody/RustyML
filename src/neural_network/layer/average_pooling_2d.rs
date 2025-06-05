@@ -119,19 +119,6 @@ impl AveragePooling2D {
         }
     }
 
-    /// Calculates the output shape for the pooling operation.
-    ///
-    /// # Parameters
-    ///
-    /// * `input_shape` - Shape of the input tensor
-    ///
-    /// # Returns
-    ///
-    /// * `Vec<usize>` - Shape of the output tensor after pooling
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
-        calculate_output_shape_2d_pooling(input_shape, self.pool_size, self.strides)
-    }
-
     /// Performs average pooling operation.
     ///
     /// # Parameters
@@ -145,7 +132,8 @@ impl AveragePooling2D {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let channels = input_shape[1];
-        let output_shape = self.calculate_output_shape(input_shape);
+        let output_shape =
+            calculate_output_shape_2d_pooling(input_shape, self.pool_size, self.strides);
 
         // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());

@@ -76,7 +76,7 @@ impl AveragePooling3D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window (depth, height, width)
-    /// - `input_shape` - Shape of the input tensor [batch_size, channels, depth, height, width]
+    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, depth, height, width\]
     /// - `strides` - Optional strides, if None, the values will match `pool_size`
     ///
     /// # Returns
