@@ -266,7 +266,7 @@ pub mod global_max_pooling_2d;
 /// Global Max Pooling 3D Layer
 pub mod global_max_pooling_3d;
 /// A module containing helper functions for neural network layers.
-pub mod helper_functions;
+mod helper_functions;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
@@ -282,7 +282,7 @@ pub mod padding_type;
 /// A 2D separable convolutional layer for neural networks
 pub mod separable_conv2d;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
-mod simple_rnn;
+pub mod simple_rnn;
 
 pub use average_pooling_1d::*;
 pub use average_pooling_2d::*;
