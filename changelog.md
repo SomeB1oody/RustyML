@@ -5,10 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.6.2] - 2025-6-6 (UTC-7)
+## [v0.6.3] - 2025-6-6 (UTC-7)
+### Added
+- Add doc comments for `SeparableConv2D` and `DepthwiseConv2D` layer weights
+- Add lifetime parameter to `get_weights` return type across layers
+
 ### Changed
 - Update dependencies(`rand`, `rayon`, and `nalgebra`)
-- Add lifetime parameter to `get_weights` return type across layers
 
 ## [v0.6.2] - 2025-6-5 (UTC-7)
 ### Added
