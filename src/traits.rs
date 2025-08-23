@@ -157,7 +157,7 @@ pub trait Layer {
     ///   - `LayerWeight::Dense` for Dense layers with weight and bias
     ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
-    fn get_weights(&self) -> LayerWeight;
+    fn get_weights(&self) -> LayerWeight<'_>;
 }
 
 /// Defines the interface for loss functions used in neural network training.

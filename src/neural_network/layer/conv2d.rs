@@ -637,7 +637,7 @@ impl Layer for Conv2D {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::Conv2D(Conv2DLayerWeight {
             weight: &self.weights,
             bias: &self.bias,

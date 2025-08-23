@@ -734,7 +734,7 @@ impl Layer for SeparableConv2D {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::SeparableConv2DLayer(SeparableConv2DLayerWeight {
             weight: &self.depthwise_weights,
             bias: &self.bias,

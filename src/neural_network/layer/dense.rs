@@ -299,7 +299,7 @@ impl Layer for Dense {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::Dense(DenseLayerWeight {
             weight: &self.weights,
             bias: &self.bias,

@@ -191,7 +191,7 @@ impl Sequential {
     ///   - `LayerWeight::Dense` for Dense layers with weight and bias
     ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
-    pub fn get_weights(&self) -> Vec<LayerWeight> {
+    pub fn get_weights(&self) -> Vec<LayerWeight<'_>> {
         let mut weights = Vec::with_capacity(self.layers.len());
         for layer in &self.layers {
             weights.push(layer.get_weights());

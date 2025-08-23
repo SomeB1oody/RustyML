@@ -576,7 +576,7 @@ impl Layer for LSTM {
         );
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::LSTM(LSTMLayerWeight {
             input: LSTMGateWeight {
                 kernel: &self.input_gate.kernel,

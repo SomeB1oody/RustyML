@@ -577,7 +577,7 @@ impl Layer for DepthwiseConv2D {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight {
             weight: &self.weights,
             bias: &self.bias,

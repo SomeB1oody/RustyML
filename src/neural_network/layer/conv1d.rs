@@ -529,7 +529,7 @@ impl Layer for Conv1D {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::Conv1D(Conv1DLayerWeight {
             weight: &self.weights,
             bias: &self.bias,

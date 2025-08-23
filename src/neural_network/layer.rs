@@ -56,7 +56,7 @@ macro_rules! no_trainable_parameters_layer_functions {
             // This layer have no trainable parameters
         }
 
-        fn get_weights(&self) -> LayerWeight {
+        fn get_weights(&self) -> LayerWeight<'_> {
             // This layer has no weights
             LayerWeight::Empty
         }

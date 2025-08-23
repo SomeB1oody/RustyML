@@ -297,7 +297,7 @@ impl Layer for SimpleRNN {
         }
     }
 
-    fn get_weights(&self) -> LayerWeight {
+    fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::SimpleRNN(SimpleRNNLayerWeight {
             kernel: &self.kernel,
             recurrent_kernel: &self.recurrent_kernel,
