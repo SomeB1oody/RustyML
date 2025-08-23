@@ -91,11 +91,13 @@ use ndarray::prelude::*;
 /// 8. Missing Attribute Values: None
 ///
 /// Summary Statistics:
-/// 	             Min  Max   Mean    SD   Class Correlation
-///    sepal length: 4.3  7.9   5.84  0.83    0.7826
-///     sepal width: 2.0  4.4   3.05  0.43   -0.4194
-///    petal length: 1.0  6.9   3.76  1.76    0.9490  (high!)
-///     petal width: 0.1  2.5   1.20  0.76    0.9565  (high!)
+///
+/// | Feature | Min | Max | Mean | SD | Class Correlation |
+/// |---------|-----|-----|------|----|--------------------|
+/// | sepal length | 4.3 | 7.9 | 5.84 | 0.83 | 0.7826 |
+/// | sepal width | 2.0 | 4.4 | 3.05 | 0.43 | -0.4194 |
+/// | petal length | 1.0 | 6.9 | 3.76 | 1.76 | 0.9490 (high!) |
+/// | petal width | 0.1 | 2.5 | 1.20 | 0.76 | 0.9565 (high!) |
 ///
 /// 9. Class Distribution: 33.3% for each of 3 classes.
 pub fn load_iris() -> (Array2<f64>, Array1<String>) {
