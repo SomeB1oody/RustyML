@@ -240,11 +240,12 @@ pub fn standardize(x: &Array2<f64>) -> Array2<f64> {
 
     // Use parallel iteration to calculate mean and standard deviation for each column
     let feature_indices: Vec<usize> = (0..n_features).collect();
-    let stats: Vec<(f64, f64)> = feature_indices.par_iter()
+    let stats: Vec<(f64, f64)> = feature_indices
+        .par_iter()
         .map(|&i| {
             let col = x.column(i);
             let mean = col.mean().unwrap_or(0.0);
-            let std = standard_deviation(col);
+            let std = standard_deviation(col).unwrap();
             // Handle cases where standard deviation is zero
             let std = if std < 1e-10 { 1.0 } else { std };
             (mean, std)
@@ -260,7 +261,8 @@ pub fn standardize(x: &Array2<f64>) -> Array2<f64> {
 
     // Method 1: Process rows in parallel
     let row_indices: Vec<usize> = (0..n_samples).collect();
-    let results: Vec<_> = row_indices.par_iter()
+    let results: Vec<_> = row_indices
+        .par_iter()
         .map(|&i| {
             let mut row = Vec::with_capacity(n_features);
             for j in 0..n_features {

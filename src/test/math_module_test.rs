@@ -1,3 +1,4 @@
+use crate::ModelError;
 use crate::math::*;
 use approx::assert_relative_eq;
 use ndarray::{Array, Array1, array};
@@ -370,24 +371,29 @@ fn test_variance_with_variance() {
 fn test_standard_deviation() {
     // Test empty array
     let empty: Array1<f64> = array![];
-    assert_eq!(standard_deviation(empty.view()), 0.0);
+    assert_eq!(
+        standard_deviation(empty.view()),
+        Err(ModelError::InputValidationError(
+            "Cannot calculate standard deviation with empty input".to_string(),
+        ))
+    );
 
     // Test array with single element
     let single = array![5.0];
-    assert_eq!(standard_deviation(single.view()), 0.0);
+    assert_eq!(standard_deviation(single.view()), Ok(0.0));
 
     // Test array with all same values
     let same_values = array![2.0, 2.0, 2.0, 2.0];
-    assert!((standard_deviation(same_values.view()) - 0.0).abs() < f64::EPSILON);
+    assert!(standard_deviation(same_values.view()).unwrap().abs() < f64::EPSILON);
 
     // Test general case
     let values = array![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
     let expected = 2.0; // population standard deviation is 2.0
-    assert!((standard_deviation(values.view()) - expected).abs() < f64::EPSILON);
+    assert!((standard_deviation(values.view()).unwrap() - expected).abs() < f64::EPSILON);
 
     // Test with negative numbers
     let negative_values = array![-5.0, -3.0, 0.0, 3.0, 5.0];
     // Correct expected population standard deviation = sqrt(68/5)
     let expected = f64::sqrt(68.0 / 5.0);
-    assert!((standard_deviation(negative_values.view()) - expected).abs() < f64::EPSILON);
+    assert!((standard_deviation(negative_values.view()).unwrap() - expected).abs() < f64::EPSILON);
 }

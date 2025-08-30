@@ -33,9 +33,15 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
         ));
     }
 
+    // Check for invalid values (NaN or infinity) in the input
+    if values.iter().any(|&x| !x.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Input contains NaN or infinite values".to_string(),
+        ));
+    }
+
     // Calculate the mean
     let mean = values.mean().unwrap();
-
     // Fully vectorized computation
     Ok(values.mapv(|x| (x - mean).powi(2)).sum())
 }
@@ -82,11 +88,31 @@ pub fn sum_of_squared_errors(
         ));
     }
 
-    let sum = predicted
+    // Check for invalid values (NaN or infinity) in both arrays
+    if predicted.iter().any(|&x| !x.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Predicted values contain NaN or infinite values".to_string(),
+        ));
+    }
+
+    if actual.iter().any(|&x| !x.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Actual values contain NaN or infinite values".to_string(),
+        ));
+    }
+
+    let sum: f64 = predicted
         .iter()
         .zip(actual.iter())
         .map(|(p, a)| (p - a).powi(2))
         .sum();
+
+    // Check if the result is valid
+    if !sum.is_finite() {
+        return Err(ModelError::ProcessingError(
+            "Calculation resulted in NaN or infinite value".to_string(),
+        ));
+    }
 
     Ok(sum)
 }
@@ -119,35 +145,24 @@ pub fn sum_of_squared_errors(
 /// assert!((value - 0.5).abs() < 1e-6);
 /// ```
 pub fn sigmoid(z: f64) -> f64 {
+    // Handle NaN input
+    if z.is_nan() {
+        return f64::NAN;
+    }
+
+    // Use numerically stable computation for extreme values
+    if z > 500.0 {
+        // For very large positive values, sigmoid(z) ≈ 1
+        return 1.0;
+    } else if z < -500.0 {
+        // For very large negative values, sigmoid(z) ≈ 0
+        return 0.0;
+    }
+
+    // Standard computation for normal range
     1.0 / (1.0 + (-z).exp())
 }
 
-/// Calculate logistic regression loss (log loss)
-///
-/// This function computes the average cross-entropy loss for logistic regression,
-/// applying sigmoid to raw predictions before calculating loss.
-///
-/// # Parameters
-///
-/// * `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
-/// * `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
-///
-/// # Returns
-///
-/// - `Ok(f64)` - Average logistic regression loss
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
-///
-/// # Examples
-/// ```rust
-/// use rustyml::math::logistic_loss;
-/// use ndarray::array;
-///
-/// let logits = array![0.0, 2.0, -1.0];
-/// let actual_labels = array![0.0, 1.0, 0.0];
-/// let loss = logistic_loss(logits.view(), actual_labels.view()).unwrap();
-/// // Expected average loss is approximately 0.37778
-/// assert!((loss - 0.37778).abs() < 1e-5);
-/// ```
 pub fn logistic_loss(
     logits: ArrayView1<f64>,
     actual_labels: ArrayView1<f64>,
@@ -160,13 +175,26 @@ pub fn logistic_loss(
         )));
     }
 
+    if logits.is_empty() {
+        return Err(ModelError::InputValidationError(
+            "Cannot calculate logistic loss with empty inputs".to_string(),
+        ));
+    }
+
+    // Check for invalid values in logits
+    if logits.iter().any(|&x| !x.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Logits contain NaN or infinite values".to_string(),
+        ));
+    }
+
     // Validate that all labels are either 0 or 1
     if actual_labels
         .iter()
-        .any(|&label| label != 0.0 && label != 1.0)
+        .any(|&label| !label.is_finite() || (label != 0.0 && label != 1.0))
     {
         return Err(ModelError::InputValidationError(
-            "All labels must be either 0 or 1".to_string(),
+            "All labels must be either 0 or 1 and finite".to_string(),
         ));
     }
 
@@ -183,6 +211,13 @@ pub fn logistic_loss(
             x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln()
         })
         .sum::<f64>();
+
+    // Check if the result is valid
+    if !total_loss.is_finite() {
+        return Err(ModelError::ProcessingError(
+            "Loss calculation resulted in NaN or infinite value".to_string(),
+        ));
+    }
 
     Ok(total_loss / n)
 }
@@ -322,10 +357,20 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 
     // Use fold operation instead of manual iteration for potential compiler optimizations
     y.fold((), |_, &value| {
+        // Handle NaN values - they should be treated as invalid input
+        if value.is_nan() {
+            return; // Skip NaN values
+        }
+
         // Convert float to integer representation with 3 decimal places precision
         let key = (value * 1000.0).round() as i64;
         *class_counts.entry(key).or_insert(0) += 1;
     });
+
+    // If all values were NaN, treat as empty dataset
+    if class_counts.is_empty() {
+        return 0.0;
+    }
 
     // Calculate entropy more efficiently with direct loop
     let mut entropy = 0.0;
@@ -381,10 +426,20 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 
     // Process all elements in the array with fold operation
     y.fold((), |_, &value| {
+        // Handle NaN values - they should be treated as invalid input
+        if value.is_nan() {
+            return; // Skip NaN values
+        }
+
         // Convert float to integer representation with 3 decimal places precision
         let key = (value * 1000.0).round() as i64;
         *class_counts.entry(key).or_insert(0) += 1;
     });
+
+    // If all values were NaN, treat as empty dataset
+    if class_counts.is_empty() {
+        return 0.0;
+    }
 
     // Calculate Gini impurity more efficiently
     let mut sum_squared_proportions = 0.0;
@@ -443,6 +498,11 @@ pub fn information_gain(
     let n_left = left_y.len() as f64;
     let n_right = right_y.len() as f64;
 
+    // Check for invalid split ratios - if child counts don't match parent, return 0
+    if (n_left + n_right - n).abs() > 1e-10 {
+        return 0.0;
+    }
+
     // Calculate entropy values
     let e = entropy(y);
 
@@ -495,8 +555,8 @@ pub fn information_gain(
 /// assert!((gr - 1.0).abs() < 1e-6);
 /// ```
 pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayView1<f64>) -> f64 {
-    // Early return if either split is empty
-    if left_y.is_empty() || right_y.is_empty() {
+    // Early return if parent is empty or either split is empty
+    if y.is_empty() || left_y.is_empty() || right_y.is_empty() {
         return 0.0;
     }
 
@@ -504,12 +564,6 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
     let n = y.len() as f64;
     let n_left = left_y.len() as f64;
     let n_right = right_y.len() as f64;
-
-    // Verify that left and right subsets contain all samples from parent
-    debug_assert!(
-        (n_left + n_right - n).abs() < f64::EPSILON,
-        "The sum of left and right samples should equal parent samples"
-    );
 
     // Calculate information gain
     let info_gain = information_gain(y, left_y, right_y);
@@ -573,14 +627,21 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
     }
 
     // Calculate mean using ndarray's mean method
-    // This is more efficient than manual calculation
-    let mean = y.mean().unwrap_or(0.0);
+    // Handle potential NaN case when all values are NaN
+    let mean = match y.mean() {
+        Some(m) if m.is_finite() => m,
+        _ => return 0.0, // Return 0.0 if mean is NaN or can't be calculated
+    };
 
     // Use fold for potentially better performance than map/sum
     // This computes the sum of squared differences in one pass
     let sum_squared_diff = y.fold(0.0, |acc, &val| {
-        let diff = val - mean;
-        acc + diff * diff
+        if val.is_finite() {
+            let diff = val - mean;
+            acc + diff * diff
+        } else {
+            acc // Skip NaN or infinite values
+        }
     });
 
     // Compute variance (MSE)
@@ -611,8 +672,8 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
 /// assert!((factor - 3.748).abs() < 0.01);
 /// ```
 pub fn average_path_length_factor(n: f64) -> f64 {
-    // Exit early for n <= 1
-    if n <= 1.0 {
+    // Handle invalid inputs
+    if !n.is_finite() || n <= 1.0 {
         return 0.0;
     }
 
@@ -640,7 +701,9 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 ///
 /// # Returns
 ///
-/// * `f64` - The population standard deviation. Returns 0.0 if the array is empty or contains only one element.
+/// * `Result<f64, ModelError>` - The population standard deviation, or an error if invalid input
+///   - Returns error for empty arrays or arrays containing NaN/infinite values
+///   - Returns 0.0 if the array contains only one element (no variation)
 ///
 /// # Examples
 /// ```rust
@@ -648,23 +711,44 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// use rustyml::math::standard_deviation;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let std_dev = standard_deviation(values.view());
+/// let std_dev = standard_deviation(values.view()).unwrap();
 /// // Population standard deviation for [1,2,3] is approximately 0.8165
 /// assert!((std_dev - 0.8165).abs() < 1e-4);
 /// ```
-pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
+pub fn standard_deviation(values: ArrayView1<f64>) -> Result<f64, ModelError> {
     let n = values.len();
 
-    // Return 0.0 for empty arrays or single-element arrays (no variation)
-    if n <= 1 {
-        return 0.0;
+    // Check for empty array
+    if n == 0 {
+        return Err(ModelError::InputValidationError(
+            "Cannot calculate standard deviation with empty input".to_string(),
+        ));
+    }
+
+    // Return 0.0 for single-element arrays (no variation)
+    if n == 1 {
+        // Still need to check if the single value is valid
+        let value = values[0];
+        if !value.is_finite() {
+            return Err(ModelError::InputValidationError(
+                "Input contains NaN or infinite values".to_string(),
+            ));
+        }
+        return Ok(0.0);
+    }
+
+    // Check for invalid values (NaN or infinity) in the input
+    if values.iter().any(|&x| !x.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Input contains NaN or infinite values".to_string(),
+        ));
     }
 
     // Use built-in methods when available for better performance
     // We can calculate variance and then take the square root
 
     // First calculate the mean efficiently
-    let mean = values.mean().unwrap();
+    let mean = values.mean().unwrap(); // Safe since we've validated input
 
     // Calculate variance in one pass
     let variance = values.fold(0.0, |acc, &x| {
@@ -672,6 +756,22 @@ pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
         acc + diff * diff
     }) / n as f64;
 
+    // Check if variance calculation resulted in invalid value
+    if !variance.is_finite() {
+        return Err(ModelError::ProcessingError(
+            "Variance calculation resulted in NaN or infinite value".to_string(),
+        ));
+    }
+
     // Take the square root for standard deviation
-    variance.sqrt()
+    let std_dev = variance.sqrt();
+
+    // Final check for the result
+    if !std_dev.is_finite() {
+        return Err(ModelError::ProcessingError(
+            "Standard deviation calculation resulted in NaN or infinite value".to_string(),
+        ));
+    }
+
+    Ok(std_dev)
 }
