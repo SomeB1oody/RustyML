@@ -163,6 +163,32 @@ pub fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
+/// Calculate logistic regression loss (log loss)
+///
+/// This function computes the average cross-entropy loss for logistic regression,
+/// applying sigmoid to raw predictions before calculating loss.
+///
+/// # Parameters
+///
+/// * `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
+/// * `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
+///
+/// # Returns
+///
+/// - `Ok(f64)` - Average logistic regression loss
+/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+///
+/// # Examples
+/// ```rust
+/// use rustyml::math::logistic_loss;
+/// use ndarray::array;
+///
+/// let logits = array![0.0, 2.0, -1.0];
+/// let actual_labels = array![0.0, 1.0, 0.0];
+/// let loss = logistic_loss(logits.view(), actual_labels.view()).unwrap();
+/// // Expected average loss is approximately 0.37778
+/// assert!((loss - 0.37778).abs() < 1e-5);
+/// ```
 pub fn logistic_loss(
     logits: ArrayView1<f64>,
     actual_labels: ArrayView1<f64>,

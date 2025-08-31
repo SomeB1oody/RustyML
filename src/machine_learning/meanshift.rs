@@ -1,3 +1,4 @@
+use super::preliminary_check;
 use crate::ModelError;
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
@@ -254,12 +255,17 @@ impl MeanShift {
             ));
         }
 
-        use super::preliminary_check;
-
         preliminary_check(x, None)?;
 
         let n_samples = x.shape()[0];
         let n_features = x.shape()[1];
+
+        // Check for zero features
+        if n_features == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input data must have at least one feature".to_string(),
+            ));
+        }
 
         // Initialize seed points
         let seeds: Vec<usize> = if self.bin_seeding {
@@ -422,7 +428,23 @@ impl MeanShift {
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
+        // Check if input data is empty
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
         if let Some(centers) = &self.cluster_centers {
+            // Check if input feature dimensions match training data
+            if x.shape()[1] != centers.shape()[1] {
+                return Err(ModelError::InputValidationError(format!(
+                    "Input feature dimension {} does not match training dimension {}",
+                    x.shape()[1],
+                    centers.shape()[1]
+                )));
+            }
+
             let n_samples = x.shape()[0];
             let n_clusters = centers.shape()[0];
 

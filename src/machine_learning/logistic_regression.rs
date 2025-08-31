@@ -1,5 +1,7 @@
 pub use super::RegularizationType;
+use super::preliminary_check;
 use crate::ModelError;
+use crate::math::{logistic_loss, sigmoid};
 pub use crate::traits::RegressorCommonGetterFunctions;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
@@ -165,16 +167,17 @@ impl LogisticRegression {
     /// - `Ok(&mut Self)` - A mutable reference to the trained model, allowing for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        use super::preliminary_check;
-        use crate::math::{logistic_loss, sigmoid};
-
         // Preliminary check
         preliminary_check(x, Some(y))?;
+
+        // Check learning rate bounds
         if self.learning_rate <= 0.0 {
             return Err(ModelError::InputValidationError(
                 "Learning rate must be greater than 0.0".to_string(),
             ));
         }
+
+        // Check target values are binary
         for &val in y.iter() {
             if val != 0.0 && val != 1.0 {
                 return Err(ModelError::InputValidationError(
@@ -182,34 +185,27 @@ impl LogisticRegression {
                 ));
             }
         }
+
         let (n_samples, mut n_features) = x.dim();
-        for (i, y_val) in y.iter().enumerate() {
-            if y_val.is_nan() || y_val.is_infinite() {
-                return Err(ModelError::InputValidationError(format!(
-                    "Target vector contains NaN or infinite values, at index {}",
-                    i
-                )));
-            }
-        }
-        if self.max_iter <= 0 {
+
+        // Check max iterations
+        if self.max_iter == 0 {
             return Err(ModelError::InputValidationError(
                 "Maximum number of iterations must be greater than 0".to_string(),
             ));
         }
 
-        // Decide the source of x_train based on whether to use intercept: only allocate new matrix when intercept is needed
+        // Decide the source of x_train based on whether to use intercept
         let x_train_view: ArrayView2<f64>;
         let _x_train_owned: Option<Array2<f64>>;
 
         if self.fit_intercept {
             n_features += 1;
             let mut x_with_bias = Array2::ones((n_samples, n_features));
-            // Copy the original data to the last n_features-1 columns of the new matrix
             x_with_bias.slice_mut(s![.., 1..]).assign(&x);
             _x_train_owned = Some(x_with_bias);
             x_train_view = _x_train_owned.as_ref().unwrap().view();
         } else {
-            // When intercept is not needed, directly use the read-only view of x, no additional memory allocation
             _x_train_owned = None;
             x_train_view = x.view();
         }
@@ -225,6 +221,7 @@ impl LogisticRegression {
             n_iter += 1;
 
             let predictions = x_train_view.dot(&weights);
+
             // Parallel computation of sigmoid activation
             let sigmoid_preds = (0..n_samples)
                 .into_par_iter()
@@ -234,15 +231,14 @@ impl LogisticRegression {
 
             // Calculate prediction errors
             let errors = sigmoid_preds - y;
+
             // Calculate gradients
             let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
 
             if let Some(reg_type) = &self.regularization_type {
-                // Skip bias term (if present)
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
 
                 match reg_type {
-                    // L1 regularization (LASSO)
                     RegularizationType::L1(regularization_strength) => {
                         for i in start_idx..n_features {
                             let sign = if weights[i] > 0.0 {
@@ -255,7 +251,6 @@ impl LogisticRegression {
                             gradients[i] += regularization_strength * sign / n_samples as f64;
                         }
                     }
-                    // L2 regularization (Ridge)
                     RegularizationType::L2(regularization_strength) => {
                         for i in start_idx..n_features {
                             gradients[i] += regularization_strength * weights[i] / n_samples as f64;
@@ -267,7 +262,7 @@ impl LogisticRegression {
             // Update weights
             weights = &weights - self.learning_rate * &gradients;
 
-            // Calculate loss
+            // Calculate loss - propagate error from logistic_loss
             let raw_preds = x_train_view.dot(&weights);
             let mut cost = logistic_loss(raw_preds.view(), y.view())?;
 
@@ -322,6 +317,20 @@ impl LogisticRegression {
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
         let (n_samples, n_features) = x.dim();
 
+        // Check for empty input data
+        if n_samples == 0 {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
         // Declare a read-only view for subsequent prediction
         let x_test_view: ArrayView2<f64>;
         // If intercept is needed, create a new owned array
@@ -339,13 +348,17 @@ impl LogisticRegression {
             x_test_view = x.view();
         }
 
-        let probs = self.predict_proba(&x_test_view);
+        let probs = self.predict_proba(&x_test_view)?;
 
-        match probs {
-            // Apply a threshold (0.5) for classification
-            Ok(probs) => Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 })),
-            Err(e) => Err(e),
+        // Check if probabilities contain invalid values
+        if probs.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::ProcessingError(
+                "Probability calculation resulted in NaN or infinite values".to_string(),
+            ));
         }
+
+        // Apply a threshold (0.5) for classification
+        Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
     }
 
     /// Predicts probability scores for samples

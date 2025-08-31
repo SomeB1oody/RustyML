@@ -281,6 +281,7 @@ impl LinearSVC {
     /// - `Ok(&mut Self)`: Reference to self if training succeeds
     /// - `Err(ModelError)`: Error if validation fails or training encounters problems
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+        // Basic input validation
         if x.nrows() != y.len() {
             return Err(ModelError::InputValidationError(format!(
                 "Input data size mismatch: x.shape={}, y.shape={}",
@@ -289,11 +290,10 @@ impl LinearSVC {
             )));
         }
 
-        if self.max_iter <= 0 {
-            return Err(ModelError::InputValidationError(format!(
-                "max_iter must be greater than 0, got {}",
-                self.max_iter
-            )));
+        if self.max_iter == 0 {
+            return Err(ModelError::InputValidationError(
+                "max_iter must be greater than 0".to_string(),
+            ));
         }
 
         if self.learning_rate <= 0.0 {
@@ -401,6 +401,13 @@ impl LinearSVC {
                 if self.fit_intercept {
                     bias += self.learning_rate * bias_update / batch_indices.len() as f64;
                 }
+
+                // Check for weight explosion - potential error source
+                if weights.iter().any(|&w| !w.is_finite()) || !bias.is_finite() {
+                    return Err(ModelError::ProcessingError(
+                        "Weights became NaN or infinite during training. Try reducing learning_rate or regularization_param".to_string()
+                    ));
+                }
             }
 
             // Convergence check
@@ -447,7 +454,37 @@ impl LinearSVC {
         };
         let bias = self.bias.unwrap_or(0.0);
 
+        // Check for empty input - potential error source
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
+        // Check feature dimension mismatch - potential error source
+        if x.ncols() != weights.len() {
+            return Err(ModelError::InputValidationError(format!(
+                "Feature dimension mismatch: expected {}, got {}",
+                weights.len(),
+                x.ncols()
+            )));
+        }
+
+        // Check for NaN/Inf values in input - potential error source
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input features contain NaN or infinite values".to_string(),
+            ));
+        }
+
         let decision = x.dot(weights) + bias;
+
+        // Check for NaN/Inf in decision values - potential error source
+        if decision.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::ProcessingError(
+                "Decision function produced NaN or infinite values".to_string(),
+            ));
+        }
 
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }

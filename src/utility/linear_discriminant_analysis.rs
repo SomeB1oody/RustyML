@@ -1,5 +1,5 @@
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use crate::ModelError;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
 /// # Linear Discriminant Analysis (LDA)
@@ -145,53 +145,87 @@ impl LDA {
     /// # Returns
     ///
     /// - `Ok(&mut Self)` - Reference to self
-    /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>) -> Result<&mut Self, Box<dyn std::error::Error>> {
+    /// - `Err(ModelError::InputValidationError)` - If input validation fails
+    /// - `Err(ModelError::ProcessingError)` - If matrix operations fail
+    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>) -> Result<&mut Self, ModelError> {
         // Input validation
         if x.nrows() != y.len() {
-            return Err(Box::new(ModelError::InputValidationError(
-                format!("x.nrows() {} != y.len() {}", x.nrows(), y.len())
+            return Err(ModelError::InputValidationError(format!(
+                "x.nrows() {} != y.len() {}",
+                x.nrows(),
+                y.len()
             )));
         }
         if x.is_empty() || y.len() == 0 {
-            return Err(Box::new(ModelError::InputValidationError(
-                "Input array is empty".to_string()
-            )));
+            return Err(ModelError::InputValidationError(
+                "Input array is empty".to_string(),
+            ));
         }
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
+
+        // Check minimum requirements for LDA
+        if n_features == 0 {
+            return Err(ModelError::InputValidationError(
+                "Number of features must be greater than 0".to_string(),
+            ));
+        }
 
         // Extract unique class labels from y
         let mut classes_vec: Vec<i32> = y.iter().copied().collect();
         classes_vec.sort();
         classes_vec.dedup();
         if classes_vec.len() < 2 {
-            return Err(Box::new(ModelError::InputValidationError(
-                "At least two distinct classes are required".to_string()
+            return Err(ModelError::InputValidationError(
+                "At least two distinct classes are required".to_string(),
+            ));
+        }
+
+        // Check if we have enough samples for reliable covariance estimation
+        if n_samples <= n_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of samples ({}) must be greater than number of features ({}) for stable covariance estimation",
+                n_samples, n_features
             )));
         }
+
         let classes_arr = Array1::from_vec(classes_vec);
         self.classes = Some(classes_arr);
 
         let n_classes = self.classes.as_ref().unwrap().len();
         let classes = self.classes.as_ref().unwrap();
 
+        // Ensure each class has enough samples
+        for &class in classes.iter() {
+            let class_count = y.iter().filter(|&&val| val == class).count();
+            if class_count < 2 {
+                return Err(ModelError::InputValidationError(format!(
+                    "Class {} has only {} sample(s). Each class must have at least 2 samples",
+                    class, class_count
+                )));
+            }
+        }
+
         // Calculate prior probabilities and means for each class in parallel
-        let class_stats: Vec<(usize, f64, Array1<f64>, Vec<usize>)> = classes.iter().enumerate()
+        let class_stats: Vec<(usize, f64, Array1<f64>, Vec<usize>)> = classes
+            .iter()
+            .enumerate()
             .map(|(i, &class)| {
-                let indices: Vec<usize> = y.indexed_iter()
+                let indices: Vec<usize> = y
+                    .indexed_iter()
                     .filter(|&(_, &val)| val == class)
                     .map(|(idx, _)| idx)
                     .collect();
                 let n_class = indices.len();
                 let prior = n_class as f64 / n_samples as f64;
                 let class_data = x.select(Axis(0), &indices);
-                let mean_row = class_data.mean_axis(Axis(0))
-                    .expect("Error computing class mean");
-                (i, prior, mean_row, indices)
+                let mean_row = class_data.mean_axis(Axis(0)).ok_or_else(|| {
+                    ModelError::ProcessingError("Error computing class mean".to_string())
+                })?;
+                Ok((i, prior, mean_row, indices))
             })
-            .collect();
+            .collect::<Result<Vec<_>, ModelError>>()?;
 
         // Extract prior probabilities and means
         let mut priors_vec = Vec::with_capacity(n_classes);
@@ -207,38 +241,62 @@ impl LDA {
         self.means = Some(means_mat);
 
         // Calculate within-class scatter matrix (Sw) in parallel
-        let sw_parts: Vec<Array2<f64>> = class_indices.par_iter()
+        let sw_parts: Vec<Array2<f64>> = class_indices
+            .par_iter()
             .map(|(i, indices)| {
                 let class_data = x.select(Axis(0), indices);
                 let class_mean = &self.means.as_ref().unwrap().row(*i);
-                class_data.outer_iter()
-                    .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, row| {
+                class_data.outer_iter().fold(
+                    Array2::<f64>::zeros((n_features, n_features)),
+                    |acc, row| {
                         let diff = &row - class_mean;
                         let diff_col = diff.insert_axis(Axis(1));
                         acc + diff_col.dot(&diff_col.t())
-                    })
+                    },
+                )
             })
             .collect();
 
-        let sw = sw_parts.into_iter()
-            .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, matrix| acc + matrix);
+        let sw = sw_parts.into_iter().fold(
+            Array2::<f64>::zeros((n_features, n_features)),
+            |acc, matrix| acc + matrix,
+        );
 
         // Estimate covariance matrix: cov = Sw / (n_samples - n_classes)
         let cov = sw / ((n_samples - n_classes) as f64);
 
+        // Add regularization to improve numerical stability
+        let regularization: f64 = 1e-6;
+        let regularized_cov: Array2<f64> = cov + Array2::<f64>::eye(n_features) * regularization;
+
         // Convert cov from ndarray to nalgebra DMatrix and calculate its inverse
-        let cov_slice = cov.as_slice().ok_or("Failed to convert cov to slice")?;
+        let cov_slice = regularized_cov.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert covariance matrix to slice".to_string())
+        })?;
         let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
-        let cov_inv_mat = cov_mat.try_inverse().ok_or("Failed to invert covariance matrix")?;
-        let cov_inv_arr = Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec())?;
+
+        let cov_inv_mat = cov_mat.try_inverse()
+            .ok_or_else(|| ModelError::ProcessingError("Covariance matrix is singular and cannot be inverted. Try adding more regularization or using more samples".to_string()))?;
+
+        let cov_inv_arr =
+            Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec())
+                .map_err(|e| {
+                    ModelError::ProcessingError(format!(
+                        "Failed to create inverse covariance array: {}",
+                        e
+                    ))
+                })?;
         self.cov_inv = Some(cov_inv_arr);
 
         // Calculate overall mean of x
-        let overall_mean = x.mean_axis(Axis(0))
-            .ok_or(ModelError::ProcessingError("Error computing overall mean".to_string()))?;
+        let overall_mean = x.mean_axis(Axis(0)).ok_or_else(|| {
+            ModelError::ProcessingError("Error computing overall mean".to_string())
+        })?;
 
         // Calculate between-class scatter matrix (Sb) in parallel
-        let sb_parts: Vec<Array2<f64>> = classes.iter().enumerate()
+        let sb_parts: Vec<Array2<f64>> = classes
+            .iter()
+            .enumerate()
             .collect::<Vec<_>>()
             .par_iter()
             .map(|&(i, &class)| {
@@ -248,28 +306,42 @@ impl LDA {
                 count * diff_col.dot(&diff_col.t())
             })
             .collect();
-        let sb = sb_parts.into_iter()
-            .fold(Array2::<f64>::zeros((n_features, n_features)), |acc, matrix| acc + matrix);
+        let sb = sb_parts.into_iter().fold(
+            Array2::<f64>::zeros((n_features, n_features)),
+            |acc, matrix| acc + matrix,
+        );
 
         // Solve generalized eigenvalue problem: calculate a_mat = cov_inv * Sb
         let cov_inv = self.cov_inv.as_ref().unwrap();
         let a_mat = cov_inv.dot(&sb);
+
         // Symmetrize a_mat to ensure symmetric eigendecomposition: a_sym = (a_mat + a_mat^T)/2
         let a_sym = (a_mat.clone() + a_mat.t()) * 0.5;
-        let a_slice = a_sym.as_slice().ok_or("Failed to convert a_sym to slice")?;
+        let a_slice = a_sym.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError(
+                "Failed to convert matrix for eigendecomposition".to_string(),
+            )
+        })?;
         let a_dmat = nalgebra::DMatrix::from_row_slice(n_features, n_features, a_slice);
         let sym_eigen = nalgebra::SymmetricEigen::new(a_dmat);
 
         // Convert eigenvalues and eigenvectors from nalgebra to ndarray format
         let eigenvalues = Array1::from_vec(sym_eigen.eigenvalues.as_slice().to_vec());
-        let eigenvectors = Array2::from_shape_vec((n_features, n_features), sym_eigen.eigenvectors.as_slice().to_vec())?;
+        let eigenvectors = Array2::from_shape_vec(
+            (n_features, n_features),
+            sym_eigen.eigenvectors.as_slice().to_vec(),
+        )
+        .map_err(|e| {
+            ModelError::ProcessingError(format!("Failed to create eigenvectors array: {}", e))
+        })?;
 
         // Sort indices by eigenvalues in descending order
-        let mut eig_pairs: Vec<(usize, f64)> = eigenvalues.iter()
+        let mut eig_pairs: Vec<(usize, f64)> = eigenvalues
+            .iter()
             .enumerate()
             .map(|(i, &val)| (i, val))
             .collect();
-        eig_pairs.par_sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        eig_pairs.par_sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // LDA's maximum dimensionality is n_classes - 1
         let max_components = if n_classes > 1 { n_classes - 1 } else { 1 };
@@ -298,7 +370,9 @@ impl LDA {
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
         if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError("Input array is empty".to_string()));
+            return Err(ModelError::InputValidationError(
+                "Input array is empty".to_string(),
+            ));
         }
         if self.classes.is_none() || self.means.is_none() || self.cov_inv.is_none() {
             return Err(ModelError::NotFitted);
@@ -311,13 +385,19 @@ impl LDA {
         let n_classes = classes.len();
 
         // Use Rayon's parallel iteration
-        let predictions: Vec<i32> = x.outer_iter()
-            .into_par_iter()  // Convert to parallel iterator
+        let predictions: Vec<i32> = x
+            .outer_iter()
+            .into_par_iter() // Convert to parallel iterator
             .map(|row| {
                 let mut best_score = f64::NEG_INFINITY;
                 let mut best_class = classes[0];
                 for j in 0..n_classes {
-                    let score = self.discriminant_score(&row.to_owned(), &means.row(j).to_owned(), priors[j], cov_inv);
+                    let score = self.discriminant_score(
+                        &row.to_owned(),
+                        &means.row(j).to_owned(),
+                        priors[j],
+                        cov_inv,
+                    );
                     if score > best_score {
                         best_score = score;
                         best_class = classes[j];
@@ -342,16 +422,23 @@ impl LDA {
     ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
-    pub fn transform(&self, x: ArrayView2<f64>, n_components: usize) -> Result<Array2<f64>, ModelError> {
+    pub fn transform(
+        &self,
+        x: ArrayView2<f64>,
+        n_components: usize,
+    ) -> Result<Array2<f64>, ModelError> {
         if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError("Input array is empty".to_string()));
+            return Err(ModelError::InputValidationError(
+                "Input array is empty".to_string(),
+            ));
         }
         let proj = self.projection.as_ref().ok_or(ModelError::NotFitted)?;
         let total_components = proj.ncols();
         if n_components == 0 || n_components > total_components {
-            return Err(ModelError::InputValidationError(
-                format!("n_components should be in range [1, {}], got {}", total_components, n_components)
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "n_components should be in range [1, {}], got {}",
+                total_components, n_components
+            )));
         }
         let w_reduced = proj.slice(s![.., 0..n_components]).to_owned();
         Ok(x.dot(&w_reduced))
@@ -369,7 +456,12 @@ impl LDA {
     ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
-    pub fn fit_transform(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>, n_components: usize) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+    pub fn fit_transform(
+        &mut self,
+        x: ArrayView2<f64>,
+        y: ArrayView1<i32>,
+        n_components: usize,
+    ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         self.fit(x, y)?;
         Ok(self.transform(x, n_components)?)
     }

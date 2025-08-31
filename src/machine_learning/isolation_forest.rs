@@ -1,10 +1,12 @@
-use ndarray::{Array1, Array2, Axis, s, ArrayView2};
-use rand::prelude::*;
-use rand::rngs::StdRng;
-use rand::rng;
-use crate::machine_learning::decision_tree::{Node, NodeType};
+use super::preliminary_check;
 use crate::ModelError;
+use crate::machine_learning::decision_tree::{Node, NodeType};
+use ndarray::{Array1, Array2, ArrayView2, Axis, s};
+use rand::prelude::*;
+use rand::rng;
+use rand::rngs::StdRng;
 use rayon::prelude::*;
+use std::sync::Arc;
 
 /// # Implementation of Isolation Forest, a decision forest based on randomly generated Isolation Trees
 ///
@@ -44,10 +46,10 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct IsolationForest {
-    trees: Option<Vec<Box<Node>>>,   // Stores multiple Isolation Trees (each tree is a Node tree)
-    n_estimators: usize,     // Number of trees in the forest
-    max_samples: usize,      // Number of subsamples for each tree
-    max_depth: usize,        // Maximum depth of each tree (defaults to ceil(log2(max_samples)))
+    trees: Option<Vec<Box<Node>>>, // Stores multiple Isolation Trees (each tree is a Node tree)
+    n_estimators: usize,           // Number of trees in the forest
+    max_samples: usize,            // Number of subsamples for each tree
+    max_depth: usize, // Maximum depth of each tree (defaults to ceil(log2(max_samples)))
     random_state: Option<u64>, // Random seed, can be used for result reproducibility
 }
 
@@ -89,10 +91,14 @@ impl IsolationForest {
     /// # Returns
     ///
     /// * `Self` - A new IsolationForest instance
-    pub fn new(n_estimators: usize, max_samples: usize, max_depth: Option<usize>, random_state: Option<u64>) -> Self {
-        let computed_max_depth = max_depth.unwrap_or_else(|| {
-            (max_samples as f64).log2().ceil() as usize
-        });
+    pub fn new(
+        n_estimators: usize,
+        max_samples: usize,
+        max_depth: Option<usize>,
+        random_state: Option<u64>,
+    ) -> Self {
+        let computed_max_depth =
+            max_depth.unwrap_or_else(|| (max_samples as f64).log2().ceil() as usize);
         IsolationForest {
             trees: None,
             n_estimators,
@@ -163,59 +169,65 @@ impl IsolationForest {
     ///
     /// - `Ok(&mut Self)` - Trained instance
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError>{
-        use super::preliminary_check;
-        use std::sync::Arc;
-
+    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
         preliminary_check(x, None)?;
 
-        if self.max_samples <= 0 {
-            return Err(ModelError::InputValidationError("max_samples must be greater than 0".to_string()));
+        if self.max_samples == 0 {
+            return Err(ModelError::InputValidationError(
+                "max_samples must be greater than 0".to_string(),
+            ));
         }
 
-        if self.n_estimators <= 0 {
-            return Err(ModelError::InputValidationError("n_estimators must be greater than 0".to_string()));
+        if self.n_estimators == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_estimators must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.max_depth == 0 {
+            return Err(ModelError::InputValidationError(
+                "max_depth must be greater than 0".to_string(),
+            ));
         }
 
         let n_rows = x.nrows();
+
         // Initialize random number generator with the main seed
-        let main_seed = self.random_state.map_or_else(
-            || {
-                let mut temp_rng = rng();
-                temp_rng.random::<u64>()
-            },
-            |seed| seed
-        );
+        let main_seed = self.random_state.unwrap_or_else(|| {
+            let mut temp_rng = rng();
+            temp_rng.random::<u64>()
+        });
 
         // Create an Arc to share the input data across threads
         let x_arc = Arc::new(x.clone());
 
-        // Generate trees in parallel
-        let trees: Vec<_> = (0..self.n_estimators)
-            .into_par_iter()  // Process each tree in parallel
-            .map(|i| {
-                // Create a new RNG for each tree with a derived seed
+        // Generate trees in parallel - collect into Result to handle potential errors
+        let trees_result: Result<Vec<_>, ModelError> = (0..self.n_estimators)
+            .into_par_iter()
+            .map(|i| -> Result<Box<Node>, ModelError> {
                 let mut tree_rng = StdRng::seed_from_u64(main_seed.wrapping_add(i as u64));
 
-                // For each tree, sample max_samples rows from the data
                 let sample_indices = if self.max_samples < n_rows {
                     let mut indices: Vec<usize> = (0..n_rows).collect();
                     indices.shuffle(&mut tree_rng);
-                    indices[..self.max_samples].to_vec()
+                    indices.into_iter().take(self.max_samples).collect()
                 } else {
-                    (0..n_rows).collect()
+                    (0..n_rows).collect::<Vec<usize>>()
                 };
 
                 let sample = x_arc.select(Axis(0), &sample_indices);
-                Self::build_tree(&sample, 0, self.max_depth, &mut tree_rng)
+                Ok(Self::build_tree(&sample, 0, self.max_depth, &mut tree_rng))
             })
             .collect();
 
-        self.trees = Some(trees);
-
-        println!("Finished building Isolation Forest");
-
-        Ok(self)
+        match trees_result {
+            Ok(trees) => {
+                self.trees = Some(trees);
+                println!("Finished building Isolation Forest");
+                Ok(self)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Recursively constructs an Isolation Tree
@@ -233,7 +245,12 @@ impl IsolationForest {
     ///
     /// If sample count <= 1 or max_depth is reached, returns a leaf node
     /// where the value represents the number of samples in that node
-    fn build_tree(x: &Array2<f64>, current_depth: usize, max_depth: usize, rng: &mut impl Rng) -> Box<Node> {
+    fn build_tree(
+        x: &Array2<f64>,
+        current_depth: usize,
+        max_depth: usize,
+        rng: &mut impl Rng,
+    ) -> Box<Node> {
         let n_samples = x.nrows();
         if current_depth >= max_depth || n_samples <= 1 {
             // Leaf node: value records the number of samples in this node
@@ -273,7 +290,12 @@ impl IsolationForest {
 
         let mut node = Node::new_internal(feature_index, split_value);
         node.left = Some(Self::build_tree(&left_x, current_depth + 1, max_depth, rng));
-        node.right = Some(Self::build_tree(&right_x, current_depth + 1, max_depth, rng));
+        node.right = Some(Self::build_tree(
+            &right_x,
+            current_depth + 1,
+            max_depth,
+            rng,
+        ));
 
         Box::new(node)
     }
@@ -294,13 +316,17 @@ impl IsolationForest {
     /// returns the current depth plus the adjustment factor c(n)
     fn path_length(node: &Box<Node>, sample: &[f64], current_depth: f64) -> f64 {
         use crate::math::average_path_length_factor;
-        
+
         match &node.node_type {
             NodeType::Leaf { value, .. } => {
                 // value stores the number of samples in the leaf node
                 current_depth + average_path_length_factor(*value)
-            },
-            NodeType::Internal { feature_index, threshold, .. } => {
+            }
+            NodeType::Internal {
+                feature_index,
+                threshold,
+                ..
+            } => {
                 if sample[*feature_index] < *threshold {
                     if let Some(ref left) = node.left {
                         Self::path_length(left, sample, current_depth + 1.0)
@@ -314,31 +340,21 @@ impl IsolationForest {
                         current_depth + 1.0
                     }
                 }
-            },
+            }
         }
     }
 
-    /// Calculates the anomaly score for a single sample
-    ///
-    /// # Parameters
-    ///
-    /// * `sample` - Input sample as a slice of features
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - Anomaly score between 0 and 1, where higher values indicate more anomalous samples
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    ///
-    /// # Notes
-    ///
-    /// The anomaly score is calculated as: score = 2^(-E(h(x))/c(max_samples))
-    /// where E(h(x)) is the average path length of the sample across all trees,
-    /// and c(n) is the adjustment factor for leaf nodes
     pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, ModelError> {
         use crate::math::average_path_length_factor;
 
         // Check if the model has been trained
         let trees = self.get_trees()?;
+
+        if sample.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Sample cannot be empty".to_string(),
+            ));
+        }
 
         // Dimension checking
         fn find_max_feature_index(node: &Box<Node>, max_index: &mut usize) {
@@ -352,14 +368,11 @@ impl IsolationForest {
                         find_max_feature_index(right, max_index);
                     }
                 }
-                NodeType::Leaf { .. } => {
-                    // Leaf nodes do not contain feature indexes
-                }
+                NodeType::Leaf { .. } => {}
             }
         }
 
         let expected_dimension = if let Some(first_tree) = trees.first() {
-            
             let mut max_feature_index = 0;
             find_max_feature_index(first_tree, &mut max_feature_index);
             max_feature_index + 1
@@ -367,35 +380,84 @@ impl IsolationForest {
             return Err(ModelError::NotFitted);
         };
 
-        
         if sample.len() != expected_dimension {
-            return Err(ModelError::InputValidationError("Input dimension does not match training data".to_string()));
+            return Err(ModelError::InputValidationError(format!(
+                "Input dimension mismatch: expected {}, got {}",
+                expected_dimension,
+                sample.len()
+            )));
         }
 
+        // Check for invalid values (NaN or infinite)
+        for (i, &value) in sample.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(ModelError::InputValidationError(format!(
+                    "Invalid value at index {}: {}",
+                    i, value
+                )));
+            }
+        }
 
         // Continue with original logic
         let mut path_length_sum = 0.0;
         for tree in trees {
-            path_length_sum += Self::path_length(tree, sample, 0.0);
+            let path_len = Self::path_length(tree, sample, 0.0);
+            if !path_len.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Path length calculation failed".to_string(),
+                ));
+            }
+            path_length_sum += path_len;
         }
 
         let avg_path_length = path_length_sum / trees.len() as f64;
         let cn = average_path_length_factor(self.max_samples as f64);
-        Ok(2f64.powf(-avg_path_length / cn))
+
+        // Check if cn is valid (not zero or invalid)
+        if cn <= 0.0 || !cn.is_finite() {
+            return Err(ModelError::ProcessingError(
+                "Invalid normalization factor".to_string(),
+            ));
+        }
+
+        let score = 2f64.powf(-avg_path_length / cn);
+
+        // Final validation of the score
+        if !score.is_finite() {
+            return Err(ModelError::ProcessingError(
+                "Anomaly score calculation failed".to_string(),
+            ));
+        }
+
+        Ok(score)
     }
 
-    /// Predicts anomaly scores for multiple samples, returning a 1D array
-    /// (each score corresponds to one sample)
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - 2D array of samples to predict
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<f64>)` - Array of anomaly scores for each input sample
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // First check if input is empty
+        if x.nrows() == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
+        if x.ncols() == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input features cannot be empty".to_string(),
+            ));
+        }
+
+        // Check for invalid values (NaN or infinite) in input data
+        for (row_idx, row) in x.axis_iter(ndarray::Axis(0)).enumerate() {
+            for (col_idx, &value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Invalid value at row {}, column {}: {}",
+                        row_idx, col_idx, value
+                    )));
+                }
+            }
+        }
+
         // Convert each row to a vector
         let samples: Vec<Vec<f64>> = (0..x.nrows())
             .map(|i| x.slice(s![i, ..]).to_vec())
@@ -408,10 +470,7 @@ impl IsolationForest {
             .collect();
 
         // Handle potential errors and convert results to Array1
-        match result {
-            Ok(scores) => Ok(Array1::from(scores)),
-            Err(e) => Err(e),
-        }
+        result.map(Array1::from)
     }
 
     /// Fits the model and performs anomaly detection in one step

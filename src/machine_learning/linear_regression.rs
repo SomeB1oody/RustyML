@@ -1,4 +1,5 @@
 pub use super::RegularizationType;
+use super::preliminary_check;
 pub use crate::traits::RegressorCommonGetterFunctions;
 use crate::{ModelError, math};
 use ndarray::{Array1, ArrayView1, ArrayView2};
@@ -167,10 +168,19 @@ impl LinearRegression {
     ///
     /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// Fits the linear regression model using gradient descent
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix, each row is a sample, each column is a feature
+    /// - `y` - Target variable vector
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
+    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        // Ensure x and y have the same number of samples
-        use super::preliminary_check;
-
+        // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
 
         let n_samples = x.nrows();
@@ -216,6 +226,13 @@ impl LinearRegression {
             let cost = sse / (2.0 * n_samples as f64) + regularization_term; // Mean squared error divided by 2
             final_cost = cost;
 
+            // Check for numerical issues in cost
+            if !cost.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Cost calculation resulted in NaN or infinite value".to_string(),
+                ));
+            }
+
             // Calculate gradients in parallel
             let gradients_result: (Array1<f64>, f64) = (0..n_samples)
                 .into_par_iter()
@@ -243,6 +260,13 @@ impl LinearRegression {
             let mut gradients = gradients_result.0 / (n_samples as f64);
             let intercept_gradient = gradients_result.1 / (n_samples as f64);
 
+            // Check for numerical issues in gradients
+            if gradients.iter().any(|&val| !val.is_finite()) || !intercept_gradient.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Gradient calculation resulted in NaN or infinite values".to_string(),
+                ));
+            }
+
             match &self.regularization_type {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
@@ -261,6 +285,13 @@ impl LinearRegression {
             weights -= &(&gradients * self.learning_rate);
             if self.fit_intercept {
                 intercept -= self.learning_rate * intercept_gradient;
+            }
+
+            // Check for numerical issues in updated parameters
+            if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Parameter update resulted in NaN or infinite values".to_string(),
+                ));
             }
 
             // Check convergence
@@ -297,6 +328,7 @@ impl LinearRegression {
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If number of features does not match training data
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check if model has been fitted
         if self.coefficients.is_none() {
             return Err(ModelError::NotFitted);
         }
@@ -304,12 +336,27 @@ impl LinearRegression {
         let coeffs = self.coefficients.as_ref().unwrap();
         let intercept = self.intercept.unwrap_or(0.0);
 
+        // Check for empty input data
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        // Check feature dimension match
         if x.ncols() != coeffs.len() {
             return Err(ModelError::InputValidationError(format!(
                 "Number of features does not match training data, x columns: {}, coefficients: {}",
                 x.ncols(),
                 coeffs.len()
             )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
         }
 
         let predictions = (0..x.nrows())
@@ -319,8 +366,15 @@ impl LinearRegression {
                 intercept + row.dot(coeffs)
             })
             .collect::<Vec<f64>>();
-        let predictions = Array1::from(predictions);
 
+        // Check if predictions contain invalid values
+        if predictions.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::ProcessingError(
+                "Prediction calculation resulted in NaN or infinite values".to_string(),
+            ));
+        }
+
+        let predictions = Array1::from(predictions);
         Ok(predictions)
     }
 

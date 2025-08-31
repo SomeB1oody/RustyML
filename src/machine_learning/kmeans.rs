@@ -1,4 +1,6 @@
+use super::preliminary_check;
 use crate::ModelError;
+use crate::math::squared_euclidean_distance_row;
 use ndarray::{Array1, Array2, ArrayView2};
 use rand::Rng;
 use rand::SeedableRng;
@@ -243,7 +245,6 @@ impl KMeans {
     ///
     /// * `data` - Training data as a 2D array
     fn init_centroids(&mut self, data: ArrayView2<f64>) {
-        use crate::math::squared_euclidean_distance_row;
         let n_samples = data.shape()[0];
         let n_features = data.shape()[1];
 
@@ -314,8 +315,6 @@ impl KMeans {
     /// - `&mut Self` - A mutable reference to self for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, data: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
-        use super::preliminary_check;
-
         preliminary_check(data, None)?;
 
         let n_samples = data.shape()[0];
@@ -342,11 +341,13 @@ impl KMeans {
                 .into_par_iter()
                 .map(|sample| {
                     // Reshape sample to a view of shape (1, n_features)
-                    let sample_shaped = sample.to_shape((1, n_features)).unwrap();
+                    let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
+                        ModelError::InputValidationError("Failed to reshape sample".to_string())
+                    })?;
                     let sample_view = sample_shaped.view();
-                    self.closest_centroid(&sample_view)
+                    Ok(self.closest_centroid(&sample_view))
                 })
-                .collect();
+                .collect::<Result<Vec<_>, ModelError>>()?;
 
             // Aggregate inertia and update labels for each sample
             let inertia: f64 = results.iter().map(|&(_, d)| d).sum();
@@ -386,7 +387,12 @@ impl KMeans {
                     let mut max_dist = -1.0;
                     let mut farthest_idx = 0;
                     for (sample_idx, sample) in data.outer_iter().enumerate() {
-                        let sample_shaped = sample.to_shape((1, n_features)).unwrap();
+                        let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
+                            ModelError::InputValidationError(
+                                "Failed to reshape sample during empty cluster handling"
+                                    .to_string(),
+                            )
+                        })?;
                         let sample_view = sample_shaped.view();
                         let (_, dist) = self.closest_centroid(&sample_view);
                         if dist > max_dist {
@@ -429,20 +435,34 @@ impl KMeans {
         if self.centroids.is_none() {
             return Err(ModelError::NotFitted);
         }
+
         let n_features = data.shape()[1];
 
-        let labels: Vec<usize> = data
+        // Verify feature dimensions match
+        let expected_features = self.centroids.as_ref().unwrap().shape()[1];
+        if n_features != expected_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Feature dimension mismatch: expected {}, got {}",
+                expected_features, n_features
+            )));
+        }
+
+        let labels: Result<Vec<usize>, ModelError> = data
             .outer_iter()
             .into_par_iter()
             .map(|sample| {
-                let sample_shaped = sample.to_shape((1, n_features)).unwrap();
+                let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
+                    ModelError::InputValidationError(
+                        "Failed to reshape sample during prediction".to_string(),
+                    )
+                })?;
                 let sample_view = sample_shaped.view();
                 let (closest_idx, _) = self.closest_centroid(&sample_view);
-                closest_idx
+                Ok(closest_idx)
             })
             .collect();
 
-        Ok(Array1::from(labels))
+        Ok(Array1::from(labels?))
     }
 
     /// Fits the model and predicts cluster indices for the input data.

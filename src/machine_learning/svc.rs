@@ -334,6 +334,19 @@ impl SVC {
     /// - `Ok(&mut Self)` - The fitted model (for method chaining)
     /// - `Err(ModelError)` - If there's an error during fitting
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+        // Input validation checks
+        if x.nrows() == 0 || x.ncols() == 0 {
+            return Err(ModelError::InputValidationError(
+                "input data cannot be empty".to_string(),
+            ));
+        }
+
+        if y.len() == 0 {
+            return Err(ModelError::InputValidationError(
+                "target labels cannot be empty".to_string(),
+            ));
+        }
+
         if x.nrows() != y.len() {
             return Err(ModelError::InputValidationError(
                 "x and y have different number of rows".to_string(),
@@ -372,8 +385,18 @@ impl SVC {
         let mut alphas = Array1::<f64>::zeros(n_samples);
         let mut b = 0.0;
 
-        // Compute kernel matrix
+        // Compute kernel matrix - this could potentially fail for certain kernel types
         let kernel_matrix = self.compute_kernel_matrix(x);
+
+        // Check if kernel matrix computation resulted in invalid values
+        if kernel_matrix
+            .iter()
+            .any(|&val| val.is_nan() || val.is_infinite())
+        {
+            return Err(ModelError::ProcessingError(
+                "kernel matrix contains invalid values (NaN or Infinity)".to_string(),
+            ));
+        }
 
         // Initialize error cache
         let mut error_cache = Array1::<f64>::zeros(n_samples);
@@ -428,6 +451,11 @@ impl SVC {
             }
         }
 
+        // Check for convergence - warn if max iterations reached
+        if iter >= self.max_iter {
+            eprintln!("Warning: SVC training reached maximum iterations without full convergence");
+        }
+
         // Extract support vectors
         let mut support_vector_indices = Vec::new();
         for i in 0..n_samples {
@@ -438,8 +466,15 @@ impl SVC {
 
         let n_support_vectors = support_vector_indices.len();
         if n_support_vectors == 0 {
-            return Err(ModelError::InputValidationError(
-                "no support vectors found".to_string(),
+            return Err(ModelError::ProcessingError(
+                "no support vectors found - model failed to converge".to_string(),
+            ));
+        }
+
+        // Check for potential numerical instability
+        if b.is_nan() || b.is_infinite() {
+            return Err(ModelError::ProcessingError(
+                "bias term contains invalid values (NaN or Infinity)".to_string(),
             ));
         }
 
@@ -451,6 +486,16 @@ impl SVC {
             support_vectors.row_mut(i).assign(&x.row(idx));
             support_vector_labels[i] = y[idx];
             support_vector_alphas[i] = alphas[idx];
+        }
+
+        // Final validation of extracted values
+        if support_vector_alphas
+            .iter()
+            .any(|&val| val.is_nan() || val.is_infinite())
+        {
+            return Err(ModelError::ProcessingError(
+                "support vector alphas contain invalid values".to_string(),
+            ));
         }
 
         println!("SVC model training finished at iteration {}", n_iter);
@@ -766,6 +811,7 @@ impl SVC {
     ///
     /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
         // Check if the model has been fitted
         if self.support_vectors.is_none()
@@ -780,10 +826,27 @@ impl SVC {
             None => return Err(ModelError::NotFitted),
         };
 
+        // Input validation
+        if x.nrows() == 0 || x.ncols() == 0 {
+            return Err(ModelError::InputValidationError(
+                "input data cannot be empty".to_string(),
+            ));
+        }
+
+        let support_vectors = self.support_vectors.as_ref().unwrap();
+
+        // Check feature dimension consistency
+        if x.ncols() != support_vectors.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "input features dimension {} does not match training features dimension {}",
+                x.ncols(),
+                support_vectors.ncols()
+            )));
+        }
+
         let n_samples = x.nrows();
         let mut predictions = Array1::<f64>::zeros(n_samples);
 
-        let support_vectors = self.support_vectors.as_ref().unwrap();
         let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
         let alphas = self.alphas.as_ref().unwrap();
 
@@ -797,18 +860,32 @@ impl SVC {
                 // Compute the decision value
                 let decision_value = (0..support_vectors.nrows())
                     .map(|j| {
-                        alphas[j]
-                            * support_vector_labels[j]
-                            * self.kernel_function(x.row(i), support_vectors.row(j))
+                        let kernel_val = self.kernel_function(x.row(i), support_vectors.row(j));
+                        alphas[j] * support_vector_labels[j] * kernel_val
                     })
                     .sum::<f64>()
                     + bias;
 
-                // Convert to class label
-                let prediction = if decision_value >= 0.0 { 1.0 } else { -1.0 };
+                // Check for numerical issues in decision value
+                let prediction = if decision_value.is_nan() {
+                    // Handle NaN case - could happen with certain kernel parameters
+                    0.0 // or return an error, but this maintains robustness
+                } else if decision_value >= 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+
                 (i, prediction)
             })
             .collect();
+
+        // Check if any predictions resulted in invalid values
+        if results.iter().any(|(_, pred)| pred.is_nan()) {
+            return Err(ModelError::ProcessingError(
+                "prediction contains invalid values (NaN)".to_string(),
+            ));
+        }
 
         // Fill the predictions array with results
         for (i, pred) in results {

@@ -1,7 +1,10 @@
+use super::preliminary_check;
 use crate::ModelError;
+use crate::math::{gain_ratio, gini, information_gain, variance};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
+use std::sync::Mutex;
 
 /// Represents different decision tree algorithms that can be used for tree construction.
 ///
@@ -364,6 +367,7 @@ impl DecisionTree {
     ///
     /// - `Ok(&mut Self)` - Mutable reference to self, enabling method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Err(ModelError::ProcessingError)` - Error during tree building process
     ///
     /// # Note
     ///
@@ -371,27 +375,55 @@ impl DecisionTree {
     /// - The algorithm used for building the tree is determined by the `algorithm` field set during initialization
     /// - Model hyperparameters like max_depth, min_samples_split etc. control the training process
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        use super::preliminary_check;
-
         preliminary_check(x, Some(y))?;
 
         self.n_features = x.ncols();
 
         if self.is_classifier {
+            // For classification tasks, check if label values are valid
+            if y.iter().any(|&val| val < 0.0) {
+                return Err(ModelError::InputValidationError(
+                    "Class labels must be non-negative finite numbers".to_string(),
+                ));
+            }
+
             // Calculate number of classes
             let unique_classes = y.iter().map(|&val| val as usize).collect::<AHashSet<_>>();
-            self.n_classes = Some(unique_classes.len());
+            let n_classes = unique_classes.len();
+
+            // Check if the number of classes is reasonable
+            if n_classes == 0 {
+                return Err(ModelError::ProcessingError(
+                    "No valid classes found in target data".to_string(),
+                ));
+            }
+
+            self.n_classes = Some(n_classes);
         }
 
         // Build decision tree based on specified algorithm
-        self.root = Some(match self.algorithm {
+        let root = match self.algorithm {
             Algorithm::ID3 => self.build_id3_tree(x, y, 0),
             Algorithm::C45 => self.build_c45_tree(x, y, 0),
             Algorithm::CART => self.build_cart_tree(x, y, 0),
-        });
+        };
 
-        let actual_depth = self.calculate_tree_depth(self.root.as_ref().unwrap());
-        println!("Finish building decision tree, depth: {}", actual_depth);
+        self.root = Some(root);
+
+        // Validate if tree was successfully built
+        if let Some(ref root_node) = self.root {
+            let actual_depth = self.calculate_tree_depth(root_node);
+            if actual_depth == 0 {
+                return Err(ModelError::ProcessingError(
+                    "Failed to build decision tree - tree has zero depth".to_string(),
+                ));
+            }
+            println!("Finish building decision tree, depth: {}", actual_depth);
+        } else {
+            return Err(ModelError::ProcessingError(
+                "Failed to build decision tree - root node is None".to_string(),
+            ));
+        }
 
         Ok(self)
     }
@@ -1132,17 +1164,23 @@ impl DecisionTree {
 /// - `f64` - The threshold value for the split
 /// - `Vec<usize>` - Indices of samples going to the left child node
 /// - `Vec<usize>` - Indices of samples going to the right child node
+///
+/// # Errors
+///
+/// - Returns default split (feature 0, threshold 0.0) if no valid split is found
+/// - Handles NaN/infinite values in feature data gracefully
 fn find_best_split(
     x: ArrayView2<f64>,
     y: ArrayView1<f64>,
     is_classifier: bool,
     algorithm: &str,
 ) -> (usize, f64, Vec<usize>, Vec<usize>) {
-    use crate::math::{gain_ratio, gini, information_gain, variance};
-    use ndarray::Array1;
-    use std::sync::Mutex;
-
     let n_features = x.ncols();
+
+    // Early return for empty data or single feature with all same values
+    if n_features == 0 || x.nrows() == 0 || y.is_empty() {
+        return (0, 0.0, Vec::new(), Vec::new());
+    }
 
     // Use Mutex to wrap the best result for thread-safe updates during parallel processing
     let best_result = Mutex::new((
@@ -1155,34 +1193,58 @@ fn find_best_split(
 
     // Process each feature in parallel
     (0..n_features).into_par_iter().for_each(|feature_idx| {
-        // Get all unique values for this feature
+        // Get all unique values for this feature, filtering out invalid values
         let mut feature_values = Vec::with_capacity(x.nrows());
         for i in 0..x.nrows() {
-            feature_values.push(x[[i, feature_idx]]);
+            let val = x[[i, feature_idx]];
+            // Skip NaN or infinite values
+            if val.is_finite() {
+                feature_values.push(val);
+            }
         }
-        feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        // Find potential thresholds (midpoints between adjacent values)
-        let thresholds: Vec<f64> = feature_values
-            .windows(2)
-            .map(|w| (w[0] + w[1]) / 2.0)
-            .collect();
+        // Skip feature if no valid values or all values are the same
+        if feature_values.len() < 2 {
+            return;
+        }
 
-        // Can optionally parallelize thresholds too (depends on number of thresholds)
+        feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Find potential thresholds (midpoints between adjacent unique values)
+        let mut thresholds = Vec::new();
+        for window in feature_values.windows(2) {
+            if (window[1] - window[0]).abs() > f64::EPSILON {
+                let threshold = (window[0] + window[1]) / 2.0;
+                if threshold.is_finite() {
+                    thresholds.push(threshold);
+                }
+            }
+        }
+
+        // Skip feature if no valid thresholds
+        if thresholds.is_empty() {
+            return;
+        }
+
+        // Process thresholds for this feature
         for &threshold in &thresholds {
             let mut left_indices = Vec::new();
             let mut right_indices = Vec::new();
 
-            // Split samples based on threshold
+            // Split samples based on threshold, handling invalid values
             for i in 0..x.nrows() {
-                if x[[i, feature_idx]] <= threshold {
-                    left_indices.push(i);
-                } else {
-                    right_indices.push(i);
+                let val = x[[i, feature_idx]];
+                if val.is_finite() {
+                    if val <= threshold {
+                        left_indices.push(i);
+                    } else {
+                        right_indices.push(i);
+                    }
                 }
+                // Skip samples with NaN or infinite values
             }
 
-            // Check if split is valid
+            // Check if split is valid - need at least one sample on each side
             if left_indices.is_empty() || right_indices.is_empty() {
                 continue;
             }
@@ -1193,48 +1255,141 @@ fn find_best_split(
             // Calculate split quality based on the selected algorithm
             let criterion = if is_classifier {
                 match algorithm {
-                    "ID3" => information_gain(y, left_y.view(), right_y.view()),
-                    "C4.5" => gain_ratio(y, left_y.view(), right_y.view()),
+                    "ID3" => {
+                        let gain = information_gain(y, left_y.view(), right_y.view());
+                        // Check for invalid gain values
+                        if gain.is_finite() {
+                            gain
+                        } else {
+                            f64::NEG_INFINITY
+                        }
+                    }
+                    "C4.5" => {
+                        let ratio = gain_ratio(y, left_y.view(), right_y.view());
+                        if ratio.is_finite() {
+                            ratio
+                        } else {
+                            f64::NEG_INFINITY
+                        }
+                    }
                     _ => {
                         // CART algorithm uses Gini impurity
-                        gini(y)
-                            - (left_y.len() as f64 / y.len() as f64) * gini(left_y.view())
-                            - (right_y.len() as f64 / y.len() as f64) * gini(right_y.view())
+                        let gini_parent = gini(y);
+                        let gini_left = gini(left_y.view());
+                        let gini_right = gini(right_y.view());
+
+                        // Check for invalid Gini values
+                        if gini_parent.is_finite()
+                            && gini_left.is_finite()
+                            && gini_right.is_finite()
+                        {
+                            let weighted_gini = (left_y.len() as f64 / y.len() as f64) * gini_left
+                                + (right_y.len() as f64 / y.len() as f64) * gini_right;
+                            gini_parent - weighted_gini
+                        } else {
+                            f64::NEG_INFINITY
+                        }
                     }
                 }
             } else {
                 // Regression uses MSE reduction
                 let total_mse = variance(y);
-                let weighted_child_mse = (left_y.len() as f64 / y.len() as f64)
-                    * variance(left_y.view())
-                    + (right_y.len() as f64 / y.len() as f64) * variance(right_y.view());
-                total_mse - weighted_child_mse
+                let left_mse = variance(left_y.view());
+                let right_mse = variance(right_y.view());
+
+                // Check for invalid MSE values
+                if total_mse.is_finite() && left_mse.is_finite() && right_mse.is_finite() {
+                    let weighted_child_mse = (left_y.len() as f64 / y.len() as f64) * left_mse
+                        + (right_y.len() as f64 / y.len() as f64) * right_mse;
+                    total_mse - weighted_child_mse
+                } else {
+                    f64::NEG_INFINITY
+                }
             };
 
-            // Update global best split (using lock to avoid data races)
-            let mut best = best_result.lock().unwrap();
-            if criterion > best.4 {
-                *best = (
-                    feature_idx,
-                    threshold,
-                    left_indices,
-                    right_indices,
-                    criterion,
-                );
+            // Only update if criterion is valid and better than current best
+            if criterion.is_finite() && criterion > f64::NEG_INFINITY {
+                // Update global best split (using lock to avoid data races)
+                if let Ok(mut best) = best_result.lock() {
+                    if criterion > best.4 {
+                        *best = (
+                            feature_idx,
+                            threshold,
+                            left_indices,
+                            right_indices,
+                            criterion,
+                        );
+                    }
+                }
             }
         }
     });
 
     // Extract final result from Mutex
-    let (best_feature, best_threshold, best_left_indices, best_right_indices, _) =
-        best_result.into_inner().unwrap();
+    match best_result.into_inner() {
+        Ok((
+            best_feature,
+            best_threshold,
+            best_left_indices,
+            best_right_indices,
+            best_criterion,
+        )) => {
+            // If no valid split was found, return a fallback split
+            if best_criterion == f64::NEG_INFINITY
+                || (best_left_indices.is_empty() && best_right_indices.is_empty())
+            {
+                // Create a simple fallback split on the first feature
+                let fallback_threshold = if x.nrows() > 0 {
+                    let first_feature_vals: Vec<f64> = (0..x.nrows())
+                        .map(|i| x[[i, 0]])
+                        .filter(|&val| val.is_finite())
+                        .collect();
 
-    (
-        best_feature,
-        best_threshold,
-        best_left_indices,
-        best_right_indices,
-    )
+                    if !first_feature_vals.is_empty() {
+                        first_feature_vals.iter().sum::<f64>() / first_feature_vals.len() as f64
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                let mut fallback_left = Vec::new();
+                let mut fallback_right = Vec::new();
+
+                for i in 0..x.nrows() {
+                    let val = x[[i, 0]];
+                    if val.is_finite() {
+                        if val <= fallback_threshold {
+                            fallback_left.push(i);
+                        } else {
+                            fallback_right.push(i);
+                        }
+                    }
+                }
+
+                // Ensure we have at least one sample on each side for fallback
+                if fallback_left.is_empty() && !fallback_right.is_empty() {
+                    fallback_left.push(fallback_right.pop().unwrap());
+                } else if fallback_right.is_empty() && !fallback_left.is_empty() {
+                    fallback_right.push(fallback_left.pop().unwrap());
+                }
+
+                (0, fallback_threshold, fallback_left, fallback_right)
+            } else {
+                (
+                    best_feature,
+                    best_threshold,
+                    best_left_indices,
+                    best_right_indices,
+                )
+            }
+        }
+        Err(_) => {
+            // Mutex was poisoned, return a safe fallback
+            (0, 0.0, Vec::new(), Vec::new())
+        }
+    }
 }
 
 /// Calculates the appropriate leaf node value based on target values

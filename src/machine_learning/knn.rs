@@ -1,4 +1,5 @@
 use super::DistanceCalculationMetric as Metric;
+use super::preliminary_check;
 use crate::ModelError;
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
@@ -184,21 +185,18 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     ///
     /// KNN is a lazy learning algorithm, and the calculation is done in the prediction phase.
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<T>) -> Result<&mut Self, ModelError> {
-        use super::preliminary_check;
-
         preliminary_check(x, None)?;
-
-        if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "The number of samples does not match, x columns: {}, y length: {}",
-                x.nrows(),
-                y.len()
-            )));
-        }
 
         if x.nrows() < self.k {
             return Err(ModelError::InputValidationError(
                 "The number of samples is less than k".to_string(),
+            ));
+        }
+
+        // check if k is 0
+        if self.k == 0 {
+            return Err(ModelError::InputValidationError(
+                "k must be greater than 0".to_string(),
             ));
         }
 
@@ -208,22 +206,34 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         Ok(self)
     }
 
-    /// Predicts the class labels for the provided data points
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - Data points to classify as a 2D array (samples × features)
-    ///
-    /// # Returns
-    ///
-    /// - `Array1<T>` - An array containing the predicted class labels
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<T>, ModelError> {
+        use super::preliminary_check;
+
+        // check if model is fitted
         if self.x_train.is_none() || self.y_train.is_none() {
             return Err(ModelError::NotFitted);
         }
 
+        // validate input data
+        preliminary_check(x, None)?;
+
+        // check if feature dimension matches training data
         let x_train = self.x_train.as_ref().unwrap();
+        if x.ncols() != x_train.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "Feature dimension mismatch: expected {}, got {}",
+                x_train.ncols(),
+                x.ncols()
+            )));
+        }
+
+        // check if input data is empty
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input array is empty".to_string(),
+            ));
+        }
+
         let y_train = self.y_train.as_ref().unwrap();
 
         // Use rayon for parallel prediction

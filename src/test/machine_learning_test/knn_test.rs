@@ -269,8 +269,10 @@ fn test_fit_predict_empty_data() {
     let x_test = Array2::<f64>::zeros((0, 2));
 
     // Should return empty predictions vector
-    let predictions = knn
-        .fit_predict(x_train.view(), y_train.view(), x_test.view())
-        .unwrap();
-    assert_eq!(predictions.len(), 0);
+    assert_eq!(
+        knn.fit_predict(x_train.view(), y_train.view(), x_test.view()),
+        Err(ModelError::InputValidationError(
+            "Input data is empty".to_string()
+        ))
+    );
 }
