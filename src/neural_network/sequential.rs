@@ -1,6 +1,6 @@
 use super::*;
 
-/// Sequential model: Mimics the Keras API style, supporting chained calls to add, compile, and fit methods
+/// Sequential model: supporting chained calls to add, compile, and fit methods
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
@@ -69,10 +69,32 @@ impl Sequential {
             ));
         }
 
+        if self.loss.is_none() {
+            return Err(ModelError::InputValidationError(
+                "Loss function not specified".to_string(),
+            ));
+        }
+
         if self.layers.is_empty() {
             return Err(ModelError::InputValidationError(
                 "Layers not specified".to_string(),
             ));
+        }
+
+        // Input shape validation
+        if x.is_empty() || y.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input tensors cannot be empty".to_string(),
+            ));
+        }
+
+        // Verify batch size match
+        if x.shape()[0] != y.shape()[0] {
+            return Err(ModelError::InputValidationError(format!(
+                "Batch size mismatch: input has {} samples, target has {} samples",
+                x.shape()[0],
+                y.shape()[0]
+            )));
         }
 
         for epoch in 0..epochs {
@@ -114,6 +136,11 @@ impl Sequential {
     ///
     /// * `Tensor` - Tensor containing the model's predictions
     pub fn predict(&mut self, x: &Tensor) -> Tensor {
+        // Input validation
+        if x.is_empty() {
+            panic!("Input tensor cannot be empty");
+        }
+
         let mut output = x.clone();
         for layer in &mut self.layers {
             output = layer.forward(&output);
