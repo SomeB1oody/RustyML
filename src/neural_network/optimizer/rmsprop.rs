@@ -5,12 +5,15 @@ use ndarray::{Array2, Array3, Array4, Array5};
 ///
 /// An optimization algorithm that adapts the learning rate for each parameter
 /// using a moving average of squared gradients.
+///
+/// # Fields
+///
+/// - `learning_rate` - Learning rate controlling the size of parameter updates
+/// - `rho` - Decay rate for the moving average of squared gradients
+/// - `epsilon` - Small constant added for numerical stability
 pub struct RMSprop {
-    /// Learning rate controlling the size of parameter updates.
     learning_rate: f32,
-    /// Decay rate for the moving average of squared gradients.
     rho: f32,
-    /// Small constant added for numerical stability.
     epsilon: f32,
 }
 
@@ -25,7 +28,7 @@ impl RMSprop {
     ///
     /// # Returns
     ///
-    /// A new RMSprop optimizer instance
+    /// * `RMSprop` - A new RMSprop optimizer instance
     pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Self {
         Self {
             learning_rate,
@@ -61,7 +64,24 @@ pub struct RMSpropCache {
 }
 
 impl RMSpropCache {
-    /// Creates a new RMSprop cache
+    /// Creates a new RMSprop cache instance
+    ///
+    /// This constructor initializes the cache arrays required by the RMSprop optimizer
+    /// for storing running averages of squared gradients. These caches are used during
+    /// optimization to compute adaptive learning rates.
+    ///
+    /// # Parameters
+    ///
+    /// - `dims` - Dimensions (rows, columns) of the main parameter matrix, used to initialize the `cache` array
+    /// - `recurrent_dims` - Optional dimensions (rows, columns) of the recurrent parameter matrix. If `Some`, initializes `cache_recurrent` array; if `None`, `cache_recurrent` remains `None`
+    /// - `bias_dims` - Dimensions (rows, columns) of the bias parameter matrix, used to initialize the `bias` array
+    ///
+    /// # Returns
+    ///
+    /// Returns a new `RMSpropCache` instance containing:
+    /// - `cache`: A zero-initialized 2D array with `dims` dimensions for storing running average of squared gradients for main parameters
+    /// - `cache_recurrent`: If `recurrent_dims` is `Some`, a zero-initialized 2D array with corresponding dimensions; otherwise `None`
+    /// - `bias`: A zero-initialized 2D array with `bias_dims` dimensions for storing running average of squared gradients for bias parameters
     pub fn new(
         dims: (usize, usize),
         recurrent_dims: Option<(usize, usize)>,
@@ -158,6 +178,7 @@ impl RMSpropCache {
 /// - `cache`: Optional moving average of squared gradients for 3D weight parameters.
 ///   Stores values for 1D convolutional kernels used in sequential feature extraction.
 ///   None when the layer has no weight parameters.
+///
 /// - `bias`: Optional moving average of squared gradients for bias parameters.
 ///   Remains 2D even in convolutional contexts but can be None when bias is disabled.
 #[derive(Debug, Clone, Default)]
@@ -177,6 +198,7 @@ pub struct RMSpropCacheConv1D {
 ///
 /// - `cache`: Moving average of squared gradients for 4D weight parameters. Typically stores values for
 ///   convolutional kernels or other multi-dimensional feature extraction parameters.
+///
 /// - `bias`: Moving average of squared gradients for bias parameters, which remain 2D even in
 ///   convolutional contexts.
 #[derive(Debug, Clone, Default)]
@@ -198,6 +220,7 @@ pub struct RMSpropCacheConv2D {
 /// - `cache` - 5D array storing the exponentially decaying average of squared gradients
 ///   for convolution weights with shape (output_channels, input_channels, kernel_depth,
 ///   kernel_height, kernel_width)
+///
 /// - `bias` - 3D array storing the exponentially decaying average of squared gradients
 ///   for bias parameters with shape (1, output_channels, 1)
 #[derive(Debug, Clone, Default)]

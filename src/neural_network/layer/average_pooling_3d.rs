@@ -81,7 +81,7 @@ impl AveragePooling3D {
     ///
     /// # Returns
     ///
-    /// A new `AveragePooling3D` instance
+    /// * `AveragePooling3D` - A new `AveragePooling3D` instance
     pub fn new(
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,

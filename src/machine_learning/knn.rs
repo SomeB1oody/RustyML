@@ -19,16 +19,16 @@ pub enum WeightingStrategy {
     Distance,
 }
 
-/// # K-Nearest Neighbors (KNN) Classifier
+/// K-Nearest Neighbors (KNN) Classifier
 ///
 /// A non-parametric classification algorithm that classifies new data points
 /// based on the majority class of its k nearest neighbors.
 ///
-/// ## Type Parameters
+/// # Type Parameters
 ///
 /// * `T` - The type of target values. Must implement `Clone`, `Hash`, and `Eq` traits.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `k` - Number of neighbors to consider for classification
 /// - `x_train` - Training data features as a 2D array
@@ -36,7 +36,7 @@ pub enum WeightingStrategy {
 /// - `weights` - Weight function for neighbor votes. Options: Uniform, Distance
 /// - `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(p=3)
 ///
-/// ## Examples
+/// # Examples
 /// ```rust
 /// use ndarray::{array, Array1, Array2};
 /// use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
@@ -105,7 +105,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new KNN classifier instance
+    /// * `KNN` - A new KNN classifier instance
     pub fn new(k: usize, weights: WeightingStrategy, metric: Metric) -> Self {
         KNN {
             k,

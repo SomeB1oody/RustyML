@@ -108,7 +108,7 @@ impl Conv1D {
     ///
     /// # Returns
     ///
-    /// A new Conv1D layer instance
+    /// * `Conv1D` - A new `Conv1D` layer instance
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -175,11 +175,11 @@ impl Conv1D {
     ///
     /// # Parameters
     ///
-    /// - `input` - Input tensor to pad
+    /// * `input` - Input tensor to pad
     ///
     /// # Returns
     ///
-    /// Padded tensor
+    /// * `Tensor` - Padded tensor
     fn apply_padding(&self, input: &Tensor) -> Tensor {
         match self.padding {
             PaddingType::Valid => input.clone(),

@@ -5,12 +5,12 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
 
-/// # Linear Support Vector Classifier (LinearSVC)
+/// Linear Support Vector Classifier (LinearSVC)
 ///
 /// Implements a classifier similar to sklearn's LinearSVC, trained using the hinge loss function.
 /// Supports L1 and L2 regularization for preventing overfitting.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `weights` - Weight coefficients for each feature
 /// - `bias` - Bias term (intercept) of the model
@@ -22,14 +22,14 @@ use rayon::prelude::*;
 /// - `tol` - Training convergence tolerance
 /// - `n_iter` - Number of iterations that were actually performed during training
 ///
-/// ## Features
+/// # Features
 ///
 /// - Binary classification
 /// - Stochastic gradient descent optimization
 /// - L1 or L2 regularization
 /// - Configurable convergence tolerance
 ///
-/// ## Example
+/// # Example
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_svc::*;
@@ -67,60 +67,35 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct LinearSVC {
-    /// Weight coefficients for each feature.
-    /// `None` if model is not trained yet.
     weights: Option<Array1<f64>>,
-
-    /// Bias term (intercept) of the model.
-    /// `None` if model is not trained yet.
     bias: Option<f64>,
-
-    /// Maximum number of iterations for the optimizer.
-    /// Higher values may lead to better convergence but longer training time.
     max_iter: usize,
-
-    /// Learning rate (step size) for gradient descent.
-    /// Controls how quickly the model adapts to the problem.
     learning_rate: f64,
-
-    /// Regularization strength parameter.
-    /// Higher values specify stronger regularization.
     regularization_param: f64,
-
-    /// Regularization type: L1 or L2.
-    /// L1 can produce sparse models, L2 typically works better for most problems.
     penalty: RegularizationType,
-
-    /// Whether to calculate and use an intercept/bias term.
-    /// If false, the decision boundary passes through origin.
     fit_intercept: bool,
-
-    /// Training convergence tolerance.
-    /// The algorithm stops when the improvement is less than this value.
     tol: f64,
-
-    /// Number of iterations that were actually performed during training.
-    /// `None` if model is not trained yet.
     n_iter: Option<usize>,
 }
 
+/// Creates a new LinearSVC with default parameters
+///
+/// # Default values
+///
+/// - `weights`: None (not trained)
+/// - `bias`: None (not trained)
+/// - `max_iter`: 1000
+/// - `learning_rate`: 0.001
+/// - `regularization_param`: 1.0
+/// - `penalty`: PenaltyType::L2
+/// - `fit_intercept`: true
+/// - `tol`: 1e-4
+/// - `n_iter`: None (not trained)
+///
+/// # Returns
+///
+/// - `LinearSVC` - A new LinearSVC instance with default parameters
 impl Default for LinearSVC {
-    /// Creates a new LinearSVC with default parameters.
-    ///
-    /// ## Default values
-    ///
-    /// - `weights`: None (not trained)
-    /// - `bias`: None (not trained)
-    /// - `max_iter`: 1000
-    /// - `learning_rate`: 0.001
-    /// - `regularization_param`: 1.0
-    /// - `penalty`: PenaltyType::L2
-    /// - `fit_intercept`: true
-    /// - `tol`: 1e-4
-    /// - `n_iter`: None (not trained)
-    ///
-    /// ## Returns
-    /// A new LinearSVC instance with default parameters
     fn default() -> Self {
         LinearSVC {
             weights: None,
@@ -149,6 +124,7 @@ impl LinearSVC {
     /// - `tol`: Convergence tolerance that stops training when reached
     ///
     /// # Returns
+    ///
     /// * `Self` - A new LinearSVC instance with specified parameters
     pub fn new(
         max_iter: usize,

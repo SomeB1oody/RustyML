@@ -2,7 +2,7 @@
 pub mod adam;
 /// RMSprop optimizer implementation
 pub mod rmsprop;
-/// Stochastic Gradient Descent (SGD) optimizer.
+/// Stochastic Gradient Descent (SGD) optimizer
 pub mod sgd;
 
 pub use adam::*;
@@ -28,6 +28,14 @@ pub struct OptimizerCache {
 ///
 /// Stores optimizer-specific state for Adam and RMSprop optimizers.
 /// This includes momentum terms and running averages for both weights and bias.
+///
+/// # Fields
+///
+/// - `adam_states` - Optional cache storage for Adam optimizer states including first
+///   and second moment estimates for both weights and biases used in 1D convolution
+///
+/// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer state including
+///   exponentially decaying averages of squared gradients for weights and biases
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheConv1D {
     pub adam_states: Option<AdamStatesConv1D>,
@@ -65,6 +73,7 @@ pub struct OptimizerCacheConv2D {
 ///
 /// - `adam_states` - Optional cache for Adam optimizer state variables including first
 ///   and second moment estimates for both weights and biases
+///
 /// - `rmsprop_cache` - Optional cache for RMSprop optimizer state variables including
 ///   exponentially decaying averages of squared gradients for weights and biases
 #[derive(Debug, Clone, Default)]

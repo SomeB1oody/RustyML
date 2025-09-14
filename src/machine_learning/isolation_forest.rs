@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-/// # Implementation of Isolation Forest, a decision forest based on randomly generated Isolation Trees
+/// Implementation of Isolation Forest, a decision forest based on randomly generated Isolation Trees
 ///
 /// Isolation Forest is an unsupervised learning algorithm that works by isolating anomalies instead of profiling normal points.
 /// It builds an ensemble of Isolation Trees that recursively partition the data space, and anomalies are points that require fewer partitions to isolate.
@@ -53,18 +53,18 @@ pub struct IsolationForest {
     random_state: Option<u64>, // Random seed, can be used for result reproducibility
 }
 
+/// Creates a new IsolationForest with default parameter values
+///
+/// This implementation uses the following default values:
+/// - `n_estimators`: 100 (number of isolation trees)
+/// - `max_samples`: 256 (maximum number of samples used to build each tree)
+/// - `max_depth`: log2(max_samples) (maximum depth of each tree, calculated automatically)
+/// - `random_state`: None (random seed is not fixed)
+///
+/// # Returns
+///
+/// * `IsolationForest` - An instance with default configuration values
 impl Default for IsolationForest {
-    /// Creates a new IsolationForest with default parameter values.
-    ///
-    /// This implementation uses the following default values:
-    /// - `n_estimators`: 100 (number of isolation trees)
-    /// - `max_samples`: 256 (maximum number of samples used to build each tree)
-    /// - `max_depth`: log2(max_samples) (maximum depth of each tree, calculated automatically)
-    /// - `random_state`: None (random seed is not fixed)
-    ///
-    /// # Returns
-    ///
-    /// * `IsolationForest` - An instance with default configuration values.
     fn default() -> Self {
         let max_samples = 256;
         let max_depth = (max_samples as f64).log2().ceil() as usize;
@@ -90,7 +90,7 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new IsolationForest instance
+    /// * `IsolationForest` - A new IsolationForest instance
     pub fn new(
         n_estimators: usize,
         max_samples: usize,

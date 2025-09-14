@@ -50,8 +50,8 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 ///
 /// # Parameters
 ///
-/// * `predicted` - Predicted values vector (y') as ndarray `ArrayView1<f64>`
-/// * `actual` - Actual values vector (y) as ndarray `ArrayView1<f64>`
+/// - `predicted` - Predicted values vector (y') as ndarray `ArrayView1<f64>`
+/// - `actual` - Actual values vector (y) as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
 ///
@@ -132,9 +132,9 @@ pub fn sum_of_squared_errors(
 ///
 /// # Mathematical properties
 ///
-/// * sigmoid(0) = 0.5
-/// * As z approaches positive infinity, sigmoid(z) approaches 1
-/// * As z approaches negative infinity, sigmoid(z) approaches 0
+/// - sigmoid(0) = 0.5
+/// - As z approaches positive infinity, sigmoid(z) approaches 1
+/// - As z approaches negative infinity, sigmoid(z) approaches 0
 ///
 /// # Examples
 /// ```rust
@@ -170,8 +170,8 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// # Parameters
 ///
-/// * `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
-/// * `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
+/// - `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
+/// - `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
 ///
 /// # Returns
 ///
@@ -256,6 +256,7 @@ pub fn logistic_loss(
 /// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
+///
 /// * `f64` - The squared Euclidean distance between x1 and x2
 ///
 /// # Examples
@@ -283,10 +284,12 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 /// of two 1D arrays, representing the Manhattan (L1) distance.
 ///
 /// # Parameters
+///
 /// - `x1` - First vector as ndarray `ArrayView1<f64>`
 /// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 ///
 /// # Returns
+///
 /// * `f64` - The Manhattan distance between x1 and x2
 ///
 /// # Examples
@@ -314,11 +317,13 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 /// representing the Minkowski distance with parameter p.
 ///
 /// # Parameters
+///
 /// - `x1` - First vector as ndarray `ArrayView1<f64>`
 /// - `x2` - Second vector as ndarray `ArrayView1<f64>`
 /// - `p` - The order of the norm (p ≥ 1.0)
 ///
 /// # Returns
+///
 /// * `f64` - The Minkowski distance between x1 and x2
 ///
 /// # Examples
@@ -358,6 +363,7 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 /// * The entropy value of the given dataset. Lower values indicate more homogeneous data.
 ///
 /// # Notes
+///
 /// - The function handles floating point labels by rounding to 3 decimal places for counting.
 /// - Returns 0.0 for empty datasets.
 ///
@@ -494,6 +500,7 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// * The information gain value. Higher values indicate a more useful split.
 ///
 /// # Notes
+///
 /// This function uses the entropy function to calculate impurity at each node.
 ///
 /// # Examples
@@ -727,7 +734,7 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 ///
 /// # Returns
 ///
-/// * `Result<f64, ModelError>` - The population standard deviation, or an error if invalid input
+/// * `Result<f64, ModelError>` - The population standard deviation, or an error if invalid input:
 ///   - Returns error for empty arrays or arrays containing NaN/infinite values
 ///   - Returns 0.0 if the array contains only one element (no variation)
 ///

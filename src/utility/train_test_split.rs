@@ -1,21 +1,21 @@
-use ndarray::{Array1, Array2, Axis};
-use rand::prelude::*;
-use rand::SeedableRng;
-use rand::rngs::StdRng;
 use crate::ModelError;
+use ndarray::{Array1, Array2, Axis};
+use rand::SeedableRng;
+use rand::prelude::*;
+use rand::rngs::StdRng;
 
 /// Splits a dataset into training and test sets
 ///
 /// # Parameters
 ///
 /// - `x` - Feature matrix with shape (n_samples, n_features)
-/// - `y` - Target values with shape (n_samples,)
+/// - `y` - Target values with shape (n_samples)
 /// - `test_size` - Size of the test set, default is 0.3 (30%)
 /// - `random_state` - Random seed, default is None
 ///
 /// # Returns
 ///
-/// Returns a tuple `(x_train, x_test, y_train, y_test)`
+/// * `Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError>` - Returns a tuple `(x_train, x_test, y_train, y_test)` if processing successfully
 ///
 /// # Example
 /// ```rust
@@ -46,26 +46,29 @@ pub fn train_test_split(
 
     // Ensure x and y have the same number of samples
     if n_samples != y.len() {
-        return Err(ModelError::InputValidationError(
-            format!("x and y must have the same number of samples, x rows: {}, y length: {}",
-                    n_samples, y.len())
-        ));
+        return Err(ModelError::InputValidationError(format!(
+            "x and y must have the same number of samples, x rows: {}, y length: {}",
+            n_samples,
+            y.len()
+        )));
     }
 
     // Set test size, default is 0.3
     let test_size = test_size.unwrap_or(0.3);
     if test_size <= 0.0 || test_size >= 1.0 {
-        return Err(ModelError::InputValidationError(
-            format!("test_size must be between 0 and 1, got {}", test_size)
-        ));
+        return Err(ModelError::InputValidationError(format!(
+            "test_size must be between 0 and 1, got {}",
+            test_size
+        )));
     }
 
     // Calculate the number of test samples using ceil to ensure at least the expected proportion
     let n_test = std::cmp::max(1, (n_samples as f64 * test_size).ceil() as usize);
     if n_test > n_samples {
-        return Err(ModelError::InputValidationError(
-            format!("test_size={} is too big for n_samples={}", test_size, n_samples)
-        ));
+        return Err(ModelError::InputValidationError(format!(
+            "test_size={} is too big for n_samples={}",
+            test_size, n_samples
+        )));
     }
 
     // Create random indices

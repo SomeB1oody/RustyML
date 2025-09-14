@@ -7,13 +7,13 @@ use rand::SeedableRng;
 use rayon::prelude::*;
 use std::ops::AddAssign;
 
-/// # KMeans clustering algorithm implementation.
+/// KMeans clustering algorithm implementation.
 ///
 /// This struct implements the K-Means clustering algorithm, which partitions
 /// n observations into k clusters where each observation belongs to the cluster
 /// with the nearest mean (centroid).
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `n_clusters` - Number of clusters to form
 /// - `max_iter` - Maximum number of iterations for a single run
@@ -24,7 +24,7 @@ use std::ops::AddAssign;
 /// - `inertia` - Sum of squared distances to the closest centroid after fitting
 /// - `n_iter` - Number of iterations the algorithm ran for after fitting
 ///
-/// ## Examples
+/// # Examples
 /// ```rust
 /// use ndarray::{array, Array2};
 /// use rustyml::machine_learning::kmeans::KMeans;
@@ -62,24 +62,28 @@ use std::ops::AddAssign;
 /// ```
 #[derive(Debug, Clone)]
 pub struct KMeans {
-    /// Number of clusters
     n_clusters: usize,
-    /// Maximum number of iterations
     max_iter: usize,
-    /// Convergence threshold
     tol: f64,
-    /// Random seed
     random_seed: Option<u64>,
-    /// Cluster centers
     centroids: Option<Array2<f64>>,
-    /// Labels of each sample point (clustering result)
     labels: Option<Array1<usize>>,
-    /// Sum of squared distances of samples to their closest cluster center
     inertia: Option<f64>,
-    /// Actual number of iterations
     n_iter: Option<usize>,
 }
 
+/// implement Default for KMeans
+///
+/// # Default Values
+///
+/// - `n_clusters` - 8
+/// - `max_iter` - 300
+/// - `tolerance` - 1e-4
+/// - `random_seed` - None
+///
+/// # Returns
+///
+/// * `KMeans` - a new `KMeans` instance with default values
 impl Default for KMeans {
     fn default() -> Self {
         KMeans::new(8, 300, 1e-4, None)

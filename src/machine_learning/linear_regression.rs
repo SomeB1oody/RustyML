@@ -5,13 +5,13 @@ use crate::{ModelError, math};
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
-/// # Linear Regression model implementation
+/// Linear Regression model implementation
 ///
 /// Trains a simple linear regression model using gradient descent algorithm. This implementation
 /// supports multivariate regression, optional intercept term, and allows adjustment of learning rate,
 /// maximum iterations, and convergence tolerance.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `coefficients` - Model coefficients (slopes), None before training
 /// - `intercept` - Model intercept, None before training
@@ -22,7 +22,7 @@ use rayon::prelude::*;
 /// - `n_iter` - Number of iterations the algorithm ran for after fitting
 /// - `regularization_type` - Regularization type and strength
 ///
-/// ## Examples
+/// # Examples
 /// ```rust
 /// use rustyml::machine_learning::linear_regression::*;
 /// use ndarray::{Array1, Array2, array};
@@ -53,24 +53,32 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct LinearRegression {
-    /// Coefficients (slopes)
     coefficients: Option<Array1<f64>>,
-    /// Intercept
     intercept: Option<f64>,
-    /// Whether to fit an intercept
     fit_intercept: bool,
-    /// Learning rate
     learning_rate: f64,
-    /// Maximum number of iterations
     max_iter: usize,
-    /// Convergence tolerance
     tol: f64,
-    /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
-    /// Regularization type and strength
     regularization_type: Option<RegularizationType>,
 }
 
+/// Creates a new LinearRegression instance with default parameter values.
+///
+/// # Default Values
+///
+/// - `coefficients` - `None` - Model coefficients are not initialized until training
+/// - `intercept` - `None` - Model intercept is not initialized until training  
+/// - `fit_intercept` - `true` - Include an intercept term in the linear model
+/// - `learning_rate` - `0.01` - Learning rate for gradient descent optimization
+/// - `max_iter` - `1000` - Maximum number of iterations for gradient descent
+/// - `tol` - `1e-5` - Convergence tolerance (0.00001) for stopping criteria
+/// - `n_iter` - `None` - Number of actual iterations performed (set after training)
+/// - `regularization_type` - `None` - No regularization applied by default
+///
+/// # Returns
+///
+/// * `LinearRegression` - A new instance with sensible default parameters for most use cases
 impl Default for LinearRegression {
     fn default() -> Self {
         Self {
@@ -112,6 +120,18 @@ impl RegressorCommonGetterFunctions for LinearRegression {
 
 impl LinearRegression {
     /// Creates a new linear regression model with custom parameters
+    ///
+    /// # Parameters
+    ///
+    /// - `fit_intercept` - Whether to calculate the intercept for this model. If set to false, no intercept will be used in calculations
+    /// - `learning_rate` - The learning rate for gradient descent optimization. Typical values range from 0.001 to 0.1
+    /// - `max_iterations` - Maximum number of iterations for gradient descent. The algorithm will stop early if convergence is reached
+    /// - `tolerance` - The tolerance for stopping criteria. If the cost change between iterations is less than this value, training stops
+    /// - `regularization_type` - Optional regularization to prevent overfitting. Can be L1, L2, or None
+    ///
+    /// # Returns
+    ///
+    /// * `LinearRegression` - A new instance of LinearRegression with the specified configuration
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,

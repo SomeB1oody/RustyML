@@ -69,7 +69,7 @@ pub fn calculate_output_shape_2d_pooling(
 ///
 /// # Returns
 ///
-/// A vector containing the calculated output shape, formatted as \[batch_size, channels, output_depth, output_height, output_width\].
+/// * `Vec<usize>` - A vector containing the calculated output shape, formatted as \[batch_size, channels, output_depth, output_height, output_width\].
 pub fn calculate_output_shape_3d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize, usize),
@@ -103,16 +103,16 @@ pub fn calculate_output_shape_3d_pooling(
 ///
 /// # Parameters
 ///
-/// * `params` - Mutable slice of model parameters to be updated
-/// * `grads` - Slice of gradients corresponding to each parameter
-/// * `m` - Mutable slice for first moment estimates (momentum)
-/// * `v` - Mutable slice for second moment estimates (velocity/variance)
-/// * `lr` - Learning rate for the update step
-/// * `beta1` - Exponential decay rate for the first moment estimates (typically 0.9)
-/// * `beta2` - Exponential decay rate for the second moment estimates (typically 0.999)
-/// * `epsilon` - Small constant for numerical stability
-/// * `bias_correction1` - Bias correction term for first moment estimate
-/// * `bias_correction2` - Bias correction term for second moment estimate
+/// - `params` - Mutable slice of model parameters to be updated
+/// - `grads` - Slice of gradients corresponding to each parameter
+/// - `m` - Mutable slice for first moment estimates (momentum)
+/// - `v` - Mutable slice for second moment estimates (velocity/variance)
+/// - `lr` - Learning rate for the update step
+/// - `beta1` - Exponential decay rate for the first moment estimates (typically 0.9)
+/// - `beta2` - Exponential decay rate for the second moment estimates (typically 0.999)
+/// - `epsilon` - Small constant for numerical stability
+/// - `bias_correction1` - Bias correction term for first moment estimate
+/// - `bias_correction2` - Bias correction term for second moment estimate
 pub fn update_adam_conv(
     params: &mut [f32],
     grads: &[f32],
@@ -241,11 +241,8 @@ pub fn compute_row_gradient_sum(
 ///
 /// The algorithm maintains a running average of the squared gradients and uses this to normalize
 /// the gradient updates:
-///
-/// ```text
-/// cache = rho * cache + (1 - rho) * grad²
-/// param = param - lr * grad / (√cache + epsilon)
-/// ```
+/// - cache = rho * cache + (1 - rho) * grad²
+/// - param = param - lr * grad / (√cache + epsilon)
 ///
 /// # Parameters
 ///
@@ -282,19 +279,18 @@ pub fn update_rmsprop(
 ///
 /// # Parameters
 ///
-/// * `padding_type` - Type of padding to apply (Valid or Same)
-/// * `input_height` - Height of the input tensor
-/// * `input_width` - Width of the input tensor
-/// * `kernel_size` - Size of the kernel as a tuple (height, width)
-/// * `strides` - Stride values as a tuple (height_stride, width_stride)
+/// - `padding_type` - Type of padding to apply (Valid or Same)
+/// - `input_height` - Height of the input tensor
+/// - `input_width` - Width of the input tensor
+/// - `kernel_size` - Size of the kernel as a tuple (height, width)
+/// - `strides` - Stride values as a tuple (height_stride, width_stride)
 ///
 /// # Returns
 ///
-/// A tuple containing the calculated output dimensions (output_height, output_width).
-///
-/// * For `Valid` padding: Dimensions are reduced based on kernel size and stride
-/// * For `Same` padding: Output dimensions are calculated to maintain the input spatial dimensions
-///   divided by the stride
+/// * `(usize, usize)` - A tuple containing the calculated output dimensions (output_height, output_width).
+///     - For `Valid` padding: Dimensions are reduced based on kernel size and stride
+///     - For `Same` padding: Output dimensions are calculated to maintain the input spatial dimensions
+///     divided by the stride
 pub fn calculate_output_height_and_weight(
     padding_type: PaddingType,
     input_height: usize,

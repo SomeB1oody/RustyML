@@ -107,7 +107,7 @@ impl Conv2D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `Conv2D` layer instance with randomly initialized weights.
+    /// * `Conv2D` - A new `Conv2D` layer instance with randomly initialized weights.
     ///
     /// # Notes
     ///

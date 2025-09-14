@@ -3,13 +3,13 @@ use ndarray::{Array1, Array2, ArrayView2, Axis};
 use rayon::prelude::*;
 use std::error::Error;
 
-/// # PCA structure for implementing Principal Component Analysis
+/// PCA structure for implementing Principal Component Analysis
 ///
 /// This structure provides functionality for dimensionality reduction using PCA.
 /// It allows fitting a model to data, transforming data into principal component space,
 /// and retrieving various statistics about the decomposition.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `n_components` - Number of principal components to keep in the model
 /// - `components` - Principal axes in feature space, representing the directions of maximum variance Shape is (n_components, n_features)
@@ -18,9 +18,8 @@ use std::error::Error;
 /// - `explained_variance_ratio` - Percentage of variance explained by each component
 /// - `singular_values` - Singular values corresponding to each component
 ///
-/// ## Examples
-///
-/// ```
+/// # Examples
+/// ```rust
 /// use ndarray::{array, Array2};
 /// use rustyml::utility::principal_component_analysis::PCA;
 ///
@@ -66,6 +65,7 @@ pub struct PCA {
     singular_values: Option<Array1<f64>>,
 }
 
+/// Default implementation for PCA
 impl Default for PCA {
     fn default() -> Self {
         // Default to 2 components which is common for visualization purposes
@@ -89,7 +89,7 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new PCA instance with the specified number of components
+    /// * `PCA` - A new PCA instance with the specified number of components
     pub fn new(n_components: usize) -> Self {
         PCA {
             n_components,
@@ -144,7 +144,7 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `Ok(&Array1<f64>)` - The singular values array if fitted
+    /// - `Ok(&Array1<f64>)` - The singular values array if fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_singular_values(&self) -> Result<&Array1<f64>, ModelError> {
         match self.singular_values.as_ref() {

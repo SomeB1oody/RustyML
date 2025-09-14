@@ -3,11 +3,11 @@ use crate::ModelError;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
-/// # Support Vector Machine Classifier
+/// Support Vector Machine Classifier
 ///
 /// Support Vector Machines (SVM) are a set of supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `kernel` - Kernel function type that transforms input data to higher dimensions
 /// - `regularization_param` - Regularization parameter C, controls the trade-off between maximizing the margin and minimizing the classification error
@@ -19,7 +19,7 @@ use rayon::prelude::*;
 /// - `max_iter` - Maximum number of iterations for the optimization algorithm
 /// - `eps` - Small value for numerical stability in calculations
 ///
-/// ## Example
+/// # Examples
 /// ```rust
 /// use rustyml::machine_learning::svc::{SVC, KernelType};
 /// use ndarray::{Array2, Array1};
@@ -46,43 +46,15 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct SVC {
-    /// Kernel function type used to transform input data
-    /// Common options include Linear, RBF, Polynomial, and Sigmoid
     kernel: KernelType,
-
-    /// Regularization parameter C, controls the penalty for misclassification
-    /// Smaller values specify stronger regularization, larger values focus on minimizing training error
-    /// Typical range: 0.1 to 100
     regularization_param: f64,
-
-    /// Lagrange multipliers from the dual form optimization problem
-    /// Each non-zero alpha corresponds to a support vector
     alphas: Option<Array1<f64>>,
-
-    /// Matrix of support vectors that define the decision boundary
-    /// Shape: (n_support_vectors, n_features)
     support_vectors: Option<Array2<f64>>,
-
-    /// Class labels (-1 or 1) for each support vector
     support_vector_labels: Option<Array1<f64>>,
-
-    /// Bias term (intercept) in the decision function
-    /// The hyperplane is defined as: w·x + bias = 0
     bias: Option<f64>,
-
-    /// Convergence tolerance for stopping criterion
-    /// The algorithm stops when KKT conditions are satisfied within this tolerance
     tol: f64,
-
-    /// Maximum number of iterations for the optimization algorithm
-    /// Prevents infinite loops in case of non-convergence
     max_iter: usize,
-
-    /// Small value for numerical stability in calculations
-    /// Helps prevent division by zero and other numerical issues
     eps: f64,
-
-    /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
 }
 

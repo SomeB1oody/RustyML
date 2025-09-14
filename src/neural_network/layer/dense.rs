@@ -24,6 +24,7 @@ use rayon::prelude::*;
 /// - Output shape: (batch_size, output_dim)
 ///
 /// # Fields
+///
 /// ## Core fields
 /// - `input_dim` - Input dimension size
 /// - `output_dim` - Output dimension size
@@ -63,25 +64,15 @@ use rayon::prelude::*;
 /// println!("Prediction results: {:?}", prediction);
 /// ```
 pub struct Dense {
-    /// Input dimension size
     input_dim: usize,
-    /// Output dimension size
     output_dim: usize,
-    /// Weight matrix with shape (input_dim, output_dim)
     weights: Array2<f32>,
-    /// Bias vector with shape (1, output_dim)
     bias: Array2<f32>,
-    /// Cache of the input from forward pass for use in backward pass
     input_cache: Option<Array2<f32>>,
-    /// Stored weight gradients
     grad_weights: Option<Array2<f32>>,
-    /// Stored bias gradients
     grad_bias: Option<Array2<f32>>,
-    /// Cache for optimizer
     optimizer_cache: OptimizerCache,
-    /// Activation function for the layer
     activation: Activation,
-    /// Cached output after activation for use in backward pass
     activation_output: Option<Array2<f32>>,
 }
 
@@ -90,7 +81,7 @@ impl Dense {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new Dense layer instance with specified dimensions
+    /// * `Dense` - A new `Dense` layer instance with specified dimensions
     pub fn new(input_dim: usize, output_dim: usize, activation: Activation) -> Self {
         let weights = Array::random((input_dim, output_dim), Uniform::new(-0.05, 0.05));
         let bias = Array::zeros((1, output_dim));

@@ -108,22 +108,13 @@ pub struct LSTM {
 /// - `rmsprop_cache` - RMSprop optimizer cache
 /// - `optimizer_cache` - Cache for optimizer
 struct Gate {
-    /// Weight matrix applied to the input
     kernel: Array2<f32>,
-    /// Weight matrix applied to the previous hidden state
     recurrent_kernel: Array2<f32>,
-    /// Bias term added to the weighted inputs
     bias: Array2<f32>,
-
-    /// Forward propagation cache
     gate_cache: Option<Vec<Array2<f32>>>,
-
-    /// Gradients
     grad_kernel: Option<Array2<f32>>,
     grad_recurrent_kernel: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
-
-    /// Cache for optimizer
     optimizer_cache: OptimizerCache,
 }
 
@@ -140,10 +131,10 @@ impl Gate {
     ///
     /// # Returns
     ///
-    /// `Self` - A new `Gate` instance with:
-    /// - Randomly initialized weight matrices using a uniform distribution between -0.05 and 0.05
-    /// - Bias vector initialized to zeros
-    /// - All caches and optimization states initialized to `None`
+    /// * `Gate` - A new `Gate` instance with:
+    ///     - Randomly initialized weight matrices using a uniform distribution between -0.05 and 0.05
+    ///     - Bias vector initialized to zeros
+    ///     - All caches and optimization states initialized to `None`
     pub fn new(input_dim: usize, units: usize) -> Self {
         fn rand_mat(r: usize, c: usize) -> Array2<f32> {
             Array::random((r, c), Uniform::new(-0.05, 0.05))

@@ -86,7 +86,7 @@ impl MaxPooling3D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the MaxPooling3D layer.
+    /// * `MaxPooling3D` - A new instance of the MaxPooling3D layer.
     pub fn new(
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,

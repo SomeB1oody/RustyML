@@ -107,7 +107,7 @@ impl Conv3D {
     ///
     /// # Returns
     ///
-    /// A new Conv3D layer instance
+    /// * `Conv3D` - A new `Conv3D` layer instance
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),

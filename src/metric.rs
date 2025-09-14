@@ -264,25 +264,25 @@ pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     1.0 - (sse / sst)
 }
 
-/// # Confusion Matrix for binary classification evaluation
+/// Confusion Matrix for binary classification evaluation
 ///
 /// A confusion matrix is a table that is often used to describe the performance of a classification model
 /// on a set of test data for which the true values are known. It allows visualization of the performance
 /// of an algorithm and identification of common types of errors.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `tp` - True Positive: The number of correct positive predictions when the actual class is positive
 /// - `fp` - False Positive: The number of incorrect positive predictions when the actual class is negative (Type I error)
 /// - `tn` - True Negative: The number of correct negative predictions when the actual class is negative
 /// - `fn_` - False Negative: The number of incorrect negative predictions when the actual class is positive (Type II error)
 ///
-/// ## Performance Metrics
+/// # Performance Metrics
 ///
 /// This implementation provides methods to calculate common performance metrics including:
 /// accuracy, precision, recall, specificity, and F1 score.
 ///
-/// ## Example
+/// # Example
 /// ```rust
 /// use ndarray::arr1;
 /// use rustyml::metric::ConfusionMatrix;
@@ -309,20 +309,9 @@ pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ConfusionMatrix {
-    /// True Positive (TP): The number of correct positive predictions
-    /// when the actual class is positive (correctly identified positive cases)
     tp: usize,
-
-    /// False Positive (FP): The number of incorrect positive predictions
-    /// when the actual class is negative (Type I error, false alarm)
     fp: usize,
-
-    /// True Negative (TN): The number of correct negative predictions
-    /// when the actual class is negative (correctly identified negative cases)
     tn: usize,
-
-    /// False Negative (FN): The number of incorrect negative predictions
-    /// when the actual class is positive (Type II error, miss)
     fn_: usize,
 }
 
@@ -380,11 +369,11 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// A tuple containing the four basic components of the confusion matrix:
-    /// - `tp` - True Positive count
-    /// - `fp` - False Positive count
-    /// - `tn` - True Negative count
-    /// - `fn_` - False Negative count
+    /// * `(usize, usize, usize, usize)` - A tuple containing the four basic components of the confusion matrix:
+    ///     - `tp` - True Positive count
+    ///     - `fp` - False Positive count
+    ///     - `tn` - True Negative count
+    ///     - `fn_` - False Negative count
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
     }

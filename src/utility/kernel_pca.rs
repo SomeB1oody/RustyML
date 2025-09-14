@@ -3,13 +3,13 @@ pub use crate::machine_learning::KernelType;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use rayon::prelude::*;
 
-/// # A Kernel Principal Component Analysis implementation.
+/// A Kernel Principal Component Analysis implementation.
 ///
 /// KernelPCA performs a non-linear dimensionality reduction by using
 /// kernel methods to map the data into a higher dimensional space where
 /// linear PCA is performed.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `kernel` - The kernel function type used to compute the kernel matrix
 /// - `n_components` - The number of components to extract
@@ -19,7 +19,7 @@ use rayon::prelude::*;
 /// - `row_means` - Mean of each row in the training kernel matrix (used for centering)
 /// - `total_mean` - Overall mean of the training kernel matrix
 ///
-/// ## Example
+/// # Example
 /// ```rust
 /// use ndarray::{Array2, arr2};
 /// use rustyml::utility::kernel_pca::{KernelPCA, KernelType};
@@ -58,11 +58,11 @@ use rayon::prelude::*;
 pub struct KernelPCA {
     kernel: KernelType,
     n_components: usize,
-    eigenvalues: Option<Array1<f64>>, // Eigenvalues in descending order
-    eigenvectors: Option<Array2<f64>>, // Corresponding normalized eigenvectors, each column is an eigenvector
-    x_fit: Option<Array2<f64>>, // Training data, used for subsequent transformation of new data
-    row_means: Option<Array1<f64>>, // Mean of each row in the training kernel matrix (used for centering)
-    total_mean: Option<f64>,        // Overall mean of the training kernel matrix
+    eigenvalues: Option<Array1<f64>>,
+    eigenvectors: Option<Array2<f64>>,
+    x_fit: Option<Array2<f64>>,
+    row_means: Option<Array1<f64>>,
+    total_mean: Option<f64>,
 }
 
 /// Calculates the kernel value between two samples based on the specified kernel type.
@@ -97,10 +97,6 @@ pub fn compute_kernel(x: &ArrayView1<f64>, y: &ArrayView1<f64>, kernel: &KernelT
 }
 
 /// Default implementation for KernelPCA.
-///
-/// Creates a KernelPCA instance with default parameters:
-/// - Linear kernel
-/// - 2 components
 impl Default for KernelPCA {
     fn default() -> Self {
         KernelPCA {
@@ -232,7 +228,7 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - containing the transformed training data (projection of the input data)
+    /// - `Ok(&mut Self)` - containing a mutable reference to the fitted model
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn std::error::Error>> {
         if x.is_empty() {

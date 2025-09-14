@@ -2,11 +2,11 @@ use crate::ModelError;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
-/// # Linear Discriminant Analysis (LDA)
+/// Linear Discriminant Analysis (LDA)
 ///
 /// A classifier and dimensionality reduction technique that projects data onto a lower-dimensional space while maintaining class separability.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `classes` - Array of unique class labels from training data
 /// - `priors` - Prior probabilities for each class
@@ -14,7 +14,7 @@ use rayon::prelude::*;
 /// - `cov_inv` - Inverse of the common covariance matrix
 /// - `projection` - Projection matrix for dimensionality reduction
 ///
-/// ## Examples
+/// # Example
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utility::linear_discriminant_analysis::LDA;
@@ -36,23 +36,15 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct LDA {
-    /// Array of classes (e.g., class labels represented by i32)
     classes: Option<Array1<i32>>,
-    /// Prior probabilities for each class
     priors: Option<Array1<f64>>,
-    /// Mean vectors for each class (each row corresponds to a class, shape: (n_classes, n_features))
     means: Option<Array2<f64>>,
-    /// Inverse of the common covariance matrix (based on within-class scatter, shape: (n_features, n_features))
     cov_inv: Option<Array2<f64>>,
-    /// Projection matrix for dimensionality reduction, each column is a projection vector (max dimension is n_classes - 1)
     projection: Option<Array2<f64>>,
 }
 
 /// Default implementation for LDA
 impl Default for LDA {
-    /// Creates a new LDA instance with default settings
-    ///
-    /// Returns a new LDA instance with all fields set to None
     fn default() -> Self {
         Self::new()
     }
@@ -61,7 +53,9 @@ impl Default for LDA {
 impl LDA {
     /// Creates a new LDA instance
     ///
-    /// Returns a new LDA instance with all fields set to None
+    /// # Returns
+    ///
+    /// * `LDA` - a new LDA instance with all fields set to None
     pub fn new() -> Self {
         LDA {
             classes: None,

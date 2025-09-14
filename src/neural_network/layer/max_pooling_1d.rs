@@ -92,9 +92,13 @@ impl MaxPooling1D {
     ///
     /// # Parameters
     ///
-    /// * `pool_size` - Size of the pooling window
-    /// * `stride` - Stride of the pooling operation
-    /// * `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
+    /// - `pool_size` - Size of the pooling window
+    /// - `stride` - Stride of the pooling operation
+    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
+    ///
+    /// # Returns
+    ///
+    /// * `MaxPooling1D` - a new instance of `MaxPooling1D`
     pub fn new(pool_size: usize, stride: usize, input_shape: Vec<usize>) -> Self {
         // verify input is 3D: [batch_size, channels, length]
         assert_eq!(

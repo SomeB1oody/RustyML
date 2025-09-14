@@ -57,7 +57,7 @@ impl GlobalMaxPooling1D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `GlobalMaxPooling1D` layer instance
+    /// * `GlobalMaxPooling1D` - A new `GlobalMaxPooling1D` layer instance
     pub fn new() -> Self {
         GlobalMaxPooling1D {
             input_shape: Vec::new(),

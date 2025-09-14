@@ -3,10 +3,48 @@ use rayon::prelude::*;
 
 /// Sparse Categorical Cross Entropy loss function for multi-class classification
 /// where true labels are integers instead of one-hot vectors
+///
+/// # Example
+///
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::ArrayD;
+///
+/// // Create a Sparse Categorical Cross Entropy loss function instance
+/// let scce = SparseCategoricalCrossEntropy::new();
+///
+/// // Create sample data - true class labels (as integers) and predicted probabilities
+/// let y_true = ArrayD::from_shape_vec(
+///     vec![3, 1],
+///     vec![0.0, 1.0, 2.0]  // Class indices: 0, 1, 2
+/// ).unwrap();
+///
+/// let y_pred = ArrayD::from_shape_vec(
+///     vec![3, 3],  // 3 samples, 3 classes
+///     vec![
+///         0.7, 0.2, 0.1,  // Sample 1: high confidence for class 0 (correct)
+///         0.1, 0.8, 0.1,  // Sample 2: high confidence for class 1 (correct)
+///         0.2, 0.3, 0.5   // Sample 3: moderate confidence for class 2 (correct)
+///     ]
+/// ).unwrap();
+///
+/// // Compute the Sparse Categorical Cross Entropy loss
+/// let loss = scce.compute_loss(&y_true, &y_pred);
+/// println!("Sparse Categorical Cross Entropy Loss: {:.4}", loss);
+///
+/// // Compute gradients for backpropagation
+/// let gradients = scce.compute_grad(&y_true, &y_pred);
+/// println!("Gradients shape: {:?}", gradients.shape());
+/// println!("Gradients: {:?}", gradients);
+/// ```
 pub struct SparseCategoricalCrossEntropy;
 
 impl SparseCategoricalCrossEntropy {
     /// Creates a new instance of SparseCategoricalCrossEntropy
+    ///
+    /// # Returns
+    ///
+    /// * `SparseCategoricalCrossEntropy` - Returns a unit-like struct `SparseCategoricalCrossEntropy`
     pub fn new() -> Self {
         Self {}
     }

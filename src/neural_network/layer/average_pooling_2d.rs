@@ -92,13 +92,13 @@ impl AveragePooling2D {
     ///
     /// # Parameters
     ///
-    /// * `pool_size` - Size of the pooling window as (height, width)
-    /// * `strides` - Stride of the pooling operation as (height, width)
-    /// * `input_shape` - Shape of the input tensor \[batch_size, channels, height, width\]
+    /// - `pool_size` - Size of the pooling window as (height, width)
+    /// - `strides` - Stride of the pooling operation as (height, width)
+    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, height, width\]
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `AveragePooling` layer instance
+    /// * `AveragePooling2D` - A new `AveragePooling2D` layer instance
     pub fn new(
         pool_size: (usize, usize),
         strides: (usize, usize),

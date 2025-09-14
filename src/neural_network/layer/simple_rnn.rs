@@ -18,6 +18,7 @@ use ndarray_rand::rand_distr::Uniform;
 /// - Output shape: (batch_size, units)
 ///
 /// # Fields
+///
 /// ## Core fields
 /// - `input_dim` - Number of input features
 /// - `units` - Number of output units (neurons)
@@ -63,35 +64,17 @@ use ndarray_rand::rand_distr::Uniform;
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
 pub struct SimpleRNN {
-    /// Number of input features
     input_dim: usize,
-    /// Number of output units (neurons)
     units: usize,
-    /// Weight matrix connecting inputs to the recurrent layer (shape: input_dim, units)
     kernel: Array2<f32>,
-    /// Weight matrix connecting previous hidden states to the current state (shape: units, units)
     recurrent_kernel: Array2<f32>,
-    /// Bias vector for the layer (shape: 1, units)
     bias: Array2<f32>,
-
-    // Cache
-    /// Cache of input tensors from forward pass (shape: batch, timesteps, input_dim)
     input_cache: Option<Array3<f32>>,
-    /// Cache of hidden states from forward pass (length = timesteps+1)
     hidden_state_cache: Option<Vec<Array2<f32>>>,
-
-    // Gradients
-    /// Gradient of the kernel weights
     grad_kernel: Option<Array2<f32>>,
-    /// Gradient of the recurrent kernel weights
     grad_recurrent_kernel: Option<Array2<f32>>,
-    /// Gradient of the bias
     grad_bias: Option<Array2<f32>>,
-
-    /// Cache for optimizer
     optimizer_cache: OptimizerCache,
-
-    /// Activation function to use
     activation: Activation,
 }
 
@@ -106,7 +89,7 @@ impl SimpleRNN {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new SimpleRNN instance with the specified activation
+    /// * `SimpleRNN` - A new SimpleRNN instance with the specified activation
     pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
         let kernel = Array::random((input_dim, units), Uniform::new(-0.05, 0.05));
         let recurrent_kernel = Array::random((units, units), Uniform::new(-0.05, 0.05));

@@ -5,8 +5,11 @@ use rayon::prelude::*;
 ///
 /// A simple optimization algorithm that updates parameters in the direction
 /// of the negative gradient, scaled by the learning rate.
+///
+/// # Fields
+///
+/// * `learning_rate` - Learning rate controlling the size of parameter updates
 pub struct SGD {
-    /// Learning rate controlling the size of parameter updates.
     learning_rate: f32,
 }
 

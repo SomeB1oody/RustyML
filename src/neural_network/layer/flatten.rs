@@ -68,11 +68,7 @@ impl Flatten {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `Flatten` layer instance
-    ///
-    /// # Panics
-    ///
-    /// Panics if the input shape is not 3D, 4D, or 5D.
+    /// * `Flatten` - A new `Flatten` layer instance
     pub fn new(input_shape: Vec<usize>) -> Self {
         assert!(
             input_shape.len() >= 3 && input_shape.len() <= 5,

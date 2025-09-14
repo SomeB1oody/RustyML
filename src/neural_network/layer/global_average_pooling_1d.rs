@@ -55,7 +55,7 @@ impl GlobalAveragePooling1D {
     ///
     /// # Returns
     ///
-    /// A new instance of `GlobalAveragePooling1D`.
+    /// * `GlobalAveragePooling1D` - A new instance of `GlobalAveragePooling1D`
     pub fn new() -> Self {
         GlobalAveragePooling1D {
             input_shape: Vec::new(),

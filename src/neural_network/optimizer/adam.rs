@@ -6,16 +6,19 @@ use ndarray::{Array2, Array3, Array4, Array5};
 /// An optimization algorithm that computes individual adaptive learning
 /// rates for different parameters from estimates of first and second moments
 /// of the gradients.
+///
+/// # Fields
+///
+/// - `learning_rate` - Learning rate controlling the size of parameter updates
+/// - `beta1` - Exponential decay rate for the first moment estimates
+/// - `beta2` - Exponential decay rate for the second moment estimates
+/// - `epsilon` - Small constant added for numerical stability
+/// - `t` - Current timestep, incremented with each update
 pub struct Adam {
-    /// Learning rate controlling the size of parameter updates.
     learning_rate: f32,
-    /// Exponential decay rate for the first moment estimates.
     beta1: f32,
-    /// Exponential decay rate for the second moment estimates.
     beta2: f32,
-    /// Small constant added for numerical stability.
     epsilon: f32,
-    /// Current timestep, incremented with each update.
     t: u64,
 }
 
@@ -31,7 +34,7 @@ impl Adam {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new Adam optimizer instance
+    /// * `Adam` - A new Adam optimizer instance
     pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Self {
         Self {
             learning_rate,
@@ -92,7 +95,7 @@ impl AdamStates {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new AdamStates instance with all moment vectors initialized to zero matrices of appropriate dimensions
+    /// - `Adam` - A new AdamStates instance with all moment vectors initialized to zero matrices of appropriate dimensions
     pub fn new(
         dims_param: (usize, usize),
         dims_recurrent: Option<(usize, usize)>,
@@ -126,7 +129,7 @@ impl AdamStates {
     ///
     /// # Returns
     ///
-    /// - Tuple containing:
+    /// * Tuple containing:
     ///   - `Array2<f32>` - Update values for main parameter matrix
     ///   - `Option<Array2<f32>>` - Optional update values for recurrent parameter matrix; None if not using recurrent parameters
     ///   - `Array2<f32>` - Update values for bias parameter matrix
@@ -188,7 +191,9 @@ impl AdamStates {
         (param_update, recurrent_update, bias_update)
     }
 
-    /// Helper function: Update Adam state variables
+    /// Update Adam state variables:
+    /// - Updates `m` in-place with new first moment values: m = beta1*m + (1-beta1)*g
+    /// - Updates `v` in-place with new second moment values: v = beta2*v + (1-beta2)*g²
     ///
     /// # Parameters
     ///
@@ -197,11 +202,6 @@ impl AdamStates {
     /// - `g` - Current gradient
     /// - `beta1` - Exponential decay rate for first moment estimates
     /// - `beta2` - Exponential decay rate for second moment estimates
-    ///
-    /// # Effects
-    ///
-    /// - Updates `m` in-place with new first moment values: m = beta1*m + (1-beta1)*g
-    /// - Updates `v` in-place with new second moment values: v = beta2*v + (1-beta2)*g²
     fn update_adam_param(
         m: &mut Array2<f32>,
         v: &mut Array2<f32>,

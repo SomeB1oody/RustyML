@@ -1,10 +1,43 @@
 use crate::neural_network::{LossFunction, Tensor};
 
 /// Mean Squared Error loss function
+///
+/// # Example
+///
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::ArrayD;
+///
+/// // Create an MSE loss function instance
+/// let mse = MeanSquaredError::new();
+///
+/// // Create sample data - true values and predictions
+/// let y_true = ArrayD::from_shape_vec(
+///     vec![3, 1],
+///     vec![1.0, 2.0, 3.0]
+/// ).unwrap();
+///
+/// let y_pred = ArrayD::from_shape_vec(
+///     vec![3, 1],
+///     vec![1.1, 2.2, 2.8]
+/// ).unwrap();
+///
+/// // Compute the MSE loss
+/// let loss = mse.compute_loss(&y_true, &y_pred);
+/// println!("MSE Loss: {:.4}", loss);
+///
+/// // Compute gradients for backpropagation
+/// let gradients = mse.compute_grad(&y_true, &y_pred);
+/// println!("Gradients: {:?}", gradients);
+/// ```
 pub struct MeanSquaredError;
 
 impl MeanSquaredError {
     /// Creates a new instance of MeanSquaredError
+    ///
+    /// # Returns
+    ///
+    /// * `MeanSquaredError` - Returns a unit-like struct `MeanSquaredError`
     pub fn new() -> Self {
         Self {}
     }

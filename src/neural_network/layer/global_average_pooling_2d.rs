@@ -56,7 +56,7 @@ impl GlobalAveragePooling2D {
     ///
     /// # Returns
     ///
-    /// A new `GlobalAveragePooling2D` instance
+    /// * `GlobalAveragePooling2D` - A new `GlobalAveragePooling2D` instance
     pub fn new() -> Self {
         GlobalAveragePooling2D {
             input_shape: Vec::new(),

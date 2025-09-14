@@ -6,11 +6,11 @@ pub use crate::traits::RegressorCommonGetterFunctions;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
-/// # Logistic Regression model implementation
+/// Logistic Regression model implementation
 ///
 /// This model uses gradient descent to train a binary classification logistic regression model.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `weights` - Model weights vector, None before training
 /// - `fit_intercept` - Whether to use intercept term (bias)
@@ -20,9 +20,8 @@ use rayon::prelude::*;
 /// - `n_iter` - Actual number of iterations the algorithm ran for after fitting, None before training
 /// - `regularization_type` - Regularization type and strength
 ///
-/// ## Examples
-///
-/// ```
+/// # Examples
+/// ```rust
 /// use rustyml::machine_learning::logistic_regression::LogisticRegression;
 /// use ndarray::{Array1, Array2};
 ///
@@ -55,22 +54,33 @@ use rayon::prelude::*;
 /// ```
 #[derive(Debug, Clone)]
 pub struct LogisticRegression {
-    /// Model weights, None before training
     weights: Option<Array1<f64>>,
-    /// Whether to use intercept term (bias)
     fit_intercept: bool,
-    /// Learning rate, controls gradient descent step size
     learning_rate: f64,
-    /// Maximum number of iterations
     max_iter: usize,
-    /// Convergence tolerance, stops iteration when loss change is smaller than this value
     tol: f64,
-    /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
-    /// Type of regularization to apply (L1, L2 or None)
     regularization_type: Option<RegularizationType>,
 }
 
+/// Creates a logistic regression model with default parameters.
+///
+/// This implementation provides sensible default values that work well for most binary
+/// classification problems as a starting point for experimentation and training.
+///
+/// # Default Values
+///
+/// - `weights`: `None` - Model weights are not initialized until training begins
+/// - `fit_intercept`: `true` - Include a bias/intercept term in the model, which is generally recommended for most datasets
+/// - `learning_rate`: `0.01` - A moderate learning rate that provides stable convergence for most problems without being too slow
+/// - `max_iter`: `100` - Maximum number of gradient descent iterations, sufficient for many simple to moderately complex problems
+/// - `tol`: `1e-4` - Convergence tolerance (0.0001), stops training when the loss change between iterations is smaller than this value
+/// - `n_iter`: `None` - Actual number of iterations performed is unknown before training
+/// - `regularization_type`: `None` - No regularization applied by default, suitable for datasets without overfitting issues
+///
+/// # Returns
+///
+/// * `Self` - A new `LogisticRegression` instance with default configuration
 impl Default for LogisticRegression {
     fn default() -> Self {
         LogisticRegression {
@@ -159,8 +169,8 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix where each row is a sample and each column is a feature
-    /// * `y` - Target variable containing 0 or 1 indicating sample class
+    /// - `x` - Feature matrix where each row is a sample and each column is a feature
+    /// - `y` - Target variable containing 0 or 1 indicating sample class
     ///
     /// # Returns
     ///
@@ -428,8 +438,6 @@ impl LogisticRegression {
 /// * `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 ///
 /// # Examples
-///
-/// Following codes show how this function works with `LogisticRegression`:
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::machine_learning::logistic_regression::{generate_polynomial_features, LogisticRegression};

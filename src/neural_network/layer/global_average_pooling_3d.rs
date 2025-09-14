@@ -55,7 +55,7 @@ impl GlobalAveragePooling3D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `GlobalAveragePooling3D` layer instance
+    /// * `GlobalAveragePooling3D` - A new `GlobalAveragePooling3D` layer instance
     pub fn new() -> Self {
         GlobalAveragePooling3D {
             input_shape: Vec::new(),

@@ -6,18 +6,18 @@ use ndarray::{Array1, ArrayView2};
 use rayon::prelude::*;
 use std::collections::{HashSet, VecDeque};
 
-/// # DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
+/// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
 /// DBSCAN is a popular density-based clustering algorithm that can discover clusters of arbitrary shapes
 /// without requiring the number of clusters to be specified beforehand.
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `eps` - Neighborhood radius used to find neighbors
 /// - `min_samples` - Minimum number of neighbors required to form a core point
 /// - `metric` - Distance metric, options: Euclidean, Manhattan, Minkowski(p=3)
 ///
-/// ## Examples
+/// # Examples
 /// ```rust
 /// use rustyml::machine_learning::dbscan::DBSCAN;
 /// use ndarray::Array2;
@@ -43,11 +43,13 @@ pub struct DBSCAN {
     core_sample_indices_: Option<Array1<usize>>,
 }
 
+/// Default parameters for DBSCAN model
+///
+/// Creates a DBSCAN instance with default parameters:
+/// - eps = 0.5
+/// - min_samples = 5
+/// - metric = Euclidean
 impl Default for DBSCAN {
-    /// Creates a DBSCAN instance with default parameters:
-    /// - eps = 0.5
-    /// - min_samples = 5
-    /// - metric = Euclidean
     fn default() -> Self {
         DBSCAN {
             eps: 0.5,
@@ -70,7 +72,7 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new DBSCAN instance with the specified parameters
+    /// * `DBSCAN` - A new DBSCAN instance with the specified parameters
     pub fn new(eps: f64, min_samples: usize, metric: Metric) -> Self {
         DBSCAN {
             eps,

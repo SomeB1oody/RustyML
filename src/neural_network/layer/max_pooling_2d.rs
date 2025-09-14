@@ -120,7 +120,7 @@ impl MaxPooling2D {
     ///
     /// # Returns
     ///
-    /// A vector containing the calculated output shape, in format \[batch_size, channels, output_height, output_width\].
+    /// * `Vec<usize>` - A vector containing the calculated output shape, in format \[batch_size, channels, output_height, output_width\].
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         calculate_output_shape_2d_pooling(input_shape, self.pool_size, self.strides)
     }

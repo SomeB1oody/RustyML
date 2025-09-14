@@ -88,7 +88,7 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new TSNE instance.
+    /// * `TSNE` - A new TSNE instance.
     pub fn new(
         perplexity: Option<f64>,
         learning_rate: Option<f64>,
@@ -231,7 +231,7 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// * `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
+    /// - `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
         use crate::math::squared_euclidean_distance_row;

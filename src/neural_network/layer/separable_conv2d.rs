@@ -106,7 +106,7 @@ impl SeparableConv2D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new `SeparableConv2D` layer instance with randomly initialized weights.
+    /// * `SeparableConv2D` - A new `SeparableConv2D` layer instance with randomly initialized weights.
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),

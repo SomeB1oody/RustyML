@@ -1,6 +1,24 @@
 use ndarray::{Array2, Axis, Zip};
 
 /// Activation function enum, supporting ReLU, Tanh, Sigmoid, and Softmax
+///
+/// # Variants
+///
+/// - `ReLU` - Rectified Linear Unit activation function.
+///   Returns max(0, x) for each element. Commonly used in hidden layers
+///   due to its computational efficiency and ability to mitigate vanishing gradients.
+///
+/// - `Tanh` - Hyperbolic tangent activation function.
+///   Maps input values to the range (-1, 1). Often preferred over sigmoid
+///   as it is zero-centered, which can help with gradient flow during training.
+///
+/// - `Sigmoid` - Logistic sigmoid activation function.
+///   Maps input values to the range (0, 1) using the formula 1/(1 + e^(-x)).
+///   Traditionally used for binary classification output layers.
+///
+/// - `Softmax` - Softmax activation function for multi-class classification.
+///   Converts a vector of real numbers into a probability distribution
+///   where all values sum to 1. Applied row-wise for batch processing.
 #[derive(Debug, PartialEq)]
 pub enum Activation {
     ReLU,
@@ -8,7 +26,6 @@ pub enum Activation {
     Sigmoid,
     Softmax,
 }
-
 impl Activation {
     /// Forward application of activation functions
     ///
@@ -20,6 +37,7 @@ impl Activation {
     /// - `activation` - The activation function to apply
     ///
     /// # Returns
+    ///
     /// * `Array2<f32>` - A new tensor with the activation function applied
     pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
         use rayon::prelude::*;
@@ -76,6 +94,7 @@ impl Activation {
     /// - `activation` - The activation function whose derivative to compute
     ///
     /// # Returns
+    ///
     /// * `Array2<f32>` - A tensor containing the derivative values
     pub fn activation_derivative(
         activation_output: &Array2<f32>,

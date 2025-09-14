@@ -1,6 +1,50 @@
 use super::*;
 
-/// Sequential model: supporting chained calls to add, compile, and fit methods
+/// A Sequential neural network model for building and training feedforward networks.
+///
+/// The Sequential model allows you to build neural networks by stacking layers in a linear fashion.
+/// Each layer feeds its output to the next layer in sequence. This model is suitable for
+/// most feedforward neural network architectures where data flows from input to output
+/// through a series of transformations.
+///
+/// # Fields
+///
+/// - `layers` - A vector containing all the layers in the model. Each layer implements
+///   the `Layer` trait and is stored as a boxed dynamic trait object.
+///
+/// - `optimizer` - An optional optimizer used for updating model parameters during training.
+///   Common optimizers include SGD, Adam, and RMSprop.
+///
+/// - `loss` - An optional loss function used to compute the training loss. Examples include
+///   mean squared error for regression and categorical crossentropy for classification.
+///
+/// # Example
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::Array;
+///
+/// // Create training data
+/// let x = Array::ones((32, 784)).into_dyn(); // 32 samples, 784 features
+/// let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
+///
+/// // Build a neural network
+/// let mut model = Sequential::new();
+/// model
+///     .add(Dense::new(784, 128, Activation::ReLU))
+///     .add(Dense::new(128, 64, Activation::ReLU))
+///     .add(Dense::new(64, 10, Activation::Softmax))
+///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());
+///
+/// // Display model structure
+/// model.summary();
+///
+/// // Train the model
+/// model.fit(&x, &y, 10).unwrap();
+///
+/// // Make predictions
+/// let predictions = model.predict(&x);
+/// println!("Predictions shape: {:?}", predictions.shape());
+/// ```
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
@@ -9,6 +53,10 @@ pub struct Sequential {
 
 impl Sequential {
     /// Creates a new empty Sequential model
+    ///
+    /// # Returns
+    ///
+    /// * `Sequential` - an empty Sequential model
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
@@ -27,7 +75,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// * `&mut Self` - Mutable reference to self for method chaining
+    /// * `&mut Sequential` - Mutable reference to self for method chaining
     pub fn add<L: 'static + Layer>(&mut self, layer: L) -> &mut Self {
         self.layers.push(Box::new(layer));
         self
@@ -42,7 +90,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// * `&mut Self` - Mutable reference to self for method chaining
+    /// * `&mut Sequential` - Mutable reference to self for method chaining
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,

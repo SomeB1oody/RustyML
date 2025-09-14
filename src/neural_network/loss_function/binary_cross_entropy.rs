@@ -1,10 +1,39 @@
 use crate::neural_network::{LossFunction, Tensor};
 
 /// Binary Cross Entropy loss function for binary classification
+///
+/// # Example
+///
+/// ```rust
+/// use rustyml::prelude::*;
+/// use ndarray::array;
+/// use statrs::function::exponential::integral;
+///
+/// // Create a binary cross entropy loss function
+/// let bce_loss = BinaryCrossEntropy::new();
+///
+/// // True binary labels (0 or 1)
+/// let y_true = Tensor::from(array![[0.0f32, 1.0f32, 1.0f32, 0.0f32]].into_dyn());
+///
+/// // Predicted probabilities (between 0 and 1)
+/// let y_pred = Tensor::from(array![[0.1f32, 0.9f32, 0.8f32, 0.2f32]].into_dyn());
+///
+/// // Compute the loss
+/// let loss = bce_loss.compute_loss(&y_true, &y_pred);
+/// println!("Binary Cross Entropy Loss: {:.4}", loss);
+///
+/// // Compute gradients for backpropagation
+/// let gradients = bce_loss.compute_grad(&y_true, &y_pred);
+/// println!("Gradients: {:?}", gradients);
+/// ```
 pub struct BinaryCrossEntropy;
 
 impl BinaryCrossEntropy {
     /// Creates a new instance of BinaryCrossEntropy
+    ///
+    /// # Returns
+    ///
+    /// * `BinaryCrossEntropy` - Returns a unit-like struct `BinaryCrossEntropy`
     pub fn new() -> Self {
         Self {}
     }

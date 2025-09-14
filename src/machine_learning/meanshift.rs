@@ -16,11 +16,18 @@ use rayon::prelude::*;
 ///
 /// # Fields
 ///
+/// ## Core Parameters
 /// - `bandwidth` - The kernel bandwidth parameter that determines the search radius. Larger values lead to fewer clusters.
 /// - `max_iter` - Maximum number of iterations to prevent infinite loops.
 /// - `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
 /// - `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
 /// - `cluster_all` - Whether to assign all points to clusters, including potential noise.
+///
+/// ## Results (Available after fitting)
+/// - `n_samples_per_center` - Number of samples assigned to each cluster center, stored as `Option<Array1<usize>>`.
+/// - `cluster_centers` - The final cluster centers found by the algorithm, stored as `Option<Array2<f64>>`.
+/// - `labels` - Cluster labels assigned to each input sample, stored as `Option<Array1<usize>>`.
+/// - `n_iter` - The actual number of iterations performed during fitting, stored as `Option<usize>`.
 ///
 /// # Examples
 /// ```rust
@@ -49,26 +56,47 @@ use rayon::prelude::*;
 /// - For large datasets, setting `bin_seeding = true` can improve performance.
 #[derive(Debug, Clone)]
 pub struct MeanShift {
-    /// Bandwidth parameter that controls the kernel width
     bandwidth: f64,
-    /// Maximum number of iterations
     max_iter: usize,
-    /// Convergence threshold
     tol: f64,
-    /// Whether to use bin seeding for initialization
     bin_seeding: bool,
-    /// Whether to assign all points to clusters
     cluster_all: bool,
-    /// Number of samples per cluster center
     n_samples_per_center: Option<Array1<usize>>,
-    /// Cluster centers
     cluster_centers: Option<Array2<f64>>,
-    /// Cluster labels for each sample
     labels: Option<Array1<usize>>,
-    /// Actual number of iterations
     n_iter: Option<usize>,
 }
 
+/// Creates a new MeanShift instance with default parameter values.
+///
+/// # Default Values
+///
+/// - `bandwidth`: `1.0` - The kernel bandwidth parameter. This is a crucial parameter that determines
+///   the search radius for each data point. A larger value will result in fewer clusters, while
+///   a smaller value will create more clusters. The default value of 1.0 is suitable for normalized data.
+/// - `max_iter`: `300` - Maximum number of iterations to prevent infinite loops during convergence.
+/// - `tol`: `1e-3` - Convergence tolerance threshold. The algorithm stops when points move less
+///   than this distance between iterations.
+/// - `bin_seeding`: `false` - Bin seeding is disabled by default. When enabled, it can significantly
+///   speed up the algorithm for large datasets by reducing the number of initial seed points.
+/// - `cluster_all`: `true` - All data points will be assigned to clusters by default, including
+///   potential outliers. When set to false, points far from any cluster center may be marked as outliers.
+///
+/// # Returns
+///
+/// * `MeanShift` - A new MeanShift instance with default parameters.
+///
+/// # Examples
+/// ```rust
+/// use rustyml::machine_learning::meanshift::MeanShift;
+///
+/// let ms = MeanShift::default();
+/// assert_eq!(ms.get_bandwidth(), 1.0);
+/// assert_eq!(ms.get_max_iter(), 300);
+/// assert_eq!(ms.get_tol(), 1e-3);
+/// assert_eq!(ms.get_bin_seeding(), false);
+/// assert_eq!(ms.get_cluster_all(), true);
+/// ```
 impl Default for MeanShift {
     fn default() -> Self {
         Self::new(1.0, None, None, None, None)
@@ -87,6 +115,7 @@ impl MeanShift {
     /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
     ///
     /// # Returns
+    ///
     /// * `Self` - A new MeanShift instance.
     pub fn new(
         bandwidth: f64,

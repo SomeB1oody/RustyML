@@ -58,7 +58,7 @@ impl GlobalMaxPooling2D {
     ///
     /// # Returns
     ///
-    /// A new `GlobalMaxPooling2D` instance
+    /// * `GlobalMaxPooling2D` - A new `GlobalMaxPooling2D` instance
     pub fn new() -> Self {
         GlobalMaxPooling2D {
             input_shape: Vec::new(),

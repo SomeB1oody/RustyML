@@ -116,7 +116,7 @@ impl DepthwiseConv2D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new DepthwiseConv2D instance with randomly initialized weights
+    /// * `DepthwiseConv2D` - A new `DepthwiseConv2D` instance with randomly initialized weights
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),

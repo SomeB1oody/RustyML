@@ -7,6 +7,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ## [v0.6.3] - 2025-8-30 (UTC-7)
 ### Changed
+- Standardize doc comments
+
+## [v0.6.3] - 2025-8-30 (UTC-7)
+### Changed
 - Improve input validation and error handling in `Sequential` model
 
 ## [v0.6.3] - 2025-8-30 (UTC-7)

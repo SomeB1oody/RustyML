@@ -20,7 +20,7 @@ pub enum Algorithm {
     CART,
 }
 
-/// # Decision Tree Implementation
+/// Decision Tree Implementation
 ///
 /// A machine learning model that makes predictions by recursively partitioning the feature space.
 /// Supports both classification and regression tasks using various algorithms (ID3, C4.5, CART).
@@ -29,7 +29,7 @@ pub enum Algorithm {
 /// - Internal nodes represent decision rules based on feature values
 /// - Leaf nodes contain predictions (class labels or regression values)
 ///
-/// ## Fields
+/// # Fields
 ///
 /// - `algorithm` - The splitting algorithm used (ID3, C45, CART)
 /// - `root` - The root node of the decision tree, if trained
@@ -38,14 +38,14 @@ pub enum Algorithm {
 /// - `params` - Hyperparameters controlling the tree's structure and training process
 /// - `is_classifier` - Boolean flag indicating whether this is a classification tree (true) or regression tree (false)
 ///
-/// ## Features
+/// # Features
 ///
 /// - Supports multiple splitting algorithms (ID3, C4.5, CART)
 /// - Handles both classification and regression tasks
 /// - Provides probability estimates for classification
 /// - Customizable via hyperparameters to control tree complexity
 ///
-/// ## Example
+/// # Example
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::decision_tree::{DecisionTree, Algorithm};
@@ -74,7 +74,7 @@ pub struct DecisionTree {
     is_classifier: bool,
 }
 
-/// # Decision Tree Parameters
+/// Decision Tree Parameters
 ///
 /// Hyperparameters that control the training and structure of the decision tree.
 /// These parameters help prevent overfitting and optimize the model's performance.
@@ -95,24 +95,38 @@ pub struct DecisionTreeParams {
     pub random_state: Option<u64>,
 }
 
-/// # Decision Tree Node Type
+/// Decision Tree Node Type
 ///
 /// Represents the two possible types of nodes in a decision tree: internal decision nodes
 /// and terminal leaf nodes.
 ///
 /// # Variants
 ///
-/// - `Internal`: A decision node that splits the data based on a feature value comparison. For numerical features, uses a threshold comparison. For categorical features, may use multi-way splits based on category values.
-/// - `Leaf`: A terminal node that provides the prediction output. For regression trees, this is typically the mean value of samples in the node. For classification trees, it contains the majority class and probability distribution across all classes.
+/// - `Internal` - A decision node that splits the data based on a feature value comparison.
+///   For numerical features, uses a threshold comparison. For categorical features, may use
+///   multi-way splits based on category values.
+///   - `feature_index`: The index of the feature used for splitting (0-based indexing)
+///   - `threshold`: The threshold value for numerical feature comparison. Samples with
+///     feature values <= threshold go left, others go right
+///   - `categories`: Optional vector of category strings for categorical features. When present,
+///     enables multi-way splits where each category maps to a specific child node
+///
+/// - `Leaf` - A terminal node that provides the prediction output. For regression trees,
+///   this is typically the mean value of samples in the node. For classification trees,
+///   it contains the majority class and probability distribution across all classes.
+///   - `value`: The predicted value for regression tasks, or the class prediction for
+///     classification tasks (typically the majority class)
+///   - `class`: Optional class index (0-based) for classification tasks. Contains the
+///     majority class index, None for regression tasks
+///   - `probabilities`: Optional probability distribution across all classes for
+///     classification tasks. Vector length equals number of classes, None for regression tasks
 #[derive(Debug, Clone)]
 pub enum NodeType {
-    /// Internal decision node that routes samples based on feature comparisons
     Internal {
         feature_index: usize,
         threshold: f64,
         categories: Option<Vec<String>>,
     },
-    /// Terminal leaf node containing the prediction information
     Leaf {
         value: f64,
         class: Option<usize>,
@@ -120,7 +134,7 @@ pub enum NodeType {
     },
 }
 
-/// # Decision Tree Node
+/// Decision Tree Node
 ///
 /// Represents a node in the decision tree hierarchy.
 /// Each node either makes a decision based on a feature (internal node)
@@ -230,11 +244,11 @@ impl Node {
 /// Provides default values for the `DecisionTreeParams` structure.
 ///
 /// This implementation sets sensible default values that work well for many datasets:
-/// * No maximum depth limit (tree can grow until other stopping criteria are met)
-/// * Minimum of 2 samples required to consider splitting a node
-/// * Minimum of 1 sample required in each leaf node
-/// * No minimum impurity decrease requirement for splitting
-/// * No specific random seed (results may vary between runs)
+/// - No maximum depth limit (tree can grow until other stopping criteria are met)
+/// - Minimum of 2 samples required to consider splitting a node
+/// - Minimum of 1 sample required in each leaf node
+/// - No minimum impurity decrease requirement for splitting
+/// - No specific random seed (results may vary between runs)
 ///
 /// # Returns
 ///
@@ -265,7 +279,7 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new, untrained DecisionTree instance configured with the specified settings
+    /// * `DecisionTree` - A new, untrained DecisionTree instance configured with the specified settings
     pub fn new(
         algorithm: Algorithm,
         is_classifier: bool,
@@ -360,8 +374,8 @@ impl DecisionTree {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix where each row is a sample and each column is a feature
-    /// * `y` - Target values (class labels for classification, continuous values for regression)
+    /// - `x` - Feature matrix where each row is a sample and each column is a feature
+    /// - `y` - Target values (class labels for classification, continuous values for regression)
     ///
     /// # Returns
     ///
@@ -920,8 +934,8 @@ impl DecisionTree {
     ///
     /// # Parameters
     ///
-    /// * `node` - Current node in the decision tree
-    /// * `x` - Feature vector for a single sample
+    /// - `node` - Current node in the decision tree
+    /// - `x` - Feature vector for a single sample
     ///
     /// # Returns
     ///
