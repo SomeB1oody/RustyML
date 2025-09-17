@@ -5,11 +5,13 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 [![Rust Version](https://img.shields.io/badge/Rust-2024_version-brown)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 [![ndarray](https://img.shields.io/badge/ndrarray-0.16.1-blue)](https://crates.io/crates/ndarray)
-[![rand](https://img.shields.io/badge/rand-0.9.1-blue)](https://crates.io/crates/rand)
-[![nalgebra](https://img.shields.io/badge/nalgebra-0.33.2-blue)](https://crates.io/crates/nalgebra)
+[![rand](https://img.shields.io/badge/rand-0.9.2-blue)](https://crates.io/crates/rand)
+[![nalgebra](https://img.shields.io/badge/nalgebra-0.34.0-blue)](https://crates.io/crates/nalgebra)
 [![statrs](https://img.shields.io/badge/statrs-0.18.0-blue)](https://crates.io/crates/statrs)
 [![rand_distr](https://img.shields.io/badge/rand_distr-0.5.1-blue)](https://crates.io/crates/rand_distr)
-[![rayon](https://img.shields.io/badge/rayon-1.10.0-blue)](https://crates.io/crates/rayon)
+[![rayon](https://img.shields.io/badge/rayon-1.11.0-blue)](https://crates.io/crates/rayon)
+[![ndarray-rand](https://img.shields.io/badge/ndarray-rand-0.15.0-blue)](https://crates.io/crates/ndarray-rand)
+[![ahash](https://img.shields.io/badge/ahash-0.8.12-blue)](https://crates.io/crates/ahash)
 
 ## Overview | 概述
 RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages with foundational components, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
