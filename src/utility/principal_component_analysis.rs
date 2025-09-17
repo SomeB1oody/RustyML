@@ -81,16 +81,24 @@ impl Default for PCA {
 }
 
 impl PCA {
-    /// Creates a new PCA instance
+    /// Creates a new PCA instance with validation
     ///
     /// # Parameters
     ///
-    /// * `n_components` - Number of principal components to keep
+    /// * `n_components` - Number of principal components to keep (must be > 0)
     ///
     /// # Returns
     ///
     /// * `PCA` - A new PCA instance with the specified number of components
+    ///
+    /// # Panics
+    ///
+    /// Panics if n_components is 0
     pub fn new(n_components: usize) -> Self {
+        if n_components == 0 {
+            panic!("Number of components must be positive");
+        }
+
         PCA {
             n_components,
             components: None,
@@ -108,10 +116,7 @@ impl PCA {
     /// - `Ok(&Array2<f64>)` - The components matrix if fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_components(&self) -> Result<&Array2<f64>, ModelError> {
-        match self.components.as_ref() {
-            Some(components) => Ok(components),
-            None => Err(ModelError::NotFitted),
-        }
+        self.components.as_ref().ok_or(ModelError::NotFitted)
     }
 
     /// Gets the explained variance
@@ -121,10 +126,9 @@ impl PCA {
     /// - `Ok(&Array1<f64>)` - The explained variance array if fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_explained_variance(&self) -> Result<&Array1<f64>, ModelError> {
-        match self.explained_variance.as_ref() {
-            Some(explained_variance) => Ok(explained_variance),
-            None => Err(ModelError::NotFitted),
-        }
+        self.explained_variance
+            .as_ref()
+            .ok_or(ModelError::NotFitted)
     }
 
     /// Gets the explained variance ratio
@@ -134,10 +138,9 @@ impl PCA {
     /// - `Ok(&Array1<f64>)` - The explained variance ratio array if fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_explained_variance_ratio(&self) -> Result<&Array1<f64>, ModelError> {
-        match self.explained_variance_ratio.as_ref() {
-            Some(explained_variance_ratio) => Ok(explained_variance_ratio),
-            None => Err(ModelError::NotFitted),
-        }
+        self.explained_variance_ratio
+            .as_ref()
+            .ok_or(ModelError::NotFitted)
     }
 
     /// Gets the singular values
@@ -147,10 +150,41 @@ impl PCA {
     /// - `Ok(&Array1<f64>)` - The singular values array if fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_singular_values(&self) -> Result<&Array1<f64>, ModelError> {
-        match self.singular_values.as_ref() {
-            Some(singular_values) => Ok(singular_values),
-            None => Err(ModelError::NotFitted),
+        self.singular_values.as_ref().ok_or(ModelError::NotFitted)
+    }
+
+    /// Validates input data for NaN and infinite values
+    fn validate_input_data(&self, x: ArrayView2<f64>) -> Result<(), ModelError> {
+        // Check if input data is empty
+        if x.nrows() == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input data is empty".to_string(),
+            ));
         }
+
+        // Parallel validation for better performance on large datasets
+        let validation_results: Vec<Option<(usize, usize)>> = x
+            .indexed_iter()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .map(|((i, j), &val)| {
+                if val.is_nan() || val.is_infinite() {
+                    Some((i, j))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Find first error position
+        if let Some(Some((i, j))) = validation_results.into_iter().find(|x| x.is_some()) {
+            return Err(ModelError::InputValidationError(format!(
+                "Input data contains NaN or infinite value at position [{}, {}]",
+                i, j
+            )));
+        }
+
+        Ok(())
     }
 
     /// Fits the PCA model
@@ -168,100 +202,62 @@ impl PCA {
     ///
     /// - Computes the mean of each feature
     /// - Centers the data by subtracting the mean
-    /// - Computes the covariance matrix
-    /// - Calculates eigenvalues and eigenvectors
+    /// - Computes SVD directly instead of eigendecomposition
     /// - Sorts components by explained variance
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn Error>> {
-        // check if input data is empty
-        if x.nrows() == 0 {
-            return Err(Box::new(ModelError::InputValidationError(
-                "Input data is empty".to_string(),
-            )));
-        }
-
-        // check if input data contains NaN or infinite values
-        for (i, row) in x.outer_iter().enumerate() {
-            for (j, &val) in row.iter().enumerate() {
-                if val.is_nan() || val.is_infinite() {
-                    return Err(Box::new(ModelError::InputValidationError(format!(
-                        "Input data contains NaN or infinite value at position [{}][{}]",
-                        i, j
-                    ))));
-                }
-            }
-        }
+        // Validate input data
+        self.validate_input_data(x)?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        if self.n_components == 0 {
-            return Err(Box::new(ModelError::InputValidationError(
-                "Number of components must be positive.".to_string(),
-            )));
-        }
+        // Calculate feature means in parallel using ndarray's built-in method
+        let mean = x.mean_axis(Axis(0)).ok_or("Failed to compute mean")?;
 
-        // Calculate feature means in parallel
-        let mean: Array1<f64> = (0..n_features)
-            .into_par_iter()
-            .map(|i| x.column(i).mean().unwrap_or(0.0))
-            .collect::<Vec<f64>>()
-            .into();
+        // Center the data more efficiently using broadcasting
+        let x_centered = &x - &mean;
 
-        // Center the data in parallel
-        let mut x_centered = x.to_owned();
-        x_centered
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .for_each(|mut row| {
-                for j in 0..n_features {
-                    row[j] -= mean[j];
-                }
-            });
-
-        // Use SVD for computation (no need to compute covariance matrix first)
-        // Convert ndarray data to nalgebra DMatrix
+        // Use SVD for more stable computation
         let x_slice = x_centered
             .as_slice()
             .ok_or("Failed to convert x_centered to slice")?;
         let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
 
-        // Compute SVD, requesting singular values and right singular vectors
+        // Compute SVD
         let svd = nalgebra::SVD::new(x_mat, true, true);
-        let s_vals = svd.singular_values; // Length is min(n_samples, n_features)
+        let s_vals = svd.singular_values;
         let m = s_vals.len();
-        // Number of principal components to keep: not exceeding the available singular values
+
+        // Limit components to available singular values
         let n_components = self.n_components.min(m);
 
-        // Get the right singular vector matrix V^T as principal components. Each row of V^T is a principal component
+        // Get principal components from V^T
         let v_t = svd.v_t.ok_or("SVD did not compute V^T")?;
         let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| v_t.row(i)[j]);
 
-        // Calculate explained variance using singular values: eigenvalue = (singular_value^2) / (n_samples - 1)
-        let mut explained_variance = Array1::<f64>::zeros(n_components);
-        let mut singular_values = Array1::<f64>::zeros(n_components);
-        let values: Vec<(usize, f64, f64)> = (0..n_components)
+        // Compute explained variance and singular values in parallel
+        let variance_and_singular: Vec<(f64, f64)> = (0..n_components)
             .into_par_iter()
             .map(|i| {
                 let s_val = s_vals[i];
                 let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
-                (i, exp_var, s_val)
+                (exp_var, s_val)
             })
             .collect();
 
-        for (i, exp_var, s_val) in values {
-            explained_variance[i] = exp_var;
-            singular_values[i] = s_val;
-        }
+        let (explained_variance, singular_values): (Vec<f64>, Vec<f64>) =
+            variance_and_singular.into_iter().unzip();
 
-        // Total variance: calculated using all singular values (note: when n_features > n_samples, remaining features have variance of 0)
-        let s_vals_vec: Vec<f64> = s_vals.iter().cloned().collect();
-        let total_variance: f64 =
-            s_vals_vec.par_iter().map(|&s| s * s).sum::<f64>() / ((n_samples - 1) as f64);
+        let explained_variance = Array1::from(explained_variance);
+        let singular_values = Array1::from(singular_values);
+
+        // Compute total variance more efficiently
+        let total_variance = s_vals.iter().map(|&s| s * s).sum::<f64>() / ((n_samples - 1) as f64);
 
         // Calculate explained variance ratio
-        let explained_variance_ratio = explained_variance.map(|v| v / total_variance);
+        let explained_variance_ratio = explained_variance.mapv(|v| v / total_variance);
 
-        // Save results to the struct
+        // Store results
         self.components = Some(components);
         self.mean = Some(mean);
         self.explained_variance = Some(explained_variance);
@@ -285,32 +281,10 @@ impl PCA {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
-        // Use ndarray's vectorized operations for centering
-        // This creates a view instead of cloning the entire array
-        let x_centered = x
-            .view()
-            .outer_iter()
-            .into_par_iter()
-            .map(|row| {
-                // Subtract the mean from each row
-                let mut centered_row = row.to_owned();
-                for (i, &m) in mean.iter().enumerate() {
-                    centered_row[i] -= m;
-                }
-                centered_row
-            })
-            .collect::<Vec<_>>();
+        // Center data using broadcasting (more efficient than manual subtraction)
+        let x_centered = &x - mean;
 
-        // Convert the vector collection back to Array2
-        let x_centered = Array2::from_shape_vec(
-            (x.nrows(), x.ncols()),
-            x_centered
-                .into_iter()
-                .flat_map(|row| row.into_iter().collect::<Vec<_>>())
-                .collect(),
-        )?;
-
-        // Transform to principal component space
+        // Direct matrix multiplication for transformation
         let transformed = x_centered.dot(&components.t());
 
         Ok(transformed)
@@ -345,18 +319,8 @@ impl PCA {
         let components = self.components.as_ref().ok_or("PCA model not fitted yet")?;
         let mean = self.mean.as_ref().ok_or("PCA model not fitted yet")?;
 
-        // Transform back to original feature space
-        let mut x_restored = x.dot(components);
-        let n_features = mean.len();
-
-        x_restored
-            .axis_chunks_iter_mut(Axis(0), 1)
-            .into_par_iter()
-            .for_each(|mut chunk| {
-                for j in 0..n_features {
-                    chunk[[0, j]] += mean[j];
-                }
-            });
+        // Transform back to original feature space using broadcasting
+        let x_restored = x.dot(components) + mean;
 
         Ok(x_restored)
     }

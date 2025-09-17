@@ -234,253 +234,296 @@ impl TSNE {
     /// - `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
-        use crate::math::squared_euclidean_distance_row;
+        // Optimized parameter validation with reduced closure allocation
+        let n_iter = self.validate_positive_param(self.n_iter, 1000, "iterations")?;
+        let perplexity = self.validate_positive_f64_param(self.perplexity, 30.0, "perplexity")?;
+        let learning_rate =
+            self.validate_positive_f64_param(self.learning_rate, 200.0, "learning rate")?;
 
-        fn validate_param<T: PartialOrd + Copy + std::fmt::Display>(
-            value: Option<T>,
-            default: T,
-            check_fn: impl Fn(T) -> bool,
-            error_msg: impl Fn(T) -> String,
-        ) -> Result<T, ModelError> {
-            match value {
-                Some(val) => {
-                    if !check_fn(val) {
-                        Err(ModelError::InputValidationError(error_msg(val)))
-                    } else {
-                        Ok(val)
-                    }
-                }
-                None => Ok(default),
-            }
-        }
+        let early_exaggeration =
+            self.validate_min_f64_param(self.early_exaggeration, 12.0, 1.0, "early exaggeration")?;
 
-        let n_iter = validate_param(
-            self.n_iter,
-            1000,
-            |val| val > 0,
-            |val| format!("Number of iterations must be greater than 0, got {}", val),
+        let exaggeration_iter = self.validate_positive_param(
+            self.exaggeration_iter,
+            n_iter / 12,
+            "exaggeration iterations",
         )?;
 
-        let perplexity = validate_param(
-            self.perplexity,
-            30.0,
-            |val| val > 0.0,
-            |val| format!("Perplexity must be greater than 0, got {}", val),
-        )?;
+        let initial_momentum =
+            self.validate_range_f64_param(self.initial_momentum, 0.5, "initial momentum")?;
 
-        let learning_rate = validate_param(
-            self.learning_rate,
-            200.0,
-            |val| val > 0.0,
-            |val| format!("Learning rate must be greater than 0, got {}", val),
+        let final_momentum =
+            self.validate_range_f64_param(self.final_momentum, 0.8, "final momentum")?;
+
+        let momentum_switch_iter = self.validate_positive_param(
+            self.momentum_switch_iter,
+            n_iter / 3,
+            "momentum switch iterations",
         )?;
 
         let random_state = self.random_state.unwrap_or(42);
-
-        let early_exaggeration = validate_param(
-            self.early_exaggeration,
-            12.0,
-            |val| val > 1.0,
-            |val| format!("Early exaggeration must be greater than 1.0, got {}", val),
-        )?;
-
-        let exaggeration_iter = validate_param(
-            self.exaggeration_iter,
-            n_iter / 12,
-            |val| val > 0,
-            |val| format!("Exaggeration iteration must be greater than 0, got {}", val),
-        )?;
-
-        let initial_momentum = validate_param(
-            self.initial_momentum,
-            0.5,
-            |val| val >= 0.0 && val <= 1.0,
-            |val| format!("Initial momentum must be between 0.0 and 1.0, got {}", val),
-        )?;
-
-        let final_momentum = validate_param(
-            self.final_momentum,
-            0.8,
-            |val| val >= 0.0 && val <= 1.0,
-            |val| format!("Final momentum must be between 0.0 and 1.0, got {}", val),
-        )?;
-
-        let momentum_switch_iter = validate_param(
-            self.momentum_switch_iter,
-            n_iter / 3,
-            |val| val > 0,
-            |val| {
-                format!(
-                    "Momentum switch iteration must be greater than 0, got {}",
-                    val
-                )
-            },
-        )?;
-
-        validate_param(
-            Some(self.dim),
-            2,
-            |val| val > 0 && val <= x.nrows(),
-            |val| {
-                format!(
-                    "Dimension must be greater than 0 and less than n_samples: {}, got {}",
-                    x.nrows(),
-                    val
-                )
-            },
-        )?;
-
         let n_samples = x.nrows();
 
-        // 1. Calculate the squared Euclidean distance between all samples in high-dimensional space
-        // Fix method: each thread calculates its own row, then merge the results
-        let distances = {
-            let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
-
-            // Method 1: Use index ranges for parallel computation, each thread is responsible for one row
-            let indices: Vec<usize> = (0..n_samples).collect();
-            let results: Vec<_> = indices
-                .par_iter()
-                .map(|&i| {
-                    let mut row_dists = Vec::with_capacity(n_samples);
-                    for j in 0..n_samples {
-                        row_dists.push(squared_euclidean_distance_row(x.row(i), x.row(j)));
-                    }
-                    (i, row_dists)
-                })
-                .collect();
-
-            // Collect results
-            for (i, row_dists) in results {
-                for j in 0..n_samples {
-                    distances[[i, j]] = row_dists[j];
-                }
-            }
-
-            distances
-        };
-
-        // 2. Use binary search to calculate conditional probability distribution p_{j|i} for each sample
-        let mut p = Array2::<f64>::zeros((n_samples, n_samples));
-        let mut rows: Vec<_> = p.axis_iter_mut(Axis(0)).collect();
-
-        rows.par_iter_mut().enumerate().for_each(|(i, row)| {
-            let (p_i, _sigma) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
-            for j in 0..n_samples {
-                if i != j {
-                    row[j] = p_i[j];
-                }
-            }
-        });
-        // Symmetrize p: p_sym = (p + p^T) / (2N)
-        let p_sym = (&p + &p.t()) / (2.0 * n_samples as f64);
-        // Early exaggeration: amplify p in early iterations
-        let mut p_exagg = p_sym.clone() * early_exaggeration;
-
-        // 3. Initialize low-dimensional mapping y (using small random values)
-        let mut rng = StdRng::seed_from_u64(random_state);
-        let mut y = Array2::<f64>::zeros((n_samples, self.dim));
-        for mut row in y.axis_iter_mut(Axis(0)) {
-            for elem in row.iter_mut() {
-                *elem = rng.sample::<f64, _>(StandardNormal) * 1e-4;
-            }
+        // Validate dimension parameter
+        if self.dim == 0 || self.dim > n_samples {
+            return Err(ModelError::InputValidationError(format!(
+                "Dimension must be greater than 0 and less than n_samples: {}, got {}",
+                n_samples, self.dim
+            )));
         }
 
-        // 4. Initialize gradient momentum matrix dy
+        // 1. Optimized distance calculation using broadcasting
+        let distances = self.compute_pairwise_distances(&x)?;
+
+        // 2. Compute conditional probabilities in parallel
+        let p = self.compute_conditional_probabilities(&distances, perplexity)?;
+
+        // 3. Symmetrize and apply early exaggeration
+        let p_sym = (&p + &p.t()) / (2.0 * n_samples as f64);
+        let mut p_exagg = p_sym.clone() * early_exaggeration;
+
+        // 4. Initialize embedding with better scaling
+        let mut y = self.initialize_embedding(n_samples, random_state)?;
         let mut dy = Array2::<f64>::zeros((n_samples, self.dim));
 
-        // 5. Iterate using gradient descent and momentum updates
+        // 5. Optimized gradient descent loop
         for iter in 0..n_iter {
-            // Calculate the similarity q between points in low-dimensional space
-            let num = {
-                let mut num = Array2::<f64>::zeros((n_samples, n_samples));
+            // Compute Q matrix more efficiently
+            let (q, num) = self.compute_q_matrix(&y)?;
 
-                // Use the same fix method as before
-                let indices: Vec<usize> = (0..n_samples).collect();
-                let results: Vec<_> = indices
-                    .par_iter()
-                    .map(|&i| {
-                        let mut row_nums = Vec::with_capacity(n_samples);
-                        for j in 0..n_samples {
-                            if i != j {
-                                let diff = &y.row(i) - &y.row(j);
-                                let dist = diff.dot(&diff);
-                                row_nums.push((j, 1.0 / (1.0 + dist)));
-                            } else {
-                                row_nums.push((j, 0.0));
-                            }
-                        }
-                        (i, row_nums)
-                    })
-                    .collect();
+            // Compute gradient with improved numerical stability
+            let grad = self.compute_gradient(&y, &p_exagg, &q, &num)?;
 
-                // Collect results
-                for (i, row_nums) in results {
-                    for (j, val) in row_nums {
-                        num[[i, j]] = val;
-                    }
-                }
-
-                num
-            };
-
-            let sum_num = num.sum();
-            let q = &num / sum_num;
-
-            // Calculate gradient dC/dy
-            let grad = {
-                let mut grad = Array2::<f64>::zeros((n_samples, self.dim));
-
-                // Use the same fix method as before
-                let indices: Vec<usize> = (0..n_samples).collect();
-                let results: Vec<_> = indices
-                    .par_iter()
-                    .map(|&i| {
-                        let mut grad_i = Array1::<f64>::zeros(self.dim);
-                        for j in 0..n_samples {
-                            if i != j {
-                                let mult = (p_exagg[[i, j]] - q[[i, j]]) * num[[i, j]];
-                                let diff = &y.row(i) - &y.row(j);
-                                grad_i = grad_i + diff.to_owned() * mult;
-                            }
-                        }
-                        let grad_i = grad_i * 4.0;
-                        (i, grad_i)
-                    })
-                    .collect();
-
-                // Collect results
-                for (i, grad_i) in results {
-                    for d in 0..self.dim {
-                        grad[[i, d]] = grad_i[d];
-                    }
-                }
-
-                grad
-            };
-
-            // Select momentum parameter based on iteration count
+            // Update momentum and positions
             let momentum = if iter < momentum_switch_iter {
                 initial_momentum
             } else {
                 final_momentum
             };
 
-            // Momentum update formula: dy = momentum * dy - learning_rate * grad
-            dy = dy * momentum - &grad * learning_rate;
-            y = y + &dy;
+            dy *= momentum;
+            dy.scaled_add(-learning_rate, &grad);
+            y += &dy;
 
-            // Keep y zero-mean
+            // Center the embedding
             let mean_y = y.mean_axis(Axis(0)).unwrap();
-            y = &y - &mean_y;
+            y -= &mean_y;
 
-            // When reaching early exaggeration iteration limit, restore normal p
+            // Switch to normal p after early exaggeration phase
             if iter == exaggeration_iter {
                 p_exagg = p_sym.clone();
             }
         }
 
         Ok(y)
+    }
+
+    // Helper methods for parameter validation
+    fn validate_positive_param(
+        &self,
+        param: Option<usize>,
+        default: usize,
+        name: &str,
+    ) -> Result<usize, ModelError> {
+        match param {
+            Some(val) if val > 0 => Ok(val),
+            Some(val) => Err(ModelError::InputValidationError(format!(
+                "{} must be greater than 0, got {}",
+                name, val
+            ))),
+            None => Ok(default),
+        }
+    }
+
+    fn validate_positive_f64_param(
+        &self,
+        param: Option<f64>,
+        default: f64,
+        name: &str,
+    ) -> Result<f64, ModelError> {
+        match param {
+            Some(val) if val > 0.0 => Ok(val),
+            Some(val) => Err(ModelError::InputValidationError(format!(
+                "{} must be greater than 0, got {}",
+                name, val
+            ))),
+            None => Ok(default),
+        }
+    }
+
+    fn validate_min_f64_param(
+        &self,
+        param: Option<f64>,
+        default: f64,
+        min_val: f64,
+        name: &str,
+    ) -> Result<f64, ModelError> {
+        match param {
+            Some(val) if val > min_val => Ok(val),
+            Some(val) => Err(ModelError::InputValidationError(format!(
+                "{} must be greater than {}, got {}",
+                name, min_val, val
+            ))),
+            None => Ok(default),
+        }
+    }
+
+    fn validate_range_f64_param(
+        &self,
+        param: Option<f64>,
+        default: f64,
+        name: &str,
+    ) -> Result<f64, ModelError> {
+        match param {
+            Some(val) if (0.0..=1.0).contains(&val) => Ok(val),
+            Some(val) => Err(ModelError::InputValidationError(format!(
+                "{} must be between 0.0 and 1.0, got {}",
+                name, val
+            ))),
+            None => Ok(default),
+        }
+    }
+
+    // Optimized distance computation using more efficient approach
+    fn compute_pairwise_distances(&self, x: &ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
+        let n_samples = x.nrows();
+        let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
+
+        // Use parallel computation with better memory access pattern
+        distances
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                let xi = x.row(i);
+                for (j, distance) in row.iter_mut().enumerate() {
+                    if i != j {
+                        let diff = &xi - &x.row(j);
+                        *distance = diff.dot(&diff);
+                    }
+                }
+            });
+
+        Ok(distances)
+    }
+
+    // Optimized conditional probability computation
+    fn compute_conditional_probabilities(
+        &self,
+        distances: &Array2<f64>,
+        perplexity: f64,
+    ) -> Result<Array2<f64>, ModelError> {
+        let n_samples = distances.nrows();
+        let mut p = Array2::<f64>::zeros((n_samples, n_samples));
+
+        // Process each row in parallel
+        p.axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                let (p_i, _) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
+                for (j, &prob) in p_i.iter().enumerate() {
+                    if i != j {
+                        row[j] = prob;
+                    }
+                }
+            });
+
+        Ok(p)
+    }
+
+    // Improved embedding initialization
+    fn initialize_embedding(
+        &self,
+        n_samples: usize,
+        random_state: u64,
+    ) -> Result<Array2<f64>, ModelError> {
+        let mut rng = StdRng::seed_from_u64(random_state);
+        let mut y = Array2::<f64>::zeros((n_samples, self.dim));
+
+        // Use better initialization scale based on dimensionality
+        let scale = 1e-4 / (self.dim as f64).sqrt();
+
+        // Pre-generate all random numbers
+        let total_elements = n_samples * self.dim;
+        let random_values: Vec<f64> = (0..total_elements)
+            .map(|_| rng.sample::<f64, _>(StandardNormal) * scale)
+            .collect();
+
+        // Apply the pre-generated values
+        y.indexed_iter_mut()
+            .enumerate()
+            .for_each(|(idx, (_, elem))| {
+                *elem = random_values[idx];
+            });
+
+        Ok(y)
+    }
+
+    // Optimized Q matrix computation with improved numerical stability
+    fn compute_q_matrix(&self, y: &Array2<f64>) -> Result<(Array2<f64>, Array2<f64>), ModelError> {
+        let n_samples = y.nrows();
+        let mut num = Array2::<f64>::zeros((n_samples, n_samples));
+
+        // Compute numerator with parallel processing
+        num.axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                let yi = y.row(i);
+                for (j, numerator) in row.iter_mut().enumerate() {
+                    if i != j {
+                        let diff = &yi - &y.row(j);
+                        let dist_sq = diff.dot(&diff);
+                        *numerator = 1.0 / (1.0 + dist_sq);
+                    }
+                }
+            });
+
+        // Normalize to get Q matrix
+        let sum_num = num.sum();
+        let q = if sum_num > 0.0 {
+            &num / sum_num
+        } else {
+            return Err(ModelError::ProcessingError(
+                "Q matrix normalization failed".to_string(),
+            ));
+        };
+
+        Ok((q, num))
+    }
+
+    // Optimized gradient computation
+    fn compute_gradient(
+        &self,
+        y: &Array2<f64>,
+        p: &Array2<f64>,
+        q: &Array2<f64>,
+        num: &Array2<f64>,
+    ) -> Result<Array2<f64>, ModelError> {
+        let n_samples = y.nrows();
+        let mut grad = Array2::<f64>::zeros((n_samples, self.dim));
+
+        // Parallel gradient computation
+        grad.axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut grad_i)| {
+                let yi = y.row(i);
+                for j in 0..n_samples {
+                    if i != j {
+                        let pq_diff = p[[i, j]] - q[[i, j]];
+                        let factor = 4.0 * pq_diff * num[[i, j]];
+                        let diff = &yi - &y.row(j);
+
+                        for (d, &diff_val) in diff.iter().enumerate() {
+                            grad_i[d] += factor * diff_val;
+                        }
+                    }
+                }
+            });
+
+        Ok(grad)
     }
 }
 

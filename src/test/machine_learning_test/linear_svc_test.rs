@@ -153,7 +153,7 @@ fn test_different_penalties() {
     let mut model_l1 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L1(0.0), true, 1e-4);
 
     // Test with L2 penalty
-    let mut model_l2 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L1(0.0), true, 1e-4);
+    let mut model_l2 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L2(0.0), true, 1e-4);
 
     // Simple dataset
     let x = arr2(&[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]);

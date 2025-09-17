@@ -309,8 +309,13 @@ impl MeanShift {
             indices[..max_seeds].to_vec()
         };
 
-        // Process mean shift for each seed point in parallel
-        let centers: Vec<Array1<f64>> = seeds
+        // Pre-compute gamma for efficiency
+        let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
+        let tol_squared = self.tol * self.tol;
+        let bandwidth_squared = self.bandwidth * self.bandwidth;
+
+        // Process mean shift for each seed point in parallel with proper iteration tracking
+        let results: Vec<(Array1<f64>, usize)> = seeds
             .par_iter()
             .map(|&seed_idx| {
                 let mut center = x.row(seed_idx).to_owned();
@@ -321,19 +326,17 @@ impl MeanShift {
                     let mut weight_sum = 0.0;
 
                     // Calculate distances and weights in parallel
-                    let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
-                    let weights: Vec<(usize, f64)> = (0..n_samples)
+                    let weights: Vec<f64> = (0..n_samples)
                         .into_par_iter()
                         .map(|i| {
-                            let point = x.row(i).to_owned();
-                            let dist = self.calculate_distance(center.view(), point.view());
-                            let weight = (-gamma * dist).exp();
-                            (i, weight)
+                            let point = x.row(i);
+                            let dist = self.calculate_distance(center.view(), point);
+                            (-gamma * dist).exp()
                         })
                         .collect();
 
-                    // Calculate weighted average (this part is harder to parallelize due to accumulation)
-                    for (i, weight) in weights {
+                    // Calculate weighted average (optimized accumulation)
+                    for (i, &weight) in weights.iter().enumerate() {
                         if weight > 0.0 {
                             let point = x.row(i);
                             for j in 0..n_features {
@@ -345,56 +348,59 @@ impl MeanShift {
 
                     // Normalize
                     if weight_sum > 0.0 {
-                        new_center.par_mapv_inplace(|x| x / weight_sum);
+                        new_center.mapv_inplace(|x| x / weight_sum);
                     }
 
-                    // Check convergence
-                    let shift = self
-                        .calculate_distance(center.view(), new_center.view())
-                        .sqrt();
+                    // Check convergence using squared distance to avoid sqrt
+                    let shift_squared = self.calculate_distance(center.view(), new_center.view());
                     center = new_center;
 
                     completed_iterations += 1;
 
-                    if shift < self.tol || completed_iterations >= self.max_iter {
-                        // The actual iteration count will be set later
+                    if shift_squared < tol_squared || completed_iterations >= self.max_iter {
                         break;
                     }
                 }
 
-                center
+                (center, completed_iterations)
             })
             .collect();
 
-        // Record max iterations (simplified handling)
-        self.n_iter = Some(self.max_iter);
+        // Extract centers and calculate actual max iterations
+        let centers: Vec<Array1<f64>> = results.iter().map(|(c, _)| c.clone()).collect();
+        let max_actual_iter = results.iter().map(|(_, i)| *i).max().unwrap_or(0);
+        self.n_iter = Some(max_actual_iter);
 
-        // Merge similar centers
-        let mut unique_centers: Vec<Array1<f64>> = Vec::new();
-        let mut center_counts: Vec<usize> = Vec::new();
+        // Merge similar centers with optimized clustering
+        let mut unique_centers: Vec<Array1<f64>> = Vec::with_capacity(centers.len());
+        let mut center_counts: Vec<usize> = Vec::with_capacity(centers.len());
 
         for center in centers {
-            let mut is_unique = true;
+            let mut merged = false;
 
-            for (i, unique_center) in unique_centers.iter().enumerate() {
-                let distance = self
-                    .calculate_distance(center.view(), unique_center.view())
-                    .sqrt();
-                if distance < self.bandwidth {
-                    // Update existing center (weighted average)
+            // Find closest existing center within bandwidth
+            for (i, unique_center) in unique_centers.iter_mut().enumerate() {
+                let distance_squared = self.calculate_distance(center.view(), unique_center.view());
+
+                if distance_squared < bandwidth_squared {
+                    // Update existing center using weighted average
                     let count = center_counts[i];
                     let new_count = count + 1;
-                    let updated_center = unique_centers[i].clone()
-                        * (count as f64 / new_count as f64)
-                        + center.clone() * (1.0 / new_count as f64);
-                    unique_centers[i] = updated_center;
+                    let weight_old = count as f64 / new_count as f64;
+                    let weight_new = 1.0 / new_count as f64;
+
+                    // Use parallel update for the center coordinates
+                    unique_center.zip_mut_with(&center, |old, &new| {
+                        *old = *old * weight_old + new * weight_new;
+                    });
+
                     center_counts[i] = new_count;
-                    is_unique = false;
+                    merged = true;
                     break;
                 }
             }
 
-            if is_unique {
+            if !merged {
                 unique_centers.push(center);
                 center_counts.push(1);
             }
@@ -403,28 +409,28 @@ impl MeanShift {
         // Create cluster_centers array
         let n_clusters = unique_centers.len();
         let mut cluster_centers = Array2::zeros((n_clusters, n_features));
-        for i in 0..n_clusters {
-            cluster_centers.row_mut(i).assign(&unique_centers[i]);
+        for (i, center) in unique_centers.iter().enumerate() {
+            cluster_centers.row_mut(i).assign(center);
         }
 
         // Assign cluster labels to each data point in parallel
         let labels: Vec<usize> = (0..n_samples)
             .into_par_iter()
             .map(|i| {
-                let point = x.row(i).to_owned();
-                let mut min_dist = f64::INFINITY;
+                let point = x.row(i);
+                let mut min_dist_squared = f64::INFINITY;
                 let mut label = 0;
 
                 for (j, center) in unique_centers.iter().enumerate() {
-                    let dist = self.calculate_distance(point.view(), center.view());
-                    if dist < min_dist {
-                        min_dist = dist;
+                    let dist_squared = self.calculate_distance(point, center.view());
+                    if dist_squared < min_dist_squared {
+                        min_dist_squared = dist_squared;
                         label = j;
                     }
                 }
 
                 // If not cluster_all and distance is too far, mark as outlier
-                if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
+                if !self.cluster_all && min_dist_squared > bandwidth_squared {
                     n_clusters // Use n_clusters as outlier label
                 } else {
                     label
@@ -439,8 +445,7 @@ impl MeanShift {
         // Print training info
         println!(
             "Mean shift model training finished at iteration {}, number of clusters: {}",
-            self.n_iter.unwrap_or(0),
-            n_clusters
+            max_actual_iter, n_clusters
         );
 
         Ok(self)
@@ -476,26 +481,27 @@ impl MeanShift {
 
             let n_samples = x.shape()[0];
             let n_clusters = centers.shape()[0];
+            let bandwidth_squared = self.bandwidth * self.bandwidth;
 
-            // Process all samples in parallel
+            // Process all samples in parallel with precomputed squared bandwidth
             let labels: Vec<usize> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| {
-                    let point = x.row(i).to_owned();
-                    let mut min_dist = f64::INFINITY;
+                    let point = x.row(i);
+                    let mut min_dist_squared = f64::INFINITY;
                     let mut label = 0;
 
                     for j in 0..n_clusters {
-                        let center = centers.row(j).to_owned();
-                        let dist = self.calculate_distance(point.view(), center.view());
-                        if dist < min_dist {
-                            min_dist = dist;
+                        let center = centers.row(j);
+                        let dist_squared = self.calculate_distance(point, center);
+                        if dist_squared < min_dist_squared {
+                            min_dist_squared = dist_squared;
                             label = j;
                         }
                     }
 
                     // If not cluster_all and distance is too far, mark as outlier
-                    if !self.cluster_all && min_dist > self.bandwidth.powi(2) {
+                    if !self.cluster_all && min_dist_squared > bandwidth_squared {
                         n_clusters // Use n_clusters as outlier label
                     } else {
                         label

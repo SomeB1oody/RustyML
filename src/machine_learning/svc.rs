@@ -270,25 +270,26 @@ impl SVC {
         let n_samples = x.nrows();
         let mut kernel_matrix = Array2::<f64>::zeros((n_samples, n_samples));
 
-        // Compute all values in parallel and collect results
-        let values: Vec<((usize, usize), f64)> = (0..n_samples)
-            .into_par_iter()
-            .flat_map(|i| {
-                let mut row_values = Vec::with_capacity(i + 1);
-                for j in 0..=i {
-                    let k_val = self.kernel_function(x.row(i), x.row(j));
-                    row_values.push(((i, j), k_val));
-                    if i != j {
-                        row_values.push(((j, i), k_val)); // Add symmetric element
-                    }
-                }
-                row_values
+        // Generate all (i,j) pairs where i <= j to compute only upper triangle + diagonal
+        let pairs: Vec<(usize, usize)> = (0..n_samples)
+            .flat_map(|i| (i..n_samples).map(move |j| (i, j)))
+            .collect();
+
+        // Compute kernel values in parallel
+        let kernel_values: Vec<((usize, usize), f64)> = pairs
+            .par_iter()
+            .map(|&(i, j)| {
+                let k_val = self.kernel_function(x.row(i), x.row(j));
+                ((i, j), k_val)
             })
             .collect();
 
-        // Fill the matrix
-        for ((i, j), val) in values {
+        // Fill the matrix (including symmetric values)
+        for ((i, j), val) in kernel_values {
             kernel_matrix[[i, j]] = val;
+            if i != j {
+                kernel_matrix[[j, i]] = val; // Symmetric
+            }
         }
 
         kernel_matrix
@@ -306,179 +307,313 @@ impl SVC {
     /// - `Ok(&mut Self)` - The fitted model (for method chaining)
     /// - `Err(ModelError)` - If there's an error during fitting
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        // Input validation checks
-        if x.nrows() == 0 || x.ncols() == 0 {
+        // Comprehensive input validation
+        let (n_samples, n_features) = (x.nrows(), x.ncols());
+
+        if n_samples == 0 || n_features == 0 {
             return Err(ModelError::InputValidationError(
-                "input data cannot be empty".to_string(),
+                "Input data cannot be empty".to_string(),
             ));
         }
 
-        if y.len() == 0 {
+        if y.len() != n_samples {
+            return Err(ModelError::InputValidationError(format!(
+                "Feature matrix has {} samples but label vector has {} elements",
+                n_samples,
+                y.len()
+            )));
+        }
+
+        // Validate labels using rayon parallel iteration
+        let y_vec: Vec<f64> = y.to_vec();
+        let label_check = y_vec.par_iter().all(|&yi| yi == 1.0 || yi == -1.0);
+        if !label_check {
             return Err(ModelError::InputValidationError(
-                "target labels cannot be empty".to_string(),
+                "All labels must be either 1.0 or -1.0".to_string(),
             ));
         }
 
-        if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(
-                "x and y have different number of rows".to_string(),
-            ));
-        }
-
-        let n_samples = x.nrows();
-        let n_features = x.ncols();
-
-        // Ensure labels are +1 and -1
-        if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
-            return Err(ModelError::InputValidationError(
-                "labels can only be either 1.0 or -1.0".to_string(),
-            ));
-        }
-
+        // Parameter validation
         if self.regularization_param <= 0.0 {
+            return Err(ModelError::InputValidationError(format!(
+                "Regularization parameter must be positive, got {}",
+                self.regularization_param
+            )));
+        }
+
+        if self.tol <= 0.0 || self.max_iter == 0 {
             return Err(ModelError::InputValidationError(
-                "regularization parameter must be positive".to_string(),
+                "Tolerance and max_iter must be positive".to_string(),
             ));
         }
 
-        if self.tol <= 0.0 {
+        // Check for data quality issues using rayon
+        let x_vec: Vec<f64> = x.iter().cloned().collect();
+        let data_valid = x_vec.par_iter().all(|&val| val.is_finite());
+        if !data_valid {
             return Err(ModelError::InputValidationError(
-                "tolerance must be positive".to_string(),
+                "Input data contains invalid values (NaN or Infinity)".to_string(),
             ));
         }
 
-        if self.max_iter <= 0 {
-            return Err(ModelError::InputValidationError(
-                "maximum number of iterations must be positive".to_string(),
-            ));
-        }
-
-        // Initialize alpha and b
+        // Initialize optimization variables
         let mut alphas = Array1::<f64>::zeros(n_samples);
         let mut b = 0.0;
 
-        // Compute kernel matrix - this could potentially fail for certain kernel types
+        // Compute kernel matrix with error handling
         let kernel_matrix = self.compute_kernel_matrix(x);
 
-        // Check if kernel matrix computation resulted in invalid values
-        if kernel_matrix
-            .iter()
-            .any(|&val| val.is_nan() || val.is_infinite())
-        {
+        // Validate kernel matrix using rayon
+        let kernel_vec: Vec<f64> = kernel_matrix.iter().cloned().collect();
+        if kernel_vec.par_iter().any(|&val| !val.is_finite()) {
             return Err(ModelError::ProcessingError(
-                "kernel matrix contains invalid values (NaN or Infinity)".to_string(),
+                "Kernel matrix contains invalid values - check kernel parameters".to_string(),
             ));
         }
 
-        // Initialize error cache
-        let mut error_cache = Array1::<f64>::zeros(n_samples);
-        for i in 0..n_samples {
-            error_cache[i] = self.decision_function_internal(i, &alphas, &kernel_matrix, y, b);
-        }
+        // Initialize error cache more efficiently
+        let error_cache: Vec<f64> = (0..n_samples)
+            .into_par_iter()
+            .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
+            .collect();
+        let mut error_cache = Array1::from(error_cache);
 
-        // SMO main loop
-        let mut iter = 0;
-        let mut num_changed_alphas = 0;
+        // SMO main loop with improved convergence tracking
+        let mut num_changed_alphas;
         let mut examine_all = true;
-        let mut n_iter = 0;
+        let mut iteration_count = 0;
 
-        while (iter < self.max_iter) && (num_changed_alphas > 0 || examine_all) {
-            n_iter += 1;
-            num_changed_alphas = 0;
-
-            if examine_all {
-                // Iterate through all samples
-                for i in 0..n_samples {
-                    num_changed_alphas += self.examine_example(
-                        i,
-                        &mut alphas,
-                        &kernel_matrix,
-                        y,
-                        &mut b,
-                        &mut error_cache,
-                    );
-                }
-            } else {
-                // Iterate through non-boundary alpha values
-                for i in 0..n_samples {
-                    if alphas[i] > 0.0 && alphas[i] < self.regularization_param {
-                        num_changed_alphas += self.examine_example(
-                            i,
-                            &mut alphas,
-                            &kernel_matrix,
-                            y,
-                            &mut b,
-                            &mut error_cache,
-                        );
-                    }
-                }
+        loop {
+            if iteration_count >= self.max_iter {
+                eprintln!(
+                    "Warning: SVC reached maximum iterations ({}) without full convergence",
+                    self.max_iter
+                );
+                break;
             }
 
-            iter += 1;
+            num_changed_alphas = 0;
+            iteration_count += 1;
 
+            let sample_range: Vec<usize> = if examine_all {
+                (0..n_samples).collect()
+            } else {
+                (0..n_samples)
+                    .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
+                    .collect()
+            };
+
+            for &i in &sample_range {
+                num_changed_alphas += self.examine_example(
+                    i,
+                    &mut alphas,
+                    &kernel_matrix,
+                    y,
+                    &mut b,
+                    &mut error_cache,
+                );
+            }
+
+            // Update examination strategy
             if examine_all {
                 examine_all = false;
             } else if num_changed_alphas == 0 {
                 examine_all = true;
             }
-        }
 
-        // Check for convergence - warn if max iterations reached
-        if iter >= self.max_iter {
-            eprintln!("Warning: SVC training reached maximum iterations without full convergence");
-        }
-
-        // Extract support vectors
-        let mut support_vector_indices = Vec::new();
-        for i in 0..n_samples {
-            if alphas[i] > self.eps {
-                support_vector_indices.push(i);
+            // Early termination check
+            if !examine_all && num_changed_alphas == 0 {
+                break;
             }
         }
 
-        let n_support_vectors = support_vector_indices.len();
-        if n_support_vectors == 0 {
+        // Extract support vectors with improved efficiency using rayon
+        let support_indices: Vec<usize> = (0..n_samples)
+            .into_par_iter()
+            .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
+            .collect();
+
+        if support_indices.is_empty() {
             return Err(ModelError::ProcessingError(
-                "no support vectors found - model failed to converge".to_string(),
+                "No support vectors found - model failed to converge. Try adjusting parameters."
+                    .to_string(),
             ));
         }
 
-        // Check for potential numerical instability
-        if b.is_nan() || b.is_infinite() {
+        // Validate bias term
+        if !b.is_finite() {
             return Err(ModelError::ProcessingError(
-                "bias term contains invalid values (NaN or Infinity)".to_string(),
+                "Bias term is invalid - numerical instability detected".to_string(),
             ));
         }
 
+        let n_support_vectors = support_indices.len();
         let mut support_vectors = Array2::<f64>::zeros((n_support_vectors, n_features));
         let mut support_vector_labels = Array1::<f64>::zeros(n_support_vectors);
         let mut support_vector_alphas = Array1::<f64>::zeros(n_support_vectors);
 
-        for (i, &idx) in support_vector_indices.iter().enumerate() {
+        // Efficiently copy support vector data
+        for (i, &idx) in support_indices.iter().enumerate() {
             support_vectors.row_mut(i).assign(&x.row(idx));
             support_vector_labels[i] = y[idx];
             support_vector_alphas[i] = alphas[idx];
         }
 
-        // Final validation of extracted values
-        if support_vector_alphas
-            .iter()
-            .any(|&val| val.is_nan() || val.is_infinite())
-        {
+        // Final validation of extracted values using rayon
+        let alphas_vec: Vec<f64> = support_vector_alphas.to_vec();
+        if alphas_vec.par_iter().any(|&val| !val.is_finite()) {
             return Err(ModelError::ProcessingError(
-                "support vector alphas contain invalid values".to_string(),
+                "Support vector alphas contain invalid values".to_string(),
             ));
         }
 
-        println!("SVC model training finished at iteration {}", n_iter);
+        println!(
+            "SVC model training completed in {} iterations with {} support vectors",
+            iteration_count, n_support_vectors
+        );
 
+        // Store results
         self.alphas = Some(support_vector_alphas);
         self.support_vectors = Some(support_vectors);
         self.support_vector_labels = Some(support_vector_labels);
         self.bias = Some(b);
-        self.n_iter = Some(n_iter);
+        self.n_iter = Some(iteration_count);
 
         Ok(self)
+    }
+
+    /// Predicts class labels for samples in X
+    ///
+    /// # Parameters
+    ///
+    /// * `x` - The input samples, where each row is a sample
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
+    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
+    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check model fitting status
+        let (support_vectors, support_vector_labels, alphas, bias) = match (
+            &self.support_vectors,
+            &self.support_vector_labels,
+            &self.alphas,
+            self.bias,
+        ) {
+            (Some(sv), Some(svl), Some(a), Some(b)) => (sv, svl, a, b),
+            _ => return Err(ModelError::NotFitted),
+        };
+
+        // Input validation
+        let (n_samples, n_features) = (x.nrows(), x.ncols());
+        if n_samples == 0 || n_features == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
+        if n_features != support_vectors.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "Input has {} features but model was trained on {} features",
+                n_features,
+                support_vectors.ncols()
+            )));
+        }
+
+        // Check for data quality using rayon
+        let x_vec: Vec<f64> = x.iter().cloned().collect();
+        if x_vec.par_iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains invalid values (NaN or Infinity)".to_string(),
+            ));
+        }
+
+        // Compute predictions in parallel with improved error handling
+        let prediction_results: Vec<Result<f64, ModelError>> = (0..n_samples)
+            .into_par_iter()
+            .map(|i| {
+                let decision_value: f64 = (0..support_vectors.nrows())
+                    .map(|j| {
+                        let kernel_val = self.kernel_function(x.row(i), support_vectors.row(j));
+                        alphas[j] * support_vector_labels[j] * kernel_val
+                    })
+                    .sum::<f64>()
+                    + bias;
+
+                // Handle numerical issues more robustly
+                if !decision_value.is_finite() {
+                    Err(ModelError::ProcessingError(
+                        "Decision function produced invalid value during prediction".to_string(),
+                    ))
+                } else {
+                    Ok(if decision_value >= 0.0 { 1.0 } else { -1.0 })
+                }
+            })
+            .collect();
+
+        // Check if any errors occurred during parallel computation
+        let mut predictions = Vec::with_capacity(n_samples);
+        for result in prediction_results {
+            match result {
+                Ok(pred) => predictions.push(pred),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(Array1::from(predictions))
+    }
+
+    /// Computes the decision function values for samples in X
+    ///
+    /// # Parameters
+    ///
+    /// * `x` - The input samples, where each row is a sample
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Array1<f64>)` - The decision function values
+    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
+    pub fn decision_function(&self, x: &Array2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check if the model has been fitted
+        if self.support_vectors.is_none()
+            || self.support_vector_labels.is_none()
+            || self.alphas.is_none()
+        {
+            return Err(ModelError::NotFitted);
+        }
+
+        let bias: f64 = match self.bias {
+            Some(b) => b,
+            None => return Err(ModelError::NotFitted),
+        };
+
+        let n_samples = x.nrows();
+        let mut decision_values = Array1::<f64>::zeros(n_samples);
+
+        let support_vectors = self.support_vectors.as_ref().unwrap();
+        let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
+        let alphas = self.alphas.as_ref().unwrap();
+
+        // Parallel computation on each element of decision_values
+        decision_values
+            .axis_iter_mut(ndarray::Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut val)| {
+                let x_i = x.row(i);
+                let sum = (0..support_vectors.nrows())
+                    .map(|j| {
+                        alphas[j]
+                            * support_vector_labels[j]
+                            * self.kernel_function(x_i, support_vectors.row(j))
+                    })
+                    .sum::<f64>();
+
+                *val.first_mut().unwrap() = sum + bias;
+            });
+
+        Ok(decision_values)
     }
 
     /// Examines an example for potential optimization as part of the SMO algorithm
@@ -771,151 +906,5 @@ impl SVC {
             .sum();
 
         sum - y[i] + b
-    }
-
-    /// Predicts class labels for samples in X
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - The input samples, where each row is a sample
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        // Check if the model has been fitted
-        if self.support_vectors.is_none()
-            || self.support_vector_labels.is_none()
-            || self.alphas.is_none()
-        {
-            return Err(ModelError::NotFitted);
-        }
-
-        let bias: f64 = match self.bias {
-            Some(b) => b,
-            None => return Err(ModelError::NotFitted),
-        };
-
-        // Input validation
-        if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "input data cannot be empty".to_string(),
-            ));
-        }
-
-        let support_vectors = self.support_vectors.as_ref().unwrap();
-
-        // Check feature dimension consistency
-        if x.ncols() != support_vectors.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "input features dimension {} does not match training features dimension {}",
-                x.ncols(),
-                support_vectors.ncols()
-            )));
-        }
-
-        let n_samples = x.nrows();
-        let mut predictions = Array1::<f64>::zeros(n_samples);
-
-        let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
-        let alphas = self.alphas.as_ref().unwrap();
-
-        // Create an array of indices
-        let indices: Vec<usize> = (0..n_samples).collect();
-
-        // Calculate predictions in parallel
-        let results: Vec<(usize, f64)> = indices
-            .par_iter()
-            .map(|&i| {
-                // Compute the decision value
-                let decision_value = (0..support_vectors.nrows())
-                    .map(|j| {
-                        let kernel_val = self.kernel_function(x.row(i), support_vectors.row(j));
-                        alphas[j] * support_vector_labels[j] * kernel_val
-                    })
-                    .sum::<f64>()
-                    + bias;
-
-                // Check for numerical issues in decision value
-                let prediction = if decision_value.is_nan() {
-                    // Handle NaN case - could happen with certain kernel parameters
-                    0.0 // or return an error, but this maintains robustness
-                } else if decision_value >= 0.0 {
-                    1.0
-                } else {
-                    -1.0
-                };
-
-                (i, prediction)
-            })
-            .collect();
-
-        // Check if any predictions resulted in invalid values
-        if results.iter().any(|(_, pred)| pred.is_nan()) {
-            return Err(ModelError::ProcessingError(
-                "prediction contains invalid values (NaN)".to_string(),
-            ));
-        }
-
-        // Fill the predictions array with results
-        for (i, pred) in results {
-            predictions[i] = pred;
-        }
-
-        Ok(predictions)
-    }
-
-    /// Computes the decision function values for samples in X
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - The input samples, where each row is a sample
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<f64>)` - The decision function values
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn decision_function(&self, x: &Array2<f64>) -> Result<Array1<f64>, ModelError> {
-        // Check if the model has been fitted
-        if self.support_vectors.is_none()
-            || self.support_vector_labels.is_none()
-            || self.alphas.is_none()
-        {
-            return Err(ModelError::NotFitted);
-        }
-
-        let bias: f64 = match self.bias {
-            Some(b) => b,
-            None => return Err(ModelError::NotFitted),
-        };
-
-        let n_samples = x.nrows();
-        let mut decision_values = Array1::<f64>::zeros(n_samples);
-
-        let support_vectors = self.support_vectors.as_ref().unwrap();
-        let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
-        let alphas = self.alphas.as_ref().unwrap();
-
-        // Parallel computation on each element of decision_values
-        decision_values
-            .axis_iter_mut(ndarray::Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut val)| {
-                let x_i = x.row(i);
-                let sum = (0..support_vectors.nrows())
-                    .map(|j| {
-                        alphas[j]
-                            * support_vector_labels[j]
-                            * self.kernel_function(x_i, support_vectors.row(j))
-                    })
-                    .sum::<f64>();
-
-                *val.first_mut().unwrap() = sum + bias;
-            });
-
-        Ok(decision_values)
     }
 }

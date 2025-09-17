@@ -341,24 +341,16 @@ impl LogisticRegression {
             ));
         }
 
-        // Declare a read-only view for subsequent prediction
-        let x_test_view: ArrayView2<f64>;
-        // If intercept is needed, create a new owned array
-        let x_test_owned;
-
-        if self.fit_intercept {
-            // Create a matrix with the first column filled with ones
+        // Prepare test data with optional bias term
+        let x_test = if self.fit_intercept {
             let mut x_with_bias = Array2::ones((n_samples, n_features + 1));
-            // Copy the data from x to the last n_features columns of x_with_bias
             x_with_bias.slice_mut(s![.., 1..]).assign(&x);
-            x_test_owned = x_with_bias;
-            x_test_view = x_test_owned.view();
+            x_with_bias
         } else {
-            // When intercept is not needed, directly use the view of x to avoid cloning data
-            x_test_view = x.view();
-        }
+            x.to_owned()
+        };
 
-        let probs = self.predict_proba(&x_test_view)?;
+        let probs = self.predict_proba(&x_test.view())?;
 
         // Check if probabilities contain invalid values
         if probs.iter().any(|&val| !val.is_finite()) {
@@ -367,7 +359,7 @@ impl LogisticRegression {
             ));
         }
 
-        // Apply a threshold (0.5) for classification
+        // Apply threshold for classification
         Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
     }
 

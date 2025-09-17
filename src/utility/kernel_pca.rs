@@ -355,76 +355,74 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` containing the transformed data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` if the model hasn't been fitted or computation errors occur
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the model hasn't been fitted
     pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
-        // Model must be fitted first
-        if self.x_fit.is_none()
-            || self.eigenvectors.is_none()
-            || self.row_means.is_none()
-            || self.total_mean.is_none()
-        {
-            return Err(Box::new(ModelError::NotFitted));
+        // Check if model is fitted
+        let (x_fit, eigenvectors, row_means, total_mean) = match (
+            &self.x_fit,
+            &self.eigenvectors,
+            &self.row_means,
+            &self.total_mean,
+        ) {
+            (Some(x_fit), Some(eigenvectors), Some(row_means), Some(total_mean)) => {
+                (x_fit, eigenvectors, row_means, *total_mean)
+            }
+            _ => return Err(Box::new(ModelError::NotFitted)),
+        };
+
+        if x.is_empty() {
+            return Err(Box::new(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            )));
         }
-        let x_fit = self.x_fit.as_ref().unwrap();
+
+        if x.ncols() != x_fit.ncols() {
+            return Err(Box::new(ModelError::InputValidationError(format!(
+                "Number of features in new data ({}) doesn't match training data ({})",
+                x.ncols(),
+                x_fit.ncols()
+            ))));
+        }
+
         let n_train = x_fit.nrows();
         let n_new = x.nrows();
+
+        // Pre-allocate kernel matrix
         let mut k_new = Array2::<f64>::zeros((n_train, n_new));
 
-        // Calculate the kernel matrix between training data and new data in parallel
-        let kernel_vals: Vec<((usize, usize), f64)> = (0..n_train)
+        // Calculate kernel values in parallel with better memory access pattern
+        let kernel_values: Vec<Vec<f64>> = (0..n_new)
             .into_par_iter()
-            .flat_map(|i| {
-                let mut local_results = Vec::new();
-                for j in 0..n_new {
-                    let k_val = compute_kernel(&x_fit.row(i), &x.row(j), &self.kernel);
-                    local_results.push(((i, j), k_val));
+            .map(|j| {
+                let x_j = x.row(j);
+                let mut column_values = Vec::with_capacity(n_train);
+                for i in 0..n_train {
+                    let k_val = compute_kernel(&x_fit.row(i), &x_j, &self.kernel);
+                    column_values.push(k_val);
                 }
-                local_results
+                column_values
             })
             .collect();
 
-        // Fill the kernel matrix
-        for ((i, j), k_val) in kernel_vals {
-            k_new[[i, j]] = k_val;
+        // Fill the kernel matrix from computed values
+        for (j, column_values) in kernel_values.iter().enumerate() {
+            for (i, &k_val) in column_values.iter().enumerate() {
+                k_new[[i, j]] = k_val;
+            }
         }
 
-        // Center the new data kernel matrix: k_new_centered[i,j] = k_new[i,j] - row_means[i] - mean(k_new[:,j]) + total_mean
-        let row_means = self.row_means.as_ref().unwrap();
-        let total_mean = self.total_mean.unwrap();
-        let mut k_new_centered = Array2::<f64>::zeros((n_train, n_new));
-
-        // Precompute column means in parallel
+        // Precompute column means efficiently
         let column_means: Vec<f64> = (0..n_new)
             .into_par_iter()
-            .map(|j| k_new.column(j).mean().unwrap())
+            .map(|j| k_new.column(j).sum() / n_train as f64)
             .collect();
 
-        // Compute centered values in parallel
-        let centered_vals: Vec<((usize, usize), f64)> = (0..n_new)
-            .into_par_iter()
-            .flat_map(|j| {
-                let mean_new = column_means[j];
-                let mut local_results = Vec::new();
-                for i in 0..n_train {
-                    let centered_val = k_new[[i, j]] - row_means[i] - mean_new + total_mean;
-                    local_results.push(((i, j), centered_val));
-                }
-                local_results
-            })
-            .collect();
+        // Center the kernel matrix in-place
+        k_new.indexed_iter_mut().for_each(|((i, j), val)| {
+            *val = *val - row_means[i] - column_means[j] + total_mean;
+        });
 
-        // Fill the centered matrix
-        for ((i, j), centered_val) in centered_vals {
-            k_new_centered[[i, j]] = centered_val;
-        }
-
-        // Project using eigenvectors saved during training: projection = eigenvectors^T * k_new_centered
-        let eigenvectors = self.eigenvectors.as_ref().unwrap(); // shape (n_train, n_components)
-        let transformed = eigenvectors.t().dot(&k_new_centered);
-        // The resulting shape is (n_components, n_new), transpose to return (n_new, n_components)
+        // Project using eigenvectors: result = eigenvectors^T * k_new_centered
+        let transformed = eigenvectors.t().dot(&k_new);
         Ok(transformed.t().to_owned())
     }
 

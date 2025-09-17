@@ -166,15 +166,18 @@ impl LDA {
             ));
         }
 
-        // Extract unique class labels from y
-        let mut classes_vec: Vec<i32> = y.iter().copied().collect();
-        classes_vec.sort();
-        classes_vec.dedup();
-        if classes_vec.len() < 2 {
+        // Extract unique class labels from y - use HashSet for better performance
+        let mut classes_set = std::collections::HashSet::new();
+        for &label in y.iter() {
+            classes_set.insert(label);
+        }
+        if classes_set.len() < 2 {
             return Err(ModelError::InputValidationError(
                 "At least two distinct classes are required".to_string(),
             ));
         }
+        let mut classes_vec: Vec<i32> = classes_set.into_iter().collect();
+        classes_vec.sort_unstable(); // sort_unstable is faster for i32
 
         // Check if we have enough samples for reliable covariance estimation
         if n_samples <= n_features {
@@ -186,91 +189,96 @@ impl LDA {
 
         let classes_arr = Array1::from_vec(classes_vec);
         self.classes = Some(classes_arr);
-
         let n_classes = self.classes.as_ref().unwrap().len();
         let classes = self.classes.as_ref().unwrap();
 
-        // Ensure each class has enough samples
+        // Pre-allocate class indices map for better performance
+        let mut class_indices_map = std::collections::HashMap::new();
         for &class in classes.iter() {
-            let class_count = y.iter().filter(|&&val| val == class).count();
-            if class_count < 2 {
+            class_indices_map.insert(class, Vec::new());
+        }
+
+        // Single pass to collect indices for all classes
+        for (idx, &class) in y.iter().enumerate() {
+            if let Some(indices) = class_indices_map.get_mut(&class) {
+                indices.push(idx);
+            }
+        }
+
+        // Ensure each class has enough samples
+        for (&class, indices) in &class_indices_map {
+            if indices.len() < 2 {
                 return Err(ModelError::InputValidationError(format!(
                     "Class {} has only {} sample(s). Each class must have at least 2 samples",
-                    class, class_count
+                    class,
+                    indices.len()
                 )));
             }
         }
 
-        // Calculate prior probabilities and means for each class in parallel
-        let class_stats: Vec<(usize, f64, Array1<f64>, Vec<usize>)> = classes
-            .iter()
-            .enumerate()
-            .map(|(i, &class)| {
-                let indices: Vec<usize> = y
-                    .indexed_iter()
-                    .filter(|&(_, &val)| val == class)
-                    .map(|(idx, _)| idx)
-                    .collect();
-                let n_class = indices.len();
-                let prior = n_class as f64 / n_samples as f64;
-                let class_data = x.select(Axis(0), &indices);
-                let mean_row = class_data.mean_axis(Axis(0)).ok_or_else(|| {
-                    ModelError::ProcessingError("Error computing class mean".to_string())
-                })?;
-                Ok((i, prior, mean_row, indices))
-            })
-            .collect::<Result<Vec<_>, ModelError>>()?;
-
-        // Extract prior probabilities and means
+        // Pre-allocate arrays for better memory efficiency
         let mut priors_vec = Vec::with_capacity(n_classes);
         let mut means_mat = Array2::<f64>::zeros((n_classes, n_features));
-        let mut class_indices = Vec::with_capacity(n_classes);
-        for (i, prior, mean_row, indices) in class_stats {
+        let mut sw = Array2::<f64>::zeros((n_features, n_features));
+
+        // Calculate overall mean first - will be used for between-class scatter
+        let overall_mean = x.mean_axis(Axis(0)).ok_or_else(|| {
+            ModelError::ProcessingError("Error computing overall mean".to_string())
+        })?;
+        let mut sb = Array2::<f64>::zeros((n_features, n_features));
+
+        // Process each class - calculate means, within-class scatter, and between-class scatter
+        for (class_idx, &class) in classes.iter().enumerate() {
+            let indices = &class_indices_map[&class];
+            let n_class = indices.len();
+            let prior = n_class as f64 / n_samples as f64;
             priors_vec.push(prior);
-            means_mat.row_mut(i).assign(&mean_row);
-            class_indices.push((i, indices));
+
+            let class_data = x.select(Axis(0), indices);
+            let class_mean = class_data.mean_axis(Axis(0)).ok_or_else(|| {
+                ModelError::ProcessingError("Error computing class mean".to_string())
+            })?;
+            means_mat.row_mut(class_idx).assign(&class_mean);
+
+            // Calculate within-class scatter for this class
+            for row in class_data.outer_iter() {
+                let diff = &row - &class_mean;
+                let diff_col = diff.insert_axis(Axis(1));
+                sw += &diff_col.dot(&diff_col.t());
+            }
+
+            // Calculate between-class scatter contribution for this class
+            let mean_diff = &class_mean - &overall_mean;
+            let mean_diff_col = mean_diff.insert_axis(Axis(1));
+            sb += &(mean_diff_col.dot(&mean_diff_col.t()) * (n_class as f64));
         }
 
         self.priors = Some(Array1::from_vec(priors_vec));
         self.means = Some(means_mat);
 
-        // Calculate within-class scatter matrix (Sw) in parallel
-        let sw_parts: Vec<Array2<f64>> = class_indices
-            .par_iter()
-            .map(|(i, indices)| {
-                let class_data = x.select(Axis(0), indices);
-                let class_mean = &self.means.as_ref().unwrap().row(*i);
-                class_data.outer_iter().fold(
-                    Array2::<f64>::zeros((n_features, n_features)),
-                    |acc, row| {
-                        let diff = &row - class_mean;
-                        let diff_col = diff.insert_axis(Axis(1));
-                        acc + diff_col.dot(&diff_col.t())
-                    },
-                )
-            })
-            .collect();
-
-        let sw = sw_parts.into_iter().fold(
-            Array2::<f64>::zeros((n_features, n_features)),
-            |acc, matrix| acc + matrix,
-        );
-
-        // Estimate covariance matrix: cov = Sw / (n_samples - n_classes)
+        // Estimate covariance matrix with better regularization strategy
         let cov = sw / ((n_samples - n_classes) as f64);
 
-        // Add regularization to improve numerical stability
-        let regularization: f64 = 1e-6;
-        let regularized_cov: Array2<f64> = cov + Array2::<f64>::eye(n_features) * regularization;
+        // Adaptive regularization based on condition number estimation
+        let trace = cov.diag().sum();
+        let regularization = (trace / n_features as f64) * 1e-6; // Scale with data magnitude
+        let regularized_cov = cov + Array2::<f64>::eye(n_features) * regularization;
 
-        // Convert cov from ndarray to nalgebra DMatrix and calculate its inverse
+        // Use more numerically stable matrix inversion
         let cov_slice = regularized_cov.as_slice().ok_or_else(|| {
             ModelError::ProcessingError("Failed to convert covariance matrix to slice".to_string())
         })?;
         let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
 
-        let cov_inv_mat = cov_mat.try_inverse()
-            .ok_or_else(|| ModelError::ProcessingError("Covariance matrix is singular and cannot be inverted. Try adding more regularization or using more samples".to_string()))?;
+        // Use SVD for more stable inversion
+        let svd = nalgebra::linalg::SVD::new(cov_mat, true, true);
+        let tolerance = 1e-12 * n_features as f64; // More conservative tolerance
+
+        let cov_inv_mat = svd.pseudo_inverse(tolerance).or_else(|_| {
+            Err(ModelError::ProcessingError(
+                "Covariance matrix is singular and cannot be inverted. Try using more samples or reducing dimensionality".to_string()
+            ))
+        })?;
 
         let cov_inv_arr =
             Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec())
@@ -282,69 +290,64 @@ impl LDA {
                 })?;
         self.cov_inv = Some(cov_inv_arr);
 
-        // Calculate overall mean of x
-        let overall_mean = x.mean_axis(Axis(0)).ok_or_else(|| {
-            ModelError::ProcessingError("Error computing overall mean".to_string())
-        })?;
-
-        // Calculate between-class scatter matrix (Sb) in parallel
-        let sb_parts: Vec<Array2<f64>> = classes
-            .iter()
-            .enumerate()
-            .collect::<Vec<_>>()
-            .par_iter()
-            .map(|&(i, &class)| {
-                let count = y.iter().filter(|&&val| val == class).count() as f64;
-                let diff = &self.means.as_ref().unwrap().row(i) - &overall_mean;
-                let diff_col = diff.insert_axis(Axis(1));
-                count * diff_col.dot(&diff_col.t())
-            })
-            .collect();
-        let sb = sb_parts.into_iter().fold(
-            Array2::<f64>::zeros((n_features, n_features)),
-            |acc, matrix| acc + matrix,
-        );
-
-        // Solve generalized eigenvalue problem: calculate a_mat = cov_inv * Sb
+        // Solve generalized eigenvalue problem using more stable approach
         let cov_inv = self.cov_inv.as_ref().unwrap();
         let a_mat = cov_inv.dot(&sb);
 
-        // Symmetrize a_mat to ensure symmetric eigendecomposition: a_sym = (a_mat + a_mat^T)/2
-        let a_sym = (a_mat.clone() + a_mat.t()) * 0.5;
-        let a_slice = a_sym.as_slice().ok_or_else(|| {
+        // Use SVD for eigendecomposition for better numerical stability
+        let a_slice = a_mat.as_slice().ok_or_else(|| {
             ModelError::ProcessingError(
                 "Failed to convert matrix for eigendecomposition".to_string(),
             )
         })?;
         let a_dmat = nalgebra::DMatrix::from_row_slice(n_features, n_features, a_slice);
-        let sym_eigen = nalgebra::SymmetricEigen::new(a_dmat);
 
-        // Convert eigenvalues and eigenvectors from nalgebra to ndarray format
-        let eigenvalues = Array1::from_vec(sym_eigen.eigenvalues.as_slice().to_vec());
-        let eigenvectors = Array2::from_shape_vec(
-            (n_features, n_features),
-            sym_eigen.eigenvectors.as_slice().to_vec(),
-        )
-        .map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to create eigenvectors array: {}", e))
-        })?;
+        // Use SVD instead of symmetric eigendecomposition for better stability
+        let svd = nalgebra::linalg::SVD::new(a_dmat, true, true);
 
-        // Sort indices by eigenvalues in descending order
+        let (eigenvalues, eigenvectors) = if let (Some(u), Some(_)) = (svd.u, svd.v_t) {
+            let singular_values = svd.singular_values;
+            (
+                Array1::from_vec(singular_values.as_slice().to_vec()),
+                Array2::from_shape_vec((n_features, n_features), u.as_slice().to_vec()).map_err(
+                    |e| {
+                        ModelError::ProcessingError(format!(
+                            "Failed to create eigenvectors array: {}",
+                            e
+                        ))
+                    },
+                )?,
+            )
+        } else {
+            return Err(ModelError::ProcessingError(
+                "SVD decomposition failed".to_string(),
+            ));
+        };
+
+        // Sort indices by eigenvalues in descending order - use unstable sort for better performance
         let mut eig_pairs: Vec<(usize, f64)> = eigenvalues
             .iter()
             .enumerate()
             .map(|(i, &val)| (i, val))
             .collect();
-        eig_pairs.par_sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        eig_pairs
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // LDA's maximum dimensionality is n_classes - 1
-        let max_components = if n_classes > 1 { n_classes - 1 } else { 1 };
+        // LDA's maximum dimensionality is min(n_classes - 1, n_features)
+        let max_components = (n_classes - 1).min(n_features);
         let mut w = Array2::<f64>::zeros((n_features, max_components));
-        for (j, &(i, _)) in eig_pairs.iter().take(max_components).enumerate() {
-            // Use each column i of eigenvectors as a projection vector
-            let vec = eigenvectors.slice(s![.., i]).to_owned();
-            w.column_mut(j).assign(&vec);
+        for (j, &(i, eigenval)) in eig_pairs.iter().take(max_components).enumerate() {
+            // Filter out very small eigenvalues for numerical stability
+            if eigenval.abs() > 1e-10 {
+                let vec = eigenvectors.slice(s![.., i]).to_owned();
+                // Normalize eigenvector for better numerical properties
+                let norm = vec.dot(&vec).sqrt();
+                if norm > 1e-12 {
+                    w.column_mut(j).assign(&(&vec / norm));
+                }
+            }
         }
+
         self.projection = Some(w);
 
         println!("LDA model training finished");
@@ -460,7 +463,7 @@ impl LDA {
         Ok(self.transform(x, n_components)?)
     }
 
-    /// Calculates the discriminant score for classification
+    /// Calculates the discriminant score for classification with numerical stability improvements
     ///
     /// # Parameters
     ///
@@ -479,9 +482,15 @@ impl LDA {
         prior: f64,
         cov_inv: &Array2<f64>,
     ) -> f64 {
-        let term1 = x.dot(&cov_inv.dot(mean));
-        let term2 = mean.dot(&cov_inv.dot(mean));
+        // More numerically stable computation
+        let diff = x - mean;
+        let mahalanobis_term = diff.dot(&cov_inv.dot(&diff));
+        let prior_term = if prior > 0.0 {
+            prior.ln()
+        } else {
+            f64::NEG_INFINITY
+        };
 
-        term1 - 0.5 * term2 + prior.ln()
+        -0.5 * mahalanobis_term + prior_term
     }
 }

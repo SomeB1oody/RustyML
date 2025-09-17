@@ -1,7 +1,7 @@
 pub use super::RegularizationType;
 use super::preliminary_check;
+use crate::ModelError;
 pub use crate::traits::RegressorCommonGetterFunctions;
-use crate::{ModelError, math};
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
@@ -188,17 +188,6 @@ impl LinearRegression {
     ///
     /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    /// Fits the linear regression model using gradient descent
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix, each row is a sample, each column is a feature
-    /// - `y` - Target variable vector
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
         // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
@@ -211,40 +200,40 @@ impl LinearRegression {
         let mut intercept = 0.0; // Initialize intercept to zero
 
         let mut prev_cost = f64::INFINITY;
-        let mut final_cost = prev_cost;
+        let mut convergence_count = 0; // Track consecutive convergences for stability
+        const CONVERGENCE_THRESHOLD: usize = 3; // Require 3 consecutive convergences
 
         let mut n_iter = 0;
+
+        // Pre-allocate arrays to avoid repeated memory allocation
+        let mut predictions = Array1::<f64>::zeros(n_samples);
+        let mut error_vec = Array1::<f64>::zeros(n_samples);
 
         // Gradient descent iterations
         while n_iter < self.max_iter {
             n_iter += 1;
 
-            // Calculate predictions using parallel iterator
-            let predictions: Array1<f64> = (0..n_samples)
-                .into_par_iter()
-                .map(|i| {
-                    let row = x.row(i);
-                    let pred = row.dot(&weights) + if self.fit_intercept { intercept } else { 0.0 };
-                    pred
-                })
-                .collect::<Vec<f64>>()
-                .into();
+            // Calculate predictions - vectorized operation
+            predictions.assign(&x.dot(&weights));
+            if self.fit_intercept {
+                predictions += intercept;
+            }
 
-            // Calculate mean squared error
-            let sse = math::sum_of_squared_errors(predictions.view(), y.view())?;
+            // Calculate errors - use borrowing to avoid moving predictions
+            error_vec.assign(&(&predictions - &y));
+
+            // Calculate cost more efficiently
+            let sse = error_vec.dot(&error_vec);
 
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
                 Some(RegularizationType::L1(alpha)) => {
                     alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
                 }
-                Some(RegularizationType::L2(alpha)) => {
-                    alpha * weights.iter().map(|w| w.powi(2)).sum::<f64>() / 2.0
-                }
+                Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights) / 2.0,
             };
 
-            let cost = sse / (2.0 * n_samples as f64) + regularization_term; // Mean squared error divided by 2
-            final_cost = cost;
+            let cost = sse / (2.0 * n_samples as f64) + regularization_term;
 
             // Check for numerical issues in cost
             if !cost.is_finite() {
@@ -253,56 +242,38 @@ impl LinearRegression {
                 ));
             }
 
-            // Calculate gradients in parallel
-            let gradients_result: (Array1<f64>, f64) = (0..n_samples)
-                .into_par_iter()
-                .map(|i| {
-                    let error = predictions[i] - y[i];
-                    let row = x.row(i);
-
-                    // Compute weight gradients
-                    let weight_grad = row.to_owned() * error;
-
-                    // Compute intercept gradient
-                    let intercept_grad = if self.fit_intercept { error } else { 0.0 };
-
-                    (weight_grad, intercept_grad)
-                })
-                .reduce(
-                    || (Array1::<f64>::zeros(n_features), 0.0),
-                    |(mut acc_w, acc_i), (w_grad, i_grad)| {
-                        acc_w += &w_grad;
-                        (acc_w, acc_i + i_grad)
-                    },
-                );
-
-            // Extract and normalize gradients
-            let mut gradients = gradients_result.0 / (n_samples as f64);
-            let intercept_gradient = gradients_result.1 / (n_samples as f64);
+            // Calculate gradients using matrix operations
+            let mut weight_gradients = x.t().dot(&error_vec) / (n_samples as f64);
+            let intercept_gradient = if self.fit_intercept {
+                error_vec.sum() / (n_samples as f64)
+            } else {
+                0.0
+            };
 
             // Check for numerical issues in gradients
-            if gradients.iter().any(|&val| !val.is_finite()) || !intercept_gradient.is_finite() {
+            if weight_gradients.iter().any(|&val| !val.is_finite())
+                || !intercept_gradient.is_finite()
+            {
                 return Err(ModelError::ProcessingError(
                     "Gradient calculation resulted in NaN or infinite values".to_string(),
                 ));
             }
 
+            // Add regularization terms to gradients
             match &self.regularization_type {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
                     for i in 0..n_features {
-                        gradients[i] += alpha * weights[i].signum();
+                        weight_gradients[i] += alpha * weights[i].signum();
                     }
                 }
                 Some(RegularizationType::L2(alpha)) => {
-                    for i in 0..n_features {
-                        gradients[i] += alpha * weights[i];
-                    }
+                    weight_gradients += &(&weights * *alpha);
                 }
             }
 
             // Update parameters
-            weights -= &(&gradients * self.learning_rate);
+            weights -= &(&weight_gradients * self.learning_rate);
             if self.fit_intercept {
                 intercept -= self.learning_rate * intercept_gradient;
             }
@@ -314,9 +285,15 @@ impl LinearRegression {
                 ));
             }
 
-            // Check convergence
-            if (prev_cost - cost).abs() < self.tol {
-                break;
+            // Enhanced convergence check with stability requirement
+            let cost_change = (prev_cost - cost).abs();
+            if cost_change < self.tol {
+                convergence_count += 1;
+                if convergence_count >= CONVERGENCE_THRESHOLD {
+                    break;
+                }
+            } else {
+                convergence_count = 0; // Reset if not converged
             }
 
             prev_cost = cost;
@@ -326,12 +303,6 @@ impl LinearRegression {
         self.coefficients = Some(weights);
         self.intercept = Some(if self.fit_intercept { intercept } else { 0.0 });
         self.n_iter = Some(n_iter);
-
-        // print training info
-        println!(
-            "Linear regression model training finished at iteration {}, cost: {}",
-            n_iter, final_cost
-        );
 
         Ok(self)
     }

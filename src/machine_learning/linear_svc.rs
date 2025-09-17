@@ -147,6 +147,89 @@ impl LinearSVC {
         }
     }
 
+    /// Validates input parameters for training
+    fn validate_training_params(&self) -> Result<(), ModelError> {
+        if self.max_iter == 0 {
+            return Err(ModelError::InputValidationError(
+                "max_iter must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.learning_rate <= 0.0 {
+            return Err(ModelError::InputValidationError(format!(
+                "learning_rate must be greater than 0.0, got {}",
+                self.learning_rate
+            )));
+        }
+
+        if self.regularization_param <= 0.0 {
+            return Err(ModelError::InputValidationError(format!(
+                "regularization_param must be greater than 0.0, got {}",
+                self.regularization_param
+            )));
+        }
+
+        if self.tol <= 0.0 {
+            return Err(ModelError::InputValidationError(format!(
+                "tol must be greater than 0.0, got {}",
+                self.tol
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Validates input data dimensions and values
+    fn validate_input_data(&self, x: ArrayView2<f64>) -> Result<(), ModelError> {
+        // Check for empty input
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
+        // Check for NaN/Inf values in input
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input features contain NaN or infinite values".to_string(),
+            ));
+        }
+
+        // Check feature dimension mismatch if model is trained
+        if let Some(ref weights) = self.weights {
+            if x.ncols() != weights.len() {
+                return Err(ModelError::InputValidationError(format!(
+                    "Feature dimension mismatch: expected {}, got {}",
+                    weights.len(),
+                    x.ncols()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Checks if weights contain invalid values (NaN or infinite)
+    fn check_weights_validity(weights: &Array1<f64>, bias: f64) -> Result<(), ModelError> {
+        if weights.iter().any(|&w| !w.is_finite()) || !bias.is_finite() {
+            return Err(ModelError::ProcessingError(
+                "Weights became NaN or infinite during training. Try reducing learning_rate or regularization_param".to_string()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Calculates the optimal batch size based on dataset size
+    fn calculate_batch_size(n_samples: usize) -> usize {
+        const MIN_BATCH_SIZE: usize = 32;
+        const MAX_BATCH_SIZE: usize = 512;
+
+        std::cmp::max(
+            MIN_BATCH_SIZE,
+            std::cmp::min(MAX_BATCH_SIZE, n_samples / 10),
+        )
+    }
+
     /// Returns the weight coefficients of the trained model.
     ///
     /// # Returns
@@ -154,10 +237,7 @@ impl LinearSVC {
     /// - `Ok(&Array1<f64>)`: Reference to weight coefficients if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_weights(&self) -> Result<&Array1<f64>, ModelError> {
-        match &self.weights {
-            Some(w) => Ok(w),
-            None => Err(ModelError::NotFitted),
-        }
+        self.weights.as_ref().ok_or(ModelError::NotFitted)
     }
 
     /// Returns the bias term (intercept) of the trained model.
@@ -167,10 +247,7 @@ impl LinearSVC {
     /// - `Ok(f64)`: Bias value if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_bias(&self) -> Result<f64, ModelError> {
-        match &self.bias {
-            Some(b) => Ok(*b),
-            None => Err(ModelError::NotFitted),
-        }
+        self.bias.ok_or(ModelError::NotFitted)
     }
 
     /// Returns the number of iterations performed during training.
@@ -180,10 +257,7 @@ impl LinearSVC {
     /// - `Ok(usize)`: Number of iterations if model is trained
     /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
     pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match &self.n_iter {
-            Some(n) => Ok(*n),
-            None => Err(ModelError::NotFitted),
-        }
+        self.n_iter.ok_or(ModelError::NotFitted)
     }
 
     /// Returns the maximum number of iterations.
@@ -257,7 +331,7 @@ impl LinearSVC {
     /// - `Ok(&mut Self)`: Reference to self if training succeeds
     /// - `Err(ModelError)`: Error if validation fails or training encounters problems
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        // Basic input validation
+        // Input shape validation
         if x.nrows() != y.len() {
             return Err(ModelError::InputValidationError(format!(
                 "Input data size mismatch: x.shape={}, y.shape={}",
@@ -266,32 +340,9 @@ impl LinearSVC {
             )));
         }
 
-        if self.max_iter == 0 {
-            return Err(ModelError::InputValidationError(
-                "max_iter must be greater than 0".to_string(),
-            ));
-        }
-
-        if self.learning_rate <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "learning_rate must be greater than 0.0, got {}",
-                self.learning_rate
-            )));
-        }
-
-        if self.regularization_param <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "regularization_param must be greater than 0.0, got {}",
-                self.regularization_param
-            )));
-        }
-
-        if self.tol <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "tol must be greater than 0.0, got {}",
-                self.tol
-            )));
-        }
+        // Validate training parameters
+        self.validate_training_params()?;
+        self.validate_input_data(x)?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -312,8 +363,8 @@ impl LinearSVC {
 
         let mut n_iter = 0;
 
-        // Define mini-batch size, can be adjusted based on dataset size
-        let batch_size = std::cmp::max(1, n_samples / 10);
+        // Calculate optimal batch size
+        let batch_size = Self::calculate_batch_size(n_samples);
 
         while n_iter < self.max_iter {
             n_iter += 1;
@@ -322,8 +373,10 @@ impl LinearSVC {
 
             // Split data into batches
             for batch_indices in indices.chunks(batch_size) {
+                let batch_len = batch_indices.len() as f64;
+
                 // Use Rayon to compute gradients for each sample in parallel
-                let gradients: Vec<(Array1<f64>, f64)> = batch_indices
+                let (weight_grad_sum, bias_grad_sum) = batch_indices
                     .par_iter()
                     .map(|&idx| {
                         let xi = x.slice(ndarray::s![idx, ..]);
@@ -341,55 +394,53 @@ impl LinearSVC {
                             (Array1::zeros(n_features), 0.0)
                         }
                     })
-                    .collect();
+                    .reduce(
+                        || (Array1::zeros(n_features), 0.0),
+                        |mut acc, (w_grad, b_grad)| {
+                            acc.0 = &acc.0 + &w_grad;
+                            acc.1 += b_grad;
+                            acc
+                        },
+                    );
 
-                // Accumulate gradients and update weights
-                let mut weight_update = Array1::<f64>::zeros(n_features);
-                let mut bias_update = 0.0;
-
-                for (w_grad, b_grad) in gradients {
-                    weight_update = &weight_update + &w_grad;
-                    bias_update += b_grad;
-                }
-
-                // Apply regularization and learning rate
+                // Apply regularization and update weights
                 match self.penalty {
                     RegularizationType::L2(_) => {
                         weights = &weights * (1.0 - self.learning_rate * self.regularization_param)
-                            + &(weight_update * (self.learning_rate / batch_indices.len() as f64));
+                            + &(weight_grad_sum * (self.learning_rate / batch_len));
                     }
                     RegularizationType::L1(_) => {
                         // L1 regularization subgradient update
+                        let l1_grad = weights.mapv(|w| {
+                            if w > 0.0 {
+                                1.0
+                            } else if w < 0.0 {
+                                -1.0
+                            } else {
+                                0.0
+                            }
+                        });
+
                         weights = &weights
-                            - &(weights.mapv(|w| {
-                                if w > 0.0 {
-                                    1.0
-                                } else if w < 0.0 {
-                                    -1.0
-                                } else {
-                                    0.0
-                                }
-                            }) * (self.learning_rate * self.regularization_param))
-                            + &(weight_update * (self.learning_rate / batch_indices.len() as f64));
+                            - &(l1_grad * (self.learning_rate * self.regularization_param))
+                            + &(weight_grad_sum * (self.learning_rate / batch_len));
                     }
                 }
 
                 if self.fit_intercept {
-                    bias += self.learning_rate * bias_update / batch_indices.len() as f64;
+                    bias += self.learning_rate * bias_grad_sum / batch_len;
                 }
 
-                // Check for weight explosion - potential error source
-                if weights.iter().any(|&w| !w.is_finite()) || !bias.is_finite() {
-                    return Err(ModelError::ProcessingError(
-                        "Weights became NaN or infinite during training. Try reducing learning_rate or regularization_param".to_string()
-                    ));
-                }
+                // Check for weight explosion early
+                Self::check_weights_validity(&weights, bias)?;
             }
 
             // Convergence check
-            let diff = &weights - &prev_weights;
-            let weight_diff =
-                diff.iter().map(|&x| x * x).sum::<f64>().sqrt() / weights.len() as f64;
+            let weight_diff = {
+                let diff = &weights - &prev_weights;
+                (diff.iter().map(|&x| x * x).sum::<f64>() / weights.len() as f64).sqrt()
+            };
+
             let bias_diff = if self.fit_intercept {
                 (bias - prev_bias).abs()
             } else {
@@ -400,7 +451,7 @@ impl LinearSVC {
                 break;
             }
 
-            prev_weights = weights.clone();
+            prev_weights.assign(&weights);
             prev_bias = bias;
         }
 
@@ -424,44 +475,11 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Array of predictions (0.0 or 1.0) for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        let weights = match self.weights.as_ref() {
-            Some(w) => w,
-            None => return Err(ModelError::NotFitted),
-        };
-        let bias = self.bias.unwrap_or(0.0);
+        // Validate input data
+        self.validate_input_data(x)?;
 
-        // Check for empty input - potential error source
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        // Check feature dimension mismatch - potential error source
-        if x.ncols() != weights.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: expected {}, got {}",
-                weights.len(),
-                x.ncols()
-            )));
-        }
-
-        // Check for NaN/Inf values in input - potential error source
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input features contain NaN or infinite values".to_string(),
-            ));
-        }
-
-        let decision = x.dot(weights) + bias;
-
-        // Check for NaN/Inf in decision values - potential error source
-        if decision.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Decision function produced NaN or infinite values".to_string(),
-            ));
-        }
-
+        // Get decision values and convert to predictions
+        let decision = self.decision_function(x)?;
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }
 
@@ -480,12 +498,21 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        let weights = match self.weights.as_ref() {
-            Some(w) => w,
-            None => return Err(ModelError::NotFitted),
-        };
+        let weights = self.get_weights()?;
         let bias = self.bias.unwrap_or(0.0);
 
-        Ok(x.dot(weights) + bias)
+        // Validate input data
+        self.validate_input_data(x)?;
+
+        let decision = x.dot(weights) + bias;
+
+        // Check for NaN/Inf in decision values
+        if decision.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::ProcessingError(
+                "Decision function produced NaN or infinite values".to_string(),
+            ));
+        }
+
+        Ok(decision)
     }
 }

@@ -13,9 +13,7 @@ use rayon::prelude::*;
 /// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
 #[derive(Debug, Clone, PartialEq)]
 pub enum WeightingStrategy {
-    /// All neighbors are weighted equally regardless of their distance to the query point.
     Uniform,
-    /// Neighbors are weighted by the inverse of their distance, giving closer neighbors more influence on the prediction.
     Distance,
 }
 
@@ -237,16 +235,15 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         let y_train = self.y_train.as_ref().unwrap();
 
         // Use rayon for parallel prediction
-        let predictions: Array1<T> = (0..x.nrows())
+        let results: Vec<T> = (0..x.nrows())
             .into_par_iter() // Convert to parallel iterator
             .map(|i| {
                 let sample = x.row(i);
                 self.predict_one(sample, x_train.view(), y_train)
             })
-            .collect::<Vec<T>>()
-            .into();
+            .collect();
 
-        Ok(predictions)
+        Ok(Array1::from(results))
     }
 
     /// Calculates the distance between two points based on the selected metric
@@ -287,9 +284,10 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// * `T` - The predicted class for the data point
     fn predict_one(&self, x: ArrayView1<f64>, x_train: ArrayView2<f64>, y_train: &Array1<T>) -> T {
         let n_samples = x_train.nrows();
+        let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
         // Calculate distances to all training samples in parallel
-        let distances: Vec<(f64, usize)> = (0..n_samples)
+        let mut distances: Vec<(f64, usize)> = (0..n_samples)
             .into_par_iter() // Convert to parallel iterator
             .map(|i| {
                 let distance = self.calculate_distance(x, x_train.row(i));
@@ -297,18 +295,15 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
             })
             .collect();
 
-        // Sort by distance
-        let mut sorted_distances = distances.clone();
-        sorted_distances.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-
-        // Get k nearest neighbors
-        let k_neighbors: Vec<_> = sorted_distances.iter().take(self.k).collect();
+        // Use partial sorting to get only k smallest elements instead of full sort
+        distances.select_nth_unstable_by(k - 1, |a, b| a.0.partial_cmp(&b.0).unwrap());
+        let k_neighbors = &distances[..k];
 
         // Calculate based on weight strategy
         match self.weights {
             WeightingStrategy::Uniform => {
-                // Count class occurrences
-                let mut class_counts: AHashMap<&T, usize> = AHashMap::new();
+                // Count class occurrences using pre-sized HashMap
+                let mut class_counts: AHashMap<&T, usize> = AHashMap::with_capacity(k);
                 for &(_, idx) in k_neighbors {
                     let class = &y_train[idx];
                     *class_counts.entry(class).or_insert(0) += 1;
@@ -316,20 +311,21 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
                 // Find the most common class
                 class_counts
-                    .iter()
-                    .max_by_key(|&(_, &count)| count)
-                    .map(|(class, _)| (*class).clone())
+                    .into_iter()
+                    .max_by_key(|(_, count)| *count)
+                    .map(|(class, _)| class.clone())
                     .unwrap()
             }
             WeightingStrategy::Distance => {
-                // Weight by inverse distance
-                let mut class_weights: AHashMap<&T, f64> = AHashMap::new();
+                // Weight by inverse distance using pre-sized HashMap
+                let mut class_weights: AHashMap<&T, f64> = AHashMap::with_capacity(k);
                 for &(distance, idx) in k_neighbors {
-                    // Avoid division by zero
-                    let weight = if distance > 0.0 {
-                        1.0 / distance
+                    // Handle zero distance case more efficiently
+                    let weight = if distance == 0.0 {
+                        // If distance is exactly zero, this sample gets maximum weight
+                        return y_train[idx].clone();
                     } else {
-                        f64::MAX
+                        1.0 / distance
                     };
                     let class = &y_train[idx];
                     *class_weights.entry(class).or_insert(0.0) += weight;
@@ -337,9 +333,9 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
                 // Find the class with highest weight
                 class_weights
-                    .iter()
-                    .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-                    .map(|(class, _)| (*class).clone())
+                    .into_iter()
+                    .max_by(|(_, weight_a), (_, weight_b)| weight_a.partial_cmp(weight_b).unwrap())
+                    .map(|(class, _)| class.clone())
                     .unwrap()
             }
         }
@@ -347,7 +343,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
 
     /// Fits the model with the training data and immediately predicts on the given test data.
     ///
-    /// This is a convenience method that combines the `fit` and `predict` steps into one operation.
+    /// This is a convenience method that combines the `fit` and `predict` steps into one operation
     ///
     /// # Parameters
     ///

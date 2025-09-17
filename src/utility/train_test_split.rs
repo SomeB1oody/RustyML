@@ -32,17 +32,14 @@ pub fn train_test_split(
     test_size: Option<f64>,
     random_state: Option<u64>,
 ) -> Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError> {
-    /// Extract a subset from Array2 based on indices using ndarray's select method
-    fn create_subset_array2(array: &Array2<f64>, indices: &[usize]) -> Array2<f64> {
-        array.select(Axis(0), indices)
-    }
-
-    /// Extract a subset from Array1 based on indices using ndarray's select method
-    fn create_subset_array1(array: &Array1<f64>, indices: &[usize]) -> Array1<f64> {
-        array.select(Axis(0), indices)
-    }
-
     let n_samples = x.nrows();
+
+    // Early return for edge cases
+    if n_samples == 0 {
+        return Err(ModelError::InputValidationError(
+            "Cannot split empty dataset".to_string(),
+        ));
+    }
 
     // Ensure x and y have the same number of samples
     if n_samples != y.len() {
@@ -55,43 +52,48 @@ pub fn train_test_split(
 
     // Set test size, default is 0.3
     let test_size = test_size.unwrap_or(0.3);
-    if test_size <= 0.0 || test_size >= 1.0 {
+    if !(0.0..1.0).contains(&test_size) {
         return Err(ModelError::InputValidationError(format!(
-            "test_size must be between 0 and 1, got {}",
+            "test_size must be between 0 and 1 (exclusive), got {}",
             test_size
         )));
     }
 
-    // Calculate the number of test samples using ceil to ensure at least the expected proportion
-    let n_test = std::cmp::max(1, (n_samples as f64 * test_size).ceil() as usize);
-    if n_test > n_samples {
-        return Err(ModelError::InputValidationError(format!(
-            "test_size={} is too big for n_samples={}",
-            test_size, n_samples
-        )));
-    }
+    // Calculate the number of test samples
+    // For small datasets, ensure at least one sample in test set and at least one in train set
+    let n_test = if n_samples == 1 {
+        1 // Special case: with only 1 sample, put it in test set
+    } else if n_samples == 2 {
+        1 // Special case: with 2 samples, always put 1 in test set regardless of test_size
+    } else {
+        // For larger datasets, use ceiling to ensure at least the expected proportion
+        let calculated = (n_samples as f64 * test_size).ceil() as usize;
+        calculated.max(1).min(n_samples - 1) // Ensure both train and test have at least 1 sample
+    };
 
     // Create random indices
     let mut indices: Vec<usize> = (0..n_samples).collect();
 
     // Shuffle indices based on random state
-    if let Some(seed) = random_state {
-        let mut rng = StdRng::seed_from_u64(seed);
-        indices.shuffle(&mut rng);
-    } else {
-        let mut rng = rand::rng();
-        indices.shuffle(&mut rng);
+    match random_state {
+        Some(seed) => {
+            let mut rng = StdRng::seed_from_u64(seed);
+            indices.shuffle(&mut rng);
+        }
+        None => {
+            let mut rng = rand::rng();
+            indices.shuffle(&mut rng);
+        }
     }
 
     // Split indices into train and test sets
-    let test_indices = &indices[0..n_test];
-    let train_indices = &indices[n_test..];
+    let (test_indices, train_indices) = indices.split_at(n_test);
 
-    // Create train and test datasets using ndarray's select method for more concise code
-    let x_train = create_subset_array2(&x, train_indices);
-    let x_test = create_subset_array2(&x, test_indices);
-    let y_train = create_subset_array1(&y, train_indices);
-    let y_test = create_subset_array1(&y, test_indices);
+    // Create train and test datasets using ndarray's select method for better performance
+    let x_train = x.select(Axis(0), train_indices);
+    let x_test = x.select(Axis(0), test_indices);
+    let y_train = y.select(Axis(0), train_indices);
+    let y_test = y.select(Axis(0), test_indices);
 
     Ok((x_train, x_test, y_train, y_test))
 }

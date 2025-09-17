@@ -167,8 +167,8 @@ let model_copy = model.clone();
 println!("{:?}", model);
 ```
 
-For Chinese mainland users, I provide mandarin video tutorial on Bilibili, follow [@SomeB1oody](https://space.bilibili.com/1349872478)
-对于中国大陆用户,我在B站提供视频教程,关注[@SomeB1oody](https://space.bilibili.com/1349872478)
+For Chinese mainland users, a mandarin video tutorial is provided on Bilibili, follow [@SomeB1oody](https://space.bilibili.com/1349872478)
+对于中国大陆用户,B站有视频教程,关注[@SomeB1oody](https://space.bilibili.com/1349872478)
 
 ## Project Status | 项目状态
 This project is in the **early development stage**. Currently, only a small subset of the planned functionality has been implemented. The API is unstable and subject to significant changes as the project evolves.

@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.6.3] - 2025-8-30 (UTC-7)
+## [v0.6.3] - 2025-9-16 (UTC-7)
+### Changed
+- Refactor models in utility and machine_learning for efficiency, maintainability, and clarity
+
+## [v0.6.3] - 2025-9-13 (UTC-7)
 ### Changed
 - Standardize doc comments
 

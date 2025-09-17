@@ -243,7 +243,10 @@ impl KMeans {
         (min_idx, min_dist)
     }
 
-    /// Initializes cluster centroids using random selection from the data points.
+    /// Initializes cluster centroids using K-means++ algorithm.
+    ///
+    /// K-means++ provides better initialization than random selection by choosing
+    /// initial centers that are spread out from each other, leading to better convergence.
     ///
     /// # Parameters
     ///
@@ -260,7 +263,7 @@ impl KMeans {
             None => rand::rngs::StdRng::seed_from_u64(0),
         };
 
-        // k-means++ initialization method
+        // K-means++ initialization method
 
         // Randomly select the first center point
         let first_center_idx = rng.random_range(0..n_samples);
@@ -269,32 +272,35 @@ impl KMeans {
         // Select the remaining center points
         for k in 1..self.n_clusters {
             // Calculate the distance from each point to the nearest center
-            let mut distances = Vec::with_capacity(n_samples);
-            let mut total_dist = 0.0;
+            let distances: Vec<f64> = data
+                .outer_iter()
+                .into_par_iter()
+                .map(|sample| {
+                    // Find the closest already selected center point
+                    centroids
+                        .rows()
+                        .into_iter()
+                        .take(k)
+                        .map(|centroid| squared_euclidean_distance_row(sample, centroid))
+                        .fold(f64::MAX, f64::min)
+                })
+                .collect();
 
-            for i in 0..n_samples {
-                let sample = data.row(i);
+            let total_dist: f64 = distances.iter().sum();
 
-                // Find the closest already selected center point
-                let mut min_dist = f64::MAX;
-
-                for j in 0..k {
-                    let centroid = centroids.row(j);
-                    let dist = squared_euclidean_distance_row(sample, centroid);
-                    if dist < min_dist {
-                        min_dist = dist;
-                    }
-                }
-
-                distances.push(min_dist);
-                total_dist += min_dist;
+            // Handle edge case where all distances are zero
+            if total_dist == 0.0 {
+                // Fallback to random selection
+                let random_idx = rng.random_range(0..n_samples);
+                centroids.row_mut(k).assign(&data.row(random_idx));
+                continue;
             }
 
             // Use roulette wheel selection to choose the next center point
             let mut cumulative_dist = 0.0;
             let choice = rng.random::<f64>() * total_dist;
 
-            for (i, dist) in distances.iter().enumerate() {
+            for (i, &dist) in distances.iter().enumerate() {
                 cumulative_dist += dist;
                 if cumulative_dist >= choice {
                     centroids.row_mut(k).assign(&data.row(i));
@@ -337,90 +343,112 @@ impl KMeans {
         let mut old_inertia = f64::MAX;
         let mut iter_count = 0;
 
+        // Pre-allocate arrays for cluster updates to avoid repeated allocations
+        let mut new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
+        let mut counts = vec![0usize; self.n_clusters];
+
         // Main iteration loop
         for i in 0..self.max_iter {
+            // Reset for this iteration
+            new_centroids.fill(0.0);
+            counts.fill(0);
+
             // Parallel computation: find the closest cluster center and distance for each sample
             let results: Vec<(usize, f64)> = data
                 .outer_iter()
                 .into_par_iter()
-                .map(|sample| {
-                    // Reshape sample to a view of shape (1, n_features)
-                    let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
-                        ModelError::InputValidationError("Failed to reshape sample".to_string())
-                    })?;
-                    let sample_view = sample_shaped.view();
-                    Ok(self.closest_centroid(&sample_view))
-                })
-                .collect::<Result<Vec<_>, ModelError>>()?;
+                .enumerate()
+                .map(|(idx, sample)| {
+                    let mut min_dist = f64::MAX;
+                    let mut min_cluster = 0;
 
-            // Aggregate inertia and update labels for each sample
-            let inertia: f64 = results.iter().map(|&(_, d)| d).sum();
-            for (i, &(cluster, _)) in results.iter().enumerate() {
-                labels[i] = cluster;
+                    // Find closest centroid for this sample
+                    for (cluster_idx, centroid) in
+                        self.centroids.as_ref().unwrap().outer_iter().enumerate()
+                    {
+                        let dist = squared_euclidean_distance_row(sample, centroid);
+                        if dist < min_dist {
+                            min_dist = dist;
+                            min_cluster = cluster_idx;
+                        }
+                    }
+
+                    (idx, (min_cluster, min_dist))
+                })
+                .map(|(_, result)| result)
+                .collect();
+
+            // Update labels and compute centroids in a single pass
+            let mut inertia = 0.0;
+            for (sample_idx, &(cluster_idx, dist)) in results.iter().enumerate() {
+                labels[sample_idx] = cluster_idx;
+                inertia += dist;
+
+                // Accumulate sample contributions to new centroids
+                let sample = data.row(sample_idx);
+                new_centroids.row_mut(cluster_idx).add_assign(&sample);
+                counts[cluster_idx] += 1;
             }
 
-            // Check convergence condition
-            if (old_inertia - inertia).abs() < self.tol * old_inertia {
+            // Check convergence condition early
+            if (old_inertia - inertia).abs() < self.tol * old_inertia.max(self.tol) {
                 iter_count = i;
                 break;
             }
             old_inertia = inertia;
             iter_count = i;
 
-            // Update cluster centers (sequential execution)
-            let mut new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
-            let mut counts = vec![0; self.n_clusters];
-
-            for (idx, sample) in data.outer_iter().enumerate() {
-                let cluster_idx = labels[idx];
-                new_centroids.row_mut(cluster_idx).add_assign(&sample);
-                counts[cluster_idx] += 1;
-            }
-
-            // Calculate the mean for each cluster center
-            for (idx, count) in counts.iter().enumerate() {
-                if *count > 0 {
-                    let count_f = *count as f64;
-                    new_centroids.row_mut(idx).par_mapv_inplace(|x| x / count_f);
-                }
-            }
+            // Calculate the mean for each cluster center using parallel processing
+            new_centroids
+                .outer_iter_mut()
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(idx, mut centroid_row)| {
+                    if counts[idx] > 0 {
+                        let count_f = counts[idx] as f64;
+                        centroid_row.par_mapv_inplace(|x| x / count_f);
+                    }
+                });
 
             // Handle empty clusters: for empty clusters, select the point furthest from current centers as new center
-            for (idx, count) in counts.iter().enumerate() {
-                if *count == 0 {
-                    let mut max_dist = -1.0;
-                    let mut farthest_idx = 0;
-                    for (sample_idx, sample) in data.outer_iter().enumerate() {
-                        let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
-                            ModelError::InputValidationError(
-                                "Failed to reshape sample during empty cluster handling"
-                                    .to_string(),
-                            )
-                        })?;
-                        let sample_view = sample_shaped.view();
-                        let (_, dist) = self.closest_centroid(&sample_view);
-                        if dist > max_dist {
-                            max_dist = dist;
-                            farthest_idx = sample_idx;
-                        }
-                    }
-                    new_centroids.row_mut(idx).assign(&data.row(farthest_idx));
+            for (cluster_idx, &count) in counts.iter().enumerate() {
+                if count == 0 {
+                    // Find the sample with maximum distance to its closest centroid
+                    let (farthest_idx, _) = data
+                        .outer_iter()
+                        .into_par_iter()
+                        .enumerate()
+                        .map(|(sample_idx, sample)| {
+                            let min_dist = self
+                                .centroids
+                                .as_ref()
+                                .unwrap()
+                                .outer_iter()
+                                .enumerate()
+                                .filter(|&(idx, _)| idx != cluster_idx) // Exclude the empty cluster
+                                .map(|(_, centroid)| {
+                                    squared_euclidean_distance_row(sample, centroid)
+                                })
+                                .fold(f64::MAX, f64::min);
+                            (sample_idx, min_dist)
+                        })
+                        .reduce(
+                            || (0, -1.0),
+                            |acc, curr| if curr.1 > acc.1 { curr } else { acc },
+                        );
+
+                    new_centroids
+                        .row_mut(cluster_idx)
+                        .assign(&data.row(farthest_idx));
                 }
             }
 
-            self.centroids = Some(new_centroids);
+            self.centroids = Some(new_centroids.clone());
         }
 
         self.labels = Some(labels);
         self.inertia = Some(old_inertia);
         self.n_iter = Some(iter_count + 1);
-
-        // Print training information
-        println!(
-            "KMeans model training finished at iteration {}, avg_cost: {}",
-            iter_count + 1,
-            old_inertia / n_samples as f64
-        );
 
         Ok(self)
     }
