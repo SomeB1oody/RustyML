@@ -10,7 +10,7 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 [![statrs](https://img.shields.io/badge/statrs-0.18.0-blue)](https://crates.io/crates/statrs)
 [![rand_distr](https://img.shields.io/badge/rand_distr-0.5.1-blue)](https://crates.io/crates/rand_distr)
 [![rayon](https://img.shields.io/badge/rayon-1.11.0-blue)](https://crates.io/crates/rayon)
-[![ndarray-rand](https://img.shields.io/badge/ndarray-rand-0.15.0-blue)](https://crates.io/crates/ndarray-rand)
+[![ndarray-rand](https://img.shields.io/badge/ndarray_rand-0.15.0-blue)](https://crates.io/crates/ndarray-rand)
 [![ahash](https://img.shields.io/badge/ahash-0.8.12-blue)](https://crates.io/crates/ahash)
 
 ## Overview | 概述
