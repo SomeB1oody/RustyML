@@ -1,4 +1,4 @@
-use super::DistanceCalculationMetric as Metric;
+use super::DistanceCalculationMetric;
 use super::preliminary_check;
 use crate::ModelError;
 use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
@@ -38,7 +38,7 @@ use std::collections::{HashSet, VecDeque};
 pub struct DBSCAN {
     eps: f64,
     min_samples: usize,
-    metric: Metric,
+    metric: DistanceCalculationMetric,
     labels_: Option<Array1<i32>>,
     core_sample_indices: Option<Array1<usize>>,
 }
@@ -54,7 +54,7 @@ impl Default for DBSCAN {
         DBSCAN {
             eps: 0.5,
             min_samples: 5,
-            metric: Metric::Euclidean,
+            metric: DistanceCalculationMetric::Euclidean,
             labels_: None,
             core_sample_indices: None,
         }
@@ -73,7 +73,7 @@ impl DBSCAN {
     /// # Returns
     ///
     /// * `DBSCAN` - A new DBSCAN instance with the specified parameters
-    pub fn new(eps: f64, min_samples: usize, metric: Metric) -> Self {
+    pub fn new(eps: f64, min_samples: usize, metric: DistanceCalculationMetric) -> Self {
         DBSCAN {
             eps,
             min_samples,
@@ -101,14 +101,7 @@ impl DBSCAN {
         self.min_samples
     }
 
-    /// Returns the distance metric being used
-    ///
-    /// # Returns
-    ///
-    /// * `&Metric` - A reference to the Metric enum used by this instance
-    pub fn get_metric(&self) -> &Metric {
-        &self.metric
-    }
+    get_metric!();
 
     /// Returns the cluster labels assigned to each sample
     ///
@@ -142,12 +135,12 @@ impl DBSCAN {
         q_row: ndarray::ArrayView1<f64>,
     ) -> f64 {
         match self.metric {
-            Metric::Euclidean => {
+            DistanceCalculationMetric::Euclidean => {
                 let squared_dist = squared_euclidean_distance_row(p_row, q_row);
                 squared_dist.sqrt()
             }
-            Metric::Manhattan => manhattan_distance_row(p_row, q_row),
-            Metric::Minkowski => minkowski_distance_row(p_row, q_row, 3.0),
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(p_row, q_row),
+            DistanceCalculationMetric::Minkowski => minkowski_distance_row(p_row, q_row, 3.0),
         }
     }
 

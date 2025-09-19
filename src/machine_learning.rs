@@ -116,7 +116,7 @@ pub enum KernelType {
 ///
 /// # Generated Method
 ///
-/// - `get_fit_intercept(&self) -> bool` - Returns the current intercept fitting setting
+/// * `get_fit_intercept(&self) -> bool` - Returns the current intercept fitting setting
 ///
 /// # Usage
 ///
@@ -142,7 +142,7 @@ macro_rules! get_fit_intercept {
 ///
 /// # Generated Method
 ///
-/// - `get_learning_rate(&self) -> f64` - Returns the current learning rate value
+/// * `get_learning_rate(&self) -> f64` - Returns the current learning rate value
 ///
 /// # Usage
 ///
@@ -170,7 +170,7 @@ macro_rules! get_learning_rate {
 ///
 /// # Generated Method
 ///
-/// - `get_max_iterations(&self) -> usize` - Returns the maximum iteration limit
+/// * `get_max_iterations(&self) -> usize` - Returns the maximum iteration limit
 ///
 /// # Usage
 ///
@@ -196,7 +196,7 @@ macro_rules! get_max_iterations {
 ///
 /// # Generated Method
 ///
-/// - `get_tolerance(&self) -> f64` - Returns the current tolerance value
+/// * `get_tolerance(&self) -> f64` - Returns the current tolerance value
 ///
 /// # Usage
 ///
@@ -226,7 +226,7 @@ macro_rules! get_tolerance {
 ///
 /// # Generated Method
 ///
-/// - `get_actual_iterations(&self) -> Result<usize, ModelError>` - Returns the iteration count or an error if not fitted
+/// * `get_actual_iterations(&self) -> Result<usize, ModelError>` - Returns the iteration count or an error if not fitted
 ///
 /// # Usage
 ///
@@ -256,7 +256,7 @@ macro_rules! get_actual_iterations {
 ///
 /// # Generated Method
 ///
-/// - `get_regularization_type(&self) -> &Option<RegularizationType>` - Returns a reference to the regularization type
+/// * `get_regularization_type(&self) -> &Option<RegularizationType>` - Returns a reference to the regularization type
 ///
 /// # Usage
 ///
@@ -274,6 +274,23 @@ macro_rules! get_regularization_type {
         /// * `&Option<RegularizationType>` - A reference to the regularization type, which will be None if no regularization is applied
         pub fn get_regularization_type(&self) -> &Option<RegularizationType> {
             &self.regularization_type
+        }
+    };
+}
+
+/// Generates a getter method for accessing the distance metric used by the instance.
+///
+/// This macro creates a standard getter method that returns a reference to the distance
+/// calculation metric stored in the `metric` field. The metric determines how distances
+/// between data points are calculated in various machine learning algorithms.
+///
+/// # Generated Method
+///
+/// * `get_metric(&self) -> &DistanceCalculationMetric` - Returns a reference to the DistanceCalculationMetric
+macro_rules! get_metric {
+    () => {
+        pub fn get_metric(&self) -> &DistanceCalculationMetric {
+            &self.metric
         }
     };
 }

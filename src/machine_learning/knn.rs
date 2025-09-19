@@ -1,4 +1,4 @@
-use super::DistanceCalculationMetric as Metric;
+use super::DistanceCalculationMetric;
 use super::preliminary_check;
 use crate::ModelError;
 use ahash::AHashMap;
@@ -73,7 +73,7 @@ pub struct KNN<T> {
     x_train: Option<Array2<f64>>,
     y_train: Option<Array1<T>>,
     weighting_strategy: WeightingStrategy,
-    metric: Metric,
+    metric: DistanceCalculationMetric,
 }
 
 impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
@@ -87,7 +87,7 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
             x_train: None,
             y_train: None,
             weighting_strategy: WeightingStrategy::Uniform,
-            metric: Metric::Euclidean,
+            metric: DistanceCalculationMetric::Euclidean,
         }
     }
 }
@@ -104,7 +104,11 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Returns
     ///
     /// * `KNN` - A new KNN classifier instance
-    pub fn new(k: usize, weighting_strategy: WeightingStrategy, metric: Metric) -> Self {
+    pub fn new(
+        k: usize,
+        weighting_strategy: WeightingStrategy,
+        metric: DistanceCalculationMetric,
+    ) -> Self {
         KNN {
             k,
             x_train: None,
@@ -132,14 +136,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         &self.weighting_strategy
     }
 
-    /// Returns the distance metric used for calculating point similarities
-    ///
-    /// # Returns
-    ///
-    /// * `&DistanceCalculationMetric` - A reference to the Metric enum used by this instance
-    pub fn get_metric(&self) -> &Metric {
-        &self.metric
-    }
+    get_metric!();
 
     /// Returns a reference to the training features if available
     ///
@@ -265,9 +262,9 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         };
 
         match self.metric {
-            Metric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
-            Metric::Manhattan => manhattan_distance_row(a, b),
-            Metric::Minkowski => minkowski_distance_row(a, b, 3.0),
+            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(a, b),
+            DistanceCalculationMetric::Minkowski => minkowski_distance_row(a, b, 3.0),
         }
     }
 
