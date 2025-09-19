@@ -1,7 +1,6 @@
 pub use super::RegularizationType;
 use super::preliminary_check;
 use crate::ModelError;
-pub use crate::traits::RegressorCommonGetterFunctions;
 use ndarray::{Array1, ArrayView1, ArrayView2};
 use rayon::prelude::*;
 
@@ -94,30 +93,6 @@ impl Default for LinearRegression {
     }
 }
 
-impl RegressorCommonGetterFunctions for LinearRegression {
-    fn get_fit_intercept(&self) -> bool {
-        self.fit_intercept
-    }
-    fn get_learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-    fn get_max_iterations(&self) -> usize {
-        self.max_iter
-    }
-    fn get_tolerance(&self) -> f64 {
-        self.tol
-    }
-    fn get_actual_iterations(&self) -> Result<usize, ModelError> {
-        match &self.n_iter {
-            Some(n_iter) => Ok(*n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-    fn get_regularization_type(&self) -> &Option<RegularizationType> {
-        &self.regularization_type
-    }
-}
-
 impl LinearRegression {
     /// Creates a new linear regression model with custom parameters
     ///
@@ -150,6 +125,18 @@ impl LinearRegression {
             regularization_type,
         }
     }
+
+    get_fit_intercept!();
+
+    get_learning_rate!();
+
+    get_max_iterations!();
+
+    get_tolerance!();
+
+    get_actual_iterations!();
+
+    get_regularization_type!();
 
     /// Returns the model coefficients if the model has been fitted
     ///

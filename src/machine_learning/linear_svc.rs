@@ -230,6 +230,16 @@ impl LinearSVC {
         )
     }
 
+    get_fit_intercept!();
+
+    get_learning_rate!();
+
+    get_max_iterations!();
+
+    get_tolerance!();
+
+    get_actual_iterations!();
+
     /// Returns the weight coefficients of the trained model.
     ///
     /// # Returns
@@ -250,34 +260,6 @@ impl LinearSVC {
         self.bias.ok_or(ModelError::NotFitted)
     }
 
-    /// Returns the number of iterations performed during training.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(usize)`: Number of iterations if model is trained
-    /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        self.n_iter.ok_or(ModelError::NotFitted)
-    }
-
-    /// Returns the maximum number of iterations.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - Maximum iterations the model will use during training
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
-
-    /// Returns the learning rate.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - Current learning rate value
-    pub fn get_learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-
     /// Returns the regularization parameter.
     ///
     /// # Returns
@@ -294,24 +276,6 @@ impl LinearSVC {
     /// * `&RegularizationType` - Reference to the current penalty type (L1 or L2)
     pub fn get_penalty(&self) -> &RegularizationType {
         &self.penalty
-    }
-
-    /// Returns whether the model uses an intercept/bias term.
-    ///
-    /// # Returns
-    ///
-    /// * `bool` - `true` if the model uses a bias term, `false` otherwise
-    pub fn get_fit_intercept(&self) -> bool {
-        self.fit_intercept
-    }
-
-    /// Returns the convergence tolerance.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - Current tolerance value
-    pub fn get_tol(&self) -> f64 {
-        self.tol
     }
 
     /// Trains the model on the provided data.

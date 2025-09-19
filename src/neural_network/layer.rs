@@ -260,7 +260,7 @@ pub mod global_average_pooling_1d;
 pub mod global_average_pooling_2d;
 pub mod global_average_pooling_3d;
 /// Global Max Pooling 1D Layer
-mod global_max_pooling_1d;
+pub mod global_max_pooling_1d;
 /// Global Max Pooling Layer
 pub mod global_max_pooling_2d;
 /// Global Max Pooling 3D Layer

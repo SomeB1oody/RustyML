@@ -136,7 +136,6 @@ impl DBSCAN {
     }
 
     /// Computes distance between two data points using the specified metric
-    #[inline]
     fn compute_distance(
         &self,
         p_row: ndarray::ArrayView1<f64>,

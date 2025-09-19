@@ -7,7 +7,7 @@ fn test_default() {
     let model = LinearSVC::default();
     assert_eq!(model.get_weights(), Err(ModelError::NotFitted));
     assert_eq!(model.get_bias(), Err(ModelError::NotFitted));
-    assert_eq!(model.get_n_iter(), Err(ModelError::NotFitted));
+    assert_eq!(model.get_actual_iterations(), Err(ModelError::NotFitted));
 }
 
 #[test]
@@ -21,12 +21,12 @@ fn test_new() {
         1e-4,                        // tol
     );
 
-    assert_eq!(model.get_max_iter(), 100);
+    assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_regularization_param(), 0.1);
     assert!(matches!(model.get_penalty(), RegularizationType::L2(0.0)));
     assert!(model.get_fit_intercept());
-    assert_eq!(model.get_tol(), 1e-4);
+    assert_eq!(model.get_tolerance(), 1e-4);
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn test_getters_before_fit() {
     // These should return errors when model is not fitted
     assert!(model.get_weights().is_err());
     assert!(model.get_bias().is_err());
-    assert!(model.get_n_iter().is_err());
+    assert!(model.get_actual_iterations().is_err());
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     // Test that weights and bias are now available
     assert!(model.get_weights().is_ok());
     assert!(model.get_bias().is_ok());
-    assert!(model.get_n_iter().is_ok());
+    assert!(model.get_actual_iterations().is_ok());
 
     // Test predictions
     let predictions = model.predict(x.view())?;

@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.7.0] - 2025-9-19 (UTC-7)
+### Changed
+- Replace trait-based getter implementation with macros for improved reusability and consistency
+
 ## [v0.6.3] - 2025-9-16 (UTC-7)
 ### Changed
 - Refactor models in utility and machine_learning for efficiency, maintainability, and clarity

@@ -2,7 +2,6 @@ pub use super::RegularizationType;
 use super::preliminary_check;
 use crate::ModelError;
 use crate::math::{logistic_loss, sigmoid};
-pub use crate::traits::RegressorCommonGetterFunctions;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
@@ -95,30 +94,6 @@ impl Default for LogisticRegression {
     }
 }
 
-impl RegressorCommonGetterFunctions for LogisticRegression {
-    fn get_fit_intercept(&self) -> bool {
-        self.fit_intercept
-    }
-    fn get_learning_rate(&self) -> f64 {
-        self.learning_rate
-    }
-    fn get_max_iterations(&self) -> usize {
-        self.max_iter
-    }
-    fn get_tolerance(&self) -> f64 {
-        self.tol
-    }
-    fn get_actual_iterations(&self) -> Result<usize, ModelError> {
-        match &self.n_iter {
-            Some(n_iter) => Ok(*n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-    fn get_regularization_type(&self) -> &Option<RegularizationType> {
-        &self.regularization_type
-    }
-}
-
 impl LogisticRegression {
     /// Creates a new logistic regression model with specified parameters
     ///
@@ -149,6 +124,18 @@ impl LogisticRegression {
             regularization_type,
         }
     }
+
+    get_fit_intercept!();
+
+    get_learning_rate!();
+
+    get_max_iterations!();
+
+    get_tolerance!();
+
+    get_actual_iterations!();
+
+    get_regularization_type!();
 
     /// Returns the model weights
     ///
