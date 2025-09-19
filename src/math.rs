@@ -26,6 +26,7 @@ use ndarray::ArrayView1;
 /// // Mean is 2.0, so SST = (1-2)^2 + (2-2)^2 + (3-2)^2 = 1 + 0 + 1 = 2.0
 /// assert!((sst - 2.0).abs() < 1e-5);
 /// ```
+#[inline]
 pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
     if values.is_empty() {
         return Err(ModelError::InputValidationError(
@@ -69,6 +70,7 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 /// // (2-1)^2 + (3-3)^2 = 1 + 0 = 1
 /// assert!((sse - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn sum_of_squared_errors(
     predicted: ArrayView1<f64>,
     actual: ArrayView1<f64>,
@@ -144,6 +146,7 @@ pub fn sum_of_squared_errors(
 /// // sigmoid(0) = 0.5
 /// assert!((value - 0.5).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn sigmoid(z: f64) -> f64 {
     // Handle NaN input
     if z.is_nan() {
@@ -189,6 +192,7 @@ pub fn sigmoid(z: f64) -> f64 {
 /// // Expected average loss is approximately 0.37778
 /// assert!((loss - 0.37778).abs() < 1e-5);
 /// ```
+#[inline]
 pub fn logistic_loss(
     logits: ArrayView1<f64>,
     actual_labels: ArrayView1<f64>,
@@ -270,6 +274,7 @@ pub fn logistic_loss(
 /// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
 /// assert!((dist - 27.0).abs() < 1e-10);
 /// ```
+#[inline]
 pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
@@ -303,6 +308,7 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 /// // |1-4| + |2-6| = 3 + 4 = 7
 /// assert!((distance - 7.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
@@ -337,6 +343,7 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 /// // Expected distance is approximately 4.497
 /// assert!((distance - 4.497).abs() < 1e-3);
 /// ```
+#[inline]
 pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) -> f64 {
     assert!(p >= 1.0, "p must be greater than or equal to 1.0");
 
@@ -377,6 +384,7 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 /// // For two classes with equal frequency, entropy = 1.0
 /// assert!((ent - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn entropy(y: ArrayView1<f64>) -> f64 {
     let total_samples = y.len() as f64;
     if total_samples == 0.0 {
@@ -446,6 +454,7 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 /// // For two classes with equal frequency, Gini = 1 - (0.5^2 + 0.5^2) = 0.5
 /// assert!((gini_val - 0.5).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn gini(y: ArrayView1<f64>) -> f64 {
     let total_samples = y.len() as f64;
     if total_samples == 0.0 {
@@ -515,6 +524,7 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// // Entropy(parent)=1.0, Entropy(left)=Entropy(right)=0, so IG = 1.0
 /// assert!((ig - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn information_gain(
     y: ArrayView1<f64>,
     left_y: ArrayView1<f64>,
@@ -587,6 +597,7 @@ pub fn information_gain(
 /// // With equal splits, gain ratio should be 1.0
 /// assert!((gr - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayView1<f64>) -> f64 {
     // Early return if parent is empty or either split is empty
     if y.is_empty() || left_y.is_empty() || right_y.is_empty() {
@@ -651,6 +662,7 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
 /// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ≈ 0.66667
 /// assert!((mse - 0.6666667).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn variance(y: ArrayView1<f64>) -> f64 {
     let n = y.len();
 
@@ -704,6 +716,7 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
 /// // For n = 10, the factor is approximately 3.748
 /// assert!((factor - 3.748).abs() < 0.01);
 /// ```
+#[inline]
 pub fn average_path_length_factor(n: f64) -> f64 {
     // Handle invalid inputs
     if !n.is_finite() || n <= 1.0 {
@@ -748,6 +761,7 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// // Population standard deviation for [1,2,3] is approximately 0.8165
 /// assert!((std_dev - 0.8165).abs() < 1e-4);
 /// ```
+#[inline]
 pub fn standard_deviation(values: ArrayView1<f64>) -> Result<f64, ModelError> {
     let n = values.len();
 

@@ -1,6 +1,6 @@
 use super::helper_functions::*;
 use super::*;
-use crate::neural_network::{ModelError, Tensor};
+use crate::ModelError;
 use crate::traits::Layer;
 use ndarray::ArrayD;
 use rayon::prelude::*;
