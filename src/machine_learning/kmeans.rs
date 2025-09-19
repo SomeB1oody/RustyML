@@ -130,24 +130,9 @@ impl KMeans {
         self.n_clusters
     }
 
-    /// Returns the maximum number of iterations allowed for the KMeans algorithm.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The maximum number of iterations.
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
+    get_max_iterations!();
 
-    /// Returns the tolerance for declaring convergence in the KMeans algorithm.
-    /// Convergence is declared when the change in inertia is less than this value.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The convergence tolerance.
-    pub fn get_tol(&self) -> f64 {
-        self.tol
-    }
+    get_tolerance!();
 
     /// Returns the random seed used for centroid initialization.
     ///
@@ -201,18 +186,7 @@ impl KMeans {
         }
     }
 
-    /// Returns the number of iterations the algorithm ran for during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(usize)` - A value representing the number of iterations,
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match self.n_iter {
-            Some(n_iter) => Ok(n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_actual_iterations!();
 
     /// Finds the closest centroid to a given data point and returns its index and distance.
     ///

@@ -35,7 +35,10 @@ fn test_new_and_default() {
     assert!(matches!(kmeans.get_centroids(), Err(ModelError::NotFitted)));
     assert!(matches!(kmeans.get_labels(), Err(ModelError::NotFitted)));
     assert!(matches!(kmeans.get_inertia(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_n_iter(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        kmeans.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
 
     // Test default method
     let default_kmeans = KMeans::default();
@@ -54,7 +57,7 @@ fn test_new_and_default() {
         Err(ModelError::NotFitted)
     ));
     assert!(matches!(
-        default_kmeans.get_n_iter(),
+        default_kmeans.get_actual_iterations(),
         Err(ModelError::NotFitted)
     ));
 }
@@ -71,7 +74,7 @@ fn test_fit() {
     assert!(matches!(kmeans.get_centroids(), Ok(_)));
     assert_eq!(kmeans.get_centroids().unwrap().shape(), &[2, 2]);
     assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_n_iter(), Ok(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
 }
 
 #[test]
@@ -125,7 +128,7 @@ fn test_fit_predict() {
     assert!(matches!(kmeans.get_centroids(), Ok(_)));
     assert!(matches!(kmeans.get_labels(), Ok(_)));
     assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_n_iter(), Ok(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
 
     // Verify labels are the same as predictions
     assert_eq!(predictions, *kmeans.get_labels().unwrap());
@@ -140,14 +143,17 @@ fn test_getters() {
     assert!(matches!(kmeans.get_centroids(), Err(ModelError::NotFitted)));
     assert!(matches!(kmeans.get_labels(), Err(ModelError::NotFitted)));
     assert!(matches!(kmeans.get_inertia(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_n_iter(), Err(ModelError::NotFitted)));
+    assert!(matches!(
+        kmeans.get_actual_iterations(),
+        Err(ModelError::NotFitted)
+    ));
 
     // State after fitting
     kmeans.fit(data.view()).unwrap();
     assert!(matches!(kmeans.get_centroids(), Ok(_)));
     assert!(matches!(kmeans.get_labels(), Ok(_)));
     assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_n_iter(), Ok(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
 }
 
 #[test]
