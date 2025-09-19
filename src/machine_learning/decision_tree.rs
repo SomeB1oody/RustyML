@@ -1205,6 +1205,39 @@ fn find_best_split(
         f64::NEG_INFINITY, // best_criterion
     ));
 
+    /// Helper function to calculate CART criterion (Gini impurity reduction)
+    fn calculate_cart_criterion(
+        y: ArrayView1<f64>,
+        left_y: ArrayView1<f64>,
+        right_y: ArrayView1<f64>,
+        is_classifier: bool,
+    ) -> f64 {
+        // Select the appropriate impurity function
+        let impurity_fn = if is_classifier { gini } else { variance };
+
+        // Calculate impurity for parent node, left child node, and right child node
+        let parent_impurity = impurity_fn(y);
+        let left_impurity = impurity_fn(left_y);
+        let right_impurity = impurity_fn(right_y);
+
+        // Check if all impurity values are valid
+        if !parent_impurity.is_finite() || !left_impurity.is_finite() || !right_impurity.is_finite()
+        {
+            return f64::NEG_INFINITY;
+        }
+
+        // Calculate weights
+        let total_len = y.len() as f64;
+        let left_weight = left_y.len() as f64 / total_len;
+        let right_weight = right_y.len() as f64 / total_len;
+
+        // Calculate weighted impurity
+        let weighted_impurity = left_weight * left_impurity + right_weight * right_impurity;
+
+        // Return the impurity reduction
+        parent_impurity - weighted_impurity
+    }
+
     // Process each feature in parallel
     (0..n_features).into_par_iter().for_each(|feature_idx| {
         // Get all unique values for this feature, filtering out invalid values
@@ -1267,9 +1300,9 @@ fn find_best_split(
             let right_y = Array1::from_iter(right_indices.iter().map(|&i| y[i]));
 
             // Calculate split quality based on the selected algorithm
-            let criterion = if is_classifier {
-                match algorithm {
-                    "ID3" => {
+            let criterion = match algorithm {
+                "ID3" => {
+                    if is_classifier {
                         let gain = information_gain(y, left_y.view(), right_y.view());
                         // Check for invalid gain values
                         if gain.is_finite() {
@@ -1277,47 +1310,25 @@ fn find_best_split(
                         } else {
                             f64::NEG_INFINITY
                         }
+                    } else {
+                        f64::NEG_INFINITY // ID3 is not applicable for regression
                     }
-                    "C4.5" => {
+                }
+                "C4.5" => {
+                    if is_classifier {
                         let ratio = gain_ratio(y, left_y.view(), right_y.view());
                         if ratio.is_finite() {
                             ratio
                         } else {
                             f64::NEG_INFINITY
                         }
-                    }
-                    _ => {
-                        // CART algorithm uses Gini impurity
-                        let gini_parent = gini(y);
-                        let gini_left = gini(left_y.view());
-                        let gini_right = gini(right_y.view());
-
-                        // Check for invalid Gini values
-                        if gini_parent.is_finite()
-                            && gini_left.is_finite()
-                            && gini_right.is_finite()
-                        {
-                            let weighted_gini = (left_y.len() as f64 / y.len() as f64) * gini_left
-                                + (right_y.len() as f64 / y.len() as f64) * gini_right;
-                            gini_parent - weighted_gini
-                        } else {
-                            f64::NEG_INFINITY
-                        }
+                    } else {
+                        f64::NEG_INFINITY // C4.5 is not applicable for regression
                     }
                 }
-            } else {
-                // Regression uses MSE reduction
-                let total_mse = variance(y);
-                let left_mse = variance(left_y.view());
-                let right_mse = variance(right_y.view());
-
-                // Check for invalid MSE values
-                if total_mse.is_finite() && left_mse.is_finite() && right_mse.is_finite() {
-                    let weighted_child_mse = (left_y.len() as f64 / y.len() as f64) * left_mse
-                        + (right_y.len() as f64 / y.len() as f64) * right_mse;
-                    total_mse - weighted_child_mse
-                } else {
-                    f64::NEG_INFINITY
+                _ => {
+                    // CART algorithm - use the extracted helper function
+                    calculate_cart_criterion(y, left_y.view(), right_y.view(), is_classifier)
                 }
             };
 

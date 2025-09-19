@@ -35,8 +35,8 @@ fn create_test_data() -> Array2<f64> {
 fn test_meanshift_default() {
     let ms = MeanShift::default();
     assert_eq!(ms.get_bandwidth(), 1.0);
-    assert_eq!(ms.get_max_iter(), 300);
-    assert_eq!(ms.get_tol(), 1e-3);
+    assert_eq!(ms.get_max_iterations(), 300);
+    assert_eq!(ms.get_tolerance(), 1e-3);
     assert_eq!(ms.get_bin_seeding(), false);
     assert_eq!(ms.get_cluster_all(), true);
 }
@@ -45,8 +45,8 @@ fn test_meanshift_default() {
 fn test_meanshift_new() {
     let ms = MeanShift::new(2.0, Some(200), Some(1e-4), Some(true), Some(true));
     assert_eq!(ms.get_bandwidth(), 2.0);
-    assert_eq!(ms.get_max_iter(), 200);
-    assert_eq!(ms.get_tol(), 1e-4);
+    assert_eq!(ms.get_max_iterations(), 200);
+    assert_eq!(ms.get_tolerance(), 1e-4);
     assert_eq!(ms.get_bin_seeding(), true);
     assert_eq!(ms.get_cluster_all(), true);
 }
@@ -57,7 +57,7 @@ fn test_meanshift_getters_before_fit() {
 
     assert!(ms.get_cluster_centers().is_err());
     assert!(ms.get_labels().is_err());
-    assert!(ms.get_n_iter().is_err());
+    assert!(ms.get_actual_iterations().is_err());
     assert!(ms.get_n_samples_per_center().is_err());
 }
 
@@ -71,7 +71,7 @@ fn test_meanshift_fit() {
     // Check that all attributes are accessible after fitting
     assert!(ms.get_cluster_centers().is_ok());
     assert!(ms.get_labels().is_ok());
-    assert!(ms.get_n_iter().is_ok());
+    assert!(ms.get_actual_iterations().is_ok());
     assert!(ms.get_n_samples_per_center().is_ok());
 
     // Check the shape of cluster centers
@@ -197,5 +197,5 @@ fn test_fit_with_max_iterations() {
     ms.fit(data.view()).unwrap();
 
     // Should complete successfully and n_iter should be 1
-    assert_eq!(ms.get_n_iter().unwrap(), 1);
+    assert_eq!(ms.get_actual_iterations().unwrap(), 1);
 }

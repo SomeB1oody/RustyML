@@ -92,8 +92,8 @@ pub struct MeanShift {
 ///
 /// let ms = MeanShift::default();
 /// assert_eq!(ms.get_bandwidth(), 1.0);
-/// assert_eq!(ms.get_max_iter(), 300);
-/// assert_eq!(ms.get_tol(), 1e-3);
+/// assert_eq!(ms.get_max_iterations(), 300);
+/// assert_eq!(ms.get_tolerance(), 1e-3);
 /// assert_eq!(ms.get_bin_seeding(), false);
 /// assert_eq!(ms.get_cluster_all(), true);
 /// ```
@@ -163,18 +163,7 @@ impl MeanShift {
         }
     }
 
-    /// Gets the number of iterations the algorithm performed.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(usize)` - A Result containing the number of iterations or an error
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match self.n_iter.as_ref() {
-            Some(n_iter) => Ok(*n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_actual_iterations!();
 
     /// Gets the number of samples per cluster center.
     ///
@@ -198,23 +187,9 @@ impl MeanShift {
         self.bandwidth
     }
 
-    /// Gets the maximum number of iterations.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The maximum number of iterations.
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
+    get_max_iterations!();
 
-    /// Gets the convergence tolerance.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The tolerance value.
-    pub fn get_tol(&self) -> f64 {
-        self.tol
-    }
+    get_tolerance!();
 
     /// Gets the bin seeding setting.
     ///

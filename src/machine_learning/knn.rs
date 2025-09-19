@@ -72,7 +72,7 @@ pub struct KNN<T> {
     k: usize,
     x_train: Option<Array2<f64>>,
     y_train: Option<Array1<T>>,
-    weights: WeightingStrategy,
+    weighting_strategy: WeightingStrategy,
     metric: Metric,
 }
 
@@ -86,7 +86,7 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
             k: 5,
             x_train: None,
             y_train: None,
-            weights: WeightingStrategy::Uniform,
+            weighting_strategy: WeightingStrategy::Uniform,
             metric: Metric::Euclidean,
         }
     }
@@ -104,12 +104,12 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Returns
     ///
     /// * `KNN` - A new KNN classifier instance
-    pub fn new(k: usize, weights: WeightingStrategy, metric: Metric) -> Self {
+    pub fn new(k: usize, weighting_strategy: WeightingStrategy, metric: Metric) -> Self {
         KNN {
             k,
             x_train: None,
             y_train: None,
-            weights,
+            weighting_strategy,
             metric,
         }
     }
@@ -128,8 +128,8 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Returns
     ///
     /// * `&WeightingStrategy` - A reference to the `WeightingStrategy` enum used by this instance
-    pub fn get_weights(&self) -> &WeightingStrategy {
-        &self.weights
+    pub fn get_weighting_strategy(&self) -> &WeightingStrategy {
+        &self.weighting_strategy
     }
 
     /// Returns the distance metric used for calculating point similarities
@@ -300,7 +300,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         let k_neighbors = &distances[..k];
 
         // Calculate based on weight strategy
-        match self.weights {
+        match self.weighting_strategy {
             WeightingStrategy::Uniform => {
                 // Count class occurrences using pre-sized HashMap
                 let mut class_counts: AHashMap<&T, usize> = AHashMap::with_capacity(k);

@@ -40,7 +40,7 @@ pub struct DBSCAN {
     min_samples: usize,
     metric: Metric,
     labels_: Option<Array1<i32>>,
-    core_sample_indices_: Option<Array1<usize>>,
+    core_sample_indices: Option<Array1<usize>>,
 }
 
 /// Default parameters for DBSCAN model
@@ -56,7 +56,7 @@ impl Default for DBSCAN {
             min_samples: 5,
             metric: Metric::Euclidean,
             labels_: None,
-            core_sample_indices_: None,
+            core_sample_indices: None,
         }
     }
 }
@@ -79,7 +79,7 @@ impl DBSCAN {
             min_samples,
             metric,
             labels_: None,
-            core_sample_indices_: None,
+            core_sample_indices: None,
         }
     }
 
@@ -130,7 +130,7 @@ impl DBSCAN {
     /// - `Ok(&Array1<usize>)` - Array of indices of core samples if model has been fitted
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     pub fn get_core_sample_indices(&self) -> Result<&Array1<usize>, ModelError> {
-        self.core_sample_indices_
+        self.core_sample_indices
             .as_ref()
             .ok_or(ModelError::NotFitted)
     }
@@ -288,7 +288,7 @@ impl DBSCAN {
         // Convert HashSet to sorted Vec for consistent ordering
         let mut core_indices: Vec<usize> = core_samples.into_iter().collect();
         core_indices.sort_unstable();
-        self.core_sample_indices_ = Some(Array1::from(core_indices));
+        self.core_sample_indices = Some(Array1::from(core_indices));
 
         Ok(self)
     }
@@ -317,7 +317,7 @@ impl DBSCAN {
         // Ensure the model has been trained
         let labels = self.labels_.as_ref().ok_or(ModelError::NotFitted)?;
         let core_samples = self
-            .core_sample_indices_
+            .core_sample_indices
             .as_ref()
             .ok_or(ModelError::NotFitted)?;
 

@@ -8,7 +8,10 @@ use ndarray::{Array1, Array2, array};
 fn test_knn_default() {
     let knn: KNN<i32> = KNN::default();
     assert_eq!(knn.get_k(), 5); // Default K value should be 5
-    assert!(matches!(knn.get_weights(), WeightingStrategy::Uniform)); // Default weight strategy should be uniform
+    assert!(matches!(
+        knn.get_weighting_strategy(),
+        WeightingStrategy::Uniform
+    )); // Default weight strategy should be uniform
     assert!(matches!(knn.get_metric(), Metric::Euclidean)); // Default metric should be Euclidean
     assert!(matches!(knn.get_x_train(), Err(ModelError::NotFitted))); // Should not have training data by default
     assert!(matches!(knn.get_y_train(), Err(ModelError::NotFitted))); // Should not have training labels by default
@@ -19,7 +22,10 @@ fn test_knn_default() {
 fn test_knn_new() {
     let knn: KNN<i32> = KNN::new(3, WeightingStrategy::Distance, Metric::Manhattan);
     assert_eq!(knn.get_k(), 3);
-    assert!(matches!(knn.get_weights(), WeightingStrategy::Distance));
+    assert!(matches!(
+        knn.get_weighting_strategy(),
+        WeightingStrategy::Distance
+    ));
     assert!(matches!(knn.get_metric(), Metric::Manhattan));
 }
 
