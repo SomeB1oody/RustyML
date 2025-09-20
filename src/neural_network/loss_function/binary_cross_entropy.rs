@@ -1,4 +1,4 @@
-use crate::neural_network::{LossFunction, Tensor};
+use super::super::{LossFunction, Tensor};
 
 /// Binary Cross Entropy loss function for binary classification
 ///

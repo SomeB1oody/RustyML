@@ -1,4 +1,4 @@
-use crate::neural_network::{Layer, Optimizer};
+use super::super::{Layer, Optimizer};
 use ndarray::{Array2, Array3, Array4, Array5};
 
 /// RMSprop optimizer implementation.

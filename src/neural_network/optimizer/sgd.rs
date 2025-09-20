@@ -1,4 +1,4 @@
-use crate::neural_network::{Layer, Optimizer};
+use super::super::{Layer, Optimizer};
 use rayon::prelude::*;
 
 /// Stochastic Gradient Descent (SGD) optimizer.

@@ -1,6 +1,6 @@
+use super::Tensor;
+use super::layer::LayerWeight;
 use crate::ModelError;
-use crate::neural_network::Tensor;
-use crate::neural_network::layer::LayerWeight;
 
 /// Defines the interface for neural network layers.
 ///

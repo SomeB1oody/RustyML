@@ -1,4 +1,4 @@
-use super::DistanceCalculationMetric;
+pub use super::DistanceCalculationMetric;
 use super::preliminary_check;
 use crate::ModelError;
 use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};

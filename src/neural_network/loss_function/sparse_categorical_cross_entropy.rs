@@ -1,4 +1,4 @@
-use crate::neural_network::{LossFunction, Tensor};
+use super::super::{LossFunction, Tensor};
 use rayon::prelude::*;
 
 /// Sparse Categorical Cross Entropy loss function for multi-class classification

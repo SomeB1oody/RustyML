@@ -1,6 +1,6 @@
+use super::decision_tree::{Node, NodeType};
 use super::preliminary_check;
 use crate::ModelError;
-use crate::machine_learning::decision_tree::{Node, NodeType};
 use ndarray::{Array1, Array2, ArrayView2, Axis, s};
 use rand::prelude::*;
 use rand::rng;
