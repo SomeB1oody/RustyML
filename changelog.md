@@ -8,9 +8,12 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.7.0] - 2025-9-19 (UTC-7)
 ### Added
 - Annotate mathematical utility functions with `#[inline]` for potential performance improvements during compilation
+- add feature flags for selective compilation
 
 ### Changed
 - Replace trait-based getter implementation with macros for improved reusability and consistency
+- Refactor imports
+- modularize traits
 
 ## [v0.6.3] - 2025-9-16 (UTC-7)
 ### Changed

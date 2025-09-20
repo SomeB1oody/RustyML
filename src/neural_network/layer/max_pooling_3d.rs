@@ -1,7 +1,5 @@
+use super::super::*;
 use super::helper_functions::*;
-use super::*;
-use crate::ModelError;
-use crate::traits::Layer;
 use ndarray::ArrayD;
 use rayon::prelude::*;
 

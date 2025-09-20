@@ -1,9 +1,5 @@
+use super::super::*;
 use super::helper_functions::*;
-use super::*;
-use crate::neural_network::activation::Activation;
-use crate::neural_network::optimizer::*;
-use crate::neural_network::{ModelError, Tensor};
-use crate::traits::Layer;
 use ndarray::{Array2, Array3, Array4, Axis};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;

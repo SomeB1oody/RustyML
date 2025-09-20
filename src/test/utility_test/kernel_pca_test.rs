@@ -1,5 +1,5 @@
 use crate::ModelError;
-use crate::machine_learning::svc::KernelType;
+use crate::utility::KernelType;
 use crate::utility::kernel_pca::{KernelPCA, compute_kernel};
 use approx::assert_abs_diff_eq;
 use ndarray::{Array2, ArrayView1};

@@ -8,19 +8,18 @@ pub mod loss_function;
 pub mod optimizer;
 /// Module that contains implementations for sequential model architecture
 pub mod sequential;
+/// Module containing trait definitions for machine neural network model interfaces
+pub mod traits;
 
 pub use activation::*;
 pub use layer::*;
 pub use loss_function::*;
 pub use optimizer::*;
 pub use sequential::*;
+pub use traits::*;
 
 use crate::ModelError;
 use ndarray::ArrayD;
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network
 pub type Tensor = ArrayD<f32>;
-
-pub use crate::traits::Layer;
-pub use crate::traits::LossFunction;
-pub use crate::traits::Optimizer;

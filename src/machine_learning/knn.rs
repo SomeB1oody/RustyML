@@ -1,6 +1,7 @@
 use super::DistanceCalculationMetric;
 use super::preliminary_check;
 use crate::ModelError;
+use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use rayon::prelude::*;
@@ -257,10 +258,6 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Notes
     /// Minkowski distance with p=3
     fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        use crate::math::{
-            manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
-        };
-
         match self.metric {
             DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(a, b),

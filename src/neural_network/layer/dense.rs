@@ -1,7 +1,4 @@
-use crate::ModelError;
-use crate::neural_network::layer::{DenseLayerWeight, LayerWeight};
-use crate::neural_network::optimizer::*;
-use crate::neural_network::{Activation, Layer, Tensor};
+use super::super::*;
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;

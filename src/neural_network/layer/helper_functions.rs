@@ -1,4 +1,4 @@
-use crate::neural_network::{Activation, PaddingType, Tensor};
+use super::super::*;
 use ndarray::{Array2, Array3, ArrayD, s};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,

@@ -94,21 +94,6 @@ pub enum RegularizationType {
     L2(f64),
 }
 
-/// Kernel function types for Support Vector Machine
-///
-/// # Variants
-/// - `Linear` - Linear kernel: K(x, y) = x·y
-/// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
-/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
-/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-#[derive(Debug, Clone)]
-pub enum KernelType {
-    Linear,
-    Poly { degree: u32, gamma: f64, coef0: f64 },
-    RBF { gamma: f64 },
-    Sigmoid { gamma: f64, coef0: f64 },
-}
-
 /// A macro that generates a getter method for the `fit_intercept` field.
 ///
 /// This macro expands to a public method that returns whether the model
@@ -327,3 +312,16 @@ pub mod linear_svc;
 
 /// This module provides an implementation of Linear Discriminant Analysis
 pub mod linear_discriminant_analysis;
+
+pub use crate::utility::KernelType;
+pub use dbscan::*;
+pub use decision_tree::*;
+pub use isolation_forest::*;
+pub use kmeans::*;
+pub use knn::*;
+pub use linear_discriminant_analysis::*;
+pub use linear_regression::*;
+pub use linear_svc::*;
+pub use logistic_regression::*;
+pub use meanshift::*;
+pub use svc::*;

@@ -92,3 +92,18 @@ pub fn standardize(x: &Array2<f64>) -> Array2<f64> {
 
     x_std
 }
+
+/// Kernel function types for Support Vector Machine
+///
+/// # Variants
+/// - `Linear` - Linear kernel: K(x, y) = x·y
+/// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
+/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
+/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
+#[derive(Debug, Clone)]
+pub enum KernelType {
+    Linear,
+    Poly { degree: u32, gamma: f64, coef0: f64 },
+    RBF { gamma: f64 },
+    Sigmoid { gamma: f64, coef0: f64 },
+}

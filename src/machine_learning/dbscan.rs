@@ -136,8 +136,7 @@ impl DBSCAN {
     ) -> f64 {
         match self.metric {
             DistanceCalculationMetric::Euclidean => {
-                let squared_dist = squared_euclidean_distance_row(p_row, q_row);
-                squared_dist.sqrt()
+                squared_euclidean_distance_row(p_row, q_row).sqrt()
             }
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(p_row, q_row),
             DistanceCalculationMetric::Minkowski => minkowski_distance_row(p_row, q_row, 3.0),

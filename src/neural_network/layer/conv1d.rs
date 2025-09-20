@@ -1,10 +1,5 @@
+use super::super::*;
 use super::helper_functions::*;
-use crate::ModelError;
-use crate::neural_network::activation::Activation;
-use crate::neural_network::layer::*;
-use crate::neural_network::optimizer::OptimizerCacheConv1D;
-use crate::neural_network::{SGD, Tensor};
-use crate::traits::Layer;
 use ndarray::{Array2, Array3};
 use ndarray_rand::RandomExt;
 use rayon::prelude::*;

@@ -6,7 +6,8 @@ use crate::neural_network::layer::LayerWeight;
 ///
 /// This trait provides the core functionality that all neural network layers must implement,
 /// including forward and backward propagation, as well as parameter updates for different
-/// optimization algorithms.
+/// optimization algorithms
+#[cfg(feature = "neural_network")]
 pub trait Layer {
     /// Performs forward propagation through the layer.
     ///
@@ -109,6 +110,7 @@ pub trait Layer {
 ///
 /// This trait provides methods to compute both the loss value and its gradient
 /// with respect to the predicted values.
+#[cfg(feature = "neural_network")]
 pub trait LossFunction {
     /// Computes the loss between true and predicted values.
     ///
@@ -139,6 +141,7 @@ pub trait LossFunction {
 ///
 /// This trait provides methods to update layer parameters during
 /// the training process.
+#[cfg(feature = "neural_network")]
 pub trait Optimizer {
     /// Updates the parameters of a layer according to the optimization algorithm.
     ///

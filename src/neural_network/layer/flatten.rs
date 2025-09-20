@@ -1,6 +1,4 @@
-use crate::neural_network::layer::LayerWeight;
-use crate::neural_network::{ModelError, Tensor};
-use crate::traits::Layer;
+use super::super::*;
 use ndarray::IxDyn;
 
 /// A layer that flattens a multi-dimensional tensor (3D, 4D, or 5D) into a 2D tensor.

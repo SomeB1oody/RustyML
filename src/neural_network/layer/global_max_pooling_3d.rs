@@ -1,6 +1,4 @@
-use super::*;
-use crate::neural_network::{ModelError, Tensor};
-use crate::traits::Layer;
+use super::super::*;
 use ndarray::{Array, IxDyn};
 use rayon::prelude::*;
 

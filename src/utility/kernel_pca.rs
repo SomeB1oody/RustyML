@@ -1,5 +1,5 @@
+pub use super::KernelType;
 use crate::ModelError;
-pub use crate::machine_learning::KernelType;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use rayon::prelude::*;
 

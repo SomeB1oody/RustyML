@@ -1,7 +1,5 @@
+use super::super::*;
 use super::helper_functions::*;
-use crate::neural_network::layer::LayerWeight;
-use crate::neural_network::{ModelError, Tensor};
-use crate::traits::Layer;
 use ndarray::ArrayD;
 use rayon::prelude::*;
 
