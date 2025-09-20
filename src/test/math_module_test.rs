@@ -1,6 +1,6 @@
 use crate::ModelError;
 use crate::math::*;
-use approx::assert_relative_eq;
+use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::{Array, Array1, array};
 
 #[test]
@@ -9,16 +9,28 @@ fn test_sum_of_square_total() {
     let values = array![2.0, 4.0, 6.0, 8.0];
     // Mean is 5.0, so SST = (2-5)² + (4-5)² + (6-5)² + (8-5)² = 9 + 1 + 1 + 9 = 20
     let expected = 20.0;
-    assert!((sum_of_square_total(values.view()).unwrap() - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        sum_of_square_total(values.view()).unwrap(),
+        expected,
+        epsilon = f64::EPSILON
+    );
 
     // Case where all values are identical
     let same_values = array![5.0, 5.0, 5.0, 5.0];
     // Mean is 5.0, so SST = 0
-    assert!((sum_of_square_total(same_values.view()).unwrap() - 0.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        sum_of_square_total(same_values.view()).unwrap(),
+        0.0,
+        epsilon = f64::EPSILON
+    );
 
     // Single value case
     let single = array![10.0];
-    assert!((sum_of_square_total(single.view()).unwrap() - 0.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        sum_of_square_total(single.view()).unwrap(),
+        0.0,
+        epsilon = f64::EPSILON
+    );
 }
 
 #[test]
@@ -29,17 +41,19 @@ fn test_sum_of_squared_errors() {
     // SSE = (1-1.2)² + (2-1.8)² + (3-3.3)² + (4-3.9)²
     // SSE = 0.04 + 0.04 + 0.09 + 0.01 = 0.18
     let expected = 0.18;
-    assert!(
-        (sum_of_squared_errors(predicted.view(), actual.view()).unwrap() - expected).abs() < 0.0001
+    assert_abs_diff_eq!(
+        sum_of_squared_errors(predicted.view(), actual.view()).unwrap(),
+        expected,
+        epsilon = 0.0001
     );
 
     // Case with perfect prediction
     let perfect_prediction = array![5.0, 10.0, 15.0];
     let actual_values = array![5.0, 10.0, 15.0];
-    assert!(
-        (sum_of_squared_errors(perfect_prediction.view(), actual_values.view()).unwrap() - 0.0)
-            .abs()
-            < f64::EPSILON
+    assert_abs_diff_eq!(
+        sum_of_squared_errors(perfect_prediction.view(), actual_values.view()).unwrap(),
+        0.0,
+        epsilon = f64::EPSILON
     );
 
     // Empty arrays case
@@ -63,21 +77,21 @@ fn test_sum_of_squared_errors_different_lengths() {
 #[test]
 fn test_sigmoid() {
     // Test the midpoint - sigmoid(0) should be exactly 0.5
-    assert!((sigmoid(0.0) - 0.5).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(sigmoid(0.0), 0.5, epsilon = f64::EPSILON);
 
     // Test extreme positive input - should approach 1.0
-    assert!((sigmoid(10.0) - 1.0).abs() < 0.0001);
+    assert_abs_diff_eq!(sigmoid(10.0), 1.0, epsilon = 0.0001);
 
     // Test extreme negative input - should approach 0.0
-    assert!((sigmoid(-10.0) - 0.0).abs() < 0.0001);
+    assert_abs_diff_eq!(sigmoid(-10.0), 0.0, epsilon = 0.0001);
 
     // Test symmetry property: sigmoid(-z) = 1 - sigmoid(z)
     let z = 2.5;
-    assert!((sigmoid(-z) - (1.0 - sigmoid(z))).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(sigmoid(-z), 1.0 - sigmoid(z), epsilon = f64::EPSILON);
 
     // Test a few known values
-    assert!((sigmoid(1.0) - 0.7310585786300049).abs() < f64::EPSILON);
-    assert!((sigmoid(-1.0) - 0.2689414213699951).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(sigmoid(1.0), 0.7310585786300049, epsilon = f64::EPSILON);
+    assert_abs_diff_eq!(sigmoid(-1.0), 0.2689414213699951, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -222,14 +236,14 @@ fn test_entropy_empty() {
 fn test_entropy_homogeneous() {
     // Dataset with only one class, entropy should be 0
     let homogeneous = array![1.0, 1.0, 1.0, 1.0, 1.0];
-    assert!(entropy(homogeneous.view()).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(entropy(homogeneous.view()), 0.0, epsilon = f64::EPSILON);
 }
 
 #[test]
 fn test_entropy_balanced_binary() {
     // Balanced binary dataset, entropy should be 1
     let balanced = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
-    assert!((entropy(balanced.view()) - 1.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(entropy(balanced.view()), 1.0, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -239,7 +253,7 @@ fn test_entropy_unbalanced() {
     // Probabilities: 0.0 -> 1/4, 1.0 -> 3/4
     // Entropy = -(0.25*log2(0.25) + 0.75*log2(0.75))
     let expected = -(0.25 * 0.25f64.log2() + 0.75 * 0.75f64.log2());
-    assert!((entropy(unbalanced.view()) - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(entropy(unbalanced.view()), expected, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -249,7 +263,7 @@ fn test_entropy_multiclass() {
     // Each class has probability 0.25
     // Entropy = -(4 * 0.25*log2(0.25))
     let expected = -(4.0 * 0.25 * 0.25f64.log2());
-    assert!((entropy(multiclass.view()) - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(entropy(multiclass.view()), expected, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -262,7 +276,7 @@ fn test_gini_empty() {
 fn test_gini_homogeneous() {
     // Homogeneous dataset, Gini impurity should be 0
     let homogeneous = array![1.0, 1.0, 1.0, 1.0];
-    assert!(gini(homogeneous.view()).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(gini(homogeneous.view()), 0.0, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -270,7 +284,7 @@ fn test_gini_balanced_binary() {
     // Balanced binary dataset, Gini impurity should be 0.5
     let balanced = array![0.0, 0.0, 1.0, 1.0];
     // Gini = 1 - (0.5^2 + 0.5^2) = 0.5
-    assert!((gini(balanced.view()) - 0.5).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(gini(balanced.view()), 0.5, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -280,7 +294,7 @@ fn test_gini_unbalanced() {
     // Probabilities: 0.0 -> 1/4, 1.0 -> 3/4
     // Gini = 1 - (0.25^2 + 0.75^2) = 1 - (0.0625 + 0.5625) = 0.375
     let expected = 1.0 - (0.25f64.powi(2) + 0.75f64.powi(2));
-    assert!((gini(unbalanced.view()) - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(gini(unbalanced.view()), expected, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -293,8 +307,10 @@ fn test_information_gain() {
     // Left child entropy = 0.0
     // Right child entropy = 0.0
     // Information gain = 1.0 - (3/6)*0.0 - (3/6)*0.0 = 1.0
-    assert!(
-        (information_gain(parent.view(), left.view(), right.view()) - 1.0).abs() < f64::EPSILON
+    assert_abs_diff_eq!(
+        information_gain(parent.view(), left.view(), right.view()),
+        1.0,
+        epsilon = f64::EPSILON
     );
 }
 
@@ -319,7 +335,11 @@ fn test_gain_ratio() {
     // Information gain = 1.0
     // Split info = -(0.5*log2(0.5) + 0.5*log2(0.5)) = 1.0
     // Gain ratio = 1.0/1.0 = 1.0
-    assert!((gain_ratio(parent.view(), left.view(), right.view()) - 1.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        gain_ratio(parent.view(), left.view(), right.view()),
+        1.0,
+        epsilon = f64::EPSILON
+    );
 }
 
 #[test]
@@ -353,7 +373,7 @@ fn test_variance_simple() {
     // MSE = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 = 2/3
     let values = array![1.0, 2.0, 3.0];
     let expected = 2.0 / 3.0;
-    assert!((variance(values.view()) - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(variance(values.view()), expected, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -364,7 +384,7 @@ fn test_variance_with_variance() {
     // variance = ((10-30)^2 + (20-30)^2 + (30-30)^2 + (40-30)^2 + (50-30)^2) / 5
     //     = (400 + 100 + 0 + 100 + 400) / 5 = 1000 / 5 = 200
     let expected = 200.0;
-    assert!((variance(values.view()) - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(variance(values.view()), expected, epsilon = f64::EPSILON);
 }
 
 #[test]
@@ -384,16 +404,25 @@ fn test_standard_deviation() {
 
     // Test array with all same values
     let same_values = array![2.0, 2.0, 2.0, 2.0];
-    assert!(standard_deviation(same_values.view()).unwrap().abs() < f64::EPSILON);
+    let result = standard_deviation(same_values.view()).unwrap();
+    assert_abs_diff_eq!(result, 0.0, epsilon = f64::EPSILON);
 
     // Test general case
     let values = array![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
     let expected = 2.0; // population standard deviation is 2.0
-    assert!((standard_deviation(values.view()).unwrap() - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        standard_deviation(values.view()).unwrap(),
+        expected,
+        epsilon = f64::EPSILON
+    );
 
     // Test with negative numbers
     let negative_values = array![-5.0, -3.0, 0.0, 3.0, 5.0];
     // Correct expected population standard deviation = sqrt(68/5)
     let expected = f64::sqrt(68.0 / 5.0);
-    assert!((standard_deviation(negative_values.view()).unwrap() - expected).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        standard_deviation(negative_values.view()).unwrap(),
+        expected,
+        epsilon = f64::EPSILON
+    );
 }

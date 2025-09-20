@@ -97,7 +97,6 @@ fn test_multivariate_regression() {
         y_vec.push(2.0 * sample[0] + 3.0 * sample[1] + 1.0);
     }
 
-    // 将Vec转换为ndarray的Array
     let x = Array2::from_shape_vec((8, 2), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 

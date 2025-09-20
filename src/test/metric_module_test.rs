@@ -1,4 +1,5 @@
 use crate::metric::*;
+use approx::assert_abs_diff_eq;
 use ndarray::{Array1, array};
 
 #[test]
@@ -7,41 +8,25 @@ fn test_root_mean_squared_error() {
     let predictions = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let targets = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let result = root_mean_squared_error(predictions.view(), targets.view());
-    assert!(
-        (result - 0.0).abs() < f64::EPSILON,
-        "Expected 0.0, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 0.0);
 
     // Test calculation with constant error
     let predictions = array![2.0, 3.0, 4.0, 5.0, 6.0];
     let targets = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let result = root_mean_squared_error(predictions.view(), targets.view());
-    assert!(
-        (result - 1.0).abs() < f64::EPSILON,
-        "Expected 1.0, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 1.0);
 
     // Test more complex example
     let predictions = array![1.5, 2.5, 3.5, 4.5, 5.5];
     let targets = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let result = root_mean_squared_error(predictions.view(), targets.view());
-    assert!(
-        (result - 0.5).abs() < f64::EPSILON,
-        "Expected 0.5, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 0.5);
 
     // Test negative values
     let predictions = array![-1.0, -2.0, -3.0];
     let targets = array![1.0, 2.0, 3.0];
     let result = root_mean_squared_error(predictions.view(), targets.view());
-    assert!(
-        (result - 4.320493798938574).abs() < f64::EPSILON,
-        "Expected 4.320493798938574, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 4.320493798938574);
 }
 
 #[test]
@@ -67,51 +52,31 @@ fn test_mean_absolute_error() {
     let predictions = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let targets = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let result = mean_absolute_error(predictions.view(), targets.view());
-    assert!(
-        (result - 0.0).abs() < f64::EPSILON,
-        "Expected 0.0, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 0.0);
 
     // Test constant error
     let predictions = array![2.0, 3.0, 4.0, 5.0, 6.0];
     let targets = array![1.0, 2.0, 3.0, 4.0, 5.0];
     let result = mean_absolute_error(predictions.view(), targets.view());
-    assert!(
-        (result - 1.0).abs() < f64::EPSILON,
-        "Expected 1.0, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 1.0);
 
     // Test mixed positive and negative errors
     let predictions = array![1.0, 3.0, 2.0];
     let targets = array![2.0, 1.0, 3.0];
     let result = mean_absolute_error(predictions.view(), targets.view());
-    assert!(
-        (result - 1.3333333333333333).abs() < f64::EPSILON,
-        "Expected 1.3333333333333333, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 1.3333333333333333, epsilon = 1e-10);
 
     // Test negative values
     let predictions = array![-1.0, -2.0, -3.0];
     let targets = array![1.0, 2.0, 3.0];
     let result = mean_absolute_error(predictions.view(), targets.view());
-    assert!(
-        (result - 4.0).abs() < f64::EPSILON,
-        "Expected 4.0, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 4.0);
 
     // Test decimal values
     let predictions = array![1.5, 2.5, 3.5];
     let targets = array![1.0, 2.0, 3.0];
     let result = mean_absolute_error(predictions.view(), targets.view());
-    assert!(
-        (result - 0.5).abs() < f64::EPSILON,
-        "Expected 0.5, got {}",
-        result
-    );
+    assert_abs_diff_eq!(result, 0.5);
 }
 
 #[test]
@@ -143,17 +108,20 @@ fn test_r2_score() {
     // Perfect prediction
     let perfect_actual = array![1.0, 2.0, 3.0];
     let perfect_predicted = array![1.0, 2.0, 3.0];
-    assert!((r2_score(perfect_predicted.view(), perfect_actual.view()) - 1.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(
+        r2_score(perfect_predicted.view(), perfect_actual.view()),
+        1.0
+    );
 
     // When prediction is always the mean, R² should be 0
     let mean_actual = array![1.0, 2.0, 3.0, 4.0, 5.0]; // mean is 3
     let mean_predicted = array![3.0, 3.0, 3.0, 3.0, 3.0];
-    assert!((r2_score(mean_predicted.view(), mean_actual.view()) - 0.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(r2_score(mean_predicted.view(), mean_actual.view()), 0.0);
 
     // When all actual values are the same, R² should be 0
     let same_actual = array![7.0, 7.0, 7.0];
     let same_predicted = array![6.0, 7.0, 8.0];
-    assert!((r2_score(same_predicted.view(), same_actual.view()) - 0.0).abs() < f64::EPSILON);
+    assert_abs_diff_eq!(r2_score(same_predicted.view(), same_actual.view()), 0.0);
 }
 
 fn assert_float_eq(a: f64, b: f64) {
