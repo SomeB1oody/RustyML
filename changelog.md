@@ -14,6 +14,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Replace trait-based getter implementation with macros for improved reusability and consistency
 - Refactor imports
 - modularize traits
+- Replace `HashSet` with `AHashSet` in DBSCAN and LDA
 
 ## [v0.6.3] - 2025-9-16 (UTC-7)
 ### Changed

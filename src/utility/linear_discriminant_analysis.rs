@@ -1,4 +1,5 @@
 use crate::ModelError;
+use ahash::AHashSet;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
 use rayon::prelude::*;
 
@@ -167,7 +168,7 @@ impl LDA {
         }
 
         // Extract unique class labels from y - use HashSet for better performance
-        let mut classes_set = std::collections::HashSet::new();
+        let mut classes_set = AHashSet::new();
         for &label in y.iter() {
             classes_set.insert(label);
         }

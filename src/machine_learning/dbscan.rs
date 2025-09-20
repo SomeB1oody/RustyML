@@ -2,9 +2,10 @@ use super::DistanceCalculationMetric;
 use super::preliminary_check;
 use crate::ModelError;
 use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
+use ahash::AHashSet;
 use ndarray::{Array1, ArrayView2};
 use rayon::prelude::*;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
@@ -212,7 +213,7 @@ impl DBSCAN {
         }
 
         let mut labels = Array1::from(vec![-1; n_samples]); // -1 represents unclassified or noise
-        let mut core_samples = HashSet::with_capacity(n_samples / 4); // Estimate 25% core samples
+        let mut core_samples = AHashSet::with_capacity(n_samples / 4); // Estimate 25% core samples
         let mut cluster_id = 0i32;
 
         // Main loop processes each point sequentially, the algorithm as a whole remains sequential
@@ -338,7 +339,7 @@ impl DBSCAN {
         let eps_squared = self.eps * self.eps;
 
         // Create a set for faster core sample lookup
-        let core_set: HashSet<usize> = core_samples.iter().copied().collect();
+        let core_set: AHashSet<usize> = core_samples.iter().copied().collect();
 
         // Process each row in parallel, collecting into Vec<i32>
         let predictions: Vec<i32> = new_data
