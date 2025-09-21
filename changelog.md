@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.7.0] - 2025-9-21 (UTC-7)
+### Added
+- Add `load_diabetes_raw_data` function to provide static raw diabetes dataset and headers
+
 ## [v0.7.0] - 2025-9-19 (UTC-7)
 ### Added
 - Annotate mathematical utility functions with `#[inline]` for potential performance improvements during compilation

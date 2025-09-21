@@ -346,13 +346,14 @@ pub mod metric;
 ///
 /// - `iris` - The famous Iris flower dataset containing measurements for three species of iris
 /// - `diabetes` - The diabetes dataset for regression analysis
+/// - `wine_quality` - The wine quality data set (red wine and white wine)
 ///
 /// # Usage Example
 /// ``` rust
 /// use rustyml::dataset::iris;
 ///
 /// // Load the iris dataset
-/// let (data, target) = iris::load_iris();
+/// let (headers, data, class) = iris::load_iris();
 /// println!("Loaded iris dataset with {} samples", data.shape()[0]);
 /// ```
 #[cfg(feature = "dataset")]
