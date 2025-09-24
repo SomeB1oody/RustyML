@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.7.0] - 2025-9-24 (UTC-7)
+### Changed
+- Refactor dataset loading functions to use `OnceLock` for thread-safe memoization and add owned copy variants
+
 ## [v0.7.0] - 2025-9-21 (UTC-7)
 ### Added
 - Add `load_diabetes_raw_data` function to provide static raw diabetes dataset and headers
