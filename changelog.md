@@ -8,6 +8,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.7.0] - 2025-9-25 (UTC-7)
 ### Added
 - Add `load_boston_housing_raw_data` function to provide static raw Boston housing dataset and headers
+- add batch processing for `fit` in Sequential model
+- Add `Linear` activation function to support identity transformations
+- Add `sequential_test` module with comprehensive tests for `Sequential` neural network functionality
 
 ### Changed
 - Refactor imports and expand wildcard usage

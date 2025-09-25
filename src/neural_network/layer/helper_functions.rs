@@ -417,6 +417,10 @@ pub fn apply_activation_conv(activation: &Activation, x: &mut Tensor) {
         Activation::Tanh => {
             x.par_mapv_inplace(|x| x.tanh());
         }
+        Activation::Linear => {
+            // Linear activation: f(x) = x (identity function)
+            // No operation needed as input remains unchanged
+        }
         Activation::Softmax => panic!("Cannot use Softmax for convolution"),
     }
 }
@@ -446,6 +450,10 @@ pub fn activation_derivative_conv(activation: &Activation, output: &mut Tensor) 
         }
         Activation::Tanh => {
             output.par_mapv_inplace(|a| 1.0 - a * a);
+        }
+        Activation::Linear => {
+            // Linear activation derivative: f'(x) = 1
+            output.par_mapv_inplace(|_| 1.0);
         }
         Activation::Softmax => panic!("Cannot use Softmax for convolution"),
     }

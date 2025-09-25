@@ -1,6 +1,6 @@
 use ndarray::{Array2, Axis, Zip};
 
-/// Activation function enum, supporting ReLU, Tanh, Sigmoid, and Softmax
+/// Activation function enum, supporting ReLU, Tanh, Sigmoid, Softmax, and Linear
 ///
 /// # Variants
 ///
@@ -19,12 +19,17 @@ use ndarray::{Array2, Axis, Zip};
 /// - `Softmax` - Softmax activation function for multi-class classification.
 ///   Converts a vector of real numbers into a probability distribution
 ///   where all values sum to 1. Applied row-wise for batch processing.
+///
+/// - `Linear` - Linear (identity) activation function.
+///   Returns the input unchanged: f(x) = x. Commonly used in regression
+///   output layers where the network needs to predict continuous values.
 #[derive(Debug, PartialEq)]
 pub enum Activation {
     ReLU,
     Tanh,
     Sigmoid,
     Softmax,
+    Linear,
 }
 impl Activation {
     /// Forward application of activation functions
@@ -57,6 +62,10 @@ impl Activation {
                 let mut result = z.clone();
                 result.par_mapv_inplace(|x| x.tanh());
                 result
+            }
+            Activation::Linear => {
+                // Linear activation: f(x) = x (identity function)
+                z.clone()
             }
             Activation::Softmax => {
                 let mut out = z.clone();
@@ -106,6 +115,10 @@ impl Activation {
             Activation::ReLU => result.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 }),
             Activation::Sigmoid => result.par_mapv_inplace(|a| a * (1.0 - a)),
             Activation::Tanh => result.par_mapv_inplace(|a| 1.0 - a * a),
+            Activation::Linear => {
+                // Linear activation derivative: f'(x) = 1
+                result.par_mapv_inplace(|_| 1.0);
+            }
             Activation::Softmax => return Array2::ones(activation_output.dim()),
         }
 
