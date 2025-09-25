@@ -8,5 +8,9 @@ pub use crate::math::*;
 pub use crate::metric::*;
 #[cfg(feature = "neural_network")]
 pub use crate::neural_network::*;
+#[cfg(all(feature = "utility", not(feature = "machine_learning")))]
+pub use crate::utility::linear_discriminant_analysis;
 #[cfg(feature = "utility")]
-pub use crate::utility::*;
+pub use crate::utility::{
+    KernelType, kernel_pca, principal_component_analysis, standardize, t_sne, train_test_split,
+};
