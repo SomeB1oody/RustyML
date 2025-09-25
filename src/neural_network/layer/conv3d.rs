@@ -1,5 +1,4 @@
 use super::super::*;
-use super::helper_functions::*;
 use super::*;
 use ndarray::{Array3, Array5, ArrayD, ArrayView5, Axis, Zip};
 use ndarray_rand::RandomExt;
@@ -428,7 +427,7 @@ impl Layer for Conv3D {
 
         // Apply activation function if specified
         if let Some(activation) = &self.activation {
-            apply_activation_conv(activation, &mut output);
+            Activation::apply_activation_inplace(activation, &mut output);
         }
 
         output
@@ -454,7 +453,7 @@ impl Layer for Conv3D {
 
         // Apply activation function derivative if specified
         if let Some(activation) = &self.activation {
-            activation_derivative_conv(activation, &mut grad_output_array);
+            Activation::activation_derivative_inplace(activation, &mut grad_output_array);
         }
 
         let grad_input = self.compute_gradients(&input_array, &grad_output_array);

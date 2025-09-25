@@ -281,7 +281,7 @@ impl Layer for Conv2D {
 
         // Apply activation function
         if let Some(activation) = &self.activation {
-            apply_activation_conv(activation, &mut output);
+            Activation::apply_activation_inplace(activation, &mut output);
         }
 
         output
@@ -297,7 +297,7 @@ impl Layer for Conv2D {
 
             // Calculate derivatives of the activation function
             if let Some(activation) = &self.activation {
-                activation_derivative_conv(activation, &mut grad_output);
+                Activation::activation_derivative_inplace(activation, &mut grad_output);
             }
 
             // Use rayon for parallel element-wise multiplication

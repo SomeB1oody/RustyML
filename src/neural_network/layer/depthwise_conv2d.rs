@@ -266,7 +266,7 @@ impl Layer for DepthwiseConv2D {
 
         // Apply activation function
         if let Some(activation) = &self.activation {
-            apply_activation_conv(activation, &mut output);
+            Activation::apply_activation_inplace(activation, &mut output);
         }
 
         output
@@ -296,7 +296,7 @@ impl Layer for DepthwiseConv2D {
 
         // Apply activation derivative
         if let Some(activation) = &self.activation {
-            activation_derivative_conv(activation, &mut grad_output_array);
+            Activation::activation_derivative_inplace(activation, &mut grad_output_array);
         }
 
         // Initialize gradients

@@ -15,6 +15,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor imports and expand wildcard usage
 - improve modular organization of utility and dataset modules
+- Refactor activation handling: consolidate `apply_activation` and `activation_derivative` logic into specialized in-place methods
 
 ## [v0.7.0] - 2025-9-24 (UTC-7)
 ### Changed

@@ -1,4 +1,5 @@
-use ndarray::{Array2, Axis, Zip};
+use ndarray::{Array2, ArrayD, Axis, Zip};
+use rayon::prelude::*;
 
 /// Activation function enum, supporting ReLU, Tanh, Sigmoid, Softmax, and Linear
 ///
@@ -45,8 +46,6 @@ impl Activation {
     ///
     /// * `Array2<f32>` - A new tensor with the activation function applied
     pub fn apply_activation(z: &Array2<f32>, activation: &Activation) -> Array2<f32> {
-        use rayon::prelude::*;
-
         match activation {
             Activation::ReLU => {
                 let mut result = z.clone();
@@ -92,6 +91,36 @@ impl Activation {
         }
     }
 
+    /// Applies the activation function to the tensor in-place (for conv layers and general use).
+    ///
+    /// If an activation function is specified for this layer, this method applies it
+    /// element-wise to the input tensor using parallel processing.
+    ///
+    /// # Parameters
+    ///
+    /// - `activation` - Activation type used
+    /// - `x` - A mutable reference to the tensor to which the activation function will be applied
+    pub fn apply_activation_inplace(activation: &Activation, x: &mut ArrayD<f32>) {
+        match activation {
+            Activation::ReLU => {
+                x.par_mapv_inplace(|x| if x > 0.0 { x } else { 0.0 });
+            }
+            Activation::Sigmoid => {
+                x.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
+            }
+            Activation::Tanh => {
+                x.par_mapv_inplace(|x| x.tanh());
+            }
+            Activation::Linear => {
+                // Linear activation: f(x) = x (identity function)
+                // No operation needed as input remains unchanged
+            }
+            Activation::Softmax => {
+                panic!("Cannot use Softmax for convolution layers");
+            }
+        }
+    }
+
     /// Computes derivatives for ReLU, Sigmoid, and Tanh activation functions
     ///
     /// Returns the derivative of the activation function given the activated output.
@@ -123,6 +152,35 @@ impl Activation {
         }
 
         result
+    }
+
+    /// Calculates the derivative of the activation function at the given output values (in-place).
+    ///
+    /// This function is used during backpropagation to compute gradients.
+    ///
+    /// # Parameters
+    ///
+    /// - `activation` - The activation function whose derivative to compute
+    /// - `output` - A mutable reference to the tensor containing the output values of the forward pass.
+    pub fn activation_derivative_inplace(activation: &Activation, output: &mut ArrayD<f32>) {
+        match activation {
+            Activation::ReLU => {
+                output.par_mapv_inplace(|x| if x > 0.0 { 1.0 } else { 0.0 });
+            }
+            Activation::Sigmoid => {
+                output.par_mapv_inplace(|a| a * (1.0 - a));
+            }
+            Activation::Tanh => {
+                output.par_mapv_inplace(|a| 1.0 - a * a);
+            }
+            Activation::Linear => {
+                // Linear activation derivative: f'(x) = 1
+                output.par_mapv_inplace(|_| 1.0);
+            }
+            Activation::Softmax => {
+                panic!("Cannot use Softmax for convolution layers");
+            }
+        }
     }
 
     /// Backward propagation for Softmax activation
