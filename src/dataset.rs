@@ -4,6 +4,8 @@ pub mod iris;
 /// This module provides access to the diabetes dataset
 pub mod diabetes;
 
+/// This module provides access to the boston housing dataset
+pub mod boston_housing;
 /// This module provides access to the raw data
 pub mod raw_data;
 /// This module provides access to the titanic dataset

@@ -1,9 +1,10 @@
 /// Loads raw iris data and its corresponding headers as static strings
 ///
 /// # Returns
-/// A tuple containing:
-/// - `&'static str`: The column headers
-/// - `&'static str`: The raw dataset rows
+///
+/// * A tuple containing:
+///     - `&'static str`: The column headers
+///     - `&'static str`: The raw dataset rows
 pub fn load_iris_raw_data() -> (&'static str, &'static str) {
     (
         // iris_data_headers_raw

@@ -1,3 +1,10 @@
+/// Loads raw titanic data and its corresponding headers as static strings
+///
+/// # Returns
+///
+/// * A tuple containing:
+///     - `&'static str`: The column headers
+///     - `&'static str`: The raw dataset rows
 pub fn load_titanic_raw_data() -> (&'static str, &'static str) {
     (
         // titanic_data_headers_raw

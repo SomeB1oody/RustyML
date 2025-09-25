@@ -1,9 +1,10 @@
 /// Loads raw red wine quality data and its corresponding headers as static strings
 ///
 /// # Returns
-/// A tuple containing:
-/// - `&'static str`: The column headers
-/// - `&'static str`: The raw dataset rows
+///
+/// * A tuple containing:
+///     - `&'static str`: The column headers
+///     - `&'static str`: The raw dataset rows
 pub fn load_red_wine_quality_raw_data() -> (&'static str, &'static str) {
     (
         // red_wine_data_headers_raw
@@ -1629,9 +1630,10 @@ quality
 /// Loads raw white wine quality data and its corresponding headers as static strings
 ///
 /// # Returns
-/// A tuple containing:
-/// - `&'static str`: The column headers
-/// - `&'static str`: The raw dataset rows
+///
+/// * A tuple containing:
+///     - `&'static str`: The column headers
+///     - `&'static str`: The raw dataset rows
 pub fn load_white_wine_quality_raw_data() -> (&'static str, &'static str) {
     (
         // white_wine_data_headers_raw

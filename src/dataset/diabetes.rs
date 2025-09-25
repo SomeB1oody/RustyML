@@ -13,12 +13,12 @@ static DIABETES_DATA: OnceLock<(Array1<&'static str>, Array2<f64>, Array1<f64>)>
 ///
 /// # Returns
 ///
-/// A tuple containing:
-/// - `Array1<&'static str>`: Array of column headers from the dataset
-/// - `Array2<f64>`: Feature matrix with shape (768, 8) where each row represents
-///   a patient sample and each column represents a feature
-/// - `Array1<f64>`: Target labels array with shape (768,) containing binary
-///   classification outcomes (0.0 for non-diabetic, 1.0 for diabetic)
+/// * A tuple containing:
+///     - `Array1<&'static str>`: Array of column headers from the dataset
+///     - `Array2<f64>`: Feature matrix with shape (768, 8) where each row represents
+///     a patient sample and each column represents a feature
+///     - `Array1<f64>`: Target labels array with shape (768,) containing binary
+///     classification outcomes (0.0 for non-diabetic, 1.0 for diabetic)
 ///
 /// # Panics
 ///
