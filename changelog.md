@@ -9,6 +9,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add `load_boston_housing_raw_data` function to provide static raw Boston housing dataset and headers
 
+### Changed
+- Refactor imports and expand wildcard usage
+- improve modular organization of utility and dataset modules
+
 ## [v0.7.0] - 2025-9-24 (UTC-7)
 ### Changed
 - Refactor dataset loading functions to use `OnceLock` for thread-safe memoization and add owned copy variants

@@ -1,28 +1,5 @@
 use ndarray::{Array1, Array2};
 
-/// This module provides an implementation of Principal Component Analysis (PCA),
-/// a dimensionality reduction technique that transforms high-dimensional data
-/// into a lower-dimensional space while preserving maximum variance
-pub mod principal_component_analysis;
-
-/// This module provides functionality for splitting datasets into training and test sets,
-/// which is a fundamental preprocessing step in machine learning workflows
-pub mod train_test_split;
-
-/// This module implements Kernel Principal Component Analysis, a non-linear dimensionality
-/// reduction technique that uses kernel methods to extend PCA to non-linear transformations
-pub mod kernel_pca;
-
-/// This module provides an implementation of Linear Discriminant Analysis, a supervised
-/// dimensionality reduction technique that finds a linear combination of features that
-/// characterizes or separates two or more classes
-pub mod linear_discriminant_analysis;
-
-/// This module provides an implementation of the t-SNE algorithm for dimensionality reduction.
-/// t-SNE is particularly well-suited for visualizing high-dimensional data in 2D or 3D spaces
-/// while preserving local structures in the data
-pub mod t_sne;
-
 /// Standardizes data to have zero mean and unit variance
 ///
 /// This function transforms input data by subtracting the mean and dividing
@@ -107,3 +84,32 @@ pub enum KernelType {
     RBF { gamma: f64 },
     Sigmoid { gamma: f64, coef0: f64 },
 }
+
+/// This module provides an implementation of Principal Component Analysis (PCA),
+/// a dimensionality reduction technique that transforms high-dimensional data
+/// into a lower-dimensional space while preserving maximum variance
+pub mod principal_component_analysis;
+
+/// This module provides functionality for splitting datasets into training and test sets,
+/// which is a fundamental preprocessing step in machine learning workflows
+pub mod train_test_split;
+
+/// This module implements Kernel Principal Component Analysis, a non-linear dimensionality
+/// reduction technique that uses kernel methods to extend PCA to non-linear transformations
+pub mod kernel_pca;
+
+/// This module provides an implementation of Linear Discriminant Analysis, a supervised
+/// dimensionality reduction technique that finds a linear combination of features that
+/// characterizes or separates two or more classes
+pub mod linear_discriminant_analysis;
+
+/// This module provides an implementation of the t-SNE algorithm for dimensionality reduction.
+/// t-SNE is particularly well-suited for visualizing high-dimensional data in 2D or 3D spaces
+/// while preserving local structures in the data
+pub mod t_sne;
+
+pub use kernel_pca::*;
+pub use linear_discriminant_analysis::*;
+pub use principal_component_analysis::*;
+pub use t_sne::*;
+pub use train_test_split::*;
