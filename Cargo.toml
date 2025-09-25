@@ -2,10 +2,10 @@
 name = "rustyml"
 version = "0.6.3"
 edition = "2024"
+rust-version = "1.85.0"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
 description = "A high-performance machine learning & deep learning library in pure Rust, offering statistical utilities, ML algorithms, and future support for transformer architectures."
 license = "MIT"
-homepage = "https://github.com/SomeB1oody/RustyML"
 readme = "README.md"
 keywords = ["machine-learning", "ML", "Deep-learning", "DL", "AI"]
 repository = "https://github.com/SomeB1oody/RustyML"
