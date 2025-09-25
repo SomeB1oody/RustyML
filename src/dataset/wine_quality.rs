@@ -115,7 +115,6 @@ fn load_white_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
 ///   containing normalized wine quality measurements
 ///
 /// # Example
-///
 /// ```rust
 /// use rustyml::dataset::wine_quality::load_red_wine_quality;
 ///
@@ -157,7 +156,6 @@ pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array
 ///   containing normalized white wine quality measurements
 ///
 /// # Example
-///
 /// ```rust
 /// use rustyml::dataset::wine_quality::load_white_wine_quality;
 /// use ndarray::prelude::*;
@@ -196,8 +194,7 @@ pub fn load_white_wine_quality() -> (&'static Array1<&'static str>, &'static Arr
 /// If you only need read-only access to the data, use `load_red_wine_quality()` instead for better performance.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::wine_quality::load_red_wine_quality_owned;
 ///
 /// let (mut headers, mut features) = load_red_wine_quality_owned();
@@ -231,8 +228,7 @@ pub fn load_red_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
 /// If you only need read-only access to the data, use `load_white_wine_quality()` instead for better performance.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::wine_quality::load_white_wine_quality_owned;
 /// use ndarray::prelude::*;
 ///

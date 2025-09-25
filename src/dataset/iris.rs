@@ -73,8 +73,7 @@ fn load_iris_internal() -> (Array1<&'static str>, Array2<f64>, Array1<&'static s
 ///     - `&'static Array1<&'static str>`: Static reference to a 1D array of length 150 containing the species labels
 ///
 /// # Example
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::iris::load_iris;
 ///
 /// let (headers, features, labels) = load_iris();
@@ -114,8 +113,7 @@ pub fn load_iris() -> (
 /// If you only need read-only access to the data, use `load_iris()` instead for better performance.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::iris::load_iris_owned;
 ///
 /// let (mut headers, mut features, mut labels) = load_iris_owned();

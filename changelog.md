@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor dataset loading functions to use `OnceLock` for thread-safe memoization and add owned copy variants
 
+### Added
+- Add `load_titanic_raw_data` function to provide static raw Titanic dataset and headers
+
 ## [v0.7.0] - 2025-9-21 (UTC-7)
 ### Added
 - Add `load_diabetes_raw_data` function to provide static raw diabetes dataset and headers

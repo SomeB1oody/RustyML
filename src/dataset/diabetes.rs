@@ -63,8 +63,7 @@ fn load_diabetes_internal() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) 
 ///     - `&'static Array1<f64>`: Static reference to class variable (0 or 1)
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::diabetes::load_diabetes;
 ///
 /// let (headers, features, classes) = load_diabetes();
@@ -99,8 +98,7 @@ pub fn load_diabetes() -> (
 /// If you only need read-only access to the data, use `load_diabetes()` instead for better performance.
 ///
 /// # Examples
-///
-/// ```
+/// ```rust
 /// use rustyml::dataset::diabetes::load_diabetes_owned;
 ///
 /// let (mut headers, mut features, mut labels) = load_diabetes_owned();
