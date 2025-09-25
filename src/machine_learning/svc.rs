@@ -467,9 +467,47 @@ impl SVC {
             ));
         }
 
+        // Calculate cost using margin-based objective function
+        let cost = {
+            // Calculate the primal objective function: 0.5 * ||w||^2 + C * sum(xi)
+            // For SVM, we compute it as: 0.5 * sum(alpha_i * alpha_j * y_i * y_j * K(x_i, x_j)) - sum(alpha_i)
+
+            // First term: 0.5 * sum(alpha_i * alpha_j * y_i * y_j * K(x_i, x_j))
+            let mut dual_objective = 0.0;
+
+            // Compute the quadratic term in parallel
+            let quadratic_term: f64 = support_indices
+                .par_iter()
+                .enumerate()
+                .map(|(i, &idx_i)| {
+                    support_indices
+                        .iter()
+                        .enumerate()
+                        .map(|(j, &idx_j)| {
+                            let kernel_val = kernel_matrix[[idx_i, idx_j]];
+                            support_vector_alphas[i]
+                                * support_vector_alphas[j]
+                                * support_vector_labels[i]
+                                * support_vector_labels[j]
+                                * kernel_val
+                        })
+                        .sum::<f64>()
+                })
+                .sum();
+
+            dual_objective += 0.5 * quadratic_term;
+
+            // Subtract the linear term: sum(alpha_i)
+            let linear_term: f64 = support_vector_alphas.sum();
+            dual_objective -= linear_term;
+
+            // Return negative dual objective as cost (higher dual objective means better, so negation gives cost)
+            -dual_objective
+        };
+
         println!(
-            "SVC model training completed in {} iterations with {} support vectors",
-            iteration_count, n_support_vectors
+            "SVC model computing finished at iteration {}, support vectors: {}, cost: {}",
+            iteration_count, n_support_vectors, cost
         );
 
         // Store results

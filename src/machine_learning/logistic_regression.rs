@@ -292,7 +292,7 @@ impl LogisticRegression {
         self.n_iter = Some(n_iter);
 
         println!(
-            "Logistic regression training finished at iteration {}, cost: {}",
+            "Logistic regression model computing finished at iteration {}, cost: {}",
             n_iter, final_cost
         );
 

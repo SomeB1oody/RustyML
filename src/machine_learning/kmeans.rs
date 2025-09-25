@@ -424,6 +424,12 @@ impl KMeans {
         self.inertia = Some(old_inertia);
         self.n_iter = Some(iter_count + 1);
 
+        println!(
+            "KMeans model computing finished at iteration {}, cost: {}",
+            iter_count + 1,
+            old_inertia
+        );
+
         Ok(self)
     }
 

@@ -291,6 +291,11 @@ impl LinearRegression {
         self.intercept = Some(if self.fit_intercept { intercept } else { 0.0 });
         self.n_iter = Some(n_iter);
 
+        println!(
+            "Linear regression computing finished at iteration {}, cost: {}",
+            n_iter, prev_cost
+        );
+
         Ok(self)
     }
 

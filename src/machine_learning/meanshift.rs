@@ -417,10 +417,48 @@ impl MeanShift {
         self.labels = Some(Array1::from(labels));
         self.n_samples_per_center = Some(Array1::from(center_counts));
 
+        // Calculate cost using closure for kernel density estimation
+        let calculate_cost = |x: ArrayView2<f64>, centers: &[Array1<f64>], bandwidth: f64| -> f64 {
+            let n_samples = x.nrows();
+            let gamma = 1.0 / (2.0 * bandwidth * bandwidth);
+
+            // Calculate the negative log-likelihood
+            let total_log_likelihood: f64 = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let point = x.row(i);
+                    // Sum kernel values from all centers
+                    let kernel_sum: f64 = centers
+                        .iter()
+                        .map(|center| {
+                            let dist_squared = {
+                                use crate::math::squared_euclidean_distance_row;
+                                squared_euclidean_distance_row(point.view(), center.view())
+                            };
+                            (-gamma * dist_squared).exp()
+                        })
+                        .sum();
+
+                    // Avoid log(0) by adding small epsilon
+                    let density = kernel_sum / centers.len() as f64;
+                    if density > 1e-15 {
+                        density.ln()
+                    } else {
+                        (-15.0_f64).ln() // log(1e-15)
+                    }
+                })
+                .sum();
+
+            // Return negative log-likelihood as cost (higher is worse)
+            -total_log_likelihood / n_samples as f64
+        };
+
+        let cost = calculate_cost(x, &unique_centers, self.bandwidth);
+
         // Print training info
         println!(
-            "Mean shift model training finished at iteration {}, number of clusters: {}",
-            max_actual_iter, n_clusters
+            "Mean shift model training finished at iteration {}, number of clusters: {}, cost: {:.6}",
+            max_actual_iter, n_clusters, cost
         );
 
         Ok(self)

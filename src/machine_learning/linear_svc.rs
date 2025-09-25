@@ -419,7 +419,53 @@ impl LinearSVC {
             prev_bias = bias;
         }
 
-        println!("Linear SVC model training finished at iteration {}", n_iter);
+        // Calculate final cost for reporting using closure
+        let calculate_cost = |x: ArrayView2<f64>,
+                              y: &Array1<f64>,
+                              weights: &Array1<f64>,
+                              bias: f64,
+                              penalty: &RegularizationType,
+                              regularization_param: f64|
+         -> f64 {
+            let n_samples = x.nrows() as f64;
+
+            // Calculate hinge loss
+            let hinge_loss: f64 = x
+                .outer_iter()
+                .zip(y.iter())
+                .map(|(xi, &yi)| {
+                    let margin = xi.dot(weights) + bias;
+                    (1.0 - yi * margin).max(0.0)
+                })
+                .sum::<f64>()
+                / n_samples;
+
+            // Calculate regularization term
+            let regularization_term = match penalty {
+                RegularizationType::L2(_) => {
+                    regularization_param * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
+                }
+                RegularizationType::L1(_) => {
+                    regularization_param * weights.iter().map(|&w| w.abs()).sum::<f64>()
+                }
+            };
+
+            hinge_loss + regularization_term
+        };
+
+        let final_cost = calculate_cost(
+            x,
+            &y_binary,
+            &weights,
+            bias,
+            &self.penalty,
+            self.regularization_param,
+        );
+
+        println!(
+            "Linear SVC model computing finished at iteration {}, cost: {}",
+            n_iter, final_cost
+        );
 
         self.weights = Some(weights);
         self.bias = Some(bias);
