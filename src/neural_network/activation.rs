@@ -24,7 +24,7 @@ use rayon::prelude::*;
 /// - `Linear` - Linear (identity) activation function.
 ///   Returns the input unchanged: f(x) = x. Commonly used in regression
 ///   output layers where the network needs to predict continuous values.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Activation {
     ReLU,
     Tanh,

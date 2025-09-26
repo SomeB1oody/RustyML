@@ -14,6 +14,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Add `#[inline]` attribute to performance-critical functions for potential inlining optimization in `metric.rs`
 - Add comprehensive tests for `apply_activation_inplace` and `activation_derivative_inplace`, including edge cases and panics for unsupported operations
 - Add `label_encoding` module for conversions between sparse and categorical formats
+- Add comprehensive tests for LSTM, Dense, SimpleRNN, and Sequential modules
+- Derive `Copy` and `Clone` for `Activation` enum to enable value duplication without ownership transfer
 
 ### Changed
 - Refactor imports and expand wildcard usage

@@ -180,6 +180,74 @@ fn test_fit_classification_convergence() {
 }
 
 #[test]
+fn test_fit_parameter_updates() {
+    // Create simple training data
+    let x = Array::from_shape_vec(
+        (10, 2),
+        vec![
+            1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0, 1.5, 2.5, 2.5, 3.5, 3.5, 4.5, 4.5,
+            5.5, 5.5, 6.5,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    let y = Array::from_shape_vec(
+        (10, 1),
+        vec![3.0, 5.0, 7.0, 9.0, 11.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+    )
+    .unwrap()
+    .into_dyn();
+
+    let mut model = Sequential::new();
+    model
+        .add(Dense::new(2, 3, Activation::ReLU))
+        .add(Dense::new(3, 1, Activation::Linear))
+        .compile(SGD::new(0.01), MeanSquaredError::new());
+
+    // Get weights before training
+    let initial_weights = model.get_weights();
+    let mut initial_weight_sums = Vec::new();
+    for layer_weight in &initial_weights {
+        match layer_weight {
+            LayerWeight::Dense(DenseLayerWeight { weight, bias: _ }) => {
+                initial_weight_sums.push(weight.sum());
+            }
+            _ => {}
+        }
+    }
+
+    // Train the model
+    model.fit(&x, &y, 10).unwrap();
+
+    // Get weights after training
+    let final_weights = model.get_weights();
+    let mut final_weight_sums = Vec::new();
+    for layer_weight in &final_weights {
+        match layer_weight {
+            LayerWeight::Dense(DenseLayerWeight { weight, bias: _ }) => {
+                final_weight_sums.push(weight.sum());
+            }
+            _ => {}
+        }
+    }
+
+    // Verify that weights have actually changed
+    for (i, (&initial_sum, &final_sum)) in initial_weight_sums
+        .iter()
+        .zip(final_weight_sums.iter())
+        .enumerate()
+    {
+        assert!(
+            (final_sum - initial_sum).abs() > 1e-6,
+            "Layer {} weights should change during training (initial: {:.6}, final: {:.6})",
+            i,
+            initial_sum,
+            final_sum
+        );
+    }
+}
+
+#[test]
 fn test_fit_error_handling() {
     let mut model = Sequential::new();
     model.add(Dense::new(2, 1, Activation::Linear));
