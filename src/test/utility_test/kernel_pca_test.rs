@@ -1,8 +1,6 @@
-use crate::ModelError;
+use super::*;
 use crate::utility::KernelType;
 use crate::utility::kernel_pca::{KernelPCA, compute_kernel};
-use approx::assert_abs_diff_eq;
-use ndarray::{Array2, ArrayView1};
 
 #[test]
 fn test_kernel_pca_default() {

@@ -1,7 +1,4 @@
-use crate::ModelError;
-use crate::utility::linear_discriminant_analysis::LDA;
-use approx::assert_relative_eq;
-use ndarray::{Array1, Array2, arr1, arr2, s};
+use super::*;
 
 #[test]
 fn test_lda_new() {

@@ -1,5 +1,4 @@
 use super::*;
-use crate::ModelError;
 
 #[test]
 fn test_global_average_pooling_3d_basic_functionality() {

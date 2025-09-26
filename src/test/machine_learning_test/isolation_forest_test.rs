@@ -1,6 +1,4 @@
-use crate::machine_learning::isolation_forest::IsolationForest;
-use ndarray::{Array, Array2};
-use rand::Rng;
+use super::*;
 
 #[test]
 fn test_isolation_forest_new() {

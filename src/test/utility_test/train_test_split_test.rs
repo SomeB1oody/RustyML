@@ -1,6 +1,4 @@
-use crate::ModelError;
-use crate::utility::train_test_split::*;
-use ndarray::{Array1, Array2};
+use super::*;
 
 #[test]
 fn test_train_test_split_valid_input() {

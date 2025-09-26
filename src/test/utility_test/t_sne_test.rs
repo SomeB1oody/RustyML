@@ -1,6 +1,4 @@
-use crate::utility::t_sne::*;
-use approx::assert_relative_eq;
-use ndarray::{Array2, Axis};
+use super::*;
 
 #[test]
 fn test_tsne_default() {

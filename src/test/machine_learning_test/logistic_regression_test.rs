@@ -1,6 +1,4 @@
-use crate::ModelError;
-use crate::machine_learning::logistic_regression::*;
-use ndarray::{Array1, Array2, arr1, arr2};
+use super::*;
 
 #[test]
 fn test_default_constructor() {

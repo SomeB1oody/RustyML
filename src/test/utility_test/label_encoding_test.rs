@@ -1,5 +1,4 @@
 use super::*;
-use ndarray::array;
 
 #[test]
 fn test_to_categorical_basic() {

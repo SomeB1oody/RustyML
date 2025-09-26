@@ -1,6 +1,4 @@
 use super::*;
-use crate::ModelError;
-use crate::neural_network::activation::Activation;
 
 #[test]
 fn test_sequential_new() {

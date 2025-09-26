@@ -1,5 +1,4 @@
-use crate::machine_learning::decision_tree::*;
-use ndarray::{Array1, Array2, arr1, arr2};
+use super::*;
 
 #[test]
 fn test_decision_tree_new() {

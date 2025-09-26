@@ -1,7 +1,4 @@
-use crate::ModelError;
-use crate::machine_learning::DistanceCalculationMetric as Metric;
-use crate::machine_learning::knn::*;
-use ndarray::{Array1, Array2, array};
+use super::*;
 
 // Test default initialization of KNN
 #[test]
@@ -12,7 +9,10 @@ fn test_knn_default() {
         knn.get_weighting_strategy(),
         WeightingStrategy::Uniform
     )); // Default weight strategy should be uniform
-    assert!(matches!(knn.get_metric(), Metric::Euclidean)); // Default metric should be Euclidean
+    assert!(matches!(
+        knn.get_metric(),
+        DistanceCalculationMetric::Euclidean
+    )); // Default metric should be Euclidean
     assert!(matches!(knn.get_x_train(), Err(ModelError::NotFitted))); // Should not have training data by default
     assert!(matches!(knn.get_y_train(), Err(ModelError::NotFitted))); // Should not have training labels by default
 }
@@ -20,13 +20,20 @@ fn test_knn_default() {
 // Test custom initialization of KNN
 #[test]
 fn test_knn_new() {
-    let knn: KNN<i32> = KNN::new(3, WeightingStrategy::Distance, Metric::Manhattan);
+    let knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Distance,
+        DistanceCalculationMetric::Manhattan,
+    );
     assert_eq!(knn.get_k(), 3);
     assert!(matches!(
         knn.get_weighting_strategy(),
         WeightingStrategy::Distance
     ));
-    assert!(matches!(knn.get_metric(), Metric::Manhattan));
+    assert!(matches!(
+        knn.get_metric(),
+        DistanceCalculationMetric::Manhattan
+    ));
 }
 
 // Test fit method of KNN
@@ -70,7 +77,11 @@ fn test_knn_fit() {
 // Test predict method with euclidean distance and uniform weights
 #[test]
 fn test_knn_predict_euclidean_uniform() {
-    let mut knn: KNN<i32> = KNN::new(1, WeightingStrategy::Uniform, Metric::Euclidean);
+    let mut knn: KNN<i32> = KNN::new(
+        1,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -102,7 +113,11 @@ fn test_knn_predict_euclidean_uniform() {
 // Test predict method with manhattan distance
 #[test]
 fn test_knn_predict_manhattan() {
-    let mut knn: KNN<i32> = KNN::new(1, WeightingStrategy::Uniform, Metric::Manhattan);
+    let mut knn: KNN<i32> = KNN::new(
+        1,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Manhattan,
+    );
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -129,7 +144,11 @@ fn test_knn_predict_manhattan() {
 // Test KNN with k=3
 #[test]
 fn test_knn_with_k3() {
-    let mut knn: KNN<i32> = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
+    let mut knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -158,7 +177,11 @@ fn test_knn_with_k3() {
 // Test KNN with distance weights
 #[test]
 fn test_knn_distance_weights() {
-    let mut knn: KNN<i32> = KNN::new(3, WeightingStrategy::Distance, Metric::Euclidean);
+    let mut knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Distance,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -200,7 +223,11 @@ fn test_knn_empty_train() {
 // Test with string labels instead of integers
 #[test]
 fn test_knn_string_labels() {
-    let mut knn: KNN<String> = KNN::new(2, WeightingStrategy::Uniform, Metric::Euclidean);
+    let mut knn: KNN<String> = KNN::new(
+        2,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     // Create simple training data
     let x_train =
@@ -233,7 +260,11 @@ fn test_knn_string_labels() {
 #[test]
 fn test_fit_predict() {
     // Create a new KNN model with k=3, uniform weights and euclidean metric
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
+    let mut knn = KNN::<i32>::new(
+        3,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     // Create training data
     // Features: 2D points
@@ -266,7 +297,11 @@ fn test_fit_predict() {
 #[test]
 fn test_fit_predict_empty_data() {
     // Test with empty test data
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
+    let mut knn = KNN::<i32>::new(
+        3,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
 
     let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
     let y_train = array![0, 0, 1];

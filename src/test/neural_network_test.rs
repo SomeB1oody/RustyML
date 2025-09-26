@@ -1,5 +1,6 @@
+use crate::ModelError;
 use crate::neural_network::*;
-use approx::assert_relative_eq;
+use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::prelude::*;
 
 mod activation_test;

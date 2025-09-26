@@ -1,7 +1,4 @@
-use crate::machine_learning::meanshift::*;
-use ndarray::{Array2, arr2};
-use rand::SeedableRng;
-use rand::prelude::*;
+use super::*;
 
 fn create_test_data() -> Array2<f64> {
     // Create a simple test dataset with three clusters

@@ -1,5 +1,4 @@
 use super::*;
-use approx::assert_abs_diff_eq;
 
 #[test]
 fn test_simple_rnn_layer() {

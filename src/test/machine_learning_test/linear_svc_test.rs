@@ -1,6 +1,4 @@
-use crate::ModelError;
-use crate::machine_learning::linear_svc::*;
-use ndarray::{arr1, arr2};
+use super::*;
 
 #[test]
 fn test_default() {
