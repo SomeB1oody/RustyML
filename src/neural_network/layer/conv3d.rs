@@ -2,7 +2,6 @@ use super::super::*;
 use super::*;
 use ndarray::{Array3, Array5, ArrayD, ArrayView5, Axis, Zip};
 use ndarray_rand::RandomExt;
-use rayon::prelude::*;
 
 /// A 3D convolutional layer for neural networks.
 ///

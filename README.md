@@ -14,11 +14,11 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 [![ahash](https://img.shields.io/badge/ahash-0.8.12-blue)](https://crates.io/crates/ahash)
 
 ## Overview | 概述
-RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages with foundational components, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
-RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，只实现了基础组件，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
+RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.
+RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
 
 ## Current Features | 当前功能
-- **Mathematical Utilities | 数学工具**:
+- **Mathematical Utilities (use `features = ["math"]` to enable) | 数学工具 (使用`features = ["math"]`来开启)**:
   - Sum of square total (SST) for measuring data variability | 总平方和(SST)，用于衡量数据变异性
   - Sum of squared errors (SSE) for evaluating prediction errors | 误差平方和(SSE)，用于评估预测误差
   - Sigmoid function for logistic regression and neural networks | Sigmoid函数，用于逻辑回归和神经网络
@@ -36,7 +36,7 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
   - Calculates the standard deviation of a set of values | 计算标准差
 
 
-- **Metric Utilities | 度量工具**:
+- **Metric Utilities (use `features = ["metric"]` to enable) | (使用`features = ["metric"]`来开启)**:
   - R-squared (R²) score for assessing model fit quality | R平方(R²)分数，用于评估模型拟合质量
   - Calculates the Root Mean Squared Error (RMSE) between predicted and actual values | 计算均方误差根
   - Calculates the Mean Squared Error (MSE) of a set of values | 计算一组值的均方误差(MSE)
@@ -48,7 +48,7 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
   - Calculates the Mean Squared Error (MSE) of a set of values | 计算一组值的均方误差(MSE)
 
 
-- **Machine Learning Models | 机器学习模型**:
+- **Machine Learning Models (use `features = ["machine_learning"]` to enable) | 机器学习模型 (使用`features = ["machine_learning"]`来开启)**:
   - Supervised Learning | 监督式学习:
     - Linear Regression | 线性回归
     - Logistic Regression | 逻辑回归
@@ -66,7 +66,7 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
     - Isolation Forest | 隔离森林
 
 
-- **Utilities | 工具**:
+- **Utilities (use `features = ["utility"]` to enable) | 工具 (使用`features = ["utility"]`来开启)**:
   - PCA(Principal Component Analysis) | 主成分分析
   - standardize data($\mu = 0$, $\sigma = 1$) | 标准化数据(确保均值 $\mu = 0$ , 协方差 $\sigma = 1$ )
   - Split dataset for training and dataset for test | 分离训练集和测试集
@@ -74,13 +74,13 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
   - t-Distributed Stochastic Neighbor Embedding (t-SNE) | t分布随机邻域嵌入
 
 
-- **Datasets | 数据集**:
+- **Datasets (use `features = ["dataset"]` to enable) | 数据集 (使用`features = ["dataset"]`来开启)**:
   - Iris dataset | 鸢尾花分类数据集
   - Diabetes dataset | 糖尿病回归数据集
+  - Wine quality dataset | 酒质量数据集
 
 
-- **Neural Network(initial implementation) | 神经网络(初步实现)**:
-
+- **Neural Network (use `features = ["neural_network"]` to enable) | 神经网络 (使用`features = [["neural_network"]]`来开启)**:
   - model | 模型:
     - Sequential | 顺序模型
 
@@ -137,7 +137,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = "0.6.3"
+rustyml = {version = "0.7.0", features = ["machine_learning"]} # or use `features = ["full"]` to enable all features
 ```
 Example usage | 使用示例:
 ``` rust
@@ -170,11 +170,11 @@ println!("{:?}", model);
 ```
 
 For Chinese mainland users, a mandarin video tutorial is provided on Bilibili, follow [@SomeB1oody](https://space.bilibili.com/1349872478)
-对于中国大陆用户,B站有视频教程,关注[@SomeB1oody](https://space.bilibili.com/1349872478)
+对于中国大陆用户，B站有视频教程，关注[@SomeB1oody](https://space.bilibili.com/1349872478)
 
 ## Project Status | 项目状态
-This project is in the **early development stage**. Currently, only a small subset of the planned functionality has been implemented. The API is unstable and subject to significant changes as the project evolves.
-该项目处于**早期开发阶段**。目前，仅实现了计划功能的一小部分。API不稳定，随着项目的发展可能会有重大变化。
+This project is in the **early development stage**. The API is unstable and subject to significant changes as the project evolves.
+该项目处于**早期开发阶段**。API不稳定，随着项目的发展可能会有重大变化。
 
 ## Contribution | 贡献
 Contributions are welcome! If you're interested in helping build a robust machine learning ecosystem in Rust, please feel free to:

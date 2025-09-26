@@ -1,5 +1,4 @@
 use super::super::*;
-use super::helper_functions::*;
 use ndarray::{Array2, Array3, Array4, Axis};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;

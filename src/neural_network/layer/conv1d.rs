@@ -1,5 +1,4 @@
 use super::super::*;
-use super::helper_functions::*;
 use ndarray::{Array2, Array3};
 use ndarray_rand::RandomExt;
 use rayon::prelude::*;
