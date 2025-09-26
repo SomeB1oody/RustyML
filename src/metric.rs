@@ -34,6 +34,7 @@ use statrs::distribution::{Discrete, Hypergeometric};
 /// println!("{}", mse);
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
+#[inline]
 pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f64 {
     if y_true.len() != y_pred.len() {
         panic!(
@@ -93,6 +94,7 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 /// // RMSE = sqrt(((2-1)^2 + (3-2)^2 + (4-3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
@@ -160,6 +162,7 @@ pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1
 /// // MAE = (|2-1| + |3-2| + |4-3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
@@ -225,6 +228,7 @@ pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64
 /// // For actual values [1,3,5], mean=3, SSE = 1+0+1 = 2, SST = 4+0+4 = 8, so R2 = 1 - (2/8) = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     // Validate inputs first
     if predicted.is_empty() || actual.is_empty() {
@@ -535,6 +539,7 @@ impl ConfusionMatrix {
 /// // Two out of three predictions are correct: accuracy = 2/3 ≈ 0.6666666666666667
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
+#[inline]
 pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     if predicted.len() != actual.len() {
         panic!(
@@ -561,6 +566,7 @@ pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
 /// - The contingency matrix
 /// - Row sums (sizes of clusters in the ground truth)
 /// - Column sums (sizes of clusters in the predicted labels)
+#[inline]
 fn contingency_matrix(
     labels_true: &[usize],
     labels_pred: &[usize],
@@ -608,6 +614,7 @@ fn contingency_matrix(
 
 /// Computes the mutual information (MI) using the formula:
 /// MI = Σ_{i,j} (n_ij/n) * ln((n * n_ij) / (a_i * b_j))
+#[inline]
 fn mutual_information(
     contingency: &Vec<Vec<usize>>,
     n: usize,
@@ -629,6 +636,7 @@ fn mutual_information(
 }
 
 /// Computes the entropy H = - Σ_i (p_i * ln(p_i))
+#[inline]
 fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
     let mut h = 0.0;
     for &count in counts {
@@ -648,6 +656,7 @@ fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
 ///
 /// EMI = Σ_{i,j} Σ_{k=max(0, a_i+b_j-n)}^{min(a_i, b_j)}
 ///       P(k) * (k/n) * ln((n * k) / (a_i * b_j))
+#[inline]
 fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: usize) -> f64 {
     let mut emi = 0.0;
     // For each pair of clusters (ground truth and predicted)
@@ -713,6 +722,7 @@ fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: 
 /// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view());
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
+#[inline]
 pub fn normalized_mutual_info(
     labels_true: ArrayView1<usize>,
     labels_pred: ArrayView1<usize>,
@@ -788,6 +798,7 @@ pub fn normalized_mutual_info(
 /// let ami = adjusted_mutual_info(true_labels.view(), pred_labels.view());
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
+#[inline]
 pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
     if labels_true.len() != labels_pred.len() {
         panic!(
@@ -858,6 +869,7 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// The implementation handles tied scores by assigning average ranks to tied elements.
 /// It implements the AUC calculation based on the Mann-Whitney U statistic, which is
 /// mathematically equivalent to the area under the ROC curve.
+#[inline]
 pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> f64 {
     if scores.len() != labels.len() {
         panic!(

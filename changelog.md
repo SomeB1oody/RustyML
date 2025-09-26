@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - add batch processing for `fit` in Sequential model
 - Add `Linear` activation function to support identity transformations
 - Add `sequential_test` module with comprehensive tests for `Sequential` neural network functionality
+- Add `#[inline]` attribute to performance-critical functions for potential inlining optimization in `metric.rs`
 
 ### Changed
 - Refactor imports and expand wildcard usage
