@@ -181,19 +181,24 @@ fn test_fit_classification_convergence() {
 
 #[test]
 fn test_fit_parameter_updates() {
-    // Create simple training data
+    // Create training data
     let x = Array::from_shape_vec(
-        (10, 2),
+        (20, 2), // Increase sample size
         vec![
-            1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0, 1.5, 2.5, 2.5, 3.5, 3.5, 4.5, 4.5,
-            5.5, 5.5, 6.5,
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7,
+            1.8, 1.9, 2.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8,
+            3.0, 3.2, 3.4, 3.6, 3.8, 4.0,
         ],
     )
     .unwrap()
     .into_dyn();
+
     let y = Array::from_shape_vec(
-        (10, 1),
-        vec![3.0, 5.0, 7.0, 9.0, 11.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+        (20, 1),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+            17.0, 18.0, 19.0, 20.0,
+        ],
     )
     .unwrap()
     .into_dyn();
@@ -202,7 +207,7 @@ fn test_fit_parameter_updates() {
     model
         .add(Dense::new(2, 3, Activation::ReLU))
         .add(Dense::new(3, 1, Activation::Linear))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.1), MeanSquaredError::new());
 
     // Get weights before training
     let initial_weights = model.get_weights();
@@ -217,7 +222,7 @@ fn test_fit_parameter_updates() {
     }
 
     // Train the model
-    model.fit(&x, &y, 10).unwrap();
+    model.fit(&x, &y, 100).unwrap();
 
     // Get weights after training
     let final_weights = model.get_weights();
@@ -237,8 +242,15 @@ fn test_fit_parameter_updates() {
         .zip(final_weight_sums.iter())
         .enumerate()
     {
+        println!(
+            "Layer {} - Initial: {:.6}, Final: {:.6}, Difference: {:.6}",
+            i,
+            initial_sum,
+            final_sum,
+            (final_sum - initial_sum).abs()
+        );
         assert!(
-            (final_sum - initial_sum).abs() > 1e-6,
+            (final_sum - initial_sum).abs() > 1e-4,
             "Layer {} weights should change during training (initial: {:.6}, final: {:.6})",
             i,
             initial_sum,

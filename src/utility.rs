@@ -108,7 +108,14 @@ pub mod linear_discriminant_analysis;
 /// while preserving local structures in the data
 pub mod t_sne;
 
+/// This module provides functions for converting between different label formats
+/// commonly used in machine learning, particularly for classification tasks.
+/// It supports conversions between sparse categorical (integer) labels and
+/// categorical (one-hot encoded) formats, with optimized performance using AHashMap.
+pub mod label_encoding;
+
 pub use kernel_pca::*;
+pub use label_encoding::*;
 pub use linear_discriminant_analysis::*;
 pub use principal_component_analysis::*;
 pub use t_sne::*;
