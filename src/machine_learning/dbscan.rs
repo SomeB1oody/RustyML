@@ -1,10 +1,4 @@
-use super::DistanceCalculationMetric;
-use super::preliminary_check;
-use crate::ModelError;
-use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
-use ahash::AHashSet;
-use ndarray::{Array1, ArrayView2};
-use rayon::prelude::*;
+use super::*;
 use std::collections::VecDeque;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
@@ -130,11 +124,7 @@ impl DBSCAN {
     }
 
     /// Computes distance between two data points using the specified metric
-    fn compute_distance(
-        &self,
-        p_row: ndarray::ArrayView1<f64>,
-        q_row: ndarray::ArrayView1<f64>,
-    ) -> f64 {
+    fn compute_distance(&self, p_row: ArrayView1<f64>, q_row: ArrayView1<f64>) -> f64 {
         match self.metric {
             DistanceCalculationMetric::Euclidean => {
                 squared_euclidean_distance_row(p_row, q_row).sqrt()

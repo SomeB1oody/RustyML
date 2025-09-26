@@ -1,8 +1,4 @@
-use super::super::*;
-use ndarray::{Array, Array2, Axis};
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::Uniform;
-use rayon::prelude::*;
+use super::*;
 
 /// Dense (Fully Connected) layer implementation for neural networks.
 ///

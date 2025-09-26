@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::ArrayD;
-use rayon::prelude::*;
+use super::*;
 
 /// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
 ///

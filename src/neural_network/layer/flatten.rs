@@ -1,5 +1,4 @@
-use super::super::*;
-use ndarray::IxDyn;
+use super::*;
 
 /// A layer that flattens a multi-dimensional tensor (3D, 4D, or 5D) into a 2D tensor.
 ///

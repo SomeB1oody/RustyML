@@ -1,7 +1,5 @@
 pub use super::KernelType;
-use crate::ModelError;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
-use rayon::prelude::*;
+use super::*;
 
 /// A Kernel Principal Component Analysis implementation.
 ///

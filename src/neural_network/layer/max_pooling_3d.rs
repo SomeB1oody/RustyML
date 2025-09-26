@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::ArrayD;
-use rayon::prelude::*;
+use super::*;
 
 /// 3D data max pooling Layer.
 ///

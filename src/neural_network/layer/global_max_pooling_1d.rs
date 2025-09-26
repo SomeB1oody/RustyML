@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::IxDyn;
-use rayon::prelude::*;
+use super::*;
 
 /// Global Max Pooling 1D Layer
 ///

@@ -1,10 +1,4 @@
-use super::preliminary_check;
-use crate::ModelError;
-use crate::math::squared_euclidean_distance_row;
-use ndarray::{Array1, Array2, ArrayView2};
-use rand::Rng;
-use rand::SeedableRng;
-use rayon::prelude::*;
+use super::*;
 use std::ops::AddAssign;
 
 /// KMeans clustering algorithm implementation.
@@ -233,8 +227,8 @@ impl KMeans {
         let mut centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
 
         let mut rng = match self.random_seed {
-            Some(seed) => rand::rngs::StdRng::seed_from_u64(seed),
-            None => rand::rngs::StdRng::seed_from_u64(0),
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::seed_from_u64(0),
         };
 
         // K-means++ initialization method

@@ -1,10 +1,4 @@
-use crate::ModelError;
-use crate::neural_network::layer::{LayerWeight, SimpleRNNLayerWeight};
-use crate::neural_network::optimizer::*;
-use crate::neural_network::{Activation, Layer, Tensor};
-use ndarray::{Array, Array2, Array3, Axis};
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand_distr::Uniform;
+use super::*;
 
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 ///

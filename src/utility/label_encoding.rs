@@ -1,5 +1,4 @@
-use ahash::AHashMap;
-use ndarray::{Array1, Array2};
+use super::*;
 
 /// Converts sparse categorical labels to categorical (one-hot encoded) format
 ///

@@ -1,7 +1,4 @@
-use crate::ModelError;
-use ahash::AHashSet;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
-use rayon::prelude::*;
+use super::*;
 
 /// Linear Discriminant Analysis (LDA)
 ///

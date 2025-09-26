@@ -1,9 +1,5 @@
-use crate::ModelError;
-pub use crate::machine_learning::RegularizationType;
-use ndarray::{Array1, ArrayView1, ArrayView2};
-use rand::rng;
-use rand::seq::SliceRandom;
-use rayon::prelude::*;
+pub use super::RegularizationType;
+use super::*;
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
@@ -343,7 +339,7 @@ impl LinearSVC {
                 let (weight_grad_sum, bias_grad_sum) = batch_indices
                     .par_iter()
                     .map(|&idx| {
-                        let xi = x.slice(ndarray::s![idx, ..]);
+                        let xi = x.slice(s![idx, ..]);
                         let yi = y_binary[idx];
 
                         // Calculate prediction

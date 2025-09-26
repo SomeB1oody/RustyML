@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::{Array, IxDyn};
-use rayon::prelude::*;
+use super::*;
 
 /// 3D Average Pooling Layer
 ///

@@ -1,11 +1,4 @@
-use super::preliminary_check;
-use crate::ModelError;
-use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rand::SeedableRng;
-use rand::rng;
-use rand::seq::SliceRandom;
-use rayon::prelude::*;
+use super::*;
 
 /// Mean Shift clustering algorithm implementation.
 ///
@@ -632,10 +625,10 @@ pub fn estimate_bandwidth(
     let n_samples = n_samples.unwrap_or(n_samples_total);
 
     let mut rng = match random_state {
-        Some(seed) => rand::rngs::StdRng::seed_from_u64(seed),
+        Some(seed) => StdRng::seed_from_u64(seed),
         None => {
-            let mut thread_rng = rand::rng();
-            rand::rngs::StdRng::from_rng(&mut thread_rng)
+            let mut thread_rng = rng();
+            StdRng::from_rng(&mut thread_rng)
         }
     };
 

@@ -1,3 +1,11 @@
+use crate::ModelError;
+use crate::math::*;
+use ahash::{AHashMap, AHashSet};
+use ndarray::prelude::*;
+use rand::prelude::*;
+use rand::rng;
+use rayon::prelude::*;
+
 /// Represents different distance calculation methods used in various machine learning algorithms.
 ///
 /// This enum defines common distance metrics that can be used in clustering algorithms,
@@ -33,12 +41,9 @@ pub enum DistanceCalculationMetric {
 ///
 /// - `Ok(())` - If all validation checks pass
 /// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
-fn preliminary_check(
-    x: ndarray::ArrayView2<f64>,
-    y: Option<ndarray::ArrayView1<f64>>,
-) -> Result<(), crate::ModelError> {
+fn preliminary_check(x: ArrayView2<f64>, y: Option<ArrayView1<f64>>) -> Result<(), ModelError> {
     if x.nrows() == 0 {
-        return Err(crate::ModelError::InputValidationError(
+        return Err(ModelError::InputValidationError(
             "Input data is empty".to_string(),
         ));
     }
@@ -46,7 +51,7 @@ fn preliminary_check(
     for (i, row) in x.outer_iter().enumerate() {
         for (j, &val) in row.iter().enumerate() {
             if val.is_nan() || val.is_infinite() {
-                return Err(crate::ModelError::InputValidationError(format!(
+                return Err(ModelError::InputValidationError(format!(
                     "Input data contains NaN or infinite value at position [{}][{}]",
                     i, j
                 )));
@@ -56,13 +61,13 @@ fn preliminary_check(
 
     if let Some(y) = y {
         if y.len() == 0 {
-            return Err(crate::ModelError::InputValidationError(
+            return Err(ModelError::InputValidationError(
                 "Target vector is empty".to_string(),
             ));
         }
 
         if y.len() != x.nrows() {
-            return Err(crate::ModelError::InputValidationError(format!(
+            return Err(ModelError::InputValidationError(format!(
                 "Input data and target vector have different lengths, x columns: {}, y length: {}",
                 x.nrows(),
                 y.len()

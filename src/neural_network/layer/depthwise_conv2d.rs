@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::{Array1, Array2, Array4, s};
-use rayon::prelude::*;
+use super::*;
 
 /// A 2D depthwise convolutional layer for neural networks.
 ///

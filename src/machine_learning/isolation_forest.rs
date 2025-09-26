@@ -1,11 +1,4 @@
-use super::decision_tree::{Node, NodeType};
-use super::preliminary_check;
-use crate::ModelError;
-use ndarray::{Array1, Array2, ArrayView2, Axis, s};
-use rand::prelude::*;
-use rand::rng;
-use rand::rngs::StdRng;
-use rayon::prelude::*;
+use super::*;
 use std::sync::Arc;
 
 /// Implementation of Isolation Forest, a decision forest based on randomly generated Isolation Trees
@@ -447,7 +440,7 @@ impl IsolationForest {
         }
 
         // Check for invalid values (NaN or infinite) in input data
-        for (row_idx, row) in x.axis_iter(ndarray::Axis(0)).enumerate() {
+        for (row_idx, row) in x.axis_iter(Axis(0)).enumerate() {
             for (col_idx, &value) in row.iter().enumerate() {
                 if !value.is_finite() {
                     return Err(ModelError::InputValidationError(format!(

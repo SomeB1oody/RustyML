@@ -1,3 +1,11 @@
+use crate::ModelError;
+use crate::neural_network::activation::Activation;
+use crate::neural_network::optimizer::*;
+use crate::neural_network::traits::Layer;
+use ndarray::prelude::*;
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Uniform;
+use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 
 /// Defines the padding method used in convolutional layers.

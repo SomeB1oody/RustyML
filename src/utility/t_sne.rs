@@ -1,8 +1,5 @@
-use crate::ModelError;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis, s};
-use rand::prelude::*;
+use super::*;
 use rand_distr::StandardNormal;
-use rayon::prelude::*;
 
 /// A t-Distributed Stochastic Neighbor Embedding (t-SNE) implementation for dimensionality reduction.
 ///

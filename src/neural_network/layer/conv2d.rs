@@ -1,7 +1,4 @@
-use super::super::*;
-use ndarray::{Array2, Array3, Array4, Axis};
-use rand_distr::{Distribution, Normal};
-use rayon::prelude::*;
+use super::*;
 
 /// A 2D convolutional layer for neural networks.
 ///

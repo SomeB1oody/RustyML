@@ -1,7 +1,5 @@
-pub use super::KernelType;
-use crate::ModelError;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
-use rayon::prelude::*;
+use super::*;
+pub use crate::utility::KernelType;
 
 /// Support Vector Machine Classifier
 ///
@@ -635,7 +633,7 @@ impl SVC {
 
         // Parallel computation on each element of decision_values
         decision_values
-            .axis_iter_mut(ndarray::Axis(0))
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
             .enumerate()
             .for_each(|(i, mut val)| {

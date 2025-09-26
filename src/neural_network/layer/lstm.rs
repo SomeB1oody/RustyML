@@ -1,8 +1,4 @@
-use super::super::*;
-use ndarray::{Array, Array2, Array3, Axis};
-use ndarray_rand::RandomExt;
-use ndarray_rand::rand::distributions::uniform::Uniform;
-use rayon::prelude::*;
+use super::*;
 
 /// LSTM (Long Short-Term Memory) neural network layer implementation.
 ///

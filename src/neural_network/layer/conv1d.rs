@@ -1,7 +1,4 @@
-use super::super::*;
-use ndarray::{Array2, Array3};
-use ndarray_rand::RandomExt;
-use rayon::prelude::*;
+use super::*;
 
 /// A 1D convolutional layer for neural networks.
 ///

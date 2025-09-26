@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::ArrayD;
-use rayon::prelude::*;
+use super::*;
 
 /// A 2D average pooling layer for neural networks.
 ///

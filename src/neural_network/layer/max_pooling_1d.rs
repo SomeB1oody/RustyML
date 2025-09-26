@@ -1,6 +1,4 @@
-use super::super::*;
-use ndarray::Array3;
-use rayon::prelude::*;
+use super::*;
 
 /// 1D Max Pooling layer for neural networks.
 ///

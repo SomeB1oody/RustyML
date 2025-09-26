@@ -1,7 +1,5 @@
-use super::super::*;
 use super::*;
-use ndarray::{Array3, Array5, ArrayD, ArrayView5, Axis, Zip};
-use ndarray_rand::RandomExt;
+use ndarray::Zip;
 
 /// A 3D convolutional layer for neural networks.
 ///
@@ -127,10 +125,7 @@ impl Conv3D {
         let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
         // Initialize weights with Xavier initialization
-        let weights = Array5::random(
-            (filters, channels, kd, kh, kw),
-            ndarray_rand::rand_distr::Uniform::new(-limit, limit),
-        );
+        let weights = Array5::random((filters, channels, kd, kh, kw), Uniform::new(-limit, limit));
 
         // Initialize bias to zeros
         let bias = Array3::zeros((1, 1, filters));
