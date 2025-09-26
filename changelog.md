@@ -21,7 +21,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Refactor imports and expand wildcard usage
 - improve modular organization of utility and dataset modules
 - Refactor activation handling: consolidate `apply_activation` and `activation_derivative` logic into specialized in-place methods
-- Consolidate `helper_functions` into `layer.rs` for improved modularity and maintainability. Refactor layer imports to remove dependency on `helper_functions`. Update README for features clarification.
+- Consolidate `helper_functions` into `layer.rs` for improved modularity and maintainability. Refactor layer imports to remove dependency on `helper_functions`
+- Update README for features clarification
 
 ## [v0.7.0] - 2025-9-24 (UTC-7)
 ### Changed

@@ -1,5 +1,4 @@
 use super::*;
-use crate::metric::{accuracy, mean_squared_error};
 
 #[test]
 fn fit_with_batches_test() {
@@ -279,43 +278,33 @@ fn test_fit_error_handling() {
 
 // Helper function: calculate mean squared error
 fn calculate_mse(y_true: &Tensor, y_pred: &Tensor) -> f32 {
-    // Convert Tensor to ArrayView1<f64> for compatibility with metric function
-    let y_true_f64: Vec<f64> = y_true.iter().map(|&x| x as f64).collect();
-    let y_pred_f64: Vec<f64> = y_pred.iter().map(|&x| x as f64).collect();
-
-    let y_true_array = Array1::from_vec(y_true_f64);
-    let y_pred_array = Array1::from_vec(y_pred_f64);
-
-    mean_squared_error(y_true_array.view(), y_pred_array.view()) as f32
+    let diff = y_pred - y_true;
+    let squared_diff = &diff * &diff;
+    squared_diff.sum() / (y_true.len() as f32)
 }
 
 // Helper function: calculate classification accuracy
 fn calculate_accuracy(y_true: &Tensor, y_pred: &Tensor) -> f32 {
+    let mut correct = 0;
     let n_samples = y_true.shape()[0];
-
-    // Convert predictions to class labels (0.0 or 1.0)
-    let mut true_labels = Vec::new();
-    let mut pred_labels = Vec::new();
 
     for i in 0..n_samples {
         // Find the maximum value indices for true labels and predicted labels
         let true_class = if y_true[[i, 0]] > y_true[[i, 1]] {
-            0.0
+            0
         } else {
-            1.0
+            1
         };
         let pred_class = if y_pred[[i, 0]] > y_pred[[i, 1]] {
-            0.0
+            0
         } else {
-            1.0
+            1
         };
 
-        true_labels.push(true_class);
-        pred_labels.push(pred_class);
+        if true_class == pred_class {
+            correct += 1;
+        }
     }
 
-    let true_array = Array1::from_vec(true_labels);
-    let pred_array = Array1::from_vec(pred_labels);
-
-    accuracy(pred_array.view(), true_array.view()) as f32
+    correct as f32 / n_samples as f32
 }
