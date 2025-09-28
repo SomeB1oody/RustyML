@@ -6,6 +6,9 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.8.0] - 2025-9-26 (UTC-7)
+### Added
+- Implement `normalize` utility with support for L1, L2, Lp, and Max normalization
+
 ### Changed
 - Refactor `param_count` method across layers to use `TrainingParameters` enum
 - Refactor dataset loading functions to return merged headers and rows as single `&'static str`

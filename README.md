@@ -80,7 +80,7 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
   - Wine quality dataset | 酒质量数据集
 
 
-- **Neural Network (use `features = ["neural_network"]` to enable) | 神经网络 (使用`features = [["neural_network"]]`来开启)**:
+- **Neural Network (use `features = ["neural_network"]` to enable) | 神经网络 (使用`features = ["neural_network"]`来开启)**:
   - model | 模型:
     - Sequential | 顺序模型
 
@@ -137,7 +137,8 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = {version = "0.7.0", features = ["machine_learning"]} # or use `features = ["full"]` to enable all features
+rustyml = {version = "0.7.0", features = ["machine_learning"]} 
+# or use `features = ["full"]` to enable all features
 ```
 Example usage | 使用示例:
 ``` rust
