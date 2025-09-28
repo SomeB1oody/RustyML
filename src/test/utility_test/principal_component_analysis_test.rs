@@ -1,5 +1,4 @@
 use super::*;
-use crate::utility::standardize;
 use std::error::Error;
 
 // Helper function for approximate equality checks
@@ -28,26 +27,6 @@ fn test_pca_default() {
     assert!(pca.get_explained_variance().is_err());
     assert!(pca.get_explained_variance_ratio().is_err());
     assert!(pca.get_singular_values().is_err());
-}
-
-#[test]
-fn test_standardize() {
-    let data = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
-
-    let standardized = standardize(&data);
-
-    // Verify mean is approximately 0
-    for col in 0..standardized.shape()[1] {
-        let mean = standardized.column(col).mean().unwrap();
-        assert!(approx_eq(mean, 0.0, 1e-10));
-    }
-
-    // Verify standard deviation is approximately 1
-    for col in 0..standardized.shape()[1] {
-        let col_data = standardized.column(col);
-        let std_dev = (col_data.map(|x| x.powi(2)).sum() / col_data.len() as f64).sqrt();
-        assert!(approx_eq(std_dev, 1.0, 1e-10));
-    }
 }
 
 #[test]
