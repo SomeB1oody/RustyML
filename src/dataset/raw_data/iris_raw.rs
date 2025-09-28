@@ -2,20 +2,10 @@
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static str`: The column headers
-///     - `&'static str`: The raw dataset rows
-pub fn load_iris_raw_data() -> (&'static str, &'static str) {
-    (
-        // iris_data_headers_raw
-        r#"
-    sepal length
-    sepal width
-    petal length
-    petal width
-    class
-    "#, // iris_data_raw
-        r#"
+/// * `&'static str` - Raw iris data
+pub fn load_iris_raw_data() -> &'static str {
+    r#"
+sepal length,sepal width,petal length,petal width,class
 5.1,3.5,1.4,0.2,Iris-setosa
 4.9,3.0,1.4,0.2,Iris-setosa
 4.7,3.2,1.3,0.2,Iris-setosa
@@ -166,6 +156,5 @@ pub fn load_iris_raw_data() -> (&'static str, &'static str) {
 6.5,3.0,5.2,2.0,Iris-virginica
 6.2,3.4,5.4,2.3,Iris-virginica
 5.9,3.0,5.1,1.8,Iris-virginica
-    "#,
-    )
+    "#
 }

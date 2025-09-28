@@ -2,17 +2,10 @@
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static str`: The column headers
-///     - `&'static str`: The raw dataset rows
-pub fn load_titanic_raw_data() -> (&'static str, &'static str) {
-    (
-        // titanic_data_headers_raw
-        r#"
+/// * `&'static str` - Raw titanic data
+pub fn load_titanic_raw_data() -> &'static str {
+    r#"
 PassengerId,Survived,Pclass,Name,Sex,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked
-        "#,
-        // titanic_data_raw
-        r#"
 1,0,3,"Braund, Mr. Owen Harris",male,22,1,0,A/5 21171,7.25,,S
 2,1,1,"Cumings, Mrs. John Bradley (Florence Briggs Thayer)",female,38,1,0,PC 17599,71.2833,C85,C
 3,1,3,"Heikkinen, Miss. Laina",female,26,0,0,STON/O2. 3101282,7.925,,S
@@ -904,6 +897,5 @@ PassengerId,Survived,Pclass,Name,Sex,Age,SibSp,Parch,Ticket,Fare,Cabin,Embarked
 889,0,3,"Johnston, Miss. Catherine Helen ""Carrie""",female,,1,2,W./C. 6607,23.45,,S
 890,1,1,"Behr, Mr. Karl Howell",male,26,0,0,111369,30,C148,C
 891,0,3,"Dooley, Mr. Patrick",male,32,0,0,370376,7.75,,Q
-        "#,
-    )
+        "#
 }

@@ -41,15 +41,26 @@ fn load_titanic_internal() -> (
     Array2<String>,
     Array2<f64>,
 ) {
-    let (titanic_data_headers_raw, titanic_data_raw) = load_titanic_raw_data();
+    let raw_data = load_titanic_raw_data();
 
-    // Parse headers
-    let all_headers: Vec<&str> = titanic_data_headers_raw.trim().split(',').collect();
+    // Split into lines and extract headers from first line
+    let lines: Vec<&str> = raw_data.trim().lines().collect();
+    if lines.is_empty() {
+        panic!("No data found");
+    }
 
-    // First pass: collect all data and determine column types
+    // Parse headers from first line
+    let all_headers: Vec<&str> = lines[0].trim().split(',').collect();
+
+    // First pass: collect all data rows and determine column types
     let mut all_rows = Vec::new();
 
-    for line in titanic_data_raw.trim().lines() {
+    // Skip the header line, process data lines
+    for line in lines.iter().skip(1) {
+        if line.trim().is_empty() {
+            continue;
+        }
+
         // Parse CSV with quoted strings
         let mut cols = Vec::new();
         let mut in_quotes = false;

@@ -2,28 +2,10 @@
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static str`: The column headers
-///     - `&'static str`: The raw dataset rows
-pub fn load_red_wine_quality_raw_data() -> (&'static str, &'static str) {
-    (
-        // red_wine_data_headers_raw
-        r#"
-fixed acidity
-volatile acidity
-citric acid
-residual sugar
-chlorides
-free sulfur dioxide
-total sulfur dioxide
-density
-pH
-sulphates
-alcohol
-quality
-    "#,
-        // red_wine_data_raw
-        r#"
+/// * `&'static str` - Raw red wine data
+pub fn load_red_wine_quality_raw_data() -> &'static str {
+    r#"
+fixed acidity,volatile acidity,citric acid,residual sugar,chlorides,free sulfur dioxide,total sulfur dioxide,density,pH,sulphates,alcohol,quality
 7.4;0.7;0;1.9;0.076;11;34;0.9978;3.51;0.56;9.4;5
 7.8;0.88;0;2.6;0.098;25;67;0.9968;3.2;0.68;9.8;5
 7.8;0.76;0.04;2.3;0.092;15;54;0.997;3.26;0.65;9.8;5
@@ -1623,36 +1605,17 @@ quality
 6.3;0.51;0.13;2.3;0.076;29;40;0.99574;3.42;0.75;11;6
 5.9;0.645;0.12;2;0.075;32;44;0.99547;3.57;0.71;10.2;5
 6;0.31;0.47;3.6;0.067;18;42;0.99549;3.39;0.66;11;6
-    "#,
-    )
+    "#
 }
 
-/// Loads raw white wine quality data and its corresponding headers as static strings
+/// Loads raw red wine quality data and its corresponding headers as static strings
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static str`: The column headers
-///     - `&'static str`: The raw dataset rows
-pub fn load_white_wine_quality_raw_data() -> (&'static str, &'static str) {
-    (
-        // white_wine_data_headers_raw
-        r#"
-fixed acidity
-volatile acidity
-citric acid
-residual sugar
-chlorides
-free sulfur dioxide
-total sulfur dioxide
-density
-pH
-sulphates
-alcohol
-quality
-    "#,
-        // white_wine_data_raw
-        r#"
+/// * `&'static str` - Raw white wine data
+pub fn load_white_wine_quality_raw_data() -> &'static str {
+    r#"
+fixed acidity,volatile acidity,citric acid,residual sugar,chlorides,free sulfur dioxide,total sulfur dioxide,density,pH,sulphates,alcohol,quality
 7;0.27;0.36;20.7;0.045;45;170;1.001;3;0.45;8.8;6
 6.3;0.3;0.34;1.6;0.049;14;132;0.994;3.3;0.49;9.5;6
 8.1;0.28;0.4;6.9;0.05;30;97;0.9951;3.26;0.44;10.1;6
@@ -6551,6 +6514,5 @@ quality
 6.5;0.24;0.19;1.2;0.041;30;111;0.99254;2.99;0.46;9.4;6
 5.5;0.29;0.3;1.1;0.022;20;110;0.98869;3.34;0.38;12.8;7
 6;0.21;0.38;0.8;0.02;22;98;0.98941;3.26;0.32;11.8;6
-    "#,
-    )
+    "#
 }

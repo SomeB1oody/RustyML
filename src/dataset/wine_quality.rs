@@ -15,8 +15,8 @@ static WHITE_WINE_DATA: OnceLock<(Array1<&'static str>, Array2<f64>)> = OnceLock
 ///
 /// # Parameters
 ///
-/// - `headers_raw` - Raw string containing feature names, one per line
-/// - `data_raw` - Raw string containing wine data with semicolon-separated values
+/// - `raw_data` - Raw string containing both headers and wine data
+/// - `n_samples` - Number of data samples expected
 ///
 /// # Returns
 ///
@@ -24,14 +24,22 @@ static WHITE_WINE_DATA: OnceLock<(Array1<&'static str>, Array2<f64>)> = OnceLock
 ///     - `Array1<&'static str>` - Array of feature names (headers)
 ///     - `Array2<f64>` - 2D array of wine quality features with shape (n_samples, 12)
 fn parse_wine_data(
-    headers_raw: &'static str,
-    data_raw: &str,
+    raw_data: &'static str,
     n_samples: usize,
 ) -> (Array1<&'static str>, Array2<f64>) {
-    let mut features_array = Vec::with_capacity(n_samples * 12);
-    let headers_array = headers_raw.trim().lines().collect::<Vec<&str>>();
+    let lines: Vec<&str> = raw_data.trim().lines().collect();
 
-    for line in data_raw.trim().lines() {
+    // First line contains headers (comma-separated)
+    let headers_line = lines[0];
+    let headers_array: Vec<&str> = headers_line.split(',').collect();
+
+    // Remaining lines contain data (semicolon-separated)
+    let mut features_array = Vec::with_capacity(n_samples * 12);
+
+    for line in &lines[1..] {
+        if line.trim().is_empty() {
+            continue;
+        }
         let cols: Vec<&str> = line.split(';').collect();
 
         for i in 0..12 {
@@ -39,7 +47,8 @@ fn parse_wine_data(
         }
     }
 
-    let features_array = Array::from_shape_vec((n_samples, 12), features_array).unwrap();
+    let features_array =
+        Array::from_shape_vec((features_array.len() / 12, 12), features_array).unwrap();
     let headers_array = Array::from_vec(headers_array);
 
     (headers_array, features_array)
@@ -47,52 +56,48 @@ fn parse_wine_data(
 
 /// Internal function to load and process the raw red wine quality dataset.
 ///
-/// This function loads the raw red wine quality dataset, parses the semicolon-separated format,
-/// and converts it into structured ndarray arrays. It handles the parsing of headers and data
-/// rows, extracting features from the dataset.
+/// This function loads the raw red wine quality dataset, parses the comma-separated headers
+/// and semicolon-separated data format, and converts it into structured ndarray arrays.
 ///
 /// # Returns
 ///
 /// * A tuple containing:
 ///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix with shape (1599, 12) where each row represents
-///     a wine sample and each column represents a feature
+///     - `Array2<f64>`: Feature matrix where each row represents a wine sample
+///       and each column represents a feature
 ///
 /// # Panics
 ///
 /// This function will panic if:
 /// - The raw data cannot be parsed as valid f64 values
-/// - The dataset structure doesn't match the expected format (1599 samples, 12 columns)
+/// - The dataset structure doesn't match the expected format
 /// - Memory allocation fails during array creation
 fn load_red_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
-    let (red_wine_data_headers_raw, red_wine_data_raw) = load_red_wine_quality_raw_data();
-
-    parse_wine_data(red_wine_data_headers_raw, red_wine_data_raw, 1599)
+    let red_wine_raw_data = load_red_wine_quality_raw_data();
+    parse_wine_data(red_wine_raw_data, 1599)
 }
 
 /// Internal function to load and process the raw white wine quality dataset.
 ///
-/// This function loads the raw white wine quality dataset, parses the semicolon-separated format,
-/// and converts it into structured ndarray arrays. It handles the parsing of headers and data
-/// rows, extracting features from the dataset.
+/// This function loads the raw white wine quality dataset, parses the comma-separated headers
+/// and semicolon-separated data format, and converts it into structured ndarray arrays.
 ///
 /// # Returns
 ///
 /// * A tuple containing:
 ///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix with shape (4898, 12) where each row represents
-///   a wine sample and each column represents a feature
+///     - `Array2<f64>`: Feature matrix where each row represents a wine sample
+///       and each column represents a feature
 ///
 /// # Panics
 ///
 /// This function will panic if:
 /// - The raw data cannot be parsed as valid f64 values
-/// - The dataset structure doesn't match the expected format (4898 samples, 12 columns)
+/// - The dataset structure doesn't match the expected format
 /// - Memory allocation fails during array creation
 fn load_white_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
-    let (white_wine_data_headers_raw, white_wine_data_raw) = load_white_wine_quality_raw_data();
-
-    parse_wine_data(white_wine_data_headers_raw, white_wine_data_raw, 4898)
+    let white_wine_raw_data = load_white_wine_quality_raw_data();
+    parse_wine_data(white_wine_raw_data, 4898)
 }
 
 /// Loads the red wine quality dataset with memoization for machine learning tasks.

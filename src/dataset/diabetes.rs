@@ -27,16 +27,22 @@ static DIABETES_DATA: OnceLock<(Array1<&'static str>, Array2<f64>, Array1<f64>)>
 /// - The dataset structure doesn't match the expected format (768 samples, 9 columns total)
 /// - Memory allocation fails during array creation
 fn load_diabetes_internal() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) {
-    let (diabetes_data_headers_raw, diabetes_data_raw) = load_diabetes_raw_data();
+    let raw_data = load_diabetes_raw_data();
+    let mut lines = raw_data.trim().lines();
 
-    let headers = diabetes_data_headers_raw
-        .trim()
-        .lines()
-        .collect::<Vec<&str>>();
+    // First line contains headers
+    let header_line = lines.next().unwrap();
+    let headers = header_line.split(',').collect::<Vec<&str>>();
+
     let mut features = Vec::with_capacity(768 * 8);
     let mut labels = Vec::with_capacity(768);
 
-    for line in diabetes_data_raw.trim().lines() {
+    // Process remaining lines as data
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+
         let cols: Vec<&str> = line.split(',').collect();
 
         for i in 0..8 {

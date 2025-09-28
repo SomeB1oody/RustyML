@@ -2,25 +2,10 @@
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static str`: The column headers
-///     - `&'static str`: The raw dataset rows
-pub fn load_diabetes_raw_data() -> (&'static str, &'static str) {
-    (
-        // diabetes_data_headers_raw
-        r#"
-Pregnancies
-Glucose
-BloodPressure
-SkinThickness
-Insulin
-BMI
-DiabetesPedigreeFunction
-Age
-Outcome
-    "#,
-        //diabetes_data_raw
-        r#"
+/// * `&'static str` - Raw diabetes data
+pub fn load_diabetes_raw_data() -> &'static str {
+    r#"
+Pregnancies,Glucose,BloodPressure,SkinThickness,Insulin,BMI,DiabetesPedigreeFunction,Age,Outcome
 6,148,72,35,0,33.6,0.627,50,1
 1,85,66,29,0,26.6,0.351,31,0
 8,183,64,0,0,23.3,0.672,32,1
@@ -789,6 +774,5 @@ Outcome
 5,121,72,23,112,26.2,0.245,30,0
 1,126,60,0,0,30.1,0.349,47,1
 1,93,70,31,0,30.4,0.315,23,0
-    "#,
-    )
+    "#
 }
