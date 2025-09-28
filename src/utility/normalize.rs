@@ -38,9 +38,9 @@ pub enum NormalizationOrder {
 ///
 /// # Parameters
 ///
-/// * `data` - Input array data as `ArrayView` with arbitrary dimensions and f64 elements
-/// * `axis` - The axis along which to perform normalization (Row/Column/Global)
-/// * `order` - The norm order to use for normalization (L1/L2/Max/Lp)
+/// - `data` - Input array data as `ArrayBase` with arbitrary dimensions and f64 elements
+/// - `axis` - The axis along which to perform normalization (Row/Column/Global)
+/// - `order` - The norm order to use for normalization (L1/L2/Max/Lp)
 ///
 /// # Returns
 ///
@@ -50,7 +50,6 @@ pub enum NormalizationOrder {
 ///   - `Err(ModelError::ProcessingError)` - If normalization computation fails
 ///
 /// # Examples
-///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::utility::{normalize, NormalizationAxis, NormalizationOrder};
@@ -67,12 +66,13 @@ pub enum NormalizationOrder {
 /// - For Global axis: The entire array is normalized as a single vector
 /// - Zero norms are handled by setting the corresponding elements to zero
 /// - NaN and infinite values in input will result in an error
-pub fn normalize<D>(
-    data: ArrayView<f64, D>,
+pub fn normalize<S, D>(
+    data: ArrayBase<S, D>,
     axis: NormalizationAxis,
     order: NormalizationOrder,
 ) -> Result<Array<f64, D>, ModelError>
 where
+    S: ndarray::Data<Elem = f64>,
     D: Dimension,
 {
     // Input validation

@@ -12,6 +12,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor `param_count` method across layers to use `TrainingParameters` enum
 - Refactor dataset loading functions to return merged headers and rows as single `&'static str`
+- Update `normalize` function to accept `ArrayBase`
 
 ## [v0.7.0] - 2025-9-26 (UTC-7)
 ### Changed
