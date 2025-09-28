@@ -16,7 +16,7 @@ fn test_depthwise_conv2d_creation() {
 
     // Verify parameter count (weights + bias)
     // Weight shape: [3, 1, 3, 3] = 27, bias: [3] = 3
-    assert_eq!(layer.param_count(), 30);
+    assert_eq!(layer.param_count(), TrainingParameters::Trainable(30));
 
     // Output shape should be "Unknown" before initialization
     assert_eq!(layer.output_shape(), "Unknown");

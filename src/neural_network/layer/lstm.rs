@@ -420,8 +420,10 @@ impl Layer for LSTM {
     fn output_shape(&self) -> String {
         format!("(None, {})", self.units)
     }
-    fn param_count(&self) -> usize {
-        4 * (self.input_dim * self.units + self.units * self.units + self.units)
+    fn param_count(&self) -> TrainingParameters {
+        TrainingParameters::Trainable(
+            4 * (self.input_dim * self.units + self.units * self.units + self.units),
+        )
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {

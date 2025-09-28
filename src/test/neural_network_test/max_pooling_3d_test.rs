@@ -96,7 +96,7 @@ fn test_max_pooling_3d_layer_properties() {
     assert_eq!(layer.output_shape(), "(1, 2, 5, 5, 5)");
 
     // Verify parameter count (pooling layers have no trainable parameters)
-    assert_eq!(layer.param_count(), 0);
+    assert_eq!(layer.param_count(), TrainingParameters::NoTrainable);
 
     // Verify layer type
     assert_eq!(layer.layer_type(), "MaxPooling3D");

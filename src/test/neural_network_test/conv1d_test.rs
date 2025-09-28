@@ -185,7 +185,7 @@ fn test_conv1d_parameter_count() {
     );
 
     // Parameter count = weights + bias = (4 * 2 * 3) + (1 * 4) = 24 + 4 = 28
-    assert_eq!(conv1d.param_count(), 28);
+    assert_eq!(conv1d.param_count(), TrainingParameters::Trainable(28));
 }
 
 #[test]

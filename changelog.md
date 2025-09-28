@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.8.0] - 2025-9-26 (UTC-7)
+### Changed
+- Refactor `param_count` method across layers to use `TrainingParameters` enum
+
 ## [v0.7.0] - 2025-9-26 (UTC-7)
 ### Changed
 - Refactor imports across neural network and utility modules to use `super::*` format, streamline dependencies, and clean up unused imports. Update import paths to simplify code structure and improve maintainability

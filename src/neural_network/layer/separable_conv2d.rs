@@ -478,11 +478,10 @@ impl Layer for SeparableConv2D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        let depthwise_count = self.depthwise_weights.len();
-        let pointwise_count = self.pointwise_weights.len();
-        let bias_count = self.bias.len();
-        depthwise_count + pointwise_count + bias_count
+    fn param_count(&self) -> TrainingParameters {
+        TrainingParameters::Trainable(
+            self.depthwise_weights.len() + self.pointwise_weights.len() + self.bias.len(),
+        )
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {

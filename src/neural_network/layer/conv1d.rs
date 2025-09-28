@@ -404,8 +404,8 @@ impl Layer for Conv1D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        self.weights.len() + self.bias.len()
+    fn param_count(&self) -> TrainingParameters {
+        TrainingParameters::Trainable(self.weights.len() + self.bias.len())
     }
 
     update_sgd_conv!();

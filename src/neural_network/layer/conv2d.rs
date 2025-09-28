@@ -450,10 +450,8 @@ impl Layer for Conv2D {
         )
     }
 
-    fn param_count(&self) -> usize {
-        let weight_count = self.weights.len();
-        let bias_count = self.bias.len();
-        weight_count + bias_count
+    fn param_count(&self) -> TrainingParameters {
+        TrainingParameters::Trainable(self.weights.len() + self.bias.len())
     }
 
     update_sgd_conv!();

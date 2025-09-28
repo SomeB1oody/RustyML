@@ -214,9 +214,9 @@ impl Layer for Dense {
         format!("(None, {})", self.output_dim)
     }
 
-    fn param_count(&self) -> usize {
+    fn param_count(&self) -> TrainingParameters {
         // Parameter count = number of weight parameters + number of bias parameters
-        self.input_dim * self.output_dim + self.output_dim
+        TrainingParameters::Trainable(self.input_dim * self.output_dim + self.output_dim)
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {

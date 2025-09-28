@@ -195,8 +195,8 @@ fn test_global_average_pooling_3d_layer_properties() {
     // Test layer type
     assert_eq!(layer.layer_type(), "GlobalAveragePooling3D");
 
-    // Test parameter count (should be 0, since this is a parameter-free layer)
-    assert_eq!(layer.param_count(), 0);
+    // Test parameter count (should be TrainingParameters::NoTrainable, since this is a parameter-free layer)
+    assert_eq!(layer.param_count(), TrainingParameters::NoTrainable);
 }
 
 #[test]

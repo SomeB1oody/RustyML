@@ -147,8 +147,8 @@ fn test_global_max_pooling_3d_layer_properties() {
     // Check layer type
     assert_eq!(layer.layer_type(), "GlobalMaxPooling3D");
 
-    // Check parameter count (should be 0 since it's a pooling layer)
-    assert_eq!(layer.param_count(), 0);
+    // Check parameter count (should be TrainingParameters::NoTrainable since it's a pooling layer)
+    assert_eq!(layer.param_count(), TrainingParameters::NoTrainable);
 }
 
 #[test]

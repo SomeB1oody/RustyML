@@ -8,8 +8,8 @@ fn test_global_max_pooling_1d_creation() {
     // Verify layer type
     assert_eq!(layer.layer_type(), "GlobalMaxPooling1D");
 
-    // Verify parameter count should be 0
-    assert_eq!(layer.param_count(), 0);
+    // Verify parameter count should be TrainingParameters::NoTrainable
+    assert_eq!(layer.param_count(), TrainingParameters::NoTrainable);
 
     // Verify output shape before initialization
     assert_eq!(layer.output_shape(), "Unknown");

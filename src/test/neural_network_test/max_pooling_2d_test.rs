@@ -134,5 +134,5 @@ fn max_pooling_2d_edge_cases() {
     assert_eq!(output.shape(), &[1, 2, 2, 3]);
 
     // Test parameter count - pooling layer has no trainable parameters
-    assert_eq!(pool_layer.param_count(), 0);
+    assert_eq!(pool_layer.param_count(), TrainingParameters::NoTrainable);
 }

@@ -167,7 +167,10 @@ fn test_dense_parameter_count() {
     // Test parameter count correctness
     let dense = Dense::new(10, 5, Activation::ReLU);
     let expected_params = 10 * 5 + 5; // weights + bias
-    assert_eq!(dense.param_count(), expected_params);
+    assert_eq!(
+        dense.param_count(),
+        TrainingParameters::Trainable(expected_params)
+    );
     println!(
         "Parameter count test passed: {} parameters",
         expected_params
@@ -180,7 +183,7 @@ fn test_dense_parameter_count() {
         let expected = input_dim * output_dim + output_dim;
         assert_eq!(
             layer.param_count(),
-            expected,
+            TrainingParameters::Trainable(expected),
             "({}, {}) layer parameter count error",
             input_dim,
             output_dim

@@ -195,8 +195,10 @@ impl Layer for SimpleRNN {
         format!("(None, {})", self.units)
     }
 
-    fn param_count(&self) -> usize {
-        self.input_dim * self.units + self.units * self.units + self.units
+    fn param_count(&self) -> TrainingParameters {
+        TrainingParameters::Trainable(
+            self.input_dim * self.units + self.units * self.units + self.units,
+        )
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {

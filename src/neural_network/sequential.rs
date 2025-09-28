@@ -391,7 +391,10 @@ impl Sequential {
             "━".repeat(col2_width),
             "━".repeat(col3_width)
         );
-        let mut total_params = 0;
+        let mut total_params: usize = 0;
+        let mut trainable_param_count: usize = 0;
+        let mut non_trainable_param_count: usize = 0;
+
         for (i, layer) in self.layers.iter().enumerate() {
             // Generate name for each layer: first layer is named "Layer", then "Layer_1", "Layer_2", etc.
             let layer_name = if i == 0 {
@@ -401,12 +404,29 @@ impl Sequential {
             };
             let out_shape = layer.output_shape();
             let param_count = layer.param_count();
-            total_params += param_count;
+            let param_count_num: usize;
+
+            match param_count {
+                TrainingParameters::Trainable(count) => {
+                    trainable_param_count += count;
+                    total_params += count;
+                    param_count_num = count;
+                }
+                TrainingParameters::NonTrainable(count) => {
+                    non_trainable_param_count += count;
+                    total_params += count;
+                    param_count_num = count;
+                }
+                _ => {
+                    param_count_num = 0;
+                }
+            };
+
             println!(
                 "│ {:<31} │ {:<22} │ {:>13} │",
                 format!("{} ({})", layer_name, layer.layer_type()),
                 out_shape,
-                param_count
+                param_count_num
             );
         }
         println!(
@@ -418,10 +438,14 @@ impl Sequential {
         println!(" Total params: {} ({} B)", total_params, total_params * 4); // Using f32, each parameter is 4 bytes
         println!(
             " Trainable params: {} ({} B)",
-            total_params,
-            total_params * 4
+            trainable_param_count,
+            trainable_param_count * 4
         );
-        println!(" Non-trainable params: 0 (0 B)");
+        println!(
+            " Non-trainable params: {} ({} B)",
+            non_trainable_param_count,
+            non_trainable_param_count * 4
+        );
     }
 
     /// Returns all the weights from each layer in the model.

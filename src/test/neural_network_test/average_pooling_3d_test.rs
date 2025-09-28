@@ -9,7 +9,7 @@ fn test_average_pooling_3d_basic() {
 
     // Check the basic properties of the layer
     assert_eq!(layer.layer_type(), "AveragePooling3D");
-    assert_eq!(layer.param_count(), 0);
+    assert_eq!(layer.param_count(), TrainingParameters::NoTrainable);
     assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 2)");
 }
 
