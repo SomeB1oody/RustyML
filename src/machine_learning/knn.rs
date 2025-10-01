@@ -227,7 +227,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         let y_train = self.y_train.as_ref().unwrap();
 
         // Use rayon for parallel prediction
-        let results: Vec<T> = (0..x.nrows())
+        let results: Result<Vec<T>, ModelError> = (0..x.nrows())
             .into_par_iter() // Convert to parallel iterator
             .map(|i| {
                 let sample = x.row(i);
@@ -235,60 +235,49 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
             })
             .collect();
 
-        Ok(Array1::from(results))
+        results.map(|predictions| Array1::from(predictions))
     }
 
     /// Calculates the distance between two points based on the selected metric
-    ///
-    /// # Parameters
-    ///
-    /// - `a` - First point as a 1D array
-    /// - `b` - Second point as a 1D array
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The calculated distance between points `a` and `b`
-    ///
-    /// # Notes
-    /// Minkowski distance with p=3
-    fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    fn calculate_distance(
+        &self,
+        a: ArrayView1<f64>,
+        b: ArrayView1<f64>,
+    ) -> Result<f64, ModelError> {
         match self.metric {
-            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
+            DistanceCalculationMetric::Euclidean => {
+                Ok(squared_euclidean_distance_row(a, b)?.sqrt())
+            }
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(a, b),
-            DistanceCalculationMetric::Minkowski => minkowski_distance_row(a, b, 3.0),
+            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(a, b, p),
         }
     }
 
     /// Predicts the class for a single data point
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - The data point to classify as a 1D array
-    /// - `x_train` - Training data features
-    /// - `y_train` - Training data labels
-    ///
-    /// # Returns
-    ///
-    /// * `T` - The predicted class for the data point
-    fn predict_one(&self, x: ArrayView1<f64>, x_train: ArrayView2<f64>, y_train: &Array1<T>) -> T {
+    fn predict_one(
+        &self,
+        x: ArrayView1<f64>,
+        x_train: ArrayView2<f64>,
+        y_train: &Array1<T>,
+    ) -> Result<T, ModelError> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
         // Calculate distances to all training samples in parallel
         let mut distances: Vec<(f64, usize)> = (0..n_samples)
-            .into_par_iter() // Convert to parallel iterator
-            .map(|i| {
-                let distance = self.calculate_distance(x, x_train.row(i));
-                (distance, i)
+            .into_par_iter()
+            .map(|i| -> Result<(f64, usize), ModelError> {
+                let distance = self.calculate_distance(x, x_train.row(i))?;
+                Ok((distance, i))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Use partial sorting to get only k smallest elements instead of full sort
         distances.select_nth_unstable_by(k - 1, |a, b| a.0.partial_cmp(&b.0).unwrap());
         let k_neighbors = &distances[..k];
 
         // Calculate based on weight strategy
-        match self.weighting_strategy {
+        let result = match self.weighting_strategy {
             WeightingStrategy::Uniform => {
                 // Count class occurrences using pre-sized HashMap
                 let mut class_counts: AHashMap<&T, usize> = AHashMap::with_capacity(k);
@@ -311,7 +300,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
                     // Handle zero distance case more efficiently
                     let weight = if distance == 0.0 {
                         // If distance is exactly zero, this sample gets maximum weight
-                        return y_train[idx].clone();
+                        return Ok(y_train[idx].clone());
                     } else {
                         1.0 / distance
                     };
@@ -326,7 +315,9 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
                     .map(|(class, _)| class.clone())
                     .unwrap()
             }
-        }
+        };
+
+        Ok(result)
     }
 
     /// Fits the model with the training data and immediately predicts on the given test data.

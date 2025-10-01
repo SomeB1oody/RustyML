@@ -191,7 +191,7 @@ impl KMeans {
     /// # Returns
     ///
     /// * `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
-    fn closest_centroid(&self, x: &ArrayView2<f64>) -> (usize, f64) {
+    fn closest_centroid(&self, x: &ArrayView2<f64>) -> Result<(usize, f64), ModelError> {
         use crate::math::squared_euclidean_distance_row;
 
         let sample = x.row(0);
@@ -201,14 +201,14 @@ impl KMeans {
         let mut min_idx = 0;
 
         for (i, centroid) in centroids.outer_iter().enumerate() {
-            let dist = squared_euclidean_distance_row(sample, centroid);
+            let dist = squared_euclidean_distance_row(sample, centroid)?;
             if dist < min_dist {
                 min_dist = dist;
                 min_idx = i;
             }
         }
 
-        (min_idx, min_dist)
+        Ok((min_idx, min_dist))
     }
 
     /// Initializes cluster centroids using K-means++ algorithm.
@@ -219,7 +219,7 @@ impl KMeans {
     /// # Parameters
     ///
     /// * `data` - Training data as a 2D array
-    fn init_centroids(&mut self, data: ArrayView2<f64>) {
+    fn init_centroids(&mut self, data: ArrayView2<f64>) -> Result<(), ModelError> {
         let n_samples = data.shape()[0];
         let n_features = data.shape()[1];
 
@@ -240,20 +240,24 @@ impl KMeans {
         // Select the remaining center points
         for k in 1..self.n_clusters {
             // Calculate the distance from each point to the nearest center
-            let distances: Vec<f64> = data
+            let distances: Result<Vec<f64>, ModelError> = data
                 .outer_iter()
                 .into_par_iter()
                 .map(|sample| {
                     // Find the closest already selected center point
-                    centroids
+                    let min_dist = centroids
                         .rows()
                         .into_iter()
                         .take(k)
                         .map(|centroid| squared_euclidean_distance_row(sample, centroid))
-                        .fold(f64::MAX, f64::min)
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .fold(f64::MAX, f64::min);
+                    Ok(min_dist)
                 })
                 .collect();
 
+            let distances = distances?;
             let total_dist: f64 = distances.iter().sum();
 
             // Handle edge case where all distances are zero
@@ -278,6 +282,8 @@ impl KMeans {
         }
 
         self.centroids = Some(centroids);
+
+        Ok(())
     }
 
     /// Fits the KMeans model to the training data.
@@ -305,7 +311,7 @@ impl KMeans {
         }
 
         // Initialize cluster centers
-        self.init_centroids(data);
+        self.init_centroids(data)?;
 
         let mut labels = Array1::<usize>::zeros(n_samples);
         let mut old_inertia = f64::MAX;
@@ -322,29 +328,35 @@ impl KMeans {
             counts.fill(0);
 
             // Parallel computation: find the closest cluster center and distance for each sample
-            let results: Vec<(usize, f64)> = data
+            let results: Result<Vec<(usize, f64)>, ModelError> = data
                 .outer_iter()
                 .into_par_iter()
                 .enumerate()
-                .map(|(idx, sample)| {
-                    let mut min_dist = f64::MAX;
-                    let mut min_cluster = 0;
+                .map(
+                    |(idx, sample)| -> Result<(usize, (usize, f64)), ModelError> {
+                        let mut min_dist = f64::MAX;
+                        let mut min_cluster = 0;
 
-                    // Find closest centroid for this sample
-                    for (cluster_idx, centroid) in
-                        self.centroids.as_ref().unwrap().outer_iter().enumerate()
-                    {
-                        let dist = squared_euclidean_distance_row(sample, centroid);
-                        if dist < min_dist {
-                            min_dist = dist;
-                            min_cluster = cluster_idx;
+                        // Find closest centroid for this sample
+                        for (cluster_idx, centroid) in
+                            self.centroids.as_ref().unwrap().outer_iter().enumerate()
+                        {
+                            let dist = squared_euclidean_distance_row(sample, centroid)?;
+                            if dist < min_dist {
+                                min_dist = dist;
+                                min_cluster = cluster_idx;
+                            }
                         }
-                    }
 
-                    (idx, (min_cluster, min_dist))
-                })
-                .map(|(_, result)| result)
-                .collect();
+                        Ok((idx, (min_cluster, min_dist)))
+                    },
+                )
+                .collect::<Result<Vec<_>, _>>()
+                .map(|vec| vec.into_iter().map(|(_, result)| result).collect());
+
+            let results = results?;
+
+            // Update labels and compute centroids in a single pass
 
             // Update labels and compute centroids in a single pass
             let mut inertia = 0.0;
@@ -382,12 +394,12 @@ impl KMeans {
             for (cluster_idx, &count) in counts.iter().enumerate() {
                 if count == 0 {
                     // Find the sample with maximum distance to its closest centroid
-                    let (farthest_idx, _) = data
+                    let result: Result<(usize, f64), ModelError> = data
                         .outer_iter()
                         .into_par_iter()
                         .enumerate()
-                        .map(|(sample_idx, sample)| {
-                            let min_dist = self
+                        .map(|(sample_idx, sample)| -> Result<(usize, f64), ModelError> {
+                            let distances: Vec<f64> = self
                                 .centroids
                                 .as_ref()
                                 .unwrap()
@@ -397,13 +409,20 @@ impl KMeans {
                                 .map(|(_, centroid)| {
                                     squared_euclidean_distance_row(sample, centroid)
                                 })
-                                .fold(f64::MAX, f64::min);
-                            (sample_idx, min_dist)
+                                .collect::<Result<Vec<_>, _>>()?;
+
+                            let min_dist = distances.into_iter().fold(f64::MAX, f64::min);
+
+                            Ok((sample_idx, min_dist))
                         })
-                        .reduce(
-                            || (0, -1.0),
-                            |acc, curr| if curr.1 > acc.1 { curr } else { acc },
-                        );
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|vec| {
+                            vec.into_iter()
+                                .reduce(|acc, curr| if curr.1 > acc.1 { curr } else { acc })
+                                .unwrap_or((0, -1.0))
+                        });
+
+                    let (farthest_idx, _) = result?;
 
                     new_centroids
                         .row_mut(cluster_idx)
@@ -463,7 +482,7 @@ impl KMeans {
                     )
                 })?;
                 let sample_view = sample_shaped.view();
-                let (closest_idx, _) = self.closest_centroid(&sample_view);
+                let (closest_idx, _) = self.closest_centroid(&sample_view)?;
                 Ok(closest_idx)
             })
             .collect();

@@ -140,24 +140,24 @@ fn test_squared_euclidean_distance_row() {
     // Basic test: Calculate squared Euclidean distance between two vectors
     let v1 = array![1.0, 2.0, 3.0];
     let v2 = array![4.0, 5.0, 6.0];
-    let dist = squared_euclidean_distance_row(v1.view(), v2.view());
+    let dist = squared_euclidean_distance_row(v1.view(), v2.view()).unwrap();
     assert_relative_eq!(dist, 27.0, epsilon = 1e-10);
 
     // Test with identical vectors
     let v3 = array![1.5, 2.5, 3.5];
-    let dist = squared_euclidean_distance_row(v3.view(), v3.view());
+    let dist = squared_euclidean_distance_row(v3.view(), v3.view()).unwrap();
     assert_relative_eq!(dist, 0.0, epsilon = 1e-10);
 
     // Test with zero vector
     let v4 = array![0.0, 0.0, 0.0];
     let v5 = array![1.0, 1.0, 1.0];
-    let dist = squared_euclidean_distance_row(v4.view(), v5.view());
+    let dist = squared_euclidean_distance_row(v4.view(), v5.view()).unwrap();
     assert_relative_eq!(dist, 3.0, epsilon = 1e-10);
 
     // Test with negative values
     let v6 = array![-1.0, -2.0, -3.0];
     let v7 = array![1.0, 2.0, 3.0];
-    let dist = squared_euclidean_distance_row(v6.view(), v7.view());
+    let dist = squared_euclidean_distance_row(v6.view(), v7.view()).unwrap();
     assert_relative_eq!(dist, 56.0, epsilon = 1e-10);
 }
 
@@ -166,24 +166,24 @@ fn test_manhattan_distance_row() {
     // Basic test: Calculate Manhattan distance between two vectors
     let v1 = array![1.0, 2.0];
     let v2 = array![4.0, 6.0];
-    let dist = manhattan_distance_row(v1.view(), v2.view());
+    let dist = manhattan_distance_row(v1.view(), v2.view()).unwrap();
     assert_relative_eq!(dist, 7.0, epsilon = 1e-6);
 
     // Test with identical vectors
     let v3 = array![1.5, 2.5, 3.5];
-    let dist = manhattan_distance_row(v3.view(), v3.view());
+    let dist = manhattan_distance_row(v3.view(), v3.view()).unwrap();
     assert_relative_eq!(dist, 0.0, epsilon = 1e-6);
 
     // Test with negative values
     let v4 = array![-1.0, -2.0, -3.0];
     let v5 = array![1.0, 2.0, 3.0];
-    let dist = manhattan_distance_row(v4.view(), v5.view());
+    let dist = manhattan_distance_row(v4.view(), v5.view()).unwrap();
     assert_relative_eq!(dist, 12.0, epsilon = 1e-6);
 
     // Test with zero vector
     let v6 = array![0.0, 0.0, 0.0];
     let v7 = array![1.0, 2.0, 3.0];
-    let dist = manhattan_distance_row(v6.view(), v7.view());
+    let dist = manhattan_distance_row(v6.view(), v7.view()).unwrap();
     assert_relative_eq!(dist, 6.0, epsilon = 1e-6);
 }
 
@@ -192,28 +192,30 @@ fn test_minkowski_distance_row() {
     // Basic test: Calculate Minkowski distance between two vectors with p=3
     let v1 = array![1.0, 2.0];
     let v2 = array![4.0, 6.0];
-    let dist = minkowski_distance_row(v1.view(), v2.view(), 3.0);
+    let dist = minkowski_distance_row(v1.view(), v2.view(), 3.0).unwrap();
     assert_relative_eq!(dist, 4.497, epsilon = 1e-3);
 
     // When p=1, should equal Manhattan distance
-    let dist_p1 = minkowski_distance_row(v1.view(), v2.view(), 1.0);
-    let manhattan_dist = manhattan_distance_row(v1.view(), v2.view());
+    let dist_p1 = minkowski_distance_row(v1.view(), v2.view(), 1.0).unwrap();
+    let manhattan_dist = manhattan_distance_row(v1.view(), v2.view()).unwrap();
     assert_relative_eq!(dist_p1, manhattan_dist, epsilon = 1e-6);
 
     // When p=2, should equal Euclidean distance
-    let dist_p2 = minkowski_distance_row(v1.view(), v2.view(), 2.0);
-    let euclidean_dist = squared_euclidean_distance_row(v1.view(), v2.view()).sqrt();
+    let dist_p2 = minkowski_distance_row(v1.view(), v2.view(), 2.0).unwrap();
+    let euclidean_dist = squared_euclidean_distance_row(v1.view(), v2.view())
+        .unwrap()
+        .sqrt();
     assert_relative_eq!(dist_p2, euclidean_dist, epsilon = 1e-6);
 
     // Test with identical vectors
     let v3 = array![1.5, 2.5, 3.5];
-    let dist = minkowski_distance_row(v3.view(), v3.view(), 4.0);
+    let dist = minkowski_distance_row(v3.view(), v3.view(), 4.0).unwrap();
     assert_relative_eq!(dist, 0.0, epsilon = 1e-6);
 
     // Test with negative values
     let v4 = array![-1.0, -2.0, -3.0];
     let v5 = array![1.0, 2.0, 3.0];
-    let dist = minkowski_distance_row(v4.view(), v5.view(), 2.0);
+    let dist = minkowski_distance_row(v4.view(), v5.view(), 2.0).unwrap();
     assert_relative_eq!(dist, 7.483314773547883, epsilon = 1e-6);
 }
 
@@ -223,7 +225,7 @@ fn test_minkowski_with_invalid_p() {
     // Test that p < 1.0 triggers a panic
     let v1 = array![1.0, 2.0];
     let v2 = array![3.0, 4.0];
-    minkowski_distance_row(v1.view(), v2.view(), 0.5);
+    minkowski_distance_row(v1.view(), v2.view(), 0.5).unwrap();
 }
 
 #[test]

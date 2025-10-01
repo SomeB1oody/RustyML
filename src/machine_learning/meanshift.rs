@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::squared_euclidean_distance_row;
 
 /// Mean Shift clustering algorithm implementation.
 ///
@@ -202,27 +203,6 @@ impl MeanShift {
         self.cluster_all
     }
 
-    /// Calculates the squared Euclidean distance between two 1D arrays
-    ///
-    /// This method converts two 1D arrays to 2D array views with a single row
-    /// and then uses the `squared_euclidean_distance` function to calculate
-    /// the distance between them.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - First vector as a 1D array
-    /// - `y` - Second vector as a 1D array
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The squared Euclidean distance between the two vectors
-    fn calculate_distance(&self, x: ArrayView1<f64>, y: ArrayView1<f64>) -> f64 {
-        use crate::math::squared_euclidean_distance_row;
-
-        // Use the provided function to calculate the distance
-        squared_euclidean_distance_row(x.view(), y.view())
-    }
-
     /// Fits the MeanShift clustering model to the input data.
     ///
     /// # Parameters
@@ -283,9 +263,9 @@ impl MeanShift {
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
         // Process mean shift for each seed point in parallel with proper iteration tracking
-        let results: Vec<(Array1<f64>, usize)> = seeds
+        let results: Result<Vec<(Array1<f64>, usize)>, ModelError> = seeds
             .par_iter()
-            .map(|&seed_idx| {
+            .map(|&seed_idx| -> Result<(Array1<f64>, usize), ModelError> {
                 let mut center = x.row(seed_idx).to_owned();
                 let mut completed_iterations = 0;
 
@@ -294,14 +274,16 @@ impl MeanShift {
                     let mut weight_sum = 0.0;
 
                     // Calculate distances and weights in parallel
-                    let weights: Vec<f64> = (0..n_samples)
+                    let weights: Result<Vec<f64>, ModelError> = (0..n_samples)
                         .into_par_iter()
                         .map(|i| {
                             let point = x.row(i);
-                            let dist = self.calculate_distance(center.view(), point);
-                            (-gamma * dist).exp()
+                            let dist = squared_euclidean_distance_row(center.view(), point)?;
+                            Ok((-gamma * dist).exp())
                         })
                         .collect();
+
+                    let weights = weights?;
 
                     // Calculate weighted average (optimized accumulation)
                     for (i, &weight) in weights.iter().enumerate() {
@@ -320,7 +302,8 @@ impl MeanShift {
                     }
 
                     // Check convergence using squared distance to avoid sqrt
-                    let shift_squared = self.calculate_distance(center.view(), new_center.view());
+                    let shift_squared =
+                        squared_euclidean_distance_row(center.view(), new_center.view())?;
                     center = new_center;
 
                     completed_iterations += 1;
@@ -330,9 +313,11 @@ impl MeanShift {
                     }
                 }
 
-                (center, completed_iterations)
+                Ok((center, completed_iterations))
             })
             .collect();
+
+        let results = results?;
 
         // Extract centers and calculate actual max iterations
         let centers: Vec<Array1<f64>> = results.iter().map(|(c, _)| c.clone()).collect();
@@ -348,7 +333,8 @@ impl MeanShift {
 
             // Find closest existing center within bandwidth
             for (i, unique_center) in unique_centers.iter_mut().enumerate() {
-                let distance_squared = self.calculate_distance(center.view(), unique_center.view());
+                let distance_squared =
+                    squared_euclidean_distance_row(center.view(), unique_center.view())?;
 
                 if distance_squared < bandwidth_squared {
                     // Update existing center using weighted average
@@ -382,15 +368,15 @@ impl MeanShift {
         }
 
         // Assign cluster labels to each data point in parallel
-        let labels: Vec<usize> = (0..n_samples)
+        let labels: Result<Vec<usize>, ModelError> = (0..n_samples)
             .into_par_iter()
-            .map(|i| {
+            .map(|i| -> Result<usize, ModelError> {
                 let point = x.row(i);
                 let mut min_dist_squared = f64::INFINITY;
                 let mut label = 0;
 
                 for (j, center) in unique_centers.iter().enumerate() {
-                    let dist_squared = self.calculate_distance(point, center.view());
+                    let dist_squared = squared_euclidean_distance_row(point, center.view())?;
                     if dist_squared < min_dist_squared {
                         min_dist_squared = dist_squared;
                         label = j;
@@ -399,54 +385,61 @@ impl MeanShift {
 
                 // If not cluster_all and distance is too far, mark as outlier
                 if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                    n_clusters // Use n_clusters as outlier label
+                    Ok(n_clusters) // Use n_clusters as outlier label
                 } else {
-                    label
+                    Ok(label)
                 }
             })
             .collect();
+
+        let labels = labels?;
 
         self.cluster_centers = Some(cluster_centers);
         self.labels = Some(Array1::from(labels));
         self.n_samples_per_center = Some(Array1::from(center_counts));
 
         // Calculate cost using closure for kernel density estimation
-        let calculate_cost = |x: ArrayView2<f64>, centers: &[Array1<f64>], bandwidth: f64| -> f64 {
+        let calculate_cost = |x: ArrayView2<f64>,
+                              centers: &[Array1<f64>],
+                              bandwidth: f64|
+         -> Result<f64, ModelError> {
             let n_samples = x.nrows();
             let gamma = 1.0 / (2.0 * bandwidth * bandwidth);
 
             // Calculate the negative log-likelihood
-            let total_log_likelihood: f64 = (0..n_samples)
+            let total_log_likelihood: Result<f64, ModelError> = (0..n_samples)
                 .into_par_iter()
-                .map(|i| {
+                .map(|i| -> Result<f64, ModelError> {
                     let point = x.row(i);
                     // Sum kernel values from all centers
-                    let kernel_sum: f64 = centers
+                    let kernel_sum: Result<f64, ModelError> = centers
                         .iter()
-                        .map(|center| {
-                            let dist_squared = {
-                                use crate::math::squared_euclidean_distance_row;
-                                squared_euclidean_distance_row(point.view(), center.view())
-                            };
-                            (-gamma * dist_squared).exp()
+                        .map(|center| -> Result<f64, ModelError> {
+                            let dist_squared =
+                                squared_euclidean_distance_row(point.view(), center.view())?;
+                            Ok((-gamma * dist_squared).exp())
                         })
                         .sum();
+
+                    let kernel_sum = kernel_sum?;
 
                     // Avoid log(0) by adding small epsilon
                     let density = kernel_sum / centers.len() as f64;
                     if density > 1e-15 {
-                        density.ln()
+                        Ok(density.ln())
                     } else {
-                        (-15.0_f64).ln() // log(1e-15)
+                        Ok((-15.0_f64).ln()) // log(1e-15)
                     }
                 })
                 .sum();
 
+            let total_log_likelihood = total_log_likelihood?;
+
             // Return negative log-likelihood as cost (higher is worse)
-            -total_log_likelihood / n_samples as f64
+            Ok(-total_log_likelihood / n_samples as f64)
         };
 
-        let cost = calculate_cost(x, &unique_centers, self.bandwidth);
+        let cost = calculate_cost(x, &unique_centers, self.bandwidth)?;
 
         // Print training info
         println!(
@@ -490,16 +483,16 @@ impl MeanShift {
             let bandwidth_squared = self.bandwidth * self.bandwidth;
 
             // Process all samples in parallel with precomputed squared bandwidth
-            let labels: Vec<usize> = (0..n_samples)
+            let labels: Result<Vec<usize>, ModelError> = (0..n_samples)
                 .into_par_iter()
-                .map(|i| {
+                .map(|i| -> Result<usize, ModelError> {
                     let point = x.row(i);
                     let mut min_dist_squared = f64::INFINITY;
                     let mut label = 0;
 
                     for j in 0..n_clusters {
                         let center = centers.row(j);
-                        let dist_squared = self.calculate_distance(point, center);
+                        let dist_squared = squared_euclidean_distance_row(point, center)?;
                         if dist_squared < min_dist_squared {
                             min_dist_squared = dist_squared;
                             label = j;
@@ -508,14 +501,14 @@ impl MeanShift {
 
                     // If not cluster_all and distance is too far, mark as outlier
                     if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                        n_clusters // Use n_clusters as outlier label
+                        Ok(n_clusters) // Use n_clusters as outlier label
                     } else {
-                        label
+                        Ok(label)
                     }
                 })
                 .collect();
 
-            Ok(Array1::from(labels))
+            Ok(Array1::from(labels?))
         } else {
             Err(ModelError::NotFitted)
         }

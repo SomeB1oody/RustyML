@@ -261,7 +261,8 @@ pub fn logistic_loss(
 ///
 /// # Returns
 ///
-/// * `f64` - The squared Euclidean distance between x1 and x2
+/// - `Ok(f64)` - The squared Euclidean distance between x1 and x2
+/// - `Err(ModelError)` - The function returns an error if the lengths of the vectors do not match
 ///
 /// # Examples
 /// ```rust
@@ -270,17 +271,26 @@ pub fn logistic_loss(
 ///
 /// let v1 = array![1.0, 2.0, 3.0];
 /// let v2 = array![4.0, 5.0, 6.0];
-/// let dist = squared_euclidean_distance_row(v1.view(), v2.view());
+/// let dist = squared_euclidean_distance_row(v1.view(), v2.view()).unwrap();
 /// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
 /// assert!((dist - 27.0).abs() < 1e-10);
 /// ```
 #[inline]
-pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
+pub fn squared_euclidean_distance_row(
+    x1: ArrayView1<f64>,
+    x2: ArrayView1<f64>,
+) -> Result<f64, ModelError> {
+    if x1.len() != x2.len() {
+        return Err(ModelError::InputValidationError(
+            "x1 and x2 must have the same length".to_string(),
+        ));
+    }
+
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
 
     // Calculate the sum of squares (fully vectorized)
-    diff.mapv(|x| x * x).sum()
+    Ok(diff.mapv(|x| x * x).sum())
 }
 
 /// Calculate the Manhattan distance between two vectors
@@ -295,7 +305,8 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 ///
 /// # Returns
 ///
-/// * `f64` - The Manhattan distance between x1 and x2
+/// - `Ok(f64)` - The Manhattan distance between x1 and x2
+/// - `Err(ModelError)` - The function returns an error if the lengths of the vectors do not match
 ///
 /// # Examples
 /// ```rust
@@ -304,17 +315,23 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = manhattan_distance_row(v1.view(), v2.view());
+/// let distance = manhattan_distance_row(v1.view(), v2.view()).unwrap();
 /// // |1-4| + |2-6| = 3 + 4 = 7
 /// assert!((distance - 7.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
+pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> Result<f64, ModelError> {
+    if x1.len() != x2.len() {
+        return Err(ModelError::InputValidationError(
+            "x1 and x2 must have the same length".to_string(),
+        ));
+    }
+
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
 
     // Calculate the sum of absolute differences (fully vectorized)
-    diff.mapv(|x| x.abs()).sum()
+    Ok(diff.mapv(|x| x.abs()).sum())
 }
 
 /// Calculate the Minkowski distance between two vectors
@@ -330,7 +347,8 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 ///
 /// # Returns
 ///
-/// * `f64` - The Minkowski distance between x1 and x2
+/// - `Ok(f64)` - The Minkowski distance between x1 and x2
+/// - `Err(ModelError)` - The function returns an error if p is less than 1.0
 ///
 /// # Examples
 /// ```rust
@@ -339,13 +357,21 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = minkowski_distance_row(v1.view(), v2.view(), 3.0);
+/// let distance = minkowski_distance_row(v1.view(), v2.view(), 3.0).unwrap();
 /// // Expected distance is approximately 4.497
 /// assert!((distance - 4.497).abs() < 1e-3);
 /// ```
 #[inline]
-pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) -> f64 {
-    assert!(p >= 1.0, "p must be greater than or equal to 1.0");
+pub fn minkowski_distance_row(
+    x1: ArrayView1<f64>,
+    x2: ArrayView1<f64>,
+    p: f64,
+) -> Result<f64, ModelError> {
+    if p < 1.0 {
+        return Err(ModelError::InputValidationError(
+            "p must be greater than or equal to 1.0".to_string(),
+        ));
+    }
 
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
@@ -353,7 +379,7 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
     // Calculate the sum of absolute differences raised to power p,
     // then take the p-th root of the sum
     let sum: f64 = diff.mapv(|x| x.abs().powf(p)).sum();
-    sum.powf(1.0 / p)
+    Ok(sum.powf(1.0 / p))
 }
 
 /// Calculates the entropy of a label set.

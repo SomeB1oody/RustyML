@@ -124,13 +124,17 @@ impl DBSCAN {
     }
 
     /// Computes distance between two data points using the specified metric
-    fn compute_distance(&self, p_row: ArrayView1<f64>, q_row: ArrayView1<f64>) -> f64 {
+    fn compute_distance(
+        &self,
+        p_row: ArrayView1<f64>,
+        q_row: ArrayView1<f64>,
+    ) -> Result<f64, ModelError> {
         match self.metric {
             DistanceCalculationMetric::Euclidean => {
-                squared_euclidean_distance_row(p_row, q_row).sqrt()
+                Ok(squared_euclidean_distance_row(p_row, q_row)?.sqrt())
             }
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(p_row, q_row),
-            DistanceCalculationMetric::Minkowski => minkowski_distance_row(p_row, q_row, 3.0),
+            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(p_row, q_row, p),
         }
     }
 
@@ -154,8 +158,11 @@ impl DBSCAN {
             .into_par_iter()
             .filter_map(|q| {
                 let q_row = data.row(q);
-                let dist = self.compute_distance(p_row, q_row);
-                if dist <= eps { Some(q) } else { None }
+                // Handle the Result returned by compute_distance
+                match self.compute_distance(p_row, q_row) {
+                    Ok(dist) if dist <= eps => Some(q),
+                    _ => None,
+                }
             })
             .collect();
 
@@ -331,12 +338,12 @@ impl DBSCAN {
         // Create a set for faster core sample lookup
         let core_set: AHashSet<usize> = core_samples.iter().copied().collect();
 
-        // Process each row in parallel, collecting into Vec<i32>
-        let predictions: Vec<i32> = new_data
+        // Process each row in parallel, collecting into Result<Vec<i32>, ModelError>
+        let predictions: Result<Vec<i32>, ModelError> = new_data
             .rows()
             .into_iter()
             .par_bridge() // Convert sequential iterator to parallel iterator
-            .map(|row| {
+            .map(|row| -> Result<i32, ModelError> {
                 let mut min_dist_squared = f64::MAX;
                 let mut closest_label = -1;
 
@@ -346,7 +353,7 @@ impl DBSCAN {
                         continue; // Skip noise points
                     }
 
-                    let squared_dist = squared_euclidean_distance_row(row, orig_row);
+                    let squared_dist = squared_euclidean_distance_row(row, orig_row)?;
 
                     // Check if distance computation is valid
                     if squared_dist.is_nan() || squared_dist.is_infinite() {
@@ -355,7 +362,7 @@ impl DBSCAN {
 
                     // If a core point is found within eps range, assign its label directly
                     if squared_dist <= eps_squared && core_set.contains(&j) {
-                        return labels[j];
+                        return Ok(labels[j]);
                     }
 
                     if squared_dist < min_dist_squared {
@@ -364,11 +371,11 @@ impl DBSCAN {
                     }
                 }
 
-                closest_label
+                Ok(closest_label)
             })
             .collect();
 
-        Ok(Array1::from(predictions))
+        Ok(Array1::from(predictions?))
     }
 
     /// Performs clustering and returns the labels in one step

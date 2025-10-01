@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.8.0] - 2025-9-26 (UTC-7)
+## [v0.8.0] - 2025-9-28 (UTC-7)
+### Added
+- Refactor distance computation methods to return `Result`
+
+## [v0.8.0] - 2025-9-27 (UTC-7)
 ### Added
 - Implement `normalize` utility with support for L1, L2, Lp, and Max normalization
 
