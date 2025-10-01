@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_new() {
     let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
-    assert_eq!(dbscan.get_eps(), 0.5);
+    assert_eq!(dbscan.get_epsilon(), 0.5);
     assert_eq!(dbscan.get_min_samples(), 5);
     assert!(matches!(
         dbscan.get_metric(),
@@ -15,14 +15,14 @@ fn test_new() {
 fn test_default() {
     let dbscan = DBSCAN::default();
     // Verify default values (adjust based on the actual implementation)
-    assert!(dbscan.get_eps() > 0.0);
+    assert!(dbscan.get_epsilon() > 0.0);
     assert!(dbscan.get_min_samples() > 0);
 }
 
 #[test]
 fn test_getters() {
     let dbscan = DBSCAN::new(0.7, 10, DistanceCalculationMetric::Manhattan);
-    assert_eq!(dbscan.get_eps(), 0.7);
+    assert_eq!(dbscan.get_epsilon(), 0.7);
     assert_eq!(dbscan.get_min_samples(), 10);
     assert!(matches!(
         dbscan.get_metric(),
@@ -34,7 +34,7 @@ fn test_getters() {
 fn test_get_labels_before_fit() {
     let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
     match dbscan.get_labels() {
-        Err(ModelError::NotFitted) => assert!(true),
+        None => assert!(true),
         _ => panic!("Expected NotFitted error"),
     }
 }
@@ -43,7 +43,7 @@ fn test_get_labels_before_fit() {
 fn test_get_core_sample_indices_before_fit() {
     let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
     match dbscan.get_core_sample_indices() {
-        Err(ModelError::NotFitted) => assert!(true),
+        None => assert!(true),
         _ => panic!("Expected NotFitted error"),
     }
 }
@@ -66,8 +66,14 @@ fn test_fit_simple_data() {
     let mut dbscan = DBSCAN::new(0.5, 3, DistanceCalculationMetric::Euclidean);
     dbscan.fit(data.view()).unwrap();
 
-    let labels = dbscan.get_labels().unwrap();
-    let core_indices = dbscan.get_core_sample_indices().unwrap();
+    let labels = match dbscan.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Expected labels to be Some"),
+    };
+    let core_indices = match dbscan.get_core_sample_indices() {
+        Some(core_indices) => core_indices,
+        None => panic!("Expected core_indices to be Some"),
+    };
 
     // Test that labels are correctly assigned
     assert_eq!(labels.len(), data.nrows());
@@ -125,9 +131,13 @@ fn test_fit_predict() {
 
     let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
     let labels = dbscan.fit_predict(data.view()).unwrap();
+    let model_labels = match dbscan.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Expected labels to be Some"),
+    };
 
     // Verify fit_predict results match fit+get_labels
-    assert_eq!(labels, *dbscan.get_labels().unwrap());
+    assert_eq!(labels, model_labels);
     assert_eq!(labels.len(), data.nrows());
 }
 
@@ -169,11 +179,17 @@ fn test_different_metrics() {
     // Test with different distance metrics
     let mut euclidean_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
     euclidean_dbscan.fit(data.view()).unwrap();
-    let euclidean_labels = euclidean_dbscan.get_labels().unwrap();
+    let euclidean_labels = match euclidean_dbscan.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Expected labels to be Some"),
+    };
 
     let mut manhattan_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
     manhattan_dbscan.fit(data.view()).unwrap();
-    let manhattan_labels = manhattan_dbscan.get_labels().unwrap();
+    let manhattan_labels = match manhattan_dbscan.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Expected labels to be Some"),
+    };
 
     // The clustering results might differ based on the metric
     // We're just checking that both complete successfully

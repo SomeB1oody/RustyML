@@ -20,39 +20,75 @@ use std::ops::AddAssign;
 ///
 /// # Examples
 /// ```rust
-/// use ndarray::{array, Array2};
 /// use rustyml::machine_learning::kmeans::KMeans;
+/// use ndarray::Array2;
+/// use rand::random;
 ///
-/// // Create a 2D dataset
-/// let data = array![
-///     [1.0, 2.0],
-///     [1.5, 1.8],
-///     [5.0, 6.0],
-///     [5.5, 6.2]
-/// ];
+/// // Create a sample dataset with 100 points in 2D space
+/// // The dataset contains 3 distinct clusters
+/// let mut data = vec![];
 ///
-/// // Create KMeans model with 2 clusters
-/// let mut kmeans = KMeans::new(2, 100, 1e-4, Some(42));
+/// // First cluster around (2.0, 2.0)
+/// for _ in 0..30 {
+///     data.push(2.0 + random::<f64>() * 0.5);
+///     data.push(2.0 + random::<f64>() * 0.5);
+/// }
 ///
-/// // Fit the model
+/// // Second cluster around (8.0, 8.0)
+/// for _ in 0..40 {
+///     data.push(8.0 + random::<f64>() * 0.5);
+///     data.push(8.0 + random::<f64>() * 0.5);
+/// }
+///
+/// // Third cluster around (2.0, 8.0)
+/// for _ in 0..30 {
+///     data.push(2.0 + random::<f64>() * 0.5);
+///     data.push(8.0 + random::<f64>() * 0.5);
+/// }
+///
+/// let data = Array2::<f64>::from_shape_vec((100, 2), data).unwrap();
+///
+/// // Create a KMeans instance with 3 clusters
+/// let mut kmeans = KMeans::new(
+///     3,        // Number of clusters
+///     300,      // Maximum iterations
+///     1e-4,     // Convergence tolerance
+///     Some(42)  // Random seed for reproducibility
+/// );
+///
+/// // Fit the model to the data
 /// kmeans.fit(data.view()).unwrap();
 ///
-/// // Get cluster labels
-/// let labels = kmeans.get_labels().unwrap();
+/// // Get cluster labels for all training samples
+/// let labels = kmeans.get_labels().as_ref().unwrap();
 /// println!("Cluster labels: {:?}", labels);
 ///
-/// // Get centroid positions
-/// let centroids = kmeans.get_centroids().unwrap();
-/// println!("Centroids: {:?}", centroids);
+/// // Get the computed centroids
+/// let centroids = kmeans.get_centroids().as_ref().unwrap();
+/// println!("Cluster centroids:\n{:?}", centroids);
+///
+/// // Get the inertia (sum of squared distances to nearest centroid)
+/// let inertia = kmeans.get_inertia().unwrap();
+/// println!("Inertia: {:.4}", inertia);
+///
+/// // Get the number of iterations performed
+/// let n_iter = kmeans.get_actual_iterations().unwrap();
+/// println!("Iterations: {}", n_iter);
 ///
 /// // Predict clusters for new data points
-/// let new_data = array![[1.2, 1.9], [5.2, 5.9]];
-/// let predictions = kmeans.predict(new_data.view()).unwrap();
-/// println!("Predictions: {:?}", predictions);
+/// let new_data = Array2::<f64>::from_shape_vec((3, 2),
+///     vec![2.1, 2.2,  // Close to first cluster
+///          7.9, 8.1,  // Close to second cluster
+///          2.2, 7.8]) // Close to third cluster
+///     .unwrap();
 ///
-/// // Fit and predict in one step
-/// let labels = kmeans.fit_predict(data.view());
-/// println!("Fit-predict results: {:?}", labels);
+/// let predicted_labels = kmeans.predict(new_data.view()).unwrap();
+/// println!("Predicted labels for new data: {:?}", predicted_labels);
+///
+/// // Alternative: fit and predict in one step
+/// let mut kmeans2 = KMeans::default(); // Uses default parameters
+/// let labels = kmeans2.fit_predict(data.view()).unwrap();
+/// println!("Labels from fit_predict: {:?}", labels);
 /// ```
 #[derive(Debug, Clone)]
 pub struct KMeans {
@@ -115,72 +151,23 @@ impl KMeans {
         }
     }
 
-    /// Returns the number of clusters (k) that the KMeans algorithm will use.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of clusters.
-    pub fn get_n_clusters(&self) -> usize {
-        self.n_clusters
-    }
+    get_field!(get_n_clusters, n_clusters, usize);
 
-    get_max_iterations!();
+    get_field!(get_max_iterations, max_iter, usize);
 
-    get_tolerance!();
+    get_field!(get_tolerance, tol, f64);
 
-    /// Returns the random seed used for centroid initialization.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(seed)` - The random seed as a `u64` if it has been set.
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_random_seed(&self) -> Result<u64, ModelError> {
-        match self.random_seed {
-            Some(seed) => Ok(seed),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field!(get_random_seed, random_seed, Option<u64>);
 
-    /// Returns the cluster centroids if the model has been fitted.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - A reference to the cluster centroids as a 2D array,
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_centroids(&self) -> Result<&Array2<f64>, ModelError> {
-        match self.centroids.as_ref() {
-            Some(centroids) => Ok(centroids),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field!(get_n_iter, n_iter, Option<usize>);
 
-    /// Returns the cluster assignments for the training data if the model has been fitted.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<usize>)` - A reference to the cluster assignments as a 1D array,
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_labels(&self) -> Result<&Array1<usize>, ModelError> {
-        match self.labels.as_ref() {
-            Some(labels) => Ok(labels),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_labels, labels, &Option<Array1<usize>>);
 
-    /// Returns the sum of squared distances of samples to their closest centroid.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - A float value representing the inertia,
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_inertia(&self) -> Result<f64, ModelError> {
-        match self.inertia {
-            Some(inertia) => Ok(inertia),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field!(get_inertia, inertia, Option<f64>);
 
-    get_actual_iterations!();
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
+
+    get_field_as_ref!(get_centroids, centroids, &Option<Array2<f64>>);
 
     /// Finds the closest centroid to a given data point and returns its index and distance.
     ///

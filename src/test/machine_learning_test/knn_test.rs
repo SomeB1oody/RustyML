@@ -13,8 +13,8 @@ fn test_knn_default() {
         knn.get_metric(),
         DistanceCalculationMetric::Euclidean
     )); // Default metric should be Euclidean
-    assert!(matches!(knn.get_x_train(), Err(ModelError::NotFitted))); // Should not have training data by default
-    assert!(matches!(knn.get_y_train(), Err(ModelError::NotFitted))); // Should not have training labels by default
+    assert!(matches!(knn.get_x_train(), None)); // Should not have training data by default
+    assert!(matches!(knn.get_y_train(), None)); // Should not have training labels by default
 }
 
 // Test custom initialization of KNN
@@ -55,12 +55,18 @@ fn test_knn_fit() {
     knn.fit(x_train.view(), y_train.view()).unwrap();
 
     // Verify training data is stored
-    assert!(matches!(knn.get_x_train(), Ok(_)));
-    assert!(matches!(knn.get_y_train(), Ok(_)));
+    assert!(matches!(knn.get_x_train(), Some(_)));
+    assert!(matches!(knn.get_y_train(), Some(_)));
 
     // Verify training data content is correct
-    let stored_x = knn.get_x_train().unwrap();
-    let stored_y = knn.get_y_train().unwrap();
+    let stored_x = match knn.get_x_train() {
+        Some(x) => x,
+        None => panic!("Training data should be available after fitting"),
+    };
+    let stored_y = match knn.get_y_train() {
+        Some(y) => y,
+        None => panic!("Training labels should be available after fitting"),
+    };
 
     assert_eq!(stored_x.shape(), x_train.shape());
     assert_eq!(stored_y.len(), y_train.len());
@@ -290,8 +296,8 @@ fn test_fit_predict() {
     assert_eq!(predictions[1], 1);
 
     // Verify the model has been fitted
-    assert!(knn.get_x_train().is_ok());
-    assert!(knn.get_y_train().is_ok());
+    assert!(knn.get_x_train().is_some());
+    assert!(knn.get_y_train().is_some());
 }
 
 #[test]

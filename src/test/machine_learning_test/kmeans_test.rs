@@ -28,34 +28,19 @@ fn test_new_and_default() {
     let kmeans = KMeans::new(3, 100, 0.0001, Some(42));
 
     // Verify parameters of instance created with new()
-    assert!(matches!(kmeans.get_centroids(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_labels(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_inertia(), Err(ModelError::NotFitted)));
-    assert!(matches!(
-        kmeans.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
+    assert!(matches!(kmeans.get_centroids(), None));
+    assert!(matches!(kmeans.get_labels(), None));
+    assert!(matches!(kmeans.get_inertia(), None));
+    assert!(matches!(kmeans.get_actual_iterations(), None));
 
     // Test default method
     let default_kmeans = KMeans::default();
 
     // Verify default parameters
-    assert!(matches!(
-        default_kmeans.get_centroids(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(
-        default_kmeans.get_labels(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(
-        default_kmeans.get_inertia(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(
-        default_kmeans.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
+    assert!(matches!(default_kmeans.get_centroids(), None));
+    assert!(matches!(default_kmeans.get_labels(), None));
+    assert!(matches!(default_kmeans.get_inertia(), None));
+    assert!(matches!(default_kmeans.get_actual_iterations(), None));
 }
 
 #[test]
@@ -66,11 +51,16 @@ fn test_fit() {
     // Test fit method
     kmeans.fit(data.view()).unwrap();
 
+    let centroids = match kmeans.get_centroids() {
+        Some(centroids) => centroids,
+        None => panic!("Centroids should be available after fitting"),
+    };
+
     // Verify state after fitting
-    assert!(matches!(kmeans.get_centroids(), Ok(_)));
-    assert_eq!(kmeans.get_centroids().unwrap().shape(), &[2, 2]);
-    assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
+    assert!(matches!(kmeans.get_centroids(), Some(_)));
+    assert_eq!(centroids.shape(), &[2, 2]);
+    assert!(matches!(kmeans.get_inertia(), Some(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Some(_)));
 }
 
 #[test]
@@ -121,13 +111,18 @@ fn test_fit_predict() {
 
     // Verify results
     assert_eq!(predictions.len(), 20);
-    assert!(matches!(kmeans.get_centroids(), Ok(_)));
-    assert!(matches!(kmeans.get_labels(), Ok(_)));
-    assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
+    assert!(matches!(kmeans.get_centroids(), Some(_)));
+    assert!(matches!(kmeans.get_labels(), Some(_)));
+    assert!(matches!(kmeans.get_inertia(), Some(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Some(_)));
+
+    let labels = match kmeans.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Labels should be available after fitting"),
+    };
 
     // Verify labels are the same as predictions
-    assert_eq!(predictions, *kmeans.get_labels().unwrap());
+    assert_eq!(predictions, labels);
 }
 
 #[test]
@@ -136,20 +131,17 @@ fn test_getters() {
     let data = create_test_data();
 
     // State before fitting
-    assert!(matches!(kmeans.get_centroids(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_labels(), Err(ModelError::NotFitted)));
-    assert!(matches!(kmeans.get_inertia(), Err(ModelError::NotFitted)));
-    assert!(matches!(
-        kmeans.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
+    assert!(matches!(kmeans.get_centroids(), None));
+    assert!(matches!(kmeans.get_labels(), None));
+    assert!(matches!(kmeans.get_inertia(), None));
+    assert!(matches!(kmeans.get_actual_iterations(), None));
 
     // State after fitting
     kmeans.fit(data.view()).unwrap();
-    assert!(matches!(kmeans.get_centroids(), Ok(_)));
-    assert!(matches!(kmeans.get_labels(), Ok(_)));
-    assert!(matches!(kmeans.get_inertia(), Ok(_)));
-    assert!(matches!(kmeans.get_actual_iterations(), Ok(_)));
+    assert!(matches!(kmeans.get_centroids(), Some(_)));
+    assert!(matches!(kmeans.get_labels(), Some(_)));
+    assert!(matches!(kmeans.get_inertia(), Some(_)));
+    assert!(matches!(kmeans.get_actual_iterations(), Some(_)));
 }
 
 #[test]
@@ -159,10 +151,18 @@ fn test_different_cluster_counts() {
     // Test with k=1
     let mut kmeans_k1 = KMeans::new(1, 100, 0.0001, Some(42));
     kmeans_k1.fit(data.view()).unwrap();
-    assert_eq!(kmeans_k1.get_centroids().unwrap().shape(), &[1, 2]);
+    let centroids = match kmeans_k1.get_centroids() {
+        Some(centroids) => centroids,
+        None => panic!("Centroids should be available after fitting"),
+    };
+    assert_eq!(centroids.shape(), &[1, 2]);
 
     // Test with k=3
     let mut kmeans_k3 = KMeans::new(3, 100, 0.0001, Some(42));
     kmeans_k3.fit(data.view()).unwrap();
-    assert_eq!(kmeans_k3.get_centroids().unwrap().shape(), &[3, 2]);
+    let centroids = match kmeans_k3.get_centroids() {
+        Some(centroids) => centroids,
+        None => panic!("Centroids should be available after fitting"),
+    };
+    assert_eq!(centroids.shape(), &[3, 2]);
 }

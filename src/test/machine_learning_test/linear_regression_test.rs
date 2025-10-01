@@ -4,15 +4,9 @@ use super::*;
 fn test_default_constructor() {
     let model = LinearRegression::default();
 
-    assert!(matches!(
-        model.get_coefficients(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(model.get_intercept(), Err(ModelError::NotFitted)));
-    assert!(matches!(
-        model.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
+    assert!(matches!(model.get_coefficients(), &None));
+    assert!(matches!(model.get_intercept(), None));
+    assert!(matches!(model.get_actual_iterations(), None));
     // Check if default values meet expectations
     assert_eq!(model.get_fit_intercept(), true); // Assuming default is true
     assert!(model.get_learning_rate() > 0.0);
@@ -27,10 +21,7 @@ fn test_new_constructor() {
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_max_iterations(), 1000);
     assert_eq!(model.get_tolerance(), 1e-5);
-    assert!(matches!(
-        model.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
+    assert!(matches!(model.get_actual_iterations(), None));
 }
 
 #[test]
@@ -41,8 +32,8 @@ fn test_not_fitted_error() {
     let coef_result = model.get_coefficients();
     let intercept_result = model.get_intercept();
 
-    assert!(matches!(coef_result, Err(ModelError::NotFitted)));
-    assert!(matches!(intercept_result, Err(ModelError::NotFitted)));
+    assert!(matches!(coef_result, None));
+    assert!(matches!(intercept_result, None));
 }
 
 #[test]
@@ -59,7 +50,10 @@ fn test_fit_and_predict() {
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
-    let coefficients = model.get_coefficients().unwrap();
+    let coefficients = match model.get_coefficients() {
+        Some(coefficients) => coefficients,
+        None => panic!("Model coefficients are not initialized"),
+    };
     let intercept = model.get_intercept().unwrap();
 
     assert!((coefficients[0] - 2.0).abs() < 0.1);
@@ -103,7 +97,10 @@ fn test_multivariate_regression() {
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
-    let coefficients = model.get_coefficients().unwrap();
+    let coefficients = match model.get_coefficients() {
+        Some(coefficients) => coefficients,
+        None => panic!("Model coefficients are not initialized"),
+    };
     let intercept = model.get_intercept().unwrap();
 
     println!("Learned coefficients: {:?}", coefficients);
@@ -149,7 +146,6 @@ fn test_no_intercept() {
     let x_vec = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0]];
     let y_vec = vec![2.0, 4.0, 6.0, 8.0];
 
-    // 将Vec转换为ndarray的Array
     let x = Array2::from_shape_vec((4, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
@@ -157,12 +153,15 @@ fn test_no_intercept() {
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficient is close to expected value (around 2.0)
-    let coefficients = model.get_coefficients().unwrap();
+    let coefficients = match model.get_coefficients() {
+        Some(coefficients) => coefficients,
+        None => panic!("Model coefficients are not initialized"),
+    };
 
     assert!((coefficients[0] - 2.0).abs() < 0.1);
 
     // Intercept should be close to 0 or not available
-    if let Ok(intercept) = model.get_intercept() {
+    if let Some(intercept) = model.get_intercept() {
         assert!(intercept.abs() < 0.1);
     }
 }
@@ -196,7 +195,11 @@ fn test_linear_regression_fit_predict() {
     }
 
     // Additional check for model parameters
-    let coefficients = model.get_coefficients().unwrap();
+    let coefficients = match model.get_coefficients() {
+        Some(coefficients) => coefficients,
+        None => panic!("Model coefficients are not initialized"),
+    };
+
     let intercept = model.get_intercept().unwrap();
 
     // Verify coefficient is close to 2 and intercept is close to 3

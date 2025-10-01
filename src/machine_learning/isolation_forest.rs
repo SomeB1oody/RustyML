@@ -337,6 +337,25 @@ impl IsolationForest {
         }
     }
 
+    /// Computes the anomaly score for a single sample.
+    ///
+    /// The anomaly score is a measure of how anomalous a sample is compared to the training data.
+    /// The score is normalized to be between 0 and 1, where:
+    /// - Scores close to 1 indicate anomalies
+    /// - Scores close to 0.5 indicate normal samples
+    /// - Scores significantly below 0.5 indicate inliers
+    ///
+    /// The algorithm calculates the average path length the sample takes through all isolation trees,
+    /// then normalizes it using the average path length factor c(n) to produce the final anomaly score.
+    ///
+    /// # Parameters
+    ///
+    /// * `sample` - A slice of f64 values representing a single data point
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(f64)` - The anomaly score for the sample (between 0 and 1)
+    /// - `Err(ModelError)` - If the model runs into problems
     pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, ModelError> {
         use crate::math::average_path_length_factor;
 
@@ -425,6 +444,26 @@ impl IsolationForest {
         Ok(score)
     }
 
+    /// Predicts anomaly scores for multiple samples in a dataset.
+    ///
+    /// This method computes the anomaly score for each row (sample) in the input data
+    /// using parallel processing for improved performance. Each score represents how
+    /// anomalous the corresponding sample is compared to the training data.
+    ///
+    /// The anomaly scores are normalized between 0 and 1, where:
+    /// - Values close to 1 suggest the sample is an anomaly
+    /// - Values close to 0.5 suggest the sample is normal
+    /// - Values significantly below 0.5 suggest the sample is a typical inlier
+    ///
+    /// # Parameters
+    ///
+    /// * `x` - A 2D array view where each row represents a sample and each column represents a feature
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Array1<f64>)` - A 1D array of anomaly scores corresponding to each input sample
+    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If the input is empty, has zero features, or contains invalid values (NaN or infinite)
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
         // First check if input is empty
         if x.nrows() == 0 {

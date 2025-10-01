@@ -120,30 +120,23 @@ impl LogisticRegression {
         }
     }
 
-    get_fit_intercept!();
+    get_field!(get_fit_intercept, fit_intercept, bool);
 
-    get_learning_rate!();
+    get_field!(get_learning_rate, learning_rate, f64);
 
-    get_max_iterations!();
+    get_field!(get_max_iterations, max_iter, usize);
 
-    get_tolerance!();
+    get_field!(get_tolerance, tol, f64);
 
-    get_actual_iterations!();
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
 
-    get_regularization_type!();
+    get_field!(
+        get_regularization_type,
+        regularization_type,
+        Option<RegularizationType>
+    );
 
-    /// Returns the model weights
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - A reference to the weight array if the model has been trained, or None otherwise
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_weights(&self) -> Result<&Array1<f64>, ModelError> {
-        match &self.weights {
-            Some(weights) => Ok(weights),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_weights, weights, &Option<Array1<f64>>);
 
     /// Trains the logistic regression model
     ///

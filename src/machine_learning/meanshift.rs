@@ -41,7 +41,7 @@ use crate::math::squared_euclidean_distance_row;
 /// let labels = ms.fit_predict(data.view());
 ///
 /// // Get the cluster centers
-/// let centers = ms.get_cluster_centers().unwrap();
+/// let centers = ms.get_cluster_centers().clone().unwrap();
 /// ```
 ///
 /// # Notes
@@ -131,77 +131,29 @@ impl MeanShift {
         }
     }
 
-    /// Gets the cluster centers found by the algorithm.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array2<f64>)` - A Result containing the cluster centers as a ndarray `Array2<f64>`
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_cluster_centers(&self) -> Result<Array2<f64>, ModelError> {
-        match self.cluster_centers.as_ref() {
-            Some(centers) => Ok(centers.clone()),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field!(get_bandwidth, bandwidth, f64);
 
-    /// Gets the cluster labels assigned to each data point.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<usize>)` - A Result containing the cluster labels as a ndarray `Array1<usize>`
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_labels(&self) -> Result<Array1<usize>, ModelError> {
-        match self.labels.as_ref() {
-            Some(labels) => Ok(labels.clone()),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_cluster_centers, cluster_centers, &Option<Array2<f64>>);
 
-    get_actual_iterations!();
+    get_field_as_ref!(get_labels, labels, &Option<Array1<usize>>);
 
-    /// Gets the number of samples per cluster center.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<usize>)` - A Result containing the number of samples per center as a ndarray `Array1<usize>`
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_n_samples_per_center(&self) -> Result<Array1<usize>, ModelError> {
-        match self.n_samples_per_center.as_ref() {
-            Some(n_samples_per_center) => Ok(n_samples_per_center.clone()),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(
+        get_n_samples_per_center,
+        n_samples_per_center,
+        &Option<Array1<usize>>
+    );
 
-    /// Gets the bandwidth parameter value.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The bandwidth value.
-    pub fn get_bandwidth(&self) -> f64 {
-        self.bandwidth
-    }
+    get_field!(get_n_iter, n_iter, Option<usize>);
 
-    get_max_iterations!();
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
 
-    get_tolerance!();
+    get_field!(get_max_iterations, max_iter, usize);
 
-    /// Gets the bin seeding setting.
-    ///
-    /// # Returns
-    ///
-    /// * `bool` - A boolean indicating whether bin seeding is enabled.
-    pub fn get_bin_seeding(&self) -> bool {
-        self.bin_seeding
-    }
+    get_field!(get_tolerance, tol, f64);
 
-    /// Gets the cluster_all setting.
-    ///
-    /// # Returns
-    ///
-    /// * `bool` - A boolean indicating whether all points are assigned to clusters.
-    pub fn get_cluster_all(&self) -> bool {
-        self.cluster_all
-    }
+    get_field!(get_bin_seeding, bin_seeding, bool);
+
+    get_field!(get_cluster_all, cluster_all, bool);
 
     /// Fits the MeanShift clustering model to the input data.
     ///

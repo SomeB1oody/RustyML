@@ -8,11 +8,8 @@ fn test_default_constructor() {
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_tolerance(), 1e-4);
-    assert!(matches!(
-        model.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(model.get_weights(), Err(ModelError::NotFitted)));
+    assert!(matches!(model.get_actual_iterations(), None));
+    assert!(matches!(model.get_weights(), &None));
 }
 
 #[test]
@@ -23,11 +20,8 @@ fn test_new_constructor() {
     assert_eq!(model.get_learning_rate(), 0.05);
     assert_eq!(model.get_max_iterations(), 200);
     assert_eq!(model.get_tolerance(), 1e-5);
-    assert!(matches!(
-        model.get_actual_iterations(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(model.get_weights(), Err(ModelError::NotFitted)));
+    assert!(matches!(model.get_actual_iterations(), None));
+    assert!(matches!(model.get_weights(), &None));
 }
 
 #[test]
@@ -49,7 +43,7 @@ fn test_fit_and_predict_simple_case() {
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if weights exist
-    assert!(matches!(model.get_weights(), Ok(_)));
+    assert!(matches!(model.get_weights(), Some(_)));
 
     // Predict training data
     let predictions = model.predict(x.view()).unwrap();

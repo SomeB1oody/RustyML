@@ -16,7 +16,7 @@ use rayon::prelude::*;
 /// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
 /// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
 /// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DistanceCalculationMetric {
     Euclidean,
     Manhattan,
@@ -91,7 +91,7 @@ fn preliminary_check(x: ArrayView2<f64>, y: Option<ArrayView1<f64>>) -> Result<(
 /// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
 ///   multiplied by the specified coefficient. Discourages large parameter values but
 ///   typically does not produce sparse solutions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RegularizationType {
     /// L1 regularization (Lasso) with the specified regularization strength coefficient
     L1(f64),
@@ -99,188 +99,55 @@ pub enum RegularizationType {
     L2(f64),
 }
 
-/// A macro that generates a getter method for the `fit_intercept` field.
+/// A macro that generates a getter method for any field.
 ///
-/// This macro expands to a public method that returns whether the model
-/// should fit an intercept term during training.
+/// This macro creates a public getter method that returns the value or reference
+/// of the specified field. The generated method includes appropriate documentation
+/// describing the field being accessed.
+///
+/// # Parameters
+///
+/// - `$method_name` - The name of the getter method (e.g., get_fit_intercept)
+/// - `$field_name` - The name of the field to access (e.g., fit_intercept)
+/// - `$return_type` - The return type of the getter method
 ///
 /// # Generated Method
 ///
-/// * `get_fit_intercept(&self) -> bool` - Returns the current intercept fitting setting
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `fit_intercept: bool` field.
-/// When called, it will generate the corresponding getter method.
-macro_rules! get_fit_intercept {
-    () => {
-        /// Gets the current setting for fitting the intercept term
-        ///
-        /// # Returns
-        ///
-        /// * `bool` - Returns `true` if the model includes an intercept term, `false` otherwise
-        pub fn get_fit_intercept(&self) -> bool {
-            self.fit_intercept
+/// The macro generates a method that returns the field value,
+/// with documentation that describes what field is being accessed.
+macro_rules! get_field {
+    ($method_name:ident, $field_name:ident, $return_type:ty) => {
+        #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
+        #[doc = "# Returns\n\n"]
+        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field")]
+        pub fn $method_name(&self) -> $return_type {
+            self.$field_name
         }
     };
 }
 
-/// A macro that generates a getter method for the `learning_rate` field.
+/// A macro that generates a public getter method returning a reference to a field.
 ///
-/// This macro expands to a public method that returns the learning rate
-/// value used in gradient-based optimization algorithms.
+/// This macro creates a method that provides immutable reference access to a private field
+/// in a struct, following the Rust convention of getter methods.
 ///
-/// # Generated Method
+/// # Parameters
 ///
-/// * `get_learning_rate(&self) -> f64` - Returns the current learning rate value
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `learning_rate: f64` field.
-/// The learning rate controls the step size in gradient descent optimization.
-macro_rules! get_learning_rate {
-    () => {
-        /// Gets the current learning rate
-        ///
-        /// The learning rate controls the step size in each iteration of gradient descent.
-        ///
-        /// # Returns
-        ///
-        /// * `f64` - The current learning rate value
-        pub fn get_learning_rate(&self) -> f64 {
-            self.learning_rate
-        }
-    };
-}
-
-/// A macro that generates a getter method for the `max_iter` field.
-///
-/// This macro expands to a public method that returns the maximum number
-/// of iterations allowed for iterative algorithms.
+/// - `$method_name` - The identifier for the generated getter method name
+/// - `$field_name` - The identifier of the struct field to access
+/// - `$return_type` - The type expression for the return value (typically a reference type like `&Type`)
 ///
 /// # Generated Method
 ///
-/// * `get_max_iterations(&self) -> usize` - Returns the maximum iteration limit
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `max_iter: usize` field.
-/// This value determines when to stop training if convergence is not achieved.
-macro_rules! get_max_iterations {
-    () => {
-        /// Gets the maximum number of iterations
-        ///
-        /// # Returns
-        ///
-        /// * `usize` - The maximum number of iterations for the gradient descent algorithm
-        pub fn get_max_iterations(&self) -> usize {
-            self.max_iter
-        }
-    };
-}
-
-/// A macro that generates a getter method for the `tol` field.
-///
-/// This macro expands to a public method that returns the convergence
-/// tolerance threshold used to determine when training should stop.
-///
-/// # Generated Method
-///
-/// * `get_tolerance(&self) -> f64` - Returns the current tolerance value
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `tol: f64` field.
-/// Training stops when the improvement between iterations falls below this threshold.
-macro_rules! get_tolerance {
-    () => {
-        /// Gets the convergence tolerance threshold
-        ///
-        /// The convergence tolerance is used to determine when to stop the training process.
-        /// Training stops when the change in the loss function between consecutive iterations
-        /// is less than this value.
-        ///
-        /// # Returns
-        ///
-        /// * `f64` - The current convergence tolerance value
-        pub fn get_tolerance(&self) -> f64 {
-            self.tol
-        }
-    };
-}
-
-/// A macro that generates a getter method for the `n_iter` field.
-///
-/// This macro expands to a public method that returns the actual number
-/// of iterations performed during the last training session.
-///
-/// # Generated Method
-///
-/// * `get_actual_iterations(&self) -> Result<usize, ModelError>` - Returns the iteration count or an error if not fitted
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `n_iter: Option<usize>` field.
-/// Returns an error if the model has not been trained yet.
-macro_rules! get_actual_iterations {
-    () => {
-        /// Returns the actual number of actual iterations performed during the last model fitting.
-        ///
-        /// # Returns
-        ///
-        /// - `Ok(usize)` - The number of iterations if the model has been fitted
-        /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-        pub fn get_actual_iterations(&self) -> Result<usize, ModelError> {
-            match &self.n_iter {
-                Some(n_iter) => Ok(*n_iter),
-                None => Err(ModelError::NotFitted),
-            }
-        }
-    };
-}
-
-/// A macro that generates a getter method for the `regularization_type` field.
-///
-/// This macro expands to a public method that returns a reference to the
-/// regularization configuration of the model.
-///
-/// # Generated Method
-///
-/// * `get_regularization_type(&self) -> &Option<RegularizationType>` - Returns a reference to the regularization type
-///
-/// # Usage
-///
-/// This macro should be used inside structs that have a `regularization_type: Option<RegularizationType>` field.
-/// The regularization type can be None, L1 (LASSO), or L2 (Ridge).
-macro_rules! get_regularization_type {
-    () => {
-        /// Returns a reference to the regularization type of the model
-        ///
-        /// This method provides access to the regularization configuration of the model,
-        /// which can be None (no regularization), L1 (LASSO), or L2 (Ridge).
-        ///
-        /// # Returns
-        ///
-        /// * `&Option<RegularizationType>` - A reference to the regularization type, which will be None if no regularization is applied
-        pub fn get_regularization_type(&self) -> &Option<RegularizationType> {
-            &self.regularization_type
-        }
-    };
-}
-
-/// Generates a getter method for accessing the distance metric used by the instance.
-///
-/// This macro creates a standard getter method that returns a reference to the distance
-/// calculation metric stored in the `metric` field. The metric determines how distances
-/// between data points are calculated in various machine learning algorithms.
-///
-/// # Generated Method
-///
-/// * `get_metric(&self) -> &DistanceCalculationMetric` - Returns a reference to the DistanceCalculationMetric
-macro_rules! get_metric {
-    () => {
-        pub fn get_metric(&self) -> &DistanceCalculationMetric {
-            &self.metric
+/// The macro generates a method that returns the field value as a reference,
+/// with documentation that describes what field is being accessed
+macro_rules! get_field_as_ref {
+    ($method_name:ident, $field_name:ident, $return_type:ty) => {
+        #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
+        #[doc = "# Returns\n\n"]
+        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field as a reference")]
+        pub fn $method_name(&self) -> $return_type {
+            &self.$field_name
         }
     };
 }

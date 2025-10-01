@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn test_default() {
     let model = LinearSVC::default();
-    assert_eq!(model.get_weights(), Err(ModelError::NotFitted));
-    assert_eq!(model.get_bias(), Err(ModelError::NotFitted));
-    assert_eq!(model.get_actual_iterations(), Err(ModelError::NotFitted));
+    assert_eq!(model.get_weights(), &None);
+    assert_eq!(model.get_bias(), None);
+    assert_eq!(model.get_actual_iterations(), None);
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_new() {
 
     assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_learning_rate(), 0.01);
-    assert_eq!(model.get_regularization_param(), 0.1);
+    assert_eq!(model.get_regularization_parameter(), 0.1);
     assert!(matches!(model.get_penalty(), RegularizationType::L2(0.0)));
     assert!(model.get_fit_intercept());
     assert_eq!(model.get_tolerance(), 1e-4);
@@ -31,10 +31,10 @@ fn test_new() {
 fn test_getters_before_fit() {
     let model = LinearSVC::default();
 
-    // These should return errors when model is not fitted
-    assert!(model.get_weights().is_err());
-    assert!(model.get_bias().is_err());
-    assert!(model.get_actual_iterations().is_err());
+    // These should return None when model is not fitted
+    assert!(model.get_weights().is_none());
+    assert!(model.get_bias().is_none());
+    assert!(model.get_actual_iterations().is_none());
 }
 
 #[test]
@@ -73,9 +73,9 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     model.fit(x.view(), y.view())?;
 
     // Test that weights and bias are now available
-    assert!(model.get_weights().is_ok());
-    assert!(model.get_bias().is_ok());
-    assert!(model.get_actual_iterations().is_ok());
+    assert!(model.get_weights().is_some());
+    assert!(model.get_bias().is_some());
+    assert!(model.get_actual_iterations().is_some());
 
     // Test predictions
     let predictions = model.predict(x.view())?;
@@ -163,7 +163,7 @@ fn test_different_penalties() {
     let _ = model_l2.fit(x.view(), y.view());
 
     // The weights should be different due to the different penalties
-    if let (Ok(w1), Ok(w2)) = (model_l1.get_weights(), model_l2.get_weights()) {
+    if let (Some(w1), Some(w2)) = (model_l1.get_weights(), model_l2.get_weights()) {
         assert_ne!(w1, w2);
     }
 }

@@ -226,53 +226,25 @@ impl LinearSVC {
         )
     }
 
-    get_fit_intercept!();
+    get_field!(get_fit_intercept, fit_intercept, bool);
 
-    get_learning_rate!();
+    get_field!(get_learning_rate, learning_rate, f64);
 
-    get_max_iterations!();
+    get_field!(get_max_iter, max_iter, usize);
 
-    get_tolerance!();
+    get_field!(get_tolerance, tol, f64);
 
-    get_actual_iterations!();
+    get_field!(get_max_iterations, max_iter, usize);
 
-    /// Returns the weight coefficients of the trained model.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)`: Reference to weight coefficients if model is trained
-    /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
-    pub fn get_weights(&self) -> Result<&Array1<f64>, ModelError> {
-        self.weights.as_ref().ok_or(ModelError::NotFitted)
-    }
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
 
-    /// Returns the bias term (intercept) of the trained model.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)`: Bias value if model is trained
-    /// - `Err(ModelError::NotFitted)`: If model hasn't been trained yet
-    pub fn get_bias(&self) -> Result<f64, ModelError> {
-        self.bias.ok_or(ModelError::NotFitted)
-    }
+    get_field_as_ref!(get_weights, weights, &Option<Array1<f64>>);
 
-    /// Returns the regularization parameter.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - Current regularization strength value
-    pub fn get_regularization_param(&self) -> f64 {
-        self.regularization_param
-    }
+    get_field!(get_bias, bias, Option<f64>);
 
-    /// Returns the regularization penalty type.
-    ///
-    /// # Returns
-    ///
-    /// * `&RegularizationType` - Reference to the current penalty type (L1 or L2)
-    pub fn get_penalty(&self) -> &RegularizationType {
-        &self.penalty
-    }
+    get_field!(get_regularization_parameter, regularization_param, f64);
+
+    get_field!(get_penalty, penalty, RegularizationType);
 
     /// Trains the model on the provided data.
     ///
@@ -504,7 +476,12 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        let weights = self.get_weights()?;
+        let weights = match self.get_weights() {
+            Some(weights) => weights,
+            None => {
+                return Err(ModelError::NotFitted);
+            }
+        };
         let bias = self.bias.unwrap_or(0.0);
 
         // Validate input data

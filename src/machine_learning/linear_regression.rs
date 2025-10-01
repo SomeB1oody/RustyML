@@ -1,4 +1,4 @@
-pub use super::*;
+use super::*;
 
 /// Linear Regression model implementation
 ///
@@ -122,43 +122,27 @@ impl LinearRegression {
         }
     }
 
-    get_fit_intercept!();
+    get_field!(get_fit_intercept, fit_intercept, bool);
 
-    get_learning_rate!();
+    get_field!(get_learning_rate, learning_rate, f64);
 
-    get_max_iterations!();
+    get_field!(get_max_iter, max_iter, usize);
 
-    get_tolerance!();
+    get_field!(get_tolerance, tol, f64);
 
-    get_actual_iterations!();
+    get_field!(get_max_iterations, max_iter, usize);
 
-    get_regularization_type!();
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
 
-    /// Returns the model coefficients if the model has been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Vec<f64>)` - A vector of model coefficients
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_coefficients(&self) -> Result<Array1<f64>, ModelError> {
-        match &self.coefficients {
-            Some(coeffs) => Ok(coeffs.clone()),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field!(
+        get_regularization_type,
+        regularization_type,
+        Option<RegularizationType>
+    );
 
-    /// Returns the intercept term if the model has been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - The intercept value
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_intercept(&self) -> Result<f64, ModelError> {
-        match self.intercept {
-            Some(intercept) => Ok(intercept),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_coefficients, coefficients, &Option<Array1<f64>>);
+
+    get_field!(get_intercept, intercept, Option<f64>);
 
     /// Fits the linear regression model using gradient descent
     ///
@@ -211,7 +195,8 @@ impl LinearRegression {
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
                 Some(RegularizationType::L1(alpha)) => {
-                    alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
+                    // Parallel computation for L1 regularization when feature count is large
+                    alpha * weights.iter().par_bridge().map(|w| w.abs()).sum::<f64>()
                 }
                 Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights) / 2.0,
             };
@@ -246,9 +231,17 @@ impl LinearRegression {
             match &self.regularization_type {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
-                    for i in 0..n_features {
-                        weight_gradients[i] += alpha * weights[i].signum();
-                    }
+                    // Parallel computation for L1 gradient when feature count is large
+                    let alpha_val = *alpha;
+                    let weights_slice = weights.as_slice().unwrap();
+                    let gradients_slice = weight_gradients.as_slice_mut().unwrap();
+
+                    gradients_slice
+                        .par_iter_mut()
+                        .zip(weights_slice.par_iter())
+                        .for_each(|(grad, w)| {
+                            *grad += alpha_val * w.signum();
+                        });
                 }
                 Some(RegularizationType::L2(alpha)) => {
                     weight_gradients += &(&weights * *alpha);

@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.8.0] - 2025-9-28 (UTC-7)
+## [v0.8.0] - 2025-10-1 (UTC-7)
+### Added
+- Refactor getter methods across machine learning models using `get_field` and `get_field_as_ref` macros for consistency and reduced code duplication
+
+## [v0.8.0] - 2025-9-30 (UTC-7)
 ### Added
 - Refactor distance computation methods to return `Result`
 

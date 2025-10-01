@@ -52,10 +52,10 @@ fn test_meanshift_new() {
 fn test_meanshift_getters_before_fit() {
     let ms = MeanShift::default();
 
-    assert!(ms.get_cluster_centers().is_err());
-    assert!(ms.get_labels().is_err());
-    assert!(ms.get_actual_iterations().is_err());
-    assert!(ms.get_n_samples_per_center().is_err());
+    assert!(ms.get_cluster_centers().is_none());
+    assert!(ms.get_labels().is_none());
+    assert!(ms.get_actual_iterations().is_none());
+    assert!(ms.get_n_samples_per_center().is_none());
 }
 
 #[test]
@@ -66,17 +66,23 @@ fn test_meanshift_fit() {
     ms.fit(data.view()).unwrap();
 
     // Check that all attributes are accessible after fitting
-    assert!(ms.get_cluster_centers().is_ok());
-    assert!(ms.get_labels().is_ok());
-    assert!(ms.get_actual_iterations().is_ok());
-    assert!(ms.get_n_samples_per_center().is_ok());
+    assert!(ms.get_cluster_centers().is_some());
+    assert!(ms.get_labels().is_some());
+    assert!(ms.get_actual_iterations().is_some());
+    assert!(ms.get_n_samples_per_center().is_some());
 
     // Check the shape of cluster centers
-    let centers = ms.get_cluster_centers().unwrap();
+    let centers = match ms.get_cluster_centers() {
+        Some(centers) => centers,
+        None => panic!("Cluster centers should be available after fitting"),
+    };
     assert_eq!(centers.dim().1, 2); // Number of features should be 2
 
     // Check labels
-    let labels = ms.get_labels().unwrap();
+    let labels = match ms.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Labels should be available after fitting"),
+    };
     assert_eq!(labels.len(), data.dim().0); // Number of labels should equal number of samples
 }
 
@@ -136,8 +142,8 @@ fn test_bin_seeding() {
     ms2.fit(data.view()).unwrap();
 
     // Both methods should fit successfully
-    assert!(ms1.get_cluster_centers().is_ok());
-    assert!(ms2.get_cluster_centers().is_ok());
+    assert!(ms1.get_cluster_centers().is_some());
+    assert!(ms2.get_cluster_centers().is_some());
 
     // With bin_seeding we typically expect fewer initial points, but we can't make strong assertions about the final number of clusters
 }
@@ -174,12 +180,18 @@ fn test_cluster_all_parameter() {
     // With cluster_all = false, some points may not be assigned to clusters
     let mut ms1 = MeanShift::new(1.0, None, None, None, Some(false));
     ms1.fit(data.view()).unwrap();
-    let labels1 = ms1.get_labels().unwrap();
+    let labels1 = match ms1.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Labels should be available after fitting"),
+    };
 
     // With cluster_all = true, all points should be assigned to clusters
     let mut ms2 = MeanShift::new(1.0, None, None, None, Some(true));
     ms2.fit(data.view()).unwrap();
-    let labels2 = ms2.get_labels().unwrap();
+    let labels2 = match ms2.get_labels() {
+        Some(labels) => labels,
+        None => panic!("Labels should be available after fitting"),
+    };
 
     // Both should have the same number of labels
     assert_eq!(labels1.len(), labels2.len());

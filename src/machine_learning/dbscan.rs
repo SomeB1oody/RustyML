@@ -78,50 +78,19 @@ impl DBSCAN {
         }
     }
 
-    /// Returns the epsilon (neighborhood radius) parameter value
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The current epsilon value
-    pub fn get_eps(&self) -> f64 {
-        self.eps
-    }
+    get_field!(get_epsilon, eps, f64);
 
-    /// Returns the minimum samples parameter value
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The current minimum samples threshold
-    pub fn get_min_samples(&self) -> usize {
-        self.min_samples
-    }
+    get_field!(get_min_samples, min_samples, usize);
 
-    get_metric!();
+    get_field!(get_metric, metric, DistanceCalculationMetric);
 
-    /// Returns the cluster labels assigned to each sample
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<i32>)` - Array of cluster labels if model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_labels(&self) -> Result<&Array1<i32>, ModelError> {
-        self.labels_.as_ref().ok_or(ModelError::NotFitted)
-    }
+    get_field_as_ref!(get_labels, labels_, &Option<Array1<i32>>);
 
-    /// Returns the indices of core samples
-    ///
-    /// Core samples are samples that have at least `min_samples` points within
-    /// distance `eps` of themselves.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<usize>)` - Array of indices of core samples if model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_core_sample_indices(&self) -> Result<&Array1<usize>, ModelError> {
-        self.core_sample_indices
-            .as_ref()
-            .ok_or(ModelError::NotFitted)
-    }
+    get_field_as_ref!(
+        get_core_sample_indices,
+        core_sample_indices,
+        &Option<Array1<usize>>
+    );
 
     /// Computes distance between two data points using the specified metric
     fn compute_distance(

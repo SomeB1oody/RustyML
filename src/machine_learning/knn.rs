@@ -6,7 +6,7 @@ pub use super::*;
 ///
 /// - `Uniform` - Each neighbor is weighted equally
 /// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WeightingStrategy {
     Uniform,
     Distance,
@@ -113,51 +113,19 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         }
     }
 
-    /// Returns the number of neighbors (k) used in the KNN algorithm
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The value of k, representing how many nearest neighbors are considered for predictions
-    pub fn get_k(&self) -> usize {
-        self.k
-    }
+    get_field!(get_k, k, usize);
 
-    /// Returns the weighting strategy used in the KNN algorithm
-    ///
-    /// # Returns
-    ///
-    /// * `&WeightingStrategy` - A reference to the `WeightingStrategy` enum used by this instance
-    pub fn get_weighting_strategy(&self) -> &WeightingStrategy {
-        &self.weighting_strategy
-    }
+    get_field!(
+        get_weighting_strategy,
+        weighting_strategy,
+        WeightingStrategy
+    );
 
-    get_metric!();
+    get_field!(get_metric, metric, DistanceCalculationMetric);
 
-    /// Returns a reference to the training features if available
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - A reference to the training data features if the model has been trained
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_x_train(&self) -> Result<&Array2<f64>, ModelError> {
-        match self.x_train {
-            Some(ref x) => Ok(x),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_x_train, x_train, &Option<Array2<f64>>);
 
-    /// Returns a reference to the training labels if available
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<T>)` - A reference to the training data labels if the model has been trained
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_y_train(&self) -> Result<&Array1<T>, ModelError> {
-        match self.y_train {
-            Some(ref y) => Ok(y),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    get_field_as_ref!(get_y_train, y_train, &Option<Array1<T>>);
 
     /// Fits the KNN classifier to the training data
     ///
