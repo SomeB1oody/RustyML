@@ -7,6 +7,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
 ### Changed
+- Refactor the implementation code of the `DecisionTree`
+
+## [v0.8.0] - 2025-10-6 (UTC-7)
+### Changed
 - Remove `#[doc(cfg)]` because it is still experimental
 
 ## [v0.8.0] - 2025-10-1 (UTC-7)

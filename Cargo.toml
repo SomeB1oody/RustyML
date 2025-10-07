@@ -9,6 +9,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["machine-learning", "ML", "Deep-learning", "DL", "AI"]
 repository = "https://github.com/SomeB1oody/RustyML"
+documentation = "https://docs.rs/crate/rustyml"
 categories = ["mathematics", "science", "algorithms"]
 
 [features]

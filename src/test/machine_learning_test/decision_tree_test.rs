@@ -18,11 +18,11 @@ fn test_decision_tree_new() {
     let dt = DecisionTree::new(Algorithm::CART, false, Some(params));
     assert!(matches!(dt.get_algorithm(), Algorithm::CART));
     assert!(!dt.get_is_classifier());
-    assert_eq!(dt.get_params().max_depth, Some(5));
-    assert_eq!(dt.get_params().min_samples_split, 10);
-    assert_eq!(dt.get_params().min_samples_leaf, 5);
-    assert_eq!(dt.get_params().min_impurity_decrease, 0.1);
-    assert_eq!(dt.get_params().random_state, Some(42));
+    assert_eq!(dt.get_parameters().max_depth, Some(5));
+    assert_eq!(dt.get_parameters().min_samples_split, 10);
+    assert_eq!(dt.get_parameters().min_samples_leaf, 5);
+    assert_eq!(dt.get_parameters().min_impurity_decrease, 0.1);
+    assert_eq!(dt.get_parameters().random_state, Some(42));
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_fit_predict_classifier() {
 
     // Ensure the model is trained correctly
     assert_eq!(dt.get_n_features(), 2);
-    assert!(dt.get_root().is_ok());
+    assert!(dt.get_root().is_some());
 
     // Predict
     let predictions = dt.predict(x.view()).unwrap();
@@ -94,7 +94,7 @@ fn test_fit_predict_regressor() {
 
     // Ensure the model is trained correctly
     assert_eq!(dt.get_n_features(), 1);
-    assert!(dt.get_root().is_ok());
+    assert!(dt.get_root().is_some());
 
     // Predict
     let predictions = dt.predict(x.view()).unwrap();
@@ -222,10 +222,10 @@ fn test_error_handling() {
     let dt = DecisionTree::new(Algorithm::CART, true, None);
 
     // Trying to get the root node should fail
-    assert!(dt.get_root().is_err());
+    assert!(dt.get_root().is_none());
 
     // Trying to get the number of classes should also fail
-    assert!(dt.get_n_classes().is_err());
+    assert!(dt.get_n_classes().is_none());
 
     // Trying to predict should fail
     let x = arr2(&[[1.0, 2.0]]);
@@ -323,8 +323,8 @@ fn test_decision_tree_fit_predict() {
     // Test other properties of the model
     assert_eq!(tree.get_n_features(), 2);
     assert!(tree.get_is_classifier());
-    assert_eq!(*tree.get_algorithm(), Algorithm::CART);
-    assert!(tree.get_root().is_ok()); // Tree should be built
+    assert_eq!(tree.get_algorithm(), Algorithm::CART);
+    assert!(tree.get_root().is_some()); // Tree should be built
 }
 
 #[test]
@@ -361,6 +361,6 @@ fn test_decision_tree_with_custom_params() {
     assert_eq!(predictions.len(), 2);
 
     // Verify parameters were correctly applied
-    assert_eq!(tree.get_params().max_depth, Some(2));
-    assert_eq!(tree.get_params().random_state, Some(42));
+    assert_eq!(tree.get_parameters().max_depth, Some(2));
+    assert_eq!(tree.get_parameters().random_state, Some(42));
 }
