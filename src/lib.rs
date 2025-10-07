@@ -18,7 +18,10 @@ impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ModelError::NotFitted => {
-                write!(f, "Model has not been fitted. Parameters are unavailable.")
+                write!(
+                    f,
+                    "Model has not been fitted. Certain methods require the model to be fitted before use."
+                )
             }
             ModelError::InputValidationError(msg) => write!(f, "Input validation error: {}", msg),
             ModelError::TreeError(msg) => write!(f, "Tree structure error: {}", msg),
@@ -30,378 +33,346 @@ impl std::fmt::Display for ModelError {
 /// Implements the standard error trait for ModelError
 impl std::error::Error for ModelError {}
 
-/// # Module `math` contains mathematical utility functions for statistical operations and model evaluation.
+/// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///
-/// # Included formula
+/// This module provides comprehensive mathematical functions essential for machine learning algorithms,
+/// including impurity measures for decision trees, distance calculations for clustering algorithms,
+/// statistical measures for evaluation, and various mathematical utilities for data processing.
 ///
-/// - Sum of square total (SST) for measuring data variability
-/// - Sum of squared errors (SSE) for evaluating prediction errors
-/// - Sigmoid function for logistic regression and neural networks
-/// - Logistic loss (log loss) for binary classification models
-/// - Accuracy score for classification model evaluation
-/// - Calculate the squared Euclidean distance between two points
-/// - Calculate the Manhattan distance between two points
-/// - Calculate the Minkowski distance between two points
-/// - Calculate the Gaussian kernel (RBF kernel)
-/// - Calculates the entropy of a label set
-/// - Calculates the Gini impurity of a label set
-/// - Calculates the information gain when splitting a dataset
-/// - Calculates the gain ratio for a dataset split
-/// - Calculates the Mean Squared Error (MSE) of a set of values
-/// - Calculates the leaf node adjustment factor c(n)
-/// - Calculates the standard deviation of a set of values
+/// # Core Functions
+///
+/// ## Decision Tree Mathematics
+/// - `entropy` - Calculates the entropy of a label set for information-based splitting
+/// - `gini` - Calculates the Gini impurity for CART-based splitting
+/// - `information_gain` - Measures information gained from dataset splitting
+/// - `gain_ratio` - Normalized information gain for C4.5 algorithm
+///
+/// ## Distance Calculations
+/// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
+/// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
+/// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
+///
+/// ## Statistical Functions
+/// - `sum_of_square_total` - Total variability measurement (SST)
+/// - `sum_of_squared_errors` - Sum of squared prediction errors (SSE)
+/// - `variance` - Mean squared error or variance of a dataset
+/// - `standard_deviation` - Population standard deviation calculation
+/// - `average_path_length_factor` - Adjustment factor for isolation forest algorithms
+///
+/// ## Activation and Loss Functions
+/// - `sigmoid` - Sigmoid activation function for neural networks and logistic regression
+/// - `logistic_loss` - Cross-entropy loss for binary classification
 ///
 /// # Example
 /// ```rust
-/// use rustyml::math::sum_of_squared_errors;
+/// use rustyml::math::{entropy, gini, sigmoid, squared_euclidean_distance_row};
 /// use ndarray::array;
 ///
-/// // Example data
-/// let predicted = array![2.1, 3.8, 5.2, 7.1];
-/// let actual = array![2.0, 4.0, 5.0, 7.0];
+/// // Decision tree impurity measures
+/// let labels = array![0.0, 1.0, 1.0, 0.0];
+/// let ent = entropy(labels.view());
+/// let gini_val = gini(labels.view());
 ///
-/// // Calculate error metrics
-/// let sse = sum_of_squared_errors(predicted.view(), actual.view());
+/// // Distance calculations
+/// let v1 = array![1.0, 2.0];
+/// let v2 = array![4.0, 6.0];
+/// let dist = squared_euclidean_distance_row(v1.view(), v2.view()).unwrap();
+///
+/// // Activation function
+/// let activated = sigmoid(0.5);
 /// ```
 #[cfg(feature = "math")]
 pub mod math;
 
 /// Module `machine_learning` provides implementations of various machine learning algorithms and models.
 ///
-/// This module includes a collection of supervised and unsupervised learning algorithms
-/// that can be used for tasks such as classification, regression, and clustering:
+/// This module includes a comprehensive collection of supervised and unsupervised learning algorithms
+/// with parallel processing optimization and robust error handling for production use.
 ///
 /// # Supervised Learning Algorithms
 ///
 /// ## Classification
-/// - **LogisticRegression**: Binary classification using logistic regression with gradient descent optimization
-/// - **KNN**: K-Nearest Neighbors classifier with customizable distance metrics and weighting strategies
-/// - **DecisionTree**: Decision tree classifier with various splitting criteria and pruning options
-/// - **Support Vector Machines (SVM)**: A set of supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm.
-/// - **Linear Support Vector Classifier (LinearSVC)**: Implements a classifier similar to sklearn's LinearSVC, trained using the hinge loss function.
-/// - **Linear Discriminant Analysis (LDA)**: A classifier and dimensionality reduction technique that projects data onto a lower-dimensional space while maintaining class separability
+/// - **LogisticRegression**: Binary classification with gradient descent optimization and regularization support
+/// - **KNN**: K-Nearest Neighbors with customizable distance metrics (Euclidean, Manhattan, Minkowski) and weighting strategies
+/// - **DecisionTree**: Decision tree classifier supporting ID3, C4.5, and CART algorithms with pruning options
+/// - **SVC**: Support Vector Classifier using Sequential Minimal Optimization (SMO) algorithm with kernel support
+/// - **LinearSVC**: Linear Support Vector Classifier optimized for large datasets with hinge loss
+/// - **LinearDiscriminantAnalysis**: LDA for classification and dimensionality reduction with class separability preservation
 ///
 /// ## Regression
-/// - **LinearRegression**: Simple and multivariate linear regression with optional intercept fitting
+/// - **LinearRegression**: Simple and multivariate linear regression with L1/L2 regularization options
 ///
 /// # Unsupervised Learning Algorithms
 ///
 /// ## Clustering
-/// - **KMeans**: K-means clustering with customizable initialization and convergence criteria
-/// - **DBSCAN**: Density-based spatial clustering of applications with noise
-/// - **MeanShift**: Non-parametric clustering that finds clusters by identifying density modes
+/// - **KMeans**: K-means clustering with K-means++ initialization and parallel processing
+/// - **DBSCAN**: Density-based clustering for discovering clusters of arbitrary shapes with noise detection
+/// - **MeanShift**: Non-parametric clustering that automatically determines cluster centers
 ///
 /// ## Anomaly Detection
-/// - **IsolationForest**: Isolation Forest for identifying anomalies and outliers in the data
+/// - **IsolationForest**: Ensemble method for efficient anomaly detection in high-dimensional data
 ///
-/// # Utility Functions
-/// - **estimate_bandwidth**: Estimates the bandwidth parameter for MeanShift clustering
-/// - **generate_polynomial_features**: Creates polynomial features for enhancing model complexity
+/// # Distance Metrics and Utilities
+/// - `DistanceCalculationMetric` - Enum defining Euclidean, Manhattan, and Minkowski distance metrics
+/// - `RegularizationType` - L1 and L2 regularization options for preventing overfitting
+/// - Helper macros and validation functions for consistent model interfaces
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::*;
+/// use rustyml::machine_learning::*;
 /// use ndarray::{Array1, Array2, array};
 ///
-/// // Create a linear regression model
+/// // Linear regression example
 /// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
-///
-/// // Prepare training data
-/// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
-/// let raw_y = vec![6.0, 9.0, 12.0];
-///
-/// // Convert Vec to ndarray types
-/// let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
-/// let y = Array1::from_vec(raw_y);
-///
-/// // Train the model
+/// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
+/// let y = array![6.0, 9.0, 12.0];
 /// model.fit(x.view(), y.view()).unwrap();
 ///
-/// // Make predictions
-/// let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
-/// let predictions = model.predict(new_data.view());
-///
-/// // Since Clone is implemented, the model can be easily cloned
-/// let model_copy = model.clone();
-///
-/// // Since Debug is implemented, detailed model information can be printed
-/// println!("{:?}", model);
+/// // K-means clustering example
+/// let mut kmeans = KMeans::new(3, 100, 1e-4, Some(42));
+/// let data = array![[1.0, 2.0], [1.5, 1.8], [5.0, 8.0], [8.0, 8.0]];
+/// kmeans.fit(data.view()).unwrap();
+/// let labels = kmeans.predict(data.view()).unwrap();
 /// ```
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
 /// A convenience module that re-exports the most commonly used types and traits from this crate.
 ///
-/// This module provides a single import point for frequently used items from this library's machine learning modules,
-/// allowing users to import multiple items with a single `use` statement.
-///
-/// # Examples
-/// ```rust
-/// // Import all common items
-/// use rustyml::prelude::*;
-///
-/// // Now you can use items like DBSCAN, KMeans, DecisionTree, etc. directly
-/// ```
+/// This module provides a single import point for frequently used items from the machine learning library,
+/// enabling quick access to essential components with a single `use` statement.
 ///
 /// # Available Components
 ///
 /// ## Machine Learning Models
+/// - Classification algorithms (KNN, DecisionTree, LogisticRegression, SVC, LinearSVC, LinearDiscriminantAnalysis)
+/// - Regression algorithms (LinearRegression)
+/// - Clustering algorithms (KMeans, DBSCAN, MeanShift)
+/// - Anomaly detection (IsolationForest)
 ///
-/// ### Clustering
-/// - `DBSCAN` - Density-based spatial clustering of applications with noise
-/// - `KMeans` - K-means clustering algorithm
-/// - `MeanShift` - Non-parametric clustering that finds clusters by identifying density modes
-///
-/// ### Classification
-/// - `KNN` - K-Nearest Neighbors classifier
-/// - `DecisionTree` - Decision tree classifier with various splitting criteria
-/// - `LogisticRegression` - Binary classification using logistic regression
-/// - `SVC` - Support Vector Classifier using Sequential Minimal Optimization
-///
-/// ### Regression
-/// - `LinearRegression` - Simple and multivariate linear regression
-///
-/// ### Anomaly Detection
-/// - `IsolationForest` - Isolation Forest for identifying anomalies and outliers
-///
-/// ## Utility Functions and Data Processing
-///
-/// ### Dimensionality Reduction
-/// - `PCA` - Principal Component Analysis for dimensionality reduction
-///
-/// ### Data Preprocessing
-/// - `standardize` - Data standardization utility
-/// - `train_test_split` - Split datasets into training and testing sets
-/// - `generate_polynomial_features` - Create polynomial features for enhanced model complexity
-/// - `estimate_bandwidth` - Estimate bandwidth parameter for MeanShift clustering
+/// ## Data Processing and Utilities
+/// - Dimensionality reduction (PCA, kernel PCA, t-SNE, LDA)
+/// - Data preprocessing (standardize, train_test_split)
+/// - Feature engineering utilities
+/// - and more (See details at documentation in utility module)
 ///
 /// ## Evaluation Metrics
-/// - `ConfusionMatrix` - Binary classification evaluation matrix
-/// - `accuracy` - Calculate classification accuracy
-/// - `mean_squared_error` - Calculate mean squared error for regression
-/// - `r2_score` - Calculate coefficient of determination (R²)
+/// - Classification metrics (ConfusionMatrix, accuracy, calculate_auc)
+/// - Regression metrics (mean_squared_error, r2_score, mean_absolute_error)
+/// - Clustering metrics (adjusted_rand_index, silhouette_score)
+/// - and more (See details at documentation in metric module)
 ///
 /// ## Neural Network Components
-/// - Complete neural network framework including layers, optimizers, loss functions, and sequential models
-/// - All components from the `neural_network` module are available
+/// - Complete neural network framework with layers, optimizers, loss functions
+/// - Sequential model architecture for building feed-forward networks
+/// - and more (See details at documentation in neural_network module)
 ///
-/// ## Configuration Types and Enums
-/// - `DistanceCalculationMetric` - Distance metrics for various algorithms
-/// - `KernelType` - Kernel types for SVM algorithms
-/// - `RegularizationType` - Regularization types for regression models
-/// - `WeightingStrategy` - Weighting strategies for KNN classifier
-/// - `Algorithm` - Algorithm options for decision trees
-/// - `DecisionTreeParams` - Parameter configuration for decision trees
+/// # Examples
+/// ```rust
+/// use rustyml::prelude::*;
 ///
-/// ## Traits
-/// - All common traits for machine learning models and neural networks
-/// - Includes interfaces for model fitting, prediction, and parameter access
+/// // Quick access to all commonly used components
+/// ```
 pub mod prelude;
 
 /// A collection of utility functions and data processing tools to support machine learning operations.
 ///
-/// This module provides various utility components that are commonly used across different machine learning
-/// tasks, including data transformation, dimensionality reduction, and preprocessing techniques.
+/// This module provides essential data transformation and preprocessing capabilities that complement
+/// the main machine learning algorithms, including dimensionality reduction techniques, data splitting
+/// utilities, and various preprocessing functions.
 ///
-/// # Submodules
+/// # Dimensionality Reduction Techniques
 ///
-/// ## Dimensionality Reduction
-/// * `principal_component_analysis` - Implementation of Principal Component Analysis (PCA) for
-///   dimensionality reduction and feature extraction
-/// * `kernel_pca` - Kernel Principal Component Analysis for non-linear dimensionality reduction
-///   using kernel methods
-/// * `t_sne` - t-Distributed Stochastic Neighbor Embedding (t-SNE) implementation for
-///   visualizing high-dimensional data
-/// * `linear_discriminant_analysis` - Linear Discriminant Analysis (LDA) for classification
-///   and dimensionality reduction with class separability preservation
+/// ## Linear Methods
+/// - **PCA (Principal Component Analysis)**: Linear dimensionality reduction for feature extraction and data visualization
+/// - **LDA (Linear Discriminant Analysis)**: Supervised dimensionality reduction with class separability optimization
 ///
-/// ## Data Preprocessing
-/// * `train_test_split` - Utility function for splitting datasets into training and test sets
-///   with configurable test size and random state
+/// ## Non-linear Methods
+/// - **Kernel PCA**: Non-linear dimensionality reduction using kernel methods for complex data patterns
+/// - **t-SNE**: t-Distributed Stochastic Neighbor Embedding for high-dimensional data visualization
 ///
-/// # Features
+/// # Data Preprocessing
+/// - **train_test_split**: Utility for splitting datasets into training and testing sets with configurable ratios
+/// - **standardize**: Data standardization (z-score normalization) for feature scaling
+/// - **KernelType**: Enumeration of supported kernel functions (RBF, Linear, Polynomial, Sigmoid)
 ///
-/// - **Linear Dimensionality Reduction**: PCA for extracting principal components from data
-/// - **Non-linear Dimensionality Reduction**: Kernel PCA and t-SNE for complex data patterns
-/// - **Supervised Dimensionality Reduction**: LDA for class-aware dimensionality reduction
-/// - **Data Splitting**: Train-test split functionality with random sampling
+/// # Key Features
+/// - **Parallel Processing**: Rayon-based parallel computation for performance optimization
 /// - **Flexible Configuration**: Customizable parameters for all algorithms
-/// - **Performance Optimized**: Parallel processing support using Rayon
+/// - **Memory Efficient**: Optimized implementations for large datasets
+/// - **Robust Error Handling**: Comprehensive input validation and error reporting
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utility::principal_component_analysis::PCA;
+/// use rustyml::utility::*;
 /// use ndarray::{Array2, arr2};
 ///
-/// // Create a new PCA instance with 2 components
+/// // PCA dimensionality reduction
 /// let mut pca = PCA::new(2);
-///
-/// // Data to transform
-/// let data = arr2(&[
-///     [1.0, 2.0, 3.0],
-///     [4.0, 5.0, 6.0],
-///     [7.0, 8.0, 9.0],
-/// ]);
-///
-/// // Fit and transform data
+/// let data = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
 /// let transformed = pca.fit_transform(data.view()).unwrap();
+/// // and more
 /// ```
 #[cfg(feature = "utility")]
 pub mod utility;
 
-/// This module provides implementation of comprehensive evaluation metrics used in statistical analysis and machine learning models.
+/// Comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
 ///
-/// The metric module contains a comprehensive collection of evaluation functions and structures for measuring
-/// the performance of machine learning models across various domains including regression, classification,
-/// and probabilistic prediction tasks.
+/// This module provides a complete collection of evaluation functions and structures for measuring
+/// the performance of machine learning models across regression, classification, and clustering tasks
+/// with robust statistical foundations and optimized implementations.
 ///
 /// # Regression Metrics
-///
-/// The module offers several metrics for evaluating regression models:
-///
-/// - `mean_squared_error` - Calculates the Mean Squared Error (MSE), measuring the average of squared differences between predicted and actual values
-/// - `root_mean_squared_error` - Calculates the Root Mean Squared Error (RMSE), providing MSE in the same units as the original data for better interpretability
-/// - `mean_absolute_error` - Calculates the Mean Absolute Error (MAE), measuring the average magnitude of errors without considering direction
-/// - `r2_score` - Calculates the coefficient of determination (R²) that measures how well a model explains the variance in the target variable
+/// - **mean_squared_error**: Average of squared differences between predicted and actual values
+/// - **root_mean_squared_error**: Square root of MSE, providing error in original data units
+/// - **mean_absolute_error**: Average magnitude of prediction errors without considering direction
+/// - **r2_score**: Coefficient of determination measuring explained variance (R² score)
 ///
 /// # Classification Metrics
 ///
-/// The module provides comprehensive binary classification evaluation tools:
-///
-/// ## ConfusionMatrix Struct
-/// * A comprehensive structure for binary classification evaluation containing:
-///   - True Positives (TP), False Positives (FP), True Negatives (TN), False Negatives (FN) counts
-///   - Methods for calculating derived metrics: accuracy, error rate, precision, recall, specificity, and F1 score
-///   - Summary generation for detailed performance reporting
+/// ## ConfusionMatrix Structure
+/// Comprehensive binary classification evaluation with:
+/// - True/False Positive and Negative counts (TP, FP, TN, FN)
+/// - Derived metrics: accuracy, precision, recall, specificity, F1-score, error rate
+/// - Formatted summary generation for detailed performance reporting
 ///
 /// ## Classification Functions
-/// - `accuracy` - Standalone function for calculating classification accuracy from predicted and actual arrays
-/// - `calculate_auc` - Computes the Area Under the ROC Curve (AUC-ROC) for binary classification models using the Mann-Whitney U statistic
+/// - **accuracy**: Standalone accuracy calculation for multi-class and binary classification
+/// - **calculate_auc**: Area Under ROC Curve using Mann-Whitney U statistic for binary classification
 ///
-/// # Advanced Statistical Metrics
-///
-/// - `adjusted_rand_index` - Calculates the Adjusted Rand Index for clustering evaluation, measuring similarity between predicted and ground truth clusterings
-/// - `silhouette_score` - Computes the Silhouette Coefficient for clustering quality assessment, measuring how similar objects are to their own cluster versus other clusters
+/// # Clustering Evaluation Metrics
+/// - **adjusted_rand_index**: Adjusted Rand Index for clustering similarity measurement with chance correction
+/// - **normalized_mutual_info**: Normalized Mutual Information measuring clustering agreement
+/// - **adjusted_mutual_info**: Mutual information adjusted for chance agreement between clusterings
 ///
 /// # Key Features
-///
-/// - **Robust Input Validation**: All functions include comprehensive input validation with clear error messages
-/// - **Edge Case Handling**: Proper handling of empty arrays, division by zero, and other edge cases
-/// - **Numerical Stability**: Implementation includes epsilon values and other techniques to handle floating-point precision issues
-/// - **Performance Optimized**: Efficient single-pass calculations where possible to minimize computational overhead
-/// - **Comprehensive Documentation**: Each function includes detailed parameter descriptions, return values, panic conditions, and practical examples
+/// - **Robust Input Validation**: Comprehensive error checking with informative messages
+/// - **Numerical Stability**: Epsilon handling and stable algorithms for edge cases
+/// - **Performance Optimized**: Single-pass calculations and efficient implementations
+/// - **Statistical Rigor**: Theoretically sound implementations with proper mathematical foundations
 ///
 /// # Examples
 /// ```rust
 /// use rustyml::metric::*;
 /// use ndarray::{Array1, array};
 ///
-/// // Regression metrics example
+/// // Regression evaluation
 /// let predictions = array![3.0, 2.0, 3.5, 4.1];
 /// let actuals = array![2.8, 2.1, 3.3, 4.2];
-///
 /// let mse = mean_squared_error(actuals.view(), predictions.view());
-/// let rmse = root_mean_squared_error(predictions.view(), actuals.view());
-/// let mae = mean_absolute_error(predictions.view(), actuals.view());
 /// let r2 = r2_score(predictions.view(), actuals.view());
 ///
-/// println!("MSE: {:.4}, RMSE: {:.4}, MAE: {:.4}, R²: {:.4}", mse, rmse, mae, r2);
-///
-/// // Binary classification metrics example
-/// let predicted = Array1::from(vec![1.0, 0.0, 1.0, 1.0, 0.0]);
-/// let actual = Array1::from(vec![1.0, 0.0, 0.0, 1.0, 1.0]);
-///
-/// // Using ConfusionMatrix for comprehensive evaluation
+/// // Classification evaluation with confusion matrix
+/// let predicted = array![1.0, 0.0, 1.0, 1.0, 0.0];
+/// let actual = array![1.0, 0.0, 0.0, 1.0, 1.0];
 /// let cm = ConfusionMatrix::new(predicted.view(), actual.view());
-/// println!("Accuracy: {:.3}", cm.accuracy());
-/// println!("Precision: {:.3}", cm.precision());
-/// println!("Recall: {:.3}", cm.recall());
 /// println!("F1 Score: {:.3}", cm.f1_score());
-/// println!("{}", cm.summary());
 ///
-/// // Using standalone accuracy function
-/// let acc = accuracy(predicted.view(), actual.view());
-/// println!("Standalone accuracy: {:.3}", acc);
-///
-/// // AUC-ROC calculation example
+/// // AUC-ROC for binary classification
 /// let scores = array![0.1, 0.4, 0.35, 0.8];
 /// let labels = array![false, true, false, true];
 /// let auc = calculate_auc(scores.view(), labels.view());
-/// println!("AUC-ROC: {:.3}", auc);
 /// ```
 #[cfg(feature = "metric")]
 pub mod metric;
 
-/// This module provides access to common datasets used for testing and benchmarking machine learning algorithms
+/// Access to standardized datasets for machine learning experimentation and algorithm benchmarking.
 ///
-/// The dataset module contains standardized datasets that are frequently used in
-/// machine learning research and education, making it easier to test algorithms
-/// against well-known data.
+/// This module provides convenient access to well-known datasets commonly used in machine learning
+/// research, education, and algorithm validation. All datasets are pre-processed and ready for
+/// immediate use with the library's machine learning algorithms.
 ///
 /// # Available Datasets
+/// - **iris**: Classic iris flower dataset for multi-class classification (150 samples, 4 features, 3 classes)
+/// - **diabetes**: Regression dataset for predicting diabetes progression (442 samples, 10 features)
+/// - **boston_housing**: Housing price prediction dataset for regression tasks
+/// - **wine_quality**: Wine quality datasets for both red and white wines (classification/regression)
+/// - **titanic**: Famous Titanic survival prediction dataset for binary classification
+/// - **raw_data**: Access to raw data loading utilities
 ///
-/// - `iris` - The famous Iris flower dataset containing measurements for three species of iris
-/// - `diabetes` - The diabetes dataset for regression analysis
-/// - `wine_quality` - The wine quality data set (red wine and white wine)
+/// # Data Format
+/// All datasets return tuples in the format `(headers, data, target)` where:
+/// - `headers`: Vector of feature names as strings
+/// - `data`: 2D ndarray with samples as rows and features as columns
+/// - `target`: 1D ndarray with target values or class labels
 ///
-/// # Usage Example
-/// ``` rust
+/// # Examples
+/// ```rust
 /// use rustyml::dataset::iris;
 ///
 /// // Load the iris dataset
 /// let (headers, data, class) = iris::load_iris();
-/// println!("Loaded iris dataset with {} samples", data.shape()[0]);
+/// println!("Dataset shape: {:?}", data.shape());
+/// println!("Classes: {:?}", class);
+/// println!("Features: {:?}", headers);
 /// ```
 #[cfg(feature = "dataset")]
 pub mod dataset;
 
-/// This module provides components for building and training neural networks.
+/// Components for building and training neural networks with flexible architecture design.
 ///
-/// # Features
-///
-/// - Various layer implementations for neural network construction
-/// - Loss functions for measuring model performance
-/// - Optimizers for parameter updates during training
-/// - Sequential model for building linear neural networks
+/// This module provides a comprehensive framework for constructing, training, and deploying
+/// neural networks with support for various layer types, optimization algorithms, loss functions,
+/// and model architectures.
 ///
 /// # Core Components
 ///
-/// - `Layer`: Trait for neural network layers with forward and backward propagation
-/// - `LossFunction`: Trait for computing loss and gradients
-/// - `Optimizer`: Trait for parameter optimization strategies
-/// - `Tensor`: Type alias for n-dimensional arrays used throughout the module
+/// ## Layer Types
+/// - **Dense**: Fully connected layers with customizable activation functions
+/// - **Activation**: Standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, etc.)
+/// - **Pooling Layers**: Max pooling operations for 1D, 2D, and 3D data (MaxPooling1D, MaxPooling2D, MaxPooling3D)
+/// - **Global Pooling**: Global max pooling for 1D, 2D, and 3D tensors
+/// - **Dropout**: Regularization layer to prevent overfitting during training
+///
+/// ## Optimization Algorithms
+/// - **SGD**: Stochastic Gradient Descent with momentum support
+/// - **Adam**: Adaptive moment estimation optimizer
+/// - **RMSProp**: Root Mean Square Propagation optimizer
+/// - **AdaGrad**: Adaptive gradient algorithm
+///
+/// ## Loss Functions
+/// - **MeanSquaredError**: For regression tasks
+/// - **BinaryCrossEntropy**: For binary classification
+/// - **CategoricalCrossEntropy**: For multi-class classification
+/// - **SparseCategoricalCrossEntropy**: For multi-class with integer labels
+///
+/// ## Model Architecture
+/// - **Sequential**: Linear stack of layers for feed-forward neural networks
+/// - **Tensor**: Type alias for n-dimensional arrays used throughout the framework
+///
+/// # Key Features
+/// - **Flexible Architecture**: Easy model construction with intuitive API
+/// - **Automatic Differentiation**: Built-in backpropagation implementation
+/// - **Training Loop**: Integrated training with loss tracking and convergence monitoring
+/// - **Prediction Interface**: Simple prediction methods for inference
 ///
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::*;
 /// use ndarray::Array;
 ///
-/// //Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
-/// let x = Array::ones((2, 4)).into_dyn();
-/// let y = Array::ones((2, 1)).into_dyn();
+/// // Create input and target tensors
+/// let x = Array::ones((2, 4)).into_dyn();  // 2 samples, 4 features
+/// let y = Array::ones((2, 1)).into_dyn();  // 2 samples, 1 output
 ///
-/// // Build the model
+/// // Build sequential model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, Activation::ReLU))
-/// .add(Dense::new(3, 1, Activation::ReLU));
-/// model.compile(SGD::new(0.01), MeanSquaredError::new());
+/// model.add(Dense::new(4, 8, Activation::ReLU))   // Input layer: 4 -> 8
+///      .add(Dense::new(8, 3, Activation::ReLU))   // Hidden layer: 8 -> 3
+///      .add(Dense::new(3, 1, Activation::Linear)); // Output layer: 3 -> 1
 ///
-/// // Print model structure (summary)
+/// // Compile with optimizer and loss function
+/// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+///
+/// // Display model architecture
 /// model.summary();
 ///
 /// // Train the model
-/// model.fit(&x, &y, 3).unwrap();
+/// model.fit(&x, &y, 100).unwrap();
 ///
-/// // Use predict for forward propagation prediction
-/// let prediction = model.predict(&x);
-/// println!("Prediction results: {:?}", prediction);
+/// // Make predictions
+/// let predictions = model.predict(&x);
 /// ```
-///
-/// Each submodule contains specialized components:
-/// - `layer`: Different neural network layers (Dense, Activation, etc.)
-/// - `loss_function`: Various loss functions (MSE, CrossEntropy, etc.)
-/// - `optimizer`: Parameter optimization algorithms (SGD, Adam, RMSProp, etc.)
-/// - `sequential`: Sequential model for creating feed-forward neural networks
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
 
