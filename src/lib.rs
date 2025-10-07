@@ -46,6 +46,7 @@ impl std::error::Error for ModelError {}
 /// - `gini` - Calculates the Gini impurity for CART-based splitting
 /// - `information_gain` - Measures information gained from dataset splitting
 /// - `gain_ratio` - Normalized information gain for C4.5 algorithm
+/// - `c` - Calculates the average path length adjustment factor for isolation trees
 ///
 /// ## Distance Calculations
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors

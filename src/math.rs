@@ -2,6 +2,8 @@ use crate::ModelError;
 use ahash::AHashMap;
 use ndarray::ArrayView1;
 
+const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
+
 /// Calculates the Sum of Square Total
 ///
 /// SST measures the total variability in the data, computed as the sum of squared
@@ -749,9 +751,6 @@ pub fn average_path_length_factor(n: f64) -> f64 {
         return 0.0;
     }
 
-    // Use constant for Euler's gamma to improve readability
-    const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
-
     // Calculate n-1 once as it's used multiple times
     let n_minus_1 = n - 1.0;
 
@@ -847,4 +846,71 @@ pub fn standard_deviation(values: ArrayView1<f64>) -> Result<f64, ModelError> {
     }
 
     Ok(std_dev)
+}
+
+/// Calculates the average path length adjustment factor for isolation trees.
+///
+/// This function computes the correction factor `c(n)` used in isolation forest algorithms
+/// to normalize path lengths. The adjustment accounts for the average path length of
+/// a binary search tree with `n` samples, which helps in calculating anomaly scores.
+///
+/// # Mathematical Formula
+///
+/// The formula used is:
+/// - `c(n) = 2 * H(n-1) - 2 * (n-1) / n`
+///
+/// where `H(n-1)` is the (n-1)th harmonic number, approximated as:
+/// - For large n (> 50): `H(n-1) ≈ ln(n-1) + γ` (where γ is Euler's constant)
+/// - For small n (≤ 50): `H(n-1) = Σ(1/i)` for i from 1 to n-1 (exact calculation)
+///
+/// # Parameters
+///
+/// * `n` - Number of samples in the isolation tree node (must be > 0)
+///
+/// # Returns
+///
+/// * `f64` - The adjustment factor for average path length normalization:
+///   - Returns 0.0 for n ≤ 1 (degenerate cases)
+///   - Returns 1.0 for n = 2 (single split)
+///   - Returns calculated adjustment factor for n > 2
+///
+/// # Performance Notes
+///
+/// For efficiency, this function uses different calculation methods based on input size:
+/// - Small values (n ≤ 50): Direct harmonic number computation for accuracy
+/// - Large values (n > 50): Logarithmic approximation for performance
+///
+/// # Examples
+/// ```rust
+/// use rustyml::math::c;
+///
+/// // Small sample size - exact calculation
+/// let factor_small = c(10);
+/// // factor_small ≈ 3.748
+///
+/// // Large sample size - logarithmic approximation
+/// let factor_large = c(1000);
+/// // factor_large ≈ 13.815
+///
+/// // Edge cases
+/// assert_eq!(c(0), 0.0);  // Degenerate case
+/// assert_eq!(c(1), 0.0);  // Single sample
+/// assert_eq!(c(2), 1.0);  // Single split
+/// ```
+#[inline]
+pub fn c(n: usize) -> f64 {
+    if n <= 1 {
+        return 0.0;
+    }
+    if n == 2 {
+        return 1.0;
+    }
+
+    let h_n_minus_1 = if n > 50 {
+        ((n - 1) as f64).ln() + EULER_GAMMA
+    } else {
+        (1..n).map(|i| 1.0 / i as f64).sum::<f64>()
+    };
+
+    2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
 }

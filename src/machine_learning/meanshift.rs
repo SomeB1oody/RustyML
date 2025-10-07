@@ -131,28 +131,20 @@ impl MeanShift {
         }
     }
 
+    // Getters
     get_field!(get_bandwidth, bandwidth, f64);
-
     get_field_as_ref!(get_cluster_centers, cluster_centers, &Option<Array2<f64>>);
-
     get_field_as_ref!(get_labels, labels, &Option<Array1<usize>>);
-
     get_field_as_ref!(
         get_n_samples_per_center,
         n_samples_per_center,
         &Option<Array1<usize>>
     );
-
     get_field!(get_n_iter, n_iter, Option<usize>);
-
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-
     get_field!(get_max_iterations, max_iter, usize);
-
     get_field!(get_tolerance, tol, f64);
-
     get_field!(get_bin_seeding, bin_seeding, bool);
-
     get_field!(get_cluster_all, cluster_all, bool);
 
     /// Fits the MeanShift clustering model to the input data.

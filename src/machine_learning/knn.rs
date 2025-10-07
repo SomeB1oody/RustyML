@@ -113,18 +113,15 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         }
     }
 
+    // Getters
     get_field!(get_k, k, usize);
-
     get_field!(
         get_weighting_strategy,
         weighting_strategy,
         WeightingStrategy
     );
-
     get_field!(get_metric, metric, DistanceCalculationMetric);
-
     get_field_as_ref!(get_x_train, x_train, &Option<Array2<f64>>);
-
     get_field_as_ref!(get_y_train, y_train, &Option<Array1<T>>);
 
     /// Fits the KNN classifier to the training data

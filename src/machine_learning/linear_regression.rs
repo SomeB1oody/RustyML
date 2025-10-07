@@ -122,26 +122,19 @@ impl LinearRegression {
         }
     }
 
+    // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
-
     get_field!(get_learning_rate, learning_rate, f64);
-
     get_field!(get_max_iter, max_iter, usize);
-
     get_field!(get_tolerance, tol, f64);
-
     get_field!(get_max_iterations, max_iter, usize);
-
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-
     get_field!(
         get_regularization_type,
         regularization_type,
         Option<RegularizationType>
     );
-
     get_field_as_ref!(get_coefficients, coefficients, &Option<Array1<f64>>);
-
     get_field!(get_intercept, intercept, Option<f64>);
 
     /// Fits the linear regression model using gradient descent

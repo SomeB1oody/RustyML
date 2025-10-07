@@ -269,15 +269,10 @@ impl DecisionTree {
 
     // Getters
     get_field!(get_algorithm, algorithm, Algorithm);
-
     get_field!(get_n_features, n_features, usize);
-
     get_field!(get_n_classes, n_classes, Option<usize>);
-
     get_field_as_ref!(get_parameters, params, &DecisionTreeParams);
-
     get_field_as_ref!(get_root, root, &Option<Box<Node>>);
-
     get_field!(get_is_classifier, is_classifier, bool);
 
     /// Trains the decision tree on the provided training data.

@@ -151,22 +151,15 @@ impl KMeans {
         }
     }
 
+    // Getters
     get_field!(get_n_clusters, n_clusters, usize);
-
     get_field!(get_max_iterations, max_iter, usize);
-
     get_field!(get_tolerance, tol, f64);
-
     get_field!(get_random_seed, random_seed, Option<u64>);
-
     get_field!(get_n_iter, n_iter, Option<usize>);
-
     get_field_as_ref!(get_labels, labels, &Option<Array1<usize>>);
-
     get_field!(get_inertia, inertia, Option<f64>);
-
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-
     get_field_as_ref!(get_centroids, centroids, &Option<Array2<f64>>);
 
     /// Finds the closest centroid to a given data point and returns its index and distance.

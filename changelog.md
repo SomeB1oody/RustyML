@@ -9,6 +9,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor the implementation code of the `DecisionTree`
 - Improve module-level documentations
+- Reconstruct the implementation of `IsolationForest`
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
 ### Changed

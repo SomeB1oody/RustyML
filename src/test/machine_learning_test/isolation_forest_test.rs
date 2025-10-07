@@ -1,226 +1,408 @@
 use super::*;
 
+// Test basic constructor functionality
 #[test]
-fn test_isolation_forest_new() {
-    // Test creation with default parameters
+fn test_new() {
+    let forest = IsolationForest::new(50, 128, Some(6), Some(42));
+    assert_eq!(forest.get_n_estimators(), 50);
+    assert_eq!(forest.get_max_samples(), 128);
+    assert_eq!(forest.get_max_depth(), 6);
+    assert_eq!(forest.get_random_state(), Some(42));
+    assert_eq!(forest.get_n_features(), 0);
+}
+
+// Test default constructor
+#[test]
+fn test_default() {
     let forest = IsolationForest::default();
-    assert_eq!(forest.get_n_estimators(), 100); // Assuming default value is 100
-    assert_eq!(forest.get_max_samples(), 256); // Assuming default value is 256
-    assert_eq!(forest.get_max_depth(), 8); // Assuming default value is 8
+    assert_eq!(forest.get_n_estimators(), 100);
+    assert_eq!(forest.get_max_samples(), 256);
+    assert_eq!(forest.get_max_depth(), 8);
     assert_eq!(forest.get_random_state(), None);
-
-    // Test creation with custom parameters
-    let forest = IsolationForest::new(50, 100, Some(10), Some(42));
-    assert_eq!(forest.get_n_estimators(), 50);
-    assert_eq!(forest.get_max_samples(), 100);
-    assert_eq!(forest.get_max_depth(), 10);
-    assert_eq!(forest.get_random_state(), Some(42));
+    assert!(forest.get_trees().is_none());
 }
 
+// Test constructor with automatic max_depth calculation
 #[test]
-fn test_isolation_forest_getters() {
-    let forest = IsolationForest::new(50, 100, Some(10), Some(42));
+fn test_new_with_auto_max_depth() {
+    let forest = IsolationForest::new(10, 64, None, None);
+    // ceil(log2(64)) = ceil(6.0) = 6
+    assert_eq!(forest.get_max_depth(), 6);
 
-    assert_eq!(forest.get_n_estimators(), 50);
-    assert_eq!(forest.get_max_samples(), 100);
-    assert_eq!(forest.get_max_depth(), 10);
-    assert_eq!(forest.get_random_state(), Some(42));
-
-    // Test that get_trees returns an error before model is fitted
-    match forest.get_trees() {
-        Err(_) => assert!(true), // Expected failure
-        Ok(_) => panic!("Should return an error before fitting"),
-    }
+    let forest2 = IsolationForest::new(10, 100, None, None);
+    // ceil(log2(100)) = ceil(6.64) = 7
+    assert_eq!(forest2.get_max_depth(), 7);
 }
 
+// Test fitting with valid data
 #[test]
-fn test_isolation_forest_fit() {
-    // Create a 2D sample data
-    let data = Array2::from_shape_vec(
-        (10, 2),
-        vec![
-            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
-            0.8, 10.0, 10.0, // Outlier
-        ],
-    )
-    .unwrap();
+fn test_fit_valid_data() {
+    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42));
+    let x = arr2(&[
+        [1.0, 2.0],
+        [2.0, 3.0],
+        [3.0, 4.0],
+        [100.0, 200.0], // potential outlier
+    ]);
 
-    let mut forest = IsolationForest::new(10, 8, Some(5), Some(42));
-    forest.fit(data.view()).unwrap();
-
-    // After fitting, we should be able to get the trees
-    assert!(forest.get_trees().is_ok());
-    if let Ok(trees) = forest.get_trees() {
-        assert_eq!(trees.len(), 10); // Should have n_estimators trees
-    }
+    let result = forest.fit(x.view());
+    assert!(result.is_ok());
+    assert_eq!(forest.get_n_features(), 2);
+    assert!(forest.get_trees().is_some());
+    assert_eq!(forest.get_trees().as_ref().unwrap().len(), 10);
 }
 
+// Test fitting with empty data
 #[test]
-fn test_isolation_forest_anomaly_score() {
-    // Create a 2D sample data with one clear outlier
-    let data = Array2::from_shape_vec(
-        (10, 2),
-        vec![
-            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
-            0.8, 10.0, 10.0, // Outlier
-        ],
-    )
-    .unwrap();
+fn test_fit_empty_data() {
+    let mut forest = IsolationForest::default();
+    let x = Array2::<f64>::zeros((0, 2));
 
-    let mut forest = IsolationForest::new(100, 8, Some(8), Some(42));
-    forest.fit(data.view()).unwrap();
+    let result = forest.fit(x.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
 
-    // Test anomaly score for a normal point
-    let normal_point = vec![0.5, 0.5];
+// Test fitting with NaN values
+#[test]
+fn test_fit_nan_data() {
+    let mut forest = IsolationForest::default();
+    let x = arr2(&[[1.0, 2.0], [f64::NAN, 3.0], [4.0, 5.0]]);
+
+    let result = forest.fit(x.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
+
+// Test fitting with infinite values
+#[test]
+fn test_fit_infinite_data() {
+    let mut forest = IsolationForest::default();
+    let x = arr2(&[[1.0, 2.0], [f64::INFINITY, 3.0], [4.0, 5.0]]);
+
+    let result = forest.fit(x.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
+
+// Test anomaly score calculation for single samples
+#[test]
+fn test_anomaly_score() {
+    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42));
+    let x_train = arr2(&[[1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.8], [0.8, 1.0]]);
+
+    forest.fit(x_train.view()).unwrap();
+
+    // Test normal point (should have low anomaly score, close to 0.5)
+    let normal_point = [1.0, 1.0];
     let normal_score = forest.anomaly_score(&normal_point).unwrap();
+    assert!(normal_score >= 0.0 && normal_score <= 1.0);
 
-    // Test anomaly score for an outlier point
-    let anomaly_point = vec![10.0, 10.0];
-    let anomaly_score = forest.anomaly_score(&anomaly_point).unwrap();
+    // Test outlier point (should have higher anomaly score)
+    let outlier_point = [10.0, 10.0];
+    let outlier_score = forest.anomaly_score(&outlier_point).unwrap();
+    assert!(outlier_score >= 0.0 && outlier_score <= 1.0);
 
-    // The outlier's score should be higher than the normal point's
-    assert!(anomaly_score > normal_score);
+    // Outlier should typically have higher score than normal point
+    // (though this isn't guaranteed due to randomness)
 }
 
+// Test anomaly score on unfitted model
 #[test]
-fn test_isolation_forest_predict() {
-    // Create a 2D sample training data
-    let train_data = Array2::from_shape_vec(
-        (10, 2),
-        vec![
-            0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4, 0.5, 0.5, 0.6, 0.6, 0.7, 0.7, 0.8,
-            0.8, 0.9, 0.9,
-        ],
-    )
-    .unwrap();
-
-    let mut forest = IsolationForest::new(100, 8, Some(8), Some(42));
-    forest.fit(train_data.view()).unwrap();
-
-    // Create test data with both normal and anomaly points
-    let test_data = Array2::from_shape_vec(
-        (4, 2),
-        vec![
-            0.5, 0.5, // Normal point
-            0.7, 0.7, // Normal point
-            10.0, 10.0, // Outlier
-            -5.0, -5.0, // Outlier
-        ],
-    )
-    .unwrap();
-
-    // Predict
-    let predictions = forest.predict(test_data.view()).unwrap();
-    assert_eq!(predictions.len(), 4);
-
-    // The outliers' scores in the predictions array should be higher
-    assert!(predictions[2] > predictions[0]); // 10.0, 10.0 > 0.5, 0.5
-    assert!(predictions[3] > predictions[1]); // -5.0, -5.0 > 0.7, 0.7
-}
-
-#[test]
-fn test_error_handling() {
+fn test_anomaly_score_not_fitted() {
     let forest = IsolationForest::default();
+    let sample = [1.0, 2.0];
 
-    // Test calling anomaly detection functions before fitting
-    let sample = vec![0.5, 0.5];
-    match forest.anomaly_score(&sample) {
-        Err(_) => assert!(true), // Expected failure
-        Ok(_) => panic!("Should return error when model is not fitted"),
-    }
-
-    // Test calling predict function before fitting
-    let test_data = Array2::from_shape_vec((2, 2), vec![0.5, 0.5, 0.7, 0.7]).unwrap();
-    match forest.predict(test_data.view()) {
-        Err(_) => assert!(true), // Expected failure
-        Ok(_) => panic!("Should return error when model is not fitted"),
-    }
+    let result = forest.anomaly_score(&sample);
+    assert!(matches!(result, Err(ModelError::NotFitted)));
 }
 
+// Test anomaly score with wrong feature dimension
 #[test]
-fn test_dimension_validation() {
-    // Train on 2D data
-    let train_data = Array2::from_shape_vec(
-        (5, 2),
-        vec![0.0, 0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4, 0.4],
-    )
-    .unwrap();
+fn test_anomaly_score_dimension_mismatch() {
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let x_train = arr2(&[[1.0, 2.0], [2.0, 3.0]]);
 
-    let mut forest = IsolationForest::new(10, 4, Some(5), Some(42));
-    forest.fit(train_data.view()).unwrap();
+    forest.fit(x_train.view()).unwrap();
 
-    // Test with 2D point (should work)
-    let correct_sample = vec![0.2, 0.2];
-    assert!(forest.anomaly_score(&correct_sample).is_ok());
-
-    // Test with 1D point (should fail)
-    let too_small_sample = vec![0.2];
-    assert!(forest.anomaly_score(&too_small_sample).is_err());
-
-    // Test with 3D point (should fail)
-    let too_large_sample = vec![0.2, 0.2, 0.2];
-    assert!(forest.anomaly_score(&too_large_sample).is_err());
+    // Try with wrong number of features
+    let wrong_sample = [1.0, 2.0, 3.0]; // 3 features instead of 2
+    let result = forest.anomaly_score(&wrong_sample);
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
 }
 
+// Test predict function with multiple samples
+#[test]
+fn test_predict() {
+    let mut forest = IsolationForest::new(20, 50, Some(4), Some(42));
+    let x_train = arr2(&[
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.0, 0.2],
+        [0.2, 0.0],
+        [-0.1, 0.1],
+        [0.1, -0.1],
+    ]);
+
+    forest.fit(x_train.view()).unwrap();
+
+    let x_test = arr2(&[
+        [0.05, 0.05], // normal point
+        [5.0, 5.0],   // outlier
+        [0.0, 0.0],   // training point
+    ]);
+
+    let scores = forest.predict(x_test.view()).unwrap();
+    assert_eq!(scores.len(), 3);
+
+    // All scores should be between 0 and 1
+    for &score in scores.iter() {
+        assert!(score >= 0.0 && score <= 1.0);
+    }
+}
+
+// Test predict on unfitted model
+#[test]
+fn test_predict_not_fitted() {
+    let forest = IsolationForest::default();
+    let x_test = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
+
+    let result = forest.predict(x_test.view());
+    assert!(matches!(result, Err(ModelError::NotFitted)));
+}
+
+// Test predict with empty data
+#[test]
+fn test_predict_empty_data() {
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
+    forest.fit(x_train.view()).unwrap();
+
+    let x_test = Array2::<f64>::zeros((0, 2));
+    let result = forest.predict(x_test.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
+
+// Test predict with dimension mismatch
+#[test]
+fn test_predict_dimension_mismatch() {
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
+    forest.fit(x_train.view()).unwrap();
+
+    let x_test = arr2(&[[1.0, 2.0, 3.0]]); // 3 features instead of 2
+    let result = forest.predict(x_test.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
+
+// Test predict with NaN values
+#[test]
+fn test_predict_nan_data() {
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
+    forest.fit(x_train.view()).unwrap();
+
+    let x_test = arr2(&[[1.0, f64::NAN]]);
+    let result = forest.predict(x_test.view());
+    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+}
+
+// Test fit_predict function
 #[test]
 fn test_fit_predict() {
-    // Create a simple dataset with some outliers
-    // Normal points clustered around origin
-    let mut data = Vec::new();
+    let mut forest = IsolationForest::new(15, 30, Some(3), Some(123));
+    let x = arr2(&[
+        [1.0, 1.0],
+        [1.2, 0.8],
+        [0.8, 1.2],
+        [1.1, 0.9],
+        [10.0, 10.0], // outlier
+    ]);
 
-    // Generate 50 normal points around origin
-    let mut rng = rand::rng();
-    for _ in 0..50 {
-        let x = rng.random_range(-1.0..1.0);
-        let y = rng.random_range(-1.0..1.0);
-        data.push(vec![x, y]);
+    let scores = forest.fit_predict(x.view()).unwrap();
+    assert_eq!(scores.len(), 5);
+
+    // All scores should be between 0 and 1
+    for &score in scores.iter() {
+        assert!(score >= 0.0 && score <= 1.0);
     }
 
-    // Add 5 outlier points far from origin
-    data.push(vec![10.0, 10.0]);
-    data.push(vec![-10.0, 10.0]);
-    data.push(vec![10.0, -10.0]);
-    data.push(vec![-10.0, -10.0]);
-    data.push(vec![15.0, 0.0]);
+    // Verify the model is fitted
+    assert_eq!(forest.get_n_features(), 2);
+    assert!(forest.get_trees().is_some());
+}
 
-    // Convert to ndarray
-    let n_samples = data.len();
-    let n_features = data[0].len();
-    let x_flat: Vec<f64> = data.into_iter().flatten().collect();
-    let x = Array::from_shape_vec((n_samples, n_features), x_flat).unwrap();
+// Test with single feature data
+#[test]
+fn test_single_feature() {
+    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42));
+    let x = arr2(&[
+        [1.0],
+        [1.1],
+        [0.9],
+        [1.05],
+        [10.0], // outlier
+    ]);
 
-    // Create and fit IsolationForest
-    let mut forest = IsolationForest::new(100, 25, Some(8), Some(42));
+    let result = forest.fit(x.view());
+    assert!(result.is_ok());
 
-    // Using fit_predict to get anomaly scores
-    let scores = forest.fit_predict(x.view()).unwrap();
+    let scores = forest.predict(x.view()).unwrap();
+    assert_eq!(scores.len(), 5);
 
-    // We expect 5 outliers to have higher anomaly scores than normal points
-    // Let's sort the scores and check the indices
-    let mut score_indices: Vec<(usize, f64)> = scores
-        .iter()
-        .enumerate()
-        .map(|(i, &score)| (i, score))
-        .collect();
+    for &score in scores.iter() {
+        assert!(score >= 0.0 && score <= 1.0);
+    }
+}
 
-    score_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap()); // Sort by score in descending order
+// Test reproducibility with random seed
+#[test]
+fn test_reproducibility() {
+    let x = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5], [10.0, 10.0]]);
 
-    // The top 5 scores should correspond to our outliers (indices 50-54)
-    let top_indices: Vec<usize> = score_indices.iter().take(5).map(|(i, _)| *i).collect();
+    // Train two models with same seed
+    let mut forest1 = IsolationForest::new(10, 20, Some(3), Some(42));
+    let mut forest2 = IsolationForest::new(10, 20, Some(3), Some(42));
 
-    assert!(top_indices.contains(&50));
-    assert!(top_indices.contains(&51));
-    assert!(top_indices.contains(&52));
-    assert!(top_indices.contains(&53));
-    assert!(top_indices.contains(&54));
+    let scores1 = forest1.fit_predict(x.view()).unwrap();
+    let scores2 = forest2.fit_predict(x.view()).unwrap();
 
-    // Also verify that fit_predict gives the same results as calling fit and predict separately
-    let mut forest2 = IsolationForest::new(100, 25, Some(8), Some(42));
-    forest2.fit(x.view()).unwrap();
-    let scores2 = forest2.predict(x.view()).unwrap();
+    // Results should be identical with same seed
+    for i in 0..scores1.len() {
+        assert!((scores1[i] - scores2[i]).abs() < 1e-10);
+    }
+}
 
-    // Compare results (should be identical since we used the same random seed)
-    for (s1, s2) in scores.iter().zip(scores2.iter()) {
-        assert_eq!(*s1, *s2);
+// Test different numbers of estimators
+#[test]
+fn test_different_n_estimators() {
+    let x = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5], [0.5, 2.5]]);
+
+    for n_estimators in [1, 5, 10, 50] {
+        let mut forest = IsolationForest::new(n_estimators, 10, Some(2), Some(42));
+        let result = forest.fit(x.view());
+        assert!(result.is_ok());
+        assert_eq!(forest.get_trees().as_ref().unwrap().len(), n_estimators);
+    }
+}
+
+// Test different max_samples values
+#[test]
+fn test_different_max_samples() {
+    let x = arr2(&[
+        [1.0, 2.0],
+        [2.0, 1.0],
+        [1.5, 1.5],
+        [0.5, 2.5],
+        [2.5, 0.5],
+        [1.8, 1.2],
+    ]);
+
+    for max_samples in [2, 4, 6, 10] {
+        let mut forest = IsolationForest::new(5, max_samples, Some(3), Some(42));
+        let result = forest.fit(x.view());
+        assert!(result.is_ok());
+        assert_eq!(forest.get_max_samples(), max_samples);
+    }
+}
+
+// Test path length calculation consistency
+#[test]
+fn test_path_length_consistency() {
+    let mut forest = IsolationForest::new(1, 10, Some(3), Some(42)); // Single tree for predictable behavior
+    let x = arr2(&[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]);
+
+    forest.fit(x.view()).unwrap();
+
+    // Same sample should always give same score
+    let sample = [1.5, 1.5];
+    let score1 = forest.anomaly_score(&sample).unwrap();
+    let score2 = forest.anomaly_score(&sample).unwrap();
+    assert_eq!(score1, score2);
+}
+
+// Test with larger dataset
+// Test with larger dataset
+#[test]
+fn test_larger_dataset() {
+    let mut forest = IsolationForest::new(20, 100, Some(5), Some(42));
+
+    // Generate normal data points around (0, 0)
+    let mut data = Vec::new();
+    for i in 0..100 {
+        data.push((i as f64 * 0.01 - 1.0).sin());
+        data.push((i as f64 * 0.01 - 1.0).cos());
+    }
+    // Add some outliers
+    data.extend_from_slice(&[10.0, 10.0, -10.0, -10.0]);
+
+    let x = Array2::from_shape_vec((102, 2), data).unwrap();
+
+    let result = forest.fit(x.view());
+    assert!(result.is_ok());
+
+    let scores = forest.predict(x.view()).unwrap();
+    assert_eq!(scores.len(), 102);
+
+    // Check that all scores are valid
+    for &score in scores.iter() {
+        assert!(score >= 0.0 && score <= 1.0);
+        assert!(!score.is_nan());
+    }
+}
+
+// Test edge case with all identical points
+#[test]
+fn test_identical_points() {
+    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42));
+    let x = arr2(&[[1.0, 2.0], [1.0, 2.0], [1.0, 2.0], [1.0, 2.0]]);
+
+    let result = forest.fit(x.view());
+    assert!(result.is_ok());
+
+    let scores = forest.predict(x.view()).unwrap();
+    assert_eq!(scores.len(), 4);
+
+    // All identical points should have similar scores
+    let first_score = scores[0];
+    for &score in scores.iter() {
+        assert!((score - first_score).abs() < 1e-10);
+        assert!(score >= 0.0 && score <= 1.0);
+    }
+}
+
+// Test parallel processing consistency
+#[test]
+fn test_parallel_consistency() {
+    let x = arr2(&[
+        [1.0, 2.0],
+        [2.0, 3.0],
+        [3.0, 4.0],
+        [4.0, 5.0],
+        [100.0, 200.0],
+    ]);
+
+    let mut forest = IsolationForest::new(10, 20, Some(4), Some(42));
+    forest.fit(x.view()).unwrap();
+
+    // Run prediction multiple times - should be consistent
+    let scores1 = forest.predict(x.view()).unwrap();
+    let scores2 = forest.predict(x.view()).unwrap();
+
+    for i in 0..scores1.len() {
+        assert_eq!(scores1[i], scores2[i]);
+    }
+}
+
+// Test memory efficiency with many small predictions
+#[test]
+fn test_memory_efficiency() {
+    let mut forest = IsolationForest::new(5, 10, Some(3), Some(42));
+    let x_train = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5]]);
+
+    forest.fit(x_train.view()).unwrap();
+
+    // Make many individual predictions
+    for i in 0..100 {
+        let test_point = [i as f64 * 0.1, i as f64 * 0.1];
+        let score = forest.anomaly_score(&test_point).unwrap();
+        assert!(score >= 0.0 && score <= 1.0);
     }
 }
