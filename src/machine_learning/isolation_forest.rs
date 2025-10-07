@@ -19,7 +19,7 @@ use super::*;
 ///
 /// # Example
 /// ```rust
-/// use rusty_ml::machine_learning::IsolationForest;
+/// use rustyml::machine_learning::IsolationForest;
 /// use ndarray::array;
 ///
 /// let mut model = IsolationForest::new(100, 256, None, Some(42));
@@ -133,24 +133,28 @@ impl IsolationForest {
 
         self.n_features = x.ncols();
 
-        // Build multiple isolation trees
-        let mut trees = Vec::with_capacity(self.n_estimators);
-        let mut rng = if let Some(seed) = self.random_state {
-            StdRng::seed_from_u64(seed)
-        } else {
-            // Use thread_rng to seed StdRng
-            StdRng::from_rng(&mut rng())
-        };
+        // Build multiple isolation trees in parallel
+        let trees: Result<Vec<Box<Node>>, ModelError> = (0..self.n_estimators)
+            .into_par_iter()
+            .map(|i| {
+                // Create an independent RNG for each tree to maintain reproducibility
+                let mut rng = if let Some(seed) = self.random_state {
+                    StdRng::seed_from_u64(seed.wrapping_add(i as u64))
+                } else {
+                    StdRng::from_rng(&mut rng())
+                };
 
-        for _ in 0..self.n_estimators {
-            // Sample a subset of data for this tree
-            let sample_size = self.max_samples.min(x.nrows());
-            let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
+                // Sample a subset of data for this tree
+                let sample_size = self.max_samples.min(x.nrows());
+                let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
 
-            // Build isolation tree
-            let tree = self.build_isolation_tree(x, &sample_indices, 0, &mut rng)?;
-            trees.push(Box::new(tree));
-        }
+                // Build isolation tree
+                self.build_isolation_tree(x, &sample_indices, 0, &mut rng)
+                    .map(Box::new)
+            })
+            .collect();
+
+        let trees = trees?;
 
         self.trees = Some(trees);
         Ok(self)
