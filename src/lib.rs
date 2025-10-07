@@ -64,7 +64,6 @@ impl std::error::Error for ModelError {}
 /// let sse = sum_of_squared_errors(predicted.view(), actual.view());
 /// ```
 #[cfg(feature = "math")]
-#[cfg_attr(docsrs, doc(cfg(feature = "math")))]
 pub mod math;
 
 /// Module `machine_learning` provides implementations of various machine learning algorithms and models.
@@ -129,7 +128,6 @@ pub mod math;
 /// println!("{:?}", model);
 /// ```
 #[cfg(feature = "machine_learning")]
-#[cfg_attr(docsrs, doc(cfg(feature = "machine_learning")))]
 pub mod machine_learning;
 
 /// A convenience module that re-exports the most commonly used types and traits from this crate.
@@ -249,7 +247,6 @@ pub mod prelude;
 /// let transformed = pca.fit_transform(data.view()).unwrap();
 /// ```
 #[cfg(feature = "utility")]
-#[cfg_attr(docsrs, doc(cfg(feature = "utility")))]
 pub mod utility;
 
 /// This module provides implementation of comprehensive evaluation metrics used in statistical analysis and machine learning models.
@@ -333,7 +330,6 @@ pub mod utility;
 /// println!("AUC-ROC: {:.3}", auc);
 /// ```
 #[cfg(feature = "metric")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metric")))]
 pub mod metric;
 
 /// This module provides access to common datasets used for testing and benchmarking machine learning algorithms
@@ -357,7 +353,6 @@ pub mod metric;
 /// println!("Loaded iris dataset with {} samples", data.shape()[0]);
 /// ```
 #[cfg(feature = "dataset")]
-#[cfg_attr(docsrs, doc(cfg(feature = "dataset")))]
 pub mod dataset;
 
 /// This module provides components for building and training neural networks.
@@ -408,7 +403,6 @@ pub mod dataset;
 /// - `optimizer`: Parameter optimization algorithms (SGD, Adam, RMSProp, etc.)
 /// - `sequential`: Sequential model for creating feed-forward neural networks
 #[cfg(feature = "neural_network")]
-#[cfg_attr(docsrs, doc(cfg(feature = "neural_network")))]
 pub mod neural_network;
 
 #[cfg(test)]
