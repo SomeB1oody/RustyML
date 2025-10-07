@@ -4,9 +4,9 @@ fn test_svc_constructor() {
     // Test basic constructor
     let svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100);
 
-    assert_eq!(svc.get_regularization_param(), 1.0);
-    assert_eq!(svc.get_tol(), 0.001);
-    assert_eq!(svc.get_max_iter(), 100);
+    assert_eq!(svc.get_regularization_parameter(), 1.0);
+    assert_eq!(svc.get_tolerance(), 0.001);
+    assert_eq!(svc.get_max_iterations(), 100);
 
     // Match kernel type
     match svc.get_kernel() {
@@ -26,10 +26,10 @@ fn test_svc_default() {
         }
         _ => panic!("Expected RBF kernel with gamma=1.0"),
     }
-    assert_eq!(svc.get_regularization_param(), 1.0);
-    assert_eq!(svc.get_tol(), 0.001);
-    assert_eq!(svc.get_max_iter(), 1000);
-    assert_eq!(svc.get_eps(), 1e-8);
+    assert_eq!(svc.get_regularization_parameter(), 1.0);
+    assert_eq!(svc.get_tolerance(), 0.001);
+    assert_eq!(svc.get_max_iterations(), 1000);
+    assert_eq!(svc.get_epsilon(), 1e-8);
 }
 
 #[test]
@@ -37,10 +37,10 @@ fn test_getters_before_fit() {
     // Test that getters return errors before model is fitted
     let svc = SVC::default();
 
-    assert!(svc.get_alphas().is_err());
-    assert!(svc.get_support_vectors().is_err());
-    assert!(svc.get_support_vector_labels().is_err());
-    assert!(svc.get_bias().is_err());
+    assert!(svc.get_alphas().is_none());
+    assert!(svc.get_support_vectors().is_none());
+    assert!(svc.get_support_vector_labels().is_none());
+    assert!(svc.get_bias().is_none());
 }
 
 #[test]
@@ -66,10 +66,10 @@ fn test_fit_and_predict_linear() {
     assert!(fit_result.is_ok());
 
     // Check that model parameters are available after training
-    assert!(svc.get_alphas().is_ok());
-    assert!(svc.get_support_vectors().is_ok());
-    assert!(svc.get_support_vector_labels().is_ok());
-    assert!(svc.get_bias().is_ok());
+    assert!(svc.get_alphas().is_some());
+    assert!(svc.get_support_vectors().is_some());
+    assert!(svc.get_support_vector_labels().is_some());
+    assert!(svc.get_bias().is_some());
 
     let predictions = svc.predict(x.view()).unwrap();
 

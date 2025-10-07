@@ -108,115 +108,21 @@ impl SVC {
         }
     }
 
-    /// Returns the kernel type used by this SVC instance
-    ///
-    /// # Returns
-    ///
-    /// * `&KernelType` - A reference to the kernel type
-    pub fn get_kernel(&self) -> &KernelType {
-        &self.kernel
-    }
-
-    /// Returns the regularization parameter (C) used by this SVC instance
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The regularization parameter value
-    pub fn get_regularization_param(&self) -> f64 {
-        self.regularization_param
-    }
-
-    /// Returns the Lagrange multipliers (alphas) from the fitted model
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - The array of Lagrange multipliers if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn get_alphas(&self) -> Result<&Array1<f64>, ModelError> {
-        match &self.alphas {
-            Some(alphas) => Ok(alphas),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Returns the support vectors from the fitted model
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - The matrix of support vectors if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn get_support_vectors(&self) -> Result<&Array2<f64>, ModelError> {
-        match &self.support_vectors {
-            Some(support_vectors) => Ok(support_vectors),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Returns the labels of the support vectors from the fitted model
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - The array of support vector labels if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn get_support_vector_labels(&self) -> Result<&Array1<f64>, ModelError> {
-        match &self.support_vector_labels {
-            Some(support_vector_labels) => Ok(support_vector_labels),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Returns the bias term (intercept) from the fitted model
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - The bias term if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn get_bias(&self) -> Result<f64, ModelError> {
-        match self.bias {
-            Some(bias) => Ok(bias),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Returns the tolerance parameter used by this SVC instance
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The tolerance parameter value
-    pub fn get_tol(&self) -> f64 {
-        self.tol
-    }
-
-    /// Returns the maximum number of iterations parameter used by this SVC instance
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The maximum number of iterations
-    pub fn get_max_iter(&self) -> usize {
-        self.max_iter
-    }
-
-    /// Returns the epsilon parameter used for numerical stability
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The epsilon value
-    pub fn get_eps(&self) -> f64 {
-        self.eps
-    }
-
-    /// Returns the epsilon parameter used for numerical stability
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(usize)` - number of iterations the algorithm ran for after fitting
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn get_n_iter(&self) -> Result<usize, ModelError> {
-        match &self.n_iter {
-            Some(n_iter) => Ok(*n_iter),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    // Getters
+    get_field_as_ref!(get_kernel, kernel, &KernelType);
+    get_field!(get_regularization_parameter, regularization_param, f64);
+    get_field!(get_tolerance, tol, f64);
+    get_field!(get_max_iterations, max_iter, usize);
+    get_field!(get_epsilon, eps, f64);
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
+    get_field_as_ref!(get_alphas, alphas, &Option<Array1<f64>>);
+    get_field_as_ref!(get_support_vectors, support_vectors, &Option<Array2<f64>>);
+    get_field_as_ref!(
+        get_support_vector_labels,
+        support_vector_labels,
+        &Option<Array1<f64>>
+    );
+    get_field!(get_bias, bias, Option<f64>);
 
     /// Calculates the kernel function value between two vectors
     ///
