@@ -25,9 +25,10 @@ pub enum WeightingStrategy {
 ///
 /// - `k` - Number of neighbors to consider for classification
 /// - `x_train` - Training data features as a 2D array
-/// - `y_train` - Training data labels/targets
-/// - `weights` - Weight function for neighbor votes. Options: Uniform, Distance
-/// - `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(p=3)
+/// - `y_train_encoded` - Encoded training labels as indices for efficient parallel computation
+/// - `label_map` - Bidirectional mapping between original labels and their encoded indices
+/// - `weighting_strategy` - Weight function for neighbor votes. Options: Uniform, Distance
+/// - `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(user can specify p)
 ///
 /// # Examples
 /// ```rust
@@ -66,7 +67,8 @@ pub enum WeightingStrategy {
 pub struct KNN<T> {
     k: usize,
     x_train: Option<Array2<f64>>,
-    y_train: Option<Array1<T>>,
+    y_train_encoded: Option<Array1<usize>>,
+    label_map: Option<(AHashMap<T, usize>, Vec<T>)>, // (label -> index, index -> label)
     weighting_strategy: WeightingStrategy,
     metric: DistanceCalculationMetric,
 }
@@ -80,14 +82,15 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
         KNN {
             k: 5,
             x_train: None,
-            y_train: None,
+            y_train_encoded: None,
+            label_map: None,
             weighting_strategy: WeightingStrategy::Uniform,
             metric: DistanceCalculationMetric::Euclidean,
         }
     }
 }
 
-impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
+impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// Creates a new KNN classifier with the specified parameters
     ///
     /// # Parameters
@@ -107,7 +110,8 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         KNN {
             k,
             x_train: None,
-            y_train: None,
+            y_train_encoded: None,
+            label_map: None,
             weighting_strategy,
             metric,
         }
@@ -122,7 +126,25 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     );
     get_field!(get_metric, metric, DistanceCalculationMetric);
     get_field_as_ref!(get_x_train, x_train, &Option<Array2<f64>>);
-    get_field_as_ref!(get_y_train, y_train, &Option<Array1<T>>);
+
+    /// Returns the decoded training labels (original label values)
+    ///
+    /// # Returns
+    ///
+    /// * `Option<Array1<T>>` - The original training labels if the model is fitted, None otherwise
+    pub fn get_y_train(&self) -> Option<Array1<T>> {
+        if let (Some(y_encoded), Some((_, idx_to_label))) = (&self.y_train_encoded, &self.label_map)
+        {
+            Some(Array1::from(
+                y_encoded
+                    .iter()
+                    .map(|&idx| idx_to_label[idx].clone())
+                    .collect::<Vec<_>>(),
+            ))
+        } else {
+            None
+        }
+    }
 
     /// Fits the KNN classifier to the training data
     ///
@@ -139,6 +161,7 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
     /// # Notes
     ///
     /// KNN is a lazy learning algorithm, and the calculation is done in the prediction phase.
+    /// Labels are internally encoded as indices for efficient parallel computation.
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<T>) -> Result<&mut Self, ModelError> {
         preliminary_check(x, None)?;
 
@@ -155,17 +178,52 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
             ));
         }
 
+        // Build label encoding map: label -> index and index -> label
+        let mut label_to_idx: AHashMap<T, usize> = AHashMap::new();
+        let mut idx_to_label: Vec<T> = Vec::new();
+        let mut next_idx = 0;
+
+        // Encode labels as indices
+        let mut encoded_labels = Vec::with_capacity(y.len());
+        for label in y.iter() {
+            let idx = if let Some(&existing_idx) = label_to_idx.get(label) {
+                existing_idx
+            } else {
+                let new_idx = next_idx;
+                label_to_idx.insert(label.clone(), new_idx);
+                idx_to_label.push(label.clone());
+                next_idx += 1;
+                new_idx
+            };
+            encoded_labels.push(idx);
+        }
+
         self.x_train = Some(x.to_owned());
-        self.y_train = Some(y.to_owned());
+        self.y_train_encoded = Some(Array1::from(encoded_labels));
+        self.label_map = Some((label_to_idx, idx_to_label));
 
         Ok(self)
     }
 
+    /// Predicts class labels for input samples (sequential version).
+    ///
+    /// This method works with any type `T` without requiring `Sync + Send` bounds.
+    /// For large datasets with types that implement `Sync + Send`, consider using
+    /// `predict_parallel` for better performance.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Test features as a 2D array (samples × features)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Array1<T>)` - Predicted labels
+    /// - `Err(ModelError)` - If model is not fitted or input is invalid
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<T>, ModelError> {
         use super::preliminary_check;
 
         // check if model is fitted
-        if self.x_train.is_none() || self.y_train.is_none() {
+        if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
             return Err(ModelError::NotFitted);
         }
 
@@ -189,20 +247,96 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
             ));
         }
 
-        let y_train = self.y_train.as_ref().unwrap();
+        let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
+        let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
-        // Use rayon for parallel prediction
-        let results: Result<Vec<T>, ModelError> = (0..x.nrows())
-            .into_par_iter() // Convert to parallel iterator
+        // Sequential prediction on encoded indices
+        let encoded_results: Result<Vec<usize>, ModelError> = (0..x.nrows())
             .map(|i| {
                 let sample = x.row(i);
-                self.predict_one(sample, x_train.view(), y_train)
+                self.predict_one(sample, x_train.view(), y_train_encoded)
             })
             .collect();
 
-        results.map(|predictions| Array1::from(predictions))
+        // Decode the predictions back to original labels
+        encoded_results.map(|encoded_preds| {
+            Array1::from(
+                encoded_preds
+                    .into_iter()
+                    .map(|idx| idx_to_label[idx].clone())
+                    .collect::<Vec<_>>(),
+            )
+        })
     }
+}
 
+impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
+    /// Predicts class labels for input samples (parallel version).
+    ///
+    /// This method uses parallel computation for faster prediction on large datasets.
+    /// Requires `T` to implement `Sync + Send` for thread safety.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Test features as a 2D array (samples × features)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Array1<T>)` - Predicted labels
+    /// - `Err(ModelError)` - If model is not fitted or input is invalid
+    pub fn predict_parallel(&self, x: ArrayView2<f64>) -> Result<Array1<T>, ModelError> {
+        use super::preliminary_check;
+
+        // check if model is fitted
+        if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
+            return Err(ModelError::NotFitted);
+        }
+
+        // validate input data
+        preliminary_check(x, None)?;
+
+        // check if feature dimension matches training data
+        let x_train = self.x_train.as_ref().unwrap();
+        if x.ncols() != x_train.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "Feature dimension mismatch: expected {}, got {}",
+                x_train.ncols(),
+                x.ncols()
+            )));
+        }
+
+        // check if input data is empty
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input array is empty".to_string(),
+            ));
+        }
+
+        let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
+        let (_, idx_to_label) = self.label_map.as_ref().unwrap();
+
+        // Parallel prediction on encoded indices
+        let encoded_results: Result<Vec<usize>, ModelError> = (0..x.nrows())
+            .into_par_iter()
+            .map(|i| {
+                let sample = x.row(i);
+                self.predict_one(sample, x_train.view(), y_train_encoded)
+            })
+            .collect();
+
+        // Decode the predictions back to original labels
+        encoded_results.map(|encoded_preds| {
+            Array1::from(
+                encoded_preds
+                    .into_iter()
+                    .map(|idx| idx_to_label[idx].clone())
+                    .collect::<Vec<_>>(),
+            )
+        })
+    }
+}
+
+impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// Calculates the distance between two points based on the selected metric
     fn calculate_distance(
         &self,
@@ -218,24 +352,37 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         }
     }
 
-    /// Predicts the class for a single data point
+    /// Predicts the encoded class index for a single data point
     fn predict_one(
         &self,
         x: ArrayView1<f64>,
         x_train: ArrayView2<f64>,
-        y_train: &Array1<T>,
-    ) -> Result<T, ModelError> {
+        y_train_encoded: &Array1<usize>,
+    ) -> Result<usize, ModelError> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        // Calculate distances to all training samples in parallel
-        let mut distances: Vec<(f64, usize)> = (0..n_samples)
-            .into_par_iter()
-            .map(|i| -> Result<(f64, usize), ModelError> {
-                let distance = self.calculate_distance(x, x_train.row(i))?;
-                Ok((distance, i))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // Threshold for using parallel distance calculation
+        const PARALLEL_THRESHOLD: usize = 1000;
+
+        // Calculate distances to all training samples
+        // Use parallel computation only when n_samples is large enough to benefit from it
+        let mut distances: Vec<(f64, usize)> = if n_samples >= PARALLEL_THRESHOLD {
+            (0..n_samples)
+                .into_iter()
+                .map(|i| -> Result<(f64, usize), ModelError> {
+                    let distance = self.calculate_distance(x, x_train.row(i))?;
+                    Ok((distance, i))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            (0..n_samples)
+                .map(|i| -> Result<(f64, usize), ModelError> {
+                    let distance = self.calculate_distance(x, x_train.row(i))?;
+                    Ok((distance, i))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
 
         // Use partial sorting to get only k smallest elements instead of full sort
         distances.select_nth_unstable_by(k - 1, |a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -244,41 +391,113 @@ impl<T: Clone + std::hash::Hash + Eq + Send + Sync> KNN<T> {
         // Calculate based on weight strategy
         let result = match self.weighting_strategy {
             WeightingStrategy::Uniform => {
-                // Count class occurrences using pre-sized HashMap
-                let mut class_counts: AHashMap<&T, usize> = AHashMap::with_capacity(k);
-                for &(_, idx) in k_neighbors {
-                    let class = &y_train[idx];
-                    *class_counts.entry(class).or_insert(0) += 1;
-                }
+                // Threshold for using parallel voting aggregation
+                const VOTING_PARALLEL_THRESHOLD: usize = 100;
 
-                // Find the most common class
-                class_counts
-                    .into_iter()
-                    .max_by_key(|(_, count)| *count)
-                    .map(|(class, _)| class.clone())
-                    .unwrap()
+                if k >= VOTING_PARALLEL_THRESHOLD {
+                    // Parallel aggregation for large k values
+                    let class_counts = k_neighbors
+                        .par_iter()
+                        .fold(
+                            || AHashMap::new(),
+                            |mut acc: AHashMap<usize, usize>, &(_, idx)| {
+                                let class_idx = y_train_encoded[idx];
+                                *acc.entry(class_idx).or_insert(0) += 1;
+                                acc
+                            },
+                        )
+                        .reduce(
+                            || AHashMap::new(),
+                            |mut a, b| {
+                                for (class_idx, count) in b {
+                                    *a.entry(class_idx).or_insert(0) += count;
+                                }
+                                a
+                            },
+                        );
+
+                    // Find the most common class
+                    class_counts
+                        .into_iter()
+                        .max_by_key(|(_, count)| *count)
+                        .map(|(class_idx, _)| class_idx)
+                        .unwrap()
+                } else {
+                    // Sequential counting for small k values
+                    let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
+                    for &(_, idx) in k_neighbors {
+                        let class_idx = y_train_encoded[idx];
+                        *class_counts.entry(class_idx).or_insert(0) += 1;
+                    }
+
+                    // Find the most common class
+                    class_counts
+                        .into_iter()
+                        .max_by_key(|(_, count)| *count)
+                        .map(|(class_idx, _)| class_idx)
+                        .unwrap()
+                }
             }
             WeightingStrategy::Distance => {
-                // Weight by inverse distance using pre-sized HashMap
-                let mut class_weights: AHashMap<&T, f64> = AHashMap::with_capacity(k);
-                for &(distance, idx) in k_neighbors {
-                    // Handle zero distance case more efficiently
-                    let weight = if distance == 0.0 {
-                        // If distance is exactly zero, this sample gets maximum weight
-                        return Ok(y_train[idx].clone());
-                    } else {
-                        1.0 / distance
-                    };
-                    let class = &y_train[idx];
-                    *class_weights.entry(class).or_insert(0.0) += weight;
+                // Check for zero distance early (exact match)
+                if let Some(&(distance, idx)) = k_neighbors.first() {
+                    if distance == 0.0 {
+                        return Ok(y_train_encoded[idx]);
+                    }
                 }
 
-                // Find the class with highest weight
-                class_weights
-                    .into_iter()
-                    .max_by(|(_, weight_a), (_, weight_b)| weight_a.partial_cmp(weight_b).unwrap())
-                    .map(|(class, _)| class.clone())
-                    .unwrap()
+                // Threshold for using parallel weight aggregation
+                const WEIGHT_PARALLEL_THRESHOLD: usize = 100;
+
+                if k >= WEIGHT_PARALLEL_THRESHOLD {
+                    // Parallel weight aggregation for large k values
+                    let class_weights = k_neighbors
+                        .par_iter()
+                        .fold(
+                            || AHashMap::new(),
+                            |mut acc: AHashMap<usize, f64>, &(distance, idx)| {
+                                let weight = 1.0 / distance;
+                                let class_idx = y_train_encoded[idx];
+                                *acc.entry(class_idx).or_insert(0.0) += weight;
+                                acc
+                            },
+                        )
+                        .reduce(
+                            || AHashMap::new(),
+                            |mut a, b| {
+                                for (class_idx, weight) in b {
+                                    *a.entry(class_idx).or_insert(0.0) += weight;
+                                }
+                                a
+                            },
+                        );
+
+                    // Find the class with highest weight
+                    class_weights
+                        .into_iter()
+                        .max_by(|(_, weight_a), (_, weight_b)| {
+                            weight_a.partial_cmp(weight_b).unwrap()
+                        })
+                        .map(|(class_idx, _)| class_idx)
+                        .unwrap()
+                } else {
+                    // Sequential weight calculation for small k values
+                    let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
+                    for &(distance, idx) in k_neighbors {
+                        let weight = 1.0 / distance;
+                        let class_idx = y_train_encoded[idx];
+                        *class_weights.entry(class_idx).or_insert(0.0) += weight;
+                    }
+
+                    // Find the class with highest weight
+                    class_weights
+                        .into_iter()
+                        .max_by(|(_, weight_a), (_, weight_b)| {
+                            weight_a.partial_cmp(weight_b).unwrap()
+                        })
+                        .map(|(class_idx, _)| class_idx)
+                        .unwrap()
+                }
             }
         };
 

@@ -323,3 +323,296 @@ fn test_fit_predict_empty_data() {
         ))
     );
 }
+
+// Test predict_parallel method with euclidean distance and uniform weights
+#[test]
+fn test_knn_predict_parallel_euclidean_uniform() {
+    let mut knn: KNN<i32> = KNN::new(
+        1,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Training data: 2D points
+    let x_train = Array2::<f64>::from_shape_vec(
+        (4, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            2.0, 2.0, // Class 0
+            5.0, 5.0, // Class 1
+            6.0, 6.0, // Class 1
+        ],
+    )
+    .unwrap();
+
+    let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Test data: should be classified as class 0
+    let x_test1 = Array2::<f64>::from_shape_vec((1, 2), vec![1.5, 1.5]).unwrap();
+    let predictions1 = knn.predict_parallel(x_test1.view()).unwrap();
+    assert_eq!(predictions1, array![0]);
+
+    // Test data: should be classified as class 1
+    let x_test2 = Array2::<f64>::from_shape_vec((1, 2), vec![5.5, 5.5]).unwrap();
+    let predictions2 = knn.predict_parallel(x_test2.view()).unwrap();
+    assert_eq!(predictions2, array![1]);
+}
+
+// Test predict_parallel with multiple test samples
+#[test]
+fn test_knn_predict_parallel_multiple_samples() {
+    let mut knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Training data: 2D points
+    let x_train = Array2::<f64>::from_shape_vec(
+        (6, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            1.5, 1.5, // Class 0
+            2.0, 2.0, // Class 0
+            5.0, 5.0, // Class 1
+            6.0, 6.0, // Class 1
+            7.0, 7.0, // Class 1
+        ],
+    )
+    .unwrap();
+
+    let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Multiple test samples
+    let x_test = Array2::<f64>::from_shape_vec(
+        (4, 2),
+        vec![
+            1.2, 1.2, // Should be class 0
+            2.5, 2.5, // Should be class 0
+            5.5, 5.5, // Should be class 1
+            6.5, 6.5, // Should be class 1
+        ],
+    )
+    .unwrap();
+
+    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    assert_eq!(predictions, array![0, 0, 1, 1]);
+}
+
+// Test predict_parallel with distance weights
+#[test]
+fn test_knn_predict_parallel_distance_weights() {
+    let mut knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Distance,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Training data: 2D points
+    let x_train = Array2::<f64>::from_shape_vec(
+        (6, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            8.0, 8.0, // Class 0 (far from test point)
+            9.0, 9.0, // Class 0 (far from test point)
+            3.9, 3.9, // Class 1 (close to test point)
+            4.1, 4.1, // Class 1 (close to test point)
+            5.0, 5.0, // Class 1 (relatively close to test point)
+        ],
+    )
+    .unwrap();
+
+    let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // With distance weights, this point should be predicted as class 1
+    // because the nearest neighbors are of class 1
+    let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![4.0, 4.0]).unwrap();
+    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    assert_eq!(predictions, array![1]);
+}
+
+// Test predict_parallel with string labels
+#[test]
+fn test_knn_predict_parallel_string_labels() {
+    let mut knn: KNN<String> = KNN::new(
+        2,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Create simple training data
+    let x_train =
+        Array2::<f64>::from_shape_vec((4, 2), vec![1.0, 1.0, 2.0, 2.0, 5.0, 5.0, 6.0, 6.0])
+            .unwrap();
+
+    let y_train = Array1::<String>::from_vec(vec![
+        "cat".to_string(),
+        "cat".to_string(),
+        "dog".to_string(),
+        "dog".to_string(),
+    ]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Test predictions
+    let x_test = Array2::<f64>::from_shape_vec(
+        (2, 2),
+        vec![
+            1.5, 1.5, // Should be "cat"
+            5.5, 5.5, // Should be "dog"
+        ],
+    )
+    .unwrap();
+
+    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    assert_eq!(predictions, array!["cat".to_string(), "dog".to_string()]);
+}
+
+// Test that predict and predict_parallel produce the same results
+#[test]
+fn test_knn_predict_consistency() {
+    let mut knn: KNN<i32> = KNN::new(
+        5,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Create larger training dataset
+    let x_train = Array2::<f64>::from_shape_vec(
+        (10, 3),
+        vec![
+            1.0, 2.0, 3.0, // Class 0
+            1.5, 2.5, 3.5, // Class 0
+            2.0, 3.0, 4.0, // Class 0
+            2.5, 3.5, 4.5, // Class 0
+            3.0, 4.0, 5.0, // Class 0
+            8.0, 9.0, 10.0, // Class 1
+            8.5, 9.5, 10.5, // Class 1
+            9.0, 10.0, 11.0, // Class 1
+            9.5, 10.5, 11.5, // Class 1
+            10.0, 11.0, 12.0, // Class 1
+        ],
+    )
+    .unwrap();
+
+    let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Test data
+    let x_test = Array2::<f64>::from_shape_vec(
+        (4, 3),
+        vec![
+            1.8, 2.8, 3.8, // Should be class 0
+            2.2, 3.2, 4.2, // Should be class 0
+            8.8, 9.8, 10.8, // Should be class 1
+            9.2, 10.2, 11.2, // Should be class 1
+        ],
+    )
+    .unwrap();
+
+    let predictions_seq = knn.predict(x_test.view()).unwrap();
+    let predictions_par = knn.predict_parallel(x_test.view()).unwrap();
+
+    // Both methods should produce identical results
+    assert_eq!(predictions_seq, predictions_par);
+}
+
+// Test predict_parallel with manhattan distance
+#[test]
+fn test_knn_predict_parallel_manhattan() {
+    let mut knn: KNN<i32> = KNN::new(
+        3,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Manhattan,
+    );
+
+    // Training data: 2D points
+    let x_train = Array2::<f64>::from_shape_vec(
+        (6, 2),
+        vec![
+            1.0, 1.0, // Class 0
+            2.0, 2.0, // Class 0
+            3.0, 3.0, // Class 0
+            7.0, 7.0, // Class 1
+            8.0, 8.0, // Class 1
+            9.0, 9.0, // Class 1
+        ],
+    )
+    .unwrap();
+
+    let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Test data
+    let x_test = Array2::<f64>::from_shape_vec(
+        (2, 2),
+        vec![
+            2.5, 2.5, // Should be class 0
+            7.5, 7.5, // Should be class 1
+        ],
+    )
+    .unwrap();
+
+    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    assert_eq!(predictions, array![0, 1]);
+}
+
+// Test predict_parallel with large k value
+#[test]
+fn test_knn_predict_parallel_large_k() {
+    let mut knn: KNN<i32> = KNN::new(
+        150,
+        WeightingStrategy::Uniform,
+        DistanceCalculationMetric::Euclidean,
+    );
+
+    // Create a larger dataset to test parallel voting aggregation (k >= 100)
+    let mut x_train_vec = Vec::new();
+    let mut y_train_vec = Vec::new();
+
+    // Create 200 training samples (100 per class)
+    for i in 0..100 {
+        let val = i as f64;
+        x_train_vec.push(val);
+        x_train_vec.push(val + 1.0);
+        y_train_vec.push(0);
+    }
+
+    for i in 100..200 {
+        let val = i as f64;
+        x_train_vec.push(val);
+        x_train_vec.push(val + 1.0);
+        y_train_vec.push(1);
+    }
+
+    let x_train = Array2::<f64>::from_shape_vec((200, 2), x_train_vec).unwrap();
+    let y_train = Array1::<i32>::from_vec(y_train_vec);
+
+    knn.fit(x_train.view(), y_train.view()).unwrap();
+
+    // Test samples
+    let x_test = Array2::<f64>::from_shape_vec(
+        (2, 2),
+        vec![
+            50.0, 51.0, // Should be class 0
+            150.0, 151.0, // Should be class 1
+        ],
+    )
+    .unwrap();
+
+    let predictions_seq = knn.predict(x_test.view()).unwrap();
+    let predictions_par = knn.predict_parallel(x_test.view()).unwrap();
+
+    // Both should produce the same results
+    assert_eq!(predictions_seq, predictions_par);
+    assert_eq!(predictions_par[0], 0);
+    assert_eq!(predictions_par[1], 1);
+}
