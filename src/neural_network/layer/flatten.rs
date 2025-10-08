@@ -103,8 +103,9 @@ impl Layer for Flatten {
         // Create new shape and flatten
         let output = input.clone();
         output
-            .into_shape_with_order(IxDyn(&[batch_size, flattened_features]))
+            .to_shape(IxDyn(&[batch_size, flattened_features]))
             .unwrap()
+            .to_owned()
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -123,11 +124,11 @@ impl Layer for Flatten {
 
             // Reshape gradient back to input shape
             let reshaped_grad = grad_output
-                .clone()
-                .into_shape_with_order(IxDyn(&input_shape))
+                .to_shape(IxDyn(&input_shape))
                 .map_err(|e| {
                     ModelError::ProcessingError(format!("Failed to reshape gradient: {}", e))
-                })?;
+                })?
+                .to_owned();
 
             Ok(reshaped_grad)
         } else {
