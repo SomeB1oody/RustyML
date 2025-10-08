@@ -98,7 +98,14 @@ impl SeparableConv2D {
     ///
     /// # Returns
     ///
-    /// * `SeparableConv2D` - A new `SeparableConv2D` layer instance with randomly initialized weights.
+    /// * `SeparableConv2D` - A new `SeparableConv2D` layer instance.
+    ///
+    /// # Notes
+    ///
+    /// Weights are initialized using Xavier (Glorot) uniform initialization:
+    /// - Depthwise weights: Based on fan-in and fan-out for depthwise filters
+    /// - Pointwise weights: Based on fan-in and fan-out for 1x1 convolution
+    /// - Biases are initialized to zeros
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -115,25 +122,31 @@ impl SeparableConv2D {
             "Input tensor must be 4-dimensional: [batch_size, channels, height, width]"
         );
 
-        let mut rng = rand::rng();
-        let normal = Normal::new(0.0, 0.1).unwrap();
-
         let channels = input_shape[1];
 
-        // Initialize depthwise weights: [depth_multiplier, channels, kernel_height, kernel_width]
-        let mut depthwise_weights =
-            Array4::zeros((depth_multiplier, channels, kernel_size.0, kernel_size.1));
-        for i in depthwise_weights.iter_mut() {
-            *i = normal.sample(&mut rng) as f32;
-        }
+        // Initialize depthwise weights using Xavier initialization
+        // For depthwise convolution, each filter only operates on one channel
+        let depthwise_fan_in = kernel_size.0 * kernel_size.1;
+        let depthwise_fan_out = depth_multiplier * kernel_size.0 * kernel_size.1;
+        let depthwise_bound = (6.0 / (depthwise_fan_in + depthwise_fan_out) as f32).sqrt();
 
-        // Initialize pointwise weights: [filters, channels * depth_multiplier, 1, 1]
-        let mut pointwise_weights = Array4::zeros((filters, channels * depth_multiplier, 1, 1));
-        for i in pointwise_weights.iter_mut() {
-            *i = normal.sample(&mut rng) as f32;
-        }
+        let depthwise_weights = Array4::random(
+            (depth_multiplier, channels, kernel_size.0, kernel_size.1),
+            Uniform::new(-depthwise_bound, depthwise_bound),
+        );
 
-        // Initialize biases
+        // Initialize pointwise weights using Xavier initialization
+        // For pointwise convolution (1x1), the kernel area is 1
+        let pointwise_fan_in = channels * depth_multiplier;
+        let pointwise_fan_out = filters;
+        let pointwise_bound = (6.0 / (pointwise_fan_in + pointwise_fan_out) as f32).sqrt();
+
+        let pointwise_weights = Array4::random(
+            (filters, channels * depth_multiplier, 1, 1),
+            Uniform::new(-pointwise_bound, pointwise_bound),
+        );
+
+        // Initialize biases to zero
         let bias = Array2::zeros((1, filters));
 
         SeparableConv2D {
@@ -299,14 +312,17 @@ impl Layer for SeparableConv2D {
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // Step 1: Depthwise convolution
+        // Step 1: Depthwise convolution - each input channel convolved independently
         let depthwise_output = self.depthwise_convolve(input);
-        self.depthwise_output_cache = Some(depthwise_output.clone());
 
-        // Step 2: Pointwise convolution
+        // Step 2: Pointwise convolution (1x1) - combines depthwise outputs
         let mut output = self.pointwise_convolve(&depthwise_output);
 
-        // Apply activation function
+        // Cache depthwise output after pointwise conv to save memory if no activation
+        // (activation derivative doesn't need depthwise output, only backward does)
+        self.depthwise_output_cache = Some(depthwise_output);
+
+        // Step 3: Apply activation function
         if let Some(activation) = &self.activation {
             Activation::apply_activation_inplace(activation, &mut output);
         }
@@ -323,13 +339,14 @@ impl Layer for SeparableConv2D {
             let channels = input_shape[1];
             let depthwise_shape = depthwise_output.shape();
 
-            // Calculate activation gradients
-            let mut grad_output = grad_output.to_owned().into_dyn();
-            if let Some(activation) = &self.activation {
-                Activation::activation_derivative_inplace(activation, &mut grad_output);
-            }
-
-            let gradient = grad_output.clone();
+            // Apply activation derivative if needed
+            let gradient = if let Some(activation) = &self.activation {
+                let mut grad = grad_output.to_owned().into_dyn();
+                Activation::activation_derivative_inplace(activation, &mut grad);
+                grad
+            } else {
+                grad_output.to_owned().into_dyn()
+            };
 
             // Initialize gradients
             let mut pointwise_weight_grads = Array4::zeros(self.pointwise_weights.dim());
@@ -586,7 +603,6 @@ impl Layer for SeparableConv2D {
                 }
 
                 // Update pointwise weights
-                let depthwise_len = self.depthwise_weights.len();
                 if let (Some(weights_slice), Some(grads_slice)) = (
                     self.pointwise_weights.as_slice_mut(),
                     pointwise_grads.as_slice(),
@@ -685,7 +701,6 @@ impl Layer for SeparableConv2D {
                 }
 
                 // Update pointwise weights
-                let depthwise_len = self.depthwise_weights.len();
                 if let (Some(weights_slice), Some(grads_slice)) = (
                     self.pointwise_weights.as_slice_mut(),
                     pointwise_grads.as_slice(),
@@ -727,7 +742,8 @@ impl Layer for SeparableConv2D {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::SeparableConv2DLayer(SeparableConv2DLayerWeight {
-            weight: &self.depthwise_weights,
+            depthwise_weight: &self.depthwise_weights,
+            pointwise_weight: &self.pointwise_weights,
             bias: &self.bias,
         })
     }

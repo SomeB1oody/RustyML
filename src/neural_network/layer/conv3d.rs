@@ -14,7 +14,7 @@ use ndarray::Zip;
 /// - `strides` - Stride values for the convolution operation as (depth_stride, height_stride, width_stride).
 /// - `padding` - Type of padding to apply (`Valid` or `Same`).
 /// - `weights` - 5D array of filter weights with shape \[filters, channels, kernel_depth, kernel_height, kernel_width\].
-/// - `bias` - 3D array of bias values with shape \[1, 1, filters\].
+/// - `bias` - 2D array of bias values with shape \[1, filters\].
 /// - `activation` - Optional activation function applied after the convolution.
 /// - `input_cache` - Cached input from the forward pass, used during backpropagation.
 /// - `input_shape` - Shape of the input tensor.
@@ -77,12 +77,12 @@ pub struct Conv3D {
     strides: (usize, usize, usize),
     padding: PaddingType,
     weights: Array5<f32>,
-    bias: Array3<f32>,
+    bias: Array2<f32>,
     activation: Option<Activation>,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array5<f32>>,
-    bias_gradients: Option<Array3<f32>>,
+    bias_gradients: Option<Array2<f32>>,
     optimizer_cache: OptimizerCacheConv3D,
 }
 
@@ -128,9 +128,9 @@ impl Conv3D {
         let weights = Array5::random((filters, channels, kd, kh, kw), Uniform::new(-limit, limit));
 
         // Initialize bias to zeros
-        let bias = Array3::zeros((1, 1, filters));
+        let bias = Array2::zeros((1, filters));
 
-        Self {
+        Conv3D {
             filters,
             kernel_size,
             strides,
@@ -252,7 +252,7 @@ impl Conv3D {
                                                 }
                                             }
 
-                                            height_slice[ow] = sum + self.bias[[0, 0, f]];
+                                            height_slice[ow] = sum + self.bias[[0, f]];
                                         }
                                     });
                             });
@@ -280,7 +280,7 @@ impl Conv3D {
 
         // Initialize gradients
         self.weight_gradients = Some(Array5::zeros(self.weights.raw_dim()));
-        self.bias_gradients = Some(Array3::zeros(self.bias.raw_dim()));
+        self.bias_gradients = Some(Array2::zeros(self.bias.raw_dim()));
 
         let mut grad_input = Array5::zeros(input.raw_dim());
 
@@ -330,7 +330,7 @@ impl Conv3D {
         // Parallel computation of bias gradients
         if let Some(ref mut bias_grads) = self.bias_gradients {
             bias_grads
-                .axis_iter_mut(Axis(2))
+                .axis_iter_mut(Axis(1))
                 .into_par_iter()
                 .enumerate()
                 .for_each(|(f, mut filter_bias)| {
@@ -344,7 +344,7 @@ impl Conv3D {
                             }
                         }
                     }
-                    filter_bias[[0, 0]] = bias_sum;
+                    filter_bias[[0]] = bias_sum;
                 });
         }
 
@@ -429,7 +429,7 @@ impl Layer for Conv3D {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         let input = self.input_cache.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Cannot use Softmax for convolution".to_string())
+            ModelError::ProcessingError("Input cache not available for backward pass".to_string())
         })?;
 
         let input_array = input
@@ -478,8 +478,8 @@ impl Layer for Conv3D {
             self.optimizer_cache.adam_states = Some(AdamStatesConv3D {
                 m: Array5::zeros(self.weights.raw_dim()),
                 v: Array5::zeros(self.weights.raw_dim()),
-                m_bias: Array3::zeros(self.bias.raw_dim()),
-                v_bias: Array3::zeros(self.bias.raw_dim()),
+                m_bias: Array2::zeros(self.bias.raw_dim()),
+                v_bias: Array2::zeros(self.bias.raw_dim()),
             });
         }
 
@@ -543,7 +543,7 @@ impl Layer for Conv3D {
         if self.optimizer_cache.rmsprop_cache.is_none() {
             self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv3D {
                 cache: Array5::zeros(self.weights.raw_dim()),
-                bias: Array3::zeros(self.bias.raw_dim()),
+                bias: Array2::zeros(self.bias.raw_dim()),
             });
         }
 

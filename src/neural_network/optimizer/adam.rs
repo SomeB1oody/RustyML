@@ -276,12 +276,12 @@ pub struct AdamStatesConv2D {
 /// - `m` - First moment estimate (momentum) for the 5D convolution weights with shape
 ///   (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
 /// - `v` - Second moment estimate (velocity) for the 5D convolution weights with the same shape as `m`
-/// - `m_bias` - First moment estimate for the 3D bias tensor with shape (1, output_channels, 1)
-/// - `v_bias` - Second moment estimate for the 3D bias tensor with the same shape as `m_bias`
+/// - `m_bias` - First moment estimate for the bias tensor with shape (1, output_channels)
+/// - `v_bias` - Second moment estimate for the bias tensor with the same shape as `m_bias`
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv3D {
     pub m: Array5<f32>,
     pub v: Array5<f32>,
-    pub m_bias: Array3<f32>,
-    pub v_bias: Array3<f32>,
+    pub m_bias: Array2<f32>,
+    pub v_bias: Array2<f32>,
 }

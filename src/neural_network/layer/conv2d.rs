@@ -103,8 +103,8 @@ impl Conv2D {
     ///
     /// # Notes
     ///
-    /// Weights are initialized from a normal distribution with mean 0.0 and standard
-    /// deviation 0.1. Biases are initialized to zeros.
+    /// Weights are initialized using Xavier (Glorot) uniform initialization.
+    /// Biases are initialized to zeros.
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -117,22 +117,24 @@ impl Conv2D {
         assert_eq!(
             input_shape.len(),
             4,
-            "Input tensor must be 5-dimensional: [batch_size, channels, height, width]"
+            "Input tensor must be 4-dimensional: [batch_size, channels, height, width]"
         );
-
-        let mut rng = rand::rng();
-        let normal = Normal::new(0.0, 0.1).unwrap();
 
         // Shape is [batch_size, channels, height, width]
         let channels = input_shape[1];
 
-        // Initialize weights
-        let mut weights = Array4::zeros((filters, channels, kernel_size.0, kernel_size.1));
-        for i in weights.iter_mut() {
-            *i = normal.sample(&mut rng) as f32;
-        }
+        // Initialize weights using Xavier initialization for convolutional layers
+        // Formula: sqrt(6 / (input_channels * kernel_area + filters * kernel_area))
+        let fan_in = channels * kernel_size.0 * kernel_size.1;
+        let fan_out = filters * kernel_size.0 * kernel_size.1;
+        let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
-        // Initialize biases
+        let weights = Array4::random(
+            (filters, channels, kernel_size.0, kernel_size.1),
+            Uniform::new(-weight_bound, weight_bound),
+        );
+
+        // Initialize biases to zero
         let bias = Array2::zeros((1, filters));
 
         Conv2D {
@@ -183,13 +185,56 @@ impl Conv2D {
                 (out_height, out_width)
             }
             PaddingType::Same => {
-                let out_height = (input_height as f32 / self.strides.0 as f32).ceil() as usize;
-                let out_width = (input_width as f32 / self.strides.1 as f32).ceil() as usize;
+                let out_height = (input_height + self.strides.0 - 1) / self.strides.0;
+                let out_width = (input_width + self.strides.1 - 1) / self.strides.1;
                 (out_height, out_width)
             }
         };
 
         vec![batch_size, self.filters, output_height, output_width]
+    }
+
+    /// Applies padding to the input tensor for PaddingType::Same.
+    fn apply_padding(&self, input: &Tensor) -> Tensor {
+        match self.padding {
+            PaddingType::Valid => input.clone(),
+            PaddingType::Same => {
+                let input_shape = input.shape();
+                let batch_size = input_shape[0];
+                let channels = input_shape[1];
+                let input_height = input_shape[2];
+                let input_width = input_shape[3];
+
+                // Calculate padding amounts
+                let out_height = (input_height + self.strides.0 - 1) / self.strides.0;
+                let out_width = (input_width + self.strides.1 - 1) / self.strides.1;
+
+                let pad_height = ((out_height - 1) * self.strides.0 + self.kernel_size.0)
+                    .saturating_sub(input_height);
+                let pad_width = ((out_width - 1) * self.strides.1 + self.kernel_size.1)
+                    .saturating_sub(input_width);
+
+                let pad_top = pad_height / 2;
+                let pad_left = pad_width / 2;
+
+                let padded_height = input_height + pad_height;
+                let padded_width = input_width + pad_width;
+
+                let mut padded = Array4::zeros((batch_size, channels, padded_height, padded_width));
+                let input_4d = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
+
+                padded
+                    .slice_mut(s![
+                        ..,
+                        ..,
+                        pad_top..pad_top + input_height,
+                        pad_left..pad_left + input_width
+                    ])
+                    .assign(&input_4d);
+
+                padded.into_dyn()
+            }
+        }
     }
 
     /// Performs the convolution operation on the input tensor.
@@ -207,10 +252,12 @@ impl Conv2D {
     ///
     /// * `Tensor` - A new tensor containing the result of the convolution operation with shape \[batch_size, filters, output_height, output_width\].
     fn convolve(&self, input: &Tensor) -> Tensor {
-        let input_shape = input.shape();
+        // Apply padding if needed
+        let padded_input = self.apply_padding(input);
+        let input_shape = padded_input.shape();
         let batch_size = input_shape[0];
         let in_channels = input_shape[1];
-        let output_shape = self.calculate_output_shape(input_shape);
+        let output_shape = self.calculate_output_shape(input.shape());
 
         // Create vector for batch processing results
         let results: Vec<_> = (0..batch_size)
@@ -230,22 +277,13 @@ impl Conv2D {
                             let mut sum = 0.0;
 
                             // Convolution kernel calculation
-                            // Pre-check boundary conditions
-                            let max_ki = input_shape[2]
-                                .saturating_sub(i_base)
-                                .min(self.kernel_size.0);
-                            let max_kj = input_shape[3]
-                                .saturating_sub(j_base)
-                                .min(self.kernel_size.1);
-
                             for c in 0..in_channels {
-                                // Use contiguous memory access pattern
-                                for ki in 0..max_ki {
+                                for ki in 0..self.kernel_size.0 {
                                     let i_pos = i_base + ki;
 
-                                    for kj in 0..max_kj {
+                                    for kj in 0..self.kernel_size.1 {
                                         let j_pos = j_base + kj;
-                                        sum += input[[b, c, i_pos, j_pos]]
+                                        sum += padded_input[[b, c, i_pos, j_pos]]
                                             * self.weights[[f, c, ki, kj]];
                                     }
                                 }
@@ -285,36 +323,25 @@ impl Layer for Conv2D {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if let Some(input) = &self.input_cache {
-            let input_shape = input.shape();
+            let original_input_shape = input.shape();
+
+            // Apply padding to input (same as in forward pass)
+            let padded_input = self.apply_padding(input);
+            let input_shape = padded_input.shape();
+
             let batch_size = input_shape[0];
             let channels = input_shape[1];
             let grad_shape = grad_output.shape();
-            let mut grad_output = grad_output.clone();
+            let grad_output = grad_output.clone();
 
-            // Calculate derivatives of the activation function
-            if let Some(activation) = &self.activation {
-                Activation::activation_derivative_inplace(activation, &mut grad_output);
-            }
-
-            // Use rayon for parallel element-wise multiplication
-            let mut gradient = grad_output.clone();
-            if let (Some(grad_slice), Some(act_slice), Some(out_slice)) = (
-                gradient.as_slice_mut(),
-                grad_output.as_slice(),
-                grad_output.as_slice(),
-            ) {
-                grad_slice
-                    .par_iter_mut()
-                    .zip(act_slice.par_iter().zip(out_slice.par_iter()))
-                    .for_each(|(g, (a, o))| {
-                        *g = a * o;
-                    });
+            // Apply activation derivative to the gradient
+            let gradient = if let Some(activation) = &self.activation {
+                let mut grad = grad_output.clone();
+                Activation::activation_derivative_inplace(activation, &mut grad);
+                grad
             } else {
-                // Fallback to loop implementation
-                for (i, v) in grad_output.iter().enumerate() {
-                    gradient.as_slice_mut().unwrap()[i] = v * grad_output.as_slice().unwrap()[i];
-                }
-            }
+                grad_output.clone()
+            };
 
             // Initialize gradients for weights and biases
             let mut weight_grads = Array4::zeros(self.weights.dim());
@@ -358,7 +385,7 @@ impl Layer for Conv2D {
 
                                         sum += compute_row_gradient_sum(
                                             &gradient,
-                                            input,
+                                            &padded_input,
                                             b,
                                             f,
                                             c,
@@ -385,7 +412,7 @@ impl Layer for Conv2D {
             let local_results: Vec<_> = (0..batch_size)
                 .into_par_iter()
                 .map(|b| {
-                    // Create local gradients for each batch
+                    // Create local gradients for padded input shape
                     let mut local_gradients =
                         Array3::zeros([channels, input_shape[2], input_shape[3]]);
 
@@ -425,12 +452,36 @@ impl Layer for Conv2D {
                 })
                 .collect();
 
-            // Merge results in the main thread
-            Ok(merge_results(
-                self.input_shape.clone(),
+            // Merge padded gradients
+            let padded_grad = merge_results(
+                vec![batch_size, channels, input_shape[2], input_shape[3]],
                 local_results,
                 channels,
-            ))
+            );
+
+            // Remove padding from gradients if PaddingType::Same was used
+            let final_grad = match self.padding {
+                PaddingType::Valid => padded_grad,
+                PaddingType::Same => {
+                    let pad_height = input_shape[2].saturating_sub(original_input_shape[2]);
+                    let pad_width = input_shape[3].saturating_sub(original_input_shape[3]);
+                    let pad_top = pad_height / 2;
+                    let pad_left = pad_width / 2;
+
+                    let padded_4d = padded_grad.into_dimensionality::<ndarray::Ix4>().unwrap();
+                    padded_4d
+                        .slice(s![
+                            ..,
+                            ..,
+                            pad_top..pad_top + original_input_shape[2],
+                            pad_left..pad_left + original_input_shape[3]
+                        ])
+                        .to_owned()
+                        .into_dyn()
+                }
+            };
+
+            Ok(final_grad)
         } else {
             Err(ModelError::ProcessingError(
                 "Forward pass has not been run".to_string(),

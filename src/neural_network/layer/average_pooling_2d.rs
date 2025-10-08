@@ -51,8 +51,8 @@ use super::*;
 ///  model
 ///  .add(AveragePooling2D::new(
 ///  (2, 2),           // Pooling window size
-///  (2, 2),           // Stride
 ///  vec![2, 3, 4, 4], // Input shape
+///  Some((2, 2)),     // Strides (optional, defaults to pool_size if None)
 ///  ))
 ///  .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -88,16 +88,16 @@ impl AveragePooling2D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (height, width)
-    /// - `strides` - Stride of the pooling operation as (height, width)
     /// - `input_shape` - Shape of the input tensor \[batch_size, channels, height, width\]
+    /// - `strides` - Optional strides of the pooling operation as (height, width), if None, the values will match `pool_size`
     ///
     /// # Returns
     ///
     /// * `AveragePooling2D` - A new `AveragePooling2D` layer instance
     pub fn new(
         pool_size: (usize, usize),
-        strides: (usize, usize),
         input_shape: Vec<usize>,
+        strides: Option<(usize, usize)>,
     ) -> Self {
         // Verify input is 4D: [batch_size, channels, height, width]
         assert_eq!(
@@ -105,6 +105,8 @@ impl AveragePooling2D {
             4,
             "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
         );
+
+        let strides = strides.unwrap_or(pool_size);
 
         AveragePooling2D {
             pool_size,
@@ -206,6 +208,8 @@ impl Layer for AveragePooling2D {
             let input_shape = input.shape();
             let batch_size = input_shape[0];
             let channels = input_shape[1];
+            let height = input_shape[2];
+            let width = input_shape[3];
 
             // Initialize input gradient to zero
             let mut input_grad = ArrayD::zeros(input_shape.to_vec());
@@ -222,33 +226,31 @@ impl Layer for AveragePooling2D {
                 .into_par_iter()
                 .flat_map(|b| {
                     (0..channels).into_par_iter().map(move |c| {
-                        let mut batch_channel_grad: ArrayD<f32> =
-                            ArrayD::zeros(input_shape.to_vec());
+                        // Only allocate gradient for the spatial dimensions (height x width)
+                        let mut spatial_grad = vec![0.0f32; height * width];
 
                         // For each output position
                         for i in 0..output_shape[2] {
-                            let i_start = i * strides.0; // Use copied variable instead of self.strides
+                            let i_start = i * strides.0;
 
                             for j in 0..output_shape[3] {
-                                let j_start = j * strides.1; // Use copied variable instead of self.strides
+                                let j_start = j * strides.1;
 
                                 // Get current output gradient
                                 let grad = grad_output[[b, c, i, j]];
 
-                                // Calculate the actual number of elements in the pooling window (considering boundaries)
+                                // Calculate count and distribute gradient in a single pass
                                 let mut count = 0;
                                 for di in 0..pool_size.0 {
-                                    // Use copied variable instead of self.pool_size
                                     let i_pos = i_start + di;
-                                    if i_pos >= input_shape[2] {
-                                        continue;
+                                    if i_pos >= height {
+                                        break; // No need to continue if we exceed height
                                     }
 
                                     for dj in 0..pool_size.1 {
-                                        // Use copied variable instead of self.pool_size
                                         let j_pos = j_start + dj;
-                                        if j_pos >= input_shape[3] {
-                                            continue;
+                                        if j_pos >= width {
+                                            break; // No need to continue if we exceed width
                                         }
 
                                         count += 1;
@@ -256,40 +258,38 @@ impl Layer for AveragePooling2D {
                                 }
 
                                 // Distribute gradient evenly to all input elements that participated in the calculation
-                                let grad_per_element =
-                                    if count > 0 { grad / count as f32 } else { 0.0 };
+                                if count > 0 {
+                                    let grad_per_element = grad / count as f32;
 
-                                for di in 0..pool_size.0 {
-                                    // Use copied variable instead of self.pool_size
-                                    let i_pos = i_start + di;
-                                    if i_pos >= input_shape[2] {
-                                        continue;
-                                    }
-
-                                    for dj in 0..pool_size.1 {
-                                        // Use copied variable instead of self.pool_size
-                                        let j_pos = j_start + dj;
-                                        if j_pos >= input_shape[3] {
-                                            continue;
+                                    for di in 0..pool_size.0 {
+                                        let i_pos = i_start + di;
+                                        if i_pos >= height {
+                                            break;
                                         }
 
-                                        batch_channel_grad[[b, c, i_pos, j_pos]] +=
-                                            grad_per_element;
+                                        for dj in 0..pool_size.1 {
+                                            let j_pos = j_start + dj;
+                                            if j_pos >= width {
+                                                break;
+                                            }
+
+                                            spatial_grad[i_pos * width + j_pos] += grad_per_element;
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        ((b, c), batch_channel_grad)
+                        ((b, c), spatial_grad)
                     })
                 })
                 .collect();
 
             // Merge gradients from all batches and channels
-            for ((b, c), grad) in results {
-                for i in 0..input_shape[2] {
-                    for j in 0..input_shape[3] {
-                        input_grad[[b, c, i, j]] += grad[[b, c, i, j]];
+            for ((b, c), spatial_grad) in results {
+                for i in 0..height {
+                    for j in 0..width {
+                        input_grad[[b, c, i, j]] = spatial_grad[i * width + j];
                     }
                 }
             }

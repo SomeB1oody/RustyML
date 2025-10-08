@@ -183,10 +183,10 @@ fn test_simple_rnn_temporal_pattern_recognition() {
     model
         .add(SimpleRNN::new(input_dim, 8, Activation::Tanh))
         .add(Dense::new(8, 1, Activation::Sigmoid))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .compile(Adam::new(0.1, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Train the model
-    model.fit(&x, &y, 60).unwrap();
+    model.fit(&x, &y, 70).unwrap();
 
     let pred = model.predict(&x);
 

@@ -112,16 +112,19 @@ impl Conv1D {
         assert_eq!(
             input_shape.len(),
             3,
-            "Input tensor must be 5-dimensional: [batch_size, channels, length]"
+            "Input tensor must be 3-dimensional: [batch_size, channels, length]"
         );
         let input_channels = input_shape[1];
 
-        // Initialize weights using Xavier initialization
-        let weight_bound = (6.0 / (input_channels + filters) as f32).sqrt();
+        // Initialize weights using Xavier initialization for convolutional layers
+        // Formula: sqrt(6 / (input_channels * kernel_size + filters * kernel_size))
+        let fan_in = input_channels * kernel_size;
+        let fan_out = filters * kernel_size;
+        let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
         let weights = Array3::random(
             (filters, input_channels, kernel_size),
-            ndarray_rand::rand_distr::Uniform::new(-weight_bound, weight_bound),
+            Uniform::new(-weight_bound, weight_bound),
         );
 
         // Initialize bias to zero
@@ -180,17 +183,45 @@ impl Conv1D {
                 let channels = input_shape[1];
                 let input_length = input_shape[2];
 
-                let output_length = (input_length + self.stride - 1) / self.stride;
-                let pad_total = ((output_length - 1) * self.stride + self.kernel_size)
-                    .saturating_sub(input_length);
-                let pad_left = pad_total / 2;
+                let (pad_total, pad_left) = self.calculate_padding_params(input_length);
 
                 let mut padded = Array3::zeros((batch_size, channels, input_length + pad_total));
+                let input_3d = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
                 padded
-                    .slice_mut(ndarray::s![.., .., pad_left..input_length + pad_left])
-                    .assign(&input.clone().into_dimensionality::<ndarray::Ix3>().unwrap());
+                    .slice_mut(s![.., .., pad_left..input_length + pad_left])
+                    .assign(&input_3d);
 
                 padded.into_dyn()
+            }
+        }
+    }
+
+    /// Calculate padding parameters for Same padding mode.
+    fn calculate_padding_params(&self, input_length: usize) -> (usize, usize) {
+        let output_length = (input_length + self.stride - 1) / self.stride;
+        let pad_total =
+            ((output_length - 1) * self.stride + self.kernel_size).saturating_sub(input_length);
+        let pad_left = pad_total / 2;
+        (pad_total, pad_left)
+    }
+
+    /// Convert padded input position to original input position.
+    fn get_original_input_pos(&self, padded_pos: usize, input_length: usize) -> Option<usize> {
+        match self.padding {
+            PaddingType::Valid => {
+                if padded_pos < input_length {
+                    Some(padded_pos)
+                } else {
+                    None
+                }
+            }
+            PaddingType::Same => {
+                let (_, pad_left) = self.calculate_padding_params(input_length);
+                if padded_pos >= pad_left && padded_pos < pad_left + input_length {
+                    Some(padded_pos - pad_left)
+                } else {
+                    None
+                }
             }
         }
     }
@@ -213,19 +244,16 @@ impl Conv1D {
         let output_length = self.calculate_output_length(input_length);
         let mut output = Array3::zeros((batch_size, self.filters, output_length));
 
-        let input_3d = padded_input
-            .clone()
-            .into_dimensionality::<ndarray::Ix3>()
-            .unwrap();
+        let input_3d = padded_input.into_dimensionality::<ndarray::Ix3>().unwrap();
 
         // Parallel processing of batches and filters
         output
-            .axis_iter_mut(ndarray::Axis(0))
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
             .enumerate()
             .for_each(|(batch, mut batch_output)| {
                 batch_output
-                    .axis_iter_mut(ndarray::Axis(0))
+                    .axis_iter_mut(Axis(0))
                     .into_par_iter()
                     .enumerate()
                     .for_each(|(filter, mut filter_output)| {
@@ -308,81 +336,63 @@ impl Layer for Conv1D {
 
         let output_length = grad_output_3d.shape()[2];
 
-        // Use parallel processing to compute gradients
-        use std::sync::Mutex;
-        let weight_gradients_mutex = Mutex::new(&mut weight_gradients);
-        let bias_gradients_mutex = Mutex::new(&mut bias_gradients);
-        let input_gradients_mutex = Mutex::new(&mut input_gradients);
+        // Compute gradients in parallel over batches
+        let batch_results: Vec<_> = (0..batch_size)
+            .into_par_iter()
+            .map(|batch| {
+                let mut local_weight_gradients = Array3::zeros(self.weights.dim());
+                let mut local_bias_gradients = Array2::zeros(self.bias.dim());
+                let mut local_input_gradients = Array2::zeros((input_channels, input_length));
 
-        // Parallelize over batches
-        (0..batch_size).into_par_iter().for_each(|batch| {
-            // Create local gradient accumulators for each thread
-            let mut local_weight_gradients = Array3::zeros(self.weights.dim());
-            let mut local_bias_gradients = Array2::zeros(self.bias.dim());
-            let mut local_input_gradients = Array3::zeros((1, input_channels, input_length));
+                for filter in 0..self.filters {
+                    for out_pos in 0..output_length {
+                        let grad_val = grad_output_3d[[batch, filter, out_pos]];
+                        let start_pos = out_pos * self.stride;
 
-            for filter in 0..self.filters {
-                for out_pos in 0..output_length {
-                    let grad_val = grad_output_3d[[batch, filter, out_pos]];
-                    let start_pos = out_pos * self.stride;
+                        // Bias gradients
+                        local_bias_gradients[[0, filter]] += grad_val;
 
-                    // Bias gradients
-                    local_bias_gradients[[0, filter]] += grad_val;
+                        // Weight and input gradients
+                        for in_channel in 0..input_channels {
+                            for kernel_pos in 0..self.kernel_size {
+                                let input_pos = start_pos + kernel_pos;
+                                if input_pos < input_3d.shape()[2] {
+                                    // Weight gradients
+                                    local_weight_gradients[[filter, in_channel, kernel_pos]] +=
+                                        grad_val * input_3d[[batch, in_channel, input_pos]];
 
-                    // Weight and input gradients
-                    for in_channel in 0..input_channels {
-                        for kernel_pos in 0..self.kernel_size {
-                            let input_pos = start_pos + kernel_pos;
-                            if input_pos < input_3d.shape()[2] {
-                                // Weight gradients
-                                local_weight_gradients[[filter, in_channel, kernel_pos]] +=
-                                    grad_val * input_3d[[batch, in_channel, input_pos]];
-
-                                // Input gradients (considering padding)
-                                let original_input_pos = match self.padding {
-                                    PaddingType::Valid => input_pos,
-                                    PaddingType::Same => {
-                                        let pad_left = ((output_length - 1) * self.stride
-                                            + self.kernel_size)
-                                            .saturating_sub(input_length)
-                                            / 2;
-                                        if input_pos >= pad_left
-                                            && input_pos < pad_left + input_length
-                                        {
-                                            input_pos - pad_left
-                                        } else {
-                                            continue;
-                                        }
+                                    // Input gradients (considering padding)
+                                    if let Some(original_input_pos) =
+                                        self.get_original_input_pos(input_pos, input_length)
+                                    {
+                                        local_input_gradients[[in_channel, original_input_pos]] +=
+                                            grad_val
+                                                * self.weights[[filter, in_channel, kernel_pos]];
                                     }
-                                };
-
-                                if original_input_pos < input_length {
-                                    local_input_gradients[[0, in_channel, original_input_pos]] +=
-                                        grad_val * self.weights[[filter, in_channel, kernel_pos]];
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Accumulate local gradients into global gradients
-            {
-                let mut global_weight_gradients = weight_gradients_mutex.lock().unwrap();
-                **global_weight_gradients += &local_weight_gradients;
-            }
-            {
-                let mut global_bias_gradients = bias_gradients_mutex.lock().unwrap();
-                **global_bias_gradients += &local_bias_gradients;
-            }
-            {
-                let mut global_input_gradients = input_gradients_mutex.lock().unwrap();
+                (
+                    local_weight_gradients,
+                    local_bias_gradients,
+                    local_input_gradients,
+                )
+            })
+            .collect();
 
-                global_input_gradients
-                    .slice_mut(ndarray::s![batch, .., ..])
-                    .assign(&local_input_gradients.slice(ndarray::s![0, .., ..]));
-            }
-        });
+        // Aggregate results from all batches
+        for (batch_idx, (local_weight_grads, local_bias_grads, local_input_grads)) in
+            batch_results.into_iter().enumerate()
+        {
+            weight_gradients += &local_weight_grads;
+            bias_gradients += &local_bias_grads;
+            input_gradients
+                .slice_mut(s![batch_idx, .., ..])
+                .assign(&local_input_grads);
+        }
 
         // Store gradients
         self.weight_gradients = Some(weight_gradients);

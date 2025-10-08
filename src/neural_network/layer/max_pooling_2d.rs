@@ -68,7 +68,7 @@ pub struct MaxPooling2D {
     strides: (usize, usize),
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
-    max_positions: Option<Vec<(usize, usize, usize, usize)>>,
+    max_positions: Option<Vec<(usize, usize, usize, usize, usize, usize)>>,
 }
 
 impl MaxPooling2D {
@@ -128,8 +128,12 @@ impl MaxPooling2D {
     ///
     /// # Returns
     ///
-    /// * `(Tensor, Vec<(usize, usize, usize, usize)>)` - Result of the pooling operation and positions of maximum values.
-    fn max_pool(&self, input: &Tensor) -> (Tensor, Vec<(usize, usize, usize, usize)>) {
+    /// * `(Tensor, Vec<(usize, usize, usize, usize, usize, usize)>)` - Result of the pooling operation
+    ///   and positions mapping: (batch, channel, out_i, out_j, in_i, in_j)
+    fn max_pool(
+        &self,
+        input: &Tensor,
+    ) -> (Tensor, Vec<(usize, usize, usize, usize, usize, usize)>) {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let channels = input_shape[1];
@@ -137,7 +141,7 @@ impl MaxPooling2D {
 
         // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());
-        // Vector to store positions of maximum values
+        // Vector to store mapping from output positions to input positions with maximum values
         let mut max_positions = Vec::new();
 
         // Process each batch and channel in parallel
@@ -151,11 +155,11 @@ impl MaxPooling2D {
                     let mut batch_channel_positions = Vec::new();
 
                     // Perform pooling for each output position
-                    for i in 0..output_shape_clone[2] {
-                        let i_start = i * self.strides.0;
+                    for out_i in 0..output_shape_clone[2] {
+                        let i_start = out_i * self.strides.0;
 
-                        for j in 0..output_shape_clone[3] {
-                            let j_start = j * self.strides.1;
+                        for out_j in 0..output_shape_clone[3] {
+                            let j_start = out_j * self.strides.1;
 
                             // Find maximum value in pooling window
                             let mut max_val = f32::NEG_INFINITY;
@@ -181,8 +185,10 @@ impl MaxPooling2D {
                                 }
                             }
 
-                            batch_channel_output.push((i, j, max_val));
-                            batch_channel_positions.push((b, c, max_pos.0, max_pos.1));
+                            batch_channel_output.push((out_i, out_j, max_val));
+                            // Store complete mapping: (batch, channel, output_i, output_j, input_i, input_j)
+                            batch_channel_positions
+                                .push((b, c, out_i, out_j, max_pos.0, max_pos.1));
                         }
                     }
 
@@ -219,32 +225,17 @@ impl Layer for MaxPooling2D {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if let (Some(input), Some(max_positions)) = (&self.input_cache, &self.max_positions) {
-            let grad_shape = grad_output.shape();
+            let input_shape = input.shape();
 
             // Initialize input gradients with same shape as input
-            let mut input_gradients = ArrayD::zeros(input.dim());
+            let mut input_gradients = ArrayD::zeros(input_shape.to_vec());
 
-            // Create a vector containing update positions and values
-            let gradient_updates: Vec<_> = max_positions
-                .par_iter()
-                .filter_map(|&(b, c, i, j)| {
-                    // Calculate corresponding output gradient index
-                    let out_i = i / self.strides.0;
-                    let out_j = j / self.strides.1;
-
-                    // Ensure indices are within valid range
-                    if out_i < grad_shape[2] && out_j < grad_shape[3] {
-                        // Return index and gradient value
-                        Some(((b, c, i, j), grad_output[[b, c, out_i, out_j]]))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Apply gradient updates sequentially
-            for ((b, c, i, j), grad_val) in gradient_updates {
-                input_gradients[[b, c, i, j]] = grad_val;
+            // Distribute gradients to the positions that produced the maximum values
+            // Each entry contains: (batch, channel, out_i, out_j, in_i, in_j)
+            // Note: Using += to handle overlapping pooling windows correctly
+            for &(b, c, out_i, out_j, in_i, in_j) in max_positions.iter() {
+                // Accumulate gradient from output position to the input position that was selected as max
+                input_gradients[[b, c, in_i, in_j]] += grad_output[[b, c, out_i, out_j]];
             }
 
             Ok(input_gradients)

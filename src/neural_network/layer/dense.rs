@@ -70,7 +70,7 @@ pub struct Dense {
 }
 
 impl Dense {
-    /// Creates a new dense layer without activation function.
+    /// Creates a new dense layer with specific activation function.
     ///
     /// # Parameters
     ///
@@ -124,81 +124,37 @@ impl Layer for Dense {
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
+        // Get activation output cache
+        let a = self.activation_output.take().ok_or_else(|| {
+            ModelError::ProcessingError(String::from("Forward pass has not been run"))
+        })?;
+
+        // Apply activation derivative
         if self.activation == Activation::Softmax {
-            let a = match self.activation_output.take() {
-                Some(a) => a,
-                None => Err(ModelError::ProcessingError(String::from(
-                    "Forward pass has not been run",
-                )))?,
-            };
             grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
         } else {
-            let a = match self.activation_output.take() {
-                Some(a) => a,
-                None => Err(ModelError::ProcessingError(String::from(
-                    "Forward pass has not been run",
-                )))?,
-            };
-
             let deriv = Activation::activation_derivative(&a, &self.activation);
             grad_upstream = deriv * grad_upstream;
         }
 
         // Get input cache
-        let input = match self.input_cache.take() {
-            Some(input) => input,
-            None => Err(ModelError::ProcessingError(String::from(
-                "Forward pass has not been run",
-            )))?,
-        };
+        let input = self.input_cache.take().ok_or_else(|| {
+            ModelError::ProcessingError(String::from("Forward pass has not been run"))
+        })?;
 
-        // Use parallel matrix multiplication to calculate weight gradients for large matrices
-        let batch_size = input.nrows();
-        let input_dim = input.ncols();
-        let output_dim = grad_upstream.ncols();
+        // Calculate weight gradients using optimized matrix multiplication
+        // grad_w = input^T * grad_upstream
+        let grad_w = input.t().dot(&grad_upstream);
 
-        // Create weight gradient matrix
-        let mut grad_w = Array2::<f32>::zeros((input_dim, output_dim));
-
-        // Parallel calculation of weight gradients
-        grad_w
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut row)| {
-                for j in 0..output_dim {
-                    let mut sum = 0.0;
-                    for k in 0..batch_size {
-                        sum += input[[k, i]] * grad_upstream[[k, j]];
-                    }
-                    row[j] = sum;
-                }
-            });
-
-        // Calculate bias gradients
+        // Calculate bias gradients by summing over batch dimension
         let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         self.grad_weights = Some(grad_w);
         self.grad_bias = Some(grad_b);
 
         // Calculate gradients to be passed to previous layer
-        // Use parallel matrix multiplication for large matrices
-        let mut grad_input = Array2::<f32>::zeros((batch_size, input_dim));
-
-        // Parallel calculation of input gradients
-        grad_input
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut row)| {
-                for j in 0..input_dim {
-                    let mut sum = 0.0;
-                    for k in 0..output_dim {
-                        sum += grad_upstream[[i, k]] * self.weights[[j, k]];
-                    }
-                    row[j] = sum;
-                }
-            });
+        // grad_input = grad_upstream * weights^T
+        let grad_input = grad_upstream.dot(&self.weights.t());
 
         Ok(grad_input.into_dyn())
     }

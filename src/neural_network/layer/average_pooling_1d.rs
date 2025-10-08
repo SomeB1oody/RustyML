@@ -48,8 +48,8 @@ use super::*;
 /// model
 ///     .add(AveragePooling1D::new(
 ///         2,              // Pool window size
-///         2,              // Stride
 ///         vec![2, 3, 8],  // Input shape
+///         Some(2),        // Stride (optional, defaults to pool_size if None)
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -85,19 +85,21 @@ impl AveragePooling1D {
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window
-    /// - `stride` - Stride of the pooling operation
     /// - `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
+    /// - `stride` - Optional stride of the pooling operation, if None, the value will match `pool_size`
     ///
     /// # Returns
     ///
     /// * `AveragePooling1D` - A new `AveragePooling1D` layer instance
-    pub fn new(pool_size: usize, stride: usize, input_shape: Vec<usize>) -> Self {
+    pub fn new(pool_size: usize, input_shape: Vec<usize>, stride: Option<usize>) -> Self {
         // verify input is 3D: [batch_size, channels, length]
         assert_eq!(
             input_shape.len(),
             3,
             "Input shape must be 3-dimensional: [batch_size, channels, length]"
         );
+
+        let stride = stride.unwrap_or(pool_size);
 
         AveragePooling1D {
             pool_size,
@@ -173,6 +175,7 @@ impl Layer for AveragePooling1D {
         let batch_size = input.shape()[0];
         let channels = input.shape()[1];
         let length = input.shape()[2];
+        let output_length = grad_output.shape()[2];
 
         let mut grad_input = Array3::<f32>::zeros((batch_size, channels, length)).into_dyn();
 
@@ -188,31 +191,29 @@ impl Layer for AveragePooling1D {
             .into_par_iter()
             .flat_map(|b| {
                 (0..channels).into_par_iter().map(move |c| {
-                    let mut batch_channel_grad =
-                        Array3::<f32>::zeros((batch_size, channels, length)).into_dyn();
+                    // Only allocate a 1D vector for this channel's gradient
+                    let mut channel_grad = vec![0.0f32; length];
 
-                    for i in 0..grad_output.shape()[2] {
+                    for i in 0..output_length {
                         let start_idx = i * stride;
                         let end_idx = start_idx + pool_size;
+                        let grad_val = grad_output[[b, c, i]] * scale_factor;
 
                         // Distribute gradient evenly to each element in the input window
                         for j in start_idx..end_idx {
-                            if j < length {
-                                batch_channel_grad[[b, c, j]] +=
-                                    grad_output[[b, c, i]] * scale_factor;
-                            }
+                            channel_grad[j] += grad_val;
                         }
                     }
 
-                    ((b, c), batch_channel_grad)
+                    ((b, c), channel_grad)
                 })
             })
             .collect();
 
-        // Merge gradients from all batches and channels
-        for ((b, c), grad) in results {
-            for j in 0..length {
-                grad_input[[b, c, j]] += grad[[b, c, j]];
+        // Write results directly into output tensor
+        for ((b, c), channel_grad) in results {
+            for (j, &grad_val) in channel_grad.iter().enumerate() {
+                grad_input[[b, c, j]] = grad_val;
             }
         }
 

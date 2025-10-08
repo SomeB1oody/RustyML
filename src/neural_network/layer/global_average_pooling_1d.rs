@@ -62,82 +62,74 @@ impl GlobalAveragePooling1D {
 
 impl Layer for GlobalAveragePooling1D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Store input shape and cache input for backpropagation
-        self.input_shape = input.shape().to_vec();
-
-        // verify input is 3D: [batch_size, channels, length]
+        // Verify input is 3D: [batch_size, channels, length]
+        let shape = input.shape();
         assert_eq!(
-            self.input_shape.len(),
+            shape.len(),
             3,
             "Input shape must be 3-dimensional: [batch_size, channels, length]"
         );
 
-        self.input_cache = Some(input.clone());
-
         // Extract dimensions
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let length = input.shape()[2];
+        let (batch_size, channels, length) = (shape[0], shape[1], shape[2]);
+
+        // Store input shape and cache input for backpropagation
+        self.input_shape = vec![batch_size, channels, length];
+        self.input_cache = Some(input.clone());
 
         // Create output tensor
         let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
 
-        let results: Vec<(usize, usize, f32)> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                (0..channels)
-                    .into_par_iter()
-                    .map(move |c| {
-                        let mut sum = 0.0;
-                        for l in 0..length {
-                            sum += input[[b, c, l]];
-                        }
-                        (b, c, sum / (length as f32))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        // Compute global average pooling
+        // Use parallel iteration over batches and channels, compute sequential sum over length
+        let length_f32 = length as f32;
 
-        for (b, c, avg_val) in results {
-            output[[b, c]] = avg_val;
-        }
+        output
+            .outer_iter_mut()
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(b, mut output_batch)| {
+                for c in 0..channels {
+                    let mut sum = 0.0;
+                    for l in 0..length {
+                        sum += input[[b, c, l]];
+                    }
+                    output_batch[c] = sum / length_f32;
+                }
+            });
 
         output
     }
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Check if we have cached the input
-        if let None = self.input_cache {
+        if self.input_cache.is_none() {
             return Err(ModelError::ProcessingError(
                 "Forward pass has not been run yet".to_string(),
             ));
         }
 
         // Extract dimensions
-        let batch_size = self.input_shape[0];
-        let channels = self.input_shape[1];
-        let length = self.input_shape[2];
+        let (channels, length) = (self.input_shape[1], self.input_shape[2]);
 
         // Create gradient tensor with the same shape as the input tensor
         let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
 
-        let updates: Vec<(usize, usize, f32)> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                (0..channels)
-                    .into_par_iter()
-                    .map(move |c| {
-                        let grad_val = grad_output[[b, c]] / (length as f32);
-                        (b, c, grad_val)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        // Distribute gradients uniformly across the sequence dimension
+        // Each position contributes equally to the average, so gradient is divided by length
+        let length_f32 = length as f32;
 
-        for (b, c, grad_val) in updates {
-            for l in 0..length {
-                grad_input[[b, c, l]] = grad_val;
-            }
-        }
+        grad_input
+            .outer_iter_mut()
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(b, mut grad_batch)| {
+                for c in 0..channels {
+                    let grad_val = grad_output[[b, c]] / length_f32;
+                    for l in 0..length {
+                        grad_batch[[c, l]] = grad_val;
+                    }
+                }
+            });
 
         Ok(grad_input)
     }

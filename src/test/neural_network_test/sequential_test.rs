@@ -115,7 +115,7 @@ fn test_fit_classification_convergence() {
         .add(Dense::new(2, 4, Activation::ReLU))
         .add(Dense::new(4, 2, Activation::Softmax))
         .compile(
-            Adam::new(0.001, 0.9, 0.999, 1e-8),
+            Adam::new(0.01, 0.9, 0.999, 1e-8),
             CategoricalCrossEntropy::new(),
         ); // Smaller learning rate
 
@@ -126,7 +126,7 @@ fn test_fit_classification_convergence() {
     println!("Initial accuracy: {:.3}", initial_accuracy);
 
     // Train the model for more epochs
-    model.fit(&x, &y, 50).unwrap(); // More epochs
+    model.fit(&x, &y, 150).unwrap();
 
     // Get predictions after training
     let final_predictions = model.predict(&x);

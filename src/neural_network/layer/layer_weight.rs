@@ -107,20 +107,22 @@ pub struct Conv2DLayerWeight<'a> {
 /// # Fields
 ///
 /// - `weight` - 5D convolution kernel with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
-/// - `bias` - Bias tensor with shape (1, output_channels, 1)
+/// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv3DLayerWeight<'a> {
     pub weight: &'a ndarray::Array5<f32>,
-    pub bias: &'a ndarray::Array3<f32>,
+    pub bias: &'a ndarray::Array2<f32>,
 }
 
 /// Weights for a 2D separable convolutional layer
 ///
 /// # Fields
 ///
-/// - `weight` - 4D weight tensor for depthwise convolution filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
+/// - `depthwise_weight` - 4D weight tensor for depthwise convolution filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
+/// - `pointwise_weight` - 4D weight tensor for pointwise (1x1) convolution filters with shape (output_filters, input_channels * depth_multiplier, 1, 1)
 /// - `bias` - Bias vector with shape (1, output_filters)
 pub struct SeparableConv2DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array4<f32>,
+    pub depthwise_weight: &'a ndarray::Array4<f32>,
+    pub pointwise_weight: &'a ndarray::Array4<f32>,
     pub bias: &'a ndarray::Array2<f32>,
 }
 

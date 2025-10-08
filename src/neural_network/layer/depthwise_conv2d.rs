@@ -161,7 +161,7 @@ impl DepthwiseConv2D {
 
         // Xavier initialization
         self.weights
-            .axis_iter_mut(ndarray::Axis(0))
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
             .for_each(|mut filter| {
                 filter
@@ -172,6 +172,26 @@ impl DepthwiseConv2D {
         // bias initialization
         self.bias
             .par_mapv_inplace(|_| (rand::random::<f32>() - 0.5) * 0.1);
+    }
+
+    /// Calculates padding dimensions for Same padding mode.
+    fn calculate_padding(
+        &self,
+        input_height: usize,
+        input_width: usize,
+        output_height: usize,
+        output_width: usize,
+    ) -> (usize, usize) {
+        match self.padding {
+            PaddingType::Valid => (0, 0),
+            PaddingType::Same => {
+                let pad_h = ((output_height - 1) * self.strides.0 + self.kernel_size.0)
+                    .saturating_sub(input_height);
+                let pad_w = ((output_width - 1) * self.strides.1 + self.kernel_size.1)
+                    .saturating_sub(input_width);
+                (pad_h, pad_w)
+            }
+        }
     }
 }
 
@@ -207,15 +227,18 @@ impl Layer for DepthwiseConv2D {
             output_shape[3],
         );
 
+        // Calculate padding dimensions once if needed
+        let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
+
         let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
 
         output
-            .axis_iter_mut(ndarray::Axis(0))
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
             .enumerate()
             .for_each(|(b, mut batch_output)| {
                 batch_output
-                    .axis_iter_mut(ndarray::Axis(0))
+                    .axis_iter_mut(Axis(0))
                     .into_par_iter()
                     .enumerate()
                     .for_each(|(c, mut channel_output)| {
@@ -223,17 +246,10 @@ impl Layer for DepthwiseConv2D {
                         let input_channel = input_array.slice(s![b, c, .., ..]).to_owned();
 
                         // Apply padding if needed
-                        let padded_input = match self.padding {
-                            PaddingType::Valid => input_channel,
-                            PaddingType::Same => {
-                                let pad_h = ((output_height - 1) * self.strides.0
-                                    + self.kernel_size.0)
-                                    .saturating_sub(height);
-                                let pad_w = ((output_width - 1) * self.strides.1
-                                    + self.kernel_size.1)
-                                    .saturating_sub(width);
-                                pad_tensor_2d(&input_channel, pad_h, pad_w)
-                            }
+                        let padded_input = if self.padding == PaddingType::Same {
+                            pad_tensor_2d(&input_channel, pad_h, pad_w)
+                        } else {
+                            input_channel
                         };
 
                         // Perform depthwise convolution for this channel
@@ -318,43 +334,38 @@ impl Layer for DepthwiseConv2D {
             bias_grads[c] = grad;
         }
 
-        // Parallel computation of weight gradients and input gradients
-        let batch_channel_results: Vec<(Array4<f32>, Array4<f32>)> = (0..batch_size)
+        // Calculate padding dimensions once if needed
+        let (pad_h, pad_w) =
+            self.calculate_padding(input_height, input_width, output_height, output_width);
+
+        // Parallel computation of weight gradients and input gradients per batch
+        let batch_results: Vec<(Array4<f32>, Array4<f32>)> = (0..batch_size)
             .into_par_iter()
             .map(|b| {
                 let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
                 let mut batch_input_grads = Array4::zeros((1, channels, input_height, input_width));
 
                 for c in 0..channels {
-                    // Weight and input gradients
                     let input_channel = input_array.slice(s![b, c, .., ..]);
                     let grad_channel = grad_output_array.slice(s![b, c, .., ..]);
 
-                    // Apply padding to input as needed
-                    let padded_input = match self.padding {
-                        PaddingType::Valid => input_channel.to_owned(),
-                        PaddingType::Same => {
-                            let pad_h = ((output_height - 1) * self.strides.0 + self.kernel_size.0)
-                                .saturating_sub(input_height);
-                            let pad_w = ((output_width - 1) * self.strides.1 + self.kernel_size.1)
-                                .saturating_sub(input_width);
-                            pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
-                        }
+                    // Apply padding to input if needed
+                    let padded_input = if self.padding == PaddingType::Same {
+                        pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
+                    } else {
+                        input_channel.to_owned()
                     };
 
                     // Calculate weight gradients
                     for kh in 0..self.kernel_size.0 {
                         for kw in 0..self.kernel_size.1 {
-                            let kernel_pos = (kh, kw);
-
-                            // Parallelize inner loop
                             let weight_grad: f32 = (0..output_height)
                                 .into_par_iter()
                                 .map(|oh| {
                                     let mut row_sum = 0.0;
                                     for ow in 0..output_width {
-                                        let ih = oh * self.strides.0 + kernel_pos.0;
-                                        let iw = ow * self.strides.1 + kernel_pos.1;
+                                        let ih = oh * self.strides.0 + kh;
+                                        let iw = ow * self.strides.1 + kw;
 
                                         if ih < padded_input.shape()[0]
                                             && iw < padded_input.shape()[1]
@@ -367,7 +378,7 @@ impl Layer for DepthwiseConv2D {
                                 })
                                 .sum();
 
-                            batch_weight_grads[[c, 0, kh, kw]] += weight_grad;
+                            batch_weight_grads[[c, 0, kh, kw]] = weight_grad;
                         }
                     }
 
@@ -376,29 +387,16 @@ impl Layer for DepthwiseConv2D {
                         for ow in 0..output_width {
                             let grad_val = grad_channel[[oh, ow]];
 
-                            // Parallel processing of kernel positions
-                            let grad_updates: Vec<((usize, usize), f32)> = (0..self.kernel_size.0)
-                                .into_par_iter()
-                                .flat_map(|kh| {
-                                    let mut row_updates = Vec::new();
-                                    for kw in 0..self.kernel_size.1 {
-                                        let ih = oh * self.strides.0 + kh;
-                                        let iw = ow * self.strides.1 + kw;
+                            for kh in 0..self.kernel_size.0 {
+                                for kw in 0..self.kernel_size.1 {
+                                    let ih = oh * self.strides.0 + kh;
+                                    let iw = ow * self.strides.1 + kw;
 
-                                        if ih < input_height && iw < input_width {
-                                            row_updates.push((
-                                                (ih, iw),
-                                                self.weights[[c, 0, kh, kw]] * grad_val,
-                                            ));
-                                        }
+                                    if ih < input_height && iw < input_width {
+                                        batch_input_grads[[0, c, ih, iw]] +=
+                                            self.weights[[c, 0, kh, kw]] * grad_val;
                                     }
-                                    row_updates
-                                })
-                                .collect();
-
-                            // Apply gradient updates
-                            for ((ih, iw), grad_update) in grad_updates {
-                                batch_input_grads[[0, c, ih, iw]] += grad_update;
+                                }
                             }
                         }
                     }
@@ -408,23 +406,12 @@ impl Layer for DepthwiseConv2D {
             })
             .collect();
 
-        // Merge batch results
-        for (batch_weight_grads, batch_input_grads) in batch_channel_results {
-            // Merge weight gradients
+        // Accumulate gradients from all batches
+        for (b, (batch_weight_grads, batch_input_grads)) in batch_results.into_iter().enumerate() {
             weight_grads += &batch_weight_grads;
-
-            // Merge input gradients
-            for b in 0..batch_size {
-                if b < batch_input_grads.shape()[0] {
-                    for c in 0..channels {
-                        for h in 0..input_height {
-                            for w in 0..input_width {
-                                input_grads[[b, c, h, w]] += batch_input_grads[[0, c, h, w]];
-                            }
-                        }
-                    }
-                }
-            }
+            input_grads
+                .slice_mut(s![b, .., .., ..])
+                .assign(&batch_input_grads.slice(s![0, .., .., ..]));
         }
 
         self.weight_gradients = Some(weight_grads);

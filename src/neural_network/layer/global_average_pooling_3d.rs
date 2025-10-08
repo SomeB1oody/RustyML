@@ -62,61 +62,46 @@ impl GlobalAveragePooling3D {
 
 impl Layer for GlobalAveragePooling3D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Store input shape and cache for backward pass
-        self.input_shape = input.shape().to_vec();
-        self.input_cache = Some(input.clone());
-
-        let input_shape = input.shape();
-
         // Verify input is 5D: [batch_size, channels, depth, height, width]
+        let shape = input.shape();
         assert_eq!(
-            input_shape.len(),
+            shape.len(),
             5,
             "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
         );
 
-        let batch_size = input_shape[0];
-        let channels = input_shape[1];
-        let depth = input_shape[2];
-        let height = input_shape[3];
-        let width = input_shape[4];
+        // Extract dimensions
+        let (batch_size, channels, depth, height, width) =
+            (shape[0], shape[1], shape[2], shape[3], shape[4]);
 
-        // Calculate the total number of spatial elements to average over
-        let spatial_elements = (depth * height * width) as f32;
+        // Store input shape and cache input for backpropagation
+        self.input_shape = vec![batch_size, channels, depth, height, width];
+        self.input_cache = Some(input.clone());
 
-        // Create output tensor with shape [batch_size, channels]
-        let mut output = Array::zeros(IxDyn(&[batch_size, channels]));
+        // Create output tensor
+        let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
 
-        // Parallel processing across batch and channel dimensions
-        // Create a flat vector of (batch, channel) indices for parallel processing
-        let batch_channel_indices: Vec<(usize, usize)> = (0..batch_size)
-            .flat_map(|b| (0..channels).map(move |c| (b, c)))
-            .collect();
+        // Compute global average pooling
+        // Use parallel iteration over batches, compute sequential sum over channels and spatial dimensions
+        let spatial_size = (depth * height * width) as f32;
 
-        // Process each (batch, channel) pair in parallel
-        let results: Vec<((usize, usize), f32)> = batch_channel_indices
-            .par_iter()
-            .map(|&(b, c)| {
-                let mut sum = 0.0f32;
-
-                // Sum all spatial elements for this batch and channel
-                for d in 0..depth {
-                    for h in 0..height {
-                        for w in 0..width {
-                            sum += input[[b, c, d, h, w]];
+        output
+            .outer_iter_mut()
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(b, mut output_batch)| {
+                for c in 0..channels {
+                    let mut sum = 0.0;
+                    for d in 0..depth {
+                        for h in 0..height {
+                            for w in 0..width {
+                                sum += input[[b, c, d, h, w]];
+                            }
                         }
                     }
+                    output_batch[c] = sum / spatial_size;
                 }
-
-                // Return the position and average value
-                ((b, c), sum / spatial_elements)
-            })
-            .collect();
-
-        // Assign results back to output tensor
-        for ((b, c), average) in results {
-            output[[b, c]] = average;
-        }
+            });
 
         output
     }

@@ -66,7 +66,7 @@ pub struct MaxPooling3D {
     strides: (usize, usize, usize),
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
-    max_positions: Option<Vec<(usize, usize, usize, usize, usize)>>,
+    max_positions: Option<Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>>,
 }
 
 impl MaxPooling3D {
@@ -106,6 +106,11 @@ impl MaxPooling3D {
         }
     }
 
+    /// Calculates the output shape of the max pooling layer.
+    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
+        calculate_output_shape_3d_pooling(input_shape, self.pool_size, self.strides)
+    }
+
     /// Performs 3D max pooling operation.
     ///
     /// # Parameters
@@ -114,14 +119,19 @@ impl MaxPooling3D {
     ///
     /// # Returns
     ///
-    /// * `(Tensor, Vec<(usize, usize, usize, usize, usize)>)` - The result of the pooling operation and the positions of the maximum values.
-    fn max_pool(&self, input: &Tensor) -> (Tensor, Vec<(usize, usize, usize, usize, usize)>) {
+    /// * `(Tensor, Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>)` - Result of the pooling operation
+    ///   and positions mapping: (batch, channel, out_d, out_i, out_j, in_d, in_i, in_j)
+    fn max_pool(
+        &self,
+        input: &Tensor,
+    ) -> (
+        Tensor,
+        Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>,
+    ) {
         let input_shape = input.shape();
-
         let batch_size = input_shape[0];
         let channels = input_shape[1];
-        let output_shape =
-            calculate_output_shape_3d_pooling(input_shape, self.pool_size, self.strides);
+        let output_shape = self.calculate_output_shape(input_shape);
 
         // Pre-allocate the output array
         let mut output = ArrayD::zeros(output_shape.clone());
@@ -139,16 +149,16 @@ impl MaxPooling3D {
                     let mut batch_channel_positions = Vec::new();
 
                     // Perform pooling for each output position
-                    for d in 0..output_shape_clone[2] {
-                        let d_start = d * self.strides.0;
+                    for out_d in 0..output_shape_clone[2] {
+                        let d_start = out_d * self.strides.0;
 
-                        for i in 0..output_shape_clone[3] {
-                            let i_start = i * self.strides.1;
+                        for out_i in 0..output_shape_clone[3] {
+                            let i_start = out_i * self.strides.1;
 
-                            for j in 0..output_shape_clone[4] {
-                                let j_start = j * self.strides.2;
+                            for out_j in 0..output_shape_clone[4] {
+                                let j_start = out_j * self.strides.2;
 
-                                // Find the maximum value in the pooling window
+                                // Find maximum value in pooling window
                                 let mut max_val = f32::NEG_INFINITY;
                                 let mut max_pos = (0, 0, 0);
 
@@ -179,9 +189,11 @@ impl MaxPooling3D {
                                     }
                                 }
 
-                                batch_channel_output.push((d, i, j, max_val));
-                                batch_channel_positions
-                                    .push((b, c, max_pos.0, max_pos.1, max_pos.2));
+                                batch_channel_output.push((out_d, out_i, out_j, max_val));
+                                // Store complete mapping: (batch, channel, output_d, output_i, output_j, input_d, input_i, input_j)
+                                batch_channel_positions.push((
+                                    b, c, out_d, out_i, out_j, max_pos.0, max_pos.1, max_pos.2,
+                                ));
                             }
                         }
                     }
@@ -219,33 +231,18 @@ impl Layer for MaxPooling3D {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if let (Some(input), Some(max_positions)) = (&self.input_cache, &self.max_positions) {
-            let grad_shape = grad_output.shape();
+            let input_shape = input.shape();
 
-            // Initialize input gradients with the same shape as the input
-            let mut input_gradients = ArrayD::zeros(input.dim());
+            // Initialize input gradients with same shape as input
+            let mut input_gradients = ArrayD::zeros(input_shape.to_vec());
 
-            // Create a vector containing update positions and values
-            let gradient_updates: Vec<_> = max_positions
-                .par_iter()
-                .filter_map(|&(b, c, d, i, j)| {
-                    // Calculate the corresponding output gradient index
-                    let out_d = d / self.strides.0;
-                    let out_i = i / self.strides.1;
-                    let out_j = j / self.strides.2;
-
-                    // Ensure the index is within valid range
-                    if out_d < grad_shape[2] && out_i < grad_shape[3] && out_j < grad_shape[4] {
-                        // Return index and gradient value
-                        Some(((b, c, d, i, j), grad_output[[b, c, out_d, out_i, out_j]]))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Apply gradient updates sequentially
-            for ((b, c, d, i, j), grad_val) in gradient_updates {
-                input_gradients[[b, c, d, i, j]] = grad_val;
+            // Distribute gradients to the positions that produced the maximum values
+            // Each entry contains: (batch, channel, out_d, out_i, out_j, in_d, in_i, in_j)
+            // Note: Using += to handle overlapping pooling windows correctly
+            for &(b, c, out_d, out_i, out_j, in_d, in_i, in_j) in max_positions.iter() {
+                // Accumulate gradient from output position to the input position that was selected as max
+                input_gradients[[b, c, in_d, in_i, in_j]] +=
+                    grad_output[[b, c, out_d, out_i, out_j]];
             }
 
             Ok(input_gradients)

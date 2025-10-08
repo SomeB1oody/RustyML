@@ -222,9 +222,9 @@ pub struct RMSpropCacheConv2D {
 ///   kernel_height, kernel_width)
 ///
 /// - `bias` - 3D array storing the exponentially decaying average of squared gradients
-///   for bias parameters with shape (1, output_channels, 1)
+///   for bias parameters with shape (1, output_channels)
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCacheConv3D {
     pub cache: Array5<f32>,
-    pub bias: Array3<f32>,
+    pub bias: Array2<f32>,
 }

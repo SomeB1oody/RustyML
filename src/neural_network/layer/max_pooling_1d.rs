@@ -21,7 +21,7 @@ use super::*;
 /// - `stride` - Stride of the pooling operation
 /// - `input_shape` - Shape of the input tensor
 /// - `input_cache` - Input tensor cached during forward pass, used for backward pass
-/// - `max_positions` - Positions of the maximum values in each pooling window, used for backpropagation
+/// - `max_positions` - 3D array storing the input indices of maximum values for each output position, used for backpropagation
 ///
 /// # Example
 /// ```rust
@@ -78,7 +78,7 @@ pub struct MaxPooling1D {
     stride: usize,
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
-    max_positions: Option<Vec<(usize, usize, usize)>>,
+    max_positions: Option<Array3<usize>>,
 }
 
 impl MaxPooling1D {
@@ -121,57 +121,44 @@ impl Layer for MaxPooling1D {
         let length = input.shape()[2];
 
         let output_length = (length - self.pool_size) / self.stride + 1;
-        let mut output = Array3::<f32>::zeros((batch_size, channels, output_length)).into_dyn();
-
-        // Store the positions of maximum values for backpropagation
-        let mut max_positions = Vec::new();
+        let mut output = Array3::<f32>::zeros((batch_size, channels, output_length));
+        let mut max_positions = Array3::<usize>::zeros((batch_size, channels, output_length));
 
         // Copy needed values from self to avoid capturing self in closure
         let pool_size = self.pool_size;
         let stride = self.stride;
 
-        // Use rayon to process batches and channels in parallel
-        let results: Vec<_> = (0..batch_size)
+        // Use rayon to parallelize over batches
+        output
+            .axis_iter_mut(Axis(0))
             .into_par_iter()
-            .flat_map(|b| {
-                (0..channels).into_par_iter().map(move |c| {
-                    let mut batch_channel_output = Vec::new();
-                    let mut batch_channel_max_positions = Vec::new();
-
-                    // Perform pooling for each output position
+            .zip(max_positions.axis_iter_mut(Axis(0)).into_par_iter())
+            .enumerate()
+            .for_each(|(b, (mut output_batch, mut max_pos_batch))| {
+                for c in 0..channels {
                     for i in 0..output_length {
                         let start_idx = i * stride;
                         let end_idx = start_idx + pool_size;
 
                         // Find maximum value and its position in the window
-                        let mut max_val = f32::MIN;
+                        // Initialize with the first element in the window
+                        let mut max_val = input[[b, c, start_idx]];
                         let mut max_idx = start_idx;
-                        for j in start_idx..end_idx {
+                        for j in (start_idx + 1)..end_idx {
                             if input[[b, c, j]] > max_val {
                                 max_val = input[[b, c, j]];
                                 max_idx = j;
                             }
                         }
 
-                        batch_channel_output.push((i, max_val));
-                        batch_channel_max_positions.push((b, c, max_idx));
+                        output_batch[[c, i]] = max_val;
+                        max_pos_batch[[c, i]] = max_idx;
                     }
-
-                    ((b, c), (batch_channel_output, batch_channel_max_positions))
-                })
-            })
-            .collect();
-
-        // Merge results into output tensor and collect max positions
-        for ((b, c), (outputs, positions)) in results {
-            for (i, val) in outputs {
-                output[[b, c, i]] = val;
-            }
-            max_positions.extend(positions);
-        }
+                }
+            });
 
         self.max_positions = Some(max_positions);
-        output
+        output.into_dyn()
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -199,21 +186,20 @@ impl Layer for MaxPooling1D {
         let channels = input.shape()[1];
         let length = input.shape()[2];
 
-        let mut grad_input = Array3::<f32>::zeros((batch_size, channels, length)).into_dyn();
+        let mut grad_input = Array3::<f32>::zeros((batch_size, channels, length));
 
         // For max pooling, gradients flow only through the maximum value in each pooling window
-        for (b, c, idx) in max_positions {
-            // Calculate which output position this max value contributed to
-            let output_idx = (*idx - (*idx % self.stride)) / self.stride;
-
-            // Ensure we're within bounds of grad_output
-            if output_idx < grad_output.shape()[2] {
-                // Pass the gradient to the input position that had the maximum value
-                grad_input[[*b, *c, *idx]] += grad_output[[*b, *c, output_idx]];
+        for b in 0..batch_size {
+            for c in 0..channels {
+                for i in 0..grad_output.shape()[2] {
+                    let max_idx = max_positions[[b, c, i]];
+                    // Pass the gradient to the input position that had the maximum value
+                    grad_input[[b, c, max_idx]] += grad_output[[b, c, i]];
+                }
             }
         }
 
-        Ok(grad_input)
+        Ok(grad_input.into_dyn())
     }
 
     fn layer_type(&self) -> &str {

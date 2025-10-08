@@ -122,27 +122,29 @@ impl SimpleRNN {
         for i in 0..size {
             // Orthogonalize column i against all previous columns
             for j in 0..i {
-                let col_i = matrix.column(i).to_owned();
-                let col_j = matrix.column(j).to_owned();
-
-                // Compute projection: dot(col_i, col_j)
-                let projection = col_i
-                    .iter()
-                    .zip(col_j.iter())
-                    .map(|(a, b)| a * b)
-                    .sum::<f32>();
+                // Compute projection: dot(col_i, col_j) / dot(col_j, col_j)
+                // Since col_j is already normalized in previous iterations, denominator is 1
+                let mut projection = 0.0;
+                for k in 0..size {
+                    projection += matrix[[k, i]] * matrix[[k, j]];
+                }
 
                 // Subtract projection from column i
                 for k in 0..size {
-                    matrix[[k, i]] -= projection * col_j[k];
+                    matrix[[k, i]] -= projection * matrix[[k, j]];
                 }
             }
 
             // Normalize column i
-            let col_i = matrix.column(i).to_owned();
-            let norm = col_i.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let mut norm: f32 = 0.0;
+            for k in 0..size {
+                norm += matrix[[k, i]] * matrix[[k, i]];
+            }
+            norm = norm.sqrt();
 
-            if norm > 1e-8 {
+            const EPSILON: f32 = 1e-8;
+
+            if norm > EPSILON {
                 for k in 0..size {
                     matrix[[k, i]] /= norm;
                 }
@@ -169,16 +171,16 @@ impl Layer for SimpleRNN {
         let mut hs = Vec::with_capacity(timesteps + 1);
         hs.push(h_prev.clone());
 
-        // Time steps loop is still sequential
+        // Sequential timestep processing (required for RNN)
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+            let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
 
-            // Matrix multiplication here can be parallelized internally
+            // Compute: h_t = activation(x_t @ W + h_{t-1} @ U + b)
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
 
             let h_t = Activation::apply_activation(&z, &self.activation);
-            hs.push(h_t.clone());
-            h_prev = h_t;
+            h_prev = h_t.clone();
+            hs.push(h_prev.clone());
         }
         self.hidden_state_cache = Some(hs);
         h_prev.into_dyn() // Return hidden state of the last timestep
@@ -220,22 +222,27 @@ impl Layer for SimpleRNN {
         let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
 
         let mut grad_h = grad_h_t;
-        // BPTT with gradient clipping
+        // Backpropagation Through Time (BPTT)
         for t in (0..timesteps).rev() {
-            let h_t = hs[t + 1].clone();
-            let h_tm1 = hs[t].clone();
+            let h_t = &hs[t + 1];
+            let h_tm1 = &hs[t];
 
-            // Compute activation derivative (removed Softmax special case for hidden layer)
-            let d_act = Activation::activation_derivative(&h_t, &self.activation);
+            // Compute activation derivative
+            let d_act = Activation::activation_derivative(h_t, &self.activation);
             let d_z = d_act * &grad_h;
 
-            let x_t = x3.index_axis(Axis(1), t).to_owned();
+            // Accumulate gradients for weights
+            let x_t = x3.index_axis(Axis(1), t);
             grad_k = grad_k + &x_t.t().dot(&d_z);
             grad_rk = grad_rk + &h_tm1.t().dot(&d_z);
-            let db = d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
-            grad_b = grad_b + &db;
-            let dx = d_z.dot(&self.kernel.t());
-            grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
+            grad_b = grad_b + &d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
+
+            // Gradient w.r.t. input at timestep t
+            grad_x3
+                .index_axis_mut(Axis(1), t)
+                .assign(&d_z.dot(&self.kernel.t()));
+
+            // Gradient w.r.t. previous hidden state (for next iteration)
             grad_h = d_z.dot(&self.recurrent_kernel.t());
         }
 

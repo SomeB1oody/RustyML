@@ -108,7 +108,6 @@ impl Layer for AveragePooling3D {
 
         // Cache input for backpropagation
         self.input_cache = Some(input.clone());
-        self.input_shape = input_shape.to_vec();
 
         let output_shape =
             calculate_output_shape_3d_pooling(input_shape, self.pool_size, self.strides);
@@ -124,12 +123,14 @@ impl Layer for AveragePooling3D {
         let output_height = output_shape[3];
         let output_width = output_shape[4];
 
-        let pool_volume = (self.pool_size.0 * self.pool_size.1 * self.pool_size.2) as f32;
-
         // Create index pairs for all (batch, channel) combinations
         let batch_channel_pairs: Vec<(usize, usize)> = (0..batch_size)
             .flat_map(|b| (0..channels).map(move |c| (b, c)))
             .collect();
+
+        // Copy needed values to avoid capturing self in closure
+        let pool_size = self.pool_size;
+        let strides = self.strides;
 
         // Parallel computation for each (batch, channel) pair
         let results: Vec<((usize, usize), Vec<((usize, usize, usize), f32)>)> = batch_channel_pairs
@@ -140,25 +141,28 @@ impl Layer for AveragePooling3D {
                 for od in 0..output_depth {
                     for oh in 0..output_height {
                         for ow in 0..output_width {
-                            let start_d = od * self.strides.0;
-                            let start_h = oh * self.strides.1;
-                            let start_w = ow * self.strides.2;
+                            let start_d = od * strides.0;
+                            let start_h = oh * strides.1;
+                            let start_w = ow * strides.2;
 
-                            let end_d = (start_d + self.pool_size.0).min(input_depth);
-                            let end_h = (start_h + self.pool_size.1).min(input_height);
-                            let end_w = (start_w + self.pool_size.2).min(input_width);
+                            let end_d = (start_d + pool_size.0).min(input_depth);
+                            let end_h = (start_h + pool_size.1).min(input_height);
+                            let end_w = (start_w + pool_size.2).min(input_width);
 
                             // Calculate average value within the pooling window
                             let mut sum = 0.0;
+                            let mut count = 0;
                             for d in start_d..end_d {
                                 for h in start_h..end_h {
                                     for w in start_w..end_w {
                                         sum += input[[b, c, d, h, w]];
+                                        count += 1;
                                     }
                                 }
                             }
 
-                            let pooled_value = sum / pool_volume;
+                            // Divide by actual number of elements, not theoretical pool size
+                            let pooled_value = if count > 0 { sum / count as f32 } else { 0.0 };
                             local_results.push(((od, oh, ow), pooled_value));
                         }
                     }
@@ -196,37 +200,51 @@ impl Layer for AveragePooling3D {
         let output_height = grad_output.shape()[3];
         let output_width = grad_output.shape()[4];
 
-        let pool_volume = (self.pool_size.0 * self.pool_size.1 * self.pool_size.2) as f32;
-
         // Create index pairs for all (batch, channel) combinations
         let batch_channel_pairs: Vec<(usize, usize)> = (0..batch_size)
             .flat_map(|b| (0..channels).map(move |c| (b, c)))
             .collect();
 
+        // Copy needed values to avoid capturing self in closure
+        let pool_size = self.pool_size;
+        let strides = self.strides;
+
         // Parallel computation of gradient contributions for each (batch, channel) pair
-        let results: Vec<((usize, usize), Vec<((usize, usize, usize), f32)>)> = batch_channel_pairs
+        let results: Vec<((usize, usize), Vec<f32>)> = batch_channel_pairs
             .into_par_iter()
             .map(|(b, c)| {
-                let mut local_gradients = Vec::new();
+                // Allocate only the spatial volume for this channel
+                let spatial_volume = input_depth * input_height * input_width;
+                let mut spatial_grad = vec![0.0f32; spatial_volume];
 
                 for od in 0..output_depth {
                     for oh in 0..output_height {
                         for ow in 0..output_width {
-                            let start_d = od * self.strides.0;
-                            let start_h = oh * self.strides.1;
-                            let start_w = ow * self.strides.2;
+                            let start_d = od * strides.0;
+                            let start_h = oh * strides.1;
+                            let start_w = ow * strides.2;
 
-                            let end_d = (start_d + self.pool_size.0).min(input_depth);
-                            let end_h = (start_h + self.pool_size.1).min(input_height);
-                            let end_w = (start_w + self.pool_size.2).min(input_width);
+                            let end_d = (start_d + pool_size.0).min(input_depth);
+                            let end_h = (start_h + pool_size.1).min(input_height);
+                            let end_w = (start_w + pool_size.2).min(input_width);
+
+                            // Calculate actual number of elements in this pooling window
+                            let actual_count =
+                                ((end_d - start_d) * (end_h - start_h) * (end_w - start_w)) as f32;
 
                             // Distribute gradient evenly to all elements in the pooling window
-                            let grad_value = grad_output[[b, c, od, oh, ow]] / pool_volume;
+                            let grad_value = if actual_count > 0.0 {
+                                grad_output[[b, c, od, oh, ow]] / actual_count
+                            } else {
+                                0.0
+                            };
 
                             for d in start_d..end_d {
                                 for h in start_h..end_h {
                                     for w in start_w..end_w {
-                                        local_gradients.push(((d, h, w), grad_value));
+                                        let idx =
+                                            d * input_height * input_width + h * input_width + w;
+                                        spatial_grad[idx] += grad_value;
                                     }
                                 }
                             }
@@ -234,14 +252,19 @@ impl Layer for AveragePooling3D {
                     }
                 }
 
-                ((b, c), local_gradients)
+                ((b, c), spatial_grad)
             })
             .collect();
 
         // Merge parallel computation results into output gradient tensor
-        for ((b, c), local_gradients) in results {
-            for ((d, h, w), grad_value) in local_gradients {
-                grad_input[[b, c, d, h, w]] += grad_value;
+        for ((b, c), spatial_grad) in results {
+            for d in 0..input_depth {
+                for h in 0..input_height {
+                    for w in 0..input_width {
+                        let idx = d * input_height * input_width + h * input_width + w;
+                        grad_input[[b, c, d, h, w]] = spatial_grad[idx];
+                    }
+                }
             }
         }
 

@@ -24,8 +24,8 @@ fn average_pooling_basic_test() {
     model
         .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
-            (2, 2),           // Stride
             vec![2, 3, 4, 4], // Input shape
+            Some((2, 2)),     // Strides (optional)
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -72,8 +72,8 @@ fn average_pooling_non_even_input_test() {
     model
         .add(AveragePooling2D::new(
             (3, 3),           // Pooling window size
-            (2, 2),           // Stride
             vec![2, 3, 5, 5], // Input shape
+            Some((2, 2)),     // Strides (optional)
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -107,8 +107,8 @@ fn average_pooling_different_strides_test() {
     model
         .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
-            (1, 1),           // Stride
             vec![1, 1, 6, 6], // Input shape
+            Some((1, 1)),     // Strides (optional)
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -133,8 +133,8 @@ fn average_pooling_backprop_test() {
     model
         .add(AveragePooling2D::new(
             (2, 2),           // Pooling window size
-            (2, 2),           // Stride
             vec![2, 2, 4, 4], // Input shape
+            Some((2, 2)),     // Strides (optional)
         ))
         .compile(RMSprop::new(0.01, 0.9, 1e-8), MeanSquaredError::new());
 

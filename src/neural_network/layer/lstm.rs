@@ -32,19 +32,45 @@ impl Gate {
     ///
     /// - `input_dim` - Dimensionality of the input features
     /// - `units` - Number of units (neurons) in this gate
+    /// - `is_forget_gate` - Whether this is a forget gate (affects bias initialization)
     ///
     /// # Returns
     ///
     /// * `Gate` - A new `Gate` instance with:
-    ///     - Randomly initialized kernel and recurrent_kernel weights (uniform distribution \[-0.05, 0.05\])
-    ///     - Zero-initialized bias terms
+    ///     - Xavier/Glorot initialization for kernel weights
+    ///     - Orthogonal initialization for recurrent_kernel weights
+    ///     - Forget gate bias initialized to 1.0, other gates to 0.0
     ///     - None gradients (will be allocated during first backward pass)
     ///     - Default optimizer cache
-    pub fn new(input_dim: usize, units: usize) -> Self {
+    pub fn new(input_dim: usize, units: usize, is_forget_gate: bool) -> Self {
+        // Xavier/Glorot initialization for input kernel
+        let limit = (6.0 / (input_dim + units) as f32).sqrt();
+        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
+
+        // Orthogonal initialization for recurrent kernel
+        let mut recurrent_kernel = Array::random((units, units), Uniform::new(-1.0, 1.0));
+        if units > 0 {
+            // Simplified orthogonalization using QR decomposition approximation
+            // For better numerical stability, normalize each column
+            for mut col in recurrent_kernel.columns_mut() {
+                let norm = col.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 1e-8 {
+                    col /= norm;
+                }
+            }
+        }
+
+        // Forget gate bias should be initialized to 1.0 to prevent early vanishing gradients
+        let bias = if is_forget_gate {
+            Array::ones((1, units))
+        } else {
+            Array::zeros((1, units))
+        };
+
         Self {
-            kernel: Array::random((input_dim, units), Uniform::new(-0.05, 0.05)),
-            recurrent_kernel: Array::random((units, units), Uniform::new(-0.05, 0.05)),
-            bias: Array::zeros((1, units)),
+            kernel,
+            recurrent_kernel,
+            bias,
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
@@ -165,10 +191,10 @@ impl LSTM {
         Self {
             input_dim,
             units,
-            input_gate: Gate::new(input_dim, units),
-            forget_gate: Gate::new(input_dim, units),
-            cell_gate: Gate::new(input_dim, units),
-            output_gate: Gate::new(input_dim, units),
+            input_gate: Gate::new(input_dim, units, false),
+            forget_gate: Gate::new(input_dim, units, true), // forget gate bias = 1.0
+            cell_gate: Gate::new(input_dim, units, false),
+            output_gate: Gate::new(input_dim, units, false),
             input_cache: None,
             hidden_cache: None,
             cell_cache: None,
@@ -513,26 +539,23 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                // Parallelize the three parameter updates within a gate
-                rayon::join(
-                    || {
-                        rayon::join(
-                            || gate.kernel = &gate.kernel - &(lr * gk),
-                            || gate.recurrent_kernel = &gate.recurrent_kernel - &(lr * grk),
-                        )
-                    },
-                    || gate.bias = &gate.bias - &(lr * gb),
-                );
+                // Apply gradient clipping to prevent exploding gradients
+                const CLIP_VALUE: f32 = 5.0;
+                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+
+                gate.kernel = &gate.kernel - &(lr * &gk_clipped);
+                gate.recurrent_kernel = &gate.recurrent_kernel - &(lr * &grk_clipped);
+                gate.bias = &gate.bias - &(lr * &gb_clipped);
             }
         }
 
-        // Update all four gates in parallel
-        rayon::scope(|s| {
-            s.spawn(|_| update_gate(&mut self.input_gate, lr));
-            s.spawn(|_| update_gate(&mut self.forget_gate, lr));
-            s.spawn(|_| update_gate(&mut self.cell_gate, lr));
-            s.spawn(|_| update_gate(&mut self.output_gate, lr));
-        });
+        // Update all four gates sequentially (overhead of parallelization outweighs benefits)
+        update_gate(&mut self.input_gate, lr);
+        update_gate(&mut self.forget_gate, lr);
+        update_gate(&mut self.cell_gate, lr);
+        update_gate(&mut self.output_gate, lr);
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
@@ -561,9 +584,23 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
+                // Apply gradient clipping before Adam update
+                const CLIP_VALUE: f32 = 5.0;
+                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+
                 let adam_states = gate.optimizer_cache.adam_states.as_mut().unwrap();
-                let (k_update, rk_update, b_update) =
-                    adam_states.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
+                let (k_update, rk_update, b_update) = adam_states.update_parameter(
+                    &gk_clipped,
+                    Some(&grk_clipped),
+                    &gb_clipped,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    t,
+                    lr,
+                );
 
                 gate.kernel = &gate.kernel - &k_update;
                 gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update.unwrap();
@@ -571,57 +608,47 @@ impl Layer for LSTM {
             }
         }
 
-        // Update all four gates in parallel
-        rayon::scope(|s| {
-            s.spawn(|_| {
-                update_gate_adam(
-                    &mut self.input_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    beta1,
-                    beta2,
-                    epsilon,
-                    t,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_adam(
-                    &mut self.forget_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    beta1,
-                    beta2,
-                    epsilon,
-                    t,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_adam(
-                    &mut self.cell_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    beta1,
-                    beta2,
-                    epsilon,
-                    t,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_adam(
-                    &mut self.output_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    beta1,
-                    beta2,
-                    epsilon,
-                    t,
-                )
-            });
-        });
+        // Update all four gates sequentially (optimizer updates are already expensive)
+        update_gate_adam(
+            &mut self.input_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            t,
+        );
+        update_gate_adam(
+            &mut self.forget_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            t,
+        );
+        update_gate_adam(
+            &mut self.cell_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            t,
+        );
+        update_gate_adam(
+            &mut self.output_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            beta1,
+            beta2,
+            epsilon,
+            t,
+        );
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
@@ -648,14 +675,20 @@ impl Layer for LSTM {
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
+                // Apply gradient clipping before RMSprop update
+                const CLIP_VALUE: f32 = 5.0;
+                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
+
                 if let Some(ref mut cache) = gate.optimizer_cache.rmsprop_cache {
                     cache.update_parameters(
                         &mut gate.kernel,
                         Some(&mut gate.recurrent_kernel),
                         &mut gate.bias,
-                        gk,
-                        Some(grk),
-                        gb,
+                        &gk_clipped,
+                        Some(&grk_clipped),
+                        &gb_clipped,
                         rho,
                         lr,
                         epsilon,
@@ -664,49 +697,39 @@ impl Layer for LSTM {
             }
         }
 
-        // Update all four gates in parallel
-        rayon::scope(|s| {
-            s.spawn(|_| {
-                update_gate_rmsprop(
-                    &mut self.input_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    rho,
-                    epsilon,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_rmsprop(
-                    &mut self.forget_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    rho,
-                    epsilon,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_rmsprop(
-                    &mut self.cell_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    rho,
-                    epsilon,
-                )
-            });
-            s.spawn(|_| {
-                update_gate_rmsprop(
-                    &mut self.output_gate,
-                    self.input_dim,
-                    self.units,
-                    lr,
-                    rho,
-                    epsilon,
-                )
-            });
-        });
+        // Update all four gates sequentially
+        update_gate_rmsprop(
+            &mut self.input_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            rho,
+            epsilon,
+        );
+        update_gate_rmsprop(
+            &mut self.forget_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            rho,
+            epsilon,
+        );
+        update_gate_rmsprop(
+            &mut self.cell_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            rho,
+            epsilon,
+        );
+        update_gate_rmsprop(
+            &mut self.output_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            rho,
+            epsilon,
+        );
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.8.0] - 2025-10-8 (UTC-7)
+### Changed
+- Refactor convolutional and pooling layers
+
 ## [v0.8.0] - 2025-10-7 (UTC-7)
 ### Changed
 - Refactor the implementation code of the `DecisionTree`

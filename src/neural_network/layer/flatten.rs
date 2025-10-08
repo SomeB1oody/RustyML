@@ -20,7 +20,7 @@ use super::*;
 ///
 /// # Fields
 ///
-/// - `output_shape` - the output shape of the layer, in the format \[batch_size, flattened_features\]
+/// - `flattened_features` - the number of features after flattening (product of all dimensions except batch)
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
 /// # Example
@@ -49,7 +49,7 @@ use super::*;
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
 pub struct Flatten {
-    output_shape: Vec<usize>,
+    flattened_features: usize,
     input_cache: Option<Tensor>,
 }
 
@@ -73,12 +73,10 @@ impl Flatten {
             input_shape.len()
         );
 
-        let batch_size = input_shape[0];
         let flattened_features = input_shape[1..].iter().product();
-        let output_shape = vec![batch_size, flattened_features];
 
         Flatten {
-            output_shape,
+            flattened_features,
             input_cache: None,
         }
     }
@@ -100,9 +98,8 @@ impl Layer for Flatten {
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
 
-        // Create new shape and flatten
-        let output = input.clone();
-        output
+        // Reshape to flatten the tensor
+        input
             .to_shape(IxDyn(&[batch_size, flattened_features]))
             .unwrap()
             .to_owned()
@@ -143,7 +140,7 @@ impl Layer for Flatten {
     }
 
     fn output_shape(&self) -> String {
-        format!("({}, {})", self.output_shape[0], self.output_shape[1])
+        format!("(batch_size, {})", self.flattened_features)
     }
 
     no_trainable_parameters_layer_functions!();

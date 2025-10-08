@@ -11,7 +11,6 @@ use super::*;
 /// # Fields
 ///
 /// * `input_shape` - Stores the shape of the input tensor during the forward pass.
-/// * `input_cache` - Caches the input tensor for backpropagation.
 /// * `max_positions` - Stores the positions of maximum values found during the forward pass, used for gradient propagation during backpropagation.
 ///
 /// # Example
@@ -44,7 +43,6 @@ use super::*;
 /// ```
 pub struct GlobalMaxPooling2D {
     input_shape: Vec<usize>,
-    input_cache: Option<Tensor>,
     max_positions: Option<Vec<(usize, usize)>>,
 }
 
@@ -57,7 +55,6 @@ impl GlobalMaxPooling2D {
     pub fn new() -> Self {
         GlobalMaxPooling2D {
             input_shape: Vec::new(),
-            input_cache: None,
             max_positions: None,
         }
     }
@@ -65,7 +62,7 @@ impl GlobalMaxPooling2D {
 
 impl Layer for GlobalMaxPooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Save input shape and cache input for backpropagation
+        // Store the input shape for backpropagation
         self.input_shape = input.shape().to_vec();
 
         // Verify input is 4D: [batch_size, channels, height, width]
@@ -75,108 +72,88 @@ impl Layer for GlobalMaxPooling2D {
             "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
         );
 
-        self.input_cache = Some(input.clone());
+        let batch_size = self.input_shape[0];
+        let channels = self.input_shape[1];
+        let height = self.input_shape[2];
+        let width = self.input_shape[3];
 
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let height = input.shape()[2];
-        let width = input.shape()[3];
+        // Initialize output tensor with shape [batch_size, channels]
+        let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
 
-        // Create result tensor and storage for maximum value positions
-        let mut result = Array::zeros(IxDyn(&[batch_size, channels]));
+        // Pre-allocate max_positions vector with correct capacity
+        let mut max_positions = vec![(0, 0); batch_size * channels];
 
-        // Create index collection representing all (batch, channel) combinations
-        let indices: Vec<(usize, usize)> = (0..batch_size)
-            .flat_map(|b| (0..channels).map(move |c| (b, c)))
-            .collect();
+        // Process each batch-channel pair in parallel
+        let results: Vec<(usize, f32, (usize, usize))> = (0..batch_size * channels)
+            .into_par_iter()
+            .map(|idx| {
+                let b = idx / channels;
+                let c = idx % channels;
 
-        // Process each (batch, channel) combination in parallel
-        let max_results: Vec<((usize, usize), f32, (usize, usize))> = indices
-            .par_iter()
-            .map(|&(b, c)| {
                 let mut max_val = f32::NEG_INFINITY;
-                let mut max_h = 0;
-                let mut max_w = 0;
+                let mut max_pos = (0, 0);
 
-                // Find the maximum value and its position in each channel
+                // Find maximum value and its position across spatial dimensions
                 for h in 0..height {
                     for w in 0..width {
                         let val = input[[b, c, h, w]];
                         if val > max_val {
                             max_val = val;
-                            max_h = h;
-                            max_w = w;
+                            max_pos = (h, w);
                         }
                     }
                 }
 
-                ((b, c), max_val, (max_h, max_w))
+                (idx, max_val, max_pos)
             })
             .collect();
 
-        // Fill output tensor and position records using parallel computation results
-        let mut max_positions = Vec::with_capacity(batch_size * channels);
-
-        for ((b, c), max_val, (max_h, max_w)) in max_results {
-            result[[b, c]] = max_val;
-            max_positions.push((max_h, max_w));
+        // Fill the output tensor and max_positions in the correct order
+        for (idx, max_val, max_pos) in results {
+            let b = idx / channels;
+            let c = idx % channels;
+            output[[b, c]] = max_val;
+            max_positions[idx] = max_pos;
         }
 
+        // Cache the positions of maximum values for backpropagation
         self.max_positions = Some(max_positions);
-        result
+
+        output
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        // Check if input cache is valid
-        let input = match &self.input_cache {
-            Some(input) => input,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run yet".to_string(),
-                ));
+        if let Some(max_positions) = &self.max_positions {
+            let batch_size = self.input_shape[0];
+            let channels = self.input_shape[1];
+
+            // Initialize input gradient tensor
+            let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
+
+            // Collect positions and values to update
+            let updates: Vec<(usize, usize, usize, usize, f32)> = (0..batch_size * channels)
+                .into_par_iter()
+                .map(|idx| {
+                    let b = idx / channels;
+                    let c = idx % channels;
+                    let (max_h, max_w) = max_positions[idx];
+                    let gradient_value = grad_output[[b, c]];
+
+                    (b, c, max_h, max_w, gradient_value)
+                })
+                .collect();
+
+            // Apply updates in the main thread
+            for (b, c, max_h, max_w, gradient_value) in updates {
+                grad_input[[b, c, max_h, max_w]] = gradient_value;
             }
-        };
 
-        // Check if maximum value position records are valid
-        let max_positions = match &self.max_positions {
-            Some(positions) => positions,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "Forward pass has not been run yet".to_string(),
-                ));
-            }
-        };
-
-        // Get input dimensions
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let height = input.shape()[2];
-        let width = input.shape()[3];
-
-        // Create a gradient tensor with the same shape as input, initialized to zero
-        let mut grad_input = Array::zeros(IxDyn(&[batch_size, channels, height, width]));
-
-        // Create index collection representing all (batch, channel) combinations
-        let indices: Vec<(usize, usize, usize)> = (0..batch_size)
-            .flat_map(|b| (0..channels).map(move |c| (b, c, b * channels + c)))
-            .collect();
-
-        // Process gradients for each (batch, channel) combination in parallel
-        let grad_results: Vec<(usize, usize, usize, usize, f32)> = indices
-            .par_iter()
-            .map(|&(b, c, idx)| {
-                let (max_h, max_w) = max_positions[idx];
-                let grad_value = grad_output[[b, c]];
-                (b, c, max_h, max_w, grad_value)
-            })
-            .collect();
-
-        // Fill gradient tensor
-        for (b, c, max_h, max_w, grad_value) in grad_results {
-            grad_input[[b, c, max_h, max_w]] = grad_value;
+            Ok(grad_input)
+        } else {
+            Err(ModelError::ProcessingError(
+                "Forward pass has not been run yet".to_string(),
+            ))
         }
-
-        Ok(grad_input)
     }
 
     fn layer_type(&self) -> &str {

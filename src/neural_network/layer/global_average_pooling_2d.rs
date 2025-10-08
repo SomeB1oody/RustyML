@@ -62,50 +62,45 @@ impl GlobalAveragePooling2D {
 
 impl Layer for GlobalAveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Save input shape and cache input for backpropagation
-        self.input_shape = input.shape().to_vec();
-
         // Verify input is 4D: [batch_size, channels, height, width]
+        let shape = input.shape();
         assert_eq!(
-            self.input_shape.len(),
+            shape.len(),
             4,
             "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
         );
 
+        // Extract dimensions
+        let (batch_size, channels, height, width) = (shape[0], shape[1], shape[2], shape[3]);
+
+        // Store input shape and cache input for backpropagation
+        self.input_shape = vec![batch_size, channels, height, width];
         self.input_cache = Some(input.clone());
 
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let height = input.shape()[2];
-        let width = input.shape()[3];
+        // Create output tensor
+        let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
+
+        // Compute global average pooling
+        // Use parallel iteration over batches, compute sequential sum over channels and spatial dimensions
         let spatial_size = (height * width) as f32;
 
-        // Create result array
-        let mut result = Array::zeros(IxDyn(&[batch_size, channels]));
-
-        let indices: Vec<(usize, usize)> = (0..batch_size)
-            .flat_map(|b| (0..channels).map(move |c| (b, c)))
-            .collect();
-
-        let avgs: Vec<f32> = indices
-            .par_iter()
-            .map(|&(b, c)| {
-                let mut sum = 0.0;
-                for h in 0..height {
-                    for w in 0..width {
-                        sum += input[[b, c, h, w]];
+        output
+            .outer_iter_mut()
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(b, mut output_batch)| {
+                for c in 0..channels {
+                    let mut sum = 0.0;
+                    for h in 0..height {
+                        for w in 0..width {
+                            sum += input[[b, c, h, w]];
+                        }
                     }
+                    output_batch[c] = sum / spatial_size;
                 }
-                sum / spatial_size
-            })
-            .collect();
+            });
 
-        // Fill the calculated results into the result tensor
-        for (i, &(b, c)) in indices.iter().enumerate() {
-            result[[b, c]] = avgs[i];
-        }
-
-        result
+        output
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

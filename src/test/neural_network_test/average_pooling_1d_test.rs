@@ -16,7 +16,7 @@ fn test_average_pooling_1d_shape() {
     ];
 
     for (pool_size, stride, expected_length) in test_cases {
-        let mut layer = AveragePooling1D::new(pool_size, stride, vec![2, 3, 10]);
+        let mut layer = AveragePooling1D::new(pool_size, vec![2, 3, 10], Some(stride));
 
         let output = layer.forward(&input_data);
 
@@ -52,7 +52,7 @@ fn test_average_pooling_1d_forward() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=2, stride=2
-    let mut layer = AveragePooling1D::new(2, 2, vec![2, 3, 8]);
+    let mut layer = AveragePooling1D::new(2, vec![2, 3, 8], Some(2));
 
     // Perform forward propagation
     let output = layer.forward(&input);
@@ -96,7 +96,7 @@ fn test_average_pooling_1d_backward() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=2, stride=1
-    let mut layer = AveragePooling1D::new(2, 1, vec![1, 1, 4]);
+    let mut layer = AveragePooling1D::new(2, vec![1, 1, 4], Some(1));
 
     // Perform forward propagation
     let output = layer.forward(&input);
@@ -151,8 +151,8 @@ fn test_average_pooling_1d_with_sequential() {
     model
         .add(AveragePooling1D::new(
             2,             // Pool size
-            2,             // Stride
             vec![2, 3, 8], // Input shape
+            Some(2),       // Stride (optional)
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -183,7 +183,7 @@ fn test_average_pooling_1d_odd_window_size() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=3, stride=1
-    let mut layer = AveragePooling1D::new(3, 1, vec![1, 1, 5]);
+    let mut layer = AveragePooling1D::new(3, vec![1, 1, 5], Some(1));
 
     // Perform forward propagation
     let output = layer.forward(&input);
@@ -199,7 +199,7 @@ fn test_average_pooling_1d_odd_window_size() {
 
 #[test]
 fn test_layer_type_and_output_shape() {
-    let layer = AveragePooling1D::new(2, 2, vec![1, 3, 10]);
+    let layer = AveragePooling1D::new(2, vec![1, 3, 10], Some(2));
 
     // Test layer type
     assert_eq!(layer.layer_type(), "AveragePooling1D");
