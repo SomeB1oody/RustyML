@@ -72,15 +72,22 @@ pub struct Dense {
 impl Dense {
     /// Creates a new dense layer without activation function.
     ///
+    /// # Parameters
+    ///
+    /// - `input_dim` - Dimensionality of input features (number of features per timestep)
+    /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
+    /// -  `activation` - Activation function applied to the final output (commonly Tanh or Linear)
+    ///
     /// # Returns
     ///
     /// * `Dense` - A new `Dense` layer instance with specified dimensions
-    pub fn new(input_dim: usize, output_dim: usize, activation: Activation) -> Self {
-        let weights = Array::random((input_dim, output_dim), Uniform::new(-0.05, 0.05));
-        let bias = Array::zeros((1, output_dim));
+    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
+        let limit = (6.0 / (input_dim + units) as f32).sqrt();
+        let weights = Array::random((input_dim, units), Uniform::new(-limit, limit));
+        let bias = Array::zeros((1, units));
         Self {
             input_dim,
-            output_dim,
+            output_dim: units,
             weights,
             bias,
             input_cache: None,
@@ -133,17 +140,8 @@ impl Layer for Dense {
                 )))?,
             };
 
-            // calculation of element-wise multiplication of activation function derivative and gradient
             let deriv = Activation::activation_derivative(&a, &self.activation);
-            let mut result = deriv.clone();
-
-            // Use parallel iterator for element-wise multiplication
-            result.par_mapv_inplace(|v| v * grad_upstream[[0, 0]]);
-            for ((i, j), val) in result.indexed_iter_mut() {
-                *val = deriv[[i, j]] * grad_upstream[[i, j]];
-            }
-
-            grad_upstream = result;
+            grad_upstream = deriv * grad_upstream;
         }
 
         // Get input cache
