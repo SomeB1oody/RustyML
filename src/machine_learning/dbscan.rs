@@ -1,6 +1,9 @@
 use super::*;
 use std::collections::VecDeque;
 
+/// Threshold for parallelization: only use parallel processing for larger datasets
+const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
+
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
 /// DBSCAN is a popular density-based clustering algorithm that can discover clusters of arbitrary shapes
@@ -104,7 +107,9 @@ impl DBSCAN {
         }
     }
 
-    /// Parallelized version of region_query: find all neighbors of point `p` (points within eps distance)
+    /// Find all neighbors of point `p` (points within eps distance)
+    ///
+    /// Uses parallelization for datasets larger than a threshold to improve performance
     fn region_query(&self, data: ArrayView2<f64>, p: usize) -> Result<Vec<usize>, ModelError> {
         // Bounds check
         if p >= data.nrows() {
@@ -118,21 +123,36 @@ impl DBSCAN {
         // Pre-compute row p (read-only view) to avoid fetching it repeatedly in each iteration
         let p_row = data.row(p);
         let eps = self.eps;
+        let n_samples = data.nrows();
 
-        // Parallel iteration through all rows, calculating distances and filtering points that satisfy the eps condition
-        let parallel_neighbors: Vec<usize> = (0..data.nrows())
-            .into_par_iter()
-            .filter_map(|q| {
-                let q_row = data.row(q);
-                // Handle the Result returned by compute_distance
-                match self.compute_distance(p_row, q_row) {
-                    Ok(dist) if dist <= eps => Some(q),
-                    _ => None,
-                }
-            })
-            .collect();
+        let neighbors: Vec<usize> = if n_samples >= DBSCAN_PARALLEL_THRESHOLD {
+            // Parallel iteration through all rows, calculating distances and filtering points that satisfy the eps condition
+            (0..n_samples)
+                .into_par_iter()
+                .filter_map(|q| {
+                    let q_row = data.row(q);
+                    // Handle the Result returned by compute_distance
+                    match self.compute_distance(p_row, q_row) {
+                        Ok(dist) if dist <= eps => Some(q),
+                        _ => None,
+                    }
+                })
+                .collect()
+        } else {
+            // Sequential iteration for smaller datasets
+            (0..n_samples)
+                .filter_map(|q| {
+                    let q_row = data.row(q);
+                    // Handle the Result returned by compute_distance
+                    match self.compute_distance(p_row, q_row) {
+                        Ok(dist) if dist <= eps => Some(q),
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
 
-        Ok(parallel_neighbors)
+        Ok(neighbors)
     }
 
     /// Performs DBSCAN clustering on the input data

@@ -1,6 +1,9 @@
 pub use super::RegularizationType;
 use super::*;
 
+/// Threshold for batch size above which parallel processing is used
+const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
+
 /// Linear Support Vector Classifier (LinearSVC)
 ///
 /// Implements a classifier similar to sklearn's LinearSVC, trained using the hinge loss function.
@@ -299,33 +302,42 @@ impl LinearSVC {
             for batch_indices in indices.chunks(batch_size) {
                 let batch_len = batch_indices.len() as f64;
 
-                // Use Rayon to compute gradients for each sample in parallel
-                let (weight_grad_sum, bias_grad_sum) = batch_indices
-                    .par_iter()
-                    .map(|&idx| {
-                        let xi = x.slice(s![idx, ..]);
-                        let yi = y_binary[idx];
+                // Gradient computation closure
+                let compute_gradient = |&idx: &usize| {
+                    let xi = x.slice(s![idx, ..]);
+                    let yi = y_binary[idx];
+                    let margin = xi.dot(&weights) + bias;
 
-                        // Calculate prediction
-                        let margin = xi.dot(&weights) + bias;
+                    if yi * margin < 1.0 {
+                        let weight_grad = xi.to_owned() * yi;
+                        let bias_grad = if self.fit_intercept { yi } else { 0.0 };
+                        (weight_grad, bias_grad)
+                    } else {
+                        (Array1::zeros(n_features), 0.0)
+                    }
+                };
 
-                        // If misclassified or on the margin, calculate gradient
-                        if yi * margin < 1.0 {
-                            let weight_grad = xi.to_owned() * yi;
-                            let bias_grad = if self.fit_intercept { yi } else { 0.0 };
-                            (weight_grad, bias_grad)
-                        } else {
-                            (Array1::zeros(n_features), 0.0)
-                        }
-                    })
-                    .reduce(
-                        || (Array1::zeros(n_features), 0.0),
-                        |mut acc, (w_grad, b_grad)| {
-                            acc.0 = &acc.0 + &w_grad;
-                            acc.1 += b_grad;
-                            acc
-                        },
-                    );
+                // Use parallel or sequential processing based on batch size
+                let (weight_grad_sum, bias_grad_sum) =
+                    if batch_indices.len() >= LINEAR_SVC_PARALLEL_THRESHOLD {
+                        batch_indices.par_iter().map(compute_gradient).reduce(
+                            || (Array1::zeros(n_features), 0.0),
+                            |mut acc, (w_grad, b_grad)| {
+                                acc.0 = &acc.0 + &w_grad;
+                                acc.1 += b_grad;
+                                acc
+                            },
+                        )
+                    } else {
+                        batch_indices.iter().map(compute_gradient).fold(
+                            (Array1::zeros(n_features), 0.0),
+                            |mut acc, (w_grad, b_grad)| {
+                                acc.0 = &acc.0 + &w_grad;
+                                acc.1 += b_grad;
+                                acc
+                            },
+                        )
+                    };
 
                 // Apply regularization and update weights
                 match self.penalty {

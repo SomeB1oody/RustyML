@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Improve module-level documentations
 - Reconstruct the implementation of `IsolationForest`
 - Encode labels as indices in `KNN` for efficient computation
+- Introduce parallelization thresholds across machine learning implementations
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
 ### Changed

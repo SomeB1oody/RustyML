@@ -1,5 +1,9 @@
 use super::*;
 
+/// Threshold for using parallel computation in LDA.
+/// When the number of samples is below this threshold, sequential computation is used.
+const LDA_PARALLEL_THRESHOLD: usize = 100;
+
 /// Linear Discriminant Analysis (LDA)
 ///
 /// A classifier and dimensionality reduction technique that projects data onto a lower-dimensional space while maintaining class separability.
@@ -225,30 +229,46 @@ impl LDA {
         })?;
         let mut sb = Array2::<f64>::zeros((n_features, n_features));
 
-        // Process each class - calculate means, within-class scatter, and between-class scatter
-        for (class_idx, &class) in classes.iter().enumerate() {
+        // Process each class - use parallel computation for large datasets
+        let process_class = |&(class_idx, &class): &(usize, &i32)| {
             let indices = &class_indices_map[&class];
             let n_class = indices.len();
             let prior = n_class as f64 / n_samples as f64;
-            priors_vec.push(prior);
 
             let class_data = x.select(Axis(0), indices);
-            let class_mean = class_data.mean_axis(Axis(0)).ok_or_else(|| {
-                ModelError::ProcessingError("Error computing class mean".to_string())
-            })?;
-            means_mat.row_mut(class_idx).assign(&class_mean);
+            let class_mean = class_data
+                .mean_axis(Axis(0))
+                .expect("Error computing class mean");
 
             // Calculate within-class scatter for this class
+            let mut class_sw = Array2::<f64>::zeros((n_features, n_features));
             for row in class_data.outer_iter() {
                 let diff = &row - &class_mean;
                 let diff_col = diff.insert_axis(Axis(1));
-                sw += &diff_col.dot(&diff_col.t());
+                class_sw += &diff_col.dot(&diff_col.t());
             }
 
             // Calculate between-class scatter contribution for this class
             let mean_diff = &class_mean - &overall_mean;
             let mean_diff_col = mean_diff.insert_axis(Axis(1));
-            sb += &(mean_diff_col.dot(&mean_diff_col.t()) * (n_class as f64));
+            let class_sb = mean_diff_col.dot(&mean_diff_col.t()) * (n_class as f64);
+
+            (class_idx, prior, class_mean, class_sw, class_sb)
+        };
+
+        let class_pairs: Vec<_> = classes.iter().enumerate().collect();
+        let class_results: Vec<_> = if n_samples >= LDA_PARALLEL_THRESHOLD {
+            class_pairs.par_iter().map(process_class).collect()
+        } else {
+            class_pairs.iter().map(process_class).collect()
+        };
+
+        // Aggregate results from parallel computation
+        for (class_idx, prior, class_mean, class_sw, class_sb) in class_results {
+            priors_vec.push(prior);
+            means_mat.row_mut(class_idx).assign(&class_mean);
+            sw += &class_sw;
+            sb += &class_sb;
         }
 
         self.priors = Some(Array1::from_vec(priors_vec));
@@ -379,30 +399,31 @@ impl LDA {
         let priors = self.priors.as_ref().unwrap();
         let n_classes = classes.len();
 
-        // Use Rayon's parallel iteration
-        let predictions: Vec<i32> = x
-            .outer_iter()
-            .into_par_iter() // Convert to parallel iterator
-            .map(|row| {
-                let mut best_score = f64::NEG_INFINITY;
-                let mut best_class = classes[0];
-                for j in 0..n_classes {
-                    let score = self.discriminant_score(
-                        &row.to_owned(),
-                        &means.row(j).to_owned(),
-                        priors[j],
-                        cov_inv,
-                    );
-                    if score > best_score {
-                        best_score = score;
-                        best_class = classes[j];
-                    }
+        // Predict class for each sample
+        let predict_sample = |row: ArrayView1<f64>| {
+            let mut best_score = f64::NEG_INFINITY;
+            let mut best_class = classes[0];
+            for j in 0..n_classes {
+                let score = self.discriminant_score(
+                    &row.to_owned(),
+                    &means.row(j).to_owned(),
+                    priors[j],
+                    cov_inv,
+                );
+                if score > best_score {
+                    best_score = score;
+                    best_class = classes[j];
                 }
-                best_class
-            })
-            .collect();
+            }
+            best_class
+        };
 
-        // Convert results back to ndarray's Array1
+        let predictions: Vec<i32> = if x.nrows() >= LDA_PARALLEL_THRESHOLD {
+            x.outer_iter().into_par_iter().map(predict_sample).collect()
+        } else {
+            x.outer_iter().map(predict_sample).collect()
+        };
+
         Ok(Array1::from(predictions))
     }
 

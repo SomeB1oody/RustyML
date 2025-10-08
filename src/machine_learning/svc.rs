@@ -1,6 +1,11 @@
 use super::*;
 pub use crate::utility::KernelType;
 
+/// Threshold for using parallel computation in SVC operations.
+/// When the number of samples is below this threshold, sequential computation is used.
+/// This avoids the overhead of thread spawning for small datasets.
+const SVC_PARALLEL_THRESHOLD: usize = 100;
+
 /// Support Vector Machine Classifier
 ///
 /// Support Vector Machines (SVM) are a set of supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm.
@@ -179,14 +184,24 @@ impl SVC {
             .flat_map(|i| (i..n_samples).map(move |j| (i, j)))
             .collect();
 
-        // Compute kernel values in parallel
-        let kernel_values: Vec<((usize, usize), f64)> = pairs
-            .par_iter()
-            .map(|&(i, j)| {
-                let k_val = self.kernel_function(x.row(i), x.row(j));
-                ((i, j), k_val)
-            })
-            .collect();
+        // Compute kernel values (parallel for large datasets, sequential for small)
+        let kernel_values: Vec<((usize, usize), f64)> = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            pairs
+                .par_iter()
+                .map(|&(i, j)| {
+                    let k_val = self.kernel_function(x.row(i), x.row(j));
+                    ((i, j), k_val)
+                })
+                .collect()
+        } else {
+            pairs
+                .iter()
+                .map(|&(i, j)| {
+                    let k_val = self.kernel_function(x.row(i), x.row(j));
+                    ((i, j), k_val)
+                })
+                .collect()
+        };
 
         // Fill the matrix (including symmetric values)
         for ((i, j), val) in kernel_values {
@@ -197,6 +212,82 @@ impl SVC {
         }
 
         kernel_matrix
+    }
+
+    /// Helper function to compute dual objective quadratic term
+    ///
+    /// # Parameters
+    ///
+    /// - `support_indices` - Indices of support vectors
+    /// - `support_vector_alphas` - Alpha values for support vectors
+    /// - `support_vector_labels` - Labels for support vectors
+    /// - `kernel_matrix` - Pre-computed kernel matrix
+    /// - `use_parallel` - Whether to use parallel computation
+    ///
+    /// # Returns
+    ///
+    /// * `f64` - The computed quadratic term value
+    fn compute_quadratic_term(
+        support_indices: &[usize],
+        support_vector_alphas: &Array1<f64>,
+        support_vector_labels: &Array1<f64>,
+        kernel_matrix: &Array2<f64>,
+        use_parallel: bool,
+    ) -> f64 {
+        let compute_fn = |(i, &idx_i): (usize, &usize)| {
+            support_indices
+                .iter()
+                .enumerate()
+                .map(|(j, &idx_j)| {
+                    let kernel_val = kernel_matrix[[idx_i, idx_j]];
+                    support_vector_alphas[i]
+                        * support_vector_alphas[j]
+                        * support_vector_labels[i]
+                        * support_vector_labels[j]
+                        * kernel_val
+                })
+                .sum::<f64>()
+        };
+
+        if use_parallel {
+            support_indices.par_iter().enumerate().map(compute_fn).sum()
+        } else {
+            support_indices.iter().enumerate().map(compute_fn).sum()
+        }
+    }
+
+    /// Helper function to compute decision value for a single sample
+    ///
+    /// # Parameters
+    ///
+    /// - `x_row` - Input sample
+    /// - `support_vectors` - Support vector matrix
+    /// - `alphas` - Alpha values
+    /// - `support_vector_labels` - Support vector labels
+    /// - `bias` - Bias term
+    /// - `kernel_fn` - Kernel function closure
+    ///
+    /// # Returns
+    ///
+    /// * `f64` - The computed decision value
+    fn compute_decision_value<F>(
+        x_row: ArrayView1<f64>,
+        support_vectors: &Array2<f64>,
+        alphas: &Array1<f64>,
+        support_vector_labels: &Array1<f64>,
+        bias: f64,
+        kernel_fn: F,
+    ) -> f64
+    where
+        F: Fn(ArrayView1<f64>, ArrayView1<f64>) -> f64,
+    {
+        (0..support_vectors.nrows())
+            .map(|j| {
+                let kernel_val = kernel_fn(x_row, support_vectors.row(j));
+                alphas[j] * support_vector_labels[j] * kernel_val
+            })
+            .sum::<f64>()
+            + bias
     }
 
     /// Fits the SVC model to the training data
@@ -228,9 +319,13 @@ impl SVC {
             )));
         }
 
-        // Validate labels using rayon parallel iteration
+        // Validate labels
         let y_vec: Vec<f64> = y.to_vec();
-        let label_check = y_vec.par_iter().all(|&yi| yi == 1.0 || yi == -1.0);
+        let label_check = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            y_vec.par_iter().all(|&yi| yi == 1.0 || yi == -1.0)
+        } else {
+            y_vec.iter().all(|&yi| yi == 1.0 || yi == -1.0)
+        };
         if !label_check {
             return Err(ModelError::InputValidationError(
                 "All labels must be either 1.0 or -1.0".to_string(),
@@ -251,9 +346,13 @@ impl SVC {
             ));
         }
 
-        // Check for data quality issues using rayon
+        // Check for data quality issues
         let x_vec: Vec<f64> = x.iter().cloned().collect();
-        let data_valid = x_vec.par_iter().all(|&val| val.is_finite());
+        let data_valid = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            x_vec.par_iter().all(|&val| val.is_finite())
+        } else {
+            x_vec.iter().all(|&val| val.is_finite())
+        };
         if !data_valid {
             return Err(ModelError::InputValidationError(
                 "Input data contains invalid values (NaN or Infinity)".to_string(),
@@ -267,19 +366,30 @@ impl SVC {
         // Compute kernel matrix with error handling
         let kernel_matrix = self.compute_kernel_matrix(x);
 
-        // Validate kernel matrix using rayon
+        // Validate kernel matrix
         let kernel_vec: Vec<f64> = kernel_matrix.iter().cloned().collect();
-        if kernel_vec.par_iter().any(|&val| !val.is_finite()) {
+        let kernel_invalid = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            kernel_vec.par_iter().any(|&val| !val.is_finite())
+        } else {
+            kernel_vec.iter().any(|&val| !val.is_finite())
+        };
+        if kernel_invalid {
             return Err(ModelError::ProcessingError(
                 "Kernel matrix contains invalid values - check kernel parameters".to_string(),
             ));
         }
 
-        // Initialize error cache more efficiently
-        let error_cache: Vec<f64> = (0..n_samples)
-            .into_par_iter()
-            .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
-            .collect();
+        // Initialize error cache
+        let error_cache: Vec<f64> = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            (0..n_samples)
+                .into_par_iter()
+                .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
+                .collect()
+        } else {
+            (0..n_samples)
+                .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
+                .collect()
+        };
         let mut error_cache = Array1::from(error_cache);
 
         // SMO main loop with improved convergence tracking
@@ -331,11 +441,17 @@ impl SVC {
             }
         }
 
-        // Extract support vectors with improved efficiency using rayon
-        let support_indices: Vec<usize> = (0..n_samples)
-            .into_par_iter()
-            .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
-            .collect();
+        // Extract support vectors
+        let support_indices: Vec<usize> = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            (0..n_samples)
+                .into_par_iter()
+                .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
+                .collect()
+        } else {
+            (0..n_samples)
+                .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
+                .collect()
+        };
 
         if support_indices.is_empty() {
             return Err(ModelError::ProcessingError(
@@ -363,9 +479,14 @@ impl SVC {
             support_vector_alphas[i] = alphas[idx];
         }
 
-        // Final validation of extracted values using rayon
+        // Final validation of extracted values
         let alphas_vec: Vec<f64> = support_vector_alphas.to_vec();
-        if alphas_vec.par_iter().any(|&val| !val.is_finite()) {
+        let alphas_invalid = if support_indices.len() >= SVC_PARALLEL_THRESHOLD {
+            alphas_vec.par_iter().any(|&val| !val.is_finite())
+        } else {
+            alphas_vec.iter().any(|&val| !val.is_finite())
+        };
+        if alphas_invalid {
             return Err(ModelError::ProcessingError(
                 "Support vector alphas contain invalid values".to_string(),
             ));
@@ -379,25 +500,14 @@ impl SVC {
             // First term: 0.5 * sum(alpha_i * alpha_j * y_i * y_j * K(x_i, x_j))
             let mut dual_objective = 0.0;
 
-            // Compute the quadratic term in parallel
-            let quadratic_term: f64 = support_indices
-                .par_iter()
-                .enumerate()
-                .map(|(i, &idx_i)| {
-                    support_indices
-                        .iter()
-                        .enumerate()
-                        .map(|(j, &idx_j)| {
-                            let kernel_val = kernel_matrix[[idx_i, idx_j]];
-                            support_vector_alphas[i]
-                                * support_vector_alphas[j]
-                                * support_vector_labels[i]
-                                * support_vector_labels[j]
-                                * kernel_val
-                        })
-                        .sum::<f64>()
-                })
-                .sum();
+            // Compute the quadratic term
+            let quadratic_term: f64 = Self::compute_quadratic_term(
+                &support_indices,
+                &support_vector_alphas,
+                &support_vector_labels,
+                &kernel_matrix,
+                support_indices.len() >= SVC_PARALLEL_THRESHOLD,
+            );
 
             dual_objective += 0.5 * quadratic_term;
 
@@ -463,36 +573,49 @@ impl SVC {
             )));
         }
 
-        // Check for data quality using rayon
+        // Check for data quality
         let x_vec: Vec<f64> = x.iter().cloned().collect();
-        if x_vec.par_iter().any(|&val| !val.is_finite()) {
+        let data_invalid = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            x_vec.par_iter().any(|&val| !val.is_finite())
+        } else {
+            x_vec.iter().any(|&val| !val.is_finite())
+        };
+        if data_invalid {
             return Err(ModelError::InputValidationError(
                 "Input data contains invalid values (NaN or Infinity)".to_string(),
             ));
         }
 
-        // Compute predictions in parallel with improved error handling
-        let prediction_results: Vec<Result<f64, ModelError>> = (0..n_samples)
-            .into_par_iter()
-            .map(|i| {
-                let decision_value: f64 = (0..support_vectors.nrows())
-                    .map(|j| {
-                        let kernel_val = self.kernel_function(x.row(i), support_vectors.row(j));
-                        alphas[j] * support_vector_labels[j] * kernel_val
-                    })
-                    .sum::<f64>()
-                    + bias;
+        // Compute predictions with improved error handling
+        let compute_prediction = |i: usize| {
+            let decision_value = Self::compute_decision_value(
+                x.row(i),
+                support_vectors,
+                alphas,
+                support_vector_labels,
+                bias,
+                |x1, x2| self.kernel_function(x1, x2),
+            );
 
-                // Handle numerical issues more robustly
-                if !decision_value.is_finite() {
-                    Err(ModelError::ProcessingError(
-                        "Decision function produced invalid value during prediction".to_string(),
-                    ))
-                } else {
-                    Ok(if decision_value >= 0.0 { 1.0 } else { -1.0 })
-                }
-            })
-            .collect();
+            // Handle numerical issues more robustly
+            if !decision_value.is_finite() {
+                Err(ModelError::ProcessingError(
+                    "Decision function produced invalid value during prediction".to_string(),
+                ))
+            } else {
+                Ok(if decision_value >= 0.0 { 1.0 } else { -1.0 })
+            }
+        };
+
+        let prediction_results: Vec<Result<f64, ModelError>> =
+            if n_samples >= SVC_PARALLEL_THRESHOLD {
+                (0..n_samples)
+                    .into_par_iter()
+                    .map(compute_prediction)
+                    .collect()
+            } else {
+                (0..n_samples).map(compute_prediction).collect()
+            };
 
         // Check if any errors occurred during parallel computation
         let mut predictions = Vec::with_capacity(n_samples);
@@ -537,23 +660,31 @@ impl SVC {
         let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
         let alphas = self.alphas.as_ref().unwrap();
 
-        // Parallel computation on each element of decision_values
-        decision_values
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut val)| {
-                let x_i = x.row(i);
-                let sum = (0..support_vectors.nrows())
-                    .map(|j| {
-                        alphas[j]
-                            * support_vector_labels[j]
-                            * self.kernel_function(x_i, support_vectors.row(j))
-                    })
-                    .sum::<f64>();
+        // Computation on each element of decision_values
+        let compute_fn = |(i, mut val): (usize, ArrayViewMut1<f64>)| {
+            let decision_val = Self::compute_decision_value(
+                x.row(i),
+                support_vectors,
+                alphas,
+                support_vector_labels,
+                bias,
+                |x1, x2| self.kernel_function(x1, x2),
+            );
+            *val.first_mut().unwrap() = decision_val;
+        };
 
-                *val.first_mut().unwrap() = sum + bias;
-            });
+        if n_samples >= SVC_PARALLEL_THRESHOLD {
+            decision_values
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(compute_fn);
+        } else {
+            decision_values
+                .axis_iter_mut(Axis(0))
+                .enumerate()
+                .for_each(compute_fn);
+        }
 
         Ok(decision_values)
     }
@@ -647,19 +778,30 @@ impl SVC {
     ) -> usize {
         let n_samples = alphas.len();
 
-        // Find the index with maximum |E1-E2| in parallel
-        let result = (0..n_samples)
-            .into_par_iter()
-            .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
-            .map(|i| {
-                let e1 = error_cache[i];
-                let delta_e = (e1 - e2).abs();
-                (i, delta_e)
-            })
-            .reduce(
-                || (i2, 0.0), // Default to i2 if no better candidate is found
-                |a, b| if b.1 > a.1 { b } else { a },
-            );
+        // Find the index with maximum |E1-E2|
+        let result = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            (0..n_samples)
+                .into_par_iter()
+                .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
+                .map(|i| {
+                    let e1 = error_cache[i];
+                    let delta_e = (e1 - e2).abs();
+                    (i, delta_e)
+                })
+                .reduce(
+                    || (i2, 0.0), // Default to i2 if no better candidate is found
+                    |a, b| if b.1 > a.1 { b } else { a },
+                )
+        } else {
+            (0..n_samples)
+                .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
+                .map(|i| {
+                    let e1 = error_cache[i];
+                    let delta_e = (e1 - e2).abs();
+                    (i, delta_e)
+                })
+                .fold((i2, 0.0), |a, b| if b.1 > a.1 { b } else { a })
+        };
 
         // Return the index of the alpha that maximizes |E1-E2|
         result.0
@@ -807,13 +949,19 @@ impl SVC {
         b: f64,
         error_cache: &mut Array1<f64>,
     ) {
-        // Use zip_with_index for parallel updates
-        error_cache
-            .indexed_iter_mut()
-            .par_bridge()
-            .for_each(|(i, error)| {
+        let n_samples = alphas.len();
+        if n_samples >= SVC_PARALLEL_THRESHOLD {
+            error_cache
+                .indexed_iter_mut()
+                .par_bridge()
+                .for_each(|(i, error)| {
+                    *error = self.decision_function_internal(i, alphas, kernel_matrix, y, b);
+                });
+        } else {
+            error_cache.indexed_iter_mut().for_each(|(i, error)| {
                 *error = self.decision_function_internal(i, alphas, kernel_matrix, y, b);
             });
+        }
     }
 
     /// Calculates the decision function value for a single training example
@@ -837,15 +985,22 @@ impl SVC {
         y: ArrayView1<f64>,
         b: f64,
     ) -> f64 {
-        // Create index range
-        let indices: Vec<usize> = (0..alphas.len()).collect();
+        let n_samples = alphas.len();
 
-        // Compute sum in parallel
-        let sum: f64 = indices
-            .par_iter()
-            .filter(|&&j| alphas[j] > 0.0) // Only consider non-zero alphas
-            .map(|&j| alphas[j] * y[j] * kernel_matrix[[i, j]])
-            .sum();
+        // Compute sum
+        let sum: f64 = if n_samples >= SVC_PARALLEL_THRESHOLD {
+            let indices: Vec<usize> = (0..n_samples).collect();
+            indices
+                .par_iter()
+                .filter(|&&j| alphas[j] > 0.0) // Only consider non-zero alphas
+                .map(|&j| alphas[j] * y[j] * kernel_matrix[[i, j]])
+                .sum()
+        } else {
+            (0..n_samples)
+                .filter(|&j| alphas[j] > 0.0) // Only consider non-zero alphas
+                .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
+                .sum()
+        };
 
         sum - y[i] + b
     }

@@ -1,6 +1,11 @@
 use super::*;
 use std::ops::AddAssign;
 
+/// Threshold for parallelization in KMeans clustering.
+/// When the number of samples is below this threshold, sequential processing is used.
+/// When the number of samples is at or above this threshold, parallel processing is used.
+const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
+
 /// KMeans clustering algorithm implementation.
 ///
 /// This struct implements the K-Means clustering algorithm, which partitions
@@ -307,32 +312,37 @@ impl KMeans {
             new_centroids.fill(0.0);
             counts.fill(0);
 
-            // Parallel computation: find the closest cluster center and distance for each sample
-            let results: Result<Vec<(usize, f64)>, ModelError> = data
-                .outer_iter()
-                .into_par_iter()
-                .enumerate()
-                .map(
-                    |(idx, sample)| -> Result<(usize, (usize, f64)), ModelError> {
-                        let mut min_dist = f64::MAX;
-                        let mut min_cluster = 0;
+            // Find the closest cluster center and distance for each sample
+            let compute_assignments =
+                |sample: ArrayView1<f64>| -> Result<(usize, f64), ModelError> {
+                    let mut min_dist = f64::MAX;
+                    let mut min_cluster = 0;
 
-                        // Find closest centroid for this sample
-                        for (cluster_idx, centroid) in
-                            self.centroids.as_ref().unwrap().outer_iter().enumerate()
-                        {
-                            let dist = squared_euclidean_distance_row(sample, centroid)?;
-                            if dist < min_dist {
-                                min_dist = dist;
-                                min_cluster = cluster_idx;
-                            }
+                    // Find closest centroid for this sample
+                    for (cluster_idx, centroid) in
+                        self.centroids.as_ref().unwrap().outer_iter().enumerate()
+                    {
+                        let dist = squared_euclidean_distance_row(sample, centroid)?;
+                        if dist < min_dist {
+                            min_dist = dist;
+                            min_cluster = cluster_idx;
                         }
+                    }
 
-                        Ok((idx, (min_cluster, min_dist)))
-                    },
-                )
-                .collect::<Result<Vec<_>, _>>()
-                .map(|vec| vec.into_iter().map(|(_, result)| result).collect());
+                    Ok((min_cluster, min_dist))
+                };
+
+            let results: Result<Vec<(usize, f64)>, ModelError> =
+                if n_samples >= KMEANS_PARALLEL_THRESHOLD {
+                    // Parallel computation for large datasets
+                    data.outer_iter()
+                        .into_par_iter()
+                        .map(compute_assignments)
+                        .collect()
+                } else {
+                    // Sequential computation for small datasets
+                    data.outer_iter().map(compute_assignments).collect()
+                };
 
             let results = results?;
 

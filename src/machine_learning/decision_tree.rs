@@ -1,5 +1,10 @@
 use super::*;
 
+/// Minimum number of samples required to enable parallel processing in decision tree operations.
+/// When the number of samples is below this threshold, sequential processing is used instead
+/// to avoid parallelization overhead.
+const DECISION_TREE_PARALLEL_THRESHOLD: usize = 1000;
+
 /// Decision tree algorithm types.
 ///
 /// Represents different splitting criteria and impurity measures used in decision tree construction.
@@ -374,19 +379,20 @@ impl DecisionTree {
         }
     }
 
-    /// Finds the best feature and threshold to split the given samples using parallel evaluation.
+    /// Finds the best feature and threshold to split the given samples.
+    /// Uses parallel evaluation when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     fn find_best_split(
         &self,
         x: ArrayView2<f64>,
         y: ArrayView1<f64>,
         indices: &[usize],
     ) -> Result<Option<(usize, f64, Vec<usize>, Vec<usize>, f64)>, ModelError> {
+        // Calculate parent impurity once
         let parent_impurity = self.calculate_impurity(y, indices);
 
-        // Parallel evaluation of all features to find the best split
-        let best_split = (0..self.n_features)
-            .into_par_iter()
-            .filter_map(|feature_idx| {
+        // Define the closure that processes each feature to find the best split
+        let process_feature =
+            |feature_idx: usize| -> Option<(f64, (usize, f64, Vec<usize>, Vec<usize>, f64))> {
                 // Get unique values for this feature
                 let mut feature_values: Vec<f64> =
                     indices.iter().map(|&i| x[[i, feature_idx]]).collect();
@@ -441,9 +447,22 @@ impl DecisionTree {
                 }
 
                 best_feature_split.map(|split| (best_feature_gain, split))
-            })
-            .max_by(|(gain_a, _), (gain_b, _)| gain_a.partial_cmp(gain_b).unwrap())
-            .map(|(_, split)| split);
+            };
+
+        // Use parallel evaluation only when sample size exceeds threshold
+        let best_split = if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
+            (0..self.n_features)
+                .into_par_iter()
+                .filter_map(process_feature)
+                .max_by(|(gain_a, _), (gain_b, _)| gain_a.partial_cmp(gain_b).unwrap())
+                .map(|(_, split)| split)
+        } else {
+            // Sequential evaluation for small datasets
+            (0..self.n_features)
+                .filter_map(process_feature)
+                .max_by(|(gain_a, _), (gain_b, _)| gain_a.partial_cmp(gain_b).unwrap())
+                .map(|(_, split)| split)
+        };
 
         Ok(best_split)
     }
@@ -612,7 +631,8 @@ impl DecisionTree {
         }
     }
 
-    /// Predicts outputs for multiple samples using parallel processing.
+    /// Predicts outputs for multiple samples.
+    /// Uses parallel processing when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     ///
     /// # Parameters
     ///
@@ -630,12 +650,18 @@ impl DecisionTree {
             return Err(ModelError::TreeError("Feature dimension mismatch"));
         }
 
-        // Parallel prediction for all samples
-        let predictions: Result<Vec<f64>, ModelError> = x
-            .axis_iter(Axis(0))
-            .into_par_iter()
-            .map(|row| self.predict_one(row.as_slice().unwrap()))
-            .collect();
+        // Use parallel processing only when sample size exceeds threshold
+        let predictions: Result<Vec<f64>, ModelError> =
+            if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
+                x.axis_iter(Axis(0))
+                    .into_par_iter()
+                    .map(|row| self.predict_one(row.as_slice().unwrap()))
+                    .collect()
+            } else {
+                x.axis_iter(Axis(0))
+                    .map(|row| self.predict_one(row.as_slice().unwrap()))
+                    .collect()
+            };
 
         Ok(Array1::from_vec(predictions?))
     }
@@ -661,7 +687,8 @@ impl DecisionTree {
         self.predict(x_test)
     }
 
-    /// Predicts class probabilities for multiple samples using parallel processing (classification only).
+    /// Predicts class probabilities for multiple samples (classification only).
+    /// Uses parallel processing when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     ///
     /// # Parameters
     ///
@@ -687,12 +714,18 @@ impl DecisionTree {
 
         let n_classes = self.n_classes.unwrap();
 
-        // Parallel probability prediction for all samples
-        let probabilities: Result<Vec<Vec<f64>>, ModelError> = x
-            .axis_iter(Axis(0))
-            .into_par_iter()
-            .map(|row| self.predict_proba_one(row.as_slice().unwrap()))
-            .collect();
+        // Use parallel processing only when sample size exceeds threshold
+        let probabilities: Result<Vec<Vec<f64>>, ModelError> =
+            if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
+                x.axis_iter(Axis(0))
+                    .into_par_iter()
+                    .map(|row| self.predict_proba_one(row.as_slice().unwrap()))
+                    .collect()
+            } else {
+                x.axis_iter(Axis(0))
+                    .map(|row| self.predict_proba_one(row.as_slice().unwrap()))
+                    .collect()
+            };
 
         let probabilities = probabilities?;
 

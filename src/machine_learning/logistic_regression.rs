@@ -1,5 +1,11 @@
 use super::*;
 
+/// Threshold for enabling parallel computation in logistic regression.
+/// When the number of samples exceeds this value, parallel processing is used
+/// to improve performance. For smaller datasets, sequential processing is used
+/// to avoid parallelization overhead.
+const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
+
 /// Logistic Regression model implementation
 ///
 /// This model uses gradient descent to train a binary classification logistic regression model.
@@ -202,12 +208,18 @@ impl LogisticRegression {
 
             let predictions = x_train_view.dot(&weights);
 
-            // Parallel computation of sigmoid activation
-            let sigmoid_preds = (0..n_samples)
-                .into_par_iter()
-                .map(|i| sigmoid(predictions[i]))
-                .collect::<Vec<f64>>();
-            let sigmoid_preds = Array1::from(sigmoid_preds);
+            // Compute sigmoid activation with conditional parallelization
+            let sigmoid_preds = if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
+                // Parallel computation for large datasets
+                let sigmoid_vec = (0..n_samples)
+                    .into_par_iter()
+                    .map(|i| sigmoid(predictions[i]))
+                    .collect::<Vec<f64>>();
+                Array1::from(sigmoid_vec)
+            } else {
+                // Sequential computation for small datasets
+                predictions.mapv(|x| sigmoid(x))
+            };
 
             // Calculate prediction errors
             let errors = sigmoid_preds - y;
@@ -349,12 +361,21 @@ impl LogisticRegression {
         use crate::math::sigmoid;
 
         if let Some(weights) = &self.weights {
-            let mut predictions = x.dot(weights);
+            let predictions = x.dot(weights);
 
-            // sigmoid
-            predictions.par_mapv_inplace(|x| sigmoid(x));
+            // Apply sigmoid with conditional parallelization
+            let n_samples = predictions.len();
+            let result = if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
+                // Parallel computation for large datasets
+                let mut preds = predictions;
+                preds.par_mapv_inplace(|x| sigmoid(x));
+                preds
+            } else {
+                // Sequential computation for small datasets
+                predictions.mapv(|x| sigmoid(x))
+            };
 
-            Ok(predictions)
+            Ok(result)
         } else {
             Err(ModelError::NotFitted)
         }

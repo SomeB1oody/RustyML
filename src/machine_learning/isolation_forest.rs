@@ -1,5 +1,11 @@
 use super::*;
 
+/// Default minimum number of trees required to enable parallel tree construction
+const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
+
+/// Default minimum number of samples required to enable parallel prediction
+const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
+
 /// An Isolation Forest implementation for anomaly detection.
 ///
 /// Isolation Forest is an unsupervised learning algorithm that detects anomalies by isolating
@@ -47,6 +53,8 @@ pub struct IsolationForest {
 /// - `max_depth` - 8 (ceil(log2(256)))
 /// - `random_state` - None
 /// - `n_features` - 0
+/// - `parallel_threshold_trees` - DEFAULT_PARALLEL_THRESHOLD_TREES
+/// - `parallel_threshold_samples` - DEFAULT_PARALLEL_THRESHOLD_SAMPLES
 impl Default for IsolationForest {
     fn default() -> Self {
         Self {
@@ -105,7 +113,8 @@ impl IsolationForest {
     /// Trains the Isolation Forest model on the provided dataset.
     ///
     /// Builds multiple isolation trees by randomly sampling subsets of the data and
-    /// recursively partitioning them using random feature splits.
+    /// recursively partitioning them using random feature splits. Uses parallelization
+    /// when the number of trees exceeds the threshold.
     ///
     /// # Parameters
     ///
@@ -133,30 +142,37 @@ impl IsolationForest {
 
         self.n_features = x.ncols();
 
-        // Build multiple isolation trees in parallel
-        let trees: Result<Vec<Box<Node>>, ModelError> = (0..self.n_estimators)
-            .into_par_iter()
-            .map(|i| {
-                // Create an independent RNG for each tree to maintain reproducibility
-                let mut rng = if let Some(seed) = self.random_state {
-                    StdRng::seed_from_u64(seed.wrapping_add(i as u64))
-                } else {
-                    StdRng::from_rng(&mut rng())
-                };
+        // Build multiple isolation trees
+        let build_tree = |i: usize| -> Result<Box<Node>, ModelError> {
+            // Create an independent RNG for each tree to maintain reproducibility
+            let mut rng = if let Some(seed) = self.random_state {
+                StdRng::seed_from_u64(seed.wrapping_add(i as u64))
+            } else {
+                StdRng::from_rng(&mut rng())
+            };
 
-                // Sample a subset of data for this tree
-                let sample_size = self.max_samples.min(x.nrows());
-                let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
+            // Sample a subset of data for this tree
+            let sample_size = self.max_samples.min(x.nrows());
+            let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
 
-                // Build isolation tree
-                self.build_isolation_tree(x, &sample_indices, 0, &mut rng)
-                    .map(Box::new)
-            })
-            .collect();
+            // Build isolation tree
+            self.build_isolation_tree(x, &sample_indices, 0, &mut rng)
+                .map(Box::new)
+        };
 
-        let trees = trees?;
+        let trees: Result<Vec<Box<Node>>, ModelError> =
+            if self.n_estimators >= DEFAULT_PARALLEL_THRESHOLD_TREES {
+                // Use parallelization for large number of trees
+                (0..self.n_estimators)
+                    .into_par_iter()
+                    .map(build_tree)
+                    .collect()
+            } else {
+                // Sequential execution for small number of trees
+                (0..self.n_estimators).map(build_tree).collect()
+            };
 
-        self.trees = Some(trees);
+        self.trees = Some(trees?);
         Ok(self)
     }
 
@@ -309,7 +325,9 @@ impl IsolationForest {
         Ok(score)
     }
 
-    /// Predicts anomaly scores for multiple samples in parallel.
+    /// Predicts anomaly scores for multiple samples.
+    ///
+    /// Uses parallelization when the number of samples exceeds the threshold.
     ///
     /// # Parameters
     ///
@@ -346,12 +364,20 @@ impl IsolationForest {
             ));
         }
 
-        // Compute anomaly scores for all samples in parallel
-        let scores: Result<Vec<f64>, ModelError> = x
-            .axis_iter(Axis(0))
-            .into_par_iter()
-            .map(|row| self.anomaly_score(row.as_slice().unwrap()))
-            .collect();
+        // Compute anomaly scores for all samples
+        let scores: Result<Vec<f64>, ModelError> =
+            if x.nrows() >= DEFAULT_PARALLEL_THRESHOLD_SAMPLES {
+                // Use parallelization for large number of samples
+                x.axis_iter(Axis(0))
+                    .into_par_iter()
+                    .map(|row| self.anomaly_score(row.as_slice().unwrap()))
+                    .collect()
+            } else {
+                // Sequential execution for small number of samples
+                x.axis_iter(Axis(0))
+                    .map(|row| self.anomaly_score(row.as_slice().unwrap()))
+                    .collect()
+            };
 
         Ok(Array1::from_vec(scores?))
     }

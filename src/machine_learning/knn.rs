@@ -1,5 +1,8 @@
 pub use super::*;
 
+/// Threshold for using parallel distance calculation
+const PARALLEL_THRESHOLD: usize = 1000;
+
 /// Represents the strategy used for weighting neighbors in KNN algorithm.
 ///
 /// # Variants
@@ -361,9 +364,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ) -> Result<usize, ModelError> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
-
-        // Threshold for using parallel distance calculation
-        const PARALLEL_THRESHOLD: usize = 1000;
 
         // Calculate distances to all training samples
         // Use parallel computation only when n_samples is large enough to benefit from it

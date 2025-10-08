@@ -1,5 +1,9 @@
 use super::*;
 
+/// Threshold for using parallel computation in Linear Regression.
+/// When the number of samples or features is below this threshold, sequential computation is used.
+const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
+
 /// Linear Regression model implementation
 ///
 /// Trains a simple linear regression model using gradient descent algorithm. This implementation
@@ -63,7 +67,7 @@ pub struct LinearRegression {
 /// # Default Values
 ///
 /// - `coefficients` - `None` - Model coefficients are not initialized until training
-/// - `intercept` - `None` - Model intercept is not initialized until training  
+/// - `intercept` - `None` - Model intercept is not initialized until training
 /// - `fit_intercept` - `true` - Include an intercept term in the linear model
 /// - `learning_rate` - `0.01` - Learning rate for gradient descent optimization
 /// - `max_iter` - `1000` - Maximum number of iterations for gradient descent
@@ -188,8 +192,12 @@ impl LinearRegression {
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
                 Some(RegularizationType::L1(alpha)) => {
-                    // Parallel computation for L1 regularization when feature count is large
-                    alpha * weights.iter().par_bridge().map(|w| w.abs()).sum::<f64>()
+                    // Use parallel computation for L1 regularization when feature count is large
+                    if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
+                        alpha * weights.iter().par_bridge().map(|w| w.abs()).sum::<f64>()
+                    } else {
+                        alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
+                    }
                 }
                 Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights) / 2.0,
             };
@@ -224,17 +232,26 @@ impl LinearRegression {
             match &self.regularization_type {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
-                    // Parallel computation for L1 gradient when feature count is large
+                    // Use parallel computation for L1 gradient when feature count is large
                     let alpha_val = *alpha;
-                    let weights_slice = weights.as_slice().unwrap();
-                    let gradients_slice = weight_gradients.as_slice_mut().unwrap();
+                    if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
+                        let weights_slice = weights.as_slice().unwrap();
+                        let gradients_slice = weight_gradients.as_slice_mut().unwrap();
 
-                    gradients_slice
-                        .par_iter_mut()
-                        .zip(weights_slice.par_iter())
-                        .for_each(|(grad, w)| {
-                            *grad += alpha_val * w.signum();
-                        });
+                        gradients_slice
+                            .par_iter_mut()
+                            .zip(weights_slice.par_iter())
+                            .for_each(|(grad, w)| {
+                                *grad += alpha_val * w.signum();
+                            });
+                    } else {
+                        weight_gradients
+                            .iter_mut()
+                            .zip(weights.iter())
+                            .for_each(|(grad, w)| {
+                                *grad += alpha_val * w.signum();
+                            });
+                    }
                 }
                 Some(RegularizationType::L2(alpha)) => {
                     weight_gradients += &(&weights * *alpha);
@@ -324,13 +341,22 @@ impl LinearRegression {
             ));
         }
 
-        let predictions = (0..x.nrows())
-            .into_par_iter()
-            .map(|i| {
-                let row = x.row(i);
-                intercept + row.dot(coeffs)
-            })
-            .collect::<Vec<f64>>();
+        let predictions: Vec<f64> = if x.nrows() >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
+            (0..x.nrows())
+                .into_par_iter()
+                .map(|i| {
+                    let row = x.row(i);
+                    intercept + row.dot(coeffs)
+                })
+                .collect()
+        } else {
+            (0..x.nrows())
+                .map(|i| {
+                    let row = x.row(i);
+                    intercept + row.dot(coeffs)
+                })
+                .collect()
+        };
 
         // Check if predictions contain invalid values
         if predictions.iter().any(|&val| !val.is_finite()) {
