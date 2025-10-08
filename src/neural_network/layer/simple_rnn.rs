@@ -85,8 +85,13 @@ impl SimpleRNN {
     ///
     /// * `SimpleRNN` - A new SimpleRNN instance with the specified activation
     pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
-        let kernel = Array::random((input_dim, units), Uniform::new(-0.05, 0.05));
-        let recurrent_kernel = Array::random((units, units), Uniform::new(-0.05, 0.05));
+        // Xavier/Glorot initialization for input kernel
+        let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
+        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
+
+        // Orthogonal initialization for recurrent kernel to maintain gradient flow
+        let recurrent_kernel = Self::orthogonal_init(units);
+
         let bias = Array::zeros((1, units));
         SimpleRNN {
             input_dim,
@@ -105,6 +110,51 @@ impl SimpleRNN {
             },
             activation,
         }
+    }
+
+    /// Generate an orthogonal matrix using Gram-Schmidt orthogonalization
+    /// This helps prevent gradient vanishing/exploding in RNNs
+    fn orthogonal_init(size: usize) -> Array2<f32> {
+        // Generate a random matrix
+        let mut matrix = Array::random((size, size), Uniform::new(-1.0, 1.0));
+
+        // Apply Gram-Schmidt orthogonalization
+        for i in 0..size {
+            // Orthogonalize column i against all previous columns
+            for j in 0..i {
+                let col_i = matrix.column(i).to_owned();
+                let col_j = matrix.column(j).to_owned();
+
+                // Compute projection: dot(col_i, col_j)
+                let projection = col_i
+                    .iter()
+                    .zip(col_j.iter())
+                    .map(|(a, b)| a * b)
+                    .sum::<f32>();
+
+                // Subtract projection from column i
+                for k in 0..size {
+                    matrix[[k, i]] -= projection * col_j[k];
+                }
+            }
+
+            // Normalize column i
+            let col_i = matrix.column(i).to_owned();
+            let norm = col_i.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+            if norm > 1e-8 {
+                for k in 0..size {
+                    matrix[[k, i]] /= norm;
+                }
+            } else {
+                // If norm is too small, use standard basis vector
+                for k in 0..size {
+                    matrix[[k, i]] = if k == i { 1.0 } else { 0.0 };
+                }
+            }
+        }
+
+        matrix
     }
 }
 
@@ -154,22 +204,31 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        let mut grad_k = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_rk = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_b = Array2::<f32>::zeros((1, self.units));
+        // Initialize or reuse existing gradients for accumulation
+        let mut grad_k = self
+            .grad_kernel
+            .take()
+            .unwrap_or_else(|| Array2::<f32>::zeros((self.input_dim, self.units)));
+        let mut grad_rk = self
+            .grad_recurrent_kernel
+            .take()
+            .unwrap_or_else(|| Array2::<f32>::zeros((self.units, self.units)));
+        let mut grad_b = self
+            .grad_bias
+            .take()
+            .unwrap_or_else(|| Array2::<f32>::zeros((1, self.units)));
         let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
 
         let mut grad_h = grad_h_t;
-        // BPTT
+        // BPTT with gradient clipping
         for t in (0..timesteps).rev() {
             let h_t = hs[t + 1].clone();
             let h_tm1 = hs[t].clone();
-            let d_z = if self.activation == Activation::Softmax {
-                Activation::softmax_backward(&h_t, &grad_h)
-            } else {
-                let d_act = Activation::activation_derivative(&h_t, &self.activation);
-                d_act * &grad_h
-            };
+
+            // Compute activation derivative (removed Softmax special case for hidden layer)
+            let d_act = Activation::activation_derivative(&h_t, &self.activation);
+            let d_z = d_act * &grad_h;
+
             let x_t = x3.index_axis(Axis(1), t).to_owned();
             grad_k = grad_k + &x_t.t().dot(&d_z);
             grad_rk = grad_rk + &h_tm1.t().dot(&d_z);
@@ -179,6 +238,12 @@ impl Layer for SimpleRNN {
             grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
             grad_h = d_z.dot(&self.recurrent_kernel.t());
         }
+
+        // Apply gradient clipping to prevent exploding gradients
+        let clip_value = 5.0;
+        grad_k.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
+        grad_rk.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
+        grad_b.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
 
         self.grad_kernel = Some(grad_k);
         self.grad_recurrent_kernel = Some(grad_rk);
