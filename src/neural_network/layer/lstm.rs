@@ -1,108 +1,24 @@
 use super::*;
 
-/// LSTM (Long Short-Term Memory) neural network layer implementation.
+/// Internal gate structure for LSTM cell operations
 ///
-/// A Long Short-Term Memory layer is a type of recurrent neural network (RNN) layer
-/// that is capable of learning long-term dependencies. It uses gates to control
-/// the flow of information and mitigate the vanishing gradient problem.
-///
-/// # Structure
-/// The LSTM cell contains four gates:
-/// - Input gate (i): Controls when new information is added to cell state
-/// - Forget gate (f): Controls what information is discarded from cell state
-/// - Cell gate (c): Generates candidate values to add to the cell state
-/// - Output gate (o): Controls what part of the cell state is output
-///
-/// # Dimensions
-///
-/// - Input shape: (batch_size, timesteps, input_dim)
-/// - Output shape: (batch_size, timesteps, units)
+/// This structure represents a single gate (input, forget, cell, or output) within an LSTM cell.
+/// Each gate contains the weights, biases, gradients, and optimizer cache needed for
+/// forward and backward propagation through the gate.
 ///
 /// # Fields
-/// - `input_dim`: The dimensionality of the input features.
-/// - `units`: The number of LSTM units (output dimensionality).
-/// - `input_gate`: Gate controlling when new information is added to cell state.
-/// - `forget_gate`: Gate controlling what information is discarded from cell state.
-/// - `cell_gate`: Gate generating candidate values to add to the cell state.
-/// - `output_gate`: Gate controlling what part of the cell state is output.
-/// - `input_cache`: Cache for storing input during forward pass for use in backward pass.
-/// - `hidden_cache`: Cache for storing hidden states during forward pass.
-/// - `cell_cache`: Cache for storing cell states during forward pass.
-/// - `cell_activated_cache`: Cache for storing activated cell states.
-/// - `activation`: Activation function applied to the cell state and gates.
 ///
-/// # Example
-/// ```rust
-/// use ndarray::Array;
-/// use rustyml::neural_network::*;
-///
-/// // Create input with batch_size=2, timesteps=5, input_dim=4,
-/// // and target with batch_size=2, units=3 (same dimension as the last hidden state)
-/// let x = Array::ones((2, 5, 4)).into_dyn();
-/// let y = Array::ones((2, 3)).into_dyn();
-///
-/// // Build model: one SimpleRnn layer with tanh activation
-/// let mut model = Sequential::new();
-/// model
-/// .add(LSTM::new(4, 3, Activation::Tanh))
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
-///
-/// // Print structure
-/// model.summary();
-///
-/// // Train for 1 epoch
-/// model.fit(&x, &y, 1).unwrap();
-///
-/// // Predict
-/// let pred = model.predict(&x);
-/// println!("LSTM prediction:\n{:#?}\n", pred);
-/// ```
-pub struct LSTM {
-    input_dim: usize,
-    units: usize,
-
-    // Using four Gate structures instead of separate weight matrices
-    input_gate: Gate,  // i - input gate
-    forget_gate: Gate, // f - forget gate
-    cell_gate: Gate,   // c - cell state update gate
-    output_gate: Gate, // o - output gate
-
-    // Cache
-    input_cache: Option<Array3<f32>>,
-    hidden_cache: Option<Vec<Array2<f32>>>,
-    cell_cache: Option<Vec<Array2<f32>>>,
-    cell_activated_cache: Option<Vec<Array2<f32>>>,
-
-    activation: Activation,
-}
-
-/// Represents a gate unit in a Long Short-Term Memory (LSTM) neural network layer.
-///
-/// In LSTM architecture, gates control the flow of information through the cell state.
-/// Each gate consists of weight matrices, biases, and various caches for training and
-/// optimization purposes.
-///
-/// # Gates in LSTM
-/// The LSTM implementation uses four types of gates:
-/// - Input gate: Controls when new information is added to cell state
-/// - Forget gate: Controls what information is discarded from cell state
-/// - Cell gate: Generates candidate values to add to the cell state
-/// - Output gate: Controls what part of the cell state is output
-///
-/// # Fields
-/// - `kernel` - Weight matrix applied to the input
-/// - `recurrent_kernel` - Weight matrix applied to the previous hidden state
-/// - `bias` - Bias term added to the weighted inputs
-/// - `gate_cache` - Forward propagation cache
-/// - `grad_*` - Gradients
-/// - `adam_states` - Adam optimizer states
-/// - `rmsprop_cache` - RMSprop optimizer cache
-/// - `optimizer_cache` - Cache for optimizer
+/// - `kernel` - Weight matrix for input connections with shape (input_dim, units)
+/// - `recurrent_kernel` - Weight matrix for recurrent connections with shape (units, units)
+/// - `bias` - Bias vector with shape (1, units)
+/// - `grad_kernel` - Optional gradient for input weights, accumulated during backpropagation
+/// - `grad_recurrent_kernel` - Optional gradient for recurrent weights, accumulated during backpropagation
+/// - `grad_bias` - Optional gradient for bias terms, accumulated during backpropagation
+/// - `optimizer_cache` - Cache for storing optimizer-specific state (Adam, RMSprop momentum, etc.)
 struct Gate {
     kernel: Array2<f32>,
     recurrent_kernel: Array2<f32>,
     bias: Array2<f32>,
-    gate_cache: Option<Vec<Array2<f32>>>,
     grad_kernel: Option<Array2<f32>>,
     grad_recurrent_kernel: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
@@ -110,58 +26,143 @@ struct Gate {
 }
 
 impl Gate {
-    /// Creates a new Gate instance for use in an LSTM layer.
+    /// Creates a new gate with randomly initialized weights
     ///
-    /// This function initializes a gate unit with weight matrices, biases, and various caches
-    /// needed for forward/backward propagation and optimization during training.
+    /// # Parameters
     ///
-    /// # Arguments
-    ///
-    /// - `input_dim` - The dimensionality of the input features. Determines the number of rows in the kernel matrix.
-    /// - `units` - The number of LSTM units (output dimensionality). Determines the number of columns in weight matrices and the size of the bias vector.
+    /// - `input_dim` - Dimensionality of the input features
+    /// - `units` - Number of units (neurons) in this gate
     ///
     /// # Returns
     ///
     /// * `Gate` - A new `Gate` instance with:
-    ///     - Randomly initialized weight matrices using a uniform distribution between -0.05 and 0.05
-    ///     - Bias vector initialized to zeros
-    ///     - All caches and optimization states initialized to `None`
+    ///     - Randomly initialized kernel and recurrent_kernel weights (uniform distribution \[-0.05, 0.05\])
+    ///     - Zero-initialized bias terms
+    ///     - None gradients (will be allocated during first backward pass)
+    ///     - Default optimizer cache
     pub fn new(input_dim: usize, units: usize) -> Self {
-        fn rand_mat(r: usize, c: usize) -> Array2<f32> {
-            Array::random((r, c), Uniform::new(-0.05, 0.05))
-        }
-        let z = Array2::zeros((1, units));
-
         Self {
-            kernel: rand_mat(input_dim, units),
-            recurrent_kernel: rand_mat(units, units),
-            bias: z.clone(),
-            gate_cache: None,
+            kernel: Array::random((input_dim, units), Uniform::new(-0.05, 0.05)),
+            recurrent_kernel: Array::random((units, units), Uniform::new(-0.05, 0.05)),
+            bias: Array::zeros((1, units)),
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            optimizer_cache: OptimizerCache {
-                adam_states: None,
-                rmsprop_cache: None,
-            },
+            optimizer_cache: OptimizerCache::default(),
         }
     }
 }
 
+/// Long Short-Term Memory (LSTM) neural network layer
+///
+/// LSTM is a type of recurrent neural network (RNN) architecture that is capable of learning
+/// long-term dependencies in sequential data. It addresses the vanishing gradient problem
+/// of traditional RNNs through the use of gating mechanisms that control information flow.
+///
+/// The LSTM cell uses three gates to control information flow:
+/// - Input Gate: Controls what new information should be stored in the cell state
+/// - Forget Gate: Controls what information should be discarded from the cell state
+/// - Output Gate: Controls what parts of the cell state should be output as the hidden state
+/// - Cell Gate: Proposes new candidate values to be added to the cell state
+///
+/// The LSTM maintains two internal states:
+/// - Cell State (C_t): The long-term memory that flows through the network
+/// - Hidden State (h_t): The short-term memory and current output
+///
+/// # Mathematical Operations
+///
+/// For each timestep t:
+/// 1. i_t = σ(W_i · \[h_{t-1}, x_t\] + b_i)  (Input gate)
+/// 2. f_t = σ(W_f · \[h_{t-1}, x_t] + b_f)  (Forget gate)
+/// 3. g_t = tanh(W_g · \[h_{t-1}, x_t\] + b_g)  (Cell gate)
+/// 4. o_t = σ(W_o · \[h_{t-1}, x_t\] + b_o)  (Output gate)
+/// 5. C_t = f_t ⊙ C_{t-1} + i_t ⊙ g_t  (Cell state update)
+/// 6. h_t = o_t ⊙ tanh(C_t)  (Hidden state update)
+///
+/// Where σ is the sigmoid function, ⊙ is element-wise multiplication, and W, b are learned parameters.
+///
+/// # Fields
+///
+/// - `input_dim` - Dimensionality of input features
+/// - `units` - Number of LSTM units (neurons) in the layer
+/// - `input_gate` - Gate controlling what new information to store in cell state
+/// - `forget_gate` - Gate controlling what information to discard from cell state
+/// - `cell_gate` - Gate proposing new candidate values for cell state
+/// - `output_gate` - Gate controlling what to output from cell state
+/// - `input_cache` - Cached input tensor for backward propagation
+/// - `hidden_cache` - Cached hidden states h_t for each timestep
+/// - `cell_cache` - Cached cell states C_t for each timestep
+/// - `cell_activated_cache` - Cached tanh(C_t) values for each timestep
+/// - `i_cache` - Cached input gate activations for each timestep
+/// - `f_cache` - Cached forget gate activations for each timestep
+/// - `g_cache` - Cached cell gate activations for each timestep
+/// - `o_cache` - Cached output gate activations for each timestep
+/// - `activation` - Activation function applied to final output (usually Tanh)
+///
+/// # Example
+/// ```rust
+/// use rustyml::neural_network::*;
+/// use ndarray::Array;
+///
+/// // Create input data: batch_size=2, timesteps=5, features=4
+/// let input = Array::ones((2, 5, 4)).into_dyn();
+/// let target = Array::ones((2, 3)).into_dyn(); // batch_size=2, units=3
+///
+/// // Create LSTM layer with 4 input features, 3 units, Tanh activation
+/// let mut model = Sequential::new();
+/// model.add(LSTM::new(4, 3, Activation::Tanh))
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///
+/// // Train the model
+/// model.fit(&input, &target, 10).unwrap();
+///
+/// // Make predictions
+/// let predictions = model.predict(&input);
+/// println!("LSTM output shape: {:?}", predictions.shape());
+/// // Output: [2, 3] (batch_size, units)
+/// ```
+pub struct LSTM {
+    input_dim: usize,
+    units: usize,
+
+    // Four gates: input, forget, cell, output
+    input_gate: Gate,
+    forget_gate: Gate,
+    cell_gate: Gate,
+    output_gate: Gate,
+
+    // Caches for forward pass
+    input_cache: Option<Array3<f32>>,
+    hidden_cache: Option<Vec<Array2<f32>>>, // hidden states h_t
+    cell_cache: Option<Vec<Array2<f32>>>,   // cell states c_t
+    cell_activated_cache: Option<Vec<Array2<f32>>>, // tanh(c_t)
+
+    // Intermediate gate values cache
+    i_cache: Option<Vec<Array2<f32>>>, // input gate values (sigmoid applied)
+    f_cache: Option<Vec<Array2<f32>>>, // forget gate values (sigmoid applied)
+    g_cache: Option<Vec<Array2<f32>>>, // cell gate values (tanh applied)
+    o_cache: Option<Vec<Array2<f32>>>, // output gate values (sigmoid applied)
+
+    activation: Activation,
+}
+
 impl LSTM {
-    /// Creates a new Long Short-Term Memory (LSTM) layer.
+    /// Creates a new LSTM layer with specified parameters
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// - `input_dim` - The dimensionality of the input features.
-    /// - `units` - The number of LSTM units (output dimensionality).
-    /// - `activation` - The activation function to use for the output.
+    /// - `input_dim` - Dimensionality of input features (number of features per timestep)
+    /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
+    /// - `activation` - Activation function applied to the final output (commonly Tanh or Linear)
     ///
     /// # Returns
     ///
-    /// * `Self` - A new LSTM instance with initialized weights and biases. All weights are randomly initialized using a uniform distribution between -0.05 and 0.05, and all biases are initialized to zeros.
+    /// * `LSTM` - A new `LSTM` instance with:
+    ///     - Four gates (input, forget, cell, output) initialized with random weights
+    ///     - All caches set to None (will be allocated during first forward pass)
+    ///     - Specified activation function for output transformation
     pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
-        LSTM {
+        Self {
             input_dim,
             units,
             input_gate: Gate::new(input_dim, units),
@@ -172,6 +173,10 @@ impl LSTM {
             hidden_cache: None,
             cell_cache: None,
             cell_activated_cache: None,
+            i_cache: None,
+            f_cache: None,
+            g_cache: None,
+            o_cache: None,
             activation,
         }
     }
@@ -179,91 +184,117 @@ impl LSTM {
 
 impl Layer for LSTM {
     fn forward(&mut self, input: &Tensor) -> Tensor {
+        // Input shape: (batch, timesteps, input_dim)
         let x3 = input.clone().into_dimensionality::<ndarray::Ix3>().unwrap();
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.clone());
 
+        // Initialize hidden state and cell state
+        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
+        let mut c_prev = Array2::<f32>::zeros((batch, self.units));
+
+        // Storage for all timesteps
         let mut hs = Vec::with_capacity(timesteps + 1);
         let mut cs = Vec::with_capacity(timesteps + 1);
-        let mut c_activateds = Vec::with_capacity(timesteps);
+        let mut cs_activated = Vec::with_capacity(timesteps);
+        let mut i_vals = Vec::with_capacity(timesteps);
+        let mut f_vals = Vec::with_capacity(timesteps);
+        let mut g_vals = Vec::with_capacity(timesteps);
+        let mut o_vals = Vec::with_capacity(timesteps);
 
-        let mut h_t = Array2::<f32>::zeros((batch, self.units));
-        let mut c_t = Array2::<f32>::zeros((batch, self.units));
-        hs.push(h_t.clone());
-        cs.push(c_t.clone());
+        hs.push(h_prev.clone());
+        cs.push(c_prev.clone());
 
-        // Clear previous gate caches
-        self.input_gate.gate_cache = Some(Vec::with_capacity(timesteps));
-        self.forget_gate.gate_cache = Some(Vec::with_capacity(timesteps));
-        self.cell_gate.gate_cache = Some(Vec::with_capacity(timesteps));
-        self.output_gate.gate_cache = Some(Vec::with_capacity(timesteps));
+        // Compute gate value: x_t @ kernel + h_prev @ recurrent_kernel + bias
+        fn compute(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) -> Array2<f32> {
+            x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
+        }
 
-        // Define a closure function to compute gate activation values
-        let compute_gate = |gate: &mut Gate,
-                            x_t: &Array2<f32>,
-                            h_t: &Array2<f32>,
-                            activation: &Activation|
-         -> Array2<f32> {
-            let pre = x_t.dot(&gate.kernel) + h_t.dot(&gate.recurrent_kernel) + &gate.bias;
-            let activated = Activation::apply_activation(&pre, activation);
-
-            // Save gate state to gate_cache
-            if let Some(cache) = &mut gate.gate_cache {
-                cache.push(activated.clone());
-            }
-            activated
-        };
-
+        // Process each timestep
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned();
+            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
-            // Use rayon to compute the four gate values in parallel
-            let ((i_t, f_t), (c_bar, o_t)) = rayon::join(
+            // Compute all 4 gate values in parallel
+            let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
                 || {
                     rayon::join(
-                        || compute_gate(&mut self.input_gate, &x_t, &h_t, &self.activation),
-                        || compute_gate(&mut self.forget_gate, &x_t, &h_t, &self.activation),
+                        || compute(&self.input_gate, &x_t, &h_prev),
+                        || compute(&self.forget_gate, &x_t, &h_prev),
                     )
                 },
                 || {
                     rayon::join(
-                        || compute_gate(&mut self.cell_gate, &x_t, &h_t, &self.activation),
-                        || compute_gate(&mut self.output_gate, &x_t, &h_t, &self.activation),
+                        || compute(&self.cell_gate, &x_t, &h_prev),
+                        || compute(&self.output_gate, &x_t, &h_prev),
                     )
                 },
             );
 
-            // Update cell state
-            c_t = &f_t * &c_t + &i_t * &c_bar;
+            // Apply activations to all 4 gates in parallel
+            let ((i_t, f_t), (g_t, o_t)) = rayon::join(
+                || {
+                    rayon::join(
+                        || Activation::apply_activation(&i_raw, &Activation::Sigmoid),
+                        || Activation::apply_activation(&f_raw, &Activation::Sigmoid),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || Activation::apply_activation(&g_raw, &Activation::Tanh),
+                        || Activation::apply_activation(&o_raw, &Activation::Sigmoid),
+                    )
+                },
+            );
 
-            // Apply activation function to cell state
-            let c_activated = Activation::apply_activation(&c_t, &self.activation);
-            c_activateds.push(c_activated.clone());
+            // Update cell state: c_t = f_t * c_prev + i_t * g_t
+            let c_t = &f_t * &c_prev + &i_t * &g_t;
 
-            // Calculate new hidden state
-            let h_new = &o_t * &c_activated;
+            // Apply tanh to cell state
+            let c_t_activated = Activation::apply_activation(&c_t, &Activation::Tanh);
 
-            // Save state caches
-            hs.push(h_new.clone());
+            // Update hidden state: h_t = o_t * tanh(c_t)
+            let h_t = &o_t * &c_t_activated;
+
+            // Apply output activation if not Linear
+            let h_t = if self.activation != Activation::Linear {
+                Activation::apply_activation(&h_t, &self.activation)
+            } else {
+                h_t
+            };
+
+            // Cache values
+            i_vals.push(i_t);
+            f_vals.push(f_t);
+            g_vals.push(g_t);
+            o_vals.push(o_t);
             cs.push(c_t.clone());
-            h_t = h_new;
+            cs_activated.push(c_t_activated);
+            hs.push(h_t.clone());
+
+            h_prev = h_t;
+            c_prev = c_t;
         }
 
-        // Save caches for backward propagation
+        // Store caches
         self.hidden_cache = Some(hs);
         self.cell_cache = Some(cs);
-        self.cell_activated_cache = Some(c_activateds);
+        self.cell_activated_cache = Some(cs_activated);
+        self.i_cache = Some(i_vals);
+        self.f_cache = Some(f_vals);
+        self.g_cache = Some(g_vals);
+        self.o_cache = Some(o_vals);
 
-        // Return the final hidden state
-        h_t.into_dyn()
+        // Return last hidden state
+        h_prev.into_dyn()
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        let mut grad_h = grad_output
+        let grad_h_t = grad_output
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
+        // Helper function to extract cache
         fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
             cache
                 .take()
@@ -274,142 +305,188 @@ impl Layer for LSTM {
         let x3 = take_cache(&mut self.input_cache, error_msg)?;
         let hs = take_cache(&mut self.hidden_cache, error_msg)?;
         let cs = take_cache(&mut self.cell_cache, error_msg)?;
-        let c_activateds = take_cache(&mut self.cell_activated_cache, error_msg)?;
-
-        // Retrieve caches from each gate
-        let gis = take_cache(&mut self.input_gate.gate_cache, error_msg)?;
-        let gfs = take_cache(&mut self.forget_gate.gate_cache, error_msg)?;
-        let gcs = take_cache(&mut self.cell_gate.gate_cache, error_msg)?;
-        let gos = take_cache(&mut self.output_gate.gate_cache, error_msg)?;
-
-        // Process the gradient of the last time step, if it's softmax, special handling is needed
-        if self.activation == Activation::Softmax {
-            grad_h = Activation::softmax_backward(&hs[hs.len() - 1], &grad_h);
-        }
+        let cs_activated = take_cache(&mut self.cell_activated_cache, error_msg)?;
+        let i_vals = take_cache(&mut self.i_cache, error_msg)?;
+        let f_vals = take_cache(&mut self.f_cache, error_msg)?;
+        let g_vals = take_cache(&mut self.g_cache, error_msg)?;
+        let o_vals = take_cache(&mut self.o_cache, error_msg)?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Initialize gradient matrices for each gate
-        let mut grad_kernel_i = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_kernel_f = grad_kernel_i.clone();
-        let mut grad_kernel_c = grad_kernel_i.clone();
-        let mut grad_kernel_o = grad_kernel_i.clone();
-        let mut grad_rk_i = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_rk_f = grad_rk_i.clone();
-        let mut grad_rk_c = grad_rk_i.clone();
-        let mut grad_rk_o = grad_rk_i.clone();
-        let mut grad_b_i = Array2::<f32>::zeros((1, self.units));
-        let mut grad_b_f = grad_b_i.clone();
-        let mut grad_b_c = grad_b_i.clone();
-        let mut grad_b_o = grad_b_i.clone();
+        // Initialize gradient accumulators
+        let mut grad_i_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
+        let mut grad_i_recurrent = Array2::<f32>::zeros((self.units, self.units));
+        let mut grad_i_bias = Array2::<f32>::zeros((1, self.units));
 
-        let mut grad_c = Array2::<f32>::zeros((batch, self.units));
+        let mut grad_f_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
+        let mut grad_f_recurrent = Array2::<f32>::zeros((self.units, self.units));
+        let mut grad_f_bias = Array2::<f32>::zeros((1, self.units));
+
+        let mut grad_g_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
+        let mut grad_g_recurrent = Array2::<f32>::zeros((self.units, self.units));
+        let mut grad_g_bias = Array2::<f32>::zeros((1, self.units));
+
+        let mut grad_o_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
+        let mut grad_o_recurrent = Array2::<f32>::zeros((self.units, self.units));
+        let mut grad_o_bias = Array2::<f32>::zeros((1, self.units));
+
         let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
 
-        for t in (0..timesteps).rev() {
-            let i_t = &gis[t];
-            let f_t = &gfs[t];
-            let c_bar = &gcs[t];
-            let o_t = &gos[t];
-            let c_prev = &cs[t];
-            let h_prev = &hs[t];
-            let x_t = x3.index_axis(Axis(1), t).to_owned();
-            let c_activated = &c_activateds[t];
+        let mut grad_h = grad_h_t;
+        let mut grad_c = Array2::<f32>::zeros((batch, self.units));
 
-            // Apply activation function derivative to c_prev of the current time step
-            let c_act_deriv = if self.activation == Activation::Softmax {
-                Activation::softmax_backward(c_activated, &Array::ones(c_activated.dim()))
+        // Backpropagation through time
+        for t in (0..timesteps).rev() {
+            let h_t = &hs[t + 1];
+            let h_prev = &hs[t];
+            let c_prev = &cs[t];
+            let c_t_activated = &cs_activated[t];
+            let i_t = &i_vals[t];
+            let f_t = &f_vals[t];
+            let g_t = &g_vals[t];
+            let o_t = &o_vals[t];
+
+            // Gradient through output activation
+            let grad_h_pre_activation = if self.activation != Activation::Linear {
+                if self.activation == Activation::Softmax {
+                    Activation::softmax_backward(h_t, &grad_h)
+                } else {
+                    let d_act = Activation::activation_derivative(h_t, &self.activation);
+                    d_act * &grad_h
+                }
             } else {
-                Activation::activation_derivative(c_activated, &self.activation)
+                grad_h.clone()
             };
 
-            // o
-            let d_o =
-                &grad_h * c_activated * Activation::activation_derivative(o_t, &self.activation);
-            // cell
-            let d_c = &grad_h * o_t * c_act_deriv + &grad_c;
+            // Gradient through h_t = o_t * tanh(c_t)
+            let grad_o_t = &grad_h_pre_activation * c_t_activated;
+            grad_c =
+                grad_c + &(&grad_h_pre_activation * o_t * &(1.0 - c_t_activated * c_t_activated));
 
-            // Calculate gradient components in parallel
-            let (d_f, (d_i, d_cbar)) = rayon::join(
-                || &d_c * c_prev * Activation::activation_derivative(f_t, &self.activation),
+            // Gradient through c_t = f_t * c_prev + i_t * g_t
+            let grad_f_t = &grad_c * c_prev;
+            let grad_i_t = &grad_c * g_t;
+            let grad_g_t = &grad_c * i_t;
+            let grad_c_prev = &grad_c * f_t;
+
+            // Compute gate activation derivatives in parallel for all 4 gates
+            let ((grad_o_raw, grad_f_raw), (grad_i_raw, grad_g_raw)) = rayon::join(
                 || {
                     rayon::join(
-                        || &d_c * c_bar * Activation::activation_derivative(i_t, &self.activation),
-                        || &d_c * i_t * Activation::activation_derivative(c_bar, &self.activation),
+                        || &grad_o_t * o_t * &(1.0 - o_t), // sigmoid derivative
+                        || &grad_f_t * f_t * &(1.0 - f_t), // sigmoid derivative
+                    )
+                },
+                || {
+                    rayon::join(
+                        || &grad_i_t * i_t * &(1.0 - i_t), // sigmoid derivative
+                        || &grad_g_t * &(1.0 - g_t * g_t), // tanh derivative
                     )
                 },
             );
 
-            // Define a function to compute gradients
-            fn compute_gradients(
-                x_t: &Array2<f32>,
-                h_prev: &Array2<f32>,
-                delta: &Array2<f32>,
-            ) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
-                let kernel_grad = x_t.t().dot(delta);
-                let rk_grad = h_prev.t().dot(delta);
-                let b_grad = delta.sum_axis(Axis(0)).insert_axis(Axis(0));
-                (kernel_grad, rk_grad, b_grad)
-            }
+            let x_t = x3.index_axis(Axis(1), t).to_owned();
 
-            // Compute gradients for all gates in parallel
-            let gates_data = [
-                (&d_i, &mut grad_kernel_i, &mut grad_rk_i, &mut grad_b_i),
-                (&d_f, &mut grad_kernel_f, &mut grad_rk_f, &mut grad_b_f),
-                (&d_cbar, &mut grad_kernel_c, &mut grad_rk_c, &mut grad_b_c),
-                (&d_o, &mut grad_kernel_o, &mut grad_rk_o, &mut grad_b_o),
-            ];
+            let x_t_t = x_t.t();
+            let h_prev_t = h_prev.t();
 
-            // Process all gates in parallel using rayon
-            let results = gates_data
-                .iter()
-                .map(|(delta, _, _, _)| *delta)
-                .collect::<Vec<_>>()
-                .par_iter()
-                .map(|delta| compute_gradients(&x_t, &h_prev, *delta))
-                .collect::<Vec<_>>();
+            // Closure to compute gradient updates for a single gate
+            let compute_gate_gradients = |grad_raw: &Array2<f32>| {
+                let kernel_update = x_t_t.dot(grad_raw);
+                let recurrent_update = h_prev_t.dot(grad_raw);
+                let bias_update = grad_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
+                (kernel_update, recurrent_update, bias_update)
+            };
 
-            // Accumulate results
-            for (i, (kernel_grad, rk_grad, b_grad)) in results.iter().enumerate() {
-                *gates_data[i].1 = &*gates_data[i].1 + kernel_grad;
-                *gates_data[i].2 = &*gates_data[i].2 + rk_grad;
-                *gates_data[i].3 = &*gates_data[i].3 + b_grad;
-            }
+            // Compute all gradient updates in parallel using rayon::join
+            let ((o_updates, f_updates), (i_updates, g_updates)) = rayon::join(
+                || {
+                    rayon::join(
+                        || compute_gate_gradients(&grad_o_raw),
+                        || compute_gate_gradients(&grad_f_raw),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || compute_gate_gradients(&grad_i_raw),
+                        || compute_gate_gradients(&grad_g_raw),
+                    )
+                },
+            );
 
-            // Propagate gradients using the core weights of each gate
-            let dx = d_i.dot(&self.input_gate.kernel.t())
-                + d_f.dot(&self.forget_gate.kernel.t())
-                + d_cbar.dot(&self.cell_gate.kernel.t())
-                + d_o.dot(&self.output_gate.kernel.t());
+            // Apply gradient updates
+            grad_o_kernel = grad_o_kernel + &o_updates.0;
+            grad_o_recurrent = grad_o_recurrent + &o_updates.1;
+            grad_o_bias = grad_o_bias + &o_updates.2;
+
+            grad_f_kernel = grad_f_kernel + &f_updates.0;
+            grad_f_recurrent = grad_f_recurrent + &f_updates.1;
+            grad_f_bias = grad_f_bias + &f_updates.2;
+
+            grad_i_kernel = grad_i_kernel + &i_updates.0;
+            grad_i_recurrent = grad_i_recurrent + &i_updates.1;
+            grad_i_bias = grad_i_bias + &i_updates.2;
+
+            grad_g_kernel = grad_g_kernel + &g_updates.0;
+            grad_g_recurrent = grad_g_recurrent + &g_updates.1;
+            grad_g_bias = grad_g_bias + &g_updates.2;
+
+            // Parallel computation of gradient with respect to input and hidden state
+            let (dx, grad_h_next) = rayon::join(
+                || {
+                    grad_o_raw.dot(&self.output_gate.kernel.t())
+                        + grad_f_raw.dot(&self.forget_gate.kernel.t())
+                        + grad_i_raw.dot(&self.input_gate.kernel.t())
+                        + grad_g_raw.dot(&self.cell_gate.kernel.t())
+                },
+                || {
+                    grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
+                        + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
+                        + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
+                        + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t())
+                },
+            );
 
             grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
+            grad_h = grad_h_next;
 
-            // Propagate gradients using the recurrent weights of each gate
-            grad_h = d_i.dot(&self.input_gate.recurrent_kernel.t())
-                + d_f.dot(&self.forget_gate.recurrent_kernel.t())
-                + d_cbar.dot(&self.cell_gate.recurrent_kernel.t())
-                + d_o.dot(&self.output_gate.recurrent_kernel.t());
-
-            grad_c = &d_c * f_t;
+            // Gradient with respect to previous cell state
+            grad_c = grad_c_prev;
         }
 
-        // Save gradients for each gate
-        self.input_gate.grad_kernel = Some(grad_kernel_i);
-        self.forget_gate.grad_kernel = Some(grad_kernel_f);
-        self.cell_gate.grad_kernel = Some(grad_kernel_c);
-        self.output_gate.grad_kernel = Some(grad_kernel_o);
+        // Store gradients using closure
+        let store_gradients = |gate: &mut Gate, grad_kernel, grad_recurrent, grad_bias| {
+            gate.grad_kernel = Some(grad_kernel);
+            gate.grad_recurrent_kernel = Some(grad_recurrent);
+            gate.grad_bias = Some(grad_bias);
+        };
 
-        self.input_gate.grad_recurrent_kernel = Some(grad_rk_i);
-        self.forget_gate.grad_recurrent_kernel = Some(grad_rk_f);
-        self.cell_gate.grad_recurrent_kernel = Some(grad_rk_c);
-        self.output_gate.grad_recurrent_kernel = Some(grad_rk_o);
-
-        self.input_gate.grad_bias = Some(grad_b_i);
-        self.forget_gate.grad_bias = Some(grad_b_f);
-        self.cell_gate.grad_bias = Some(grad_b_c);
-        self.output_gate.grad_bias = Some(grad_b_o);
+        store_gradients(
+            &mut self.input_gate,
+            grad_i_kernel,
+            grad_i_recurrent,
+            grad_i_bias,
+        );
+        store_gradients(
+            &mut self.forget_gate,
+            grad_f_kernel,
+            grad_f_recurrent,
+            grad_f_bias,
+        );
+        store_gradients(
+            &mut self.cell_gate,
+            grad_g_kernel,
+            grad_g_recurrent,
+            grad_g_bias,
+        );
+        store_gradients(
+            &mut self.output_gate,
+            grad_o_kernel,
+            grad_o_recurrent,
+            grad_o_bias,
+        );
 
         Ok(grad_x3.into_dyn())
     }
@@ -417,9 +494,11 @@ impl Layer for LSTM {
     fn layer_type(&self) -> &str {
         "LSTM"
     }
+
     fn output_shape(&self) -> String {
         format!("(None, {})", self.units)
     }
+
     fn param_count(&self) -> TrainingParameters {
         TrainingParameters::Trainable(
             4 * (self.input_dim * self.units + self.units * self.units + self.units),
@@ -427,101 +506,143 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {
-        // Create a helper function to update gate parameters
-        fn update_gate_parameters(gate: &mut Gate, lr: f32) {
+        // Helper to update a single gate's parameters
+        fn update_gate(gate: &mut Gate, lr: f32) {
             if let (Some(gk), Some(grk), Some(gb)) = (
                 &gate.grad_kernel,
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                SGD::update_sgd_parameters_rnn(
-                    &mut gate.kernel,
-                    gk,
-                    &mut gate.recurrent_kernel,
-                    grk,
-                    &mut gate.bias,
-                    gb,
-                    lr,
+                // Parallelize the three parameter updates within a gate
+                rayon::join(
+                    || {
+                        rayon::join(
+                            || gate.kernel = &gate.kernel - &(lr * gk),
+                            || gate.recurrent_kernel = &gate.recurrent_kernel - &(lr * grk),
+                        )
+                    },
+                    || gate.bias = &gate.bias - &(lr * gb),
                 );
             }
         }
 
-        // Use the helper function to update parameters for each gate
-        rayon::join(
-            || {
-                rayon::join(
-                    || update_gate_parameters(&mut self.input_gate, lr),
-                    || update_gate_parameters(&mut self.forget_gate, lr),
-                )
-            },
-            || {
-                rayon::join(
-                    || update_gate_parameters(&mut self.cell_gate, lr),
-                    || update_gate_parameters(&mut self.output_gate, lr),
-                )
-            },
-        );
+        // Update all four gates in parallel
+        rayon::scope(|s| {
+            s.spawn(|_| update_gate(&mut self.input_gate, lr));
+            s.spawn(|_| update_gate(&mut self.forget_gate, lr));
+            s.spawn(|_| update_gate(&mut self.cell_gate, lr));
+            s.spawn(|_| update_gate(&mut self.output_gate, lr));
+        });
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize AdamStates structure if not already initialized
-        if self.input_gate.optimizer_cache.adam_states.is_none() {
-            let dk = (self.input_dim, self.units);
-            let dr = (self.units, self.units);
-            let db = (1, self.units);
+        // Helper to update a single gate's parameters with Adam
+        fn update_gate_adam(
+            gate: &mut Gate,
+            input_dim: usize,
+            units: usize,
+            lr: f32,
+            beta1: f32,
+            beta2: f32,
+            epsilon: f32,
+            t: u64,
+        ) {
+            // Initialize Adam states if needed
+            if gate.optimizer_cache.adam_states.is_none() {
+                gate.optimizer_cache.adam_states = Some(AdamStates::new(
+                    (input_dim, units),
+                    Some((units, units)),
+                    (1, units),
+                ));
+            }
 
-            // Initialize Adam states for all gates
-            self.input_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.forget_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.cell_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-            self.output_gate.optimizer_cache.adam_states = Some(AdamStates::new(dk, Some(dr), db));
-        }
-
-        // Helper function to update individual gate parameters
-        fn update_gate(gate: &mut Gate, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
             if let (Some(gk), Some(grk), Some(gb)) = (
                 &gate.grad_kernel,
                 &gate.grad_recurrent_kernel,
                 &gate.grad_bias,
             ) {
-                let adam = gate.optimizer_cache.adam_states.as_mut().unwrap();
-                let (w_update, rk_update, b_update) =
-                    adam.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
+                let adam_states = gate.optimizer_cache.adam_states.as_mut().unwrap();
+                let (k_update, rk_update, b_update) =
+                    adam_states.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
 
-                // Apply parameter updates
-                gate.kernel = &gate.kernel - &w_update;
+                gate.kernel = &gate.kernel - &k_update;
                 gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update.unwrap();
                 gate.bias = &gate.bias - &b_update;
             }
         }
 
-        // Apply parameter updates for each gate
-        update_gate(&mut self.input_gate, lr, beta1, beta2, epsilon, t);
-        update_gate(&mut self.forget_gate, lr, beta1, beta2, epsilon, t);
-        update_gate(&mut self.cell_gate, lr, beta1, beta2, epsilon, t);
-        update_gate(&mut self.output_gate, lr, beta1, beta2, epsilon, t);
+        // Update all four gates in parallel
+        rayon::scope(|s| {
+            s.spawn(|_| {
+                update_gate_adam(
+                    &mut self.input_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    t,
+                )
+            });
+            s.spawn(|_| {
+                update_gate_adam(
+                    &mut self.forget_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    t,
+                )
+            });
+            s.spawn(|_| {
+                update_gate_adam(
+                    &mut self.cell_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    t,
+                )
+            });
+            s.spawn(|_| {
+                update_gate_adam(
+                    &mut self.output_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    beta1,
+                    beta2,
+                    epsilon,
+                    t,
+                )
+            });
+        });
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // Initialize RMSprop cache if it doesn't exist
-        if self.input_gate.optimizer_cache.rmsprop_cache.is_none() {
-            let dk = (self.input_dim, self.units);
-            let dr = (self.units, self.units);
-            let db = (1, self.units);
+        // Helper to update a single gate's parameters with RMSprop
+        fn update_gate_rmsprop(
+            gate: &mut Gate,
+            input_dim: usize,
+            units: usize,
+            lr: f32,
+            rho: f32,
+            epsilon: f32,
+        ) {
+            // Initialize RMSprop cache if needed
+            if gate.optimizer_cache.rmsprop_cache.is_none() {
+                gate.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
+                    (input_dim, units),
+                    Some((units, units)),
+                    (1, units),
+                ));
+            }
 
-            // Initialize RMSprop cache for all gates
-            self.input_gate.optimizer_cache.rmsprop_cache =
-                Some(RMSpropCache::new(dk, Some(dr), db));
-            self.forget_gate.optimizer_cache.rmsprop_cache =
-                Some(RMSpropCache::new(dk, Some(dr), db));
-            self.cell_gate.optimizer_cache.rmsprop_cache =
-                Some(RMSpropCache::new(dk, Some(dr), db));
-            self.output_gate.optimizer_cache.rmsprop_cache =
-                Some(RMSpropCache::new(dk, Some(dr), db));
-        }
-
-        // Update parameters for each gate
-        fn update_gate_rms(gate: &mut Gate, lr: f32, rho: f32, epsilon: f32) {
             if let (Some(gk), Some(grk), Some(gb)) = (
                 &gate.grad_kernel,
                 &gate.grad_recurrent_kernel,
@@ -543,21 +664,49 @@ impl Layer for LSTM {
             }
         }
 
-        // Apply RMSprop updates to all gates
-        rayon::join(
-            || {
-                rayon::join(
-                    || update_gate_rms(&mut self.input_gate, lr, rho, epsilon),
-                    || update_gate_rms(&mut self.forget_gate, lr, rho, epsilon),
+        // Update all four gates in parallel
+        rayon::scope(|s| {
+            s.spawn(|_| {
+                update_gate_rmsprop(
+                    &mut self.input_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    rho,
+                    epsilon,
                 )
-            },
-            || {
-                rayon::join(
-                    || update_gate_rms(&mut self.cell_gate, lr, rho, epsilon),
-                    || update_gate_rms(&mut self.output_gate, lr, rho, epsilon),
+            });
+            s.spawn(|_| {
+                update_gate_rmsprop(
+                    &mut self.forget_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    rho,
+                    epsilon,
                 )
-            },
-        );
+            });
+            s.spawn(|_| {
+                update_gate_rmsprop(
+                    &mut self.cell_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    rho,
+                    epsilon,
+                )
+            });
+            s.spawn(|_| {
+                update_gate_rmsprop(
+                    &mut self.output_gate,
+                    self.input_dim,
+                    self.units,
+                    lr,
+                    rho,
+                    epsilon,
+                )
+            });
+        });
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

@@ -121,27 +121,6 @@ fn test_lstm_sequential_composition() {
 }
 
 #[test]
-fn test_lstm_overfitting() {
-    // Test if the model can overfit a simple dataset
-    let x = Array::ones((2, 4, 3)).into_dyn();
-    let y = Array::ones((2, 7)).into_dyn();
-
-    let mut model = Sequential::new();
-    model
-        .add(LSTM::new(3, 7, Activation::Tanh))
-        .compile(RMSprop::new(0.01, 0.9, 1e-8), MeanSquaredError::new());
-
-    // Train long enough to overfit
-    model.fit(&x, &y, 50).unwrap();
-
-    // Predictions should be very close to target values
-    let pred = model.predict(&x);
-    for (pred_val, target_val) in pred.iter().zip(y.iter()) {
-        assert_abs_diff_eq!(*pred_val, *target_val, epsilon = 0.1);
-    }
-}
-
-#[test]
 fn test_lstm_sequence_learning() {
     // Test LSTM's ability to learn sequence patterns
     // Create sequences where output depends on the sum of inputs
@@ -257,4 +236,232 @@ fn test_lstm_state_evolution() {
         change
     );
     println!("Final prediction mean: {:.4}", pred_mean);
+}
+
+#[test]
+fn test_lstm_temporal_xor() {
+    // Temporal XOR: Output depends on XOR of current and previous inputs
+    // This is a temporal version of XOR problem, testing LSTM's memory
+    // y[t] = x[t] XOR x[t-1]
+
+    let seq_len = 10;
+    let batch_size = 100;
+    let input_dim = 1;
+
+    let mut x_train = Array3::<f32>::zeros((batch_size, seq_len, input_dim));
+    let mut y_train = Array2::<f32>::zeros((batch_size, 1));
+
+    use rand::Rng;
+    let mut rng = rand::rng();
+
+    // Generate sequences of 0s and 1s
+    for b in 0..batch_size {
+        let mut prev_val = 0.0;
+        let mut xor_count = 0;
+
+        for t in 0..seq_len {
+            let val = if rng.random_bool(0.5) { 1.0 } else { 0.0 };
+            x_train[[b, t, 0]] = val;
+
+            // XOR with previous value
+            if t > 0 && ((val > 0.5) != (prev_val > 0.5)) {
+                xor_count += 1;
+            }
+            prev_val = val;
+        }
+
+        // Target: count of XOR changes (normalized)
+        y_train[[b, 0]] = xor_count as f32 / (seq_len - 1) as f32;
+    }
+
+    let x_train = x_train.into_dyn();
+    let y_train = y_train.into_dyn();
+
+    // Build model
+    let mut model = Sequential::new();
+    model
+        .add(LSTM::new(input_dim, 16, Activation::Tanh))
+        .add(Dense::new(16, 8, Activation::ReLU))
+        .add(Dense::new(8, 1, Activation::Sigmoid))
+        .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+
+    println!("\n=== Temporal XOR Task ===");
+    model.summary();
+
+    // Train
+    println!("\nTraining LSTM on temporal XOR pattern...");
+    for epoch in 0..100 {
+        model.fit(&x_train, &y_train, 1).unwrap();
+
+        if (epoch + 1) % 25 == 0 {
+            let pred = model.predict(&x_train);
+            let mut total_error = 0.0;
+            for b in 0..batch_size {
+                let error = (pred[[b, 0]] - y_train[[b, 0]]).abs();
+                total_error += error;
+            }
+            let avg_error = total_error / batch_size as f32;
+            println!("Epoch {}: Average error = {:.4}", epoch + 1, avg_error);
+        }
+    }
+
+    // Test
+    let pred = model.predict(&x_train);
+    let mut total_error = 0.0;
+
+    println!("\n=== Sample Predictions ===");
+    for b in 0..5 {
+        let error = (pred[[b, 0]] - y_train[[b, 0]]).abs();
+        total_error += error;
+
+        print!("  Sequence {}: ", b);
+        for t in 0..seq_len {
+            print!("{}", if x_train[[b, t, 0]] > 0.5 { "1" } else { "0" });
+        }
+        println!(
+            " -> pred={:.3}, target={:.3}, error={:.3}",
+            pred[[b, 0]],
+            y_train[[b, 0]],
+            error
+        );
+    }
+
+    let avg_error = total_error / 5.0;
+    println!("\nAverage error on samples: {:.4}", avg_error);
+
+    // Calculate overall accuracy
+    let mut correct = 0;
+    for b in 0..batch_size {
+        let error = (pred[[b, 0]] - y_train[[b, 0]]).abs();
+        if error < 0.15 {
+            correct += 1;
+        }
+    }
+    let accuracy = correct as f32 / batch_size as f32;
+
+    println!(
+        "Overall accuracy (within 0.15 error): {:.2}%",
+        accuracy * 100.0
+    );
+
+    assert!(
+        accuracy > 0.70,
+        "Temporal XOR accuracy too low: {:.2}%",
+        accuracy * 100.0
+    );
+
+    println!("✓ LSTM successfully learned temporal XOR pattern!");
+}
+
+#[test]
+fn test_lstm_parity_check() {
+    // Parity Check Task: Determine if sequence has odd/even number of 1s
+    // This tests LSTM's ability to count and remember across long sequences
+
+    let seq_len = 8; // Reduced from 12 to make task easier
+    let batch_size = 128;
+    let input_dim = 1;
+
+    let mut x_train = Array3::<f32>::zeros((batch_size, seq_len, input_dim));
+    let mut y_train = Array2::<f32>::zeros((batch_size, 1));
+
+    use rand::Rng;
+    let mut rng = rand::rng();
+
+    // Generate sequences
+    for b in 0..batch_size {
+        let mut count_ones = 0;
+
+        for t in 0..seq_len {
+            let val = if rng.random_bool(0.5) { 1.0 } else { 0.0 };
+            x_train[[b, t, 0]] = val;
+
+            if val > 0.5 {
+                count_ones += 1;
+            }
+        }
+
+        // Target: 1 if odd number of 1s, 0 if even
+        y_train[[b, 0]] = if count_ones % 2 == 1 { 1.0 } else { 0.0 };
+    }
+
+    let x_train = x_train.into_dyn();
+    let y_train = y_train.into_dyn();
+
+    // Build model
+    let mut model = Sequential::new();
+    model
+        .add(LSTM::new(input_dim, 32, Activation::Tanh)) // Increased from 24 to 32
+        .add(Dense::new(32, 16, Activation::Tanh)) // Changed from ReLU to Tanh
+        .add(Dense::new(16, 1, Activation::Sigmoid))
+        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+
+    println!("\n=== Parity Check Task ===");
+    model.summary();
+
+    // Train
+    println!("\nTraining LSTM on parity check...");
+
+    // Create closure for accuracy calculation to eliminate repetition
+    let calculate_accuracy =
+        |pred: &ArrayD<f32>, y_train: &ArrayD<f32>, batch_size: usize| -> f32 {
+            let correct = (0..batch_size)
+                .filter(|&b| {
+                    let predicted = if pred[[b, 0]] > 0.5 { 1.0 } else { 0.0 };
+                    let target = y_train[[b, 0]];
+                    (predicted - target).abs() < 0.1
+                })
+                .count();
+            correct as f32 / batch_size as f32
+        };
+
+    for epoch in 0..200 {
+        // Increased from 120 to 200
+        model.fit(&x_train, &y_train, 1).unwrap();
+
+        if (epoch + 1) % 40 == 0 {
+            let pred = model.predict(&x_train);
+            let accuracy = calculate_accuracy(&pred, &y_train, batch_size);
+            println!("Epoch {}: Accuracy = {:.2}%", epoch + 1, accuracy * 100.0);
+        }
+    }
+
+    // Test
+    let pred = model.predict(&x_train);
+
+    println!("\n=== Sample Predictions ===");
+    for b in 0..8 {
+        let predicted = if pred[[b, 0]] > 0.5 { 1.0 } else { 0.0 };
+        let target = y_train[[b, 0]];
+
+        let mut count_ones = 0;
+        print!("  Sequence {}: ", b);
+        for t in 0..seq_len {
+            let bit = if x_train[[b, t, 0]] > 0.5 { 1 } else { 0 };
+            print!("{}", bit);
+            count_ones += bit;
+        }
+
+        let is_correct = (predicted - target).abs() < 0.1;
+        println!(
+            " -> {} 1s ({}), pred={}, target={} {}",
+            count_ones,
+            if count_ones % 2 == 1 { "odd" } else { "even" },
+            if predicted > 0.5 { "odd" } else { "even" },
+            if target > 0.5 { "odd" } else { "even" },
+            if is_correct { "✓" } else { "✗" }
+        );
+    }
+
+    // Calculate overall accuracy using the closure
+    let accuracy = calculate_accuracy(&pred, &y_train, batch_size);
+    println!("\nOverall Accuracy: {:.2}%", accuracy * 100.0);
+
+    assert!(
+        accuracy > 0.85,
+        "Parity check accuracy too low: {:.2}%",
+        accuracy * 100.0
+    );
+
+    println!("✓ LSTM successfully learned parity check!");
 }

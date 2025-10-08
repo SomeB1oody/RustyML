@@ -1,8 +1,4 @@
-use crate::ModelError;
-use crate::neural_network::Tensor;
-use crate::neural_network::activation::Activation;
-use crate::neural_network::optimizer::*;
-use crate::neural_network::traits::Layer;
+use super::*;
 use helper_functions::*;
 use ndarray::prelude::*;
 use ndarray_rand::RandomExt;

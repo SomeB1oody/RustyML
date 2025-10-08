@@ -13,6 +13,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Encode labels as indices in `KNN` for efficient computation
 - Introduce parallelization thresholds across machine learning implementations
 - Refactor getter methods using macros for consistency and reduced duplication in utility modules
+- Refactor LSTM layer and tests
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
 ### Changed
