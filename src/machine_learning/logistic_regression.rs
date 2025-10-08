@@ -137,7 +137,7 @@ impl LogisticRegression {
         regularization_type,
         Option<RegularizationType>
     );
-    get_field_as_ref!(get_weights, weights, &Option<Array1<f64>>);
+    get_field_as_ref!(get_weights, weights, Option<&Array1<f64>>);
 
     /// Trains the logistic regression model
     ///

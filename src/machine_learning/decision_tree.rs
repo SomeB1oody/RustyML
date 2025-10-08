@@ -32,7 +32,7 @@ pub enum Algorithm {
 /// - `min_samples_leaf` - Minimum number of samples required to be at a leaf node. Splits that result in leaves with fewer samples are rejected.
 /// - `min_impurity_decrease` - Minimum impurity decrease required for a split. A node will be split if the decrease in impurity is greater than or equal to this value.
 /// - `random_state` - Seed for random number generation. Currently not used but reserved for future stochastic features.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct DecisionTreeParams {
     pub max_depth: Option<usize>,
     pub min_samples_split: usize,
@@ -276,8 +276,8 @@ impl DecisionTree {
     get_field!(get_algorithm, algorithm, Algorithm);
     get_field!(get_n_features, n_features, usize);
     get_field!(get_n_classes, n_classes, Option<usize>);
-    get_field_as_ref!(get_parameters, params, &DecisionTreeParams);
-    get_field_as_ref!(get_root, root, &Option<Box<Node>>);
+    get_field!(get_parameters, params, DecisionTreeParams);
+    get_field_as_ref!(get_root, root, Option<&Box<Node>>);
     get_field!(get_is_classifier, is_classifier, bool);
 
     /// Trains the decision tree on the provided training data.

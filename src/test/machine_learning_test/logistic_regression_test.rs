@@ -9,7 +9,7 @@ fn test_default_constructor() {
     assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_tolerance(), 1e-4);
     assert!(matches!(model.get_actual_iterations(), None));
-    assert!(matches!(model.get_weights(), &None));
+    assert!(matches!(model.get_weights(), None));
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_new_constructor() {
     assert_eq!(model.get_max_iterations(), 200);
     assert_eq!(model.get_tolerance(), 1e-5);
     assert!(matches!(model.get_actual_iterations(), None));
-    assert!(matches!(model.get_weights(), &None));
+    assert!(matches!(model.get_weights(), None));
 }
 
 #[test]

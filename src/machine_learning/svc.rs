@@ -114,18 +114,18 @@ impl SVC {
     }
 
     // Getters
-    get_field_as_ref!(get_kernel, kernel, &KernelType);
+    get_field!(get_kernel, kernel, KernelType);
     get_field!(get_regularization_parameter, regularization_param, f64);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_epsilon, eps, f64);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-    get_field_as_ref!(get_alphas, alphas, &Option<Array1<f64>>);
-    get_field_as_ref!(get_support_vectors, support_vectors, &Option<Array2<f64>>);
+    get_field_as_ref!(get_alphas, alphas, Option<&Array1<f64>>);
+    get_field_as_ref!(get_support_vectors, support_vectors, Option<&Array2<f64>>);
     get_field_as_ref!(
         get_support_vector_labels,
         support_vector_labels,
-        &Option<Array1<f64>>
+        Option<&Array1<f64>>
     );
     get_field!(get_bias, bias, Option<f64>);
 
@@ -661,7 +661,7 @@ impl SVC {
         let alphas = self.alphas.as_ref().unwrap();
 
         // Computation on each element of decision_values
-        let compute_fn = |(i, mut val): (usize, ArrayViewMut1<f64>)| {
+        let compute_fn = |(i, mut val): (usize, ArrayViewMut0<f64>)| {
             let decision_val = Self::compute_decision_value(
                 x.row(i),
                 support_vectors,
@@ -670,7 +670,7 @@ impl SVC {
                 bias,
                 |x1, x2| self.kernel_function(x1, x2),
             );
-            *val.first_mut().unwrap() = decision_val;
+            val.fill(decision_val);
         };
 
         if n_samples >= SVC_PARALLEL_THRESHOLD {

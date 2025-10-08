@@ -5,13 +5,14 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.8.0] - 2025-10-6 (UTC-7)
+## [v0.8.0] - 2025-10-7 (UTC-7)
 ### Changed
 - Refactor the implementation code of the `DecisionTree`
 - Improve module-level documentations
 - Reconstruct the implementation of `IsolationForest`
 - Encode labels as indices in `KNN` for efficient computation
 - Introduce parallelization thresholds across machine learning implementations
+- Refactor getter methods using macros for consistency and reduced duplication in utility modules
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
 ### Changed

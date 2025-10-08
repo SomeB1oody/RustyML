@@ -85,11 +85,11 @@ impl DBSCAN {
     get_field!(get_epsilon, eps, f64);
     get_field!(get_min_samples, min_samples, usize);
     get_field!(get_metric, metric, DistanceCalculationMetric);
-    get_field_as_ref!(get_labels, labels_, &Option<Array1<i32>>);
+    get_field_as_ref!(get_labels, labels_, Option<&Array1<i32>>);
     get_field_as_ref!(
         get_core_sample_indices,
         core_sample_indices,
-        &Option<Array1<usize>>
+        Option<&Array1<usize>>
     );
 
     /// Computes distance between two data points using the specified metric

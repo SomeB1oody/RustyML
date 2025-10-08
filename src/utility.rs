@@ -11,7 +11,7 @@ use rayon::prelude::*;
 /// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
 /// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
 /// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum KernelType {
     Linear,
     Poly { degree: u32, gamma: f64, coef0: f64 },
@@ -48,10 +48,10 @@ pub mod t_sne;
 /// categorical (one-hot encoded) formats, with optimized performance using AHashMap.
 pub mod label_encoding;
 
+/// This module provides a method to Normalize data along specified axis using the given norm order
+pub mod normalize;
 /// This module provides a method to standardizes data to have zero mean and unit variance
 pub mod standardize;
-
-pub mod normalize;
 
 pub use kernel_pca::*;
 pub use label_encoding::*;

@@ -173,17 +173,17 @@ fn test_different_kernels() {
             gamma,
             coef0,
         } => {
-            assert_eq!(*degree, 3);
-            assert!((*gamma - 0.1).abs() < 1e-10);
-            assert!((*coef0 - 0.0).abs() < 1e-10);
+            assert_eq!(degree, 3);
+            assert!((gamma - 0.1).abs() < 1e-10);
+            assert!((coef0 - 0.0).abs() < 1e-10);
         }
         _ => panic!("Expected polynomial kernel"),
     }
 
     match sigmoid_svc.get_kernel() {
         KernelType::Sigmoid { gamma, coef0 } => {
-            assert!((*gamma - 0.1).abs() < 1e-10);
-            assert!((*coef0 - 0.0).abs() < 1e-10);
+            assert!((gamma - 0.1).abs() < 1e-10);
+            assert!((coef0 - 0.0).abs() < 1e-10);
         }
         _ => panic!("Expected sigmoid kernel"),
     }

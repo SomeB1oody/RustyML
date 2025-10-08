@@ -65,11 +65,11 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// kmeans.fit(data.view()).unwrap();
 ///
 /// // Get cluster labels for all training samples
-/// let labels = kmeans.get_labels().as_ref().unwrap();
+/// let labels = kmeans.get_labels().unwrap();
 /// println!("Cluster labels: {:?}", labels);
 ///
 /// // Get the computed centroids
-/// let centroids = kmeans.get_centroids().as_ref().unwrap();
+/// let centroids = kmeans.get_centroids().unwrap();
 /// println!("Cluster centroids:\n{:?}", centroids);
 ///
 /// // Get the inertia (sum of squared distances to nearest centroid)
@@ -162,10 +162,10 @@ impl KMeans {
     get_field!(get_tolerance, tol, f64);
     get_field!(get_random_seed, random_seed, Option<u64>);
     get_field!(get_n_iter, n_iter, Option<usize>);
-    get_field_as_ref!(get_labels, labels, &Option<Array1<usize>>);
+    get_field_as_ref!(get_labels, labels, Option<&Array1<usize>>);
     get_field!(get_inertia, inertia, Option<f64>);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-    get_field_as_ref!(get_centroids, centroids, &Option<Array2<f64>>);
+    get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
     /// Finds the closest centroid to a given data point and returns its index and distance.
     ///

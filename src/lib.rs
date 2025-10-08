@@ -33,6 +33,61 @@ impl std::fmt::Display for ModelError {
 /// Implements the standard error trait for ModelError
 impl std::error::Error for ModelError {}
 
+/// A macro that generates a getter method for any field.
+///
+/// This macro creates a public getter method that returns the value or reference
+/// of the specified field. The generated method includes appropriate documentation
+/// describing the field being accessed.
+///
+/// # Parameters
+///
+/// - `$method_name` - The name of the getter method (e.g., get_fit_intercept)
+/// - `$field_name` - The name of the field to access (e.g., fit_intercept)
+/// - `$return_type` - The return type of the getter method
+///
+/// # Generated Method
+///
+/// The macro generates a method that returns the field value,
+/// with documentation that describes what field is being accessed.
+#[cfg(any(feature = "machine_learning"))]
+macro_rules! get_field {
+    ($method_name:ident, $field_name:ident, $return_type:ty) => {
+        #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
+        #[doc = "# Returns\n\n"]
+        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field")]
+        pub fn $method_name(&self) -> $return_type {
+            self.$field_name
+        }
+    };
+}
+
+/// A macro that generates a public getter method returning a reference to a field.
+///
+/// This macro creates a method that provides immutable reference access to a private field
+/// in a struct, following the Rust convention of getter methods.
+///
+/// # Parameters
+///
+/// - `$method_name` - The identifier for the generated getter method name
+/// - `$field_name` - The identifier of the struct field to access
+/// - `$return_type` - The type expression for the return value (typically a reference type like `&Type`)
+///
+/// # Generated Method
+///
+/// The macro generates a method that returns the field value as a reference,
+/// with documentation that describes what field is being accessed
+#[cfg(any(feature = "machine_learning", feature = "utility"))]
+macro_rules! get_field_as_ref {
+    ($method_name:ident, $field_name:ident, $return_type:ty) => {
+        #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
+        #[doc = "# Returns\n\n"]
+        #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field as a reference")]
+        pub fn $method_name(&self) -> $return_type {
+            self.$field_name.as_ref()
+        }
+    };
+}
+
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///
 /// This module provides comprehensive mathematical functions essential for machine learning algorithms,

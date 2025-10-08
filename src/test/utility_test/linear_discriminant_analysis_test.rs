@@ -3,31 +3,31 @@ use super::*;
 #[test]
 fn test_lda_new() {
     let lda = LDA::new();
-    assert!(lda.get_classes().is_err());
-    assert!(lda.get_priors().is_err());
-    assert!(lda.get_means().is_err());
-    assert!(lda.get_cov_inv().is_err());
-    assert!(lda.get_projection().is_err());
+    assert!(lda.get_classes().is_none());
+    assert!(lda.get_priors().is_none());
+    assert!(lda.get_means().is_none());
+    assert!(lda.get_cov_inv().is_none());
+    assert!(lda.get_projection().is_none());
 }
 
 #[test]
 fn test_lda_default() {
     let lda = LDA::default();
-    assert!(lda.get_classes().is_err());
-    assert!(lda.get_priors().is_err());
-    assert!(lda.get_means().is_err());
-    assert!(lda.get_cov_inv().is_err());
-    assert!(lda.get_projection().is_err());
+    assert!(lda.get_classes().is_none());
+    assert!(lda.get_priors().is_none());
+    assert!(lda.get_means().is_none());
+    assert!(lda.get_cov_inv().is_none());
+    assert!(lda.get_projection().is_none());
 }
 
 #[test]
 fn test_getters_on_unfitted_model() {
     let lda = LDA::new();
-    assert!(matches!(lda.get_classes(), Err(ModelError::NotFitted)));
-    assert!(matches!(lda.get_priors(), Err(ModelError::NotFitted)));
-    assert!(matches!(lda.get_means(), Err(ModelError::NotFitted)));
-    assert!(matches!(lda.get_cov_inv(), Err(ModelError::NotFitted)));
-    assert!(matches!(lda.get_projection(), Err(ModelError::NotFitted)));
+    assert!(matches!(lda.get_classes(), None));
+    assert!(matches!(lda.get_priors(), None));
+    assert!(matches!(lda.get_means(), None));
+    assert!(matches!(lda.get_cov_inv(), None));
+    assert!(matches!(lda.get_projection(), None));
 }
 
 #[test]
@@ -48,11 +48,11 @@ fn test_fit_basic() {
     assert!(result.is_ok());
 
     // Verify model properties after fitting
-    assert!(lda.get_classes().is_ok());
-    assert!(lda.get_priors().is_ok());
-    assert!(lda.get_means().is_ok());
-    assert!(lda.get_cov_inv().is_ok());
-    assert!(lda.get_projection().is_ok());
+    assert!(lda.get_classes().is_some());
+    assert!(lda.get_priors().is_some());
+    assert!(lda.get_means().is_some());
+    assert!(lda.get_cov_inv().is_some());
+    assert!(lda.get_projection().is_some());
 
     // Verify specific values
     let classes = lda.get_classes().unwrap();
@@ -209,11 +209,11 @@ fn test_fit_transform() {
     assert_eq!(transformed.shape(), &[6, 1]);
 
     // Verify the model has been fitted
-    assert!(lda.get_classes().is_ok());
-    assert!(lda.get_priors().is_ok());
-    assert!(lda.get_means().is_ok());
-    assert!(lda.get_cov_inv().is_ok());
-    assert!(lda.get_projection().is_ok());
+    assert!(lda.get_classes().is_some());
+    assert!(lda.get_priors().is_some());
+    assert!(lda.get_means().is_some());
+    assert!(lda.get_cov_inv().is_some());
+    assert!(lda.get_projection().is_some());
 
     // Transformed data should match separate transform call
     let transformed_separate = lda.transform(x.view(), 1).unwrap();

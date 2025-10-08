@@ -108,7 +108,7 @@ impl IsolationForest {
     get_field!(get_max_depth, max_depth, usize);
     get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_n_features, n_features, usize);
-    get_field_as_ref!(get_trees, trees, &Option<Vec<Box<Node>>>);
+    get_field_as_ref!(get_trees, trees, Option<&Vec<Box<Node>>>);
 
     /// Trains the Isolation Forest model on the provided dataset.
     ///

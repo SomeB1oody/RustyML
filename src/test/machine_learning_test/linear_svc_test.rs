@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_default() {
     let model = LinearSVC::default();
-    assert_eq!(model.get_weights(), &None);
+    assert_eq!(model.get_weights(), None);
     assert_eq!(model.get_bias(), None);
     assert_eq!(model.get_actual_iterations(), None);
 }

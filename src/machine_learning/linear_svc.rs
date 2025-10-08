@@ -236,7 +236,7 @@ impl LinearSVC {
     get_field!(get_tolerance, tol, f64);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-    get_field_as_ref!(get_weights, weights, &Option<Array1<f64>>);
+    get_field_as_ref!(get_weights, weights, Option<&Array1<f64>>);
     get_field!(get_bias, bias, Option<f64>);
     get_field!(get_regularization_parameter, regularization_param, f64);
     get_field!(get_penalty, penalty, RegularizationType);

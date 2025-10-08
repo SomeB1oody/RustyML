@@ -68,65 +68,11 @@ impl LDA {
         }
     }
 
-    /// Returns the unique class labels from the training data
-    ///
-    /// Returns an error if the model has not been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<i32>)` - Array of class labels
-    /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn get_classes(&self) -> Result<&Array1<i32>, ModelError> {
-        self.classes.as_ref().ok_or(ModelError::NotFitted)
-    }
-
-    /// Returns the prior probabilities for each class
-    ///
-    /// Returns an error if the model has not been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - Array of prior probabilities
-    /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn get_priors(&self) -> Result<&Array1<f64>, ModelError> {
-        self.priors.as_ref().ok_or(ModelError::NotFitted)
-    }
-
-    /// Returns the mean vectors for each class
-    ///
-    /// Returns an error if the model has not been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - Matrix of mean vectors
-    /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn get_means(&self) -> Result<&Array2<f64>, ModelError> {
-        self.means.as_ref().ok_or(ModelError::NotFitted)
-    }
-
-    /// Returns the inverse of the common covariance matrix
-    ///
-    /// Returns an error if the model has not been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - Inverse covariance matrix
-    /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn get_cov_inv(&self) -> Result<&Array2<f64>, ModelError> {
-        self.cov_inv.as_ref().ok_or(ModelError::NotFitted)
-    }
-
-    /// Returns the projection matrix for dimensionality reduction
-    ///
-    /// Returns an error if the model has not been fitted
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - Projection matrix
-    /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn get_projection(&self) -> Result<&Array2<f64>, ModelError> {
-        self.projection.as_ref().ok_or(ModelError::NotFitted)
-    }
+    get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
+    get_field_as_ref!(get_priors, priors, Option<&Array1<f64>>);
+    get_field_as_ref!(get_means, means, Option<&Array2<f64>>);
+    get_field_as_ref!(get_cov_inv, cov_inv, Option<&Array2<f64>>);
+    get_field_as_ref!(get_projection, projection, Option<&Array2<f64>>);
 
     /// Fits the LDA model using training data
     ///

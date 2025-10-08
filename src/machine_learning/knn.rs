@@ -128,7 +128,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         WeightingStrategy
     );
     get_field!(get_metric, metric, DistanceCalculationMetric);
-    get_field_as_ref!(get_x_train, x_train, &Option<Array2<f64>>);
+    get_field_as_ref!(get_x_train, x_train, Option<&Array2<f64>>);
 
     /// Returns the decoded training labels (original label values)
     ///

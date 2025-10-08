@@ -138,7 +138,7 @@ impl LinearRegression {
         regularization_type,
         Option<RegularizationType>
     );
-    get_field_as_ref!(get_coefficients, coefficients, &Option<Array1<f64>>);
+    get_field_as_ref!(get_coefficients, coefficients, Option<&Array1<f64>>);
     get_field!(get_intercept, intercept, Option<f64>);
 
     /// Fits the linear regression model using gradient descent

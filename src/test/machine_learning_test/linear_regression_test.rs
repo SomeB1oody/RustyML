@@ -4,7 +4,7 @@ use super::*;
 fn test_default_constructor() {
     let model = LinearRegression::default();
 
-    assert!(matches!(model.get_coefficients(), &None));
+    assert!(matches!(model.get_coefficients(), None));
     assert!(matches!(model.get_intercept(), None));
     assert!(matches!(model.get_actual_iterations(), None));
     // Check if default values meet expectations
