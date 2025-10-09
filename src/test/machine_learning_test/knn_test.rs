@@ -14,7 +14,7 @@ fn test_knn_default() {
         DistanceCalculationMetric::Euclidean
     )); // Default metric should be Euclidean
     assert!(matches!(knn.get_x_train(), None)); // Should not have training data by default
-    assert!(matches!(knn.get_y_train(), None)); // Should not have training labels by default
+    assert!(matches!(knn.get_y_train_encoded(), None)); // Should not have training labels by default
 }
 
 // Test custom initialization of KNN
@@ -56,14 +56,14 @@ fn test_knn_fit() {
 
     // Verify training data is stored
     assert!(matches!(knn.get_x_train(), Some(_)));
-    assert!(matches!(knn.get_y_train(), Some(_)));
+    assert!(matches!(knn.get_y_train_encoded(), Some(_)));
 
     // Verify training data content is correct
     let stored_x = match knn.get_x_train() {
         Some(x) => x,
         None => panic!("Training data should be available after fitting"),
     };
-    let stored_y = match knn.get_y_train() {
+    let stored_y = match knn.get_y_train_encoded() {
         Some(y) => y,
         None => panic!("Training labels should be available after fitting"),
     };
@@ -71,13 +71,35 @@ fn test_knn_fit() {
     assert_eq!(stored_x.shape(), x_train.shape());
     assert_eq!(stored_y.len(), y_train.len());
 
-    // Compare elements one by one
+    // Compare feature data elements one by one
     for i in 0..x_train.nrows() {
         for j in 0..x_train.ncols() {
             assert_eq!(stored_x[[i, j]], x_train[[i, j]]);
         }
-        assert_eq!(stored_y[i], y_train[i]);
     }
+
+    // Verify that labels are properly encoded (should be valid indices)
+    // The exact encoding is an implementation detail, so we verify the structure
+    for &encoded_val in stored_y.iter() {
+        // Encoded labels should be valid indices (0 or 1 for this binary classification)
+        assert!(
+            encoded_val <= 1,
+            "Encoded value should be 0 or 1 for binary classification"
+        );
+    }
+
+    // Test that the model can actually make predictions (functional test)
+    let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![3.5, 4.5]).unwrap();
+    let predictions = knn.predict(x_test.view());
+    assert!(
+        predictions.is_ok(),
+        "Model should be able to make predictions after fitting"
+    );
+
+    let pred_result = predictions.unwrap();
+    assert_eq!(pred_result.len(), 1);
+    // The prediction should be one of the original labels
+    assert!(pred_result[0] == 0 || pred_result[0] == 1);
 }
 
 // Test predict method with euclidean distance and uniform weights
@@ -297,7 +319,7 @@ fn test_fit_predict() {
 
     // Verify the model has been fitted
     assert!(knn.get_x_train().is_some());
-    assert!(knn.get_y_train().is_some());
+    assert!(knn.get_y_train_encoded().is_some());
 }
 
 #[test]

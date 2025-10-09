@@ -129,25 +129,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     );
     get_field!(get_metric, metric, DistanceCalculationMetric);
     get_field_as_ref!(get_x_train, x_train, Option<&Array2<f64>>);
-
-    /// Returns the decoded training labels (original label values)
-    ///
-    /// # Returns
-    ///
-    /// * `Option<Array1<T>>` - The original training labels if the model is fitted, None otherwise
-    pub fn get_y_train(&self) -> Option<Array1<T>> {
-        if let (Some(y_encoded), Some((_, idx_to_label))) = (&self.y_train_encoded, &self.label_map)
-        {
-            Some(Array1::from(
-                y_encoded
-                    .iter()
-                    .map(|&idx| idx_to_label[idx].clone())
-                    .collect::<Vec<_>>(),
-            ))
-        } else {
-            None
-        }
-    }
+    get_field_as_ref!(get_y_train_encoded, y_train_encoded, Option<&Array1<usize>>);
+    get_field_as_ref!(
+        get_label_map,
+        label_map,
+        Option<&(AHashMap<T, usize>, Vec<T>)>
+    );
 
     /// Fits the KNN classifier to the training data
     ///
@@ -331,7 +318,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
         encoded_results.map(|encoded_preds| {
             Array1::from(
                 encoded_preds
-                    .into_iter()
+                    .into_par_iter()
                     .map(|idx| idx_to_label[idx].clone())
                     .collect::<Vec<_>>(),
             )
