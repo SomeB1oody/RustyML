@@ -329,21 +329,61 @@ impl DecisionTree {
             self.n_classes = Some((*max_class as usize) + 1);
         }
 
+        // Estimate maximum possible nodes for progress bar
+        // For a balanced binary tree with depth d, max nodes = 2^(d+1) - 1
+        let estimated_max_depth = self.params.max_depth.unwrap_or(20).min(20);
+        let estimated_nodes = (1 << (estimated_max_depth + 1)) - 1;
+
+        // Create progress bar for tree building
+        let progress_bar = ProgressBar::new(estimated_nodes as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos} nodes | Depth: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("0");
+
         // Build the tree
         let indices: Vec<usize> = (0..x.nrows()).collect();
-        self.root = Some(Box::new(self.build_tree(x, y, &indices, 0)?));
+        self.root = Some(Box::new(self.build_tree_with_progress(
+            x,
+            y,
+            &indices,
+            0,
+            &progress_bar,
+        )?));
+
+        // Finish progress bar
+        progress_bar
+            .finish_with_message(format!("{}", self.count_nodes(self.root.as_ref().unwrap())));
+
+        let tree_depth = self.calculate_depth(self.root.as_ref().unwrap());
+        let total_nodes = self.count_nodes(self.root.as_ref().unwrap());
+
+        println!(
+            "\nDecision Tree training completed: {} samples, {} features, {} nodes, depth: {}",
+            x.nrows(),
+            self.n_features,
+            total_nodes,
+            tree_depth
+        );
 
         Ok(self)
     }
 
-    /// Recursively builds a decision tree node by finding optimal splits.
-    fn build_tree(
+    /// Recursively builds a decision tree node by finding optimal splits with progress tracking.
+    fn build_tree_with_progress(
         &self,
         x: ArrayView2<f64>,
         y: ArrayView1<f64>,
         indices: &[usize],
         depth: usize,
+        progress_bar: &ProgressBar,
     ) -> Result<Node, ModelError> {
+        progress_bar.inc(1);
+        progress_bar.set_message(format!("{}", depth));
+
         let n_samples = indices.len();
 
         // Check stopping criteria
@@ -374,12 +414,19 @@ impl DecisionTree {
 
             // Create internal node and recursively build children
             let mut node = Node::new_internal(feature_idx, threshold);
-            node.left = Some(Box::new(self.build_tree(x, y, &left_indices, depth + 1)?));
-            node.right = Some(Box::new(self.build_tree(
+            node.left = Some(Box::new(self.build_tree_with_progress(
+                x,
+                y,
+                &left_indices,
+                depth + 1,
+                progress_bar,
+            )?));
+            node.right = Some(Box::new(self.build_tree_with_progress(
                 x,
                 y,
                 &right_indices,
                 depth + 1,
+                progress_bar,
             )?));
 
             Ok(node)
@@ -838,6 +885,35 @@ impl DecisionTree {
         output.push_str("Decision Tree Structure:\n");
         self.print_node(self.root.as_ref().unwrap(), &mut output, "", true);
         Ok(output)
+    }
+
+    /// Calculates the depth (height) of the tree.
+    fn calculate_depth(&self, node: &Node) -> usize {
+        match &node.node_type {
+            NodeType::Leaf { .. } => 0,
+            NodeType::Internal { .. } => {
+                let left_depth = node.left.as_ref().map_or(0, |n| self.calculate_depth(n));
+                let right_depth = node.right.as_ref().map_or(0, |n| self.calculate_depth(n));
+                1 + left_depth.max(right_depth)
+            }
+        }
+    }
+
+    /// Counts the total number of nodes in the tree.
+    fn count_nodes(&self, node: &Node) -> usize {
+        let mut count = 1; // Count current node
+        match &node.node_type {
+            NodeType::Leaf { .. } => count,
+            NodeType::Internal { .. } => {
+                if let Some(ref left) = node.left {
+                    count += self.count_nodes(left);
+                }
+                if let Some(ref right) = node.right {
+                    count += self.count_nodes(right);
+                }
+                count
+            }
+        }
     }
 
     // Recursively print tree structure

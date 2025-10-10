@@ -199,8 +199,19 @@ impl DBSCAN {
         let mut core_samples = AHashSet::with_capacity(n_samples / 4); // Estimate 25% core samples
         let mut cluster_id = 0i32;
 
+        // Initialize progress bar for tracking clustering progress
+        let pb = ProgressBar::new(n_samples as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Clusters: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        pb.set_message("0 | Core points: 0");
+
         // Main loop processes each point sequentially, the algorithm as a whole remains sequential
         for p in 0..n_samples {
+            pb.inc(1);
             if labels[p] != -1 {
                 continue;
             }
@@ -248,13 +259,29 @@ impl DBSCAN {
 
             cluster_id += 1;
 
+            // Update progress bar message with current statistics
+            pb.set_message(format!(
+                "{} | Core points: {}",
+                cluster_id,
+                core_samples.len()
+            ));
+
             // Check for cluster_id overflow
             if cluster_id >= i32::MAX {
+                pb.finish_with_message("Error: cluster ID overflow");
                 return Err(ModelError::ProcessingError(
                     "Too many clusters: cluster ID overflow".to_string(),
                 ));
             }
         }
+
+        // Finish progress bar with final statistics
+        pb.finish_with_message(format!(
+            "{} | Core points: {} | Noise points: {}",
+            cluster_id,
+            core_samples.len(),
+            labels.iter().filter(|&&x| x == -1).count()
+        ));
 
         self.labels_ = Some(labels);
         // Convert HashSet to sorted Vec for consistent ordering

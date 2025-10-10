@@ -306,6 +306,16 @@ impl KMeans {
         let mut new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
         let mut counts = vec![0usize; self.n_clusters];
 
+        // Create progress bar for clustering iterations
+        let progress_bar = ProgressBar::new(self.max_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Inertia: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message(format!("{:.6}", f64::INFINITY));
+
         // Main iteration loop
         for i in 0..self.max_iter {
             // Reset for this iteration
@@ -357,6 +367,10 @@ impl KMeans {
                 new_centroids.row_mut(cluster_idx).add_assign(&sample);
                 counts[cluster_idx] += 1;
             }
+
+            // Update progress bar with current inertia
+            progress_bar.set_message(format!("{:.6}", inertia));
+            progress_bar.inc(1);
 
             // Check convergence condition
             if let Some(prev) = prev_inertia {
@@ -421,12 +435,29 @@ impl KMeans {
             new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
         }
 
+        // Finish progress bar with final statistics
+        let final_inertia = self.inertia.unwrap_or_else(|| prev_inertia.unwrap_or(0.0));
+        let convergence_status = if iter_count < self.max_iter {
+            "Converged"
+        } else {
+            "Max iterations"
+        };
+        progress_bar.finish_with_message(format!(
+            "{:.6} | {} | Iterations: {}",
+            final_inertia, convergence_status, iter_count
+        ));
+
         self.labels = Some(labels);
         // Set inertia if not already set (i.e., if max_iter was reached without convergence)
         if self.inertia.is_none() {
             self.inertia = prev_inertia;
         }
         self.n_iter = Some(iter_count);
+
+        println!(
+            "\nKMeans clustering completed: {} samples, {} clusters, {} iterations, final inertia: {:.6}",
+            n_samples, self.n_clusters, iter_count, final_inertia
+        );
 
         Ok(self)
     }

@@ -15,9 +15,9 @@ categories = ["mathematics", "science", "algorithms"]
 [features]
 default = []
 dataset = ["dep:ndarray"]
-machine_learning = ["math", "utility", "dep:ndarray", "dep:rayon", "dep:ahash"]
+machine_learning = ["math", "utility", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:indicatif"]
 neural_network = ["dep:ndarray", "dep:rayon", "dep:rand_distr", "dep:ndarray-rand", "dep:rand", "dep:statrs"]
-utility = ["math", "dep:ndarray", "dep:rand", "dep:nalgebra", "dep:rayon", "dep:rand_distr", "dep:ahash"]
+utility = ["math", "dep:ndarray", "dep:rand", "dep:nalgebra", "dep:rayon", "dep:rand_distr", "dep:ahash", "dep:indicatif"]
 math = ["dep:ndarray", "dep:ahash"]
 metric = ["dep:ndarray", "dep:ahash", "dep:statrs"]
 full = ["default", "dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
@@ -31,6 +31,7 @@ rand_distr = { version = "0.5.1", optional = true }
 rayon = { version = "1.11.0", optional = true }
 ndarray-rand = { version = "0.15.0", optional = true }
 ahash = { version = "0.8.12", optional = true }
+indicatif = { version = "0.18.0", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"

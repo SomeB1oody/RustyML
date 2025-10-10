@@ -202,6 +202,16 @@ impl LogisticRegression {
         let mut final_cost = prev_cost;
         let mut n_iter = 0;
 
+        // Create progress bar for training iterations
+        let progress_bar = ProgressBar::new(self.max_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Loss: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message(format!("{:.6}", f64::INFINITY));
+
         // Gradient descent iterations
         while n_iter < self.max_iter {
             n_iter += 1;
@@ -276,6 +286,10 @@ impl LogisticRegression {
 
             final_cost = cost;
 
+            // Update progress bar with current loss
+            progress_bar.set_message(format!("{:.6}", cost));
+            progress_bar.inc(1);
+
             // Check convergence condition
             if (prev_cost - cost).abs() < self.tol {
                 break;
@@ -283,12 +297,23 @@ impl LogisticRegression {
             prev_cost = cost;
         }
 
+        // Finish progress bar with final statistics
+        let convergence_status = if n_iter < self.max_iter {
+            "Converged"
+        } else {
+            "Max iterations"
+        };
+        progress_bar.finish_with_message(format!(
+            "{:.6} | {} | Iterations: {}",
+            final_cost, convergence_status, n_iter
+        ));
+
         self.weights = Some(weights);
         self.n_iter = Some(n_iter);
 
         println!(
-            "Logistic regression model computing finished at iteration {}, cost: {}",
-            n_iter, final_cost
+            "\nLogistic Regression training completed: {} samples, {} features, {} iterations, final loss: {:.6}",
+            n_samples, n_features, n_iter, final_cost
         );
 
         Ok(self)

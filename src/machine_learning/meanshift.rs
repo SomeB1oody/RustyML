@@ -274,20 +274,40 @@ impl MeanShift {
             Ok((center, completed_iterations))
         };
 
+        // Create progress bar for seed processing
+        let progress_bar = ProgressBar::new(seeds.len() as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} seeds | {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Processing seeds...");
+
         // Process mean shift for each seed point
         let results: Result<Vec<(Array1<f64>, usize)>, ModelError> = if use_parallel {
-            seeds
+            let results: Result<Vec<_>, _> = seeds
                 .par_iter()
-                .map(|&seed_idx| process_seed(seed_idx))
-                .collect()
+                .map(|&seed_idx| {
+                    let result = process_seed(seed_idx);
+                    progress_bar.inc(1);
+                    result
+                })
+                .collect();
+            results
         } else {
             seeds
                 .iter()
-                .map(|&seed_idx| process_seed(seed_idx))
+                .map(|&seed_idx| {
+                    let result = process_seed(seed_idx);
+                    progress_bar.inc(1);
+                    result
+                })
                 .collect()
         };
 
         let results = results?;
+        progress_bar.finish_with_message("All seeds processed");
 
         // Extract centers and calculate actual max iterations
         let centers: Vec<Array1<f64>> = results.iter().map(|(c, _)| c.clone()).collect();
@@ -421,8 +441,13 @@ impl MeanShift {
 
         // Print training info
         println!(
-            "Mean shift model training finished at iteration {}, number of clusters: {}, cost: {:.6}",
-            max_actual_iter, n_clusters, cost
+            "\nMean Shift training completed: {} samples, {} features, {} seeds processed, {} clusters found, max iterations: {}, cost: {:.6}",
+            n_samples,
+            n_features,
+            seeds.len(),
+            n_clusters,
+            max_actual_iter,
+            cost
         );
 
         Ok(self)

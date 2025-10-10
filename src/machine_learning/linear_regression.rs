@@ -173,6 +173,20 @@ impl LinearRegression {
         let mut predictions = Array1::<f64>::zeros(n_samples);
         let mut error_vec = Array1::<f64>::zeros(n_samples);
 
+        // Create progress bar for training iterations
+        let progress_bar = ProgressBar::new(self.max_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Cost: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message(format!(
+            "{:.6} | Convergence: 0/{}",
+            f64::INFINITY,
+            CONVERGENCE_THRESHOLD
+        ));
+
         // Gradient descent iterations
         while n_iter < self.max_iter {
             n_iter += 1;
@@ -204,8 +218,16 @@ impl LinearRegression {
 
             let cost = sse / (2.0 * n_samples as f64) + regularization_term;
 
+            // Update progress bar with current cost and convergence status
+            progress_bar.set_message(format!(
+                "{:.6} | Convergence: {}/{}",
+                cost, convergence_count, CONVERGENCE_THRESHOLD
+            ));
+            progress_bar.inc(1);
+
             // Check for numerical issues in cost
             if !cost.is_finite() {
+                progress_bar.finish_with_message("Error: NaN or infinite cost");
                 return Err(ModelError::ProcessingError(
                     "Cost calculation resulted in NaN or infinite value".to_string(),
                 ));
@@ -223,6 +245,7 @@ impl LinearRegression {
             if weight_gradients.iter().any(|&val| !val.is_finite())
                 || !intercept_gradient.is_finite()
             {
+                progress_bar.finish_with_message("Error: NaN or infinite gradients");
                 return Err(ModelError::ProcessingError(
                     "Gradient calculation resulted in NaN or infinite values".to_string(),
                 ));
@@ -266,6 +289,7 @@ impl LinearRegression {
 
             // Check for numerical issues in updated parameters
             if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
+                progress_bar.finish_with_message("Error: NaN or infinite parameters");
                 return Err(ModelError::ProcessingError(
                     "Parameter update resulted in NaN or infinite values".to_string(),
                 ));
@@ -285,14 +309,25 @@ impl LinearRegression {
             prev_cost = cost;
         }
 
+        // Finish progress bar with final statistics
+        let convergence_status = if n_iter < self.max_iter {
+            "Converged"
+        } else {
+            "Max iterations"
+        };
+        progress_bar.finish_with_message(format!(
+            "{:.6} | {} | Iterations: {}",
+            prev_cost, convergence_status, n_iter
+        ));
+
         // Save training results
         self.coefficients = Some(weights);
         self.intercept = Some(if self.fit_intercept { intercept } else { 0.0 });
         self.n_iter = Some(n_iter);
 
         println!(
-            "Linear regression computing finished at iteration {}, cost: {}",
-            n_iter, prev_cost
+            "\nLinear Regression training completed: {} samples, {} features, {} iterations, final cost: {:.6}",
+            n_samples, n_features, n_iter, prev_cost
         );
 
         Ok(self)

@@ -142,6 +142,16 @@ impl IsolationForest {
 
         self.n_features = x.ncols();
 
+        // Create progress bar for tree building
+        let progress_bar = ProgressBar::new(self.n_estimators as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Building isolation trees");
+
         // Build multiple isolation trees
         let build_tree = |i: usize| -> Result<Box<Node>, ModelError> {
             // Create an independent RNG for each tree to maintain reproducibility
@@ -156,8 +166,12 @@ impl IsolationForest {
             let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
 
             // Build isolation tree
-            self.build_isolation_tree(x, &sample_indices, 0, &mut rng)
-                .map(Box::new)
+            let result = self
+                .build_isolation_tree(x, &sample_indices, 0, &mut rng)
+                .map(Box::new);
+
+            progress_bar.inc(1);
+            result
         };
 
         let trees: Result<Vec<Box<Node>>, ModelError> =
@@ -172,7 +186,20 @@ impl IsolationForest {
                 (0..self.n_estimators).map(build_tree).collect()
             };
 
+        // Finish progress bar
+        progress_bar.finish_with_message("Trees built successfully");
+
         self.trees = Some(trees?);
+
+        println!(
+            "\nIsolation Forest training completed: {} samples, {} features, {} trees (max depth: {}, max samples per tree: {})",
+            x.nrows(),
+            x.ncols(),
+            self.n_estimators,
+            self.max_depth,
+            self.max_samples
+        );
+
         Ok(self)
     }
 

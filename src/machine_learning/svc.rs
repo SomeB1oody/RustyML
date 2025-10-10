@@ -397,8 +397,21 @@ impl SVC {
         let mut examine_all = true;
         let mut iteration_count = 0;
 
+        // Create progress bar for SMO iterations
+        let progress_bar = ProgressBar::new(self.max_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Alpha changes: 0 | Examine: All");
+
         loop {
             if iteration_count >= self.max_iter {
+                progress_bar.finish_with_message(
+                    "Warning: Max iterations reached without full convergence",
+                );
                 eprintln!(
                     "Warning: SVC reached maximum iterations ({}) without full convergence",
                     self.max_iter
@@ -408,6 +421,7 @@ impl SVC {
 
             num_changed_alphas = 0;
             iteration_count += 1;
+            progress_bar.inc(1);
 
             let sample_range: Vec<usize> = if examine_all {
                 (0..n_samples).collect()
@@ -428,6 +442,13 @@ impl SVC {
                 );
             }
 
+            // Update progress bar with current status
+            let examine_mode = if examine_all { "All" } else { "Non-bound" };
+            progress_bar.set_message(format!(
+                "Alpha changes: {} | Examine: {}",
+                num_changed_alphas, examine_mode
+            ));
+
             // Update examination strategy
             if examine_all {
                 examine_all = false;
@@ -440,6 +461,9 @@ impl SVC {
                 break;
             }
         }
+
+        // Finish progress bar with convergence status
+        progress_bar.finish_with_message(format!("Converged at iteration {}", iteration_count));
 
         // Extract support vectors
         let support_indices: Vec<usize> = if n_samples >= SVC_PARALLEL_THRESHOLD {
@@ -520,8 +544,8 @@ impl SVC {
         };
 
         println!(
-            "SVC model computing finished at iteration {}, support vectors: {}, cost: {}",
-            iteration_count, n_support_vectors, cost
+            "\nSVC training completed: {} samples, {} features, {} iterations, {} support vectors, final cost: {:.6}",
+            n_samples, n_features, iteration_count, n_support_vectors, cost
         );
 
         // Store results

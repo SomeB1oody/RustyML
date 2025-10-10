@@ -288,8 +288,53 @@ impl LinearSVC {
         // Calculate optimal batch size
         let batch_size = Self::calculate_batch_size(n_samples);
 
+        // Define cost calculation closure
+        let calculate_cost = |x: ArrayView2<f64>,
+                              y: &Array1<f64>,
+                              weights: &Array1<f64>,
+                              bias: f64,
+                              penalty: &RegularizationType|
+         -> f64 {
+            let n_samples = x.nrows() as f64;
+
+            // Calculate hinge loss
+            let hinge_loss: f64 = x
+                .outer_iter()
+                .zip(y.iter())
+                .map(|(xi, &yi)| {
+                    let margin = xi.dot(weights) + bias;
+                    (1.0 - yi * margin).max(0.0)
+                })
+                .sum::<f64>()
+                / n_samples;
+
+            // Calculate regularization term
+            let regularization_term = match penalty {
+                RegularizationType::L2(lambda) => {
+                    lambda * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
+                }
+                RegularizationType::L1(lambda) => {
+                    lambda * weights.iter().map(|&w| w.abs()).sum::<f64>()
+                }
+            };
+
+            hinge_loss + regularization_term
+        };
+
+        // Create progress bar for training iterations
+        let progress_bar = ProgressBar::new(self.max_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Cost: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Initializing...");
+
         while n_iter < self.max_iter {
             n_iter += 1;
+            progress_bar.inc(1);
+
             // Randomly shuffle indices
             indices.shuffle(&mut rng);
 
@@ -382,6 +427,12 @@ impl LinearSVC {
 
             let total_diff = (weight_diff + bias_diff).sqrt();
 
+            // Calculate and display current cost
+            if n_iter % 10 == 0 || total_diff < self.tol {
+                let current_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
+                progress_bar.set_message(format!("{:.6}", current_cost));
+            }
+
             if total_diff < self.tol {
                 break;
             }
@@ -390,44 +441,23 @@ impl LinearSVC {
             prev_bias = bias;
         }
 
-        // Calculate final cost for reporting using closure
-        let calculate_cost = |x: ArrayView2<f64>,
-                              y: &Array1<f64>,
-                              weights: &Array1<f64>,
-                              bias: f64,
-                              penalty: &RegularizationType|
-         -> f64 {
-            let n_samples = x.nrows() as f64;
-
-            // Calculate hinge loss
-            let hinge_loss: f64 = x
-                .outer_iter()
-                .zip(y.iter())
-                .map(|(xi, &yi)| {
-                    let margin = xi.dot(weights) + bias;
-                    (1.0 - yi * margin).max(0.0)
-                })
-                .sum::<f64>()
-                / n_samples;
-
-            // Calculate regularization term
-            let regularization_term = match penalty {
-                RegularizationType::L2(lambda) => {
-                    lambda * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
-                }
-                RegularizationType::L1(lambda) => {
-                    lambda * weights.iter().map(|&w| w.abs()).sum::<f64>()
-                }
-            };
-
-            hinge_loss + regularization_term
-        };
-
+        // Calculate final cost
         let final_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
 
+        // Finish progress bar with final statistics
+        let convergence_status = if n_iter < self.max_iter {
+            "Converged"
+        } else {
+            "Max iterations"
+        };
+        progress_bar.finish_with_message(format!(
+            "{:.6} | {} | Iterations: {}",
+            final_cost, convergence_status, n_iter
+        ));
+
         println!(
-            "Linear SVC model computing finished at iteration {}, cost: {}",
-            n_iter, final_cost
+            "\nLinear SVC training completed: {} samples, {} features, {} iterations, final cost: {:.6}",
+            n_samples, n_features, n_iter, final_cost
         );
 
         self.weights = Some(weights);
