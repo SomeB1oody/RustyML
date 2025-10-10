@@ -175,6 +175,18 @@ impl TSNE {
         let mut y = self.initialize_embedding(n_samples, self.random_state)?;
         let mut dy = Array2::<f64>::zeros((n_samples, self.dim));
 
+        // Create progress bar for optimization iterations
+        let progress_bar = ProgressBar::new(self.n_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | KL Divergence: {msg}",
+                )
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message(format!("{:.6}", 0.0));
+
         // 5. Optimized gradient descent loop
         for iter in 0..self.n_iter {
             // Compute Q matrix more efficiently
@@ -182,6 +194,13 @@ impl TSNE {
 
             // Compute gradient with improved numerical stability
             let grad = self.compute_gradient(&y, &p_exagg, &q, &num)?;
+
+            // Compute KL divergence for monitoring
+            let kl_divergence = self.compute_kl_divergence(&p_exagg, &q);
+
+            // Update progress bar with current KL divergence
+            progress_bar.set_message(format!("{:.6}", kl_divergence));
+            progress_bar.inc(1);
 
             // Update momentum and positions
             let momentum = if iter < self.momentum_switch_iter {
@@ -203,6 +222,20 @@ impl TSNE {
                 p_exagg = p_sym.clone();
             }
         }
+
+        // Finish progress bar with final KL divergence
+        let (final_q, _) = self.compute_q_matrix(&y)?;
+        let final_kl = self.compute_kl_divergence(&p_sym, &final_q);
+        progress_bar.finish_with_message(format!("{:.6} | Completed", final_kl));
+
+        println!(
+            "\nt-SNE dimensionality reduction completed: {} samples, {} -> {} dimensions, {} iterations, final KL divergence: {:.6}",
+            n_samples,
+            x.ncols(),
+            self.dim,
+            self.n_iter,
+            final_kl
+        );
 
         Ok(y)
     }
@@ -399,6 +432,21 @@ impl TSNE {
         };
 
         Ok((q, num))
+    }
+
+    // Compute KL divergence for monitoring optimization progress
+    fn compute_kl_divergence(&self, p: &Array2<f64>, q: &Array2<f64>) -> f64 {
+        let epsilon = 1e-12;
+        p.iter()
+            .zip(q.iter())
+            .map(|(&p_val, &q_val)| {
+                if p_val > epsilon {
+                    p_val * (p_val / q_val.max(epsilon)).ln()
+                } else {
+                    0.0
+                }
+            })
+            .sum()
     }
 
     // Optimized gradient computation

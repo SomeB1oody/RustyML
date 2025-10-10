@@ -7,11 +7,11 @@ fn test_kernel_pca_default() {
     let kpca = KernelPCA::default();
     assert!(matches!(kpca.get_kernel(), KernelType::Linear));
     assert_eq!(kpca.get_n_components(), 2);
-    assert!(kpca.get_eigenvalues().is_err());
-    assert!(kpca.get_eigenvectors().is_err());
-    assert!(kpca.get_x_fit().is_err());
-    assert!(kpca.get_row_means().is_err());
-    assert!(kpca.get_total_mean().is_err());
+    assert!(kpca.get_eigenvalues().is_none());
+    assert!(kpca.get_eigenvectors().is_none());
+    assert!(kpca.get_x_fit().is_none());
+    assert!(kpca.get_row_means().is_none());
+    assert!(kpca.get_total_mean().is_none());
 }
 
 #[test]
@@ -22,11 +22,11 @@ fn test_kernel_pca_new() {
 
     assert!(matches!(kpca.get_kernel(), KernelType::RBF { gamma: 0.1 }));
     assert_eq!(kpca.get_n_components(), 3);
-    assert!(kpca.get_eigenvalues().is_err());
-    assert!(kpca.get_eigenvectors().is_err());
-    assert!(kpca.get_x_fit().is_err());
-    assert!(kpca.get_row_means().is_err());
-    assert!(kpca.get_total_mean().is_err());
+    assert!(kpca.get_eigenvalues().is_none());
+    assert!(kpca.get_eigenvectors().is_none());
+    assert!(kpca.get_x_fit().is_none());
+    assert!(kpca.get_row_means().is_none());
+    assert!(kpca.get_total_mean().is_none());
 }
 
 #[test]
@@ -80,14 +80,11 @@ fn test_compute_kernel_sigmoid() {
 fn test_getters_not_fitted() {
     let kpca = KernelPCA::default();
 
-    assert!(matches!(kpca.get_eigenvalues(), Err(ModelError::NotFitted)));
-    assert!(matches!(
-        kpca.get_eigenvectors(),
-        Err(ModelError::NotFitted)
-    ));
-    assert!(matches!(kpca.get_x_fit(), Err(ModelError::NotFitted)));
-    assert!(matches!(kpca.get_row_means(), Err(ModelError::NotFitted)));
-    assert!(matches!(kpca.get_total_mean(), Err(ModelError::NotFitted)));
+    assert!(matches!(kpca.get_eigenvalues(), None));
+    assert!(matches!(kpca.get_eigenvectors(), None));
+    assert!(matches!(kpca.get_x_fit(), None));
+    assert!(matches!(kpca.get_row_means(), None));
+    assert!(matches!(kpca.get_total_mean(), None));
 }
 
 #[test]
@@ -96,7 +93,7 @@ fn test_getter_methods() {
     let n_components = 2;
     let kpca = KernelPCA::new(kernel.clone(), n_components);
 
-    assert!(matches!(*kpca.get_kernel(), KernelType::RBF { gamma: 0.1 }));
+    assert!(matches!(kpca.get_kernel(), KernelType::RBF { gamma: 0.1 }));
     assert_eq!(kpca.get_n_components(), 2);
 }
 
@@ -134,11 +131,11 @@ fn test_fit_simple_case() {
     assert!(result.is_ok());
 
     // Verify that the model is correctly fitted
-    assert!(kpca.get_eigenvalues().is_ok());
-    assert!(kpca.get_eigenvectors().is_ok());
-    assert!(kpca.get_x_fit().is_ok());
-    assert!(kpca.get_row_means().is_ok());
-    assert!(kpca.get_total_mean().is_ok());
+    assert!(kpca.get_eigenvalues().is_some());
+    assert!(kpca.get_eigenvectors().is_some());
+    assert!(kpca.get_x_fit().is_some());
+    assert!(kpca.get_row_means().is_some());
+    assert!(kpca.get_total_mean().is_some());
 
     // Verify the number of eigenvalues
     assert_eq!(kpca.get_eigenvalues().unwrap().len(), 2);

@@ -107,6 +107,16 @@ impl LDA {
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
+        // Create progress bar for training stages
+        let progress_bar = ProgressBar::new(5);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Stage: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Validating input and extracting classes");
+
         // Check minimum requirements for LDA
         if n_features == 0 {
             return Err(ModelError::InputValidationError(
@@ -139,6 +149,9 @@ impl LDA {
         self.classes = Some(classes_arr);
         let n_classes = self.classes.as_ref().unwrap().len();
         let classes = self.classes.as_ref().unwrap();
+
+        progress_bar.inc(1);
+        progress_bar.set_message("Computing class statistics and scatter matrices");
 
         // Pre-allocate class indices map for better performance
         let mut class_indices_map = std::collections::HashMap::new();
@@ -220,6 +233,9 @@ impl LDA {
         self.priors = Some(Array1::from_vec(priors_vec));
         self.means = Some(means_mat);
 
+        progress_bar.inc(1);
+        progress_bar.set_message("Inverting covariance matrix");
+
         // Estimate covariance matrix with better regularization strategy
         let cov = sw / ((n_samples - n_classes) as f64);
 
@@ -254,6 +270,9 @@ impl LDA {
                     ))
                 })?;
         self.cov_inv = Some(cov_inv_arr);
+
+        progress_bar.inc(1);
+        progress_bar.set_message("Computing projection matrix via eigendecomposition");
 
         // Solve generalized eigenvalue problem using more stable approach
         let cov_inv = self.cov_inv.as_ref().unwrap();
@@ -316,6 +335,14 @@ impl LDA {
         }
 
         self.projection = Some(w);
+
+        progress_bar.inc(1);
+        progress_bar.finish_with_message("Completed");
+
+        println!(
+            "\nLDA training completed: {} samples, {} features, {} classes, max components: {}",
+            n_samples, n_features, n_classes, component_idx
+        );
 
         Ok(self)
     }

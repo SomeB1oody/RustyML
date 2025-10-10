@@ -132,88 +132,14 @@ impl KernelPCA {
         }
     }
 
-    /// Gets the kernel type used by this KernelPCA instance.
-    ///
-    /// # Returns
-    ///
-    /// * `&KernelType` - A reference to the kernel type
-    pub fn get_kernel(&self) -> &KernelType {
-        &self.kernel
-    }
-
-    /// Gets the number of components this KernelPCA instance extracts.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of components
-    pub fn get_n_components(&self) -> usize {
-        self.n_components
-    }
-
-    /// Gets the eigenvalues computed during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - containing a reference to the eigenvalues if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - if the model hasn't been fitted
-    pub fn get_eigenvalues(&self) -> Result<&Array1<f64>, ModelError> {
-        match self.eigenvalues.as_ref() {
-            Some(eigenvalues) => Ok(eigenvalues),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Gets the eigenvectors computed during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - containing a reference to the eigenvectors if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - if the model hasn't been fitted
-    pub fn get_eigenvectors(&self) -> Result<&Array2<f64>, ModelError> {
-        match self.eigenvectors.as_ref() {
-            Some(eigenvectors) => Ok(eigenvectors),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Gets the training data saved during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - containing a reference to the training data if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - if the model hasn't been fitted
-    pub fn get_x_fit(&self) -> Result<&Array2<f64>, ModelError> {
-        match self.x_fit.as_ref() {
-            Some(x_fit) => Ok(x_fit),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Gets the row means computed during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - containing a reference to the row means if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - if the model hasn't been fitted
-    pub fn get_row_means(&self) -> Result<&Array1<f64>, ModelError> {
-        match self.row_means.as_ref() {
-            Some(row_means) => Ok(row_means),
-            None => Err(ModelError::NotFitted),
-        }
-    }
-
-    /// Gets the total mean computed during fitting.
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(f64)` - containing the total mean if the model has been fitted
-    /// - `Err(ModelError::NotFitted)` - if the model hasn't been fitted
-    pub fn get_total_mean(&self) -> Result<f64, ModelError> {
-        match self.total_mean {
-            Some(total_mean) => Ok(total_mean),
-            None => Err(ModelError::NotFitted),
-        }
-    }
+    // Getters
+    get_field!(get_kernel, kernel, KernelType);
+    get_field!(get_n_components, n_components, usize);
+    get_field_as_ref!(get_eigenvalues, eigenvalues, Option<&Array1<f64>>);
+    get_field_as_ref!(get_eigenvectors, eigenvectors, Option<&Array2<f64>>);
+    get_field_as_ref!(get_x_fit, x_fit, Option<&Array2<f64>>);
+    get_field_as_ref!(get_row_means, row_means, Option<&Array1<f64>>);
+    get_field!(get_total_mean, total_mean, Option<f64>);
 
     /// Fits the KernelPCA model to the input data.
     ///
@@ -255,6 +181,18 @@ impl KernelPCA {
 
         // Calculate kernel matrix: k_matrix[i, j] = kernel(x[i], x[j])
         let mut k_matrix = Array2::<f64>::zeros((n_samples, n_samples));
+
+        // Create progress bar for kernel matrix computation
+        let total_computations = (n_samples * (n_samples + 1)) / 2;
+        let progress_bar = ProgressBar::new(total_computations as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message("Computing kernel matrix");
+
         let kernel_vals: Vec<((usize, usize), f64)> = (0..n_samples)
             .into_par_iter()
             .flat_map(|i| {
@@ -270,7 +208,10 @@ impl KernelPCA {
         for ((i, j), k_val) in kernel_vals {
             k_matrix[[i, j]] = k_val;
             k_matrix[[j, i]] = k_val;
+            progress_bar.inc(1);
         }
+
+        progress_bar.finish_with_message("Kernel matrix computed");
 
         // Calculate mean for each row and the overall mean
         let row_means = k_matrix.mean_axis(Axis(1)).unwrap();
@@ -324,6 +265,13 @@ impl KernelPCA {
 
         self.eigenvalues = Some(selected_eigenvalues);
         self.eigenvectors = Some(selected_eigenvectors);
+
+        println!(
+            "\nKernel PCA fitting completed: {} samples, {} features, {} components extracted",
+            n_samples,
+            x.ncols(),
+            self.n_components
+        );
 
         Ok(self)
     }

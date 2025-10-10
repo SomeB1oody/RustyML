@@ -12,10 +12,10 @@ fn test_pca_new() {
     let pca = PCA::new(2);
 
     // All getters should return errors when PCA is not fitted
-    assert!(pca.get_components().is_err());
-    assert!(pca.get_explained_variance().is_err());
-    assert!(pca.get_explained_variance_ratio().is_err());
-    assert!(pca.get_singular_values().is_err());
+    assert!(pca.get_components().is_none());
+    assert!(pca.get_explained_variance().is_none());
+    assert!(pca.get_explained_variance_ratio().is_none());
+    assert!(pca.get_singular_values().is_none());
 }
 
 #[test]
@@ -23,10 +23,10 @@ fn test_pca_default() {
     let pca = PCA::default();
 
     // All getters should return errors when PCA is not fitted
-    assert!(pca.get_components().is_err());
-    assert!(pca.get_explained_variance().is_err());
-    assert!(pca.get_explained_variance_ratio().is_err());
-    assert!(pca.get_singular_values().is_err());
+    assert!(pca.get_components().is_none());
+    assert!(pca.get_explained_variance().is_none());
+    assert!(pca.get_explained_variance_ratio().is_none());
+    assert!(pca.get_singular_values().is_none());
 }
 
 #[test]
@@ -42,17 +42,17 @@ fn test_fit_and_transform() -> Result<(), Box<dyn Error>> {
     pca.fit(data.view())?;
 
     // After fitting, getters should return valid components
-    let components = pca.get_components()?;
+    let components = pca.get_components().unwrap();
     assert_eq!(components.shape(), &[2, 3]);
 
-    let explained_variance = pca.get_explained_variance()?;
+    let explained_variance = pca.get_explained_variance().unwrap();
     assert_eq!(explained_variance.len(), 2);
 
-    let variance_ratio = pca.get_explained_variance_ratio()?;
+    let variance_ratio = pca.get_explained_variance_ratio().unwrap();
     assert_eq!(variance_ratio.len(), 2);
     assert!(approx_eq(variance_ratio.sum(), 1.0, 1e-10));
 
-    let singular_values = pca.get_singular_values()?;
+    let singular_values = pca.get_singular_values().unwrap();
     assert_eq!(singular_values.len(), 2);
 
     // Test transform functionality
@@ -75,7 +75,7 @@ fn test_fit_transform() -> Result<(), Box<dyn Error>> {
     let transformed = pca.fit_transform(data.view())?;
 
     // After fit_transform, getters should return valid components
-    assert!(pca.get_components().is_ok());
+    assert!(pca.get_components().is_some());
     assert_eq!(transformed.shape(), &[4, 2]);
 
     Ok(())
@@ -113,10 +113,10 @@ fn test_errors_when_not_fitted() {
     let pca = PCA::new(2);
 
     // Attempting to get components before fitting should return an error
-    assert!(pca.get_components().is_err());
-    assert!(pca.get_explained_variance().is_err());
-    assert!(pca.get_explained_variance_ratio().is_err());
-    assert!(pca.get_singular_values().is_err());
+    assert!(pca.get_components().is_none());
+    assert!(pca.get_explained_variance().is_none());
+    assert!(pca.get_explained_variance_ratio().is_none());
+    assert!(pca.get_singular_values().is_none());
 
     // Attempting to transform data before fitting should return an error
     let data = arr2(&[[1.0, 2.0, 3.0]]);
@@ -139,7 +139,7 @@ fn test_with_different_n_components() -> Result<(), Box<dyn Error>> {
         pca.fit(data.view())?;
 
         // Verify component dimensions
-        let components = pca.get_components()?;
+        let components = pca.get_components().unwrap();
         assert_eq!(components.shape(), &[n_components, 4]);
 
         // Verify dimensions of transformed data
@@ -163,13 +163,13 @@ fn test_variance_explained_properties() -> Result<(), Box<dyn Error>> {
     pca.fit(data.view())?;
 
     // Check that variance explained is non-negative
-    let explained_variance = pca.get_explained_variance()?;
+    let explained_variance = pca.get_explained_variance().unwrap();
     for &variance in explained_variance.iter() {
         assert!(variance >= 0.0);
     }
 
     // Check that variance ratio sums to approximately 1
-    let variance_ratio = pca.get_explained_variance_ratio()?;
+    let variance_ratio = pca.get_explained_variance_ratio().unwrap();
     assert!(approx_eq(variance_ratio.sum(), 1.0, 1e-10));
 
     // Check that variance ratios are sorted in descending order
@@ -205,7 +205,7 @@ fn test_pca_with_random_data() -> Result<(), Box<dyn Error>> {
         pca.fit(data.view())?;
 
         // Check dimensions
-        assert_eq!(pca.get_components()?.shape(), &[n_components, 10]);
+        assert_eq!(pca.get_components().unwrap().shape(), &[n_components, 10]);
 
         // Transform and reconstruct
         let transformed = pca.transform(data.view())?;

@@ -111,49 +111,20 @@ impl PCA {
         }
     }
 
-    /// Gets the components matrix
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array2<f64>)` - The components matrix if fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_components(&self) -> Result<&Array2<f64>, ModelError> {
-        self.components.as_ref().ok_or(ModelError::NotFitted)
-    }
-
-    /// Gets the explained variance
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - The explained variance array if fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_explained_variance(&self) -> Result<&Array1<f64>, ModelError> {
-        self.explained_variance
-            .as_ref()
-            .ok_or(ModelError::NotFitted)
-    }
-
-    /// Gets the explained variance ratio
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - The explained variance ratio array if fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_explained_variance_ratio(&self) -> Result<&Array1<f64>, ModelError> {
-        self.explained_variance_ratio
-            .as_ref()
-            .ok_or(ModelError::NotFitted)
-    }
-
-    /// Gets the singular values
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(&Array1<f64>)` - The singular values array if fitted
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    pub fn get_singular_values(&self) -> Result<&Array1<f64>, ModelError> {
-        self.singular_values.as_ref().ok_or(ModelError::NotFitted)
-    }
+    get_field_as_ref!(get_components, components, Option<&Array2<f64>>);
+    get_field_as_ref!(get_mean, mean, Option<&Array1<f64>>);
+    get_field_as_ref!(
+        get_explained_variance,
+        explained_variance,
+        Option<&Array1<f64>>
+    );
+    get_field_as_ref!(
+        get_explained_variance_ratio,
+        explained_variance_ratio,
+        Option<&Array1<f64>>
+    );
+    get_field_as_ref!(get_singular_values, singular_values, Option<&Array1<f64>>);
+    get_field!(get_n_components, n_components, usize);
 
     /// Validates input data for NaN and infinite values
     fn validate_input_data(&self, x: ArrayView2<f64>) -> Result<(), ModelError> {
