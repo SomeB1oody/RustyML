@@ -235,8 +235,9 @@ impl LDA {
         let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
 
         // Use SVD for more stable inversion
-        let svd = nalgebra::linalg::SVD::new(cov_mat, true, true);
-        let tolerance = 1e-12 * n_features as f64; // More conservative tolerance
+        let svd = nalgebra::linalg::SVD::new(cov_mat.clone(), true, true);
+        let max_singular_value = svd.singular_values.max();
+        let tolerance = 1e-12 * max_singular_value; // Scale tolerance by largest singular value
 
         let cov_inv_mat = svd.pseudo_inverse(tolerance).or_else(|_| {
             Err(ModelError::ProcessingError(
@@ -300,21 +301,22 @@ impl LDA {
         // LDA's maximum dimensionality is min(n_classes - 1, n_features)
         let max_components = (n_classes - 1).min(n_features);
         let mut w = Array2::<f64>::zeros((n_features, max_components));
-        for (j, &(i, eigenval)) in eig_pairs.iter().take(max_components).enumerate() {
+        let mut component_idx = 0;
+        for &(i, eigenval) in eig_pairs.iter().take(max_components) {
             // Filter out very small eigenvalues for numerical stability
             if eigenval.abs() > 1e-10 {
-                let vec = eigenvectors.slice(s![.., i]).to_owned();
+                let vec = eigenvectors.slice(s![.., i]);
                 // Normalize eigenvector for better numerical properties
                 let norm = vec.dot(&vec).sqrt();
                 if norm > 1e-12 {
-                    w.column_mut(j).assign(&(&vec / norm));
+                    w.column_mut(component_idx).assign(&(&vec / norm));
+                    component_idx += 1;
                 }
             }
         }
 
         self.projection = Some(w);
 
-        println!("LDA model training finished");
         Ok(self)
     }
 
@@ -350,12 +352,15 @@ impl LDA {
             let mut best_score = f64::NEG_INFINITY;
             let mut best_class = classes[0];
             for j in 0..n_classes {
-                let score = self.discriminant_score(
-                    &row.to_owned(),
-                    &means.row(j).to_owned(),
-                    priors[j],
-                    cov_inv,
-                );
+                let diff = &row - &means.row(j);
+                let mahalanobis_term = diff.dot(&cov_inv.dot(&diff));
+                let prior_term = if priors[j] > 0.0 {
+                    priors[j].ln()
+                } else {
+                    f64::NEG_INFINITY
+                };
+                let score = -0.5 * mahalanobis_term + prior_term;
+
                 if score > best_score {
                     best_score = score;
                     best_class = classes[j];
@@ -426,36 +431,5 @@ impl LDA {
     ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         self.fit(x, y)?;
         Ok(self.transform(x, n_components)?)
-    }
-
-    /// Calculates the discriminant score for classification with numerical stability improvements
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature vector of a sample, shape: (n_features,)
-    /// - `mean` - Mean vector of a class, shape: (n_features,)
-    /// - `prior` - Prior probability of a class
-    /// - `cov_inv` - Inverse of the common covariance matrix
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - Discriminant score
-    fn discriminant_score(
-        &self,
-        x: &Array1<f64>,
-        mean: &Array1<f64>,
-        prior: f64,
-        cov_inv: &Array2<f64>,
-    ) -> f64 {
-        // More numerically stable computation
-        let diff = x - mean;
-        let mahalanobis_term = diff.dot(&cov_inv.dot(&diff));
-        let prior_term = if prior > 0.0 {
-            prior.ln()
-        } else {
-            f64::NEG_INFINITY
-        };
-
-        -0.5 * mahalanobis_term + prior_term
     }
 }

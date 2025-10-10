@@ -125,7 +125,7 @@ fn test_normalize_max() {
         let norm: f64 = row
             .iter()
             .map(|&x| x.abs())
-            .fold(0.0, |max, x| if x > max { x } else { max });
+            .fold(f64::NEG_INFINITY, f64::max);
         assert!(approx_eq(norm, 1.0, 1e-10));
     }
 }
@@ -371,4 +371,45 @@ fn test_normalize_axis_consistency() {
     assert_eq!(row_result.shape(), data.shape());
     assert_eq!(col_result.shape(), data.shape());
     assert_eq!(global_result.shape(), data.shape());
+}
+
+/// Test Max norm with all negative values
+#[test]
+fn test_normalize_max_all_negative() {
+    let data = array![[-3.0, -8.0, -2.0], [-6.0, -4.0, -1.0]];
+    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::Max).unwrap();
+
+    // First row: Max norm = max(|-3|, |-8|, |-2|) = 8
+    // Second row: Max norm = max(|-6|, |-4|, |-1|) = 6
+    let expected = array![
+        [-3.0 / 8.0, -8.0 / 8.0, -2.0 / 8.0],
+        [-6.0 / 6.0, -4.0 / 6.0, -1.0 / 6.0]
+    ];
+
+    assert_arrays_approx_equal(&result, &expected, 1e-10);
+
+    // Verify each row has Max norm of 1
+    for row in result.rows() {
+        let norm: f64 = row
+            .iter()
+            .map(|&x| x.abs())
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(approx_eq(norm, 1.0, 1e-10));
+    }
+}
+
+/// Test Max norm with mixed positive and negative values
+#[test]
+fn test_normalize_max_mixed_signs() {
+    let data = array![[-5.0, 3.0, -2.0], [4.0, -7.0, 1.0]];
+    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::Max).unwrap();
+
+    // First row: Max norm = max(|-5|, |3|, |-2|) = 5
+    // Second row: Max norm = max(|4|, |-7|, |1|) = 7
+    let expected = array![
+        [-5.0 / 5.0, 3.0 / 5.0, -2.0 / 5.0],
+        [4.0 / 7.0, -7.0 / 7.0, 1.0 / 7.0]
+    ];
+
+    assert_arrays_approx_equal(&result, &expected, 1e-10);
 }

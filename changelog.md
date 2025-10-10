@@ -5,6 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.8.0] - 2025-10-9 (UTC-7)
+### Changed
+- Refactor ML models
+- Refactor utilities
+
 ## [v0.8.0] - 2025-10-8 (UTC-7)
 ### Changed
 - Refactor convolutional and pooling layers

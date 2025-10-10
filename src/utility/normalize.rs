@@ -1,12 +1,32 @@
 use super::*;
 
+/// Tolerance for considering a norm as effectively zero
+const NORM_ZERO_THRESHOLD: f64 = 1e-15;
+
+/// Threshold for determining whether to use parallel processing
+/// Parallel processing is only used when the number of elements exceeds this threshold
+const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
+
 /// Defines the axis along which the normalization is applied
 ///
 /// # Variants
 ///
 /// - `Row` - Normalize across rows (each row is normalized independently)
+///   - For 2D arrays: normalizes each row (samples) independently
+///   - For N-D arrays (N>2): normalizes along the last axis (features dimension)
+///   - Example: For shape (batch, height, width), normalizes along width axis
 /// - `Column` - Normalize across columns (each column is normalized independently)
-/// - `Global` - Normalize the entire array globally
+///   - For 2D arrays: normalizes each column (features) independently
+///   - For N-D arrays (N>2): normalizes along the second-to-last axis
+///   - Example: For shape (batch, height, width), normalizes along height axis
+/// - `Global` - Normalize the entire array globally (treats all elements as a single vector)
+///
+/// # Note on High-Dimensional Arrays
+///
+/// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two axes:
+/// - `Row`: normalizes along axis N-1 (last axis)
+/// - `Column`: normalizes along axis N-2 (second-to-last axis)
+/// This convention follows common machine learning practices where the last axis represents features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationAxis {
     Row,
@@ -115,6 +135,20 @@ where
     Ok(result)
 }
 
+/// Helper function to apply normalization to a 1D array view with adaptive parallelization
+fn normalize_array_view(mut array: ArrayViewMut1<f64>, norm: f64) {
+    if norm > NORM_ZERO_THRESHOLD {
+        if array.len() >= NORMALIZE_PARALLEL_THRESHOLD {
+            array.par_mapv_inplace(|x| x / norm);
+        } else {
+            array.mapv_inplace(|x| x / norm);
+        }
+    } else {
+        // If norm is effectively zero, set all elements to zero
+        array.fill(0.0);
+    }
+}
+
 /// Helper function to normalize the entire array globally
 fn normalize_global<D>(
     data: &mut Array<f64, D>,
@@ -125,11 +159,12 @@ where
 {
     let norm = compute_norm(data.view().into_iter().copied(), order)?;
 
-    if norm > 1e-15 {
-        data.mapv_inplace(|x| x / norm);
-    } else {
-        // If norm is effectively zero, set all elements to zero
-        data.fill(0.0);
+    if norm > NORM_ZERO_THRESHOLD {
+        if data.len() >= NORMALIZE_PARALLEL_THRESHOLD {
+            data.par_mapv_inplace(|x| x / norm);
+        } else {
+            data.mapv_inplace(|x| x / norm);
+        }
     }
 
     Ok(())
@@ -154,15 +189,9 @@ where
     let last_axis = Axis(ndim - 1);
 
     // Process each lane along the last axis
-    for mut row in data.lanes_mut(last_axis) {
+    for row in data.lanes_mut(last_axis) {
         let norm = compute_norm(row.iter().copied(), order)?;
-
-        if norm > 1e-15 {
-            row.mapv_inplace(|x| x / norm);
-        } else {
-            // If norm is effectively zero, set all elements in row to zero
-            row.fill(0.0);
-        }
+        normalize_array_view(row, norm);
     }
 
     Ok(())
@@ -187,15 +216,9 @@ where
     let axis = Axis(ndim - 2);
 
     // Process each lane along the specified axis
-    for mut col in data.lanes_mut(axis) {
+    for col in data.lanes_mut(axis) {
         let norm = compute_norm(col.iter().copied(), order)?;
-
-        if norm > 1e-15 {
-            col.mapv_inplace(|x| x / norm);
-        } else {
-            // If norm is effectively zero, set all elements in column to zero
-            col.fill(0.0);
-        }
+        normalize_array_view(col, norm);
     }
 
     Ok(())
@@ -228,11 +251,13 @@ where
             }
         }
         NormalizationOrder::Max => {
-            let norm = values
-                .map(|x| x.abs())
-                .fold(0.0, |max, x| if x > max { x } else { max });
-            if norm.is_finite() {
+            let norm = values.map(|x| x.abs()).fold(f64::NEG_INFINITY, f64::max);
+            // Handle the case where the iterator was empty or all values were zero
+            if norm.is_finite() && norm >= 0.0 {
                 Ok(norm)
+            } else if norm == f64::NEG_INFINITY {
+                // Empty iterator case
+                Ok(0.0)
             } else {
                 Err(ModelError::ProcessingError(
                     "Max norm computation resulted in non-finite value".to_string(),

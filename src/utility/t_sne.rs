@@ -1,6 +1,11 @@
 use super::*;
 use rand_distr::StandardNormal;
 
+/// Threshold for determining whether to use parallel computation in t-SNE.
+/// Parallel processing is only beneficial when the number of samples exceeds this threshold,
+/// as the overhead of thread creation and management can outweigh benefits for smaller datasets.
+const TSNE_PARALLEL_THRESHOLD: usize = 1000;
+
 /// A t-Distributed Stochastic Neighbor Embedding (t-SNE) implementation for dimensionality reduction.
 ///
 /// t-SNE is a technique for visualizing high-dimensional data by giving each datapoint
@@ -37,32 +42,32 @@ use rand_distr::StandardNormal;
 /// ```
 #[derive(Debug)]
 pub struct TSNE {
-    perplexity: Option<f64>,
-    learning_rate: Option<f64>,
-    n_iter: Option<usize>,
+    perplexity: f64,
+    learning_rate: f64,
+    n_iter: usize,
     dim: usize,
-    random_state: Option<u64>,
-    early_exaggeration: Option<f64>,
-    exaggeration_iter: Option<usize>,
-    initial_momentum: Option<f64>,
-    final_momentum: Option<f64>,
-    momentum_switch_iter: Option<usize>,
+    random_state: u64,
+    early_exaggeration: f64,
+    exaggeration_iter: usize,
+    initial_momentum: f64,
+    final_momentum: f64,
+    momentum_switch_iter: usize,
 }
 
 impl Default for TSNE {
     fn default() -> Self {
         let default_max_iter = 1000;
         TSNE {
-            perplexity: Some(30.0),
-            learning_rate: Some(200.0),
-            n_iter: Some(default_max_iter),
+            perplexity: 30.0,
+            learning_rate: 200.0,
+            n_iter: default_max_iter,
             dim: 2,
-            random_state: Some(42),
-            early_exaggeration: Some(12.0),
-            exaggeration_iter: Some(default_max_iter / 12),
-            initial_momentum: Some(0.5),
-            final_momentum: Some(0.8),
-            momentum_switch_iter: Some(default_max_iter / 3),
+            random_state: 42,
+            early_exaggeration: 12.0,
+            exaggeration_iter: default_max_iter / 12,
+            initial_momentum: 0.5,
+            final_momentum: 0.8,
+            momentum_switch_iter: default_max_iter / 3,
         }
     }
 }
@@ -72,16 +77,16 @@ impl TSNE {
     ///
     /// # Parameters
     ///
-    /// - `perplexity` - Controls the effective number of neighbors. Higher means more neighbors.
-    /// - `learning_rate` - Step size for gradient descent updates.
-    /// - `n_iter` - Maximum number of optimization iterations.
+    /// - `perplexity` - Controls the effective number of neighbors. Higher means more neighbors. Default is 30.0.
+    /// - `learning_rate` - Step size for gradient descent updates. Default is 200.0.
+    /// - `n_iter` - Maximum number of optimization iterations. Default is 1000.
     /// - `dim` - Dimensionality of the embedding space.
-    /// - `random_state` - Seed for random number generation.
-    /// - `early_exaggeration` - Factor to multiply probabilities in early iterations.
-    /// - `exaggeration_iter` - Number of iterations to apply early exaggeration.
-    /// - `initial_momentum` - Initial momentum coefficient.
-    /// - `final_momentum` - Final momentum coefficient.
-    /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final.
+    /// - `random_state` - Seed for random number generation. Default is 42.
+    /// - `early_exaggeration` - Factor to multiply probabilities in early iterations. Default is 12.0.
+    /// - `exaggeration_iter` - Number of iterations to apply early exaggeration. Default is n_iter/12.
+    /// - `initial_momentum` - Initial momentum coefficient. Default is 0.5.
+    /// - `final_momentum` - Final momentum coefficient. Default is 0.8.
+    /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final. Default is n_iter/3.
     ///
     /// # Returns
     ///
@@ -98,127 +103,32 @@ impl TSNE {
         final_momentum: Option<f64>,
         momentum_switch_iter: Option<usize>,
     ) -> Self {
+        let n_iter_val = n_iter.unwrap_or(1000);
         TSNE {
-            perplexity,
-            learning_rate,
-            n_iter,
+            perplexity: perplexity.unwrap_or(30.0),
+            learning_rate: learning_rate.unwrap_or(200.0),
+            n_iter: n_iter_val,
             dim,
-            random_state,
-            early_exaggeration,
-            exaggeration_iter,
-            initial_momentum,
-            final_momentum,
-            momentum_switch_iter,
+            random_state: random_state.unwrap_or(42),
+            early_exaggeration: early_exaggeration.unwrap_or(12.0),
+            exaggeration_iter: exaggeration_iter.unwrap_or(n_iter_val / 12),
+            initial_momentum: initial_momentum.unwrap_or(0.5),
+            final_momentum: final_momentum.unwrap_or(0.8),
+            momentum_switch_iter: momentum_switch_iter.unwrap_or(n_iter_val / 3),
         }
     }
 
-    /// Returns the perplexity parameter used in t-SNE.
-    ///
-    /// Perplexity is related to the number of nearest neighbors that
-    /// is used in other manifold learning algorithms. Larger datasets
-    /// usually require a larger perplexity.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The perplexity value, defaults to 30.0 if not specified.
-    pub fn get_perplexity(&self) -> f64 {
-        self.perplexity.unwrap_or(30.0)
-    }
-
-    /// Returns the learning rate used in the optimization process.
-    ///
-    /// The learning rate determines the step size at each iteration
-    /// while moving toward the minimum of the cost function.
-    ///
-    /// # Returns
-    ///
-    /// *`f64` - The learning rate, defaults to 200.0 if not specified.
-    pub fn get_learning_rate(&self) -> f64 {
-        self.learning_rate.unwrap_or(200.0)
-    }
-
-    /// Returns the maximum number of iterations for the optimization.
-    ///
-    /// # Returns
-    ///
-    /// *`usize` - The maximum number of iterations, defaults to 1000 if not specified.
-    pub fn get_n_iter(&self) -> usize {
-        self.n_iter.unwrap_or(1000)
-    }
-
-    /// Returns the dimensionality of the embedded space.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of dimensions in the embedded space.
-    pub fn get_dim(&self) -> usize {
-        self.dim
-    }
-
-    /// Returns the random state seed used for reproducibility.
-    ///
-    /// # Returns
-    ///
-    /// * `u64` - The random seed value, defaults to 42 if not specified.
-    pub fn get_random_state(&self) -> u64 {
-        self.random_state.unwrap_or(42)
-    }
-
-    /// Returns the early exaggeration factor.
-    ///
-    /// Early exaggeration increases the attraction between points
-    /// in the early phases of optimization to form tighter clusters.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The early exaggeration factor, defaults to 12.0 if not specified.
-    pub fn get_early_exaggeration(&self) -> f64 {
-        self.early_exaggeration.unwrap_or(12.0)
-    }
-
-    /// Returns the number of iterations for early exaggeration phase.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The number of iterations for the early exaggeration phase, defaults to 1000/12 if not specified.
-    pub fn get_exaggeration_iter(&self) -> usize {
-        self.exaggeration_iter.unwrap_or(1000 / 12)
-    }
-
-    /// Returns the initial momentum coefficient.
-    ///
-    /// Momentum accelerates the optimization and helps to escape local minima.
-    ///
-    /// # Returns
-    ///
-    /// *`f64` - The initial momentum value, defaults to 0.5 if not specified.
-    pub fn get_initial_momentum(&self) -> f64 {
-        self.initial_momentum.unwrap_or(0.5)
-    }
-
-    /// Returns the final momentum coefficient.
-    ///
-    /// The momentum is increased from the initial to the final value
-    /// during the optimization process.
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The final momentum value, defaults to 0.8 if not specified.
-    pub fn get_final_momentum(&self) -> f64 {
-        self.final_momentum.unwrap_or(0.8)
-    }
-
-    /// Returns the iteration at which momentum value is switched.
-    ///
-    /// Specifies when to switch from initial momentum to final momentum
-    /// during the optimization process.
-    ///
-    /// # Returns
-    ///
-    /// * `usize` - The iteration number for momentum switch, defaults to 1000/3 if not specified.
-    pub fn get_momentum_switch_iter(&self) -> usize {
-        self.momentum_switch_iter.unwrap_or(1000 / 3)
-    }
+    // Getters
+    get_field!(get_perplexity, perplexity, f64);
+    get_field!(get_learning_rate, learning_rate, f64);
+    get_field!(get_actual_iterations, n_iter, usize);
+    get_field!(get_dimensions, dim, usize);
+    get_field!(get_random_state, random_state, u64);
+    get_field!(get_early_exaggeration, early_exaggeration, f64);
+    get_field!(get_exaggeration_iterations, exaggeration_iter, usize);
+    get_field!(get_initial_momentum, initial_momentum, f64);
+    get_field!(get_final_momentum, final_momentum, f64);
+    get_field!(get_momentum_switch_iterations, momentum_switch_iter, usize);
 
     /// Performs t-SNE dimensionality reduction on input data.
     ///
@@ -231,34 +141,16 @@ impl TSNE {
     /// - `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
-        // Optimized parameter validation with reduced closure allocation
-        let n_iter = self.validate_positive_param(self.n_iter, 1000, "iterations")?;
-        let perplexity = self.validate_positive_f64_param(self.perplexity, 30.0, "perplexity")?;
-        let learning_rate =
-            self.validate_positive_f64_param(self.learning_rate, 200.0, "learning rate")?;
+        // Validate all parameters
+        self.validate_positive_usize(self.n_iter, "iterations")?;
+        self.validate_positive_f64(self.perplexity, "perplexity")?;
+        self.validate_positive_f64(self.learning_rate, "learning rate")?;
+        self.validate_min_f64(self.early_exaggeration, 1.0, "early exaggeration")?;
+        self.validate_positive_usize(self.exaggeration_iter, "exaggeration iterations")?;
+        self.validate_range_f64(self.initial_momentum, "initial momentum")?;
+        self.validate_range_f64(self.final_momentum, "final momentum")?;
+        self.validate_positive_usize(self.momentum_switch_iter, "momentum switch iterations")?;
 
-        let early_exaggeration =
-            self.validate_min_f64_param(self.early_exaggeration, 12.0, 1.0, "early exaggeration")?;
-
-        let exaggeration_iter = self.validate_positive_param(
-            self.exaggeration_iter,
-            n_iter / 12,
-            "exaggeration iterations",
-        )?;
-
-        let initial_momentum =
-            self.validate_range_f64_param(self.initial_momentum, 0.5, "initial momentum")?;
-
-        let final_momentum =
-            self.validate_range_f64_param(self.final_momentum, 0.8, "final momentum")?;
-
-        let momentum_switch_iter = self.validate_positive_param(
-            self.momentum_switch_iter,
-            n_iter / 3,
-            "momentum switch iterations",
-        )?;
-
-        let random_state = self.random_state.unwrap_or(42);
         let n_samples = x.nrows();
 
         // Validate dimension parameter
@@ -273,18 +165,18 @@ impl TSNE {
         let distances = self.compute_pairwise_distances(&x)?;
 
         // 2. Compute conditional probabilities in parallel
-        let p = self.compute_conditional_probabilities(&distances, perplexity)?;
+        let p = self.compute_conditional_probabilities(&distances, self.perplexity)?;
 
         // 3. Symmetrize and apply early exaggeration
-        let p_sym = (&p + &p.t()) / (2.0 * n_samples as f64);
-        let mut p_exagg = p_sym.clone() * early_exaggeration;
+        let p_sym = (&p + &p.t()) / 2.0;
+        let mut p_exagg = p_sym.clone() * self.early_exaggeration;
 
         // 4. Initialize embedding with better scaling
-        let mut y = self.initialize_embedding(n_samples, random_state)?;
+        let mut y = self.initialize_embedding(n_samples, self.random_state)?;
         let mut dy = Array2::<f64>::zeros((n_samples, self.dim));
 
         // 5. Optimized gradient descent loop
-        for iter in 0..n_iter {
+        for iter in 0..self.n_iter {
             // Compute Q matrix more efficiently
             let (q, num) = self.compute_q_matrix(&y)?;
 
@@ -292,14 +184,14 @@ impl TSNE {
             let grad = self.compute_gradient(&y, &p_exagg, &q, &num)?;
 
             // Update momentum and positions
-            let momentum = if iter < momentum_switch_iter {
-                initial_momentum
+            let momentum = if iter < self.momentum_switch_iter {
+                self.initial_momentum
             } else {
-                final_momentum
+                self.final_momentum
             };
 
             dy *= momentum;
-            dy.scaled_add(-learning_rate, &grad);
+            dy.scaled_add(-self.learning_rate, &grad);
             y += &dy;
 
             // Center the embedding
@@ -307,7 +199,7 @@ impl TSNE {
             y -= &mean_y;
 
             // Switch to normal p after early exaggeration phase
-            if iter == exaggeration_iter {
+            if iter == self.exaggeration_iter {
                 p_exagg = p_sym.clone();
             }
         }
@@ -316,68 +208,47 @@ impl TSNE {
     }
 
     // Helper methods for parameter validation
-    fn validate_positive_param(
-        &self,
-        param: Option<usize>,
-        default: usize,
-        name: &str,
-    ) -> Result<usize, ModelError> {
-        match param {
-            Some(val) if val > 0 => Ok(val),
-            Some(val) => Err(ModelError::InputValidationError(format!(
+    fn validate_positive_usize(&self, val: usize, name: &str) -> Result<(), ModelError> {
+        if val > 0 {
+            Ok(())
+        } else {
+            Err(ModelError::InputValidationError(format!(
                 "{} must be greater than 0, got {}",
                 name, val
-            ))),
-            None => Ok(default),
+            )))
         }
     }
 
-    fn validate_positive_f64_param(
-        &self,
-        param: Option<f64>,
-        default: f64,
-        name: &str,
-    ) -> Result<f64, ModelError> {
-        match param {
-            Some(val) if val > 0.0 => Ok(val),
-            Some(val) => Err(ModelError::InputValidationError(format!(
+    fn validate_positive_f64(&self, val: f64, name: &str) -> Result<(), ModelError> {
+        if val > 0.0 {
+            Ok(())
+        } else {
+            Err(ModelError::InputValidationError(format!(
                 "{} must be greater than 0, got {}",
                 name, val
-            ))),
-            None => Ok(default),
+            )))
         }
     }
 
-    fn validate_min_f64_param(
-        &self,
-        param: Option<f64>,
-        default: f64,
-        min_val: f64,
-        name: &str,
-    ) -> Result<f64, ModelError> {
-        match param {
-            Some(val) if val > min_val => Ok(val),
-            Some(val) => Err(ModelError::InputValidationError(format!(
+    fn validate_min_f64(&self, val: f64, min_val: f64, name: &str) -> Result<(), ModelError> {
+        if val > min_val {
+            Ok(())
+        } else {
+            Err(ModelError::InputValidationError(format!(
                 "{} must be greater than {}, got {}",
                 name, min_val, val
-            ))),
-            None => Ok(default),
+            )))
         }
     }
 
-    fn validate_range_f64_param(
-        &self,
-        param: Option<f64>,
-        default: f64,
-        name: &str,
-    ) -> Result<f64, ModelError> {
-        match param {
-            Some(val) if (0.0..=1.0).contains(&val) => Ok(val),
-            Some(val) => Err(ModelError::InputValidationError(format!(
+    fn validate_range_f64(&self, val: f64, name: &str) -> Result<(), ModelError> {
+        if (0.0..=1.0).contains(&val) {
+            Ok(())
+        } else {
+            Err(ModelError::InputValidationError(format!(
                 "{} must be between 0.0 and 1.0, got {}",
                 name, val
-            ))),
-            None => Ok(default),
+            )))
         }
     }
 
@@ -386,12 +257,24 @@ impl TSNE {
         let n_samples = x.nrows();
         let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
 
-        // Use parallel computation with better memory access pattern
-        distances
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut row)| {
+        // Use parallel computation only when sample size exceeds threshold
+        if n_samples >= TSNE_PARALLEL_THRESHOLD {
+            distances
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, mut row)| {
+                    let xi = x.row(i);
+                    for (j, distance) in row.iter_mut().enumerate() {
+                        if i != j {
+                            let diff = &xi - &x.row(j);
+                            *distance = diff.dot(&diff);
+                        }
+                    }
+                });
+        } else {
+            // Sequential computation for small datasets
+            for (i, mut row) in distances.axis_iter_mut(Axis(0)).enumerate() {
                 let xi = x.row(i);
                 for (j, distance) in row.iter_mut().enumerate() {
                     if i != j {
@@ -399,7 +282,8 @@ impl TSNE {
                         *distance = diff.dot(&diff);
                     }
                 }
-            });
+            }
+        }
 
         Ok(distances)
     }
@@ -413,18 +297,30 @@ impl TSNE {
         let n_samples = distances.nrows();
         let mut p = Array2::<f64>::zeros((n_samples, n_samples));
 
-        // Process each row in parallel
-        p.axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut row)| {
+        // Process each row with conditional parallelization
+        if n_samples >= TSNE_PARALLEL_THRESHOLD {
+            p.axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, mut row)| {
+                    let (p_i, _) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
+                    for (j, &prob) in p_i.iter().enumerate() {
+                        if i != j {
+                            row[j] = prob;
+                        }
+                    }
+                });
+        } else {
+            // Sequential computation for small datasets
+            for (i, mut row) in p.axis_iter_mut(Axis(0)).enumerate() {
                 let (p_i, _) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
                 for (j, &prob) in p_i.iter().enumerate() {
                     if i != j {
                         row[j] = prob;
                     }
                 }
-            });
+            }
+        }
 
         Ok(p)
     }
@@ -438,8 +334,8 @@ impl TSNE {
         let mut rng = StdRng::seed_from_u64(random_state);
         let mut y = Array2::<f64>::zeros((n_samples, self.dim));
 
-        // Use better initialization scale based on dimensionality
-        let scale = 1e-4 / (self.dim as f64).sqrt();
+        // Use standard t-SNE initialization scale
+        let scale = 1e-4;
 
         // Pre-generate all random numbers
         let total_elements = n_samples * self.dim;
@@ -462,11 +358,24 @@ impl TSNE {
         let n_samples = y.nrows();
         let mut num = Array2::<f64>::zeros((n_samples, n_samples));
 
-        // Compute numerator with parallel processing
-        num.axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut row)| {
+        // Compute numerator with conditional parallelization
+        if n_samples >= TSNE_PARALLEL_THRESHOLD {
+            num.axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, mut row)| {
+                    let yi = y.row(i);
+                    for (j, numerator) in row.iter_mut().enumerate() {
+                        if i != j {
+                            let diff = &yi - &y.row(j);
+                            let dist_sq = diff.dot(&diff);
+                            *numerator = 1.0 / (1.0 + dist_sq);
+                        }
+                    }
+                });
+        } else {
+            // Sequential computation for small datasets
+            for (i, mut row) in num.axis_iter_mut(Axis(0)).enumerate() {
                 let yi = y.row(i);
                 for (j, numerator) in row.iter_mut().enumerate() {
                     if i != j {
@@ -475,12 +384,14 @@ impl TSNE {
                         *numerator = 1.0 / (1.0 + dist_sq);
                     }
                 }
-            });
+            }
+        }
 
-        // Normalize to get Q matrix
+        // Normalize to get Q matrix with numerical stability
         let sum_num = num.sum();
-        let q = if sum_num > 0.0 {
-            &num / sum_num
+        let epsilon = 1e-12;
+        let q = if sum_num > epsilon {
+            &num / sum_num.max(epsilon)
         } else {
             return Err(ModelError::ProcessingError(
                 "Q matrix normalization failed".to_string(),
@@ -501,24 +412,34 @@ impl TSNE {
         let n_samples = y.nrows();
         let mut grad = Array2::<f64>::zeros((n_samples, self.dim));
 
-        // Parallel gradient computation
-        grad.axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(i, mut grad_i)| {
-                let yi = y.row(i);
-                for j in 0..n_samples {
-                    if i != j {
-                        let pq_diff = p[[i, j]] - q[[i, j]];
-                        let factor = 4.0 * pq_diff * num[[i, j]];
-                        let diff = &yi - &y.row(j);
+        // Define gradient computation logic as a closure to avoid code duplication
+        let compute_grad_row = |i: usize, mut grad_i: ArrayViewMut1<f64>| {
+            let yi = y.row(i);
+            for j in 0..n_samples {
+                if i != j {
+                    let pq_diff = p[[i, j]] - q[[i, j]];
+                    let factor = 4.0 * pq_diff * num[[i, j]];
+                    let diff = &yi - &y.row(j);
 
-                        for (d, &diff_val) in diff.iter().enumerate() {
-                            grad_i[d] += factor * diff_val;
-                        }
+                    for (d, &diff_val) in diff.iter().enumerate() {
+                        grad_i[d] += factor * diff_val;
                     }
                 }
-            });
+            }
+        };
+
+        // Gradient computation with conditional parallelization
+        if n_samples >= TSNE_PARALLEL_THRESHOLD {
+            grad.axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, grad_i)| compute_grad_row(i, grad_i));
+        } else {
+            // Sequential computation for small datasets
+            grad.axis_iter_mut(Axis(0))
+                .enumerate()
+                .for_each(|(i, grad_i)| compute_grad_row(i, grad_i));
+        }
 
         Ok(grad)
     }
@@ -555,13 +476,16 @@ fn binary_search_sigma(distances: ArrayView1<f64>, target_perplexity: f64) -> (A
                 (-d / (2.0 * sigma * sigma)).exp()
             };
         }
-        let sum_p = p.sum();
-        if sum_p == 0.0 {
-            p.fill(1e-10);
-        }
 
-        let p_sum = p.sum();
-        p.par_mapv_inplace(|v| v / p_sum);
+        let sum_p = p.sum();
+        let epsilon = 1e-12;
+
+        if sum_p < epsilon {
+            // If sum is too small, use uniform distribution
+            p.fill(1.0 / n as f64);
+        } else {
+            p.par_mapv_inplace(|v| v / sum_p);
+        }
 
         let h: f64 = p
             .iter()

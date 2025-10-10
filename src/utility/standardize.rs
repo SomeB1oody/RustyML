@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for enabling parallel computation in standardization
+/// Arrays with fewer elements than this threshold will use sequential computation
+/// to avoid the overhead of thread spawning and synchronization
+const STANDARDIZE_PARALLEL_THRESHOLD: usize = 10000;
+
 /// Defines the axis along which the standardization is applied
 ///
 /// # Variants
@@ -103,8 +108,7 @@ fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), M
 where
     D: Dimension,
 {
-    let values: Vec<f64> = data.iter().copied().collect();
-    let n = values.len() as f64;
+    let n = data.len() as f64;
 
     if n == 0.0 {
         return Err(ModelError::ProcessingError(
@@ -112,15 +116,26 @@ where
         ));
     }
 
-    // Calculate mean
-    let mean = values.iter().sum::<f64>() / n;
+    // Use parallel computation for large datasets
+    if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
+        // Calculate mean
+        let mean = data.par_iter().sum::<f64>() / n;
 
-    // Calculate standard deviation
-    let variance = values.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-    let std_dev = variance.sqrt() + epsilon;
+        // Calculate variance
+        let variance = data.par_iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
 
-    // Apply standardization
-    data.mapv_inplace(|x| (x - mean) / std_dev);
+        // Add epsilon to variance for numerical stability, then take sqrt
+        let std_dev = (variance + epsilon * epsilon).sqrt();
+
+        // Apply standardization
+        data.par_mapv_inplace(|x| (x - mean) / std_dev);
+    } else {
+        // Same process as above, but sequential
+        let mean = data.iter().sum::<f64>() / n;
+        let variance = data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
+        let std_dev = (variance + epsilon * epsilon).sqrt();
+        data.mapv_inplace(|x| (x - mean) / std_dev);
+    }
 
     Ok(())
 }
@@ -133,14 +148,26 @@ fn compute_mean_and_std(values: &[f64], epsilon: f64) -> (f64, f64) {
         return (0.0, epsilon);
     }
 
-    // Calculate mean
-    let mean = values.iter().sum::<f64>() / n;
+    // Use parallel computation for large datasets
+    if values.len() >= STANDARDIZE_PARALLEL_THRESHOLD {
+        // Calculate mean
+        let mean = values.par_iter().sum::<f64>() / n;
 
-    // Calculate standard deviation
-    let variance = values.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-    let std_dev = variance.sqrt() + epsilon;
+        // Calculate variance
+        let variance = values.par_iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
 
-    (mean, std_dev)
+        // Add epsilon to variance for numerical stability, then take sqrt
+        let std_dev = (variance + epsilon * epsilon).sqrt();
+
+        (mean, std_dev)
+    } else {
+        // Same process as above, but sequential
+        let mean = values.iter().sum::<f64>() / n;
+        let variance = values.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
+        let std_dev = (variance + epsilon * epsilon).sqrt();
+
+        (mean, std_dev)
+    }
 }
 
 /// Generic helper function to standardize lanes along a specified axis
@@ -164,17 +191,22 @@ where
     // Process each lane along the specified axis using parallel iteration
     let mut lanes: Vec<_> = data.lanes_mut(axis).into_iter().collect();
 
-    lanes
-        .par_iter_mut()
-        .try_for_each(|lane| -> Result<(), ModelError> {
-            let values: Vec<f64> = lane.iter().copied().collect();
-            let (mean, std_dev) = compute_mean_and_std(&values, epsilon);
+    // Define a closure that processes a single lane
+    let process_lane = |lane: &mut ArrayViewMut1<f64>| -> Result<(), ModelError> {
+        let values: Vec<f64> = lane.iter().copied().collect();
+        let (mean, std_dev) = compute_mean_and_std(&values, epsilon);
+        lane.mapv_inplace(|x| (x - mean) / std_dev);
+        Ok(())
+    };
 
-            // Apply standardization
-            lane.mapv_inplace(|x| (x - mean) / std_dev);
-
-            Ok(())
-        })?;
+    // Choose between parallel and sequential processing based on the number of lanes
+    if lanes.len() >= STANDARDIZE_PARALLEL_THRESHOLD / 100 {
+        // Use parallel iteration for large number of lanes
+        lanes.par_iter_mut().try_for_each(process_lane)?;
+    } else {
+        // Use sequential iteration for small number of lanes
+        lanes.iter_mut().try_for_each(process_lane)?;
+    }
 
     Ok(())
 }

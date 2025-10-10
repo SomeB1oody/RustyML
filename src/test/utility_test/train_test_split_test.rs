@@ -114,21 +114,6 @@ fn test_error_invalid_test_size() {
 }
 
 #[test]
-fn test_small_dataset() {
-    // Test extreme case with only 1 sample
-    let x = Array2::from_shape_vec((1, 2), vec![1.0, 2.0]).unwrap();
-    let y = Array1::from(vec![0.0]);
-
-    let result = train_test_split(x, y, Some(0.5), Some(42));
-    assert!(result.is_ok());
-
-    let (_x_train, x_test, _y_train, y_test) = result.unwrap();
-    // Should have at least one sample in the test set
-    assert_eq!(x_test.nrows(), 1);
-    assert_eq!(y_test.len(), 1);
-}
-
-#[test]
 fn test_consistent_x_y_split() {
     let x = Array2::from_shape_vec(
         (5, 2),

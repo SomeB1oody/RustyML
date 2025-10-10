@@ -1,6 +1,10 @@
 use super::*;
 use std::error::Error;
 
+/// Threshold for determining whether to use parallel processing in PCA computations
+/// When n_components >= this threshold, parallel processing is used for variance calculations
+const PCA_PARALLEL_THRESHOLD: usize = 64;
+
 /// PCA structure for implementing Principal Component Analysis
 ///
 /// This structure provides functionality for dimensionality reduction using PCA.
@@ -160,22 +164,12 @@ impl PCA {
             ));
         }
 
-        // Parallel validation for better performance on large datasets
-        let validation_results: Vec<Option<(usize, usize)>> = x
+        // Check for NaN or infinite values using iterator
+        // More efficient than collecting and parallelizing for most use cases
+        if let Some(((i, j), _)) = x
             .indexed_iter()
-            .collect::<Vec<_>>()
-            .into_par_iter()
-            .map(|((i, j), &val)| {
-                if val.is_nan() || val.is_infinite() {
-                    Some((i, j))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Find first error position
-        if let Some(Some((i, j))) = validation_results.into_iter().find(|x| x.is_some()) {
+            .find(|&(_, &val)| val.is_nan() || val.is_infinite())
+        {
             return Err(ModelError::InputValidationError(format!(
                 "Input data contains NaN or infinite value at position [{}, {}]",
                 i, j
@@ -233,15 +227,26 @@ impl PCA {
         let v_t = svd.v_t.ok_or("SVD did not compute V^T")?;
         let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| v_t.row(i)[j]);
 
-        // Compute explained variance and singular values in parallel
-        let variance_and_singular: Vec<(f64, f64)> = (0..n_components)
-            .into_par_iter()
-            .map(|i| {
-                let s_val = s_vals[i];
-                let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
-                (exp_var, s_val)
-            })
-            .collect();
+        // Compute explained variance and singular values
+        // Use parallel processing only when n_components exceeds threshold
+        let variance_and_singular: Vec<(f64, f64)> = if n_components >= PCA_PARALLEL_THRESHOLD {
+            (0..n_components)
+                .into_par_iter()
+                .map(|i| {
+                    let s_val = s_vals[i];
+                    let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
+                    (exp_var, s_val)
+                })
+                .collect()
+        } else {
+            (0..n_components)
+                .map(|i| {
+                    let s_val = s_vals[i];
+                    let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
+                    (exp_var, s_val)
+                })
+                .collect()
+        };
 
         let (explained_variance, singular_values): (Vec<f64>, Vec<f64>) =
             variance_and_singular.into_iter().unzip();
@@ -249,8 +254,8 @@ impl PCA {
         let explained_variance = Array1::from(explained_variance);
         let singular_values = Array1::from(singular_values);
 
-        // Compute total variance more efficiently
-        let total_variance = s_vals.iter().map(|&s| s * s).sum::<f64>() / ((n_samples - 1) as f64);
+        // Compute total variance from already calculated values
+        let total_variance: f64 = explained_variance.sum();
 
         // Calculate explained variance ratio
         let explained_variance_ratio = explained_variance.mapv(|v| v / total_variance);
@@ -314,8 +319,8 @@ impl PCA {
     /// - `Ok(Array2<f64>)` - The reconstructed data in original space
     /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
     pub fn inverse_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
-        let components = self.components.as_ref().ok_or("PCA model not fitted yet")?;
-        let mean = self.mean.as_ref().ok_or("PCA model not fitted yet")?;
+        let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
+        let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
         // Transform back to original feature space using broadcasting
         let x_restored = x.dot(components) + mean;

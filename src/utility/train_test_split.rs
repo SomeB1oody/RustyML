@@ -48,7 +48,7 @@ pub fn train_test_split(
 
     // Set test size, default is 0.3
     let test_size = test_size.unwrap_or(0.3);
-    if !(0.0..1.0).contains(&test_size) {
+    if test_size <= 0.0 || test_size >= 1.0 {
         return Err(ModelError::InputValidationError(format!(
             "test_size must be between 0 and 1 (exclusive), got {}",
             test_size
@@ -56,14 +56,16 @@ pub fn train_test_split(
     }
 
     // Calculate the number of test samples
-    // For small datasets, ensure at least one sample in test set and at least one in train set
+    // For small datasets, ensure at least one sample in both train and test sets
     let n_test = if n_samples == 1 {
-        1 // Special case: with only 1 sample, put it in test set
+        return Err(ModelError::InputValidationError(
+            "Cannot split a dataset with only 1 sample into train and test sets".to_string(),
+        ));
     } else if n_samples == 2 {
         1 // Special case: with 2 samples, always put 1 in test set regardless of test_size
     } else {
-        // For larger datasets, use ceiling to ensure at least the expected proportion
-        let calculated = (n_samples as f64 * test_size).ceil() as usize;
+        // For larger datasets, use rounding to get closest to the expected proportion
+        let calculated = (n_samples as f64 * test_size).round() as usize;
         calculated.max(1).min(n_samples - 1) // Ensure both train and test have at least 1 sample
     };
 

@@ -235,11 +235,10 @@ impl KernelPCA {
             )));
         }
 
-        if self.n_components <= 0 {
-            return Err(Box::new(ModelError::InputValidationError(format!(
-                "n_components={} must be greater than 0",
-                self.n_components
-            ))));
+        if self.n_components == 0 {
+            return Err(Box::new(ModelError::InputValidationError(
+                "n_components must be greater than 0".to_string(),
+            )));
         }
 
         if x.nrows() < self.n_components {
@@ -279,23 +278,11 @@ impl KernelPCA {
         self.row_means = Some(row_means.clone());
         self.total_mean = Some(total_mean);
 
-        // Center the kernel matrix: k_centered[i,j] = k_matrix[i,j] - row_means[i] - row_means[j] + total_mean
-        let mut k_centered = k_matrix.clone();
-        let centered_vals: Vec<((usize, usize), f64)> = (0..n_samples)
-            .into_par_iter()
-            .flat_map(|i| {
-                let mut local_results = Vec::new();
-                for j in 0..n_samples {
-                    let centered_val = k_matrix[[i, j]] - row_means[i] - row_means[j] + total_mean;
-                    local_results.push(((i, j), centered_val));
-                }
-                local_results
-            })
-            .collect();
-
-        for ((i, j), centered_val) in centered_vals {
-            k_centered[[i, j]] = centered_val;
-        }
+        // Center the kernel matrix in-place: k_centered[i,j] = k_matrix[i,j] - row_means[i] - row_means[j] + total_mean
+        let mut k_centered = Array2::<f64>::zeros((n_samples, n_samples));
+        k_centered.indexed_iter_mut().for_each(|((i, j), val)| {
+            *val = k_matrix[[i, j]] - row_means[i] - row_means[j] + total_mean;
+        });
 
         // Perform eigenvalue decomposition on the centered kernel matrix
         let k_centered_slice = k_centered
@@ -319,7 +306,7 @@ impl KernelPCA {
             .collect();
 
         // Sort (eigenvalue, eigenvector) pairs by eigenvalue in descending order
-        eig_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        eig_pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Select the top n_components eigenvalues and corresponding eigenvectors, and normalize the eigenvectors
         let mut selected_eigenvalues = Array1::<f64>::zeros(self.n_components);
@@ -442,9 +429,6 @@ impl KernelPCA {
         x: ArrayView2<f64>,
     ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
         self.fit(x)?;
-        match self.transform(x) {
-            Ok(transformed) => Ok(transformed),
-            Err(err) => Err(err),
-        }
+        self.transform(x)
     }
 }

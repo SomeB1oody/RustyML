@@ -47,18 +47,25 @@ pub fn to_categorical(labels: &Array1<i32>, num_classes: Option<usize>) -> Array
     }
 
     // Determine number of classes
-    let max_label = *labels.iter().max().unwrap_or(&0) as usize;
+    let max_label = labels.par_iter().max().copied().unwrap_or(0) as usize;
     let n_classes = match num_classes {
         Some(n) => {
-            if n <= max_label {
+            if n < max_label + 1 {
                 panic!(
-                    "num_classes ({}) must be greater than the maximum label ({})",
-                    n, max_label
+                    "num_classes ({}) must be at least {} (max_label + 1)",
+                    n,
+                    max_label + 1
                 );
             }
             n
         }
-        None => max_label + 1,
+        None => {
+            if labels.is_empty() {
+                1 // Default to at least 1 class for empty input
+            } else {
+                max_label + 1
+            }
+        }
     };
 
     // Create one-hot encoded matrix
@@ -109,13 +116,10 @@ where
 
     // Create mapping from unique labels to indices using AHashMap
     let mut label_to_index = AHashMap::new();
-    let mut index = 0;
 
     for label in labels.iter() {
-        if !label_to_index.contains_key(label) {
-            label_to_index.insert(label.clone(), index);
-            index += 1;
-        }
+        let len = label_to_index.len();
+        label_to_index.entry(label.clone()).or_insert(len);
     }
 
     // Determine number of classes
@@ -175,23 +179,15 @@ where
 /// This function finds the class with the highest probability for each sample,
 /// making it suitable for converting model predictions back to class labels.
 pub fn to_sparse_categorical(categorical: &Array2<f64>) -> Array1<i32> {
-    let n_samples = categorical.nrows();
-    let mut labels = Array1::<i32>::zeros(n_samples);
-
-    for (i, row) in categorical.rows().into_iter().enumerate() {
-        // Find the index of the maximum value in the row
-        let mut max_index = 0;
-        let mut max_value = row[0];
-
-        for (j, &value) in row.iter().enumerate() {
-            if value > max_value {
-                max_value = value;
-                max_index = j;
-            }
-        }
-
-        labels[i] = max_index as i32;
-    }
-
-    labels
+    categorical
+        .rows()
+        .into_iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(idx, _)| idx as i32)
+                .unwrap_or(0)
+        })
+        .collect()
 }
