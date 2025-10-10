@@ -54,6 +54,19 @@ pub struct TSNE {
     momentum_switch_iter: usize,
 }
 
+/// Default implementation for TSNE
+///
+/// Creates a new TSNE instance with default values:
+/// - `perplexity`: 30.0 (typical range 5-50, controls neighborhood size)
+/// - `learning_rate`: 200.0 (typical range 10-1000, controls step size in optimization)
+/// - `n_iter`: 1000 (maximum number of optimization iterations)
+/// - `dim`: 2 (target dimensionality, commonly 2 for visualization)
+/// - `random_state`: 42 (seed for random number generation for reproducibility)
+/// - `early_exaggeration`: 12.0 (factor for early exaggeration phase)
+/// - `exaggeration_iter`: 83 (approximately n_iter/12, iterations for early exaggeration)
+/// - `initial_momentum`: 0.5 (momentum for first phase of optimization)
+/// - `final_momentum`: 0.8 (momentum for second phase of optimization)  
+/// - `momentum_switch_iter`: 333 (approximately n_iter/3, when to switch momentum values)
 impl Default for TSNE {
     fn default() -> Self {
         let default_max_iter = 1000;

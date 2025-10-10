@@ -1,5 +1,5 @@
 use super::*;
-use ndarray::{Array, IxDyn};
+use indicatif::{ProgressBar, ProgressStyle};
 use rand::seq::SliceRandom;
 
 /// A Sequential neural network model for building and training feedforward networks.
@@ -203,13 +203,33 @@ impl Sequential {
         // Validate inputs
         self.validate_training_inputs(x, y)?;
 
-        for epoch in 0..epochs {
-            println!("Epoch {}", epoch + 1);
+        let n_samples = x.shape()[0];
 
+        // Create progress bar for training epochs
+        let progress_bar = ProgressBar::new(epochs as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Loss: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+
+        for _ in 0..epochs {
             // Train on the entire dataset as one batch
             let loss_value = self.train_batch(x, y)?;
-            println!("Loss: {}", loss_value);
+
+            // Update progress bar with current loss
+            progress_bar.set_message(format!("{:.6}", loss_value));
+            progress_bar.inc(1);
         }
+
+        // Finish progress bar
+        progress_bar.finish_with_message("Training completed");
+
+        println!(
+            "\nNeural network training completed: {} samples, {} epochs",
+            n_samples, epochs
+        );
 
         Ok(self)
     }
@@ -274,11 +294,11 @@ impl Sequential {
                 // Extract data for selected indices
                 for &idx in indices {
                     // Extract sample from x
-                    let x_sample = x.slice(ndarray::s![idx, ..]);
+                    let x_sample = x.slice(s![idx, ..]);
                     x_batch_data.extend(x_sample.iter().cloned());
 
                     // Extract sample from y
-                    let y_sample = y.slice(ndarray::s![idx, ..]);
+                    let y_sample = y.slice(s![idx, ..]);
                     y_batch_data.extend(y_sample.iter().cloned());
                 }
 
@@ -305,10 +325,20 @@ impl Sequential {
         // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
+        let total_batches = (n_samples + batch_size - 1) / batch_size;
+        let total_iterations = epochs as u64 * total_batches as u64;
+
+        // Create progress bar for batch training
+        let progress_bar = ProgressBar::new(total_iterations);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Epoch {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+
         // Training loop
         for epoch in 0..epochs {
-            println!("Epoch {}/{}", epoch + 1, epochs);
-
             // Shuffle data at the beginning of each epoch
             indices.shuffle(&mut rand::rng());
 
@@ -326,19 +356,25 @@ impl Sequential {
                 let batch_loss = self.train_batch(&batch_x, &batch_y)?;
                 epoch_loss += batch_loss;
 
-                println!(
-                    "  Batch {}/{}: Loss = {:.6}",
-                    batch_count,
-                    (n_samples + batch_size - 1) / batch_size, // Ceiling division for total batches
-                    batch_loss
-                );
+                // Update progress bar
+                let avg_loss = epoch_loss / batch_count as f32;
+                progress_bar.set_message(format!(
+                    "{}/{} | Avg Loss: {:.6}",
+                    epoch + 1,
+                    epochs,
+                    avg_loss
+                ));
+                progress_bar.inc(1);
             }
-
-            // Print epoch summary
-            let avg_loss = epoch_loss / batch_count as f32;
-            println!("  Average Loss: {}", avg_loss);
-            println!();
         }
+
+        // Finish progress bar
+        progress_bar.finish_with_message("Training completed");
+
+        println!(
+            "\nNeural network batch training completed: {} samples, {} batch size, {} epochs",
+            n_samples, batch_size, epochs
+        );
 
         Ok(self)
     }

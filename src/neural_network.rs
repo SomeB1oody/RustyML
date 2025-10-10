@@ -19,7 +19,7 @@ pub use sequential::*;
 pub use traits::*;
 
 use crate::ModelError;
-use ndarray::ArrayD;
+use ndarray::prelude::*;
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network
 pub type Tensor = ArrayD<f32>;

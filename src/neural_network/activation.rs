@@ -1,4 +1,5 @@
-use ndarray::{Array2, ArrayD, Axis, Zip};
+use super::*;
+use ndarray::Zip;
 use rayon::prelude::*;
 
 /// Activation function enum, supporting ReLU, Tanh, Sigmoid, Softmax, and Linear

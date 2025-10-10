@@ -68,6 +68,14 @@ pub struct PCA {
 }
 
 /// Default implementation for PCA
+///
+/// Creates a new PCA instance with default values:
+/// - `n_components`: 2 (common for visualization purposes)
+/// - `components`: None (computed during fitting)
+/// - `mean`: None (computed during fitting)
+/// - `explained_variance`: None (computed during fitting)
+/// - `explained_variance_ratio`: None (computed during fitting)
+/// - `singular_values`: None (computed during fitting)
 impl Default for PCA {
     fn default() -> Self {
         // Default to 2 components which is common for visualization purposes

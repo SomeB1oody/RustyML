@@ -95,6 +95,15 @@ pub fn compute_kernel(x: &ArrayView1<f64>, y: &ArrayView1<f64>, kernel: &KernelT
 }
 
 /// Default implementation for KernelPCA.
+///
+/// Creates a new KernelPCA instance with default values:
+/// - `kernel`: Linear kernel (no transformation, equivalent to standard PCA)
+/// - `n_components`: 2 (commonly used for visualization purposes)
+/// - `eigenvalues`: None (computed during fitting process)
+/// - `eigenvectors`: None (computed during fitting process)
+/// - `x_fit`: None (stores training data after fitting)
+/// - `row_means`: None (mean of each row in kernel matrix, computed during fitting)
+/// - `total_mean`: None (overall mean of kernel matrix, computed during fitting)
 impl Default for KernelPCA {
     fn default() -> Self {
         KernelPCA {

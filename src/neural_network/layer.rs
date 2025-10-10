@@ -1,6 +1,5 @@
 use super::*;
 use helper_functions::*;
-use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;

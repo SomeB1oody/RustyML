@@ -1,5 +1,4 @@
 use super::*;
-use crate::ModelError;
 
 /// Defines the interface for neural network layers.
 ///

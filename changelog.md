@@ -8,6 +8,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.8.0] - 2025-10-9 (UTC-7)
 ### Added
 - Introduce progress bar support across ML models
+- Introduce progress bar support for the utility module
+- Introduce progress bar support to neural network
 
 ### Changed
 - Refactor ML models
