@@ -138,7 +138,7 @@ fn test_error_handling() {
     assert!(predict_result.is_err());
 
     // Test decision function error before training
-    let decision_result = svc.decision_function(&test_x);
+    let decision_result = svc.decision_function(test_x.view());
     assert!(decision_result.is_err());
 }
 
@@ -201,7 +201,7 @@ fn test_decision_function() {
 
     // Get decision scores
     let test_point = arr2(&[[0.0, 0.0]]);
-    let decisions = svc.decision_function(&test_point).unwrap();
+    let decisions = svc.decision_function(test_point.view()).unwrap();
 
     // Decision function should return a single score for the test point
     assert_eq!(decisions.len(), 1);

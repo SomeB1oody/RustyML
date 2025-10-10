@@ -372,7 +372,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         };
 
         // Use partial sorting to get only k smallest elements instead of full sort
-        distances.select_nth_unstable_by(k - 1, |a, b| a.0.partial_cmp(&b.0).unwrap());
+        distances.select_nth_unstable_by(k - 1, |a, b| {
+            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal) // Handle NaN by treating as equal
+        });
         let k_neighbors = &distances[..k];
 
         // Calculate based on weight strategy
@@ -408,7 +410,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         .into_iter()
                         .max_by_key(|(_, count)| *count)
                         .map(|(class_idx, _)| class_idx)
-                        .unwrap()
+                        .ok_or(ModelError::ProcessingError(
+                            "No valid neighbors found for classification".to_string(),
+                        ))?
                 } else {
                     // Sequential counting for small k values
                     let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
@@ -422,7 +426,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         .into_iter()
                         .max_by_key(|(_, count)| *count)
                         .map(|(class_idx, _)| class_idx)
-                        .unwrap()
+                        .ok_or(ModelError::ProcessingError(
+                            "No valid neighbors found for classification".to_string(),
+                        ))?
                 }
             }
             WeightingStrategy::Distance => {
@@ -463,10 +469,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     class_weights
                         .into_iter()
                         .max_by(|(_, weight_a), (_, weight_b)| {
-                            weight_a.partial_cmp(weight_b).unwrap()
+                            weight_a
+                                .partial_cmp(weight_b)
+                                .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
                         })
                         .map(|(class_idx, _)| class_idx)
-                        .unwrap()
+                        .ok_or(ModelError::ProcessingError(
+                            "No valid neighbors found for classification".to_string(),
+                        ))?
                 } else {
                     // Sequential weight calculation for small k values
                     let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
@@ -480,10 +490,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     class_weights
                         .into_iter()
                         .max_by(|(_, weight_a), (_, weight_b)| {
-                            weight_a.partial_cmp(weight_b).unwrap()
+                            weight_a
+                                .partial_cmp(weight_b)
+                                .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
                         })
                         .map(|(class_idx, _)| class_idx)
-                        .unwrap()
+                        .ok_or(ModelError::ProcessingError(
+                            "No valid neighbors found for classification".to_string(),
+                        ))?
                 }
             }
         };

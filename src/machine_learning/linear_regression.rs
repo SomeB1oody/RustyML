@@ -199,7 +199,7 @@ impl LinearRegression {
                         alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
                     }
                 }
-                Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights) / 2.0,
+                Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights),
             };
 
             let cost = sse / (2.0 * n_samples as f64) + regularization_term;
@@ -254,12 +254,12 @@ impl LinearRegression {
                     }
                 }
                 Some(RegularizationType::L2(alpha)) => {
-                    weight_gradients += &(&weights * *alpha);
+                    weight_gradients.scaled_add(*alpha, &weights);
                 }
             }
 
             // Update parameters
-            weights -= &(&weight_gradients * self.learning_rate);
+            weights.scaled_add(-self.learning_rate, &weight_gradients);
             if self.fit_intercept {
                 intercept -= self.learning_rate * intercept_gradient;
             }
@@ -341,22 +341,11 @@ impl LinearRegression {
             ));
         }
 
-        let predictions: Vec<f64> = if x.nrows() >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
-            (0..x.nrows())
-                .into_par_iter()
-                .map(|i| {
-                    let row = x.row(i);
-                    intercept + row.dot(coeffs)
-                })
-                .collect()
-        } else {
-            (0..x.nrows())
-                .map(|i| {
-                    let row = x.row(i);
-                    intercept + row.dot(coeffs)
-                })
-                .collect()
-        };
+        // Calculate predictions using matrix operations
+        let mut predictions = x.dot(coeffs);
+        if self.fit_intercept {
+            predictions += intercept;
+        }
 
         // Check if predictions contain invalid values
         if predictions.iter().any(|&val| !val.is_finite()) {
@@ -365,7 +354,6 @@ impl LinearRegression {
             ));
         }
 
-        let predictions = Array1::from(predictions);
         Ok(predictions)
     }
 

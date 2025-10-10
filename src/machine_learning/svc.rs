@@ -639,26 +639,36 @@ impl SVC {
     ///
     /// - `Ok(Array1<f64>)` - The decision function values
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    pub fn decision_function(&self, x: &Array2<f64>) -> Result<Array1<f64>, ModelError> {
-        // Check if the model has been fitted
-        if self.support_vectors.is_none()
-            || self.support_vector_labels.is_none()
-            || self.alphas.is_none()
-        {
-            return Err(ModelError::NotFitted);
-        }
-
-        let bias: f64 = match self.bias {
-            Some(b) => b,
-            None => return Err(ModelError::NotFitted),
+    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
+    pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check model fitting status
+        let (support_vectors, support_vector_labels, alphas, bias) = match (
+            &self.support_vectors,
+            &self.support_vector_labels,
+            &self.alphas,
+            self.bias,
+        ) {
+            (Some(sv), Some(svl), Some(a), Some(b)) => (sv, svl, a, b),
+            _ => return Err(ModelError::NotFitted),
         };
 
-        let n_samples = x.nrows();
-        let mut decision_values = Array1::<f64>::zeros(n_samples);
+        // Input validation
+        let (n_samples, n_features) = (x.nrows(), x.ncols());
+        if n_samples == 0 || n_features == 0 {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
 
-        let support_vectors = self.support_vectors.as_ref().unwrap();
-        let support_vector_labels = self.support_vector_labels.as_ref().unwrap();
-        let alphas = self.alphas.as_ref().unwrap();
+        if n_features != support_vectors.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "Input has {} features but model was trained on {} features",
+                n_features,
+                support_vectors.ncols()
+            )));
+        }
+
+        let mut decision_values = Array1::<f64>::zeros(n_samples);
 
         // Computation on each element of decision_values
         let compute_fn = |(i, mut val): (usize, ArrayViewMut0<f64>)| {
@@ -732,7 +742,7 @@ impl SVC {
             let mut start = rand::random_range(0..n_samples);
 
             for _ in 0..n_samples {
-                i1 = (start + 1) % n_samples;
+                i1 = start;
                 if alphas[i1] > 0.0 && alphas[i1] < self.regularization_param && i1 != i2 {
                     if self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
                         return 1;
@@ -744,7 +754,7 @@ impl SVC {
             // Try all alphas randomly
             start = rand::random_range(0..n_samples);
             for _ in 0..n_samples {
-                i1 = (start + 1) % n_samples;
+                i1 = start;
                 if i1 != i2 {
                     if self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
                         return 1;

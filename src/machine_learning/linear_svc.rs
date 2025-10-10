@@ -15,8 +15,7 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// - `bias` - Bias term (intercept) of the model
 /// - `max_iter` - Maximum number of iterations for the optimizer
 /// - `learning_rate` - Learning rate (step size) for gradient descent
-/// - `regularization_param` - Regularization strength parameter
-/// - `penalty` - Regularization type: L1 or L2
+/// - `penalty` - Regularization type (L1 or L2) with strength parameter
 /// - `fit_intercept` - Whether to calculate and use an intercept/bias term
 /// - `tol` - Training convergence tolerance
 /// - `n_iter` - Number of iterations that were actually performed during training
@@ -36,12 +35,11 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// // Create model with custom parameters
 /// let mut model = LinearSVC::new(
-///     1000,                // max_iter
-///     0.001,               // learning_rate
-///     1.0,                 // regularization_param
-///     RegularizationType::L2(0.0),     // penalty type, number here means nothing
-///     true,                // fit_intercept
-///     1e-4                 // tolerance
+///     1000,                           // max_iter
+///     0.001,                          // learning_rate
+///     RegularizationType::L2(1.0),    // penalty type with regularization strength
+///     true,                           // fit_intercept
+///     1e-4                            // tolerance
 /// );
 ///
 /// let x = Array2::from_shape_vec((8, 2), vec![
@@ -70,7 +68,6 @@ pub struct LinearSVC {
     bias: Option<f64>,
     max_iter: usize,
     learning_rate: f64,
-    regularization_param: f64,
     penalty: RegularizationType,
     fit_intercept: bool,
     tol: f64,
@@ -85,8 +82,7 @@ pub struct LinearSVC {
 /// - `bias`: None (not trained)
 /// - `max_iter`: 1000
 /// - `learning_rate`: 0.001
-/// - `regularization_param`: 1.0
-/// - `penalty`: PenaltyType::L2
+/// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
 /// - `fit_intercept`: true
 /// - `tol`: 1e-4
 /// - `n_iter`: None (not trained)
@@ -101,8 +97,7 @@ impl Default for LinearSVC {
             bias: None,
             max_iter: 1000,
             learning_rate: 0.001,
-            regularization_param: 1.0,
-            penalty: RegularizationType::L2(0.0), // the number here means nothing
+            penalty: RegularizationType::L2(1.0),
             fit_intercept: true,
             tol: 1e-4,
             n_iter: None,
@@ -117,8 +112,7 @@ impl LinearSVC {
     ///
     /// - `max_iter`: Maximum number of iterations for the optimizer
     /// - `learning_rate`: Step size for gradient descent updates
-    /// - `regularization_param`: Strength of regularization (higher = stronger)
-    /// - `penalty`: Type of regularization (L1 or L2)
+    /// - `penalty`: Type and strength of regularization (L1(lambda) or L2(lambda))
     /// - `fit_intercept`: Whether to calculate and use bias term
     /// - `tol`: Convergence tolerance that stops training when reached
     ///
@@ -128,7 +122,6 @@ impl LinearSVC {
     pub fn new(
         max_iter: usize,
         learning_rate: f64,
-        regularization_param: f64,
         penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
@@ -138,7 +131,6 @@ impl LinearSVC {
             bias: None,
             max_iter,
             learning_rate,
-            regularization_param,
             penalty,
             fit_intercept,
             tol,
@@ -161,10 +153,14 @@ impl LinearSVC {
             )));
         }
 
-        if self.regularization_param <= 0.0 {
+        // Validate regularization parameter
+        let reg_param = match self.penalty {
+            RegularizationType::L1(lambda) | RegularizationType::L2(lambda) => lambda,
+        };
+        if reg_param < 0.0 {
             return Err(ModelError::InputValidationError(format!(
-                "regularization_param must be greater than 0.0, got {}",
-                self.regularization_param
+                "regularization parameter must be non-negative, got {}",
+                reg_param
             )));
         }
 
@@ -238,7 +234,6 @@ impl LinearSVC {
     get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field_as_ref!(get_weights, weights, Option<&Array1<f64>>);
     get_field!(get_bias, bias, Option<f64>);
-    get_field!(get_regularization_parameter, regularization_param, f64);
     get_field!(get_penalty, penalty, RegularizationType);
 
     /// Trains the model on the provided data.
@@ -308,9 +303,10 @@ impl LinearSVC {
                     let yi = y_binary[idx];
                     let margin = xi.dot(&weights) + bias;
 
+                    // Hinge loss gradient: only contribute if margin violation occurs
                     if yi * margin < 1.0 {
                         let weight_grad = xi.to_owned() * yi;
-                        let bias_grad = if self.fit_intercept { yi } else { 0.0 };
+                        let bias_grad = yi;
                         (weight_grad, bias_grad)
                     } else {
                         (Array1::zeros(n_features), 0.0)
@@ -339,14 +335,17 @@ impl LinearSVC {
                         )
                     };
 
-                // Apply regularization and update weights
+                // Update weights with hinge loss gradient
+                weights = &weights + &(weight_grad_sum * (self.learning_rate / batch_len));
+
+                // Apply regularization
                 match self.penalty {
-                    RegularizationType::L2(_) => {
-                        weights = &weights * (1.0 - self.learning_rate * self.regularization_param)
-                            + &(weight_grad_sum * (self.learning_rate / batch_len));
+                    RegularizationType::L2(lambda) => {
+                        // L2 regularization: gradient is lambda * weights
+                        weights = &weights * (1.0 - self.learning_rate * lambda);
                     }
-                    RegularizationType::L1(_) => {
-                        // L1 regularization subgradient update
+                    RegularizationType::L1(lambda) => {
+                        // L1 regularization: subgradient update
                         let l1_grad = weights.mapv(|w| {
                             if w > 0.0 {
                                 1.0
@@ -356,10 +355,7 @@ impl LinearSVC {
                                 0.0
                             }
                         });
-
-                        weights = &weights
-                            - &(l1_grad * (self.learning_rate * self.regularization_param))
-                            + &(weight_grad_sum * (self.learning_rate / batch_len));
+                        weights = &weights - &(l1_grad * (self.learning_rate * lambda));
                     }
                 }
 
@@ -371,19 +367,22 @@ impl LinearSVC {
                 Self::check_weights_validity(&weights, bias)?;
             }
 
-            // Convergence check
-            let weight_diff = {
-                let diff = &weights - &prev_weights;
-                (diff.iter().map(|&x| x * x).sum::<f64>() / weights.len() as f64).sqrt()
-            };
+            // Convergence check: compute mean squared difference
+            let weight_diff = (&weights - &prev_weights)
+                .iter()
+                .map(|&x| x * x)
+                .sum::<f64>()
+                / n_features as f64;
 
             let bias_diff = if self.fit_intercept {
-                (bias - prev_bias).abs()
+                (bias - prev_bias).powi(2)
             } else {
                 0.0
             };
 
-            if weight_diff < self.tol && bias_diff < self.tol {
+            let total_diff = (weight_diff + bias_diff).sqrt();
+
+            if total_diff < self.tol {
                 break;
             }
 
@@ -396,8 +395,7 @@ impl LinearSVC {
                               y: &Array1<f64>,
                               weights: &Array1<f64>,
                               bias: f64,
-                              penalty: &RegularizationType,
-                              regularization_param: f64|
+                              penalty: &RegularizationType|
          -> f64 {
             let n_samples = x.nrows() as f64;
 
@@ -414,25 +412,18 @@ impl LinearSVC {
 
             // Calculate regularization term
             let regularization_term = match penalty {
-                RegularizationType::L2(_) => {
-                    regularization_param * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
+                RegularizationType::L2(lambda) => {
+                    lambda * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
                 }
-                RegularizationType::L1(_) => {
-                    regularization_param * weights.iter().map(|&w| w.abs()).sum::<f64>()
+                RegularizationType::L1(lambda) => {
+                    lambda * weights.iter().map(|&w| w.abs()).sum::<f64>()
                 }
             };
 
             hinge_loss + regularization_term
         };
 
-        let final_cost = calculate_cost(
-            x,
-            &y_binary,
-            &weights,
-            bias,
-            &self.penalty,
-            self.regularization_param,
-        );
+        let final_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
 
         println!(
             "Linear SVC model computing finished at iteration {}, cost: {}",

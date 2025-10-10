@@ -284,7 +284,7 @@ impl IsolationForest {
 
     /// Computes the anomaly score for a single sample.
     ///
-    /// The anomaly score is normalized to the range [0, 1], where values close to 1
+    /// The anomaly score is normalized to the range \[0, 1\], where values close to 1
     /// indicate anomalies and values close to 0 indicate normal samples.
     ///
     /// # Parameters

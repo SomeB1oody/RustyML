@@ -311,11 +311,21 @@ impl DecisionTree {
 
         self.n_features = x.ncols();
 
-        // For classification, determine number of classes
+        // For classification, determine number of classes and validate labels
         if self.is_classifier {
             let max_class = y.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).ok_or(
                 ModelError::ProcessingError("Cannot determine max class".to_string()),
             )?;
+
+            // Validate that all labels are non-negative integers
+            for &label in y.iter() {
+                if label < 0.0 || label.fract() != 0.0 {
+                    return Err(ModelError::InputValidationError(
+                        "Class labels must be non-negative integers starting from 0".to_string(),
+                    ));
+                }
+            }
+
             self.n_classes = Some((*max_class as usize) + 1);
         }
 
@@ -428,14 +438,9 @@ impl DecisionTree {
                         + (n_right / n_samples) * right_impurity;
                     let impurity_decrease = parent_impurity - weighted_impurity;
 
-                    // Information gain for ID3 and C4.5
-                    let gain = match self.algorithm {
-                        Algorithm::ID3 | Algorithm::C45 => impurity_decrease,
-                        Algorithm::CART => impurity_decrease,
-                    };
-
-                    if gain > best_feature_gain {
-                        best_feature_gain = gain;
+                    // Use impurity decrease as the gain metric for all algorithms
+                    if impurity_decrease > best_feature_gain {
+                        best_feature_gain = impurity_decrease;
                         best_feature_split = Some((
                             feature_idx,
                             threshold,
@@ -655,11 +660,17 @@ impl DecisionTree {
             if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
-                    .map(|row| self.predict_one(row.as_slice().unwrap()))
+                    .map(|row| {
+                        let row_slice = row.to_vec();
+                        self.predict_one(&row_slice)
+                    })
                     .collect()
             } else {
                 x.axis_iter(Axis(0))
-                    .map(|row| self.predict_one(row.as_slice().unwrap()))
+                    .map(|row| {
+                        let row_slice = row.to_vec();
+                        self.predict_one(&row_slice)
+                    })
                     .collect()
             };
 
@@ -719,11 +730,17 @@ impl DecisionTree {
             if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
-                    .map(|row| self.predict_proba_one(row.as_slice().unwrap()))
+                    .map(|row| {
+                        let row_slice = row.to_vec();
+                        self.predict_proba_one(&row_slice)
+                    })
                     .collect()
             } else {
                 x.axis_iter(Axis(0))
-                    .map(|row| self.predict_proba_one(row.as_slice().unwrap()))
+                    .map(|row| {
+                        let row_slice = row.to_vec();
+                        self.predict_proba_one(&row_slice)
+                    })
                     .collect()
             };
 
@@ -771,7 +788,8 @@ impl DecisionTree {
     fn get_probabilities(&self, node: &Node, x: &[f64]) -> Result<Vec<f64>, ModelError> {
         match &node.node_type {
             NodeType::Leaf { probabilities, .. } => probabilities
-                .clone()
+                .as_ref()
+                .cloned()
                 .ok_or(ModelError::TreeError("No probabilities in leaf node")),
             NodeType::Internal {
                 feature_index,

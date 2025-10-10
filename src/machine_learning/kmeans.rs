@@ -1,4 +1,5 @@
 use super::*;
+use ndarray_rand::rand::{RngCore, thread_rng};
 use std::ops::AddAssign;
 
 /// Threshold for parallelization in KMeans clustering.
@@ -161,10 +162,9 @@ impl KMeans {
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_random_seed, random_seed, Option<u64>);
-    get_field!(get_n_iter, n_iter, Option<usize>);
+    get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field_as_ref!(get_labels, labels, Option<&Array1<usize>>);
     get_field!(get_inertia, inertia, Option<f64>);
-    get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
     /// Finds the closest centroid to a given data point and returns its index and distance.
@@ -213,7 +213,7 @@ impl KMeans {
 
         let mut rng = match self.random_seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::seed_from_u64(0),
+            None => StdRng::seed_from_u64(thread_rng().next_u64()),
         };
 
         // K-means++ initialization method
@@ -299,7 +299,7 @@ impl KMeans {
         self.init_centroids(data)?;
 
         let mut labels = Array1::<usize>::zeros(n_samples);
-        let mut old_inertia = f64::MAX;
+        let mut prev_inertia: Option<f64> = None;
         let mut iter_count = 0;
 
         // Pre-allocate arrays for cluster updates to avoid repeated allocations
@@ -347,8 +347,6 @@ impl KMeans {
             let results = results?;
 
             // Update labels and compute centroids in a single pass
-
-            // Update labels and compute centroids in a single pass
             let mut inertia = 0.0;
             for (sample_idx, &(cluster_idx, dist)) in results.iter().enumerate() {
                 labels[sample_idx] = cluster_idx;
@@ -360,13 +358,16 @@ impl KMeans {
                 counts[cluster_idx] += 1;
             }
 
-            // Check convergence condition early
-            if (old_inertia - inertia).abs() < self.tol * old_inertia.max(self.tol) {
-                iter_count = i;
-                break;
+            // Check convergence condition
+            if let Some(prev) = prev_inertia {
+                if (prev - inertia).abs() < self.tol * prev.max(self.tol) {
+                    iter_count = i + 1;
+                    self.inertia = Some(inertia);
+                    break;
+                }
             }
-            old_inertia = inertia;
-            iter_count = i;
+            prev_inertia = Some(inertia);
+            iter_count = i + 1;
 
             // Calculate the mean for each cluster center using parallel processing
             new_centroids
@@ -380,58 +381,52 @@ impl KMeans {
                     }
                 });
 
-            // Handle empty clusters: for empty clusters, select the point furthest from current centers as new center
+            // Handle empty clusters: for empty clusters, select the point furthest from its assigned centroid
             for (cluster_idx, &count) in counts.iter().enumerate() {
                 if count == 0 {
-                    // Find the sample with maximum distance to its closest centroid
-                    let result: Result<(usize, f64), ModelError> = data
-                        .outer_iter()
-                        .into_par_iter()
+                    // Find the sample with maximum distance to its assigned centroid
+                    let result: Result<Option<usize>, ModelError> = results
+                        .iter()
                         .enumerate()
-                        .map(|(sample_idx, sample)| -> Result<(usize, f64), ModelError> {
-                            let distances: Vec<f64> = self
-                                .centroids
-                                .as_ref()
-                                .unwrap()
-                                .outer_iter()
-                                .enumerate()
-                                .filter(|&(idx, _)| idx != cluster_idx) // Exclude the empty cluster
-                                .map(|(_, centroid)| {
-                                    squared_euclidean_distance_row(sample, centroid)
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
+                        .try_fold(
+                            None,
+                            |acc, (sample_idx, &(assigned_cluster, dist))| match acc {
+                                None => Ok(Some((sample_idx, assigned_cluster, dist))),
+                                Some((best_idx, best_cluster, best_dist)) => {
+                                    if dist > best_dist {
+                                        Ok(Some((sample_idx, assigned_cluster, dist)))
+                                    } else {
+                                        Ok(Some((best_idx, best_cluster, best_dist)))
+                                    }
+                                }
+                            },
+                        )
+                        .map(|opt| opt.map(|(idx, _, _)| idx));
 
-                            let min_dist = distances.into_iter().fold(f64::MAX, f64::min);
-
-                            Ok((sample_idx, min_dist))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .map(|vec| {
-                            vec.into_iter()
-                                .reduce(|acc, curr| if curr.1 > acc.1 { curr } else { acc })
-                                .unwrap_or((0, -1.0))
-                        });
-
-                    let (farthest_idx, _) = result?;
-
-                    new_centroids
-                        .row_mut(cluster_idx)
-                        .assign(&data.row(farthest_idx));
+                    if let Some(farthest_idx) = result? {
+                        new_centroids
+                            .row_mut(cluster_idx)
+                            .assign(&data.row(farthest_idx));
+                    } else {
+                        // Fallback: if no samples exist (shouldn't happen), keep the old centroid
+                        new_centroids
+                            .row_mut(cluster_idx)
+                            .assign(&self.centroids.as_ref().unwrap().row(cluster_idx));
+                    }
                 }
             }
 
-            self.centroids = Some(new_centroids.clone());
+            self.centroids = Some(new_centroids);
+            // Re-allocate for next iteration if needed
+            new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
         }
 
         self.labels = Some(labels);
-        self.inertia = Some(old_inertia);
-        self.n_iter = Some(iter_count + 1);
-
-        println!(
-            "KMeans model computing finished at iteration {}, cost: {}",
-            iter_count + 1,
-            old_inertia
-        );
+        // Set inertia if not already set (i.e., if max_iter was reached without convergence)
+        if self.inertia.is_none() {
+            self.inertia = prev_inertia;
+        }
+        self.n_iter = Some(iter_count);
 
         Ok(self)
     }

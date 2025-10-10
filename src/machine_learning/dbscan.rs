@@ -221,14 +221,13 @@ impl DBSCAN {
 
             // Expand cluster (the expansion process is still sequential)
             while let Some(q) = seeds.pop_front() {
-                // Skip if q has already been assigned to another cluster
-                if labels[q] >= 0 && labels[q] != cluster_id {
+                // If already processed in this cluster, skip
+                if labels[q] == cluster_id {
                     continue;
                 }
 
-                if labels[q] == -1 {
-                    labels[q] = cluster_id;
-                }
+                // Assign to current cluster (could be noise or unvisited)
+                labels[q] = cluster_id;
 
                 let q_neighbors = self.region_query(data, q).map_err(|e| {
                     ModelError::ProcessingError(format!(
@@ -240,9 +239,8 @@ impl DBSCAN {
                 if q_neighbors.len() >= self.min_samples {
                     core_samples.insert(q);
                     for r in q_neighbors {
-                        if labels[r] == -1 {
+                        if labels[r] != cluster_id {
                             seeds.push_back(r);
-                            labels[r] = cluster_id;
                         }
                     }
                 }
@@ -257,8 +255,6 @@ impl DBSCAN {
                 ));
             }
         }
-
-        println!("DBSCAN model computing finished");
 
         self.labels_ = Some(labels);
         // Convert HashSet to sorted Vec for consistent ordering
@@ -319,8 +315,6 @@ impl DBSCAN {
             return Ok(Array1::from(vec![]));
         }
 
-        let eps_squared = self.eps * self.eps;
-
         // Create a set for faster core sample lookup
         let core_set: AHashSet<usize> = core_samples.iter().copied().collect();
 
@@ -330,7 +324,7 @@ impl DBSCAN {
             .into_iter()
             .par_bridge() // Convert sequential iterator to parallel iterator
             .map(|row| -> Result<i32, ModelError> {
-                let mut min_dist_squared = f64::MAX;
+                let mut min_dist = f64::MAX;
                 let mut closest_label = -1;
 
                 // Find the closest classified data point
@@ -339,25 +333,30 @@ impl DBSCAN {
                         continue; // Skip noise points
                     }
 
-                    let squared_dist = squared_euclidean_distance_row(row, orig_row)?;
+                    let dist = self.compute_distance(row, orig_row)?;
 
                     // Check if distance computation is valid
-                    if squared_dist.is_nan() || squared_dist.is_infinite() {
+                    if dist.is_nan() || dist.is_infinite() {
                         continue;
                     }
 
                     // If a core point is found within eps range, assign its label directly
-                    if squared_dist <= eps_squared && core_set.contains(&j) {
+                    if dist <= self.eps && core_set.contains(&j) {
                         return Ok(labels[j]);
                     }
 
-                    if squared_dist < min_dist_squared {
-                        min_dist_squared = squared_dist;
+                    if dist < min_dist {
+                        min_dist = dist;
                         closest_label = labels[j];
                     }
                 }
 
-                Ok(closest_label)
+                // Only assign to closest cluster if within eps distance, otherwise mark as noise
+                if min_dist <= self.eps {
+                    Ok(closest_label)
+                } else {
+                    Ok(-1)
+                }
             })
             .collect();
 

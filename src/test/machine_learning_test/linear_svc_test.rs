@@ -13,16 +13,14 @@ fn test_new() {
     let model = LinearSVC::new(
         100,                         // max_iter
         0.01,                        // learning_rate
-        0.1,                         // regularization_param
-        RegularizationType::L2(0.0), // penalty
+        RegularizationType::L2(0.1), // penalty with regularization strength
         true,                        // fit_intercept
         1e-4,                        // tol
     );
 
     assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_learning_rate(), 0.01);
-    assert_eq!(model.get_regularization_parameter(), 0.1);
-    assert!(matches!(model.get_penalty(), RegularizationType::L2(0.0)));
+    assert!(matches!(model.get_penalty(), RegularizationType::L2(0.1)));
     assert!(model.get_fit_intercept());
     assert_eq!(model.get_tolerance(), 1e-4);
 }
@@ -61,12 +59,11 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     ]);
 
     let mut model = LinearSVC::new(
-        10000,                       // max_iter
-        0.1,                         // learning_rate
-        1.0,                         // regularization_param
-        RegularizationType::L2(0.0), // penalty
-        true,                        // fit_intercept
-        1e-4,                        // tol
+        10000,                        // max_iter
+        0.1,                          // learning_rate
+        RegularizationType::L2(0.01), // penalty with regularization strength
+        true,                         // fit_intercept
+        1e-4,                         // tol
     );
 
     // Fit the model
@@ -148,10 +145,10 @@ fn test_decision_function() -> Result<(), ModelError> {
 #[test]
 fn test_different_penalties() {
     // Test with L1 penalty
-    let mut model_l1 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L1(0.0), true, 1e-4);
+    let mut model_l1 = LinearSVC::new(100, 0.01, RegularizationType::L1(0.1), true, 1e-4);
 
     // Test with L2 penalty
-    let mut model_l2 = LinearSVC::new(100, 0.01, 0.1, RegularizationType::L2(0.0), true, 1e-4);
+    let mut model_l2 = LinearSVC::new(100, 0.01, RegularizationType::L2(0.1), true, 1e-4);
 
     // Simple dataset
     let x = arr2(&[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]);

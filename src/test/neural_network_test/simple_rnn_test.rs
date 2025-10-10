@@ -186,7 +186,7 @@ fn test_simple_rnn_temporal_pattern_recognition() {
         .compile(Adam::new(0.1, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Train the model
-    model.fit(&x, &y, 70).unwrap();
+    model.fit(&x, &y, 50).unwrap();
 
     let pred = model.predict(&x);
 

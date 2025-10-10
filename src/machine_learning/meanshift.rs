@@ -396,13 +396,9 @@ impl MeanShift {
 
                 let kernel_sum = kernel_sum?;
 
-                // Avoid log(0) by adding small epsilon
-                let density = kernel_sum / centers.len() as f64;
-                if density > 1e-15 {
-                    Ok(density.ln())
-                } else {
-                    Ok((-15.0_f64).ln()) // log(1e-15)
-                }
+                // Avoid log(0) by clamping to minimum density
+                let density = (kernel_sum / centers.len() as f64).max(1e-15);
+                Ok(density.ln())
             };
 
             // Calculate the negative log-likelihood
@@ -512,10 +508,11 @@ impl MeanShift {
     /// # Returns
     ///
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Err(ModelError::NotFitted)` - If fitting succeeded but labels were not set
     pub fn fit_predict(&mut self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
         self.fit(x)?;
-        Ok(self.labels.clone().unwrap())
+        self.labels.clone().ok_or(ModelError::NotFitted)
     }
 
     /// Generates initial seeds for the clustering algorithm using binning.
@@ -531,16 +528,14 @@ impl MeanShift {
         let n_samples = x.shape()[0];
         let n_features = x.shape()[1];
 
-        // Calculate min and max for each feature in parallel
-        let (mins, _): (Vec<f64>, Vec<f64>) = (0..n_features)
+        // Calculate min for each feature in parallel
+        let mins: Vec<f64> = (0..n_features)
             .into_par_iter()
             .map(|j| {
                 let col = x.column(j);
-                let min = col.fold(f64::INFINITY, |a, &b| a.min(b));
-                let max = col.fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                (min, max)
+                col.fold(f64::INFINITY, |a, &b| a.min(b))
             })
-            .unzip();
+            .collect();
 
         // Create grid - this part is harder to parallelize due to shared HashMap
         let bin_size = self.bandwidth;

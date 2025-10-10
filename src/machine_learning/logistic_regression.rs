@@ -206,6 +206,7 @@ impl LogisticRegression {
         while n_iter < self.max_iter {
             n_iter += 1;
 
+            // Compute linear predictions (reuse for both gradient and loss calculation)
             let predictions = x_train_view.dot(&weights);
 
             // Compute sigmoid activation with conditional parallelization
@@ -222,7 +223,7 @@ impl LogisticRegression {
             };
 
             // Calculate prediction errors
-            let errors = sigmoid_preds - y;
+            let errors = &sigmoid_preds - &y;
 
             // Calculate gradients
             let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
@@ -254,9 +255,8 @@ impl LogisticRegression {
             // Update weights
             weights = &weights - self.learning_rate * &gradients;
 
-            // Calculate loss - propagate error from logistic_loss
-            let raw_preds = x_train_view.dot(&weights);
-            let mut cost = logistic_loss(raw_preds.view(), y.view())?;
+            // Calculate loss using existing predictions
+            let mut cost = logistic_loss(predictions.view(), y.view())?;
 
             if let Some(reg_type) = &self.regularization_type {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -300,7 +300,7 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix where each row is a sample and each column is a feature
+    /// * `x` - Feature matrix where each row is a sample and each column is a feature (without bias term)
     ///
     /// # Returns
     ///
@@ -323,16 +323,14 @@ impl LogisticRegression {
             ));
         }
 
-        // Prepare test data with optional bias term
-        let x_test = if self.fit_intercept {
+        // Prepare test data with optional bias term and compute probabilities
+        let probs = if self.fit_intercept {
             let mut x_with_bias = Array2::ones((n_samples, n_features + 1));
             x_with_bias.slice_mut(s![.., 1..]).assign(&x);
-            x_with_bias
+            self.predict_proba(&x_with_bias.view())?
         } else {
-            x.to_owned()
+            self.predict_proba(&x)?
         };
-
-        let probs = self.predict_proba(&x_test.view())?;
 
         // Check if probabilities contain invalid values
         if probs.iter().any(|&val| !val.is_finite()) {
@@ -351,31 +349,29 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix view where each row is a sample and each column is a feature
+    /// * `x` - Feature matrix view where each row is a sample and each column is a feature (with bias if fit_intercept=true)
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<f64>)`A 1D array containing the probability of each sample belonging to the positive class
+    /// - `Ok(Array1<f64>)` - A 1D array containing the probability of each sample belonging to the positive class
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     fn predict_proba(&self, x: &ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
         use crate::math::sigmoid;
 
         if let Some(weights) = &self.weights {
-            let predictions = x.dot(weights);
+            let mut predictions = x.dot(weights);
 
-            // Apply sigmoid with conditional parallelization
+            // Apply sigmoid with conditional parallelization (mutate in place)
             let n_samples = predictions.len();
-            let result = if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
+            if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
                 // Parallel computation for large datasets
-                let mut preds = predictions;
-                preds.par_mapv_inplace(|x| sigmoid(x));
-                preds
+                predictions.par_mapv_inplace(|x| sigmoid(x));
             } else {
                 // Sequential computation for small datasets
-                predictions.mapv(|x| sigmoid(x))
-            };
+                predictions.mapv_inplace(|x| sigmoid(x));
+            }
 
-            Ok(result)
+            Ok(predictions)
         } else {
             Err(ModelError::NotFitted)
         }
