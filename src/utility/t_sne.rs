@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::binary_search_sigma;
 use rand_distr::StandardNormal;
 
 /// Threshold for determining whether to use parallel computation in t-SNE.
@@ -40,7 +41,7 @@ const TSNE_PARALLEL_THRESHOLD: usize = 1000;
 /// // `embedding` now contains 100 samples in 3 dimensions
 /// assert_eq!(embedding.shape(), &[100, 3]);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TSNE {
     perplexity: f64,
     learning_rate: f64,
@@ -504,70 +505,6 @@ impl TSNE {
 
         Ok(grad)
     }
-}
 
-/// Finds the appropriate sigma value for a single sample's distances to achieve target perplexity.
-///
-/// This function uses binary search to find a precision parameter (sigma) that makes the
-/// perplexity of the conditional probability distribution match the target value.
-///
-/// # Parameters
-///
-/// - `distances` - Vector of squared Euclidean distances from a point to all others.
-/// - `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
-///
-/// # Returns
-///
-/// * `(Array1<f64>, f64)` - A tuple containing:
-///   - The normalized probability distribution
-///   - The found sigma value that achieves the target perplexity
-fn binary_search_sigma(distances: ArrayView1<f64>, target_perplexity: f64) -> (Array1<f64>, f64) {
-    let tol = 1e-5;
-    let mut sigma_min: f64 = 1e-20;
-    let mut sigma_max: f64 = 1e20;
-    let mut sigma: f64 = 1.0;
-    let n = distances.len();
-    let mut p = Array1::<f64>::zeros(n);
-
-    for _ in 0..50 {
-        for (j, &d) in distances.iter().enumerate() {
-            p[j] = if d == 0.0 {
-                0.0
-            } else {
-                (-d / (2.0 * sigma * sigma)).exp()
-            };
-        }
-
-        let sum_p = p.sum();
-        let epsilon = 1e-12;
-
-        if sum_p < epsilon {
-            // If sum is too small, use uniform distribution
-            p.fill(1.0 / n as f64);
-        } else {
-            p.par_mapv_inplace(|v| v / sum_p);
-        }
-
-        let h: f64 = p
-            .iter()
-            .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
-            .sum();
-        let current_perplexity = h.exp();
-        let diff = current_perplexity - target_perplexity;
-        if diff.abs() < tol {
-            break;
-        }
-        if diff > 0.0 {
-            sigma_min = sigma;
-            if sigma_max.is_infinite() {
-                sigma *= 2.0;
-            } else {
-                sigma = (sigma + sigma_max) / 2.0;
-            }
-        } else {
-            sigma_max = sigma;
-            sigma = (sigma + sigma_min) / 2.0;
-        }
-    }
-    (p, sigma)
+    model_save_and_load_methods!(TSNE);
 }

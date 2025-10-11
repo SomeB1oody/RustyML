@@ -57,7 +57,7 @@ const PCA_PARALLEL_THRESHOLD: usize = 64;
 /// - Data visualization: Project data to 2 or 3 dimensions for visualization
 /// - Feature extraction: Extract the most important features from the dataset
 /// - Noise filtering: Remove noise by discarding components with low variance
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PCA {
     n_components: usize,
     components: Option<Array2<f64>>,
@@ -306,4 +306,6 @@ impl PCA {
 
         Ok(x_restored)
     }
+
+    model_save_and_load_methods!(PCA);
 }

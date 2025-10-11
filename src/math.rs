@@ -1,6 +1,6 @@
 use crate::error::ModelError;
 use ahash::AHashMap;
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 
@@ -913,4 +913,86 @@ pub fn c(n: usize) -> f64 {
     };
 
     2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
+}
+
+/// Finds the appropriate sigma value for a single sample's distances to achieve target perplexity.
+///
+/// This function uses binary search to find a precision parameter (sigma) that makes the
+/// perplexity of the conditional probability distribution match the target value.
+///
+/// # Parameters
+///
+/// - `distances` - Vector of squared Euclidean distances from a point to all others.
+/// - `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
+///
+/// # Returns
+///
+/// * `(Array1<f64>, f64)` - A tuple containing:
+///   - The normalized probability distribution
+///   - The found sigma value that achieves the target perplexity
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::binary_search_sigma;
+///
+/// let distances = array![0.0, 1.0, 4.0, 9.0, 16.0];
+/// let target_perplexity = 2.0;
+/// let (probabilities, sigma) = binary_search_sigma(distances.view(), target_perplexity);
+/// // The function returns probabilities and sigma that achieve the target perplexity
+/// assert_eq!(probabilities.len(), 5);
+/// assert!(sigma > 0.0);
+/// ```
+pub fn binary_search_sigma(
+    distances: ArrayView1<f64>,
+    target_perplexity: f64,
+) -> (Array1<f64>, f64) {
+    let tol = 1e-5;
+    let mut sigma_min: f64 = 1e-20;
+    let mut sigma_max: f64 = 1e20;
+    let mut sigma: f64 = 1.0;
+    let n = distances.len();
+    let mut p = Array1::<f64>::zeros(n);
+
+    for _ in 0..50 {
+        for (j, &d) in distances.iter().enumerate() {
+            p[j] = if d == 0.0 {
+                0.0
+            } else {
+                (-d / (2.0 * sigma * sigma)).exp()
+            };
+        }
+
+        let sum_p = p.sum();
+        let epsilon = 1e-12;
+
+        if sum_p < epsilon {
+            // If sum is too small, use uniform distribution
+            p.fill(1.0 / n as f64);
+        } else {
+            p.par_mapv_inplace(|v| v / sum_p);
+        }
+
+        let h: f64 = p
+            .iter()
+            .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
+            .sum();
+        let current_perplexity = h.exp();
+        let diff = current_perplexity - target_perplexity;
+        if diff.abs() < tol {
+            break;
+        }
+        if diff > 0.0 {
+            sigma_min = sigma;
+            if sigma_max.is_infinite() {
+                sigma *= 2.0;
+            } else {
+                sigma = (sigma + sigma_max) / 2.0;
+            }
+        } else {
+            sigma_max = sigma;
+            sigma = (sigma + sigma_min) / 2.0;
+        }
+    }
+    (p, sigma)
 }

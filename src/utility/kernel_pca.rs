@@ -52,7 +52,7 @@ use super::*;
 /// assert_eq!(new_transformed.ncols(), 2);
 /// assert_eq!(new_transformed.nrows(), 2);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelPCA {
     kernel: KernelType,
     n_components: usize,
@@ -388,4 +388,6 @@ impl KernelPCA {
         self.fit(x)?;
         self.transform(x)
     }
+
+    model_save_and_load_methods!(KernelPCA);
 }

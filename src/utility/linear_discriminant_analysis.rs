@@ -36,7 +36,7 @@ const LDA_PARALLEL_THRESHOLD: usize = 100;
 /// // Transform data to lower dimension
 /// let x_transformed = lda.transform(x.view(), 1).unwrap();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LDA {
     classes: Option<Array1<i32>>,
     priors: Option<Array1<f64>>,
@@ -459,4 +459,6 @@ impl LDA {
         self.fit(x, y)?;
         Ok(self.transform(x, n_components)?)
     }
+
+    model_save_and_load_methods!(LDA);
 }
