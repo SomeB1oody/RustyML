@@ -9,6 +9,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add serialization and deserialization support across ML models, add `save_to_path` and `load_from_path` functions for ML models
 - Add serialization and deserialization support in the utility module, add `save_to_path` and `load_from_path` functions in the utility module
+- Add serialization and deserialization support for neural network layers, add `save_to_path` and `load_from_path` functions for `Sequential` model
 
 ## [v0.8.0] - 2025-10-9 (UTC-7)
 ### Added

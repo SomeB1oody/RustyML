@@ -5,7 +5,7 @@ use super::*;
 /// This trait provides the core functionality that all neural network layers must implement,
 /// including forward and backward propagation, as well as parameter updates for different
 /// optimization algorithms
-pub trait Layer {
+pub trait Layer: std::any::Any {
     /// Performs forward propagation through the layer.
     ///
     /// # Parameters
@@ -145,4 +145,28 @@ pub trait Optimizer {
     ///
     /// * `layer` - The layer whose parameters should be updated
     fn update(&mut self, layer: &mut dyn Layer);
+}
+
+/// Trait for applying serialized weights to a specific layer type.
+///
+/// This trait is implemented by serializable weight structures to apply
+/// their contained weights to the corresponding layer type. It provides
+/// a uniform interface for weight deserialization and application across
+/// all layer types.
+///
+/// # Type Parameters
+///
+/// * `L` - The layer type that these weights can be applied to
+pub trait ApplyWeights<L> {
+    /// Applies the serialized weights to a layer instance.
+    ///
+    /// # Parameters
+    ///
+    /// * `layer` - Mutable reference to the layer that will receive the weights
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - Weights were successfully applied
+    /// - `Err(IoError)` - Weight shape mismatch or conversion error
+    fn apply_to_layer(&self, layer: &mut L) -> Result<(), IoError>;
 }

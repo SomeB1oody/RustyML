@@ -181,6 +181,17 @@ impl Conv3D {
         ]
     }
 
+    /// Sets the weights and bias for this layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `weights` - 5D array of filter weights with shape [filters, channels, kernel_depth, kernel_height, kernel_width]
+    /// - `bias` - 2D array of bias values with shape [1, filters]
+    pub fn set_weights(&mut self, weights: Array5<f32>, bias: Array2<f32>) {
+        self.weights = weights;
+        self.bias = bias;
+    }
+
     /// Applies 3D convolution operation to the input.
     fn conv3d(&self, input: ArrayView5<f32>) -> Array5<f32> {
         let input_shape = input.shape();

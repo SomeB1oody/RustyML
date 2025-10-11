@@ -1,3 +1,5 @@
+use ndarray::prelude::*;
+
 /// Container for different types of neural network layer weights
 ///
 /// This enum serves as a polymorphic container for the weights of various
@@ -32,8 +34,8 @@ pub enum LayerWeight<'a> {
 /// - `weight` - Weight matrix with shape (input_features, output_features)
 /// - `bias` - Bias vector with shape (1, output_features)
 pub struct DenseLayerWeight<'a> {
-    pub weight: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub weight: &'a Array2<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a simple recurrent neural network layer
@@ -44,9 +46,9 @@ pub struct DenseLayerWeight<'a> {
 /// - `recurrent_kernel` - Weight matrix for recurrent connections
 /// - `bias` - Bias vector
 pub struct SimpleRNNLayerWeight<'a> {
-    pub kernel: &'a ndarray::Array2<f32>,
-    pub recurrent_kernel: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub kernel: &'a Array2<f32>,
+    pub recurrent_kernel: &'a Array2<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a single gate in an LSTM layer
@@ -57,9 +59,9 @@ pub struct SimpleRNNLayerWeight<'a> {
 /// - `recurrent_kernel` - Weight matrix for recurrent connections
 /// - `bias` - Bias vector for the gate
 pub struct LSTMGateWeight<'a> {
-    pub kernel: &'a ndarray::Array2<f32>,
-    pub recurrent_kernel: &'a ndarray::Array2<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub kernel: &'a Array2<f32>,
+    pub recurrent_kernel: &'a Array2<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a Long Short-Term Memory (LSTM) layer
@@ -87,8 +89,8 @@ pub struct LSTMLayerWeight<'a> {
 /// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
 /// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv1DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array3<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub weight: &'a Array3<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D convolutional layer
@@ -98,8 +100,8 @@ pub struct Conv1DLayerWeight<'a> {
 /// - `weight` - 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
 /// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv2DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array4<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub weight: &'a Array4<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 3D convolutional layer
@@ -109,8 +111,8 @@ pub struct Conv2DLayerWeight<'a> {
 /// - `weight` - 5D convolution kernel with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
 /// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv3DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array5<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub weight: &'a Array5<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D separable convolutional layer
@@ -121,9 +123,9 @@ pub struct Conv3DLayerWeight<'a> {
 /// - `pointwise_weight` - 4D weight tensor for pointwise (1x1) convolution filters with shape (output_filters, input_channels * depth_multiplier, 1, 1)
 /// - `bias` - Bias vector with shape (1, output_filters)
 pub struct SeparableConv2DLayerWeight<'a> {
-    pub depthwise_weight: &'a ndarray::Array4<f32>,
-    pub pointwise_weight: &'a ndarray::Array4<f32>,
-    pub bias: &'a ndarray::Array2<f32>,
+    pub depthwise_weight: &'a Array4<f32>,
+    pub pointwise_weight: &'a Array4<f32>,
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D depthwise convolutional layer
@@ -133,6 +135,6 @@ pub struct SeparableConv2DLayerWeight<'a> {
 /// - `weight` - 4D weight tensor for depthwise filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
 /// - `bias` - Bias vector with shape (one bias per input channel)
 pub struct DepthwiseConv2DLayerWeight<'a> {
-    pub weight: &'a ndarray::Array4<f32>,
-    pub bias: &'a ndarray::Array1<f32>,
+    pub weight: &'a Array4<f32>,
+    pub bias: &'a Array1<f32>,
 }

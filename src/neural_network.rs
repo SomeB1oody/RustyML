@@ -18,7 +18,7 @@ pub use optimizer::*;
 pub use sequential::*;
 pub use traits::*;
 
-use crate::error::ModelError;
+use crate::error::{IoError, ModelError};
 use ndarray::prelude::*;
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network

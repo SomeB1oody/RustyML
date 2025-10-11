@@ -193,6 +193,17 @@ impl DepthwiseConv2D {
             }
         }
     }
+
+    /// Sets the weights and bias for this layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
+    /// - `bias` - 1D bias vector with shape \[filters\]
+    pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) {
+        self.weights = weights;
+        self.bias = bias;
+    }
 }
 
 impl Layer for DepthwiseConv2D {

@@ -206,6 +206,49 @@ impl LSTM {
             activation,
         }
     }
+
+    /// Sets the weights for all four gates in this LSTM layer.
+    ///
+    /// # Parameters
+    ///
+    /// Each gate requires three arrays:
+    /// - `kernel` - Weight matrix connecting inputs with shape (input_dim, units)
+    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
+    /// - `bias` - Bias vector with shape (1, units)
+    ///
+    /// The parameters are provided for each of the four gates in order:
+    /// input gate, forget gate, cell gate, output gate
+    pub fn set_weights(
+        &mut self,
+        input_kernel: Array2<f32>,
+        input_recurrent_kernel: Array2<f32>,
+        input_bias: Array2<f32>,
+        forget_kernel: Array2<f32>,
+        forget_recurrent_kernel: Array2<f32>,
+        forget_bias: Array2<f32>,
+        cell_kernel: Array2<f32>,
+        cell_recurrent_kernel: Array2<f32>,
+        cell_bias: Array2<f32>,
+        output_kernel: Array2<f32>,
+        output_recurrent_kernel: Array2<f32>,
+        output_bias: Array2<f32>,
+    ) {
+        self.input_gate.kernel = input_kernel;
+        self.input_gate.recurrent_kernel = input_recurrent_kernel;
+        self.input_gate.bias = input_bias;
+
+        self.forget_gate.kernel = forget_kernel;
+        self.forget_gate.recurrent_kernel = forget_recurrent_kernel;
+        self.forget_gate.bias = forget_bias;
+
+        self.cell_gate.kernel = cell_kernel;
+        self.cell_gate.recurrent_kernel = cell_recurrent_kernel;
+        self.cell_gate.bias = cell_bias;
+
+        self.output_gate.kernel = output_kernel;
+        self.output_gate.recurrent_kernel = output_recurrent_kernel;
+        self.output_gate.bias = output_bias;
+    }
 }
 
 impl Layer for LSTM {

@@ -205,6 +205,17 @@ impl Conv1D {
         (pad_total, pad_left)
     }
 
+    /// Sets the weights and bias for this layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `weights` - 3D array of filter weights with shape [filters, channels, kernel_size]
+    /// - `bias` - 2D array of bias values with shape [1, filters]
+    pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array2<f32>) {
+        self.weights = weights;
+        self.bias = bias;
+    }
+
     /// Convert padded input position to original input position.
     fn get_original_input_pos(&self, padded_pos: usize, input_length: usize) -> Option<usize> {
         match self.padding {

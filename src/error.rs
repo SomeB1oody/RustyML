@@ -1,4 +1,14 @@
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utility"
+))]
 use std::fs::File;
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utility"
+))]
 use std::io::BufReader;
 
 /// Error types that can occur during model operations

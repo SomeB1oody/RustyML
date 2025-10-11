@@ -284,22 +284,22 @@ macro_rules! layer_functions_global_pooling {
     };
 }
 
-/// 1D Average Pooling layer for neural networks.
+/// 1D Average Pooling layer for neural networks
 pub mod average_pooling_1d;
-/// A 2D average pooling layer for neural networks.
+/// A 2D average pooling layer for neural networks
 pub mod average_pooling_2d;
 /// 3D Average Pooling Layer
 pub mod average_pooling_3d;
-/// A 1D convolutional layer for neural networks.
+/// A 1D convolutional layer for neural networks
 pub mod conv1d;
-/// A 2D convolutional layer for neural networks.
+/// A 2D convolutional layer for neural networks
 pub mod conv2d;
 /// A 3D convolutional layer for neural networks
 pub mod conv3d;
-/// Dense (Fully Connected) layer implementation for neural networks.
+/// Dense (Fully Connected) layer implementation for neural networks
 pub mod dense;
 pub mod depthwise_conv2d;
-/// A layer that flattens a 4D tensor into a 2D tensor.
+/// A layer that flattens a 4D tensor into a 2D tensor
 pub mod flatten;
 /// Global Average Pooling 1D Layer
 pub mod global_average_pooling_1d;
@@ -316,17 +316,19 @@ pub mod global_max_pooling_3d;
 mod helper_functions;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
-/// LSTM (Long Short-Term Memory) neural network layer implementation.
+/// LSTM (Long Short-Term Memory) neural network layer implementation
 pub mod lstm;
 /// 1D Max Pooling layer for neural networks.
 pub mod max_pooling_1d;
-/// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
+/// Defines a structure for max pooling operation, used to perform max pooling on 2D data
 pub mod max_pooling_2d;
 /// 3D data max pooling Layer.
 mod max_pooling_3d;
 /// A 2D separable convolutional layer for neural networks
 pub mod separable_conv2d;
-/// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
+/// A module containing helper functions and structs for serializing neural network weights
+pub mod serialize_weight;
+/// A Simple Recurrent Neural Network (SimpleRNN) layer implementation
 pub mod simple_rnn;
 
 pub use average_pooling_1d::*;

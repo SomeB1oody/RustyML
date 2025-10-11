@@ -43,8 +43,24 @@ use rand::seq::SliceRandom;
 /// // Train the model
 /// model.fit(&x, &y, 10).unwrap();
 ///
-/// // Make predictions
-/// let predictions = model.predict(&x);
+/// // Save model weights to file
+/// model.save_to_path("model.json").unwrap();
+///
+/// // Create a new model with the same architecture
+/// let mut new_model = Sequential::new();
+/// new_model
+///     .add(Dense::new(784, 128, Activation::ReLU))
+///     .add(Dense::new(128, 64, Activation::ReLU))
+///     .add(Dense::new(64, 10, Activation::Softmax));
+///
+/// // Load weights from file
+/// new_model.load_from_path("model.json").unwrap();
+///
+/// // Compile before using (required for training, optional for prediction)
+/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());
+///
+/// // Make predictions with loaded model
+/// let predictions = new_model.predict(&x);
 /// println!("Predictions shape: {:?}", predictions.shape());
 /// ```
 pub struct Sequential {
@@ -503,5 +519,220 @@ impl Sequential {
             weights.push(layer.get_weights());
         }
         weights
+    }
+
+    /// Saves the model architecture and weights to a JSON file at the specified path.
+    ///
+    /// This method serializes the model structure including layer types, configurations,
+    /// and all trainable parameters (weights and biases) to JSON format. Note that the
+    /// optimizer and loss function are not saved and must be reconfigured after loading.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - File path where the model will be saved (e.g., "model.json")
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - Model successfully saved to file
+    /// - `Err(IoError::StdIoError)` - File creation or write operation failed
+    /// - `Err(IoError::JsonError)` - Serialization to JSON failed
+    pub fn save_to_path(&self, path: &str) -> Result<(), IoError> {
+        use crate::error::IoError;
+        use serde_json::to_writer_pretty;
+        use std::fs::File;
+        use std::io::{BufWriter, Write};
+
+        // Convert layers to serializable format
+        let serializable_layers = self
+            .layers
+            .iter()
+            .map(|layer| {
+                let weights = layer.get_weights();
+                let layer_info = serialize_weight::LayerInfo {
+                    layer_type: layer.layer_type().to_string(),
+                    output_shape: layer.output_shape(),
+                };
+
+                serialize_weight::SerializableLayer {
+                    info: layer_info,
+                    weights: serialize_weight::SerializableLayerWeight::from_layer_weight(&weights),
+                }
+            })
+            .collect();
+
+        let serializable_model = serialize_weight::SerializableSequential {
+            layers: serializable_layers,
+        };
+
+        // Create or overwrite the file
+        let file = File::create(path).map_err(IoError::StdIoError)?;
+        let mut writer = BufWriter::new(file);
+
+        // Serialize the model to JSON and write to file
+        to_writer_pretty(&mut writer, &serializable_model).map_err(IoError::JsonError)?;
+
+        // Ensure all data is written to disk
+        writer.flush().map_err(IoError::StdIoError)?;
+
+        Ok(())
+    }
+
+    /// Loads model weights from a JSON file and applies them to the current model.
+    ///
+    /// This method deserializes weights from a previously saved model file and applies them
+    /// to the current model's layers. The current model must have the same architecture
+    /// (same number and types of layers) as the saved model.
+    ///
+    /// Note: You must build the model structure first and then call this method to load weights.
+    /// After loading, you should call `compile()` to set the optimizer and loss function.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - File path from which to load the weights (e.g., "model.json")
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` - Successfully loaded weights into the model
+    /// - `Err(IoError::StdIoError)` - File not found or read operation failed
+    /// - `Err(IoError::JsonError)` - Deserialization from JSON failed
+    /// - `Err(IoError::ModelStructureMismatch)` - Model structure doesn't match saved weights
+    pub fn load_from_path(&mut self, path: &str) -> Result<(), IoError> {
+        use crate::error::IoError;
+        use serde_json::from_reader;
+
+        // Open and buffer the file for reading
+        let reader = IoError::load_in_buf_reader(path)?;
+
+        // Deserialize the model from JSON
+        let serializable_model: serialize_weight::SerializableSequential =
+            from_reader(reader).map_err(IoError::JsonError)?;
+
+        // Verify layer count matches
+        if serializable_model.layers.len() != self.layers.len() {
+            return Err(IoError::StdIoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Layer count mismatch: model has {} layers, file has {} layers",
+                    self.layers.len(),
+                    serializable_model.layers.len()
+                ),
+            )));
+        }
+
+        // Apply weights to each layer
+        for (i, serializable_layer) in serializable_model.layers.iter().enumerate() {
+            Self::apply_weights_to_layer(
+                &mut *self.layers[i],
+                &serializable_layer.weights,
+                &serializable_layer.info.layer_type,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Helper function to apply deserialized weights to a layer
+    fn apply_weights_to_layer(
+        layer: &mut dyn Layer,
+        weights: &serialize_weight::SerializableLayerWeight,
+        expected_type: &str,
+    ) -> Result<(), IoError> {
+        use std::any::Any;
+
+        match weights {
+            serialize_weight::SerializableLayerWeight::Dense(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(dense_layer) = layer_any.downcast_mut::<Dense>() {
+                    w.apply_to_layer(dense_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected Dense layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::SimpleRNN(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(rnn_layer) = layer_any.downcast_mut::<SimpleRNN>() {
+                    w.apply_to_layer(rnn_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected SimpleRNN layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::LSTM(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(lstm_layer) = layer_any.downcast_mut::<LSTM>() {
+                    w.apply_to_layer(lstm_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected LSTM layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::Conv1D(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(conv_layer) = layer_any.downcast_mut::<Conv1D>() {
+                    w.apply_to_layer(conv_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected Conv1D layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::Conv2D(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(conv_layer) = layer_any.downcast_mut::<Conv2D>() {
+                    w.apply_to_layer(conv_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected Conv2D layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::Conv3D(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(conv_layer) = layer_any.downcast_mut::<Conv3D>() {
+                    w.apply_to_layer(conv_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected Conv3D layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::SeparableConv2D(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(conv_layer) = layer_any.downcast_mut::<SeparableConv2D>() {
+                    w.apply_to_layer(conv_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected SeparableConv2D layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::DepthwiseConv2D(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(conv_layer) = layer_any.downcast_mut::<DepthwiseConv2D>() {
+                    w.apply_to_layer(conv_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected DepthwiseConv2D layer but got {}", expected_type),
+                    )));
+                }
+            }
+            serialize_weight::SerializableLayerWeight::Empty => {
+                // No weights to set for empty layers
+            }
+        }
+
+        Ok(())
     }
 }

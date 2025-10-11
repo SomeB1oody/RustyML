@@ -101,6 +101,17 @@ impl Dense {
             },
         }
     }
+
+    /// Sets the weights and bias for this layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `weights` - Weight matrix with shape (input_dim, output_dim)
+    /// - `bias` - Bias vector with shape (1, output_dim)
+    pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) {
+        self.weights = weights;
+        self.bias = bias;
+    }
 }
 
 impl Layer for Dense {

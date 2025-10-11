@@ -62,6 +62,7 @@ macro_rules! get_field_as_ref {
 /// # Parameters
 ///
 /// * `$model_type` - The type of the model struct (e.g., LinearRegression, LogisticRegression)
+#[cfg(any(feature = "machine_learning", feature = "utility"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
         /// Saves the trained model to a JSON file at the specified path.
@@ -145,6 +146,12 @@ macro_rules! model_save_and_load_methods {
 /// Error type for file operations and serialization:
 /// - **StdIoError**: Standard I/O errors during file system operations
 /// - **JsonError**: JSON serialization/deserialization failures
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "math",
+    feature = "neural_network",
+    feature = "utility"
+))]
 pub mod error;
 
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.

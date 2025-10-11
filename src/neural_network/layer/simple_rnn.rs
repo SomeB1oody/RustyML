@@ -158,6 +158,24 @@ impl SimpleRNN {
 
         matrix
     }
+
+    /// Sets the weights for this layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `kernel` - Weight matrix connecting inputs to the layer with shape (input_dim, units)
+    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
+    /// - `bias` - Bias vector with shape (1, units)
+    pub fn set_weights(
+        &mut self,
+        kernel: Array2<f32>,
+        recurrent_kernel: Array2<f32>,
+        bias: Array2<f32>,
+    ) {
+        self.kernel = kernel;
+        self.recurrent_kernel = recurrent_kernel;
+        self.bias = bias;
+    }
 }
 
 impl Layer for SimpleRNN {
