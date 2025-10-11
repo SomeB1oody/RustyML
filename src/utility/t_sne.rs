@@ -40,7 +40,7 @@ const TSNE_PARALLEL_THRESHOLD: usize = 1000;
 /// // `embedding` now contains 100 samples in 3 dimensions
 /// assert_eq!(embedding.shape(), &[100, 3]);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TSNE {
     perplexity: f64,
     learning_rate: f64,

@@ -32,7 +32,7 @@ const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
 /// let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
 /// let labels = dbscan.fit_predict(data.view());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DBSCAN {
     eps: f64,
     min_samples: usize,
@@ -409,4 +409,6 @@ impl DBSCAN {
         self.fit(data)?;
         Ok(self.labels_.as_ref().unwrap().clone())
     }
+
+    model_save_and_load_methods!(DBSCAN);
 }

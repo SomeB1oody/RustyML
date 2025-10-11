@@ -9,7 +9,7 @@ const PARALLEL_THRESHOLD: usize = 1000;
 ///
 /// - `Uniform` - Each neighbor is weighted equally
 /// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum WeightingStrategy {
     Uniform,
     Distance,
@@ -66,12 +66,18 @@ pub enum WeightingStrategy {
 /// let predictions = knn.predict(x_test.view()).unwrap();
 /// println!("Predictions: {:?}", predictions);  // Should print ["A", "B"]
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KNN<T> {
     k: usize,
     x_train: Option<Array2<f64>>,
     y_train_encoded: Option<Array1<usize>>,
+
+    #[serde(bound(
+        serialize = "T: Serialize + Eq + std::hash::Hash",
+        deserialize = "T: Deserialize<'de> + Eq + std::hash::Hash"
+    ))]
     label_map: Option<(AHashMap<T, usize>, Vec<T>)>, // (label -> index, index -> label)
+
     weighting_strategy: WeightingStrategy,
     metric: DistanceCalculationMetric,
 }
@@ -528,4 +534,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         self.fit(x_train, y_train)?;
         Ok(self.predict(x_test)?)
     }
+}
+
+impl<T: Clone + std::hash::Hash + Eq + Serialize + for<'de> Deserialize<'de>> KNN<T> {
+    model_save_and_load_methods!(KNN<T>);
 }

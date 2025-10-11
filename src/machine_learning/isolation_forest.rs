@@ -33,7 +33,7 @@ const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
 /// model.fit(data.view()).unwrap();
 /// let scores = model.predict(data.view()).unwrap();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IsolationForest {
     trees: Option<Vec<Box<Node>>>,
     n_estimators: usize,
@@ -424,4 +424,6 @@ impl IsolationForest {
         self.fit(x)?;
         self.predict(x)
     }
+
+    model_save_and_load_methods!(IsolationForest);
 }

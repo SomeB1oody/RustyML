@@ -1,9 +1,10 @@
-use crate::ModelError;
+use crate::error::ModelError;
 use ahash::{AHashMap, AHashSet};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::prelude::*;
 use rand::prelude::*;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// Kernel function types for Support Vector Machine
 ///
@@ -12,7 +13,7 @@ use rayon::prelude::*;
 /// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
 /// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
 /// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub enum KernelType {
     Linear,
     Poly { degree: u32, gamma: f64, coef0: f64 },

@@ -62,7 +62,7 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// // Make predictions
 /// let predictions = model.predict(x_test.view()).unwrap();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearSVC {
     weights: Option<Array1<f64>>,
     bias: Option<f64>,
@@ -523,4 +523,6 @@ impl LinearSVC {
 
         Ok(decision)
     }
+
+    model_save_and_load_methods!(LinearSVC);
 }

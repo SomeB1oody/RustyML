@@ -52,7 +52,7 @@ const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 /// // Make predictions
 /// let predictions = model.predict(x_test.view());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogisticRegression {
     weights: Option<Array1<f64>>,
     fit_intercept: bool,
@@ -425,6 +425,8 @@ impl LogisticRegression {
         self.fit(train_x, train_y)?;
         Ok(self.predict(test_x)?)
     }
+
+    model_save_and_load_methods!(LogisticRegression);
 }
 
 /// Generates polynomial features from input features.

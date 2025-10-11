@@ -1,4 +1,4 @@
-use crate::ModelError;
+use crate::error::ModelError;
 use crate::math::*;
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::{Array, Array1, array};

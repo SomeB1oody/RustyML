@@ -51,7 +51,7 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// - If unsure about an appropriate bandwidth value, use the `estimate_bandwidth` function.
 /// - The bandwidth parameter significantly affects algorithm performance and should be chosen carefully based on data characteristics.
 /// - For large datasets, setting `bin_seeding = true` can improve performance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MeanShift {
     bandwidth: f64,
     max_iter: usize,
@@ -596,6 +596,8 @@ impl MeanShift {
 
         seeds
     }
+
+    model_save_and_load_methods!(MeanShift);
 }
 
 /// Estimates the bandwidth to use with the MeanShift algorithm.

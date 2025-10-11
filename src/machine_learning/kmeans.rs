@@ -96,7 +96,7 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// let labels = kmeans2.fit_predict(data.view()).unwrap();
 /// println!("Labels from fit_predict: {:?}", labels);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KMeans {
     n_clusters: usize,
     max_iter: usize,
@@ -522,4 +522,6 @@ impl KMeans {
         self.fit(data)?;
         Ok(self.labels.clone().unwrap())
     }
+
+    model_save_and_load_methods!(KMeans);
 }

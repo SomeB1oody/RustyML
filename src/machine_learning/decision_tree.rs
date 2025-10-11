@@ -14,7 +14,7 @@ const DECISION_TREE_PARALLEL_THRESHOLD: usize = 1000;
 /// - `ID3` - Iterative Dichotomiser 3, uses information gain (entropy) for splitting. Only suitable for classification tasks.
 /// - `C45` - Successor to ID3, uses information gain ratio to handle varied attribute value ranges. Only suitable for classification tasks.
 /// - `CART` - Classification and Regression Trees, uses Gini impurity for classification and MSE for regression. Supports both classification and regression.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Algorithm {
     ID3,
     C45,
@@ -32,7 +32,7 @@ pub enum Algorithm {
 /// - `min_samples_leaf` - Minimum number of samples required to be at a leaf node. Splits that result in leaves with fewer samples are rejected.
 /// - `min_impurity_decrease` - Minimum impurity decrease required for a split. A node will be split if the decrease in impurity is greater than or equal to this value.
 /// - `random_state` - Seed for random number generation. Currently not used but reserved for future stochastic features.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
     pub max_depth: Option<usize>,
     pub min_samples_split: usize,
@@ -72,7 +72,7 @@ impl Default for DecisionTreeParams {
 ///   - `value`: The predicted value (class label for classification, continuous value for regression).
 ///   - `class`: For classification, the majority class index.
 ///   - `probabilities`: For classification, probability distribution over all classes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum NodeType {
     Internal {
         feature_index: usize,
@@ -96,7 +96,7 @@ pub enum NodeType {
 /// - `left` - For binary splits, the left child node (samples with feature value ≤ threshold).
 /// - `right` - For binary splits, the right child node (samples with feature value > threshold).
 /// - `children` - For categorical splits, a map from category values to child nodes (not yet fully implemented).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
     pub node_type: NodeType,
     pub left: Option<Box<Node>>,
@@ -227,7 +227,7 @@ impl Node {
 /// // Get probability estimates for classification
 /// let probabilities = tree.predict_proba(x_test.view()).unwrap();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionTree {
     algorithm: Algorithm,
     root: Option<Box<Node>>,
@@ -968,4 +968,6 @@ impl DecisionTree {
             }
         }
     }
+
+    model_save_and_load_methods!(DecisionTree);
 }

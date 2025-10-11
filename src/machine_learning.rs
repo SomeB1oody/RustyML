@@ -1,4 +1,4 @@
-use crate::ModelError;
+use crate::error::ModelError;
 use crate::math::*;
 use ahash::{AHashMap, AHashSet};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -6,6 +6,7 @@ use ndarray::prelude::*;
 use rand::prelude::*;
 use rand::rng;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// Represents different distance calculation methods used in various machine learning algorithms.
 ///
@@ -17,11 +18,106 @@ use rayon::prelude::*;
 /// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
 /// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
 /// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum DistanceCalculationMetric {
     Euclidean,
     Manhattan,
     Minkowski(f64),
+}
+
+/// Represents different types of regularization techniques used in machine learning models.
+///
+/// Regularization helps prevent overfitting by adding a penalty term to the model's loss function
+/// during training. This enum defines common regularization approaches that can be applied to
+/// various learning algorithms.
+///
+/// # Variants
+///
+/// - `L1` - L1 regularization (Lasso) that adds the sum of absolute values of parameters
+///   multiplied by the specified coefficient. Promotes sparse solutions by driving some
+///   parameters to exactly zero.
+/// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
+///   multiplied by the specified coefficient. Discourages large parameter values but
+///   typically does not produce sparse solutions.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub enum RegularizationType {
+    /// L1 regularization (Lasso) with the specified regularization strength coefficient
+    L1(f64),
+    /// L2 regularization (Ridge) with the specified regularization strength coefficient
+    L2(f64),
+}
+
+/// Macro for generating save_to_path and load_from_path methods for model structs.
+///
+/// This macro generates two methods:
+/// - `save_to_path`: Saves the model to a JSON file at the specified path
+/// - `load_from_path`: Loads a model from a JSON file at the specified path
+///
+/// # Parameters
+///
+/// * `$model_type` - The type of the model struct (e.g., LinearRegression, LogisticRegression)
+macro_rules! model_save_and_load_methods {
+    ($model_type:ty) => {
+        /// Saves the trained model to a JSON file at the specified path.
+        ///
+        /// This method serializes the entire model state including coefficients, intercept,
+        /// hyperparameters, and training metadata to JSON format using serde_json.
+        ///
+        /// # Parameters
+        ///
+        /// * `path` - File path where the model will be saved (e.g., "model.json")
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(())` - Model successfully saved to file
+        /// - `Err(IoError::StdIoError)` - File creation or write operation failed
+        /// - `Err(IoError::JsonError)` - Serialization to JSON failed
+        pub fn save_to_path(&self, path: &str) -> Result<(), crate::error::IoError> {
+            use crate::error::IoError;
+            use serde_json::to_writer_pretty;
+            use std::fs::File;
+            use std::io::{BufWriter, Write};
+
+            // Create or overwrite the file
+            let file = File::create(path).map_err(IoError::StdIoError)?;
+            let mut writer = BufWriter::new(file);
+
+            // Serialize the model to JSON and write to file
+            to_writer_pretty(&mut writer, self).map_err(IoError::JsonError)?;
+
+            // Ensure all data is written to disk
+            writer.flush().map_err(IoError::StdIoError)?;
+
+            Ok(())
+        }
+
+        /// Loads a trained model from a JSON file at the specified path.
+        ///
+        /// This method deserializes a previously saved model from JSON format,
+        /// restoring all model parameters, hyperparameters, and training state.
+        ///
+        /// # Parameters
+        ///
+        /// * `path` - File path from which to load the model (e.g., "model.json")
+        ///
+        /// # Returns
+        ///
+        /// - `Ok(Self)` - Successfully loaded model instance
+        /// - `Err(IoError::StdIoError)` - File not found or read operation failed
+        /// - `Err(IoError::JsonError)` - Deserialization from JSON failed (invalid format or corrupted data)
+        pub fn load_from_path(path: &str) -> Result<Self, crate::error::IoError> {
+            use crate::error::IoError;
+            use serde_json::from_reader;
+
+            // Open and buffer the file for reading
+            let reader = IoError::load_in_buf_reader(path)?;
+
+            // Deserialize the model from JSON
+            let model: $model_type = from_reader(reader).map_err(IoError::JsonError)?;
+
+            Ok(model)
+        }
+    };
 }
 
 /// Performs validation checks on the input data matrices.
@@ -76,28 +172,6 @@ fn preliminary_check(x: ArrayView2<f64>, y: Option<ArrayView1<f64>>) -> Result<(
         }
     }
     Ok(())
-}
-
-/// Represents different types of regularization techniques used in machine learning models.
-///
-/// Regularization helps prevent overfitting by adding a penalty term to the model's loss function
-/// during training. This enum defines common regularization approaches that can be applied to
-/// various learning algorithms.
-///
-/// # Variants
-///
-/// - `L1` - L1 regularization (Lasso) that adds the sum of absolute values of parameters
-///   multiplied by the specified coefficient. Promotes sparse solutions by driving some
-///   parameters to exactly zero.
-/// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
-///   multiplied by the specified coefficient. Discourages large parameter values but
-///   typically does not produce sparse solutions.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RegularizationType {
-    /// L1 regularization (Lasso) with the specified regularization strength coefficient
-    L1(f64),
-    /// L2 regularization (Ridge) with the specified regularization strength coefficient
-    L2(f64),
 }
 
 /// Linear regression module implementing the ordinary least squares method

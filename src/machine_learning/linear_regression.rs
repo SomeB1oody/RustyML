@@ -50,7 +50,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// // Since Debug is implemented, detailed model information can be printed
 /// println!("{:?}", model);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearRegression {
     coefficients: Option<Array1<f64>>,
     intercept: Option<f64>,
@@ -413,4 +413,6 @@ impl LinearRegression {
         self.fit(x, y)?;
         Ok(self.predict(x)?)
     }
+
+    model_save_and_load_methods!(LinearRegression);
 }

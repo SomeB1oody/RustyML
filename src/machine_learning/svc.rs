@@ -47,7 +47,7 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 /// let predictions = svc.predict(x_test.view()).expect("Failed to predict");
 /// println!("Predictions: {:?}", predictions);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SVC {
     kernel: KernelType,
     regularization_param: f64,
@@ -1038,4 +1038,6 @@ impl SVC {
 
         sum - y[i] + b
     }
+
+    model_save_and_load_methods!(SVC);
 }

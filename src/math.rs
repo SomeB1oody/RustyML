@@ -1,4 +1,4 @@
-use crate::ModelError;
+use crate::error::ModelError;
 use ahash::AHashMap;
 use ndarray::ArrayView1;
 

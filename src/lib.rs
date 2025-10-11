@@ -1,38 +1,3 @@
-/// Error types that can occur during model operations
-///
-/// # Variants
-///
-/// - `NotFitted` - Indicates that the model has not been fitted yet
-/// - `InputValidationError` - indicates the input data provided does not meet the expected format, type, or validation rules
-/// - `TreeError` - indicates that there is something wrong with the tree
-/// - `ProcessingError` - indicates that there is something wrong while processing
-#[derive(Debug, Clone, PartialEq)]
-pub enum ModelError {
-    NotFitted,
-    InputValidationError(String),
-    TreeError(&'static str),
-    ProcessingError(String),
-}
-
-impl std::fmt::Display for ModelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ModelError::NotFitted => {
-                write!(
-                    f,
-                    "Model has not been fitted. Certain methods require the model to be fitted before use."
-                )
-            }
-            ModelError::InputValidationError(msg) => write!(f, "Input validation error: {}", msg),
-            ModelError::TreeError(msg) => write!(f, "Tree structure error: {}", msg),
-            ModelError::ProcessingError(msg) => write!(f, "Processing error: {}", msg),
-        }
-    }
-}
-
-/// Implements the standard error trait for ModelError
-impl std::error::Error for ModelError {}
-
 /// A macro that generates a getter method for any field.
 ///
 /// This macro creates a public getter method that returns the value or reference
@@ -49,7 +14,7 @@ impl std::error::Error for ModelError {}
 ///
 /// The macro generates a method that returns the field value,
 /// with documentation that describes what field is being accessed.
-#[cfg(any(feature = "machine_learning"))]
+#[cfg(any(feature = "machine_learning", feature = "utility"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -87,6 +52,27 @@ macro_rules! get_field_as_ref {
         }
     };
 }
+
+/// Error handling module containing custom error types for machine learning operations.
+///
+/// This module defines comprehensive error types that can occur throughout the machine learning
+/// library, providing structured error handling for various failure modes including model state
+/// validation, input data validation, processing errors, and I/O operations.
+///
+/// # Error Types
+///
+/// ## ModelError
+/// Primary error type for machine learning model operations:
+/// - **NotFitted**: Model hasn't been trained/fitted before prediction or transformation
+/// - **InputValidationError**: Invalid input data format, dimensions, or values (NaN/infinite)
+/// - **TreeError**: Decision tree structure or operation errors
+/// - **ProcessingError**: General computation or algorithm execution errors
+///
+/// ## IoError
+/// Error type for file operations and serialization:
+/// - **StdIoError**: Standard I/O errors during file system operations
+/// - **JsonError**: JSON serialization/deserialization failures
+pub mod error;
 
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///

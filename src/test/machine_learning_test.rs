@@ -1,4 +1,4 @@
-use crate::ModelError;
+use crate::error::ModelError;
 use crate::machine_learning::DistanceCalculationMetric;
 use crate::machine_learning::*;
 use ndarray::prelude::*;
