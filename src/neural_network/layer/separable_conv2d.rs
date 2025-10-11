@@ -310,9 +310,9 @@ impl SeparableConv2D {
     ///
     /// # Parameters
     ///
-    /// - `depthwise_weights` - 4D array for depthwise filters with shape [depth_multiplier, channels, kernel_height, kernel_width]
-    /// - `pointwise_weights` - 4D array for pointwise filters with shape [filters, channels * depth_multiplier, 1, 1]
-    /// - `bias` - 2D array of bias values with shape [1, filters]
+    /// - `depthwise_weights` - 4D array for depthwise filters with shape \[depth_multiplier, channels, kernel_height, kernel_width\]
+    /// - `pointwise_weights` - 4D array for pointwise filters with shape \[filters, channels * depth_multiplier, 1, 1\]
+    /// - `bias` - 2D array of bias values with shape \[1, filters\]
     pub fn set_weights(
         &mut self,
         depthwise_weights: Array4<f32>,

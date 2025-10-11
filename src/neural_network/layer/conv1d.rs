@@ -209,8 +209,8 @@ impl Conv1D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 3D array of filter weights with shape [filters, channels, kernel_size]
-    /// - `bias` - 2D array of bias values with shape [1, filters]
+    /// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\]
+    /// - `bias` - 2D array of bias values with shape \[1, filters\]
     pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array2<f32>) {
         self.weights = weights;
         self.bias = bias;
