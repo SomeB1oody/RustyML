@@ -23,7 +23,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::*;
+/// use rustyml::machine_learning::linear_regression::*; // or just use `rustyml::prelude::*;`
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Create a linear regression model
@@ -43,6 +43,15 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// // Make predictions
 /// let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
 /// let predictions = model.predict(new_data.view());
+///
+/// // Save the trained model to a file
+/// model.save_to_path("linear_regression_model.json").unwrap();
+///
+/// // Load the model from the file
+/// let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
+///
+/// // Use the loaded model for predictions
+/// let loaded_predictions = loaded_model.predict(new_data.view());
 ///
 /// // Since Clone is implemented, the model can be easily cloned
 /// let model_copy = model.clone();

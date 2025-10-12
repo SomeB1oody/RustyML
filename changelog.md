@@ -36,15 +36,15 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Refactor LSTM layer and tests
 
 ## [v0.8.0] - 2025-10-6 (UTC-7)
-### Changed
+### Removed
 - Remove `#[doc(cfg)]` because it is still experimental
 
 ## [v0.8.0] - 2025-10-1 (UTC-7)
-### Added
+### Changed
 - Refactor getter methods across machine learning models using `get_field` and `get_field_as_ref` macros for consistency and reduced code duplication
 
 ## [v0.8.0] - 2025-9-30 (UTC-7)
-### Added
+### Changed
 - Refactor distance computation methods to return `Result`
 
 ## [v0.8.0] - 2025-9-27 (UTC-7)

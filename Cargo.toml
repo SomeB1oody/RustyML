@@ -1,6 +1,6 @@
 [package]
 name = "rustyml"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.85.0"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
@@ -37,6 +37,12 @@ serde_json = { version = "1.0.145", optional = true}
 
 [dev-dependencies]
 approx = "0.5.1"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
 
 [package.metadata.docs.rs]
 features = ["full"]

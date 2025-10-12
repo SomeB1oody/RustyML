@@ -1,3 +1,194 @@
+//! # RustyML - A Comprehensive Machine Learning and Deep Learning Library in Pure Rust
+//!
+//! RustyML is a high-performance machine learning and deep learning library written entirely in Rust,
+//! leveraging Rust's memory safety, concurrency features, and zero-cost abstractions to provide
+//! efficient implementations of classical ML algorithms, neural networks, and data processing utilities.
+//!
+//! ## Overview
+//!
+//! This crate offers a complete ecosystem for machine learning tasks, from data preprocessing
+//! and feature engineering to model training and evaluation. All implementations are designed
+//! with production use in mind, featuring robust error handling, parallel processing optimization,
+//! and comprehensive input validation.
+//!
+//! ## Key Features
+//!
+//! - **Pure Rust Implementation**: No external C/C++ dependencies, ensuring memory safety and portability
+//! - **Parallel Processing**: Leverages Rayon for efficient multi-threaded computation
+//! - **Rich Algorithm Collection**: Supervised, unsupervised learning, and neural networks
+//! - **Comprehensive Metrics**: Evaluation tools for regression, classification, and clustering
+//! - **Model Persistence**: Save and load trained models with JSON serialization
+//! - **Standard Datasets**: Built-in access to benchmark datasets for experimentation
+//! - **Feature Gated**: Modular design allowing you to compile only what you need
+//!
+//! ## Architecture
+//!
+//! The library is organized into six main modules, each gated by feature flags:
+//!
+//! ### [`machine_learning`]
+//! Classical machine learning algorithms for supervised and unsupervised learning:
+//! - **Regression**: Linear Regression with L1/L2 regularization
+//! - **Classification**: Logistic Regression, KNN, Decision Tree, SVC, Linear SVC, LDA
+//! - **Clustering**: KMeans, DBSCAN, MeanShift
+//! - **Anomaly Detection**: Isolation Forest
+//!
+//! ### [`neural_network`]
+//! Complete neural network framework with flexible architecture design:
+//! - **Layers**: Dense, RNN, LSTM, Convolution, Pooling, Dropout
+//! - **Optimizers**: SGD, Adam, RMSProp, AdaGrad
+//! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy
+//! - **Models**: Sequential architecture for feed-forward networks
+//!
+//! ### [`utility`]
+//! Data preprocessing and dimensionality reduction utilities:
+//! - **Dimensionality Reduction**: PCA, Kernel PCA, LDA, t-SNE
+//! - **Preprocessing**: Standardization, train-test splitting
+//! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid
+//!
+//! ### [`metric`]
+//! Comprehensive evaluation metrics for model performance assessment:
+//! - **Regression**: MSE, RMSE, MAE, R² score
+//! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
+//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score
+//!
+//! ### [`math`]
+//! Mathematical utilities and statistical functions:
+//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski
+//! - **Impurity Measures**: Entropy, Gini, Information Gain
+//! - **Statistical Functions**: Variance, standard deviation, SST, SSE
+//! - **Activation Functions**: Sigmoid, logistic loss
+//!
+//! ### [`dataset`]
+//! Access to standardized datasets for experimentation:
+//! - Iris, Diabetes, Boston Housing, Wine Quality, Titanic
+//! - Pre-processed and ready for immediate use
+//!
+//! ## Quick Start
+//!
+//! ### Machine Learning Example
+//!
+//! Add RustyML to your `Cargo.toml`:
+//! ```toml
+//! [dependencies]
+//! rustyml = { version = "0.8.0", features = ["machine_learning"] }
+//! # Or use features = ["full"] to enable all modules
+//! ```
+//!
+//! In your Rust code, write:
+//! ```rust, ignore
+//! use rustyml::machine_learning::linear_regression::*;
+//! // or just use `rustyml::prelude::*;`
+//! use ndarray::{Array1, Array2, array};
+//!
+//! // Create a linear regression model
+//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+//!
+//! // Prepare training data
+//! let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
+//! let raw_y = vec![6.0, 9.0, 12.0];
+//!
+//! // Convert Vec to ndarray types
+//! let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
+//! let y = Array1::from_vec(raw_y);
+//!
+//! // Train the model
+//! model.fit(x.view(), y.view()).unwrap();
+//!
+//! // Make predictions
+//! let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
+//! let predictions = model.predict(new_data.view());
+//!
+//! // Save the trained model to a file
+//! model.save_to_path("linear_regression_model.json").unwrap();
+//!
+//! // Load the model from the file
+//! let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
+//!
+//! // Use the loaded model for predictions
+//! let loaded_predictions = loaded_model.predict(new_data.view());
+//!
+//! // Since Clone is implemented, the model can be easily cloned
+//! let model_copy = model.clone();
+//!
+//! // Since Debug is implemented, detailed model information can be printed
+//! println!("{:?}", model);
+//! ```
+//!
+//! ## Neural Network Example
+//!
+//! Add RustyML to your `Cargo.toml`:
+//! ```toml
+//! [dependencies]
+//! rustyml = { version = "0.8.0", features = ["neural_network"] }
+//! # Or use features = ["full"] to enable all modules
+//! ```
+//!
+//! In your Rust code, write:
+//! ```rust, ignore
+//! use rustyml::prelude::*;
+//! use ndarray::Array;
+//!
+//! // Create training data
+//! let x = Array::ones((32, 784)).into_dyn(); // 32 samples, 784 features
+//! let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
+//!
+//! // Build a neural network
+//! let mut model = Sequential::new();
+//! model
+//!     .add(Dense::new(784, 128, Activation::ReLU))
+//!     .add(Dense::new(128, 64, Activation::ReLU))
+//!     .add(Dense::new(64, 10, Activation::Softmax))
+//!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());
+//!
+//! // Display model structure
+//! model.summary();
+//!
+//! // Train the model
+//! model.fit(&x, &y, 10).unwrap();
+//!
+//! // Save model weights to file
+//! model.save_to_path("model.json").unwrap();
+//!
+//! // Create a new model with the same architecture
+//! let mut new_model = Sequential::new();
+//! new_model
+//!     .add(Dense::new(784, 128, Activation::ReLU))
+//!     .add(Dense::new(128, 64, Activation::ReLU))
+//!     .add(Dense::new(64, 10, Activation::Softmax));
+//!
+//! // Load weights from file
+//! new_model.load_from_path("model.json").unwrap();
+//!
+//! // Compile before using (required for training, optional for prediction)
+//! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());
+//!
+//! // Make predictions with loaded model
+//! let predictions = new_model.predict(&x);
+//! println!("Predictions shape: {:?}", predictions.shape());
+//! ```
+//!
+//! ## Feature Flags
+//!
+//! The crate uses feature flags for modular compilation:
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `machine_learning` | Classical ML algorithms (depends on `math`, `utility`) |
+//! | `neural_network` | Neural network framework |
+//! | `utility` | Data preprocessing and dimensionality reduction |
+//! | `metric` | Evaluation metrics |
+//! | `math` | Mathematical utilities |
+//! | `dataset` | Standard datasets |
+//! | `full` | Enables all features |
+//!
+//! ## Design Principles
+//!
+//! - **Safety First**: Extensive input validation and comprehensive error types
+//! - **Performance**: Parallel processing via Rayon, efficient memory layouts with ndarray
+//! - **Ergonomics**: Intuitive API design following Rust conventions
+//! - **Flexibility**: Customizable hyperparameters and configuration options
+//! - **Reliability**: Robust implementations tested against standard datasets
+
 /// A macro that generates a getter method for any field.
 ///
 /// This macro creates a public getter method that returns the value or reference
@@ -173,6 +364,7 @@ pub mod error;
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
+/// - Finds the appropriate sigma value for a single sample's distances to achieve target perplexity
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)
