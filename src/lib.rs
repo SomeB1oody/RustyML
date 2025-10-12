@@ -451,7 +451,7 @@ pub mod math;
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
-/// A convenience module that re-exports the most commonly used types and traits from this crate.
+/// Module `prelude` re-exports the most commonly used types and traits from this crate.
 ///
 /// This module provides a single import point for frequently used items from the machine learning library,
 /// enabling quick access to essential components with a single `use` statement.
@@ -489,7 +489,7 @@ pub mod machine_learning;
 /// ```
 pub mod prelude;
 
-/// A collection of utility functions and data processing tools to support machine learning operations.
+/// Module `utility` provides a collection of utility functions and data processing tools to support machine learning operations.
 ///
 /// This module provides essential data transformation and preprocessing capabilities that complement
 /// the main machine learning algorithms, including dimensionality reduction techniques, data splitting
@@ -530,7 +530,7 @@ pub mod prelude;
 #[cfg(feature = "utility")]
 pub mod utility;
 
-/// Comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
+/// Module `metric` provides comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
 ///
 /// This module provides a complete collection of evaluation functions and structures for measuring
 /// the performance of machine learning models across regression, classification, and clustering tasks
@@ -590,7 +590,7 @@ pub mod utility;
 #[cfg(feature = "metric")]
 pub mod metric;
 
-/// Access to standardized datasets for machine learning experimentation and algorithm benchmarking.
+/// Module `dataset` provides access to standardized datasets for machine learning experimentation and algorithm benchmarking.
 ///
 /// This module provides convenient access to well-known datasets commonly used in machine learning
 /// research, education, and algorithm validation. All datasets are pre-processed and ready for
@@ -623,7 +623,7 @@ pub mod metric;
 #[cfg(feature = "dataset")]
 pub mod dataset;
 
-/// Components for building and training neural networks with flexible architecture design.
+/// Module `neural_network` provides components for building and training neural networks with flexible architecture design.
 ///
 /// This module provides a comprehensive framework for constructing, training, and deploying
 /// neural networks with support for various layer types, optimization algorithms, loss functions,
