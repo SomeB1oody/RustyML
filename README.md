@@ -306,15 +306,15 @@ The crate uses feature flags for modular compilation:
 
 ## Design Principles | 设计原则
 
-- **Safety First | 安全第一**: Extensive input validation and comprehensive error types | 广泛的输入验证和全面的错误类型
-- **Performance | 性能**: Parallel processing via Rayon, efficient memory layouts with ndarray | 通过Rayon实现并行处理，使用ndarray实现高效内存布局
-- **Ergonomics | 人体工学**: Intuitive API design following Rust conventions | 遵循Rust约定的直观API设计
-- **Flexibility | 灵活性**: Customizable hyperparameters and configuration options | 可自定义的超参数和配置选项
-- **Reliability | 可靠性**: Robust implementations tested against standard datasets | 经过标准数据集测试的健壮实现
+- **Safety First**: Extensive input validation and comprehensive error types | **安全第一**: 广泛的输入验证和全面的错误类型
+- **Performance**: Parallel processing via Rayon, efficient memory layouts with ndarray | **性能**: 通过Rayon实现并行处理，使用ndarray实现高效内存布局
+- **Ergonomics**: Intuitive API design following Rust conventions | **人体工学**: 遵循Rust约定的直观API设计
+- **Flexibility**: Customizable hyperparameters and configuration options | **灵活性**: 可自定义的超参数和配置选项
+- **Reliability**: Robust implementations tested against standard datasets | **可靠性**: 经过标准数据集测试的健壮实现
 
 ## Project Status | 项目状态
-RustyML is in active development. While the API is stabilizing, breaking changes may occur in minor version updates until version 1.0.0. The project's long-term vision includes transformer architectures and pre-trained model support.  
-RustyML正在积极开发中。虽然API正在稳定，但在1.0.0版本之前，次要版本更新中可能会出现破坏性更改。该项目的长期愿景包括transformer架构和预训练模型支持。
+RustyML is in active development. While the API is stabilizing, breaking changes may occur in minor version updates until version 1.0.0.
+RustyML正在积极开发中。虽然API正在稳定，但在1.0.0版本之前，次要版本更新中可能会出现破坏性更改。
 
 ## Contribution | 贡献
 Contributions are welcome! If you're interested in helping build a robust machine learning ecosystem in Rust, please feel free to:  
