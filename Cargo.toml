@@ -13,14 +13,14 @@ documentation = "https://docs.rs/crate/rustyml"
 categories = ["mathematics", "science", "algorithms"]
 
 [features]
-default = []
+default = ["machine_learning", "neural_network"]
 dataset = ["dep:ndarray"]
 machine_learning = ["math", "utility", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
 neural_network = ["dep:ndarray", "dep:rayon", "dep:rand_distr", "dep:ndarray-rand", "dep:rand", "dep:statrs", "dep:indicatif", "dep:serde", "dep:serde_json"]
 utility = ["math", "dep:ndarray", "dep:rand", "dep:nalgebra", "dep:rayon", "dep:rand_distr", "dep:ahash", "dep:indicatif", "dep:serde", "dep:serde_json"]
 math = ["dep:ndarray", "dep:ahash"]
 metric = ["dep:ndarray", "dep:ahash", "dep:statrs"]
-full = ["default", "dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
+full = ["dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
 
 [dependencies]
 ndarray = { version = "0.16.1", features = ["rayon", "serde"], optional = true }

@@ -179,6 +179,7 @@
 //! | `metric` | Evaluation metrics |
 //! | `math` | Mathematical utilities |
 //! | `dataset` | Standard datasets |
+//! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
 //!
 //! ## Design Principles

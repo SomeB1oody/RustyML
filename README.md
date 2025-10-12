@@ -294,15 +294,16 @@ For Chinese mainland users, a mandarin video tutorial is provided on Bilibili, f
 The crate uses feature flags for modular compilation:  
 该crate使用特性标志进行模块化编译：
 
-| Feature            | Description                                            | 说明                            |  
-|--------------------|--------------------------------------------------------|-------------------------------|  
-| `machine_learning` | Classical ML algorithms (depends on `math`, `utility`) | 经典机器学习算法（依赖于`math`、`utility`） |  
-| `neural_network`   | Neural network framework                               | 神经网络框架                        |  
-| `utility`          | Data preprocessing and dimensionality reduction        | 数据预处理和降维                      |  
-| `metric`           | Evaluation metrics                                     | 评估指标                          |  
-| `math`             | Mathematical utilities                                 | 数学工具                          |  
-| `dataset`          | Standard datasets                                      | 标准数据集                         |  
-| `full`             | Enables all features                                   | 启用所有功能                        |  
+| Feature            | Description                                            | 说明                                       |  
+|--------------------|--------------------------------------------------------|------------------------------------------|  
+| `machine_learning` | Classical ML algorithms (depends on `math`, `utility`) | 经典机器学习算法（依赖于`math`、`utility`）            |  
+| `neural_network`   | Neural network framework                               | 神经网络框架                                   |  
+| `utility`          | Data preprocessing and dimensionality reduction        | 数据预处理和降维                                 |  
+| `metric`           | Evaluation metrics                                     | 评估指标                                     |  
+| `math`             | Mathematical utilities                                 | 数学工具                                     |  
+| `dataset`          | Standard datasets                                      | 标准数据集                                    | 
+| `default`          | Enables `machine_learning` and `neural_network`        | 开启`machine_learning`和`neural_network`功能  |
+| `full`             | Enables all features                                   | 启用所有功能                                   |  
 
 ## Design Principles | 设计原则
 

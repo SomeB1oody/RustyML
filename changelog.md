@@ -6,6 +6,10 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.8.0] - 2025-10-11 (UTC-7)
+### Changed
+- Update default feature set to include `machine_learning` and `neural_network`
+
+## [v0.8.0] - 2025-10-11 (UTC-7)
 ### Added
 - Add serialization and deserialization support across ML models, add `save_to_path` and `load_from_path` functions for ML models
 - Add serialization and deserialization support in the utility module, add `save_to_path` and `load_from_path` functions in the utility module
