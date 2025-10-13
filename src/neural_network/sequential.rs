@@ -529,7 +529,7 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// * `path` - File path where the model will be saved (e.g., "model.json")
+    /// * `path` - File path where the model will be saved (e.g., "stored_model.json")
     ///
     /// # Returns
     ///
@@ -588,7 +588,7 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// * `path` - File path from which to load the weights (e.g., "model.json")
+    /// * `path` - File path from which to load the weights (e.g., "stored_model.json")
     ///
     /// # Returns
     ///

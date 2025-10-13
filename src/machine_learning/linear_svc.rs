@@ -40,7 +40,7 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 ///     RegularizationType::L2(1.0),    // penalty type with regularization strength
 ///     true,                           // fit_intercept
 ///     1e-4                            // tolerance
-/// );
+/// ).unwrap();
 ///
 /// let x = Array2::from_shape_vec((8, 2), vec![
 ///         1.0, 2.0,
@@ -118,15 +118,39 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new LinearSVC instance with specified parameters
+    /// * `Result<Self, ModelError>` - A new LinearSVC instance with specified parameters if validation passes
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `max_iter` is 0
+    /// - `learning_rate` is not positive or not finite
+    /// - `penalty` regularization parameter is negative or not finite
+    /// - `tol` is not positive or not finite
     pub fn new(
         max_iter: usize,
         learning_rate: f64,
         penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
-    ) -> Self {
-        LinearSVC {
+    ) -> Result<Self, ModelError> {
+        // Validate parameters
+        validate_max_iterations(max_iter)?;
+        validate_learning_rate(learning_rate)?;
+        validate_tolerance(tol)?;
+
+        // Validate regularization parameter
+        let reg_param = match penalty {
+            RegularizationType::L1(lambda) | RegularizationType::L2(lambda) => lambda,
+        };
+        if reg_param < 0.0 || !reg_param.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "Regularization parameter must be non-negative and finite, got {}",
+                reg_param
+            )));
+        }
+
+        Ok(LinearSVC {
             weights: None,
             bias: None,
             max_iter,
@@ -135,43 +159,7 @@ impl LinearSVC {
             fit_intercept,
             tol,
             n_iter: None,
-        }
-    }
-
-    /// Validates input parameters for training
-    fn validate_training_params(&self) -> Result<(), ModelError> {
-        if self.max_iter == 0 {
-            return Err(ModelError::InputValidationError(
-                "max_iter must be greater than 0".to_string(),
-            ));
-        }
-
-        if self.learning_rate <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "learning_rate must be greater than 0.0, got {}",
-                self.learning_rate
-            )));
-        }
-
-        // Validate regularization parameter
-        let reg_param = match self.penalty {
-            RegularizationType::L1(lambda) | RegularizationType::L2(lambda) => lambda,
-        };
-        if reg_param < 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "regularization parameter must be non-negative, got {}",
-                reg_param
-            )));
-        }
-
-        if self.tol <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "tol must be greater than 0.0, got {}",
-                self.tol
-            )));
-        }
-
-        Ok(())
+        })
     }
 
     /// Validates input data dimensions and values
@@ -251,20 +239,11 @@ impl LinearSVC {
     /// # Returns
     ///
     /// - `Ok(&mut Self)`: Reference to self if training succeeds
-    /// - `Err(ModelError)`: Error if validation fails or training encounters problems
+    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        // Input shape validation
-        if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input data size mismatch: x.shape={}, y.shape={}",
-                x.nrows(),
-                y.len()
-            )));
-        }
-
-        // Validate training parameters
-        self.validate_training_params()?;
-        self.validate_input_data(x)?;
+        // Use preliminary_check for input validation
+        preliminary_check(x, Some(y))?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -477,7 +456,13 @@ impl LinearSVC {
     ///
     /// - `Ok(Array1<f64>)`: Array of predictions (0.0 or 1.0) for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
+    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check if model has been fitted
+        if self.weights.is_none() {
+            return Err(ModelError::NotFitted);
+        }
+
         // Validate input data
         self.validate_input_data(x)?;
 
@@ -500,7 +485,9 @@ impl LinearSVC {
     ///
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
+    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
     pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check if model has been fitted
         let weights = match self.get_weights() {
             Some(weights) => weights,
             None => {

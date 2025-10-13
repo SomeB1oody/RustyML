@@ -37,7 +37,7 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 ///     1.0,  // regularization parameter
 ///     1e-3, // tolerance
 ///     100   // max iterations
-/// );
+/// ).expect("Failed to create SVC");
 ///
 /// // Train the model
 /// svc.fit(x_train.view(), y_train.view()).expect("Failed to train SVM");
@@ -97,9 +97,29 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new SVC instance with the specified parameters
-    pub fn new(kernel: KernelType, regularization_param: f64, tol: f64, max_iter: usize) -> Self {
-        SVC {
+    /// - `Ok(Self)` - A new SVC instance with the specified parameters
+    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid
+    pub fn new(
+        kernel: KernelType,
+        regularization_param: f64,
+        tol: f64,
+        max_iter: usize,
+    ) -> Result<Self, ModelError> {
+        // Validate regularization parameter
+        if regularization_param <= 0.0 || !regularization_param.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "Regularization parameter must be positive and finite, got {}",
+                regularization_param
+            )));
+        }
+
+        // Validate tolerance
+        validate_tolerance(tol)?;
+
+        // Validate maximum iterations
+        validate_max_iterations(max_iter)?;
+
+        Ok(SVC {
             kernel,
             regularization_param,
             alphas: None,
@@ -110,7 +130,7 @@ impl SVC {
             max_iter,
             eps: 1e-8,
             n_iter: None,
-        }
+        })
     }
 
     // Getters
@@ -302,24 +322,12 @@ impl SVC {
     /// - `Ok(&mut Self)` - The fitted model (for method chaining)
     /// - `Err(ModelError)` - If there's an error during fitting
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        // Comprehensive input validation
+        // Use preliminary_check for basic input validation
+        preliminary_check(x, Some(y))?;
+
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
-        if n_samples == 0 || n_features == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        if y.len() != n_samples {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature matrix has {} samples but label vector has {} elements",
-                n_samples,
-                y.len()
-            )));
-        }
-
-        // Validate labels
+        // Validate labels (SVC-specific requirement)
         let y_vec: Vec<f64> = y.to_vec();
         let label_check = if n_samples >= SVC_PARALLEL_THRESHOLD {
             y_vec.par_iter().all(|&yi| yi == 1.0 || yi == -1.0)
@@ -329,33 +337,6 @@ impl SVC {
         if !label_check {
             return Err(ModelError::InputValidationError(
                 "All labels must be either 1.0 or -1.0".to_string(),
-            ));
-        }
-
-        // Parameter validation
-        if self.regularization_param <= 0.0 {
-            return Err(ModelError::InputValidationError(format!(
-                "Regularization parameter must be positive, got {}",
-                self.regularization_param
-            )));
-        }
-
-        if self.tol <= 0.0 || self.max_iter == 0 {
-            return Err(ModelError::InputValidationError(
-                "Tolerance and max_iter must be positive".to_string(),
-            ));
-        }
-
-        // Check for data quality issues
-        let x_vec: Vec<f64> = x.iter().cloned().collect();
-        let data_valid = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            x_vec.par_iter().all(|&val| val.is_finite())
-        } else {
-            x_vec.iter().all(|&val| val.is_finite())
-        };
-        if !data_valid {
-            return Err(ModelError::InputValidationError(
-                "Input data contains invalid values (NaN or Infinity)".to_string(),
             ));
         }
 
@@ -581,14 +562,12 @@ impl SVC {
             _ => return Err(ModelError::NotFitted),
         };
 
-        // Input validation
-        let (n_samples, n_features) = (x.nrows(), x.ncols());
-        if n_samples == 0 || n_features == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
+        // Basic input validation
+        preliminary_check(x, None)?;
 
+        let n_features = x.ncols();
+
+        // Check feature dimension match
         if n_features != support_vectors.ncols() {
             return Err(ModelError::InputValidationError(format!(
                 "Input has {} features but model was trained on {} features",
@@ -597,18 +576,7 @@ impl SVC {
             )));
         }
 
-        // Check for data quality
-        let x_vec: Vec<f64> = x.iter().cloned().collect();
-        let data_invalid = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            x_vec.par_iter().any(|&val| !val.is_finite())
-        } else {
-            x_vec.iter().any(|&val| !val.is_finite())
-        };
-        if data_invalid {
-            return Err(ModelError::InputValidationError(
-                "Input data contains invalid values (NaN or Infinity)".to_string(),
-            ));
-        }
+        let n_samples = x.nrows();
 
         // Compute predictions with improved error handling
         let compute_prediction = |i: usize| {
@@ -676,14 +644,12 @@ impl SVC {
             _ => return Err(ModelError::NotFitted),
         };
 
-        // Input validation
-        let (n_samples, n_features) = (x.nrows(), x.ncols());
-        if n_samples == 0 || n_features == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
+        // Basic input validation
+        preliminary_check(x, None)?;
 
+        let n_features = x.ncols();
+
+        // Check feature dimension match
         if n_features != support_vectors.ncols() {
             return Err(ModelError::InputValidationError(format!(
                 "Input has {} features but model was trained on {} features",
@@ -691,6 +657,8 @@ impl SVC {
                 support_vectors.ncols()
             )));
         }
+
+        let n_samples = x.nrows();
 
         let mut decision_values = Array1::<f64>::zeros(n_samples);
 

@@ -3,7 +3,7 @@ use super::*;
 // Test basic constructor functionality
 #[test]
 fn test_new() {
-    let forest = IsolationForest::new(50, 128, Some(6), Some(42));
+    let forest = IsolationForest::new(50, 128, Some(6), Some(42)).unwrap();
     assert_eq!(forest.get_n_estimators(), 50);
     assert_eq!(forest.get_max_samples(), 128);
     assert_eq!(forest.get_max_depth(), 6);
@@ -25,11 +25,11 @@ fn test_default() {
 // Test constructor with automatic max_depth calculation
 #[test]
 fn test_new_with_auto_max_depth() {
-    let forest = IsolationForest::new(10, 64, None, None);
+    let forest = IsolationForest::new(10, 64, None, None).unwrap();
     // ceil(log2(64)) = ceil(6.0) = 6
     assert_eq!(forest.get_max_depth(), 6);
 
-    let forest2 = IsolationForest::new(10, 100, None, None);
+    let forest2 = IsolationForest::new(10, 100, None, None).unwrap();
     // ceil(log2(100)) = ceil(6.64) = 7
     assert_eq!(forest2.get_max_depth(), 7);
 }
@@ -37,7 +37,7 @@ fn test_new_with_auto_max_depth() {
 // Test fitting with valid data
 #[test]
 fn test_fit_valid_data() {
-    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42));
+    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42)).unwrap();
     let x = arr2(&[
         [1.0, 2.0],
         [2.0, 3.0],
@@ -85,7 +85,7 @@ fn test_fit_infinite_data() {
 // Test anomaly score calculation for single samples
 #[test]
 fn test_anomaly_score() {
-    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42));
+    let mut forest = IsolationForest::new(10, 50, Some(3), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 1.0], [1.1, 0.9], [0.9, 1.1], [1.0, 0.8], [0.8, 1.0]]);
 
     forest.fit(x_train.view()).unwrap();
@@ -117,7 +117,7 @@ fn test_anomaly_score_not_fitted() {
 // Test anomaly score with wrong feature dimension
 #[test]
 fn test_anomaly_score_dimension_mismatch() {
-    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 2.0], [2.0, 3.0]]);
 
     forest.fit(x_train.view()).unwrap();
@@ -131,7 +131,7 @@ fn test_anomaly_score_dimension_mismatch() {
 // Test predict function with multiple samples
 #[test]
 fn test_predict() {
-    let mut forest = IsolationForest::new(20, 50, Some(4), Some(42));
+    let mut forest = IsolationForest::new(20, 50, Some(4), Some(42)).unwrap();
     let x_train = arr2(&[
         [0.0, 0.0],
         [0.1, 0.1],
@@ -171,7 +171,7 @@ fn test_predict_not_fitted() {
 // Test predict with empty data
 #[test]
 fn test_predict_empty_data() {
-    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     forest.fit(x_train.view()).unwrap();
 
@@ -183,7 +183,7 @@ fn test_predict_empty_data() {
 // Test predict with dimension mismatch
 #[test]
 fn test_predict_dimension_mismatch() {
-    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     forest.fit(x_train.view()).unwrap();
 
@@ -195,7 +195,7 @@ fn test_predict_dimension_mismatch() {
 // Test predict with NaN values
 #[test]
 fn test_predict_nan_data() {
-    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42));
+    let mut forest = IsolationForest::new(5, 10, Some(2), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     forest.fit(x_train.view()).unwrap();
 
@@ -207,7 +207,7 @@ fn test_predict_nan_data() {
 // Test fit_predict function
 #[test]
 fn test_fit_predict() {
-    let mut forest = IsolationForest::new(15, 30, Some(3), Some(123));
+    let mut forest = IsolationForest::new(15, 30, Some(3), Some(123)).unwrap();
     let x = arr2(&[
         [1.0, 1.0],
         [1.2, 0.8],
@@ -232,7 +232,7 @@ fn test_fit_predict() {
 // Test with single feature data
 #[test]
 fn test_single_feature() {
-    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42));
+    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42)).unwrap();
     let x = arr2(&[
         [1.0],
         [1.1],
@@ -258,8 +258,8 @@ fn test_reproducibility() {
     let x = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5], [10.0, 10.0]]);
 
     // Train two models with same seed
-    let mut forest1 = IsolationForest::new(10, 20, Some(3), Some(42));
-    let mut forest2 = IsolationForest::new(10, 20, Some(3), Some(42));
+    let mut forest1 = IsolationForest::new(10, 20, Some(3), Some(42)).unwrap();
+    let mut forest2 = IsolationForest::new(10, 20, Some(3), Some(42)).unwrap();
 
     let scores1 = forest1.fit_predict(x.view()).unwrap();
     let scores2 = forest2.fit_predict(x.view()).unwrap();
@@ -276,7 +276,7 @@ fn test_different_n_estimators() {
     let x = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5], [0.5, 2.5]]);
 
     for n_estimators in [1, 5, 10, 50] {
-        let mut forest = IsolationForest::new(n_estimators, 10, Some(2), Some(42));
+        let mut forest = IsolationForest::new(n_estimators, 10, Some(2), Some(42)).unwrap();
         let result = forest.fit(x.view());
         assert!(result.is_ok());
         assert_eq!(forest.get_trees().as_ref().unwrap().len(), n_estimators);
@@ -296,7 +296,7 @@ fn test_different_max_samples() {
     ]);
 
     for max_samples in [2, 4, 6, 10] {
-        let mut forest = IsolationForest::new(5, max_samples, Some(3), Some(42));
+        let mut forest = IsolationForest::new(5, max_samples, Some(3), Some(42)).unwrap();
         let result = forest.fit(x.view());
         assert!(result.is_ok());
         assert_eq!(forest.get_max_samples(), max_samples);
@@ -306,7 +306,7 @@ fn test_different_max_samples() {
 // Test path length calculation consistency
 #[test]
 fn test_path_length_consistency() {
-    let mut forest = IsolationForest::new(1, 10, Some(3), Some(42)); // Single tree for predictable behavior
+    let mut forest = IsolationForest::new(1, 10, Some(3), Some(42)).unwrap(); // Single tree for predictable behavior
     let x = arr2(&[[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]);
 
     forest.fit(x.view()).unwrap();
@@ -322,7 +322,7 @@ fn test_path_length_consistency() {
 // Test with larger dataset
 #[test]
 fn test_larger_dataset() {
-    let mut forest = IsolationForest::new(20, 100, Some(5), Some(42));
+    let mut forest = IsolationForest::new(20, 100, Some(5), Some(42)).unwrap();
 
     // Generate normal data points around (0, 0)
     let mut data = Vec::new();
@@ -351,7 +351,7 @@ fn test_larger_dataset() {
 // Test edge case with all identical points
 #[test]
 fn test_identical_points() {
-    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42));
+    let mut forest = IsolationForest::new(10, 20, Some(3), Some(42)).unwrap();
     let x = arr2(&[[1.0, 2.0], [1.0, 2.0], [1.0, 2.0], [1.0, 2.0]]);
 
     let result = forest.fit(x.view());
@@ -379,7 +379,7 @@ fn test_parallel_consistency() {
         [100.0, 200.0],
     ]);
 
-    let mut forest = IsolationForest::new(10, 20, Some(4), Some(42));
+    let mut forest = IsolationForest::new(10, 20, Some(4), Some(42)).unwrap();
     forest.fit(x.view()).unwrap();
 
     // Run prediction multiple times - should be consistent
@@ -394,7 +394,7 @@ fn test_parallel_consistency() {
 // Test memory efficiency with many small predictions
 #[test]
 fn test_memory_efficiency() {
-    let mut forest = IsolationForest::new(5, 10, Some(3), Some(42));
+    let mut forest = IsolationForest::new(5, 10, Some(3), Some(42)).unwrap();
     let x_train = arr2(&[[1.0, 2.0], [2.0, 1.0], [1.5, 1.5]]);
 
     forest.fit(x_train.view()).unwrap();

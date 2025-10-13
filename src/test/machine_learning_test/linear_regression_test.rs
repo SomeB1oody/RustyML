@@ -16,7 +16,7 @@ fn test_default_constructor() {
 
 #[test]
 fn test_new_constructor() {
-    let model = LinearRegression::new(false, 0.01, 1000, 1e-5, None);
+    let model = LinearRegression::new(false, 0.01, 1000, 1e-5, None).unwrap();
     assert!(!model.get_fit_intercept());
     assert_eq!(model.get_learning_rate(), 0.01);
     assert_eq!(model.get_max_iterations(), 1000);
@@ -46,7 +46,7 @@ fn test_fit_and_predict() {
     let x = Array2::from_shape_vec((4, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
-    let mut model = LinearRegression::new(true, 0.01, 10000, 1e-8, None);
+    let mut model = LinearRegression::new(true, 0.01, 10000, 1e-8, None).unwrap();
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
@@ -93,7 +93,7 @@ fn test_multivariate_regression() {
     let y = Array1::from_vec(y_vec);
 
     // Create model and train
-    let mut model = LinearRegression::new(true, 0.005, 20000, 1e-10, None);
+    let mut model = LinearRegression::new(true, 0.005, 20000, 1e-10, None).unwrap();
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
@@ -149,7 +149,7 @@ fn test_no_intercept() {
     let x = Array2::from_shape_vec((4, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
-    let mut model = LinearRegression::new(false, 0.01, 10000, 1e-8, None);
+    let mut model = LinearRegression::new(false, 0.01, 10000, 1e-8, None).unwrap();
     model.fit(x.view(), y.view()).unwrap();
 
     // Check if coefficient is close to expected value (around 2.0)
@@ -169,7 +169,7 @@ fn test_no_intercept() {
 #[test]
 fn test_linear_regression_fit_predict() {
     // Create a simple linear regression model instance
-    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 
     // Create simple training data
     let x_vec = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0], vec![5.0]];

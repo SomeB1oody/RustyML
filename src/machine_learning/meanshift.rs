@@ -41,7 +41,7 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// let mut ms = MeanShift::default();
 ///
 /// // Fit the model and predict cluster labels
-/// let labels = ms.fit_predict(data.view());
+/// let labels = ms.fit_predict(data.view()).unwrap();
 ///
 /// // Get the cluster centers
 /// let centers = ms.get_cluster_centers().clone().unwrap();
@@ -82,21 +82,9 @@ pub struct MeanShift {
 /// # Returns
 ///
 /// * `MeanShift` - A new MeanShift instance with default parameters.
-///
-/// # Examples
-/// ```rust
-/// use rustyml::machine_learning::meanshift::MeanShift;
-///
-/// let ms = MeanShift::default();
-/// assert_eq!(ms.get_bandwidth(), 1.0);
-/// assert_eq!(ms.get_max_iterations(), 300);
-/// assert_eq!(ms.get_tolerance(), 1e-3);
-/// assert_eq!(ms.get_bin_seeding(), false);
-/// assert_eq!(ms.get_cluster_all(), true);
-/// ```
 impl Default for MeanShift {
     fn default() -> Self {
-        Self::new(1.0, None, None, None, None)
+        Self::new(1.0, None, None, None, None).expect("Default parameters should be valid")
     }
 }
 
@@ -105,33 +93,51 @@ impl MeanShift {
     ///
     /// # Parameters
     ///
-    /// - `bandwidth` - The bandwidth parameter that determines the size of the kernel.
-    /// - `max_iter` - The maximum number of iterations for the mean shift algorithm.
-    /// - `tol` - The convergence threshold for the algorithm.
+    /// - `bandwidth` - The bandwidth parameter that determines the size of the kernel. Must be positive and finite.
+    /// - `max_iter` - The maximum number of iterations for the mean shift algorithm. Must be greater than 0.
+    /// - `tol` - The convergence threshold for the algorithm. Must be positive and finite.
     /// - `bin_seeding` - Whether to use bin seeding for initialization.
     /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
     ///
     /// # Returns
     ///
-    /// * `Self` - A new MeanShift instance.
+    /// - `Ok(Self)` - A new MeanShift instance with validated parameters
+    /// - `Err(ModelError::InputValidationError)` - If any parameter is invalid
     pub fn new(
         bandwidth: f64,
         max_iter: Option<usize>,
         tol: Option<f64>,
         bin_seeding: Option<bool>,
         cluster_all: Option<bool>,
-    ) -> Self {
-        MeanShift {
+    ) -> Result<Self, ModelError> {
+        // Validate bandwidth
+        if bandwidth <= 0.0 || !bandwidth.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "bandwidth must be positive and finite, got {}",
+                bandwidth
+            )));
+        }
+
+        let max_iter_val = max_iter.unwrap_or(300);
+        let tol_val = tol.unwrap_or(1e-3);
+
+        // Validate max_iter
+        validate_max_iterations(max_iter_val)?;
+
+        // Validate tolerance
+        validate_tolerance(tol_val)?;
+
+        Ok(MeanShift {
             bandwidth,
-            max_iter: max_iter.unwrap_or(300),
-            tol: tol.unwrap_or(1e-3),
+            max_iter: max_iter_val,
+            tol: tol_val,
             bin_seeding: bin_seeding.unwrap_or(false),
             cluster_all: cluster_all.unwrap_or(true),
             n_samples_per_center: None,
             cluster_centers: None,
             labels: None,
             n_iter: None,
-        }
+        })
     }
 
     // Getters
@@ -161,35 +167,10 @@ impl MeanShift {
     /// - `Ok(&mut Self)` - A mutable reference to the fitted model
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
-        if self.bandwidth <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                "bandwidth must be positive".to_string(),
-            ));
-        }
-
-        if self.max_iter <= 0 {
-            return Err(ModelError::InputValidationError(
-                "max_iter must be positive".to_string(),
-            ));
-        }
-
-        if self.tol <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                "tol must be positive".to_string(),
-            ));
-        }
-
         preliminary_check(x, None)?;
 
         let n_samples = x.shape()[0];
         let n_features = x.shape()[1];
-
-        // Check for zero features
-        if n_features == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data must have at least one feature".to_string(),
-            ));
-        }
 
         // Initialize seed points
         let seeds: Vec<usize> = if self.bin_seeding {
@@ -463,65 +444,76 @@ impl MeanShift {
     ///
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input data is invalid or dimensions don't match training data
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
-        // Check if input data is empty
+        // Check if model has been fitted
+        if self.cluster_centers.is_none() {
+            return Err(ModelError::NotFitted);
+        }
+
+        let centers = self.cluster_centers.as_ref().unwrap();
+
+        // Check for empty input data
         if x.is_empty() {
             return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
+                "Cannot predict on empty dataset".to_string(),
             ));
         }
 
-        if let Some(centers) = &self.cluster_centers {
-            // Check if input feature dimensions match training data
-            if x.shape()[1] != centers.shape()[1] {
-                return Err(ModelError::InputValidationError(format!(
-                    "Input feature dimension {} does not match training dimension {}",
-                    x.shape()[1],
-                    centers.shape()[1]
-                )));
+        // Check if input feature dimensions match training data
+        if x.shape()[1] != centers.shape()[1] {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, training features: {}",
+                x.shape()[1],
+                centers.shape()[1]
+            )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        let n_samples = x.shape()[0];
+        let n_clusters = centers.shape()[0];
+        let bandwidth_squared = self.bandwidth * self.bandwidth;
+
+        // Determine whether to use parallel processing
+        let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
+
+        // Helper function for finding nearest cluster
+        let find_nearest = |i: usize| -> Result<usize, ModelError> {
+            let point = x.row(i);
+            let mut min_dist_squared = f64::INFINITY;
+            let mut label = 0;
+
+            for j in 0..n_clusters {
+                let center = centers.row(j);
+                let dist_squared = squared_euclidean_distance_row(point, center)?;
+                if dist_squared < min_dist_squared {
+                    min_dist_squared = dist_squared;
+                    label = j;
+                }
             }
 
-            let n_samples = x.shape()[0];
-            let n_clusters = centers.shape()[0];
-            let bandwidth_squared = self.bandwidth * self.bandwidth;
-
-            // Determine whether to use parallel processing
-            let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
-
-            // Helper function for finding nearest cluster
-            let find_nearest = |i: usize| -> Result<usize, ModelError> {
-                let point = x.row(i);
-                let mut min_dist_squared = f64::INFINITY;
-                let mut label = 0;
-
-                for j in 0..n_clusters {
-                    let center = centers.row(j);
-                    let dist_squared = squared_euclidean_distance_row(point, center)?;
-                    if dist_squared < min_dist_squared {
-                        min_dist_squared = dist_squared;
-                        label = j;
-                    }
-                }
-
-                // If not cluster_all and distance is too far, mark as outlier
-                if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                    Ok(n_clusters) // Use n_clusters as outlier label
-                } else {
-                    Ok(label)
-                }
-            };
-
-            // Process all samples with optional parallelization
-            let labels: Result<Vec<usize>, ModelError> = if use_parallel {
-                (0..n_samples).into_par_iter().map(find_nearest).collect()
+            // If not cluster_all and distance is too far, mark as outlier
+            if !self.cluster_all && min_dist_squared > bandwidth_squared {
+                Ok(n_clusters) // Use n_clusters as outlier label
             } else {
-                (0..n_samples).map(find_nearest).collect()
-            };
+                Ok(label)
+            }
+        };
 
-            Ok(Array1::from(labels?))
+        // Process all samples with optional parallelization
+        let labels: Result<Vec<usize>, ModelError> = if use_parallel {
+            (0..n_samples).into_par_iter().map(find_nearest).collect()
         } else {
-            Err(ModelError::NotFitted)
-        }
+            (0..n_samples).map(find_nearest).collect()
+        };
+
+        Ok(Array1::from(labels?))
     }
 
     /// Fits the model to the input data and predicts cluster labels.
@@ -613,16 +605,19 @@ impl MeanShift {
 ///
 /// # Returns
 ///
-/// * `f64` - The estimated bandwidth.
+/// - `Ok(f64)` - The estimated bandwidth
+/// - `Err(ModelError::InputValidationError)` - quantile is not in range \[0, 1\]
 pub fn estimate_bandwidth(
     x: ArrayView2<f64>,
     quantile: Option<f64>,
     n_samples: Option<usize>,
     random_state: Option<u64>,
-) -> f64 {
+) -> Result<f64, ModelError> {
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
-        panic!("quantile should be in range [0, 1]");
+        return Err(ModelError::InputValidationError(
+            "quantile should be in range [0, 1]".to_string(),
+        ));
     }
 
     let (n_samples_total, _) = x.dim();
@@ -680,5 +675,5 @@ pub fn estimate_bandwidth(
     distances.par_sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let k = (distances.len() as f64 * quantile) as usize;
-    distances.get(k).copied().unwrap_or(0.0)
+    Ok(distances.get(k).copied().unwrap_or(0.0))
 }

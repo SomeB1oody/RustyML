@@ -101,21 +101,29 @@ impl LogisticRegression {
     /// # Parameters
     ///
     /// - `fit_intercept` - Whether to add intercept term (bias)
-    /// - `learning_rate` - Learning rate for gradient descent
-    /// - `max_iterations` - Maximum number of iterations
-    /// - `tolerance` - Convergence tolerance, stops when loss change is below this value
+    /// - `learning_rate` - Learning rate for gradient descent, must be positive and finite
+    /// - `max_iterations` - Maximum number of iterations, must be greater than 0
+    /// - `tolerance` - Convergence tolerance, stops when loss change is below this value, must be positive and finite
+    /// - `regularization_type` - Optional regularization to prevent overfitting. Alpha must be non-negative and finite
     ///
     /// # Returns
     ///
-    /// * `Self` - An untrained logistic regression model instance
+    /// - `Ok(Self)` - An untrained logistic regression model instance
+    /// - `Err(ModelError::InputValidationError)` - If any parameter is invalid
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
         regularization_type: Option<RegularizationType>,
-    ) -> Self {
-        LogisticRegression {
+    ) -> Result<Self, ModelError> {
+        // Input validation
+        validate_learning_rate(learning_rate)?;
+        validate_max_iterations(max_iterations)?;
+        validate_tolerance(tolerance)?;
+        validate_regulation_type(regularization_type)?;
+
+        Ok(LogisticRegression {
             weights: None,
             fit_intercept,
             learning_rate,
@@ -123,7 +131,7 @@ impl LogisticRegression {
             tol: tolerance,
             n_iter: None,
             regularization_type,
-        }
+        })
     }
 
     // Getters
@@ -151,17 +159,10 @@ impl LogisticRegression {
     /// # Returns
     ///
     /// - `Ok(&mut Self)` - A mutable reference to the trained model, allowing for method chaining
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
         // Preliminary check
         preliminary_check(x, Some(y))?;
-
-        // Check learning rate bounds
-        if self.learning_rate <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                "Learning rate must be greater than 0.0".to_string(),
-            ));
-        }
 
         // Check target values are binary
         for &val in y.iter() {
@@ -173,13 +174,6 @@ impl LogisticRegression {
         }
 
         let (n_samples, mut n_features) = x.dim();
-
-        // Check max iterations
-        if self.max_iter == 0 {
-            return Err(ModelError::InputValidationError(
-                "Maximum number of iterations must be greater than 0".to_string(),
-            ));
-        }
 
         // Decide the source of x_train based on whether to use intercept
         let x_train_view: ArrayView2<f64>;
@@ -238,6 +232,14 @@ impl LogisticRegression {
             // Calculate gradients
             let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
 
+            // Check for numerical issues in gradients
+            if gradients.iter().any(|&val| !val.is_finite()) {
+                progress_bar.finish_with_message("Error: NaN or infinite gradients");
+                return Err(ModelError::ProcessingError(
+                    "Gradient calculation resulted in NaN or infinite values".to_string(),
+                ));
+            }
+
             if let Some(reg_type) = &self.regularization_type {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
 
@@ -265,6 +267,14 @@ impl LogisticRegression {
             // Update weights
             weights = &weights - self.learning_rate * &gradients;
 
+            // Check for numerical issues in updated weights
+            if weights.iter().any(|&val| !val.is_finite()) {
+                progress_bar.finish_with_message("Error: NaN or infinite weights");
+                return Err(ModelError::ProcessingError(
+                    "Weight update resulted in NaN or infinite values".to_string(),
+                ));
+            }
+
             // Calculate loss using existing predictions
             let mut cost = logistic_loss(predictions.view(), y.view())?;
 
@@ -285,6 +295,14 @@ impl LogisticRegression {
             }
 
             final_cost = cost;
+
+            // Check for numerical issues in cost
+            if !cost.is_finite() {
+                progress_bar.finish_with_message("Error: NaN or infinite cost");
+                return Err(ModelError::ProcessingError(
+                    "Cost calculation resulted in NaN or infinite value".to_string(),
+                ));
+            }
 
             // Update progress bar with current loss
             progress_bar.set_message(format!("{:.6}", cost));
@@ -331,7 +349,14 @@ impl LogisticRegression {
     ///
     /// - `Ok(Array1<i32>)` - A 1D array containing predicted class labels (0 or 1) for each sample
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input is invalid or feature dimensions don't match
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during prediction
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
+        // Check if model has been fitted
+        if self.weights.is_none() {
+            return Err(ModelError::NotFitted);
+        }
+
         let (n_samples, n_features) = x.dim();
 
         // Check for empty input data
@@ -339,6 +364,20 @@ impl LogisticRegression {
             return Err(ModelError::InputValidationError(
                 "Cannot predict on empty dataset".to_string(),
             ));
+        }
+
+        // Check feature dimension match
+        let expected_features = if self.fit_intercept {
+            self.weights.as_ref().unwrap().len() - 1
+        } else {
+            self.weights.as_ref().unwrap().len()
+        };
+
+        if n_features != expected_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                n_features, expected_features
+            )));
         }
 
         // Check for invalid values in input data
@@ -381,8 +420,6 @@ impl LogisticRegression {
     /// - `Ok(Array1<f64>)` - A 1D array containing the probability of each sample belonging to the positive class
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     fn predict_proba(&self, x: &ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
-        use crate::math::sigmoid;
-
         if let Some(weights) = &self.weights {
             let mut predictions = x.dot(weights);
 

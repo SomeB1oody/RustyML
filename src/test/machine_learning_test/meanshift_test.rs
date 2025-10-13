@@ -40,7 +40,7 @@ fn test_meanshift_default() {
 
 #[test]
 fn test_meanshift_new() {
-    let ms = MeanShift::new(2.0, Some(200), Some(1e-4), Some(true), Some(true));
+    let ms = MeanShift::new(2.0, Some(200), Some(1e-4), Some(true), Some(true)).unwrap();
     assert_eq!(ms.get_bandwidth(), 2.0);
     assert_eq!(ms.get_max_iterations(), 200);
     assert_eq!(ms.get_tolerance(), 1e-4);
@@ -62,7 +62,7 @@ fn test_meanshift_getters_before_fit() {
 fn test_meanshift_fit() {
     let data = create_test_data();
 
-    let mut ms = MeanShift::new(2.0, None, None, None, Some(true));
+    let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
     ms.fit(data.view()).unwrap();
 
     // Check that all attributes are accessible after fitting
@@ -90,7 +90,7 @@ fn test_meanshift_fit() {
 fn test_meanshift_predict() {
     let data = create_test_data();
 
-    let mut ms = MeanShift::new(2.0, None, None, None, Some(true));
+    let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
     ms.fit(data.view()).unwrap();
 
     // Create some new test points
@@ -116,7 +116,7 @@ fn test_meanshift_predict() {
 fn test_meanshift_fit_predict() {
     let data = create_test_data();
 
-    let mut ms = MeanShift::new(2.0, None, None, None, Some(true));
+    let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
     let labels = ms.fit_predict(data.view()).unwrap();
 
     assert_eq!(labels.len(), data.dim().0);
@@ -135,8 +135,8 @@ fn test_bin_seeding() {
     let data = create_test_data();
 
     // Compare with and without bin_seeding
-    let mut ms1 = MeanShift::new(2.0, None, None, Some(false), None);
-    let mut ms2 = MeanShift::new(2.0, None, None, Some(true), None);
+    let mut ms1 = MeanShift::new(2.0, None, None, Some(false), None).unwrap();
+    let mut ms2 = MeanShift::new(2.0, None, None, Some(true), None).unwrap();
 
     ms1.fit(data.view()).unwrap();
     ms2.fit(data.view()).unwrap();
@@ -153,23 +153,23 @@ fn test_estimate_bandwidth() {
     let data = create_test_data();
 
     // Default parameters
-    let bw1 = estimate_bandwidth(data.view(), None, None, None);
+    let bw1 = estimate_bandwidth(data.view(), None, None, None).unwrap();
     assert!(bw1 > 0.0);
 
     // Specified quantile
-    let bw2 = estimate_bandwidth(data.view(), Some(0.3), None, None);
+    let bw2 = estimate_bandwidth(data.view(), Some(0.3), None, None).unwrap();
     assert!(bw2 > 0.0);
 
     // Specified n_samples
-    let bw3 = estimate_bandwidth(data.view(), None, Some(50), None);
+    let bw3 = estimate_bandwidth(data.view(), None, Some(50), None).unwrap();
     assert!(bw3 > 0.0);
 
     // Specified random_state
-    let bw4 = estimate_bandwidth(data.view(), None, None, Some(42));
+    let bw4 = estimate_bandwidth(data.view(), None, None, Some(42)).unwrap();
     assert!(bw4 > 0.0);
 
     // Using the same random seed should yield the same result
-    let bw5 = estimate_bandwidth(data.view(), None, None, Some(42));
+    let bw5 = estimate_bandwidth(data.view(), None, None, Some(42)).unwrap();
     assert_eq!(bw4, bw5);
 }
 
@@ -178,7 +178,7 @@ fn test_cluster_all_parameter() {
     let data = create_test_data();
 
     // With cluster_all = false, some points may not be assigned to clusters
-    let mut ms1 = MeanShift::new(1.0, None, None, None, Some(false));
+    let mut ms1 = MeanShift::new(1.0, None, None, None, Some(false)).unwrap();
     ms1.fit(data.view()).unwrap();
     let labels1 = match ms1.get_labels() {
         Some(labels) => labels,
@@ -186,7 +186,7 @@ fn test_cluster_all_parameter() {
     };
 
     // With cluster_all = true, all points should be assigned to clusters
-    let mut ms2 = MeanShift::new(1.0, None, None, None, Some(true));
+    let mut ms2 = MeanShift::new(1.0, None, None, None, Some(true)).unwrap();
     ms2.fit(data.view()).unwrap();
     let labels2 = match ms2.get_labels() {
         Some(labels) => labels,
@@ -202,7 +202,7 @@ fn test_fit_with_max_iterations() {
     let data = create_test_data();
 
     // Set a very low max_iter to force early stopping
-    let mut ms = MeanShift::new(2.0, Some(1), None, None, None);
+    let mut ms = MeanShift::new(2.0, Some(1), None, None, None).unwrap();
     ms.fit(data.view()).unwrap();
 
     // Should complete successfully and n_iter should be 1

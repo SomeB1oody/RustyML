@@ -24,7 +24,8 @@ fn test_knn_new() {
         3,
         WeightingStrategy::Distance,
         DistanceCalculationMetric::Manhattan,
-    );
+    )
+    .unwrap();
     assert_eq!(knn.get_k(), 3);
     assert!(matches!(
         knn.get_weighting_strategy(),
@@ -109,7 +110,8 @@ fn test_knn_predict_euclidean_uniform() {
         1,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -145,7 +147,8 @@ fn test_knn_predict_manhattan() {
         1,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Manhattan,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -176,7 +179,8 @@ fn test_knn_with_k3() {
         3,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -209,7 +213,8 @@ fn test_knn_distance_weights() {
         3,
         WeightingStrategy::Distance,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -255,7 +260,8 @@ fn test_knn_string_labels() {
         2,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Create simple training data
     let x_train =
@@ -292,7 +298,8 @@ fn test_fit_predict() {
         3,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Create training data
     // Features: 2D points
@@ -329,7 +336,8 @@ fn test_fit_predict_empty_data() {
         3,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
     let y_train = array![0, 0, 1];
@@ -353,7 +361,8 @@ fn test_knn_predict_parallel_euclidean_uniform() {
         1,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -389,7 +398,8 @@ fn test_knn_predict_parallel_multiple_samples() {
         3,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -432,7 +442,8 @@ fn test_knn_predict_parallel_distance_weights() {
         3,
         WeightingStrategy::Distance,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -466,7 +477,8 @@ fn test_knn_predict_parallel_string_labels() {
         2,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Create simple training data
     let x_train =
@@ -503,7 +515,8 @@ fn test_knn_predict_consistency() {
         5,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Create larger training dataset
     let x_train = Array2::<f64>::from_shape_vec(
@@ -553,7 +566,8 @@ fn test_knn_predict_parallel_manhattan() {
         3,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Manhattan,
-    );
+    )
+    .unwrap();
 
     // Training data: 2D points
     let x_train = Array2::<f64>::from_shape_vec(
@@ -594,7 +608,8 @@ fn test_knn_predict_parallel_large_k() {
         150,
         WeightingStrategy::Uniform,
         DistanceCalculationMetric::Euclidean,
-    );
+    )
+    .unwrap();
 
     // Create a larger dataset to test parallel voting aggregation (k >= 100)
     let mut x_train_vec = Vec::new();

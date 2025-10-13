@@ -52,7 +52,7 @@ pub enum WeightingStrategy {
 /// let y_train = array!["A", "A", "A", "B", "B"];
 ///
 /// // Create KNN model with k=3 and default settings
-/// let mut knn = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean);
+/// let mut knn = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
 ///
 /// // Fit the model
 /// knn.fit(x_train.view(), y_train.view()).unwrap();
@@ -110,20 +110,28 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// * `KNN` - A new KNN classifier instance
+    /// - `Ok(Self)` - A new KNN classifier instance
+    /// - `Err(ModelError::InputValidationError)` - If k is 0
     pub fn new(
         k: usize,
         weighting_strategy: WeightingStrategy,
         metric: DistanceCalculationMetric,
-    ) -> Self {
-        KNN {
+    ) -> Result<Self, ModelError> {
+        // Validate k parameter
+        if k == 0 {
+            return Err(ModelError::InputValidationError(
+                "k must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(KNN {
             k,
             x_train: None,
             y_train_encoded: None,
             label_map: None,
             weighting_strategy,
             metric,
-        }
+        })
     }
 
     // Getters
@@ -164,13 +172,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         if x.nrows() < self.k {
             return Err(ModelError::InputValidationError(
                 "The number of samples is less than k".to_string(),
-            ));
-        }
-
-        // check if k is 0
-        if self.k == 0 {
-            return Err(ModelError::InputValidationError(
-                "k must be greater than 0".to_string(),
             ));
         }
 

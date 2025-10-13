@@ -29,8 +29,8 @@ const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
 ///     2.0, 2.0,
 /// ]).unwrap();
 ///
-/// let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
-/// let labels = dbscan.fit_predict(data.view());
+/// let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+/// let labels = dbscan.fit_predict(data.view()).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DBSCAN {
@@ -70,15 +70,48 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// * `DBSCAN` - A new DBSCAN instance with the specified parameters
-    pub fn new(eps: f64, min_samples: usize, metric: DistanceCalculationMetric) -> Self {
-        DBSCAN {
+    /// - `Ok(DBSCAN)` - A new DBSCAN instance with the specified parameters
+    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid
+    pub fn new(
+        eps: f64,
+        min_samples: usize,
+        metric: DistanceCalculationMetric,
+    ) -> Result<Self, ModelError> {
+        // Validate eps parameter
+        if eps <= 0.0 || !eps.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "eps must be positive and finite, got {}",
+                eps
+            )));
+        }
+
+        // Validate min_samples parameter
+        if min_samples == 0 {
+            return Err(ModelError::InputValidationError(
+                "min_samples must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate metric parameter
+        match metric {
+            DistanceCalculationMetric::Minkowski(p) => {
+                if p <= 0.0 || !p.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Minkowski p must be positive and finite, got {}",
+                        p
+                    )));
+                }
+            }
+            _ => {} // Euclidean and Manhattan don't need additional validation
+        }
+
+        Ok(DBSCAN {
             eps,
             min_samples,
             metric,
             labels_: None,
             core_sample_indices: None,
-        }
+        })
     }
 
     // Getters
@@ -164,7 +197,7 @@ impl DBSCAN {
     /// # Returns
     ///
     /// - `Ok(&mut Self)` - The trained instance
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
     ///
     /// # Notes
     ///
@@ -172,18 +205,6 @@ impl DBSCAN {
     /// Labels of -1 indicate noise points (outliers).
     pub fn fit(&mut self, data: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
         preliminary_check(data, None)?;
-
-        if self.eps <= 0.0 {
-            return Err(ModelError::InputValidationError(
-                "eps must be positive".to_string(),
-            ));
-        }
-
-        if self.min_samples == 0 {
-            return Err(ModelError::InputValidationError(
-                "min_samples must be greater than 0".to_string(),
-            ));
-        }
 
         // Check if dataset is empty
         let n_samples = data.nrows();
@@ -303,6 +324,7 @@ impl DBSCAN {
     ///
     /// - `Ok(Array1<i32>)` - Array of predicted cluster labels
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input validation fails
     ///
     /// # Notes
     ///
@@ -319,6 +341,18 @@ impl DBSCAN {
             .core_sample_indices
             .as_ref()
             .ok_or(ModelError::NotFitted)?;
+
+        // Check if trained data is empty
+        if trained_data.nrows() == 0 {
+            return Err(ModelError::InputValidationError(
+                "Trained data is empty".to_string(),
+            ));
+        }
+
+        // Check if new data is empty
+        if new_data.nrows() == 0 {
+            return Ok(Array1::from(vec![]));
+        }
 
         // Check dimension matching
         if trained_data.ncols() != new_data.ncols() {
@@ -337,9 +371,18 @@ impl DBSCAN {
             )));
         }
 
-        // Check if new data is empty
-        if new_data.nrows() == 0 {
-            return Ok(Array1::from(vec![]));
+        // Check for invalid values in trained data
+        if trained_data.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Trained data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        // Check for invalid values in new data
+        if new_data.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "New data contains NaN or infinite values".to_string(),
+            ));
         }
 
         // Create a set for faster core sample lookup

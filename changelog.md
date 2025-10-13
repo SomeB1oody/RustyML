@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.8.0] - 2025-10-11 (UTC-7)
+## [v0.9.0] - 2025-10-13 (UTC-7)
+### Changed
+- Enhance error handling and input validation across ML models
+
+## [v0.9.0] - 2025-10-12 (UTC-7)
 ### Changed
 - Update default feature set to include `machine_learning` and `neural_network`
 

@@ -1,6 +1,7 @@
 use crate::error::ModelError;
 use crate::math::*;
 use ahash::{AHashMap, AHashSet};
+use helper_functions::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::prelude::*;
 use rand::prelude::*;
@@ -47,60 +48,6 @@ pub enum RegularizationType {
     L2(f64),
 }
 
-/// Performs validation checks on the input data matrices.
-///
-/// This function validates that:
-/// - The input data matrix is not empty
-/// - The input data does not contain NaN or infinite values
-/// - When a target vector is provided:
-///   - The target vector is not empty
-///   - The target vector length matches the number of rows in the input data
-///
-/// # Parameters
-///
-/// * `x` - A 2D array of feature values where rows represent samples and columns represent features
-/// * `y` - An optional 1D array representing the target variables or labels corresponding to each sample
-///
-/// # Returns
-///
-/// - `Ok(())` - If all validation checks pass
-/// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
-fn preliminary_check(x: ArrayView2<f64>, y: Option<ArrayView1<f64>>) -> Result<(), ModelError> {
-    if x.nrows() == 0 {
-        return Err(ModelError::InputValidationError(
-            "Input data is empty".to_string(),
-        ));
-    }
-
-    for (i, row) in x.outer_iter().enumerate() {
-        for (j, &val) in row.iter().enumerate() {
-            if val.is_nan() || val.is_infinite() {
-                return Err(ModelError::InputValidationError(format!(
-                    "Input data contains NaN or infinite value at position [{}][{}]",
-                    i, j
-                )));
-            }
-        }
-    }
-
-    if let Some(y) = y {
-        if y.len() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Target vector is empty".to_string(),
-            ));
-        }
-
-        if y.len() != x.nrows() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input data and target vector have different lengths, x columns: {}, y length: {}",
-                x.nrows(),
-                y.len()
-            )));
-        }
-    }
-    Ok(())
-}
-
 /// Linear regression module implementing the ordinary least squares method
 pub mod linear_regression;
 
@@ -133,6 +80,9 @@ pub mod linear_svc;
 
 /// This module provides an implementation of Linear Discriminant Analysis
 pub mod linear_discriminant_analysis;
+
+/// This module provides helper functions for machine learning models
+mod helper_functions;
 
 pub use crate::utility::KernelType;
 pub use dbscan::*;

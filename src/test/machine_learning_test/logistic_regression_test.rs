@@ -14,7 +14,7 @@ fn test_default_constructor() {
 
 #[test]
 fn test_new_constructor() {
-    let model = LogisticRegression::new(false, 0.05, 200, 1e-5, None);
+    let model = LogisticRegression::new(false, 0.05, 200, 1e-5, None).unwrap();
 
     assert_eq!(model.get_fit_intercept(), false);
     assert_eq!(model.get_learning_rate(), 0.05);
@@ -61,7 +61,7 @@ fn test_fit_and_predict_simple_case() {
 #[test]
 fn test_predict_proba() {
     // Create a simple model and set weights
-    let mut model = LogisticRegression::new(false, 0.01, 100, 1e-4, None);
+    let mut model = LogisticRegression::new(false, 0.01, 100, 1e-4, None).unwrap();
 
     // Since predict_proba is private, we'll test it indirectly
     // First, fit the model with simple data
@@ -106,11 +106,12 @@ fn test_fit_with_intercept() {
     let x = arr2(&[[1.0], [2.0], [3.0], [4.0]]);
     let y = arr1(&[0.0, 0.0, 1.0, 1.0]);
 
-    let mut model_with_intercept = LogisticRegression::new(true, 0.1, 1000, 1e-6, None);
+    let mut model_with_intercept = LogisticRegression::new(true, 0.1, 1000, 1e-6, None).unwrap();
     model_with_intercept.fit(x.view(), y.view()).unwrap();
 
     // Training without intercept
-    let mut model_without_intercept = LogisticRegression::new(false, 0.1, 1000, 1e-6, None);
+    let mut model_without_intercept =
+        LogisticRegression::new(false, 0.1, 1000, 1e-6, None).unwrap();
     model_without_intercept.fit(x.view(), y.view()).unwrap();
 
     // Check predictions from both models
@@ -123,7 +124,7 @@ fn test_fit_with_intercept() {
 #[test]
 fn test_fit_predict() {
     // Create a simple logistic regression instance
-    let mut model = LogisticRegression::new(true, 0.01, 10000, 1e-5, None);
+    let mut model = LogisticRegression::new(true, 0.01, 10000, 1e-5, None).unwrap();
 
     // Create training data: simple 2D features
     // For example: two features forming two linearly separable classes

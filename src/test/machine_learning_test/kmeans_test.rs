@@ -25,7 +25,7 @@ fn create_test_data() -> Array2<f64> {
 #[test]
 fn test_new_and_default() {
     // Test new method
-    let kmeans = KMeans::new(3, 100, 0.0001, Some(42));
+    let kmeans = KMeans::new(3, 100, 0.0001, Some(42)).unwrap();
 
     // Verify parameters of instance created with new()
     assert!(matches!(kmeans.get_centroids(), None));
@@ -45,7 +45,7 @@ fn test_new_and_default() {
 
 #[test]
 fn test_fit() {
-    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42));
+    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42)).unwrap();
     let data = create_test_data();
 
     // Test fit method
@@ -65,7 +65,7 @@ fn test_fit() {
 
 #[test]
 fn test_predict() {
-    let mut kmeans = KMeans::new(2, 1000, 1e-7, Some(42));
+    let mut kmeans = KMeans::new(2, 1000, 1e-7, Some(42)).unwrap();
     let data = create_test_data();
 
     // Fit first
@@ -103,7 +103,7 @@ fn test_predict() {
 
 #[test]
 fn test_fit_predict() {
-    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42));
+    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42)).unwrap();
     let data = create_test_data();
 
     // Test fit_predict method
@@ -127,7 +127,7 @@ fn test_fit_predict() {
 
 #[test]
 fn test_getters() {
-    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42));
+    let mut kmeans = KMeans::new(2, 100, 0.0001, Some(42)).unwrap();
     let data = create_test_data();
 
     // State before fitting
@@ -149,7 +149,7 @@ fn test_different_cluster_counts() {
     let data = create_test_data();
 
     // Test with k=1
-    let mut kmeans_k1 = KMeans::new(1, 100, 0.0001, Some(42));
+    let mut kmeans_k1 = KMeans::new(1, 100, 0.0001, Some(42)).unwrap();
     kmeans_k1.fit(data.view()).unwrap();
     let centroids = match kmeans_k1.get_centroids() {
         Some(centroids) => centroids,
@@ -158,7 +158,7 @@ fn test_different_cluster_counts() {
     assert_eq!(centroids.shape(), &[1, 2]);
 
     // Test with k=3
-    let mut kmeans_k3 = KMeans::new(3, 100, 0.0001, Some(42));
+    let mut kmeans_k3 = KMeans::new(3, 100, 0.0001, Some(42)).unwrap();
     kmeans_k3.fit(data.view()).unwrap();
     let centroids = match kmeans_k3.get_centroids() {
         Some(centroids) => centroids,

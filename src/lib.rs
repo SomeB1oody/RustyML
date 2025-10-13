@@ -72,16 +72,17 @@
 //! [dependencies]
 //! rustyml = { version = "0.8.0", features = ["machine_learning"] }
 //! # Or use features = ["full"] to enable all modules
+//! # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, ignore
+//! ```rust
 //! use rustyml::machine_learning::linear_regression::*;
 //! // or just use `rustyml::prelude::*;`
 //! use ndarray::{Array1, Array2, array};
 //!
 //! // Create a linear regression model
-//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 //!
 //! // Prepare training data
 //! let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -121,10 +122,11 @@
 //! [dependencies]
 //! rustyml = { version = "0.8.0", features = ["neural_network"] }
 //! # Or use features = ["full"] to enable all modules
+//! # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, ignore
+//! ```rust
 //! use rustyml::prelude::*;
 //! use ndarray::Array;
 //!
@@ -264,7 +266,7 @@ macro_rules! model_save_and_load_methods {
         ///
         /// # Parameters
         ///
-        /// * `path` - File path where the model will be saved (e.g., "model.json")
+        /// * `path` - File path where the model will be saved (e.g., "stored_model.json")
         ///
         /// # Returns
         ///
@@ -297,7 +299,7 @@ macro_rules! model_save_and_load_methods {
         ///
         /// # Parameters
         ///
-        /// * `path` - File path from which to load the model (e.g., "model.json")
+        /// * `path` - File path from which to load the model (e.g., "stored_model.json")
         ///
         /// # Returns
         ///
@@ -438,13 +440,13 @@ pub mod math;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Linear regression example
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// let y = array![6.0, 9.0, 12.0];
 /// model.fit(x.view(), y.view()).unwrap();
 ///
 /// // K-means clustering example
-/// let mut kmeans = KMeans::new(3, 100, 1e-4, Some(42));
+/// let mut kmeans = KMeans::new(3, 100, 1e-4, Some(42)).unwrap();
 /// let data = array![[1.0, 2.0], [1.5, 1.8], [5.0, 8.0], [8.0, 8.0]];
 /// kmeans.fit(data.view()).unwrap();
 /// let labels = kmeans.predict(data.view()).unwrap();

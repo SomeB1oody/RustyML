@@ -27,7 +27,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Create a linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 ///
 /// // Prepare training data
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -122,8 +122,14 @@ impl LinearRegression {
         max_iterations: usize,
         tolerance: f64,
         regularization_type: Option<RegularizationType>,
-    ) -> Self {
-        LinearRegression {
+    ) -> Result<Self, ModelError> {
+        // Input validation
+        validate_learning_rate(learning_rate)?;
+        validate_max_iterations(max_iterations)?;
+        validate_tolerance(tolerance)?;
+        validate_regulation_type(regularization_type)?;
+
+        Ok(LinearRegression {
             coefficients: None,
             intercept: None,
             fit_intercept,
@@ -132,7 +138,7 @@ impl LinearRegression {
             tol: tolerance,
             n_iter: None,
             regularization_type,
-        }
+        })
     }
 
     // Getters
@@ -160,7 +166,7 @@ impl LinearRegression {
     /// # Returns
     ///
     /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
         // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
@@ -209,7 +215,7 @@ impl LinearRegression {
             // Calculate errors - use borrowing to avoid moving predictions
             error_vec.assign(&(&predictions - &y));
 
-            // Calculate cost more efficiently
+            // Calculate cost
             let sse = error_vec.dot(&error_vec);
 
             let regularization_term = match &self.regularization_type {

@@ -189,6 +189,7 @@ Add the library to your `Cargo.toml`:
 [dependencies]
 rustyml = {version = "0.8.0", features = ["machine_learning"]} 
 # or use `features = ["full"]` to enable all features
+# Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
 ```
 
 In your Rust code, write: 
@@ -199,7 +200,7 @@ use rustyml::machine_learning::linear_regression::*;
 use ndarray::{Array1, Array2, array};  
   
 // Create a linear regression model  
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None);  
+let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();  
   
 // Prepare training data   
 let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];  
@@ -240,6 +241,7 @@ Add the library to your `Cargo.toml`:
 [dependencies]
 rustyml = {version = "0.8.0", features = ["neural_network"]} 
 # or use `features = ["full"]` to enable all features
+# Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
 ```
 
 In your Rust code, write:

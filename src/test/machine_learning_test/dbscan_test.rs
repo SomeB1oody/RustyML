@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_new() {
-    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
+    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean).unwrap();
     assert_eq!(dbscan.get_epsilon(), 0.5);
     assert_eq!(dbscan.get_min_samples(), 5);
     assert!(matches!(
@@ -21,7 +21,7 @@ fn test_default() {
 
 #[test]
 fn test_getters() {
-    let dbscan = DBSCAN::new(0.7, 10, DistanceCalculationMetric::Manhattan);
+    let dbscan = DBSCAN::new(0.7, 10, DistanceCalculationMetric::Manhattan).unwrap();
     assert_eq!(dbscan.get_epsilon(), 0.7);
     assert_eq!(dbscan.get_min_samples(), 10);
     assert!(matches!(
@@ -32,7 +32,7 @@ fn test_getters() {
 
 #[test]
 fn test_get_labels_before_fit() {
-    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
+    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean).unwrap();
     match dbscan.get_labels() {
         None => assert!(true),
         _ => panic!("Expected NotFitted error"),
@@ -41,7 +41,7 @@ fn test_get_labels_before_fit() {
 
 #[test]
 fn test_get_core_sample_indices_before_fit() {
-    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean);
+    let dbscan = DBSCAN::new(0.5, 5, DistanceCalculationMetric::Euclidean).unwrap();
     match dbscan.get_core_sample_indices() {
         None => assert!(true),
         _ => panic!("Expected NotFitted error"),
@@ -63,7 +63,7 @@ fn test_fit_simple_data() {
         [5.0, 5.0],
     ]);
 
-    let mut dbscan = DBSCAN::new(0.5, 3, DistanceCalculationMetric::Euclidean);
+    let mut dbscan = DBSCAN::new(0.5, 3, DistanceCalculationMetric::Euclidean).unwrap();
     dbscan.fit(data.view()).unwrap();
 
     let labels = match dbscan.get_labels() {
@@ -111,7 +111,7 @@ fn test_predict() {
         [5.0, 5.0],   // Should be noise
     ]);
 
-    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     dbscan.fit(train_data.view()).unwrap();
 
     let predictions = dbscan.predict(train_data.view(), new_data.view()).unwrap();
@@ -129,7 +129,7 @@ fn test_fit_predict() {
         [5.0, 5.0],
     ]);
 
-    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     let labels = dbscan.fit_predict(data.view()).unwrap();
     let model_labels = match dbscan.get_labels() {
         Some(labels) => labels,
@@ -147,7 +147,7 @@ fn test_predict_before_fit() {
 
     let new_data = arr2(&[[1.0, 2.1]]);
 
-    let dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     match dbscan.predict(data.view(), new_data.view()) {
         Err(ModelError::NotFitted) => assert!(true),
         _ => panic!("Expected NotFitted error"),
@@ -157,7 +157,7 @@ fn test_predict_before_fit() {
 #[test]
 fn test_empty_data() {
     let data = Array2::<f64>::zeros((0, 2));
-    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
 
     // Test with empty dataset
     match dbscan.fit(data.view()) {
@@ -177,14 +177,14 @@ fn test_different_metrics() {
     ]);
 
     // Test with different distance metrics
-    let mut euclidean_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let mut euclidean_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     euclidean_dbscan.fit(data.view()).unwrap();
     let euclidean_labels = match euclidean_dbscan.get_labels() {
         Some(labels) => labels,
         None => panic!("Expected labels to be Some"),
     };
 
-    let mut manhattan_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean);
+    let mut manhattan_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     manhattan_dbscan.fit(data.view()).unwrap();
     let manhattan_labels = match manhattan_dbscan.get_labels() {
         Some(labels) => labels,

@@ -217,7 +217,7 @@ impl Node {
 ///     random_state: Some(42),
 /// };
 ///
-/// let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params));
+/// let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
 /// tree.fit(x_train.view(), y_train.view()).unwrap();
 ///
 /// // Make predictions
@@ -248,28 +248,56 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// * `DecisionTree` - A new untrained `DecisionTree` instance.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `is_classifier` is `false` and `algorithm` is not `CART`, as only CART supports regression.
+    /// * `Result<Self, ModelError>` - A new untrained `DecisionTree` instance, or a `ModelError` if validation fails.
     pub fn new(
         algorithm: Algorithm,
         is_classifier: bool,
         params: Option<DecisionTreeParams>,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Validate algorithm compatibility with task type
         if !is_classifier && algorithm != Algorithm::CART {
-            panic!("Only CART algorithm is supported for regression tasks");
+            return Err(ModelError::InputValidationError(
+                "Only CART algorithm is supported for regression tasks".to_string(),
+            ));
         }
 
-        Self {
+        let params = params.unwrap_or_default();
+
+        // Validate hyperparameters
+        if params.min_samples_split < 2 {
+            return Err(ModelError::InputValidationError(
+                "min_samples_split must be at least 2".to_string(),
+            ));
+        }
+
+        if params.min_samples_leaf < 1 {
+            return Err(ModelError::InputValidationError(
+                "min_samples_leaf must be at least 1".to_string(),
+            ));
+        }
+
+        if params.min_samples_leaf > params.min_samples_split {
+            return Err(ModelError::InputValidationError(format!(
+                "min_samples_leaf ({}) cannot be greater than min_samples_split ({})",
+                params.min_samples_leaf, params.min_samples_split
+            )));
+        }
+
+        if params.min_impurity_decrease < 0.0 || !params.min_impurity_decrease.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "min_impurity_decrease must be non-negative and finite, got {}",
+                params.min_impurity_decrease
+            )));
+        }
+
+        Ok(Self {
             algorithm,
             root: None,
             n_features: 0,
             n_classes: None,
-            params: params.unwrap_or_default(),
+            params,
             is_classifier,
-        }
+        })
     }
 
     // Getters
@@ -297,15 +325,22 @@ impl DecisionTree {
     ///
     /// * `Result<&mut Self, ModelError>` - A mutable reference to `self` for method chaining, or a `ModelError` if training fails.
     pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
-        if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(
-                "Number of samples in x and y must match".to_string(),
-            ));
+        // Use preliminary_check for input validation
+        preliminary_check(x, Some(y))?;
+
+        // Check minimum samples requirement for tree construction
+        if x.nrows() < self.params.min_samples_split {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of samples ({}) is less than min_samples_split ({})",
+                x.nrows(),
+                self.params.min_samples_split
+            )));
         }
 
-        if x.nrows() == 0 {
+        // Check that there are enough features
+        if x.ncols() == 0 {
             return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
+                "Input data must have at least one feature".to_string(),
             ));
         }
 
@@ -698,8 +733,27 @@ impl DecisionTree {
             return Err(ModelError::NotFitted);
         }
 
+        // Check for empty input data
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        // Check feature dimension match
         if x.ncols() != self.n_features {
-            return Err(ModelError::TreeError("Feature dimension mismatch"));
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                self.n_features
+            )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
         }
 
         // Use parallel processing only when sample size exceeds threshold
@@ -766,8 +820,27 @@ impl DecisionTree {
             return Err(ModelError::NotFitted);
         }
 
+        // Check for empty input data
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        // Check feature dimension match
         if x.ncols() != self.n_features {
-            return Err(ModelError::TreeError("Feature dimension mismatch"));
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                self.n_features
+            )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
         }
 
         let n_classes = self.n_classes.unwrap();

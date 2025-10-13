@@ -60,7 +60,7 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 ///     300,      // Maximum iterations
 ///     1e-4,     // Convergence tolerance
 ///     Some(42)  // Random seed for reproducibility
-/// );
+/// ).unwrap();
 ///
 /// // Fit the model to the data
 /// kmeans.fit(data.view()).unwrap();
@@ -122,7 +122,8 @@ pub struct KMeans {
 /// * `KMeans` - a new `KMeans` instance with default values
 impl Default for KMeans {
     fn default() -> Self {
-        KMeans::new(8, 300, 1e-4, None)
+        // Default values are guaranteed to be valid, so unwrap is safe here
+        KMeans::new(8, 300, 1e-4, None).expect("Default KMeans parameters should be valid")
     }
 }
 
@@ -131,21 +132,32 @@ impl KMeans {
     ///
     /// # Parameters
     ///
-    /// - `n_clusters` - Number of clusters to form
-    /// - `max_iter` - Maximum number of iterations for the algorithm
-    /// - `tol` - Convergence tolerance, the algorithm stops when the centroids move less than this value
+    /// - `n_clusters` - Number of clusters to form (must be greater than 0)
+    /// - `max_iter` - Maximum number of iterations for the algorithm (must be greater than 0)
+    /// - `tol` - Convergence tolerance, the algorithm stops when the centroids move less than this value (must be positive and finite)
     /// - `random_seed` - Optional seed for random number generation to ensure reproducibility
     ///
     /// # Returns
     ///
-    /// * `KMeans` - A new KMeans instance with the specified configuration
+    /// * `Ok(KMeans)` - A new KMeans instance with the specified configuration
+    /// * `Err(ModelError::InputValidationError)` - If any parameter is invalid
     pub fn new(
         n_clusters: usize,
         max_iterations: usize,
         tolerance: f64,
         random_seed: Option<u64>,
-    ) -> Self {
-        KMeans {
+    ) -> Result<Self, ModelError> {
+        // Input validation
+        if n_clusters == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_clusters must be greater than 0".to_string(),
+            ));
+        }
+
+        validate_max_iterations(max_iterations)?;
+        validate_tolerance(tolerance)?;
+
+        Ok(KMeans {
             n_clusters,
             max_iter: max_iterations,
             tol: tolerance,
@@ -154,7 +166,7 @@ impl KMeans {
             labels: None,
             inertia: None,
             n_iter: None,
-        }
+        })
     }
 
     // Getters
@@ -472,9 +484,24 @@ impl KMeans {
     ///
     /// - `Array1<usize>` - An array of cluster indices for each input data point
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
+    /// - `Err(ModelError::InputValidationError)` - If input data is invalid or has incorrect dimensions
     pub fn predict(&self, data: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
         if self.centroids.is_none() {
             return Err(ModelError::NotFitted);
+        }
+
+        // Check for empty input data
+        if data.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        // Check for invalid values in input data
+        if data.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
         }
 
         let n_features = data.shape()[1];

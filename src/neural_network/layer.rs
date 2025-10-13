@@ -1,5 +1,6 @@
 use super::*;
 use helper_functions::*;
+use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;
@@ -351,7 +352,5 @@ pub use lstm::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
 pub use max_pooling_3d::*;
-use ndarray::{Array2, Array3, ArrayD, s};
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator};
 pub use separable_conv2d::*;
 pub use simple_rnn::*;

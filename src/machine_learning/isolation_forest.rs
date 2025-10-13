@@ -28,7 +28,7 @@ const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
 /// use rustyml::machine_learning::IsolationForest;
 /// use ndarray::array;
 ///
-/// let mut model = IsolationForest::new(100, 256, None, Some(42));
+/// let mut model = IsolationForest::new(100, 256, None, Some(42)).unwrap();
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(data.view()).unwrap();
 /// let scores = model.predict(data.view()).unwrap();
@@ -80,26 +80,52 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// * `IsolationForest` - A new unfitted `IsolationForest` instance
+    /// * `Result<IsolationForest, ModelError>` - A new unfitted `IsolationForest` instance, or `ModelError` if:
+    ///     - `n_estimators` is 0
+    ///     - `max_samples` is 0
+    ///     - `max_depth` (if provided) is 0
     pub fn new(
         n_estimators: usize,
         max_samples: usize,
         max_depth: Option<usize>,
         random_state: Option<u64>,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Validate n_estimators
+        if n_estimators == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_estimators must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate max_samples
+        if max_samples == 0 {
+            return Err(ModelError::InputValidationError(
+                "max_samples must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate max_depth if provided
+        if let Some(depth) = max_depth {
+            if depth == 0 {
+                return Err(ModelError::InputValidationError(
+                    "max_depth must be greater than 0".to_string(),
+                ));
+            }
+        }
+
         let computed_max_depth = max_depth.unwrap_or_else(|| {
             // ceil(log2(max_samples))
             (max_samples as f64).log2().ceil() as usize
         });
 
-        Self {
+        Ok(Self {
             trees: None,
             n_estimators,
             max_samples,
             max_depth: computed_max_depth,
             random_state,
             n_features: 0,
-        }
+        })
     }
 
     // Getters
@@ -127,18 +153,8 @@ impl IsolationForest {
     ///     - Input contains NaN or infinite values
     ///     - Tree building fails
     pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
-        if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        // Check for NaN or infinite values
-        if x.iter().any(|&v| v.is_nan() || v.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        // Use preliminary_check for input validation
+        preliminary_check(x, None)?;
 
         self.n_features = x.ncols();
 
@@ -368,27 +384,21 @@ impl IsolationForest {
     ///     - Feature dimension does not match training data
     ///     - Input contains NaN or infinite values
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+        // Check if model has been fitted
         if self.trees.is_none() {
             return Err(ModelError::NotFitted);
         }
 
-        if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
+        // Use preliminary_check for basic input validation
+        preliminary_check(x, None)?;
 
+        // Check feature dimension match
         if x.ncols() != self.n_features {
-            return Err(ModelError::InputValidationError(
-                "Feature dimension mismatch".to_string(),
-            ));
-        }
-
-        // Check for NaN or infinite values
-        if x.iter().any(|&v| v.is_nan() || v.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
+            return Err(ModelError::InputValidationError(format!(
+                "Feature dimension mismatch: expected {} features, got {}",
+                self.n_features,
+                x.ncols()
+            )));
         }
 
         // Compute anomaly scores for all samples

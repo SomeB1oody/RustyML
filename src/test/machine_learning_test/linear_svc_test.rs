@@ -16,7 +16,8 @@ fn test_new() {
         RegularizationType::L2(0.1), // penalty with regularization strength
         true,                        // fit_intercept
         1e-4,                        // tol
-    );
+    )
+    .unwrap();
 
     assert_eq!(model.get_max_iterations(), 100);
     assert_eq!(model.get_learning_rate(), 0.01);
@@ -64,7 +65,8 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
         RegularizationType::L2(0.01), // penalty with regularization strength
         true,                         // fit_intercept
         1e-4,                         // tol
-    );
+    )
+    .unwrap();
 
     // Fit the model
     model.fit(x.view(), y.view())?;
@@ -145,10 +147,10 @@ fn test_decision_function() -> Result<(), ModelError> {
 #[test]
 fn test_different_penalties() {
     // Test with L1 penalty
-    let mut model_l1 = LinearSVC::new(100, 0.01, RegularizationType::L1(0.1), true, 1e-4);
+    let mut model_l1 = LinearSVC::new(100, 0.01, RegularizationType::L1(0.1), true, 1e-4).unwrap();
 
     // Test with L2 penalty
-    let mut model_l2 = LinearSVC::new(100, 0.01, RegularizationType::L2(0.1), true, 1e-4);
+    let mut model_l2 = LinearSVC::new(100, 0.01, RegularizationType::L2(0.1), true, 1e-4).unwrap();
 
     // Simple dataset
     let x = arr2(&[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]]);
