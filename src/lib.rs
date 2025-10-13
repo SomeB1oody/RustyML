@@ -525,7 +525,7 @@ pub mod prelude;
 /// use ndarray::{Array2, arr2};
 ///
 /// // PCA dimensionality reduction
-/// let mut pca = PCA::new(2);
+/// let mut pca = PCA::new(2).unwrap();
 /// let data = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
 /// let transformed = pca.fit_transform(data.view()).unwrap();
 /// // and more

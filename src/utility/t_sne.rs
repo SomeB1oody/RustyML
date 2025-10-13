@@ -30,7 +30,8 @@ const TSNE_PARALLEL_THRESHOLD: usize = 1000;
 /// use ndarray::Array2;
 /// use rustyml::utility::t_sne::TSNE;
 ///
-/// let tsne = TSNE::new(None, None, Some(100), 3, None, None, None, None, None, None);
+/// // Create a new TSNE instance with custom parameters
+/// let tsne = TSNE::new(None, None, Some(100), 3, None, None, None, None, None, None).unwrap();
 ///
 /// // Generate some high-dimensional data
 /// let data = Array2::<f64>::ones((100, 50));
@@ -94,17 +95,18 @@ impl TSNE {
     /// - `perplexity` - Controls the effective number of neighbors. Higher means more neighbors. Default is 30.0.
     /// - `learning_rate` - Step size for gradient descent updates. Default is 200.0.
     /// - `n_iter` - Maximum number of optimization iterations. Default is 1000.
-    /// - `dim` - Dimensionality of the embedding space.
+    /// - `dim` - Dimensionality of the embedding space. Must be greater than 0.
     /// - `random_state` - Seed for random number generation. Default is 42.
     /// - `early_exaggeration` - Factor to multiply probabilities in early iterations. Default is 12.0.
     /// - `exaggeration_iter` - Number of iterations to apply early exaggeration. Default is n_iter/12.
-    /// - `initial_momentum` - Initial momentum coefficient. Default is 0.5.
-    /// - `final_momentum` - Final momentum coefficient. Default is 0.8.
+    /// - `initial_momentum` - Initial momentum coefficient. Must be in range [0.0, 1.0]. Default is 0.5.
+    /// - `final_momentum` - Final momentum coefficient. Must be in range [0.0, 1.0]. Default is 0.8.
     /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final. Default is n_iter/3.
     ///
     /// # Returns
     ///
-    /// * `TSNE` - A new TSNE instance.
+    /// * `Ok(TSNE)` - A new TSNE instance if all parameters are valid
+    /// * `Err(ModelError::InputValidationError)` - If any parameter is invalid
     pub fn new(
         perplexity: Option<f64>,
         learning_rate: Option<f64>,
@@ -116,20 +118,39 @@ impl TSNE {
         initial_momentum: Option<f64>,
         final_momentum: Option<f64>,
         momentum_switch_iter: Option<usize>,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
         let n_iter_val = n_iter.unwrap_or(1000);
-        TSNE {
-            perplexity: perplexity.unwrap_or(30.0),
-            learning_rate: learning_rate.unwrap_or(200.0),
+        let perplexity_val = perplexity.unwrap_or(30.0);
+        let learning_rate_val = learning_rate.unwrap_or(200.0);
+        let early_exaggeration_val = early_exaggeration.unwrap_or(12.0);
+        let exaggeration_iter_val = exaggeration_iter.unwrap_or(n_iter_val / 12);
+        let initial_momentum_val = initial_momentum.unwrap_or(0.5);
+        let final_momentum_val = final_momentum.unwrap_or(0.8);
+        let momentum_switch_iter_val = momentum_switch_iter.unwrap_or(n_iter_val / 3);
+
+        // Validate parameters
+        Self::validate_positive_usize_static(n_iter_val, "n_iter")?;
+        Self::validate_positive_f64_static(perplexity_val, "perplexity")?;
+        Self::validate_positive_f64_static(learning_rate_val, "learning_rate")?;
+        Self::validate_min_f64_static(early_exaggeration_val, 1.0, "early_exaggeration")?;
+        Self::validate_positive_usize_static(exaggeration_iter_val, "exaggeration_iter")?;
+        Self::validate_range_f64_static(initial_momentum_val, "initial_momentum")?;
+        Self::validate_range_f64_static(final_momentum_val, "final_momentum")?;
+        Self::validate_positive_usize_static(momentum_switch_iter_val, "momentum_switch_iter")?;
+        Self::validate_positive_usize_static(dim, "dim")?;
+
+        Ok(TSNE {
+            perplexity: perplexity_val,
+            learning_rate: learning_rate_val,
             n_iter: n_iter_val,
             dim,
             random_state: random_state.unwrap_or(42),
-            early_exaggeration: early_exaggeration.unwrap_or(12.0),
-            exaggeration_iter: exaggeration_iter.unwrap_or(n_iter_val / 12),
-            initial_momentum: initial_momentum.unwrap_or(0.5),
-            final_momentum: final_momentum.unwrap_or(0.8),
-            momentum_switch_iter: momentum_switch_iter.unwrap_or(n_iter_val / 3),
-        }
+            early_exaggeration: early_exaggeration_val,
+            exaggeration_iter: exaggeration_iter_val,
+            initial_momentum: initial_momentum_val,
+            final_momentum: final_momentum_val,
+            momentum_switch_iter: momentum_switch_iter_val,
+        })
     }
 
     // Getters
@@ -152,26 +173,37 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - Either a matrix of reduced dimensionality representations where each row corresponds to the original sample
+    /// - `Ok(Array2<f64>)` - A matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
-        // Validate all parameters
-        self.validate_positive_usize(self.n_iter, "iterations")?;
-        self.validate_positive_f64(self.perplexity, "perplexity")?;
-        self.validate_positive_f64(self.learning_rate, "learning rate")?;
-        self.validate_min_f64(self.early_exaggeration, 1.0, "early exaggeration")?;
-        self.validate_positive_usize(self.exaggeration_iter, "exaggeration iterations")?;
-        self.validate_range_f64(self.initial_momentum, "initial momentum")?;
-        self.validate_range_f64(self.final_momentum, "final momentum")?;
-        self.validate_positive_usize(self.momentum_switch_iter, "momentum switch iterations")?;
+        // Validate input data
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input data is empty".to_string(),
+            ));
+        }
+
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
 
         let n_samples = x.nrows();
 
-        // Validate dimension parameter
-        if self.dim == 0 || self.dim > n_samples {
+        // Validate dimension parameter against actual sample size
+        if self.dim > n_samples {
             return Err(ModelError::InputValidationError(format!(
-                "Dimension must be greater than 0 and less than n_samples: {}, got {}",
+                "dim must be less than or equal to n_samples: {}, got {}",
                 n_samples, self.dim
+            )));
+        }
+
+        // Validate perplexity is appropriate for the dataset size
+        if self.perplexity >= n_samples as f64 {
+            return Err(ModelError::InputValidationError(format!(
+                "perplexity must be less than n_samples: {}, got {}",
+                n_samples, self.perplexity
             )));
         }
 
@@ -255,7 +287,7 @@ impl TSNE {
     }
 
     // Helper methods for parameter validation
-    fn validate_positive_usize(&self, val: usize, name: &str) -> Result<(), ModelError> {
+    fn validate_positive_usize_static(val: usize, name: &str) -> Result<(), ModelError> {
         if val > 0 {
             Ok(())
         } else {
@@ -266,30 +298,30 @@ impl TSNE {
         }
     }
 
-    fn validate_positive_f64(&self, val: f64, name: &str) -> Result<(), ModelError> {
-        if val > 0.0 {
+    fn validate_positive_f64_static(val: f64, name: &str) -> Result<(), ModelError> {
+        if val > 0.0 && val.is_finite() {
             Ok(())
         } else {
             Err(ModelError::InputValidationError(format!(
-                "{} must be greater than 0, got {}",
+                "{} must be positive and finite, got {}",
                 name, val
             )))
         }
     }
 
-    fn validate_min_f64(&self, val: f64, min_val: f64, name: &str) -> Result<(), ModelError> {
-        if val > min_val {
+    fn validate_min_f64_static(val: f64, min_val: f64, name: &str) -> Result<(), ModelError> {
+        if val > min_val && val.is_finite() {
             Ok(())
         } else {
             Err(ModelError::InputValidationError(format!(
-                "{} must be greater than {}, got {}",
+                "{} must be greater than {} and finite, got {}",
                 name, min_val, val
             )))
         }
     }
 
-    fn validate_range_f64(&self, val: f64, name: &str) -> Result<(), ModelError> {
-        if (0.0..=1.0).contains(&val) {
+    fn validate_range_f64_static(val: f64, name: &str) -> Result<(), ModelError> {
+        if (0.0..=1.0).contains(&val) && val.is_finite() {
             Ok(())
         } else {
             Err(ModelError::InputValidationError(format!(

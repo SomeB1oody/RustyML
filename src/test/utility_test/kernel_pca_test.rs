@@ -18,7 +18,7 @@ fn test_kernel_pca_default() {
 fn test_kernel_pca_new() {
     let kernel = KernelType::RBF { gamma: 0.1 };
     let n_components = 3;
-    let kpca = KernelPCA::new(kernel.clone(), n_components);
+    let kpca = KernelPCA::new(kernel.clone(), n_components).unwrap();
 
     assert!(matches!(kpca.get_kernel(), KernelType::RBF { gamma: 0.1 }));
     assert_eq!(kpca.get_n_components(), 3);
@@ -91,7 +91,7 @@ fn test_getters_not_fitted() {
 fn test_getter_methods() {
     let kernel = KernelType::RBF { gamma: 0.1 };
     let n_components = 2;
-    let kpca = KernelPCA::new(kernel.clone(), n_components);
+    let kpca = KernelPCA::new(kernel.clone(), n_components).unwrap();
 
     assert!(matches!(kpca.get_kernel(), KernelType::RBF { gamma: 0.1 }));
     assert_eq!(kpca.get_n_components(), 2);
@@ -105,20 +105,19 @@ fn test_fit_invalid_inputs() {
     let empty = Array2::<f64>::zeros((0, 5));
     assert!(kpca.fit(empty.view()).is_err());
 
-    // Test case where n_components is 0
-    let mut kpca_zero = KernelPCA::new(KernelType::Linear, 0);
-    let data = Array2::<f64>::zeros((10, 3));
-    assert!(kpca_zero.fit(data.view()).is_err());
+    // Test case where n_components is 0 (should fail at construction)
+    let kpca_zero_result = KernelPCA::new(KernelType::Linear, 0);
+    assert!(kpca_zero_result.is_err());
 
     // Test case where sample count is less than n_components
-    let mut kpca_large = KernelPCA::new(KernelType::Linear, 5);
+    let mut kpca_large = KernelPCA::new(KernelType::Linear, 5).unwrap();
     let small_data = Array2::<f64>::zeros((3, 3));
     assert!(kpca_large.fit(small_data.view()).is_err());
 }
 
 #[test]
 fn test_fit_simple_case() {
-    let mut kpca = KernelPCA::new(KernelType::Linear, 2);
+    let mut kpca = KernelPCA::new(KernelType::Linear, 2).unwrap();
     let data = Array2::from_shape_vec(
         (4, 3),
         vec![
@@ -151,7 +150,7 @@ fn test_transform_not_fitted() {
 
 #[test]
 fn test_fit_transform() {
-    let mut kpca = KernelPCA::new(KernelType::Linear, 2);
+    let mut kpca = KernelPCA::new(KernelType::Linear, 2).unwrap();
     let data = Array2::from_shape_vec(
         (4, 3),
         vec![
@@ -170,7 +169,7 @@ fn test_fit_transform() {
 
 #[test]
 fn test_fit_and_transform() {
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2);
+    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2).unwrap();
     let train_data = Array2::from_shape_vec(
         (4, 3),
         vec![
@@ -220,8 +219,140 @@ fn test_different_kernel_types() {
     .unwrap();
 
     for kernel in kernels {
-        let mut kpca = KernelPCA::new(kernel, 2);
+        let mut kpca = KernelPCA::new(kernel, 2).unwrap();
         let result = kpca.fit_transform(data.view());
         assert!(result.is_ok());
     }
+}
+
+#[test]
+fn test_new_validation() {
+    // Test n_components = 0
+    let result = KernelPCA::new(KernelType::Linear, 0);
+    assert!(result.is_err());
+
+    // Test invalid RBF gamma (negative)
+    let result = KernelPCA::new(KernelType::RBF { gamma: -0.1 }, 2);
+    assert!(result.is_err());
+
+    // Test invalid RBF gamma (zero)
+    let result = KernelPCA::new(KernelType::RBF { gamma: 0.0 }, 2);
+    assert!(result.is_err());
+
+    // Test invalid RBF gamma (NaN)
+    let result = KernelPCA::new(KernelType::RBF { gamma: f64::NAN }, 2);
+    assert!(result.is_err());
+
+    // Test invalid RBF gamma (infinity)
+    let result = KernelPCA::new(
+        KernelType::RBF {
+            gamma: f64::INFINITY,
+        },
+        2,
+    );
+    assert!(result.is_err());
+
+    // Test invalid Poly degree (zero)
+    let result = KernelPCA::new(
+        KernelType::Poly {
+            degree: 0,
+            gamma: 1.0,
+            coef0: 0.0,
+        },
+        2,
+    );
+    assert!(result.is_err());
+
+    // Test invalid Poly gamma (NaN)
+    let result = KernelPCA::new(
+        KernelType::Poly {
+            degree: 2,
+            gamma: f64::NAN,
+            coef0: 0.0,
+        },
+        2,
+    );
+    assert!(result.is_err());
+
+    // Test invalid Poly coef0 (infinity)
+    let result = KernelPCA::new(
+        KernelType::Poly {
+            degree: 2,
+            gamma: 1.0,
+            coef0: f64::INFINITY,
+        },
+        2,
+    );
+    assert!(result.is_err());
+
+    // Test invalid Sigmoid gamma (NaN)
+    let result = KernelPCA::new(
+        KernelType::Sigmoid {
+            gamma: f64::NAN,
+            coef0: 0.0,
+        },
+        2,
+    );
+    assert!(result.is_err());
+
+    // Test valid kernels
+    assert!(KernelPCA::new(KernelType::Linear, 1).is_ok());
+    assert!(KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2).is_ok());
+    assert!(
+        KernelPCA::new(
+            KernelType::Poly {
+                degree: 2,
+                gamma: 1.0,
+                coef0: 0.0,
+            },
+            3
+        )
+        .is_ok()
+    );
+    assert!(
+        KernelPCA::new(
+            KernelType::Sigmoid {
+                gamma: 1.0,
+                coef0: 0.0,
+            },
+            4
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn test_fit_validation() {
+    let mut kpca = KernelPCA::new(KernelType::Linear, 2).unwrap();
+
+    // Test data with NaN
+    let data_with_nan =
+        Array2::from_shape_vec((3, 2), vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0]).unwrap();
+    assert!(kpca.fit(data_with_nan.view()).is_err());
+
+    // Test data with infinity
+    let data_with_inf =
+        Array2::from_shape_vec((3, 2), vec![1.0, 2.0, f64::INFINITY, 4.0, 5.0, 6.0]).unwrap();
+    assert!(kpca.fit(data_with_inf.view()).is_err());
+}
+
+#[test]
+fn test_transform_validation() {
+    let mut kpca = KernelPCA::new(KernelType::Linear, 2).unwrap();
+    let train_data = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ],
+    )
+    .unwrap();
+    kpca.fit(train_data.view()).unwrap();
+
+    // Test empty data
+    let empty = Array2::<f64>::zeros((0, 3));
+    assert!(kpca.transform(empty.view()).is_err());
+
+    // Test mismatched feature count
+    let wrong_features = Array2::<f64>::zeros((2, 5));
+    assert!(kpca.transform(wrong_features.view()).is_err());
 }

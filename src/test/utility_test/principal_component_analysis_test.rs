@@ -9,7 +9,7 @@ fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {
 #[test]
 fn test_pca_new() {
     // We can only test the public API behavior, not internal fields
-    let pca = PCA::new(2);
+    let pca = PCA::new(2).unwrap();
 
     // All getters should return errors when PCA is not fitted
     assert!(pca.get_components().is_none());
@@ -31,7 +31,7 @@ fn test_pca_default() {
 
 #[test]
 fn test_fit_and_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2);
+    let mut pca = PCA::new(2).unwrap();
     let data = arr2(&[
         [1.0, 2.0, 3.0],
         [4.0, 5.0, 6.0],
@@ -64,7 +64,7 @@ fn test_fit_and_transform() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_fit_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2);
+    let mut pca = PCA::new(2).unwrap();
     let data = arr2(&[
         [1.0, 2.0, 3.0],
         [4.0, 5.0, 6.0],
@@ -83,7 +83,7 @@ fn test_fit_transform() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_inverse_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2);
+    let mut pca = PCA::new(2).unwrap();
     let data = arr2(&[
         [1.0, 2.0, 3.0],
         [4.0, 5.0, 6.0],
@@ -110,7 +110,7 @@ fn test_inverse_transform() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_errors_when_not_fitted() {
-    let pca = PCA::new(2);
+    let pca = PCA::new(2).unwrap();
 
     // Attempting to get components before fitting should return an error
     assert!(pca.get_components().is_none());
@@ -128,7 +128,7 @@ fn test_errors_when_not_fitted() {
 fn test_with_different_n_components() -> Result<(), Box<dyn Error>> {
     // Test different numbers of components
     for n_components in 1..=3 {
-        let mut pca = PCA::new(n_components);
+        let mut pca = PCA::new(n_components).unwrap();
         let data = arr2(&[
             [1.0, 2.0, 3.0, 4.0],
             [5.0, 6.0, 7.0, 8.0],
@@ -152,7 +152,7 @@ fn test_with_different_n_components() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_variance_explained_properties() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2);
+    let mut pca = PCA::new(2).unwrap();
     let data = arr2(&[
         [1.0, 2.0, 3.0, 4.0],
         [5.0, 6.0, 7.0, 8.0],
@@ -201,7 +201,7 @@ fn test_pca_with_random_data() -> Result<(), Box<dyn Error>> {
 
     // Test PCA with different numbers of components
     for n_components in [2, 5, 8] {
-        let mut pca = PCA::new(n_components);
+        let mut pca = PCA::new(n_components).unwrap();
         pca.fit(data.view())?;
 
         // Check dimensions

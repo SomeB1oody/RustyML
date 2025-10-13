@@ -33,7 +33,7 @@ const PCA_PARALLEL_THRESHOLD: usize = 64;
 /// ]).unwrap();
 ///
 /// // Create a PCA model with 2 components
-/// let mut pca = PCA::new(2);
+/// let mut pca = PCA::new(2).expect("Failed to create PCA model");
 ///
 /// // Fit the model to the data
 /// pca.fit(data.view()).expect("Failed to fit PCA model");
@@ -99,24 +99,27 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// * `PCA` - A new PCA instance with the specified number of components
+    /// * `Result<Self, ModelError>` - A new PCA instance with the specified number of components, or an error if validation fails
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if n_components is 0
-    pub fn new(n_components: usize) -> Self {
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `n_components` is 0
+    pub fn new(n_components: usize) -> Result<Self, ModelError> {
         if n_components == 0 {
-            panic!("Number of components must be positive");
+            return Err(ModelError::InputValidationError(
+                "n_components must be greater than 0".to_string(),
+            ));
         }
 
-        PCA {
+        Ok(PCA {
             n_components,
             components: None,
             mean: None,
             explained_variance: None,
             explained_variance_ratio: None,
             singular_values: None,
-        }
+        })
     }
 
     get_field_as_ref!(get_components, components, Option<&Array2<f64>>);
@@ -169,6 +172,13 @@ impl PCA {
     /// - `Ok(&mut Self)` - The instance
     /// - `Err(Box<dyn std::error::Error>)` - If something goes wrong
     ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Input data is empty
+    /// - Input data contains NaN or infinite values
+    /// - Number of features is 0
+    ///
     /// # Implementation Details
     ///
     /// - Computes the mean of each feature
@@ -181,6 +191,13 @@ impl PCA {
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
+
+        // Check if number of features is valid
+        if n_features == 0 {
+            return Err(Box::new(ModelError::InputValidationError(
+                "Number of features must be greater than 0".to_string(),
+            )));
+        }
 
         // Calculate feature means in parallel using ndarray's built-in method
         let mean = x.mean_axis(Axis(0)).ok_or("Failed to compute mean")?;
@@ -259,9 +276,29 @@ impl PCA {
     ///
     /// - `Ok(Array2<f64>)` - The transformed data if successful
     /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Model has not been fitted
+    /// - Input data is empty
+    /// - Input data contains NaN or infinite values
+    /// - Number of features does not match the training data
     pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
+
+        // Validate input data
+        self.validate_input_data(x)?;
+
+        // Check feature dimension match
+        if x.ncols() != mean.len() {
+            return Err(Box::new(ModelError::InputValidationError(format!(
+                "Number of features does not match training data: expected {}, got {}",
+                mean.len(),
+                x.ncols()
+            ))));
+        }
 
         // Center data using broadcasting (more efficient than manual subtraction)
         let x_centered = &x - mean;
@@ -297,9 +334,29 @@ impl PCA {
     ///
     /// - `Ok(Array2<f64>)` - The reconstructed data in original space
     /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Model has not been fitted
+    /// - Input data is empty
+    /// - Input data contains NaN or infinite values
+    /// - Number of components does not match the model's n_components
     pub fn inverse_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
+
+        // Validate input data
+        self.validate_input_data(x)?;
+
+        // Check component dimension match
+        if x.ncols() != components.nrows() {
+            return Err(Box::new(ModelError::InputValidationError(format!(
+                "Number of components does not match model: expected {}, got {}",
+                components.nrows(),
+                x.ncols()
+            ))));
+        }
 
         // Transform back to original feature space using broadcasting
         let x_restored = x.dot(components) + mean;

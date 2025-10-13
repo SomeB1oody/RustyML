@@ -26,7 +26,7 @@ const LDA_PARALLEL_THRESHOLD: usize = 100;
 /// let y = Array1::from_vec(vec![0, 0, 0, 1, 1, 1]);
 ///
 /// // Create and fit LDA model
-/// let mut lda = LDA::new();
+/// let mut lda = LDA::new().unwrap();
 /// lda.fit(x.view(), y.view()).unwrap();
 ///
 /// // Make predictions
@@ -48,7 +48,7 @@ pub struct LDA {
 /// Default implementation for LDA
 impl Default for LDA {
     fn default() -> Self {
-        Self::new()
+        Self::new().expect("LDA::new() should never fail")
     }
 }
 
@@ -57,15 +57,15 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// * `LDA` - a new LDA instance with all fields set to None
-    pub fn new() -> Self {
-        LDA {
+    /// * `Ok(LDA)` - A new LDA instance with all fields set to None
+    pub fn new() -> Result<Self, ModelError> {
+        Ok(LDA {
             classes: None,
             priors: None,
             means: None,
             cov_inv: None,
             projection: None,
-        }
+        })
     }
 
     get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
@@ -359,13 +359,16 @@ impl LDA {
     /// - `Err(ModelError::InputValidationError)` - If input does not match the expectation
     /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
-        if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input array is empty".to_string(),
-            ));
-        }
+        // Check if model has been fitted
         if self.classes.is_none() || self.means.is_none() || self.cov_inv.is_none() {
             return Err(ModelError::NotFitted);
+        }
+
+        // Check for empty input data
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
         }
 
         let classes = self.classes.as_ref().unwrap();
@@ -373,6 +376,23 @@ impl LDA {
         let cov_inv = self.cov_inv.as_ref().unwrap();
         let priors = self.priors.as_ref().unwrap();
         let n_classes = classes.len();
+
+        // Check feature dimension match
+        let n_features = means.ncols();
+        if x.ncols() != n_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                n_features
+            )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
 
         // Predict class for each sample
         let predict_sample = |row: ArrayView1<f64>| {
@@ -416,17 +436,40 @@ impl LDA {
     ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+    /// - `Err(ModelError::NotFitted)` - If not fitted
     pub fn transform(
         &self,
         x: ArrayView2<f64>,
         n_components: usize,
     ) -> Result<Array2<f64>, ModelError> {
-        if x.nrows() == 0 || x.ncols() == 0 {
+        // Check if model has been fitted
+        let proj = self.projection.as_ref().ok_or(ModelError::NotFitted)?;
+
+        // Check for empty input data
+        if x.is_empty() {
             return Err(ModelError::InputValidationError(
-                "Input array is empty".to_string(),
+                "Cannot transform empty dataset".to_string(),
             ));
         }
-        let proj = self.projection.as_ref().ok_or(ModelError::NotFitted)?;
+
+        // Check feature dimension match
+        let n_features = proj.nrows();
+        if x.ncols() != n_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                n_features
+            )));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        // Check n_components range
         let total_components = proj.ncols();
         if n_components == 0 || n_components > total_components {
             return Err(ModelError::InputValidationError(format!(
@@ -434,6 +477,7 @@ impl LDA {
                 total_components, n_components
             )));
         }
+
         let w_reduced = proj.slice(s![.., 0..n_components]).to_owned();
         Ok(x.dot(&w_reduced))
     }

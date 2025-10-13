@@ -34,7 +34,7 @@ use super::*;
 /// let mut kpca = KernelPCA::new(
 ///     KernelType::RBF { gamma: 0.1 },
 ///     2
-/// );
+/// ).unwrap();
 ///
 /// // Fit the model and transform the data
 /// let transformed = kpca.fit_transform(data.view()).unwrap();
@@ -128,9 +128,69 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new KernelPCA instance
-    pub fn new(kernel: KernelType, n_components: usize) -> Self {
-        KernelPCA {
+    /// - `Ok(Self)` - A new KernelPCA instance
+    /// - `Err(ModelError::InputValidationError)` - If input parameters are invalid
+    pub fn new(kernel: KernelType, n_components: usize) -> Result<Self, ModelError> {
+        // Validate n_components
+        if n_components == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_components must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate kernel parameters
+        match &kernel {
+            KernelType::Linear => {
+                // No parameters to validate for linear kernel
+            }
+            KernelType::Poly {
+                degree,
+                gamma,
+                coef0,
+            } => {
+                if *degree == 0 {
+                    return Err(ModelError::InputValidationError(
+                        "Polynomial kernel degree must be greater than 0".to_string(),
+                    ));
+                }
+                if !gamma.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Polynomial kernel gamma must be finite, got {}",
+                        gamma
+                    )));
+                }
+                if !coef0.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Polynomial kernel coef0 must be finite, got {}",
+                        coef0
+                    )));
+                }
+            }
+            KernelType::RBF { gamma } => {
+                if *gamma <= 0.0 || !gamma.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "RBF kernel gamma must be positive and finite, got {}",
+                        gamma
+                    )));
+                }
+            }
+            KernelType::Sigmoid { gamma, coef0 } => {
+                if !gamma.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Sigmoid kernel gamma must be finite, got {}",
+                        gamma
+                    )));
+                }
+                if !coef0.is_finite() {
+                    return Err(ModelError::InputValidationError(format!(
+                        "Sigmoid kernel coef0 must be finite, got {}",
+                        coef0
+                    )));
+                }
+            }
+        }
+
+        Ok(KernelPCA {
             kernel,
             n_components,
             eigenvalues: None,
@@ -138,7 +198,7 @@ impl KernelPCA {
             x_fit: None,
             row_means: None,
             total_mean: None,
-        }
+        })
     }
 
     // Getters
@@ -170,18 +230,19 @@ impl KernelPCA {
             )));
         }
 
-        if self.n_components == 0 {
-            return Err(Box::new(ModelError::InputValidationError(
-                "n_components must be greater than 0".to_string(),
-            )));
-        }
-
         if x.nrows() < self.n_components {
             return Err(Box::new(ModelError::InputValidationError(format!(
-                "n_components={} must be less than the number of samples={}",
+                "n_components={} must be less than or equal to the number of samples={}",
                 self.n_components,
                 x.nrows()
             ))));
+        }
+
+        // Check for invalid values in input data
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(Box::new(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            )));
         }
 
         let n_samples = x.nrows();

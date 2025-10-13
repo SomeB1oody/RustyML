@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.9.0] - 2025-10-13 (UTC-7)
 ### Changed
 - Enhance error handling and input validation across ML models
+- Enhance error handling and input validation in `utility` module
 
 ## [v0.9.0] - 2025-10-12 (UTC-7)
 ### Changed
