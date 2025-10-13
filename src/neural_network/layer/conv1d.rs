@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining whether to use parallel or sequential computation in Conv1D.
+/// When `batch_size * filters * output_length < CONV_1D_PARALLEL_THRESHOLD`,
+/// sequential execution is used to avoid parallelization overhead.
+const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
+
 /// A 1D convolutional layer for neural networks.
 ///
 /// This layer applies a convolution operation to input data, which is particularly
@@ -237,7 +242,85 @@ impl Conv1D {
         }
     }
 
-    /// Performs 1D convolution operation with parallel processing.
+    /// Computes a single convolution output value.
+    fn compute_conv_output(
+        &self,
+        input_3d: &Array3<f32>,
+        batch: usize,
+        filter: usize,
+        out_pos: usize,
+        input_length: usize,
+    ) -> f32 {
+        let start_pos = out_pos * self.stride;
+        let mut sum = 0.0;
+
+        // Convolution operation
+        for in_channel in 0..self.input_shape[1] {
+            for kernel_pos in 0..self.kernel_size {
+                let input_pos = start_pos + kernel_pos;
+                if input_pos < input_length {
+                    sum += input_3d[[batch, in_channel, input_pos]]
+                        * self.weights[[filter, in_channel, kernel_pos]];
+                }
+            }
+        }
+
+        // Add bias
+        sum + self.bias[[0, filter]]
+    }
+
+    /// Computes gradients for a single batch during backpropagation.
+    fn compute_batch_gradients(
+        &self,
+        batch: usize,
+        grad_output_3d: &Array3<f32>,
+        input_3d: &Array3<f32>,
+        input_channels: usize,
+        input_length: usize,
+        output_length: usize,
+    ) -> (Array3<f32>, Array2<f32>, Array2<f32>) {
+        let mut local_weight_gradients = Array3::zeros(self.weights.dim());
+        let mut local_bias_gradients = Array2::zeros(self.bias.dim());
+        let mut local_input_gradients = Array2::zeros((input_channels, input_length));
+
+        for filter in 0..self.filters {
+            for out_pos in 0..output_length {
+                let grad_val = grad_output_3d[[batch, filter, out_pos]];
+                let start_pos = out_pos * self.stride;
+
+                // Bias gradients
+                local_bias_gradients[[0, filter]] += grad_val;
+
+                // Weight and input gradients
+                for in_channel in 0..input_channels {
+                    for kernel_pos in 0..self.kernel_size {
+                        let input_pos = start_pos + kernel_pos;
+                        if input_pos < input_3d.shape()[2] {
+                            // Weight gradients
+                            local_weight_gradients[[filter, in_channel, kernel_pos]] +=
+                                grad_val * input_3d[[batch, in_channel, input_pos]];
+
+                            // Input gradients (considering padding)
+                            if let Some(original_input_pos) =
+                                self.get_original_input_pos(input_pos, input_length)
+                            {
+                                local_input_gradients[[in_channel, original_input_pos]] +=
+                                    grad_val * self.weights[[filter, in_channel, kernel_pos]];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        (
+            local_weight_gradients,
+            local_bias_gradients,
+            local_input_gradients,
+        )
+    }
+
+    /// Performs 1D convolution operation with adaptive parallel/sequential processing.
     ///
     /// # Parameters
     ///
@@ -257,40 +340,50 @@ impl Conv1D {
 
         let input_3d = padded_input.into_dimensionality::<ndarray::Ix3>().unwrap();
 
-        // Parallel processing of batches and filters
-        output
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(batch, mut batch_output)| {
-                batch_output
-                    .axis_iter_mut(Axis(0))
-                    .into_par_iter()
-                    .enumerate()
-                    .for_each(|(filter, mut filter_output)| {
-                        filter_output.indexed_iter_mut().par_bridge().for_each(
-                            |(out_pos, output_val)| {
-                                let start_pos = out_pos * self.stride;
-                                let mut sum = 0.0;
+        // Determine whether to use parallel or sequential execution
+        let total_ops = batch_size * self.filters * output_length;
 
-                                // Convolution operation
-                                for in_channel in 0..self.input_shape[1] {
-                                    for kernel_pos in 0..self.kernel_size {
-                                        let input_pos = start_pos + kernel_pos;
-                                        if input_pos < input_length {
-                                            sum += input_3d[[batch, in_channel, input_pos]]
-                                                * self.weights[[filter, in_channel, kernel_pos]];
-                                        }
-                                    }
-                                }
-
-                                // Add bias
-                                sum += self.bias[[0, filter]];
-                                *output_val = sum;
-                            },
+        if total_ops >= CONV_1D_PARALLEL_THRESHOLD {
+            // Parallel processing for large workloads
+            output
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(batch, mut batch_output)| {
+                    batch_output
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(filter, mut filter_output)| {
+                            filter_output.indexed_iter_mut().par_bridge().for_each(
+                                |(out_pos, output_val)| {
+                                    *output_val = self.compute_conv_output(
+                                        &input_3d,
+                                        batch,
+                                        filter,
+                                        out_pos,
+                                        input_length,
+                                    );
+                                },
+                            );
+                        });
+                });
+        } else {
+            // Sequential processing for small workloads
+            for batch in 0..batch_size {
+                for filter in 0..self.filters {
+                    for out_pos in 0..output_length {
+                        output[[batch, filter, out_pos]] = self.compute_conv_output(
+                            &input_3d,
+                            batch,
+                            filter,
+                            out_pos,
+                            input_length,
                         );
-                    });
-            });
+                    }
+                }
+            }
+        }
 
         output.into_dyn()
     }
@@ -347,62 +440,54 @@ impl Layer for Conv1D {
 
         let output_length = grad_output_3d.shape()[2];
 
-        // Compute gradients in parallel over batches
-        let batch_results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .map(|batch| {
-                let mut local_weight_gradients = Array3::zeros(self.weights.dim());
-                let mut local_bias_gradients = Array2::zeros(self.bias.dim());
-                let mut local_input_gradients = Array2::zeros((input_channels, input_length));
+        // Determine whether to use parallel or sequential execution
+        let total_ops = batch_size * self.filters * output_length;
 
-                for filter in 0..self.filters {
-                    for out_pos in 0..output_length {
-                        let grad_val = grad_output_3d[[batch, filter, out_pos]];
-                        let start_pos = out_pos * self.stride;
+        if total_ops >= CONV_1D_PARALLEL_THRESHOLD {
+            // Parallel computation for large workloads
+            let batch_results: Vec<_> = (0..batch_size)
+                .into_par_iter()
+                .map(|batch| {
+                    self.compute_batch_gradients(
+                        batch,
+                        &grad_output_3d,
+                        &input_3d,
+                        input_channels,
+                        input_length,
+                        output_length,
+                    )
+                })
+                .collect();
 
-                        // Bias gradients
-                        local_bias_gradients[[0, filter]] += grad_val;
+            // Aggregate results from all batches
+            for (batch_idx, (local_weight_grads, local_bias_grads, local_input_grads)) in
+                batch_results.into_iter().enumerate()
+            {
+                weight_gradients += &local_weight_grads;
+                bias_gradients += &local_bias_grads;
+                input_gradients
+                    .slice_mut(s![batch_idx, .., ..])
+                    .assign(&local_input_grads);
+            }
+        } else {
+            // Sequential computation for small workloads
+            for batch in 0..batch_size {
+                let (local_weight_grads, local_bias_grads, local_input_grads) = self
+                    .compute_batch_gradients(
+                        batch,
+                        &grad_output_3d,
+                        &input_3d,
+                        input_channels,
+                        input_length,
+                        output_length,
+                    );
 
-                        // Weight and input gradients
-                        for in_channel in 0..input_channels {
-                            for kernel_pos in 0..self.kernel_size {
-                                let input_pos = start_pos + kernel_pos;
-                                if input_pos < input_3d.shape()[2] {
-                                    // Weight gradients
-                                    local_weight_gradients[[filter, in_channel, kernel_pos]] +=
-                                        grad_val * input_3d[[batch, in_channel, input_pos]];
-
-                                    // Input gradients (considering padding)
-                                    if let Some(original_input_pos) =
-                                        self.get_original_input_pos(input_pos, input_length)
-                                    {
-                                        local_input_gradients[[in_channel, original_input_pos]] +=
-                                            grad_val
-                                                * self.weights[[filter, in_channel, kernel_pos]];
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                (
-                    local_weight_gradients,
-                    local_bias_gradients,
-                    local_input_gradients,
-                )
-            })
-            .collect();
-
-        // Aggregate results from all batches
-        for (batch_idx, (local_weight_grads, local_bias_grads, local_input_grads)) in
-            batch_results.into_iter().enumerate()
-        {
-            weight_gradients += &local_weight_grads;
-            bias_gradients += &local_bias_grads;
-            input_gradients
-                .slice_mut(s![batch_idx, .., ..])
-                .assign(&local_input_grads);
+                weight_gradients += &local_weight_grads;
+                bias_gradients += &local_bias_grads;
+                input_gradients
+                    .slice_mut(s![batch, .., ..])
+                    .assign(&local_input_grads);
+            }
         }
 
         // Store gradients

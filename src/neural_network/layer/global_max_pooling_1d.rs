@@ -1,5 +1,9 @@
 use super::*;
 
+/// Threshold for deciding between parallel and sequential execution.
+/// When batch_size * channels >= this threshold, use parallel execution.
+const GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
+
 /// Global Max Pooling 1D Layer
 ///
 /// Performs global max pooling operation on the input tensor across the sequence dimension.
@@ -82,34 +86,35 @@ impl Layer for GlobalMaxPooling1D {
         // Pre-allocate max_positions vector with correct capacity
         let mut max_positions = vec![0; batch_size * channels];
 
-        // Process each batch-channel pair in parallel
-        let results: Vec<(usize, f32, usize)> = (0..batch_size * channels)
-            .into_par_iter()
-            .map(|idx| {
-                let b = idx / channels;
-                let c = idx % channels;
+        // Helper closure to compute global max pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut max_val = f32::NEG_INFINITY;
+            let mut max_pos = 0;
 
-                let mut max_val = f32::NEG_INFINITY;
-                let mut max_pos = 0;
-
-                // Find maximum value and its position along the length dimension
-                for l in 0..length {
-                    let val = input[[b, c, l]];
-                    if val > max_val {
-                        max_val = val;
-                        max_pos = l;
-                    }
+            // Find maximum value and its position along the length dimension
+            for l in 0..length {
+                let val = input[[b, c, l]];
+                if val > max_val {
+                    max_val = val;
+                    max_pos = l;
                 }
+            }
 
-                (idx, max_val, max_pos)
-            })
-            .collect();
+            ((b, c), (max_val, max_pos))
+        };
 
-        // Fill the output tensor and max_positions in the correct order
-        for (idx, max_val, max_pos) in results {
-            let b = idx / channels;
-            let c = idx % channels;
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
+
+        // Fill the output tensor and max_positions
+        for ((b, c), (max_val, max_pos)) in results {
             output[[b, c]] = max_val;
+            let idx = b * channels + c;
             max_positions[idx] = max_pos;
         }
 
@@ -123,26 +128,37 @@ impl Layer for GlobalMaxPooling1D {
         if let Some(max_positions) = &self.max_positions {
             let batch_size = self.input_shape[0];
             let channels = self.input_shape[1];
+            let length = self.input_shape[2];
 
             // Initialize input gradient tensor
             let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
 
-            // Collect positions and values to update
-            let updates: Vec<(usize, usize, usize, f32)> = (0..batch_size * channels)
-                .into_par_iter()
-                .map(|idx| {
-                    let b = idx / channels;
-                    let c = idx % channels;
-                    let max_pos = max_positions[idx];
-                    let gradient_value = grad_output[[b, c]];
+            // Helper closure to compute gradient for a single (batch, channel) pair
+            let compute_gradient = |b: usize, c: usize| {
+                let idx = b * channels + c;
+                let max_pos = max_positions[idx];
+                let gradient_value = grad_output[[b, c]];
 
-                    (b, c, max_pos, gradient_value)
-                })
-                .collect();
+                // Create a gradient vector for this channel (only one position gets the gradient)
+                let mut seq_grad = vec![0.0; length];
+                seq_grad[max_pos] = gradient_value;
 
-            // Apply updates in the main thread
-            for (b, c, max_pos, gradient_value) in updates {
-                grad_input[[b, c, max_pos]] = gradient_value;
+                ((b, c), seq_grad)
+            };
+
+            // Choose parallel or sequential execution based on workload size
+            let results: Vec<_> = execute_parallel_or_sequential!(
+                batch_size,
+                channels,
+                GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD,
+                compute_gradient
+            );
+
+            // Apply updates to gradient tensor
+            for ((b, c), seq_grad) in results {
+                for (l, grad_val) in seq_grad.iter().enumerate() {
+                    grad_input[[b, c, l]] = *grad_val;
+                }
             }
 
             Ok(grad_input)

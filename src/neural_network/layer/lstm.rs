@@ -1,5 +1,13 @@
 use super::*;
 
+/// Threshold for using parallel computation in LSTM layer.
+/// When batch_size * units < this value, sequential execution is used.
+/// When batch_size * units >= this value, parallel execution is used.
+///
+/// Value is chosen based on empirical benchmarks where rayon's thread pool
+/// overhead is amortized by computational gains from parallelization.
+const LSTM_PARALLEL_THRESHOLD: usize = 1024;
+
 /// Internal gate structure for LSTM cell operations
 ///
 /// This structure represents a single gate (input, forget, cell, or output) within an LSTM cell.
@@ -279,41 +287,64 @@ impl Layer for LSTM {
             x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
         }
 
+        // Determine whether to use parallel execution based on computational load
+        let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
+
         // Process each timestep
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
-            // Compute all 4 gate values in parallel
-            let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
-                || {
-                    rayon::join(
-                        || compute(&self.input_gate, &x_t, &h_prev),
-                        || compute(&self.forget_gate, &x_t, &h_prev),
-                    )
-                },
-                || {
-                    rayon::join(
-                        || compute(&self.cell_gate, &x_t, &h_prev),
-                        || compute(&self.output_gate, &x_t, &h_prev),
-                    )
-                },
-            );
+            // Compute all 4 gate values (parallel or sequential)
+            let (i_raw, f_raw, g_raw, o_raw) = if use_parallel {
+                let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
+                    || {
+                        rayon::join(
+                            || compute(&self.input_gate, &x_t, &h_prev),
+                            || compute(&self.forget_gate, &x_t, &h_prev),
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || compute(&self.cell_gate, &x_t, &h_prev),
+                            || compute(&self.output_gate, &x_t, &h_prev),
+                        )
+                    },
+                );
+                (i_raw, f_raw, g_raw, o_raw)
+            } else {
+                (
+                    compute(&self.input_gate, &x_t, &h_prev),
+                    compute(&self.forget_gate, &x_t, &h_prev),
+                    compute(&self.cell_gate, &x_t, &h_prev),
+                    compute(&self.output_gate, &x_t, &h_prev),
+                )
+            };
 
-            // Apply activations to all 4 gates in parallel
-            let ((i_t, f_t), (g_t, o_t)) = rayon::join(
-                || {
-                    rayon::join(
-                        || Activation::apply_activation(&i_raw, &Activation::Sigmoid),
-                        || Activation::apply_activation(&f_raw, &Activation::Sigmoid),
-                    )
-                },
-                || {
-                    rayon::join(
-                        || Activation::apply_activation(&g_raw, &Activation::Tanh),
-                        || Activation::apply_activation(&o_raw, &Activation::Sigmoid),
-                    )
-                },
-            );
+            // Apply activations to all 4 gates (parallel or sequential)
+            let (i_t, f_t, g_t, o_t) = if use_parallel {
+                let ((i_t, f_t), (g_t, o_t)) = rayon::join(
+                    || {
+                        rayon::join(
+                            || Activation::apply_activation(&i_raw, &Activation::Sigmoid),
+                            || Activation::apply_activation(&f_raw, &Activation::Sigmoid),
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || Activation::apply_activation(&g_raw, &Activation::Tanh),
+                            || Activation::apply_activation(&o_raw, &Activation::Sigmoid),
+                        )
+                    },
+                );
+                (i_t, f_t, g_t, o_t)
+            } else {
+                (
+                    Activation::apply_activation(&i_raw, &Activation::Sigmoid),
+                    Activation::apply_activation(&f_raw, &Activation::Sigmoid),
+                    Activation::apply_activation(&g_raw, &Activation::Tanh),
+                    Activation::apply_activation(&o_raw, &Activation::Sigmoid),
+                )
+            };
 
             // Update cell state: c_t = f_t * c_prev + i_t * g_t
             let c_t = &f_t * &c_prev + &i_t * &g_t;
@@ -406,6 +437,9 @@ impl Layer for LSTM {
         let mut grad_h = grad_h_t;
         let mut grad_c = Array2::<f32>::zeros((batch, self.units));
 
+        // Determine whether to use parallel execution based on computational load
+        let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
+
         // Backpropagation through time
         for t in (0..timesteps).rev() {
             let h_t = &hs[t + 1];
@@ -440,21 +474,31 @@ impl Layer for LSTM {
             let grad_g_t = &grad_c * i_t;
             let grad_c_prev = &grad_c * f_t;
 
-            // Compute gate activation derivatives in parallel for all 4 gates
-            let ((grad_o_raw, grad_f_raw), (grad_i_raw, grad_g_raw)) = rayon::join(
-                || {
-                    rayon::join(
-                        || &grad_o_t * o_t * &(1.0 - o_t), // sigmoid derivative
-                        || &grad_f_t * f_t * &(1.0 - f_t), // sigmoid derivative
-                    )
-                },
-                || {
-                    rayon::join(
-                        || &grad_i_t * i_t * &(1.0 - i_t), // sigmoid derivative
-                        || &grad_g_t * &(1.0 - g_t * g_t), // tanh derivative
-                    )
-                },
-            );
+            // Compute gate activation derivatives (parallel or sequential)
+            let (grad_o_raw, grad_f_raw, grad_i_raw, grad_g_raw) = if use_parallel {
+                let ((grad_o_raw, grad_f_raw), (grad_i_raw, grad_g_raw)) = rayon::join(
+                    || {
+                        rayon::join(
+                            || &grad_o_t * o_t * &(1.0 - o_t), // sigmoid derivative
+                            || &grad_f_t * f_t * &(1.0 - f_t), // sigmoid derivative
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || &grad_i_t * i_t * &(1.0 - i_t), // sigmoid derivative
+                            || &grad_g_t * &(1.0 - g_t * g_t), // tanh derivative
+                        )
+                    },
+                );
+                (grad_o_raw, grad_f_raw, grad_i_raw, grad_g_raw)
+            } else {
+                (
+                    &grad_o_t * o_t * &(1.0 - o_t), // sigmoid derivative
+                    &grad_f_t * f_t * &(1.0 - f_t), // sigmoid derivative
+                    &grad_i_t * i_t * &(1.0 - i_t), // sigmoid derivative
+                    &grad_g_t * &(1.0 - g_t * g_t), // tanh derivative
+                )
+            };
 
             let x_t = x3.index_axis(Axis(1), t).to_owned();
 
@@ -469,21 +513,31 @@ impl Layer for LSTM {
                 (kernel_update, recurrent_update, bias_update)
             };
 
-            // Compute all gradient updates in parallel using rayon::join
-            let ((o_updates, f_updates), (i_updates, g_updates)) = rayon::join(
-                || {
-                    rayon::join(
-                        || compute_gate_gradients(&grad_o_raw),
-                        || compute_gate_gradients(&grad_f_raw),
-                    )
-                },
-                || {
-                    rayon::join(
-                        || compute_gate_gradients(&grad_i_raw),
-                        || compute_gate_gradients(&grad_g_raw),
-                    )
-                },
-            );
+            // Compute all gradient updates (parallel or sequential)
+            let (o_updates, f_updates, i_updates, g_updates) = if use_parallel {
+                let ((o_updates, f_updates), (i_updates, g_updates)) = rayon::join(
+                    || {
+                        rayon::join(
+                            || compute_gate_gradients(&grad_o_raw),
+                            || compute_gate_gradients(&grad_f_raw),
+                        )
+                    },
+                    || {
+                        rayon::join(
+                            || compute_gate_gradients(&grad_i_raw),
+                            || compute_gate_gradients(&grad_g_raw),
+                        )
+                    },
+                );
+                (o_updates, f_updates, i_updates, g_updates)
+            } else {
+                (
+                    compute_gate_gradients(&grad_o_raw),
+                    compute_gate_gradients(&grad_f_raw),
+                    compute_gate_gradients(&grad_i_raw),
+                    compute_gate_gradients(&grad_g_raw),
+                )
+            };
 
             // Apply gradient updates
             grad_o_kernel = grad_o_kernel + &o_updates.0;
@@ -502,21 +556,34 @@ impl Layer for LSTM {
             grad_g_recurrent = grad_g_recurrent + &g_updates.1;
             grad_g_bias = grad_g_bias + &g_updates.2;
 
-            // Parallel computation of gradient with respect to input and hidden state
-            let (dx, grad_h_next) = rayon::join(
-                || {
+            // Compute gradient with respect to input and hidden state (parallel or sequential)
+            let (dx, grad_h_next) = if use_parallel {
+                rayon::join(
+                    || {
+                        grad_o_raw.dot(&self.output_gate.kernel.t())
+                            + grad_f_raw.dot(&self.forget_gate.kernel.t())
+                            + grad_i_raw.dot(&self.input_gate.kernel.t())
+                            + grad_g_raw.dot(&self.cell_gate.kernel.t())
+                    },
+                    || {
+                        grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
+                            + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
+                            + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
+                            + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t())
+                    },
+                )
+            } else {
+                (
                     grad_o_raw.dot(&self.output_gate.kernel.t())
                         + grad_f_raw.dot(&self.forget_gate.kernel.t())
                         + grad_i_raw.dot(&self.input_gate.kernel.t())
-                        + grad_g_raw.dot(&self.cell_gate.kernel.t())
-                },
-                || {
+                        + grad_g_raw.dot(&self.cell_gate.kernel.t()),
                     grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
                         + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
                         + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
-                        + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t())
-                },
-            );
+                        + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t()),
+                )
+            };
 
             grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
             grad_h = grad_h_next;

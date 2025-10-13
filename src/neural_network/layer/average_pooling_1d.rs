@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining when to use parallel vs sequential execution.
+/// When batch_size * channels >= this threshold, parallel execution is used.
+/// Otherwise, sequential execution is used to avoid parallel overhead.
+const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
+
 /// 1D Average Pooling layer for neural networks.
 ///
 /// This layer performs average pooling operation on a 3D tensor.
@@ -126,30 +131,33 @@ impl Layer for AveragePooling1D {
         let pool_size = self.pool_size;
         let stride = self.stride;
 
-        // Use rayon to process batches and channels in parallel
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                (0..channels).into_par_iter().map(move |c| {
-                    let mut batch_channel_output = Vec::new();
+        // Helper closure to compute pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut batch_channel_output = Vec::new();
 
-                    // Perform pooling for each output position
-                    for i in 0..output_length {
-                        let start_idx = i * stride;
-                        let end_idx = start_idx + pool_size;
+            // Perform pooling for each output position
+            for i in 0..output_length {
+                let start_idx = i * stride;
+                let end_idx = start_idx + pool_size;
 
-                        // Calculate average of elements in the window
-                        let mut sum = 0.0;
-                        for j in start_idx..end_idx {
-                            sum += input[[b, c, j]];
-                        }
-                        batch_channel_output.push((i, sum / (pool_size as f32)));
-                    }
+                // Calculate average of elements in the window
+                let mut sum = 0.0;
+                for j in start_idx..end_idx {
+                    sum += input[[b, c, j]];
+                }
+                batch_channel_output.push((i, sum / (pool_size as f32)));
+            }
 
-                    ((b, c), batch_channel_output)
-                })
-            })
-            .collect();
+            ((b, c), batch_channel_output)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
 
         // Merge results into output tensor
         for ((b, c), outputs) in results {
@@ -186,29 +194,32 @@ impl Layer for AveragePooling1D {
         let pool_size = self.pool_size;
         let stride = self.stride;
 
-        // Use rayon to process batches and channels in parallel
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                (0..channels).into_par_iter().map(move |c| {
-                    // Only allocate a 1D vector for this channel's gradient
-                    let mut channel_grad = vec![0.0f32; length];
+        // Helper closure to compute gradient for a single (batch, channel) pair
+        let compute_gradient = |b: usize, c: usize| {
+            // Only allocate a 1D vector for this channel's gradient
+            let mut channel_grad = vec![0.0f32; length];
 
-                    for i in 0..output_length {
-                        let start_idx = i * stride;
-                        let end_idx = start_idx + pool_size;
-                        let grad_val = grad_output[[b, c, i]] * scale_factor;
+            for i in 0..output_length {
+                let start_idx = i * stride;
+                let end_idx = start_idx + pool_size;
+                let grad_val = grad_output[[b, c, i]] * scale_factor;
 
-                        // Distribute gradient evenly to each element in the input window
-                        for j in start_idx..end_idx {
-                            channel_grad[j] += grad_val;
-                        }
-                    }
+                // Distribute gradient evenly to each element in the input window
+                for j in start_idx..end_idx {
+                    channel_grad[j] += grad_val;
+                }
+            }
 
-                    ((b, c), channel_grad)
-                })
-            })
-            .collect();
+            ((b, c), channel_grad)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_gradient
+        );
 
         // Write results directly into output tensor
         for ((b, c), channel_grad) in results {

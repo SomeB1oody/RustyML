@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining when to use parallel vs sequential execution.
+/// When batch_size * channels >= this threshold, parallel execution is used.
+/// Otherwise, sequential execution is used to avoid parallel overhead.
+const GLOBAL_AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
+
 /// Global Average Pooling 2D Layer
 ///
 /// Performs global average pooling operation on the spatial dimensions (height and width) of the input tensor.
@@ -81,24 +86,31 @@ impl Layer for GlobalAveragePooling2D {
         let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
 
         // Compute global average pooling
-        // Use parallel iteration over batches, compute sequential sum over channels and spatial dimensions
         let spatial_size = (height * width) as f32;
 
-        output
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(b, mut output_batch)| {
-                for c in 0..channels {
-                    let mut sum = 0.0;
-                    for h in 0..height {
-                        for w in 0..width {
-                            sum += input[[b, c, h, w]];
-                        }
-                    }
-                    output_batch[c] = sum / spatial_size;
+        // Helper closure to compute pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut sum = 0.0;
+            for h in 0..height {
+                for w in 0..width {
+                    sum += input[[b, c, h, w]];
                 }
-            });
+            }
+            ((b, c), sum / spatial_size)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            GLOBAL_AVERAGE_POOLING_2D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
+
+        // Merge results into the output tensor
+        for ((b, c), val) in results {
+            output[[b, c]] = val;
+        }
 
         output
     }
@@ -122,30 +134,31 @@ impl Layer for GlobalAveragePooling2D {
         let spatial_size = height * width;
         let scale_factor = 1.0 / (spatial_size as f32);
 
-        // Create a collection containing all indices
-        let indices: Vec<(usize, usize, usize, usize)> = (0..batch_size)
-            .flat_map(|b| {
-                (0..channels).flat_map(move |c| {
-                    (0..height).flat_map(move |h| (0..width).map(move |w| (b, c, h, w)))
-                })
-            })
-            .collect();
+        // Helper closure to compute gradient for a single (batch, channel) pair
+        let compute_gradient = |b: usize, c: usize| {
+            let grad_val = grad_output[[b, c]] * scale_factor;
+            let spatial_grad = vec![grad_val; spatial_size];
+            ((b, c), spatial_grad)
+        };
 
-        // Create gradient tensor using into_par_iter().map().collect() pattern
-        let grad_values: Vec<(usize, usize, usize, usize, f32)> = indices
-            .into_par_iter()
-            .map(|(b, c, h, w)| {
-                let grad = grad_output[[b, c]] * scale_factor;
-                (b, c, h, w, grad)
-            })
-            .collect();
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            GLOBAL_AVERAGE_POOLING_2D_PARALLEL_THRESHOLD,
+            compute_gradient
+        );
 
         // Create and fill gradient tensor
         let mut grad_input = Array::zeros(IxDyn(&[batch_size, channels, height, width]));
 
-        // Fill the calculated results into the gradient tensor
-        for (b, c, h, w, grad) in grad_values {
-            grad_input[[b, c, h, w]] = grad;
+        // Merge gradients from all batches and channels
+        for ((b, c), spatial_grad) in results {
+            for h in 0..height {
+                for w in 0..width {
+                    grad_input[[b, c, h, w]] = spatial_grad[h * width + w];
+                }
+            }
         }
 
         Ok(grad_input)

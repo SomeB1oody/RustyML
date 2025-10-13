@@ -6,6 +6,9 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.9.0] - 2025-10-13 (UTC-7)
+### Added
+- Introduce adaptive parallel processing thresholds in layers of `neural_network` module
+
 ### Changed
 - Enhance error handling and input validation across ML models
 - Enhance error handling and input validation in `utility` module

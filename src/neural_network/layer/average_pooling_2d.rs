@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining when to use parallel vs sequential execution.
+/// When batch_size * channels >= this threshold, parallel execution is used.
+/// Otherwise, sequential execution is used to avoid parallel overhead.
+const AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
+
 /// A 2D average pooling layer for neural networks.
 ///
 /// This layer performs average pooling operations on 4D tensors.
@@ -135,53 +140,58 @@ impl AveragePooling2D {
         // Pre-allocate output array
         let mut output = ArrayD::zeros(output_shape.clone());
 
-        // Process each batch and channel in parallel
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                // Clone output_shape to avoid ownership movement issues
-                let output_shape_clone = output_shape.clone();
-                (0..channels).into_par_iter().map(move |c| {
-                    let mut batch_channel_output = Vec::new();
+        // Copy needed values to avoid capturing self in closure
+        let pool_size = self.pool_size;
+        let strides = self.strides;
 
-                    // Perform pooling for each output position
-                    for i in 0..output_shape_clone[2] {
-                        let i_start = i * self.strides.0;
+        // Helper closure to compute pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut batch_channel_output = Vec::new();
 
-                        for j in 0..output_shape_clone[3] {
-                            let j_start = j * self.strides.1;
+            // Perform pooling for each output position
+            for i in 0..output_shape[2] {
+                let i_start = i * strides.0;
 
-                            // Calculate average value within the pooling window
-                            let mut sum = 0.0;
-                            let mut count = 0;
+                for j in 0..output_shape[3] {
+                    let j_start = j * strides.1;
 
-                            for di in 0..self.pool_size.0 {
-                                let i_pos = i_start + di;
-                                if i_pos >= input_shape[2] {
-                                    continue;
-                                }
+                    // Calculate average value within the pooling window
+                    let mut sum = 0.0;
+                    let mut count = 0;
 
-                                for dj in 0..self.pool_size.1 {
-                                    let j_pos = j_start + dj;
-                                    if j_pos >= input_shape[3] {
-                                        continue;
-                                    }
+                    for di in 0..pool_size.0 {
+                        let i_pos = i_start + di;
+                        if i_pos >= input_shape[2] {
+                            continue;
+                        }
 
-                                    sum += input[[b, c, i_pos, j_pos]];
-                                    count += 1;
-                                }
+                        for dj in 0..pool_size.1 {
+                            let j_pos = j_start + dj;
+                            if j_pos >= input_shape[3] {
+                                continue;
                             }
 
-                            // Calculate average, avoiding division by zero
-                            let avg_val = if count > 0 { sum / count as f32 } else { 0.0 };
-                            batch_channel_output.push((i, j, avg_val));
+                            sum += input[[b, c, i_pos, j_pos]];
+                            count += 1;
                         }
                     }
 
-                    ((b, c), batch_channel_output)
-                })
-            })
-            .collect();
+                    // Calculate average, avoiding division by zero
+                    let avg_val = if count > 0 { sum / count as f32 } else { 0.0 };
+                    batch_channel_output.push((i, j, avg_val));
+                }
+            }
+
+            ((b, c), batch_channel_output)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            AVERAGE_POOLING_2D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
 
         // Merge results into the output tensor
         for ((b, c), outputs) in results {
@@ -221,69 +231,72 @@ impl Layer for AveragePooling2D {
             let pool_size = self.pool_size;
             let strides = self.strides;
 
-            // Process each batch and channel in parallel
-            let results: Vec<_> = (0..batch_size)
-                .into_par_iter()
-                .flat_map(|b| {
-                    (0..channels).into_par_iter().map(move |c| {
-                        // Only allocate gradient for the spatial dimensions (height x width)
-                        let mut spatial_grad = vec![0.0f32; height * width];
+            // Helper closure to compute gradient for a single (batch, channel) pair
+            let compute_gradient = |b: usize, c: usize| {
+                // Only allocate gradient for the spatial dimensions (height x width)
+                let mut spatial_grad = vec![0.0f32; height * width];
 
-                        // For each output position
-                        for i in 0..output_shape[2] {
-                            let i_start = i * strides.0;
+                // For each output position
+                for i in 0..output_shape[2] {
+                    let i_start = i * strides.0;
 
-                            for j in 0..output_shape[3] {
-                                let j_start = j * strides.1;
+                    for j in 0..output_shape[3] {
+                        let j_start = j * strides.1;
 
-                                // Get current output gradient
-                                let grad = grad_output[[b, c, i, j]];
+                        // Get current output gradient
+                        let grad = grad_output[[b, c, i, j]];
 
-                                // Calculate count and distribute gradient in a single pass
-                                let mut count = 0;
-                                for di in 0..pool_size.0 {
-                                    let i_pos = i_start + di;
-                                    if i_pos >= height {
-                                        break; // No need to continue if we exceed height
-                                    }
+                        // Calculate count and distribute gradient in a single pass
+                        let mut count = 0;
+                        for di in 0..pool_size.0 {
+                            let i_pos = i_start + di;
+                            if i_pos >= height {
+                                break; // No need to continue if we exceed height
+                            }
 
-                                    for dj in 0..pool_size.1 {
-                                        let j_pos = j_start + dj;
-                                        if j_pos >= width {
-                                            break; // No need to continue if we exceed width
-                                        }
-
-                                        count += 1;
-                                    }
+                            for dj in 0..pool_size.1 {
+                                let j_pos = j_start + dj;
+                                if j_pos >= width {
+                                    break; // No need to continue if we exceed width
                                 }
 
-                                // Distribute gradient evenly to all input elements that participated in the calculation
-                                if count > 0 {
-                                    let grad_per_element = grad / count as f32;
-
-                                    for di in 0..pool_size.0 {
-                                        let i_pos = i_start + di;
-                                        if i_pos >= height {
-                                            break;
-                                        }
-
-                                        for dj in 0..pool_size.1 {
-                                            let j_pos = j_start + dj;
-                                            if j_pos >= width {
-                                                break;
-                                            }
-
-                                            spatial_grad[i_pos * width + j_pos] += grad_per_element;
-                                        }
-                                    }
-                                }
+                                count += 1;
                             }
                         }
 
-                        ((b, c), spatial_grad)
-                    })
-                })
-                .collect();
+                        // Distribute gradient evenly to all input elements that participated in the calculation
+                        if count > 0 {
+                            let grad_per_element = grad / count as f32;
+
+                            for di in 0..pool_size.0 {
+                                let i_pos = i_start + di;
+                                if i_pos >= height {
+                                    break;
+                                }
+
+                                for dj in 0..pool_size.1 {
+                                    let j_pos = j_start + dj;
+                                    if j_pos >= width {
+                                        break;
+                                    }
+
+                                    spatial_grad[i_pos * width + j_pos] += grad_per_element;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ((b, c), spatial_grad)
+            };
+
+            // Choose parallel or sequential execution based on workload size
+            let results: Vec<_> = execute_parallel_or_sequential!(
+                batch_size,
+                channels,
+                AVERAGE_POOLING_2D_PARALLEL_THRESHOLD,
+                compute_gradient
+            );
 
             // Merge gradients from all batches and channels
             for ((b, c), spatial_grad) in results {

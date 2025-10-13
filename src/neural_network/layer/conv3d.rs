@@ -1,5 +1,9 @@
 use super::*;
-use ndarray::Zip;
+
+/// Threshold for deciding when to use parallel computation in Conv3D operations.
+/// If batch_size * filters * output_volume < threshold, use sequential processing.
+/// Otherwise, use parallel processing with Rayon.
+const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 
 /// A 3D convolutional layer for neural networks.
 ///
@@ -192,6 +196,42 @@ impl Conv3D {
         self.bias = bias;
     }
 
+    /// Helper function to compute convolution for a single output position.
+    fn compute_conv_at_position(
+        &self,
+        input: &ArrayView5<f32>,
+        b: usize,
+        f: usize,
+        od: usize,
+        oh: usize,
+        ow: usize,
+        input_shape: &[usize],
+    ) -> f32 {
+        let (kd, kh, kw) = self.kernel_size;
+        let (sd, sh, sw) = self.strides;
+        let mut sum = 0.0;
+
+        // Convolution kernel computation
+        for c in 0..input_shape[1] {
+            for kd_idx in 0..kd {
+                for kh_idx in 0..kh {
+                    for kw_idx in 0..kw {
+                        let id = od * sd + kd_idx;
+                        let ih = oh * sh + kh_idx;
+                        let iw = ow * sw + kw_idx;
+
+                        if id < input_shape[2] && ih < input_shape[3] && iw < input_shape[4] {
+                            sum += input[[b, c, id, ih, iw]]
+                                * self.weights[[f, c, kd_idx, kh_idx, kw_idx]];
+                        }
+                    }
+                }
+            }
+        }
+
+        sum + self.bias[[0, f]]
+    }
+
     /// Applies 3D convolution operation to the input.
     fn conv3d(&self, input: ArrayView5<f32>) -> Array5<f32> {
         let input_shape = input.shape();
@@ -208,77 +248,160 @@ impl Conv3D {
         let mut output =
             Array5::zeros((batch_size, self.filters, out_depth, out_height, out_width));
 
-        let (kd, kh, kw) = self.kernel_size;
-        let (sd, sh, sw) = self.strides;
+        // Calculate workload size to decide between parallel and sequential execution
+        let workload_size = batch_size * self.filters * out_depth * out_height * out_width;
 
-        // First level parallelization: batch level
-        output
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(b, mut batch_output)| {
-                // Second level parallelization: filter level
-                batch_output
-                    .axis_iter_mut(Axis(0))
-                    .into_par_iter()
-                    .enumerate()
-                    .for_each(|(f, mut filter_output)| {
-                        // Third level parallelization: output depth dimension
-                        filter_output
-                            .axis_iter_mut(Axis(0))
-                            .into_par_iter()
-                            .enumerate()
-                            .for_each(|(od, mut depth_slice)| {
-                                // Fourth level parallelization: output height dimension
-                                depth_slice
-                                    .axis_iter_mut(Axis(0))
-                                    .into_par_iter()
-                                    .enumerate()
-                                    .for_each(|(oh, mut height_slice)| {
-                                        // Inner loop: convolution computation for width dimension
-                                        for ow in 0..out_width {
-                                            let mut sum = 0.0;
-
-                                            // Convolution kernel computation
-                                            for c in 0..input_shape[1] {
-                                                for kd_idx in 0..kd {
-                                                    for kh_idx in 0..kh {
-                                                        for kw_idx in 0..kw {
-                                                            let id = od * sd + kd_idx;
-                                                            let ih = oh * sh + kh_idx;
-                                                            let iw = ow * sw + kw_idx;
-
-                                                            if id < input_shape[2]
-                                                                && ih < input_shape[3]
-                                                                && iw < input_shape[4]
-                                                            {
-                                                                sum += input[[b, c, id, ih, iw]]
-                                                                    * self.weights[[
-                                                                        f, c, kd_idx, kh_idx,
-                                                                        kw_idx,
-                                                                    ]];
-                                                            }
-                                                        }
-                                                    }
-                                                }
+        if workload_size >= CONV_3D_PARALLEL_THRESHOLD {
+            // Parallel processing for large workloads
+            output
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut batch_output)| {
+                    batch_output
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(f, mut filter_output)| {
+                            filter_output
+                                .axis_iter_mut(Axis(0))
+                                .into_par_iter()
+                                .enumerate()
+                                .for_each(|(od, mut depth_slice)| {
+                                    depth_slice
+                                        .axis_iter_mut(Axis(0))
+                                        .into_par_iter()
+                                        .enumerate()
+                                        .for_each(|(oh, mut height_slice)| {
+                                            for ow in 0..out_width {
+                                                height_slice[ow] = self.compute_conv_at_position(
+                                                    &input,
+                                                    b,
+                                                    f,
+                                                    od,
+                                                    oh,
+                                                    ow,
+                                                    input_shape,
+                                                );
                                             }
-
-                                            height_slice[ow] = sum + self.bias[[0, f]];
-                                        }
-                                    });
-                            });
-                    });
-            });
+                                        });
+                                });
+                        });
+                });
+        } else {
+            // Sequential processing for small workloads
+            for b in 0..batch_size {
+                for f in 0..self.filters {
+                    for od in 0..out_depth {
+                        for oh in 0..out_height {
+                            for ow in 0..out_width {
+                                output[[b, f, od, oh, ow]] = self.compute_conv_at_position(
+                                    &input,
+                                    b,
+                                    f,
+                                    od,
+                                    oh,
+                                    ow,
+                                    input_shape,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         output
     }
 
+    /// Helper function to compute weight gradient for a single kernel position.
+    fn compute_weight_grad_at_position(
+        input: &Array5<f32>,
+        grad_output: &ArrayD<f32>,
+        f: usize,
+        c: usize,
+        kd_idx: usize,
+        kh_idx: usize,
+        kw_idx: usize,
+        batch_size: usize,
+        grad_shape: &[usize],
+        depth: usize,
+        height: usize,
+        width: usize,
+        strides: (usize, usize, usize),
+    ) -> f32 {
+        let (sd, sh, sw) = strides;
+        let mut grad_sum = 0.0;
+
+        for b in 0..batch_size {
+            for od in 0..grad_shape[2] {
+                for oh in 0..grad_shape[3] {
+                    for ow in 0..grad_shape[4] {
+                        let id = od * sd + kd_idx;
+                        let ih = oh * sh + kh_idx;
+                        let iw = ow * sw + kw_idx;
+
+                        if id < depth && ih < height && iw < width {
+                            grad_sum += input[[b, c, id, ih, iw]] * grad_output[[b, f, od, oh, ow]];
+                        }
+                    }
+                }
+            }
+        }
+
+        grad_sum
+    }
+
+    /// Helper function to compute input gradient for a single position.
+    fn compute_input_grad_at_position(
+        weights: &Array5<f32>,
+        grad_output: &ArrayD<f32>,
+        b: usize,
+        c: usize,
+        id: usize,
+        ih: usize,
+        iw: usize,
+        grad_shape: &[usize],
+        kernel_size: (usize, usize, usize),
+        strides: (usize, usize, usize),
+        filters: usize,
+    ) -> f32 {
+        let (kd, kh, kw) = kernel_size;
+        let (sd, sh, sw) = strides;
+        let mut grad_sum = 0.0;
+
+        for f in 0..filters {
+            for kd_idx in 0..kd {
+                for kh_idx in 0..kh {
+                    for kw_idx in 0..kw {
+                        if id >= kd_idx && ih >= kh_idx && iw >= kw_idx {
+                            let od = (id - kd_idx) / sd;
+                            let oh = (ih - kh_idx) / sh;
+                            let ow = (iw - kw_idx) / sw;
+
+                            if od < grad_shape[2] && oh < grad_shape[3] && ow < grad_shape[4] {
+                                if (id - kd_idx) % sd == 0
+                                    && (ih - kh_idx) % sh == 0
+                                    && (iw - kw_idx) % sw == 0
+                                {
+                                    grad_sum += weights[[f, c, kd_idx, kh_idx, kw_idx]]
+                                        * grad_output[[b, f, od, oh, ow]];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        grad_sum
+    }
+
     /// Computes gradients during backward propagation.
-    /// Parallel gradient computation
     fn compute_gradients(&mut self, input: &Array5<f32>, grad_output: &ArrayD<f32>) -> Array5<f32> {
         let input_shape = input.shape();
         let grad_shape = grad_output.shape();
-        let (batch_size, _, depth, height, width) = (
+        let (batch_size, channels, depth, height, width) = (
             input_shape[0],
             input_shape[1],
             input_shape[2],
@@ -287,7 +410,6 @@ impl Conv3D {
         );
 
         let (kd, kh, kw) = self.kernel_size;
-        let (sd, sh, sw) = self.strides;
 
         // Initialize gradients
         self.weight_gradients = Some(Array5::zeros(self.weights.raw_dim()));
@@ -295,56 +417,103 @@ impl Conv3D {
 
         let mut grad_input = Array5::zeros(input.raw_dim());
 
-        // Parallel computation of weight gradients
+        // Calculate workload size to decide between parallel and sequential execution
+        let grad_workload_size = batch_size * grad_shape[2] * grad_shape[3] * grad_shape[4];
+
+        // Compute weight gradients
+        let strides = self.strides;
         if let Some(ref mut weight_grads) = self.weight_gradients {
-            // Use parallel iterators to compute weight gradients
-            weight_grads
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(f, mut filter_grads)| {
-                    filter_grads
-                        .axis_iter_mut(Axis(0))
-                        .into_par_iter()
-                        .enumerate()
-                        .for_each(|(c, mut channel_grads)| {
-                            for kd_idx in 0..kd {
-                                for kh_idx in 0..kh {
-                                    for kw_idx in 0..kw {
-                                        let mut grad_sum = 0.0;
-
-                                        for b in 0..batch_size {
-                                            for od in 0..grad_shape[2] {
-                                                for oh in 0..grad_shape[3] {
-                                                    for ow in 0..grad_shape[4] {
-                                                        let id = od * sd + kd_idx;
-                                                        let ih = oh * sh + kh_idx;
-                                                        let iw = ow * sw + kw_idx;
-
-                                                        if id < depth && ih < height && iw < width {
-                                                            grad_sum += input[[b, c, id, ih, iw]]
-                                                                * grad_output[[b, f, od, oh, ow]];
-                                                        }
-                                                    }
-                                                }
-                                            }
+            if grad_workload_size >= CONV_3D_PARALLEL_THRESHOLD {
+                // Parallel computation
+                weight_grads
+                    .axis_iter_mut(Axis(0))
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(f, mut filter_grads)| {
+                        filter_grads
+                            .axis_iter_mut(Axis(0))
+                            .into_par_iter()
+                            .enumerate()
+                            .for_each(|(c, mut channel_grads)| {
+                                for kd_idx in 0..kd {
+                                    for kh_idx in 0..kh {
+                                        for kw_idx in 0..kw {
+                                            channel_grads[[kd_idx, kh_idx, kw_idx]] =
+                                                Self::compute_weight_grad_at_position(
+                                                    input,
+                                                    grad_output,
+                                                    f,
+                                                    c,
+                                                    kd_idx,
+                                                    kh_idx,
+                                                    kw_idx,
+                                                    batch_size,
+                                                    grad_shape,
+                                                    depth,
+                                                    height,
+                                                    width,
+                                                    strides,
+                                                );
                                         }
+                                    }
+                                }
+                            });
+                    });
+            } else {
+                // Sequential computation
+                for f in 0..self.filters {
+                    for c in 0..channels {
+                        for kd_idx in 0..kd {
+                            for kh_idx in 0..kh {
+                                for kw_idx in 0..kw {
+                                    weight_grads[[f, c, kd_idx, kh_idx, kw_idx]] =
+                                        Self::compute_weight_grad_at_position(
+                                            input,
+                                            grad_output,
+                                            f,
+                                            c,
+                                            kd_idx,
+                                            kh_idx,
+                                            kw_idx,
+                                            batch_size,
+                                            grad_shape,
+                                            depth,
+                                            height,
+                                            width,
+                                            strides,
+                                        );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-                                        channel_grads[[kd_idx, kh_idx, kw_idx]] = grad_sum;
+        // Compute bias gradients
+        if let Some(ref mut bias_grads) = self.bias_gradients {
+            if grad_workload_size >= CONV_3D_PARALLEL_THRESHOLD {
+                // Parallel computation
+                bias_grads
+                    .axis_iter_mut(Axis(1))
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(f, mut filter_bias)| {
+                        let mut bias_sum = 0.0;
+                        for b in 0..batch_size {
+                            for od in 0..grad_shape[2] {
+                                for oh in 0..grad_shape[3] {
+                                    for ow in 0..grad_shape[4] {
+                                        bias_sum += grad_output[[b, f, od, oh, ow]];
                                     }
                                 }
                             }
-                        });
-                });
-        }
-
-        // Parallel computation of bias gradients
-        if let Some(ref mut bias_grads) = self.bias_gradients {
-            bias_grads
-                .axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(f, mut filter_bias)| {
+                        }
+                        filter_bias[[0]] = bias_sum;
+                    });
+            } else {
+                // Sequential computation
+                for f in 0..self.filters {
                     let mut bias_sum = 0.0;
                     for b in 0..batch_size {
                         for od in 0..grad_shape[2] {
@@ -355,62 +524,78 @@ impl Conv3D {
                             }
                         }
                     }
-                    filter_bias[[0]] = bias_sum;
-                });
+                    bias_grads[[0, f]] = bias_sum;
+                }
+            }
         }
 
-        // Parallel computation of input gradients
-        grad_input
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(b, mut batch_grad)| {
-                batch_grad
-                    .axis_iter_mut(Axis(0))
-                    .into_par_iter()
-                    .enumerate()
-                    .for_each(|(c, mut channel_grad)| {
-                        for id in 0..depth {
-                            for ih in 0..height {
-                                for iw in 0..width {
-                                    let mut grad_sum = 0.0;
+        // Compute input gradients
+        let input_grad_workload = batch_size * channels * depth * height * width;
+        let kernel_size = self.kernel_size;
+        let filters = self.filters;
+        let weights = &self.weights;
 
-                                    for f in 0..self.filters {
-                                        for kd_idx in 0..kd {
-                                            for kh_idx in 0..kh {
-                                                for kw_idx in 0..kw {
-                                                    if id >= kd_idx && ih >= kh_idx && iw >= kw_idx
-                                                    {
-                                                        let od = (id - kd_idx) / sd;
-                                                        let oh = (ih - kh_idx) / sh;
-                                                        let ow = (iw - kw_idx) / sw;
-
-                                                        if od < grad_shape[2]
-                                                            && oh < grad_shape[3]
-                                                            && ow < grad_shape[4]
-                                                        {
-                                                            if (id - kd_idx) % sd == 0
-                                                                && (ih - kh_idx) % sh == 0
-                                                                && (iw - kw_idx) % sw == 0
-                                                            {
-                                                                grad_sum += self.weights[[
-                                                                    f, c, kd_idx, kh_idx, kw_idx,
-                                                                ]] * grad_output
-                                                                    [[b, f, od, oh, ow]];
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+        if input_grad_workload >= CONV_3D_PARALLEL_THRESHOLD {
+            // Parallel computation
+            grad_input
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut batch_grad)| {
+                    batch_grad
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(c, mut channel_grad)| {
+                            for id in 0..depth {
+                                for ih in 0..height {
+                                    for iw in 0..width {
+                                        channel_grad[[id, ih, iw]] =
+                                            Self::compute_input_grad_at_position(
+                                                weights,
+                                                grad_output,
+                                                b,
+                                                c,
+                                                id,
+                                                ih,
+                                                iw,
+                                                grad_shape,
+                                                kernel_size,
+                                                strides,
+                                                filters,
+                                            );
                                     }
-
-                                    channel_grad[[id, ih, iw]] = grad_sum;
                                 }
                             }
+                        });
+                });
+        } else {
+            // Sequential computation
+            for b in 0..batch_size {
+                for c in 0..channels {
+                    for id in 0..depth {
+                        for ih in 0..height {
+                            for iw in 0..width {
+                                grad_input[[b, c, id, ih, iw]] =
+                                    Self::compute_input_grad_at_position(
+                                        weights,
+                                        grad_output,
+                                        b,
+                                        c,
+                                        id,
+                                        ih,
+                                        iw,
+                                        grad_shape,
+                                        kernel_size,
+                                        strides,
+                                        filters,
+                                    );
+                            }
                         }
-                    });
-            });
+                    }
+                }
+            }
+        }
 
         grad_input
     }

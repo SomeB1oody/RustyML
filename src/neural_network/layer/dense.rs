@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining when to use parallel computation in dense layer operations.
+/// When the total number of operations (input_dim * output_dim) is below this threshold,
+/// sequential computation is used to avoid parallelization overhead.
+const DENSE_PARALLEL_THRESHOLD: usize = 512;
+
 /// Dense (Fully Connected) layer implementation for neural networks.
 ///
 /// This layer performs a linear transformation of the input data using a weight matrix and bias vector,
@@ -102,6 +107,38 @@ impl Dense {
         }
     }
 
+    /// Performs matrix multiplication with automatic parallel/sequential selection.
+    fn matmul<S1, S2>(
+        &self,
+        a: &ArrayBase<S1, ndarray::Ix2>,
+        b: &ArrayBase<S2, ndarray::Ix2>,
+    ) -> Array2<f32>
+    where
+        S1: ndarray::Data<Elem = f32>,
+        S2: ndarray::Data<Elem = f32>,
+    {
+        if self.input_dim * self.output_dim >= DENSE_PARALLEL_THRESHOLD {
+            // Use ndarray's parallel dot operation (with rayon)
+            a.dot(b)
+        } else {
+            // Use sequential computation for small matrices
+            let (m, k) = (a.nrows(), a.ncols());
+            let (_, n) = (b.nrows(), b.ncols());
+            let mut result = Array2::zeros((m, n));
+
+            for i in 0..m {
+                for j in 0..n {
+                    let mut sum = 0.0;
+                    for p in 0..k {
+                        sum += a[[i, p]] * b[[p, j]];
+                    }
+                    result[[i, j]] = sum;
+                }
+            }
+            result
+        }
+    }
+
     /// Sets the weights and bias for this layer.
     ///
     /// # Parameters
@@ -120,8 +157,8 @@ impl Layer for Dense {
         let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
         self.input_cache = Some(input_2d.clone());
 
-        // Use dot operation (ndarray itself will use parallel computation when rayon feature is enabled)
-        let z = input_2d.dot(&self.weights) + &self.bias;
+        // Use adaptive parallel/sequential matrix multiplication
+        let z = self.matmul(&input_2d, &self.weights) + &self.bias;
 
         let a = Activation::apply_activation(&z, &self.activation);
         self.activation_output = Some(a.clone());
@@ -153,9 +190,9 @@ impl Layer for Dense {
             ModelError::ProcessingError(String::from("Forward pass has not been run"))
         })?;
 
-        // Calculate weight gradients using optimized matrix multiplication
+        // Calculate weight gradients using adaptive matrix multiplication
         // grad_w = input^T * grad_upstream
-        let grad_w = input.t().dot(&grad_upstream);
+        let grad_w = self.matmul(&input.t(), &grad_upstream);
 
         // Calculate bias gradients by summing over batch dimension
         let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -165,7 +202,7 @@ impl Layer for Dense {
 
         // Calculate gradients to be passed to previous layer
         // grad_input = grad_upstream * weights^T
-        let grad_input = grad_upstream.dot(&self.weights.t());
+        let grad_input = self.matmul(&grad_upstream, &self.weights.t());
 
         Ok(grad_input.into_dyn())
     }

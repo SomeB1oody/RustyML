@@ -1,5 +1,6 @@
 use super::*;
 use helper_functions::*;
+use ndarray::Zip;
 use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
@@ -107,6 +108,38 @@ macro_rules! no_trainable_parameters_layer_functions {
         fn get_weights(&self) -> LayerWeight<'_> {
             // This layer has no weights
             LayerWeight::Empty
+        }
+    };
+}
+
+/// A macro that conditionally executes parallel or sequential computation based on a threshold.
+///
+/// This macro is designed to eliminate code duplication in pooling layers by providing
+/// a unified pattern for choosing between parallel and sequential execution strategies.
+///
+/// # Parameters
+///
+/// - `$batch_size` - Number of batches
+/// - `$channels` - Number of channels
+/// - `$threshold` - Threshold for parallel execution (when batch_size * channels >= threshold)
+/// - `$compute_fn` - Closure/function to execute for each (batch, channel) pair
+macro_rules! execute_parallel_or_sequential {
+    ($batch_size:expr, $channels:expr, $threshold:expr, $compute_fn:expr) => {
+        if $batch_size * $channels >= $threshold {
+            // Parallel execution for large workloads
+            (0..$batch_size)
+                .into_par_iter()
+                .flat_map(|b| {
+                    (0..$channels)
+                        .into_par_iter()
+                        .map(move |c| $compute_fn(b, c))
+                })
+                .collect()
+        } else {
+            // Sequential execution for small workloads
+            (0..$batch_size)
+                .flat_map(|b| (0..$channels).map(move |c| $compute_fn(b, c)))
+                .collect()
         }
     };
 }

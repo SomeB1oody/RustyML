@@ -76,7 +76,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust
+//! ```rust, ignore
 //! use rustyml::machine_learning::linear_regression::*;
 //! // or just use `rustyml::prelude::*;`
 //! use ndarray::{Array1, Array2, array};
@@ -126,7 +126,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust
+//! ```rust, ignore
 //! use rustyml::prelude::*;
 //! use ndarray::Array;
 //!

@@ -1,5 +1,9 @@
 use super::*;
 
+/// Threshold for deciding between parallel and sequential execution.
+/// When batch_size * channels >= this threshold, use parallel execution.
+const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
+
 /// 3D data max pooling Layer.
 ///
 /// Max pooling is a common downsampling technique in convolutional neural networks that
@@ -138,70 +142,70 @@ impl MaxPooling3D {
         // Vector to store maximum value positions
         let mut max_positions = Vec::new();
 
-        // Process each batch and channel in parallel
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .flat_map(|b| {
-                // Clone output_shape here to avoid ownership movement issues
-                let output_shape_clone = output_shape.clone();
-                (0..channels).into_par_iter().map(move |c| {
-                    let mut batch_channel_output = Vec::new();
-                    let mut batch_channel_positions = Vec::new();
+        // Helper closure to compute max pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut batch_channel_output = Vec::new();
+            let mut batch_channel_positions = Vec::new();
 
-                    // Perform pooling for each output position
-                    for out_d in 0..output_shape_clone[2] {
-                        let d_start = out_d * self.strides.0;
+            // Perform pooling for each output position
+            for out_d in 0..output_shape[2] {
+                let d_start = out_d * self.strides.0;
 
-                        for out_i in 0..output_shape_clone[3] {
-                            let i_start = out_i * self.strides.1;
+                for out_i in 0..output_shape[3] {
+                    let i_start = out_i * self.strides.1;
 
-                            for out_j in 0..output_shape_clone[4] {
-                                let j_start = out_j * self.strides.2;
+                    for out_j in 0..output_shape[4] {
+                        let j_start = out_j * self.strides.2;
 
-                                // Find maximum value in pooling window
-                                let mut max_val = f32::NEG_INFINITY;
-                                let mut max_pos = (0, 0, 0);
+                        // Find maximum value in pooling window
+                        let mut max_val = f32::NEG_INFINITY;
+                        let mut max_pos = (0, 0, 0);
 
-                                for dd in 0..self.pool_size.0 {
-                                    let d_pos = d_start + dd;
-                                    if d_pos >= input_shape[2] {
+                        for dd in 0..self.pool_size.0 {
+                            let d_pos = d_start + dd;
+                            if d_pos >= input_shape[2] {
+                                continue;
+                            }
+
+                            for di in 0..self.pool_size.1 {
+                                let i_pos = i_start + di;
+                                if i_pos >= input_shape[3] {
+                                    continue;
+                                }
+
+                                for dj in 0..self.pool_size.2 {
+                                    let j_pos = j_start + dj;
+                                    if j_pos >= input_shape[4] {
                                         continue;
                                     }
 
-                                    for di in 0..self.pool_size.1 {
-                                        let i_pos = i_start + di;
-                                        if i_pos >= input_shape[3] {
-                                            continue;
-                                        }
-
-                                        for dj in 0..self.pool_size.2 {
-                                            let j_pos = j_start + dj;
-                                            if j_pos >= input_shape[4] {
-                                                continue;
-                                            }
-
-                                            let val = input[[b, c, d_pos, i_pos, j_pos]];
-                                            if val > max_val {
-                                                max_val = val;
-                                                max_pos = (d_pos, i_pos, j_pos);
-                                            }
-                                        }
+                                    let val = input[[b, c, d_pos, i_pos, j_pos]];
+                                    if val > max_val {
+                                        max_val = val;
+                                        max_pos = (d_pos, i_pos, j_pos);
                                     }
                                 }
-
-                                batch_channel_output.push((out_d, out_i, out_j, max_val));
-                                // Store complete mapping: (batch, channel, output_d, output_i, output_j, input_d, input_i, input_j)
-                                batch_channel_positions.push((
-                                    b, c, out_d, out_i, out_j, max_pos.0, max_pos.1, max_pos.2,
-                                ));
                             }
                         }
-                    }
 
-                    ((b, c), (batch_channel_output, batch_channel_positions))
-                })
-            })
-            .collect();
+                        batch_channel_output.push((out_d, out_i, out_j, max_val));
+                        // Store complete mapping: (batch, channel, output_d, output_i, output_j, input_d, input_i, input_j)
+                        batch_channel_positions
+                            .push((b, c, out_d, out_i, out_j, max_pos.0, max_pos.1, max_pos.2));
+                    }
+                }
+            }
+
+            ((b, c), (batch_channel_output, batch_channel_positions))
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            MAX_POOLING_3D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
 
         // Merge results into the output tensor
         for ((b, c), (outputs, positions)) in results {
@@ -232,17 +236,60 @@ impl Layer for MaxPooling3D {
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if let (Some(input), Some(max_positions)) = (&self.input_cache, &self.max_positions) {
             let input_shape = input.shape();
+            let batch_size = input_shape[0];
+            let channels = input_shape[1];
+            let depth = input_shape[2];
+            let height = input_shape[3];
+            let width = input_shape[4];
 
             // Initialize input gradients with same shape as input
             let mut input_gradients = ArrayD::zeros(input_shape.to_vec());
 
-            // Distribute gradients to the positions that produced the maximum values
-            // Each entry contains: (batch, channel, out_d, out_i, out_j, in_d, in_i, in_j)
-            // Note: Using += to handle overlapping pooling windows correctly
+            // Group max_positions by (batch, channel) for parallel processing
+            let mut positions_by_bc: std::collections::HashMap<
+                (usize, usize),
+                Vec<(usize, usize, usize, usize, usize, usize)>,
+            > = std::collections::HashMap::new();
+
             for &(b, c, out_d, out_i, out_j, in_d, in_i, in_j) in max_positions.iter() {
-                // Accumulate gradient from output position to the input position that was selected as max
-                input_gradients[[b, c, in_d, in_i, in_j]] +=
-                    grad_output[[b, c, out_d, out_i, out_j]];
+                positions_by_bc
+                    .entry((b, c))
+                    .or_insert_with(Vec::new)
+                    .push((out_d, out_i, out_j, in_d, in_i, in_j));
+            }
+
+            // Helper closure to compute gradient for a single (batch, channel) pair
+            let compute_gradient = |b: usize, c: usize| {
+                let mut spatial_grad = vec![0.0; depth * height * width];
+
+                if let Some(positions) = positions_by_bc.get(&(b, c)) {
+                    for &(out_d, out_i, out_j, in_d, in_i, in_j) in positions {
+                        let flat_idx = in_d * (height * width) + in_i * width + in_j;
+                        spatial_grad[flat_idx] += grad_output[[b, c, out_d, out_i, out_j]];
+                    }
+                }
+
+                ((b, c), spatial_grad)
+            };
+
+            // Choose parallel or sequential execution based on workload size
+            let results: Vec<_> = execute_parallel_or_sequential!(
+                batch_size,
+                channels,
+                MAX_POOLING_3D_PARALLEL_THRESHOLD,
+                compute_gradient
+            );
+
+            // Write results back to gradient array
+            for ((b, c), spatial_grad) in results {
+                for d in 0..depth {
+                    for i in 0..height {
+                        for j in 0..width {
+                            let flat_idx = d * (height * width) + i * width + j;
+                            input_gradients[[b, c, d, i, j]] = spatial_grad[flat_idx];
+                        }
+                    }
+                }
             }
 
             Ok(input_gradients)

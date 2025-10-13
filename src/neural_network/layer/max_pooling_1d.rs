@@ -1,5 +1,9 @@
 use super::*;
 
+/// Threshold for deciding between parallel and sequential execution.
+/// When batch_size * channels >= this threshold, use parallel execution.
+const MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
+
 /// 1D Max Pooling layer for neural networks.
 ///
 /// This layer performs max pooling operation on a 3D tensor.
@@ -128,34 +132,49 @@ impl Layer for MaxPooling1D {
         let pool_size = self.pool_size;
         let stride = self.stride;
 
-        // Use rayon to parallelize over batches
-        output
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .zip(max_positions.axis_iter_mut(Axis(0)).into_par_iter())
-            .enumerate()
-            .for_each(|(b, (mut output_batch, mut max_pos_batch))| {
-                for c in 0..channels {
-                    for i in 0..output_length {
-                        let start_idx = i * stride;
-                        let end_idx = start_idx + pool_size;
+        // Helper closure to compute max pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut channel_output = Vec::new();
+            let mut channel_max_pos = Vec::new();
 
-                        // Find maximum value and its position in the window
-                        // Initialize with the first element in the window
-                        let mut max_val = input[[b, c, start_idx]];
-                        let mut max_idx = start_idx;
-                        for j in (start_idx + 1)..end_idx {
-                            if input[[b, c, j]] > max_val {
-                                max_val = input[[b, c, j]];
-                                max_idx = j;
-                            }
-                        }
+            for i in 0..output_length {
+                let start_idx = i * stride;
+                let end_idx = start_idx + pool_size;
 
-                        output_batch[[c, i]] = max_val;
-                        max_pos_batch[[c, i]] = max_idx;
+                // Find maximum value and its position in the window
+                let mut max_val = input[[b, c, start_idx]];
+                let mut max_idx = start_idx;
+                for j in (start_idx + 1)..end_idx {
+                    if input[[b, c, j]] > max_val {
+                        max_val = input[[b, c, j]];
+                        max_idx = j;
                     }
                 }
-            });
+
+                channel_output.push((i, max_val));
+                channel_max_pos.push((i, max_idx));
+            }
+
+            ((b, c), (channel_output, channel_max_pos))
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            MAX_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
+
+        // Write results back to output arrays
+        for ((b, c), (channel_output, channel_max_pos)) in results {
+            for (i, val) in channel_output {
+                output[[b, c, i]] = val;
+            }
+            for (i, pos) in channel_max_pos {
+                max_positions[[b, c, i]] = pos;
+            }
+        }
 
         self.max_positions = Some(max_positions);
         output.into_dyn()
@@ -185,17 +204,35 @@ impl Layer for MaxPooling1D {
         let batch_size = input.shape()[0];
         let channels = input.shape()[1];
         let length = input.shape()[2];
+        let output_length = grad_output.shape()[2];
 
         let mut grad_input = Array3::<f32>::zeros((batch_size, channels, length));
 
-        // For max pooling, gradients flow only through the maximum value in each pooling window
-        for b in 0..batch_size {
-            for c in 0..channels {
-                for i in 0..grad_output.shape()[2] {
-                    let max_idx = max_positions[[b, c, i]];
-                    // Pass the gradient to the input position that had the maximum value
-                    grad_input[[b, c, max_idx]] += grad_output[[b, c, i]];
-                }
+        // Helper closure to compute gradient for a single (batch, channel) pair
+        let compute_gradient = |b: usize, c: usize| {
+            let mut channel_grad = vec![0.0; length];
+
+            // For max pooling, gradients flow only through the maximum value in each pooling window
+            for i in 0..output_length {
+                let max_idx = max_positions[[b, c, i]];
+                channel_grad[max_idx] += grad_output[[b, c, i]];
+            }
+
+            ((b, c), channel_grad)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            MAX_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_gradient
+        );
+
+        // Write results back to gradient array
+        for ((b, c), channel_grad) in results {
+            for (j, grad_val) in channel_grad.iter().enumerate() {
+                grad_input[[b, c, j]] = *grad_val;
             }
         }
 

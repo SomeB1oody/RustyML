@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for deciding between parallel and sequential execution.
+/// When `batch_size * output_channels * output_height * output_width >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD`,
+/// parallel processing is used for better performance.
+const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
+
 /// A 2D separable convolutional layer for neural networks.
 ///
 /// This layer implements depthwise separable convolution, which factors a standard convolution
@@ -196,55 +201,77 @@ impl SeparableConv2D {
         let channels = input_shape[1];
         let output_shape = self.calculate_depthwise_output_shape(input_shape);
 
-        // Parallel processing across batches
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .map(|b| {
-                let mut batch_output = Array3::zeros((
-                    channels * self.depth_multiplier,
-                    output_shape[2],
-                    output_shape[3],
-                ));
+        // Calculate workload size to decide between parallel and sequential execution
+        let workload_size =
+            batch_size * channels * self.depth_multiplier * output_shape[2] * output_shape[3];
 
-                for c in 0..channels {
-                    for m in 0..self.depth_multiplier {
-                        let output_channel = c * self.depth_multiplier + m;
-
-                        for i in 0..output_shape[2] {
-                            let i_base = i * self.strides.0;
-
-                            for j in 0..output_shape[3] {
-                                let j_base = j * self.strides.1;
-                                let mut sum = 0.0;
-
-                                let max_ki = input_shape[2]
-                                    .saturating_sub(i_base)
-                                    .min(self.kernel_size.0);
-                                let max_kj = input_shape[3]
-                                    .saturating_sub(j_base)
-                                    .min(self.kernel_size.1);
-
-                                for ki in 0..max_ki {
-                                    let i_pos = i_base + ki;
-                                    for kj in 0..max_kj {
-                                        let j_pos = j_base + kj;
-                                        sum += input[[b, c, i_pos, j_pos]]
-                                            * self.depthwise_weights[[m, c, ki, kj]];
-                                    }
-                                }
-
-                                batch_output[[output_channel, i, j]] = sum;
-                            }
-                        }
-                    }
-                }
-
-                (b, batch_output)
-            })
-            .collect();
+        // Compute batch convolution results (parallel or sequential based on workload)
+        let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
+            // Use parallel processing for large workloads
+            (0..batch_size)
+                .into_par_iter()
+                .map(|b| self.compute_depthwise_batch(b, input, &output_shape, channels))
+                .collect()
+        } else {
+            // Use sequential processing for small workloads
+            (0..batch_size)
+                .map(|b| self.compute_depthwise_batch(b, input, &output_shape, channels))
+                .collect()
+        };
 
         // Use merge_results function to combine batch results
         merge_results(output_shape, results, channels * self.depth_multiplier)
+    }
+
+    /// Computes depthwise convolution for a single batch.
+    fn compute_depthwise_batch(
+        &self,
+        b: usize,
+        input: &Tensor,
+        output_shape: &[usize],
+        channels: usize,
+    ) -> (usize, Array3<f32>) {
+        let input_shape = input.shape();
+        let mut batch_output = Array3::zeros((
+            channels * self.depth_multiplier,
+            output_shape[2],
+            output_shape[3],
+        ));
+
+        for c in 0..channels {
+            for m in 0..self.depth_multiplier {
+                let output_channel = c * self.depth_multiplier + m;
+
+                for i in 0..output_shape[2] {
+                    let i_base = i * self.strides.0;
+
+                    for j in 0..output_shape[3] {
+                        let j_base = j * self.strides.1;
+                        let mut sum = 0.0;
+
+                        let max_ki = input_shape[2]
+                            .saturating_sub(i_base)
+                            .min(self.kernel_size.0);
+                        let max_kj = input_shape[3]
+                            .saturating_sub(j_base)
+                            .min(self.kernel_size.1);
+
+                        for ki in 0..max_ki {
+                            let i_pos = i_base + ki;
+                            for kj in 0..max_kj {
+                                let j_pos = j_base + kj;
+                                sum += input[[b, c, i_pos, j_pos]]
+                                    * self.depthwise_weights[[m, c, ki, kj]];
+                            }
+                        }
+
+                        batch_output[[output_channel, i, j]] = sum;
+                    }
+                }
+            }
+        }
+
+        (b, batch_output)
     }
 
     /// Performs pointwise convolution (1x1 convolution).
@@ -253,34 +280,52 @@ impl SeparableConv2D {
         let batch_size = input_shape[0];
         let output_shape = vec![batch_size, self.filters, input_shape[2], input_shape[3]];
 
-        // Parallel processing across batches
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .map(|b| {
-                let mut batch_output =
-                    Array3::zeros((self.filters, input_shape[2], input_shape[3]));
+        // Calculate workload size to decide between parallel and sequential execution
+        let workload_size = batch_size * self.filters * input_shape[2] * input_shape[3];
 
-                for f in 0..self.filters {
-                    for i in 0..input_shape[2] {
-                        for j in 0..input_shape[3] {
-                            let mut sum = 0.0;
-
-                            for c in 0..input_shape[1] {
-                                sum += input[[b, c, i, j]] * self.pointwise_weights[[f, c, 0, 0]];
-                            }
-
-                            sum += self.bias[[0, f]];
-                            batch_output[[f, i, j]] = sum;
-                        }
-                    }
-                }
-
-                (b, batch_output)
-            })
-            .collect();
+        // Compute batch convolution results (parallel or sequential based on workload)
+        let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
+            // Use parallel processing for large workloads
+            (0..batch_size)
+                .into_par_iter()
+                .map(|b| self.compute_pointwise_batch(b, input, input_shape))
+                .collect()
+        } else {
+            // Use sequential processing for small workloads
+            (0..batch_size)
+                .map(|b| self.compute_pointwise_batch(b, input, input_shape))
+                .collect()
+        };
 
         // Use merge_results function to combine batch results
         merge_results(output_shape, results, self.filters)
+    }
+
+    /// Computes pointwise convolution for a single batch.
+    fn compute_pointwise_batch(
+        &self,
+        b: usize,
+        input: &Tensor,
+        input_shape: &[usize],
+    ) -> (usize, Array3<f32>) {
+        let mut batch_output = Array3::zeros((self.filters, input_shape[2], input_shape[3]));
+
+        for f in 0..self.filters {
+            for i in 0..input_shape[2] {
+                for j in 0..input_shape[3] {
+                    let mut sum = 0.0;
+
+                    for c in 0..input_shape[1] {
+                        sum += input[[b, c, i, j]] * self.pointwise_weights[[f, c, 0, 0]];
+                    }
+
+                    sum += self.bias[[0, f]];
+                    batch_output[[f, i, j]] = sum;
+                }
+            }
+        }
+
+        (b, batch_output)
     }
 
     /// Calculates the output shape after depthwise convolution.

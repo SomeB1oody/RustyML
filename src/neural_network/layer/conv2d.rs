@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for deciding when to use parallel computation in Conv2D operations.
+/// If batch_size * filters * output_area < threshold, use sequential processing.
+/// Otherwise, use parallel processing with Rayon.
+const CONV_2D_PARALLEL_THRESHOLD: usize = 10000;
+
 /// A 2D convolutional layer for neural networks.
 ///
 /// This layer applies a convolution operation to input data, which is a fundamental
@@ -157,22 +162,6 @@ impl Conv2D {
     }
 
     /// Calculates the output shape of the convolutional layer based on input dimensions.
-    ///
-    /// This function determines the spatial dimensions of the output tensor based on:
-    /// - Input dimensions
-    /// - Kernel size
-    /// - Stride values
-    /// - Padding type
-    ///
-    /// # Parameters
-    ///
-    /// * `input_shape` - A slice containing the shape of the input tensor in the format
-    ///   \[batch_size, channels, height, width\].
-    ///
-    /// # Returns
-    ///
-    /// A vector containing the calculated output shape in the format
-    /// \[batch_size, filters, output_height, output_width\].
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let input_height = input_shape[2];
@@ -248,10 +237,53 @@ impl Conv2D {
         }
     }
 
+    /// Computes convolution for a single batch.
+    fn compute_batch_convolution(
+        &self,
+        b: usize,
+        padded_input: &Tensor,
+        in_channels: usize,
+        output_shape: &[usize],
+    ) -> (usize, Array3<f32>) {
+        // Create output portion for this batch
+        let mut batch_output = Array3::zeros((self.filters, output_shape[2], output_shape[3]));
+
+        // Computation for each batch
+        for f in 0..self.filters {
+            for i in 0..output_shape[2] {
+                let i_base = i * self.strides.0;
+
+                for j in 0..output_shape[3] {
+                    let j_base = j * self.strides.1;
+                    let mut sum = 0.0;
+
+                    // Convolution kernel calculation
+                    for c in 0..in_channels {
+                        for ki in 0..self.kernel_size.0 {
+                            let i_pos = i_base + ki;
+
+                            for kj in 0..self.kernel_size.1 {
+                                let j_pos = j_base + kj;
+                                sum += padded_input[[b, c, i_pos, j_pos]]
+                                    * self.weights[[f, c, ki, kj]];
+                            }
+                        }
+                    }
+
+                    // Update batch output
+                    sum += self.bias[[0, f]];
+                    batch_output[[f, i, j]] = sum;
+                }
+            }
+        }
+
+        (b, batch_output)
+    }
+
     /// Performs the convolution operation on the input tensor.
     ///
     /// This method implements the core convolution algorithm with optimizations:
-    /// - Parallel batch processing using Rayon
+    /// - Adaptive parallel/sequential processing based on workload size
     /// - Boundary condition pre-checking
     /// - Memory access pattern optimization
     ///
@@ -270,46 +302,26 @@ impl Conv2D {
         let in_channels = input_shape[1];
         let output_shape = self.calculate_output_shape(input.shape());
 
-        // Create vector for batch processing results
-        let results: Vec<_> = (0..batch_size)
-            .into_par_iter()
-            .map(|b| {
-                // Create output portion for this batch
-                let mut batch_output =
-                    Array3::zeros((self.filters, output_shape[2], output_shape[3]));
+        // Calculate workload size to decide between parallel and sequential execution
+        let workload_size = batch_size * self.filters * output_shape[2] * output_shape[3];
 
-                // Computation for each batch
-                for f in 0..self.filters {
-                    for i in 0..output_shape[2] {
-                        let i_base = i * self.strides.0;
-
-                        for j in 0..output_shape[3] {
-                            let j_base = j * self.strides.1;
-                            let mut sum = 0.0;
-
-                            // Convolution kernel calculation
-                            for c in 0..in_channels {
-                                for ki in 0..self.kernel_size.0 {
-                                    let i_pos = i_base + ki;
-
-                                    for kj in 0..self.kernel_size.1 {
-                                        let j_pos = j_base + kj;
-                                        sum += padded_input[[b, c, i_pos, j_pos]]
-                                            * self.weights[[f, c, ki, kj]];
-                                    }
-                                }
-                            }
-
-                            // Update batch output
-                            sum += self.bias[[0, f]];
-                            batch_output[[f, i, j]] = sum;
-                        }
-                    }
-                }
-
-                (b, batch_output)
-            })
-            .collect();
+        // Choose execution strategy based on workload
+        let results: Vec<_> = if workload_size >= CONV_2D_PARALLEL_THRESHOLD {
+            // Use parallel processing for large workloads
+            (0..batch_size)
+                .into_par_iter()
+                .map(|b| {
+                    self.compute_batch_convolution(b, &padded_input, in_channels, &output_shape)
+                })
+                .collect()
+        } else {
+            // Use sequential processing for small workloads
+            (0..batch_size)
+                .map(|b| {
+                    self.compute_batch_convolution(b, &padded_input, in_channels, &output_shape)
+                })
+                .collect()
+        };
 
         // Merge results from each batch into final output
         merge_results(output_shape, results, self.filters)

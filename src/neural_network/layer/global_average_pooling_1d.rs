@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for determining when to use parallel vs sequential execution.
+/// When batch_size * channels >= this threshold, parallel execution is used.
+/// Otherwise, sequential execution is used to avoid parallel overhead.
+const GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
+
 /// Global Average Pooling 1D Layer
 ///
 /// Performs global average pooling operation on the sequence dimension of the input tensor.
@@ -81,22 +86,29 @@ impl Layer for GlobalAveragePooling1D {
         let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
 
         // Compute global average pooling
-        // Use parallel iteration over batches and channels, compute sequential sum over length
         let length_f32 = length as f32;
 
-        output
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(b, mut output_batch)| {
-                for c in 0..channels {
-                    let mut sum = 0.0;
-                    for l in 0..length {
-                        sum += input[[b, c, l]];
-                    }
-                    output_batch[c] = sum / length_f32;
-                }
-            });
+        // Helper closure to compute pooling for a single (batch, channel) pair
+        let compute_pooling = |b: usize, c: usize| {
+            let mut sum = 0.0;
+            for l in 0..length {
+                sum += input[[b, c, l]];
+            }
+            ((b, c), sum / length_f32)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_pooling
+        );
+
+        // Merge results into the output tensor
+        for ((b, c), val) in results {
+            output[[b, c]] = val;
+        }
 
         output
     }
@@ -109,27 +121,40 @@ impl Layer for GlobalAveragePooling1D {
         }
 
         // Extract dimensions
-        let (channels, length) = (self.input_shape[1], self.input_shape[2]);
-
-        // Create gradient tensor with the same shape as the input tensor
-        let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
+        let (batch_size, channels, length) = (
+            self.input_shape[0],
+            self.input_shape[1],
+            self.input_shape[2],
+        );
 
         // Distribute gradients uniformly across the sequence dimension
         // Each position contributes equally to the average, so gradient is divided by length
         let length_f32 = length as f32;
 
-        grad_input
-            .outer_iter_mut()
-            .into_par_iter()
-            .enumerate()
-            .for_each(|(b, mut grad_batch)| {
-                for c in 0..channels {
-                    let grad_val = grad_output[[b, c]] / length_f32;
-                    for l in 0..length {
-                        grad_batch[[c, l]] = grad_val;
-                    }
-                }
-            });
+        // Helper closure to compute gradient for a single (batch, channel) pair
+        let compute_gradient = |b: usize, c: usize| {
+            let grad_val = grad_output[[b, c]] / length_f32;
+            let seq_grad = vec![grad_val; length];
+            ((b, c), seq_grad)
+        };
+
+        // Choose parallel or sequential execution based on workload size
+        let results: Vec<_> = execute_parallel_or_sequential!(
+            batch_size,
+            channels,
+            GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
+            compute_gradient
+        );
+
+        // Create gradient tensor with the same shape as the input tensor
+        let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
+
+        // Merge gradients from all batches and channels
+        for ((b, c), seq_grad) in results {
+            for l in 0..length {
+                grad_input[[b, c, l]] = seq_grad[l];
+            }
+        }
 
         Ok(grad_input)
     }
