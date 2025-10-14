@@ -274,14 +274,7 @@ impl Layer for MaxPooling2D {
             );
 
             // Write results back to gradient array
-            for ((b, c), spatial_grad) in results {
-                for i in 0..height {
-                    for j in 0..width {
-                        let flat_idx = i * width + j;
-                        input_gradients[[b, c, i, j]] = spatial_grad[flat_idx];
-                    }
-                }
-            }
+            merge_gradients_2d!(input_gradients, results, height, width);
 
             Ok(input_gradients)
         } else {

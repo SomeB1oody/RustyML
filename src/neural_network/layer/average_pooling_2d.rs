@@ -299,13 +299,7 @@ impl Layer for AveragePooling2D {
             );
 
             // Merge gradients from all batches and channels
-            for ((b, c), spatial_grad) in results {
-                for i in 0..height {
-                    for j in 0..width {
-                        input_grad[[b, c, i, j]] = spatial_grad[i * width + j];
-                    }
-                }
-            }
+            merge_gradients_2d!(input_grad, results, height, width);
 
             Ok(input_grad)
         } else {

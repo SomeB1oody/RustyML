@@ -150,11 +150,7 @@ impl Layer for GlobalAveragePooling1D {
         let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
 
         // Merge gradients from all batches and channels
-        for ((b, c), seq_grad) in results {
-            for l in 0..length {
-                grad_input[[b, c, l]] = seq_grad[l];
-            }
-        }
+        merge_gradients_1d!(grad_input, results, length);
 
         Ok(grad_input)
     }

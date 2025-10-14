@@ -261,16 +261,7 @@ impl Layer for AveragePooling3D {
         );
 
         // Merge parallel computation results into output gradient tensor
-        for ((b, c), spatial_grad) in results {
-            for d in 0..input_depth {
-                for h in 0..input_height {
-                    for w in 0..input_width {
-                        let idx = d * input_height * input_width + h * input_width + w;
-                        grad_input[[b, c, d, h, w]] = spatial_grad[idx];
-                    }
-                }
-            }
-        }
+        merge_gradients_3d!(grad_input, results, input_depth, input_height, input_width);
 
         Ok(grad_input)
     }

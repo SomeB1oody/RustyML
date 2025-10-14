@@ -155,11 +155,7 @@ impl Layer for GlobalMaxPooling1D {
             );
 
             // Apply updates to gradient tensor
-            for ((b, c), seq_grad) in results {
-                for (l, grad_val) in seq_grad.iter().enumerate() {
-                    grad_input[[b, c, l]] = *grad_val;
-                }
-            }
+            merge_gradients_1d!(grad_input, results, length);
 
             Ok(grad_input)
         } else {

@@ -222,11 +222,7 @@ impl Layer for AveragePooling1D {
         );
 
         // Write results directly into output tensor
-        for ((b, c), channel_grad) in results {
-            for (j, &grad_val) in channel_grad.iter().enumerate() {
-                grad_input[[b, c, j]] = grad_val;
-            }
-        }
+        merge_gradients_1d!(grad_input, results, length);
 
         Ok(grad_input)
     }

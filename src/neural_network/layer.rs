@@ -144,6 +144,77 @@ macro_rules! execute_parallel_or_sequential {
     };
 }
 
+/// A macro that merges gradient results back into the gradient tensor for 1D spatial data.
+///
+/// This macro handles the common pattern of writing computed spatial gradients
+/// back to the gradient tensor for 1D pooling layers.
+///
+/// # Parameters
+///
+/// - `$grad_tensor` - The gradient tensor to write to
+/// - `$results` - Iterator of results in format ((batch, channel), spatial_grad)
+/// - `$length` - Length of the spatial dimension
+macro_rules! merge_gradients_1d {
+    ($grad_tensor:expr, $results:expr, $length:expr) => {
+        for ((b, c), spatial_grad) in $results {
+            for (idx, grad_val) in spatial_grad.iter().enumerate() {
+                $grad_tensor[[b, c, idx]] = *grad_val;
+            }
+        }
+    };
+}
+
+/// A macro that merges gradient results back into the gradient tensor for 2D spatial data.
+///
+/// This macro handles the common pattern of writing computed spatial gradients
+/// back to the gradient tensor for 2D pooling layers.
+///
+/// # Parameters
+///
+/// - `$grad_tensor` - The gradient tensor to write to
+/// - `$results` - Iterator of results in format ((batch, channel), spatial_grad)
+/// - `$height` - Height of the spatial dimension
+/// - `$width` - Width of the spatial dimension
+macro_rules! merge_gradients_2d {
+    ($grad_tensor:expr, $results:expr, $height:expr, $width:expr) => {
+        for ((b, c), spatial_grad) in $results {
+            for h in 0..$height {
+                for w in 0..$width {
+                    let flat_idx = h * $width + w;
+                    $grad_tensor[[b, c, h, w]] = spatial_grad[flat_idx];
+                }
+            }
+        }
+    };
+}
+
+/// A macro that merges gradient results back into the gradient tensor for 3D spatial data.
+///
+/// This macro handles the common pattern of writing computed spatial gradients
+/// back to the gradient tensor for 3D pooling layers.
+///
+/// # Parameters
+///
+/// - `$grad_tensor` - The gradient tensor to write to
+/// - `$results` - Iterator of results in format ((batch, channel), spatial_grad)
+/// - `$depth` - Depth of the spatial dimension
+/// - `$height` - Height of the spatial dimension
+/// - `$width` - Width of the spatial dimension
+macro_rules! merge_gradients_3d {
+    ($grad_tensor:expr, $results:expr, $depth:expr, $height:expr, $width:expr) => {
+        for ((b, c), spatial_grad) in $results {
+            for d in 0..$depth {
+                for h in 0..$height {
+                    for w in 0..$width {
+                        let flat_idx = d * ($height * $width) + h * $width + w;
+                        $grad_tensor[[b, c, d, h, w]] = spatial_grad[flat_idx];
+                    }
+                }
+            }
+        }
+    };
+}
+
 /// A macro that generates standard function implementations for 1D pooling layers.
 ///
 /// This macro expands to implementations of:

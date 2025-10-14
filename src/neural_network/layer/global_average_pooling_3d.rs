@@ -150,16 +150,7 @@ impl Layer for GlobalAveragePooling3D {
             let mut grad_input = Array::zeros(IxDyn(&input_shape));
 
             // Merge gradients from all batches and channels
-            for ((b, c), spatial_grad) in results {
-                for d in 0..depth {
-                    for h in 0..height {
-                        for w in 0..width {
-                            grad_input[[b, c, d, h, w]] =
-                                spatial_grad[d * height * width + h * width + w];
-                        }
-                    }
-                }
-            }
+            merge_gradients_3d!(grad_input, results, depth, height, width);
 
             Ok(grad_input)
         } else {

@@ -12,6 +12,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Enhance error handling and input validation across ML models
 - Enhance error handling and input validation in `utility` module
+- Refactor gradient merging in pooling layers by introducing macros for 1D, 2D, and 3D operations
 
 ## [v0.9.0] - 2025-10-12 (UTC-7)
 ### Changed

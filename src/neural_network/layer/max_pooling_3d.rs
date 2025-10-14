@@ -281,16 +281,7 @@ impl Layer for MaxPooling3D {
             );
 
             // Write results back to gradient array
-            for ((b, c), spatial_grad) in results {
-                for d in 0..depth {
-                    for i in 0..height {
-                        for j in 0..width {
-                            let flat_idx = d * (height * width) + i * width + j;
-                            input_gradients[[b, c, d, i, j]] = spatial_grad[flat_idx];
-                        }
-                    }
-                }
-            }
+            merge_gradients_3d!(input_gradients, results, depth, height, width);
 
             Ok(input_gradients)
         } else {

@@ -160,14 +160,7 @@ impl Layer for GlobalMaxPooling2D {
             );
 
             // Apply updates to gradient tensor
-            for ((b, c), spatial_grad) in results {
-                for h in 0..height {
-                    for w in 0..width {
-                        let flat_idx = h * width + w;
-                        grad_input[[b, c, h, w]] = spatial_grad[flat_idx];
-                    }
-                }
-            }
+            merge_gradients_2d!(grad_input, results, height, width);
 
             Ok(grad_input)
         } else {

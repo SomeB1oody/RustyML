@@ -164,16 +164,7 @@ impl Layer for GlobalMaxPooling3D {
             );
 
             // Apply updates to gradient tensor
-            for ((b, c), spatial_grad) in results {
-                for d in 0..depth {
-                    for h in 0..height {
-                        for w in 0..width {
-                            let flat_idx = d * (height * width) + h * width + w;
-                            grad_input[[b, c, d, h, w]] = spatial_grad[flat_idx];
-                        }
-                    }
-                }
-            }
+            merge_gradients_3d!(grad_input, results, depth, height, width);
 
             Ok(grad_input)
         } else {
