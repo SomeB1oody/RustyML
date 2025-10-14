@@ -198,7 +198,7 @@ impl KMeans {
         let mut min_idx = 0;
 
         for (i, centroid) in centroids.outer_iter().enumerate() {
-            let dist = squared_euclidean_distance_row(sample, centroid)?;
+            let dist = squared_euclidean_distance_row(sample, centroid);
             if dist < min_dist {
                 min_dist = dist;
                 min_idx = i;
@@ -237,24 +237,22 @@ impl KMeans {
         // Select the remaining center points
         for k in 1..self.n_clusters {
             // Calculate the distance from each point to the nearest center
-            let distances: Result<Vec<f64>, ModelError> = data
+            let distances: Vec<f64> = data
                 .outer_iter()
                 .into_par_iter()
                 .map(|sample| {
                     // Find the closest already selected center point
-                    let min_dist = centroids
+                    centroids
                         .rows()
                         .into_iter()
                         .take(k)
                         .map(|centroid| squared_euclidean_distance_row(sample, centroid))
-                        .collect::<Result<Vec<_>, _>>()?
+                        .collect::<Vec<_>>()
                         .into_iter()
-                        .fold(f64::MAX, f64::min);
-                    Ok(min_dist)
+                        .fold(f64::MAX, f64::min)
                 })
                 .collect();
 
-            let distances = distances?;
             let total_dist: f64 = distances.iter().sum();
 
             // Handle edge case where all distances are zero
@@ -344,7 +342,7 @@ impl KMeans {
                     for (cluster_idx, centroid) in
                         self.centroids.as_ref().unwrap().outer_iter().enumerate()
                     {
-                        let dist = squared_euclidean_distance_row(sample, centroid)?;
+                        let dist = squared_euclidean_distance_row(sample, centroid);
                         if dist < min_dist {
                             min_dist = dist;
                             min_cluster = cluster_idx;

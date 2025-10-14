@@ -393,7 +393,7 @@ pub mod error;
 /// // Distance calculations
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let dist = squared_euclidean_distance_row(v1.view(), v2.view()).unwrap();
+/// let dist = squared_euclidean_distance_row(v1.view(), v2.view());
 ///
 /// // Activation function
 /// let activated = sigmoid(0.5);

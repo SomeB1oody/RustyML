@@ -335,15 +335,9 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// Calculates the distance between two points based on the selected metric
-    fn calculate_distance(
-        &self,
-        a: ArrayView1<f64>,
-        b: ArrayView1<f64>,
-    ) -> Result<f64, ModelError> {
+    fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         match self.metric {
-            DistanceCalculationMetric::Euclidean => {
-                Ok(squared_euclidean_distance_row(a, b)?.sqrt())
-            }
+            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(a, b),
             DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(a, b, p),
         }
@@ -365,14 +359,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
             (0..n_samples)
                 .into_iter()
                 .map(|i| -> Result<(f64, usize), ModelError> {
-                    let distance = self.calculate_distance(x, x_train.row(i))?;
+                    let distance = self.calculate_distance(x, x_train.row(i));
                     Ok((distance, i))
                 })
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             (0..n_samples)
                 .map(|i| -> Result<(f64, usize), ModelError> {
-                    let distance = self.calculate_distance(x, x_train.row(i))?;
+                    let distance = self.calculate_distance(x, x_train.row(i));
                     Ok((distance, i))
                 })
                 .collect::<Result<Vec<_>, _>>()?

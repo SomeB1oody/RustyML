@@ -562,59 +562,27 @@ impl DecisionTree {
 
         if self.is_classifier {
             match self.algorithm {
-                Algorithm::CART => self.calculate_gini(y, indices),
-                Algorithm::ID3 | Algorithm::C45 => self.calculate_entropy(y, indices),
+                Algorithm::CART => {
+                    let subset = y.select(Axis(0), indices);
+                    let subset_view: ArrayView1<f64> = subset.view();
+                    gini(subset_view)
+                }
+                Algorithm::ID3 | Algorithm::C45 => {
+                    let subset = y.select(Axis(0), indices);
+                    let subset_view: ArrayView1<f64> = subset.view();
+                    entropy(subset_view)
+                }
             }
         } else {
             self.calculate_mse(y, indices)
         }
     }
 
-    /// Calculates Gini impurity for classification samples.
-    fn calculate_gini(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
-        let n_samples = indices.len() as f64;
-        let mut class_counts = vec![0.0; self.n_classes.unwrap_or(0)];
-
-        for &idx in indices {
-            let class = y[idx] as usize;
-            class_counts[class] += 1.0;
-        }
-
-        let mut gini = 1.0;
-        for count in class_counts {
-            let p = count / n_samples;
-            gini -= p * p;
-        }
-
-        gini
-    }
-
-    /// Calculates entropy for classification samples.
-    fn calculate_entropy(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
-        let n_samples = indices.len() as f64;
-        let mut class_counts = vec![0.0; self.n_classes.unwrap_or(0)];
-
-        for &idx in indices {
-            let class = y[idx] as usize;
-            class_counts[class] += 1.0;
-        }
-
-        let mut entropy = 0.0;
-        for count in class_counts {
-            if count > 0.0 {
-                let p = count / n_samples;
-                entropy -= p * p.log2();
-            }
-        }
-
-        entropy
-    }
-
     /// Calculates mean squared error for regression samples.
     fn calculate_mse(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
-        let n_samples = indices.len() as f64;
-        let mean: f64 = indices.iter().map(|&i| y[i]).sum::<f64>() / n_samples;
-        indices.iter().map(|&i| (y[i] - mean).powi(2)).sum::<f64>() / n_samples
+        // Collect subset values into an Array1 to use math::variance
+        let subset: Array1<f64> = indices.iter().map(|&i| y[i]).collect();
+        variance(subset.view())
     }
 
     /// Checks if all samples in the given indices have the same label (pure node).

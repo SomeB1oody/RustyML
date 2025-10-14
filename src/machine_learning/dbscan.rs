@@ -126,14 +126,10 @@ impl DBSCAN {
     );
 
     /// Computes distance between two data points using the specified metric
-    fn compute_distance(
-        &self,
-        p_row: ArrayView1<f64>,
-        q_row: ArrayView1<f64>,
-    ) -> Result<f64, ModelError> {
+    fn compute_distance(&self, p_row: ArrayView1<f64>, q_row: ArrayView1<f64>) -> f64 {
         match self.metric {
             DistanceCalculationMetric::Euclidean => {
-                Ok(squared_euclidean_distance_row(p_row, q_row)?.sqrt())
+                squared_euclidean_distance_row(p_row, q_row).sqrt()
             }
             DistanceCalculationMetric::Manhattan => manhattan_distance_row(p_row, q_row),
             DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(p_row, q_row, p),
@@ -164,11 +160,8 @@ impl DBSCAN {
                 .into_par_iter()
                 .filter_map(|q| {
                     let q_row = data.row(q);
-                    // Handle the Result returned by compute_distance
-                    match self.compute_distance(p_row, q_row) {
-                        Ok(dist) if dist <= eps => Some(q),
-                        _ => None,
-                    }
+                    let dist = self.compute_distance(p_row, q_row);
+                    if dist <= eps { Some(q) } else { None }
                 })
                 .collect()
         } else {
@@ -176,11 +169,8 @@ impl DBSCAN {
             (0..n_samples)
                 .filter_map(|q| {
                     let q_row = data.row(q);
-                    // Handle the Result returned by compute_distance
-                    match self.compute_distance(p_row, q_row) {
-                        Ok(dist) if dist <= eps => Some(q),
-                        _ => None,
-                    }
+                    let dist = self.compute_distance(p_row, q_row);
+                    if dist <= eps { Some(q) } else { None }
                 })
                 .collect()
         };
@@ -403,7 +393,7 @@ impl DBSCAN {
                         continue; // Skip noise points
                     }
 
-                    let dist = self.compute_distance(row, orig_row)?;
+                    let dist = self.compute_distance(row, orig_row);
 
                     // Check if distance computation is valid
                     if dist.is_nan() || dist.is_infinite() {

@@ -276,7 +276,7 @@ impl LogisticRegression {
             }
 
             // Calculate loss using existing predictions
-            let mut cost = logistic_loss(predictions.view(), y.view())?;
+            let mut cost = logistic_loss(predictions.view(), y.view());
 
             if let Some(reg_type) = &self.regularization_type {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };

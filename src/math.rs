@@ -1,4 +1,3 @@
-use crate::error::ModelError;
 use ahash::AHashMap;
 use ndarray::{Array1, ArrayView1};
 
@@ -15,8 +14,7 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The Sum of Square Total (SST)
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+/// - `f64` - The Sum of Square Total (SST)
 ///
 /// # Examples
 /// ```rust
@@ -24,29 +22,16 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 /// use ndarray::array;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let sst = sum_of_square_total(values.view()).unwrap();
+/// let sst = sum_of_square_total(values.view());
 /// // Mean is 2.0, so SST = (1-2)^2 + (2-2)^2 + (3-2)^2 = 1 + 0 + 1 = 2.0
 /// assert!((sst - 2.0).abs() < 1e-5);
 /// ```
 #[inline]
-pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
-    if values.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot calculate sum of square total with empty inputs".to_string(),
-        ));
-    }
-
-    // Check for invalid values (NaN or infinity) in the input
-    if values.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Input contains NaN or infinite values".to_string(),
-        ));
-    }
-
+pub fn sum_of_square_total(values: ArrayView1<f64>) -> f64 {
     // Calculate the mean
     let mean = values.mean().unwrap();
     // Fully vectorized computation
-    Ok(values.mapv(|x| (x - mean).powi(2)).sum())
+    values.mapv(|x| (x - mean).powi(2)).sum()
 }
 
 /// Calculate the sum of squared errors
@@ -58,8 +43,7 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - Sum of squared errors sum((predicted_i - actual_i)^2)
-/// - `Err(ModelError::InputValidationError)` if input does not match expectation
+/// - `f64` - Sum of squared errors sum((predicted_i - actual_i)^2)
 ///
 /// # Examples
 /// ```rust
@@ -68,63 +52,28 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> Result<f64, ModelError> {
 ///
 /// let predicted = array![2.0, 3.0];
 /// let actual = array![1.0, 3.0];
-/// let sse = sum_of_squared_errors(predicted.view(), actual.view()).unwrap();
+/// let sse = sum_of_squared_errors(predicted.view(), actual.view());
 /// // (2-1)^2 + (3-3)^2 = 1 + 0 = 1
 /// assert!((sse - 1.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn sum_of_squared_errors(
-    predicted: ArrayView1<f64>,
-    actual: ArrayView1<f64>,
-) -> Result<f64, ModelError> {
-    // Ensure both arrays have the same length
-    if predicted.len() != actual.len() {
-        return Err(ModelError::InputValidationError(format!(
-            "Predicted and actual arrays must have the same length, predicted length: {}, actual length: {}",
-            predicted.len(),
-            actual.len()
-        )));
-    }
-
-    if predicted.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot calculate sum of squared errors with empty inputs".to_string(),
-        ));
-    }
-
-    // Check for invalid values (NaN or infinity) in both arrays
-    if predicted.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Predicted values contain NaN or infinite values".to_string(),
-        ));
-    }
-
-    if actual.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Actual values contain NaN or infinite values".to_string(),
-        ));
-    }
-
+pub fn sum_of_squared_errors(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
     let sum: f64 = predicted
         .iter()
         .zip(actual.iter())
         .map(|(p, a)| (p - a).powi(2))
         .sum();
 
-    // Check if the result is valid
-    if !sum.is_finite() {
-        return Err(ModelError::ProcessingError(
-            "Calculation resulted in NaN or infinite value".to_string(),
-        ));
-    }
-
-    Ok(sum)
+    sum
 }
 
 /// Calculate the sigmoid function value for a given input
 ///
 /// The sigmoid function transforms any real-valued number into the range (0, 1).
 /// It is defined as: σ(z) = 1 / (1 + e^(-z))
+///
+/// - For very large positive values, sigmoid(z) ≈ 1. When input > 500, this function returns 1.0
+/// - For very large negative values, sigmoid(z) ≈ 0. When input < -500, this function returns 0.0
 ///
 /// # Parameters
 ///
@@ -150,16 +99,14 @@ pub fn sum_of_squared_errors(
 /// ```
 #[inline]
 pub fn sigmoid(z: f64) -> f64 {
-    // Handle NaN input
-    if z.is_nan() {
-        return f64::NAN;
-    }
-
     // Use numerically stable computation for extreme values
-    if z > 500.0 {
+    const MAX_SIGMOID_INPUT: f64 = 500.0;
+    const MIN_SIGMOID_INPUT: f64 = -500.0;
+
+    if z > MAX_SIGMOID_INPUT {
         // For very large positive values, sigmoid(z) ≈ 1
         return 1.0;
-    } else if z < -500.0 {
+    } else if z < MIN_SIGMOID_INPUT {
         // For very large negative values, sigmoid(z) ≈ 0
         return 0.0;
     }
@@ -180,8 +127,7 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - Average logistic regression loss
-/// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+/// - `f64` - Average logistic regression loss
 ///
 /// # Examples
 /// ```rust
@@ -190,46 +136,12 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// let logits = array![0.0, 2.0, -1.0];
 /// let actual_labels = array![0.0, 1.0, 0.0];
-/// let loss = logistic_loss(logits.view(), actual_labels.view()).unwrap();
+/// let loss = logistic_loss(logits.view(), actual_labels.view());
 /// // Expected average loss is approximately 0.37778
 /// assert!((loss - 0.37778).abs() < 1e-5);
 /// ```
 #[inline]
-pub fn logistic_loss(
-    logits: ArrayView1<f64>,
-    actual_labels: ArrayView1<f64>,
-) -> Result<f64, ModelError> {
-    if logits.len() != actual_labels.len() {
-        return Err(ModelError::InputValidationError(format!(
-            "Predicted and actual vectors must have the same length, predicted length: {}, actual length: {}",
-            logits.len(),
-            actual_labels.len()
-        )));
-    }
-
-    if logits.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot calculate logistic loss with empty inputs".to_string(),
-        ));
-    }
-
-    // Check for invalid values in logits
-    if logits.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Logits contain NaN or infinite values".to_string(),
-        ));
-    }
-
-    // Validate that all labels are either 0 or 1
-    if actual_labels
-        .iter()
-        .any(|&label| !label.is_finite() || (label != 0.0 && label != 1.0))
-    {
-        return Err(ModelError::InputValidationError(
-            "All labels must be either 0 or 1 and finite".to_string(),
-        ));
-    }
-
+pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) -> f64 {
     // Using a vectorized approach to calculate log loss
     let n = logits.len() as f64;
 
@@ -244,14 +156,7 @@ pub fn logistic_loss(
         })
         .sum::<f64>();
 
-    // Check if the result is valid
-    if !total_loss.is_finite() {
-        return Err(ModelError::ProcessingError(
-            "Loss calculation resulted in NaN or infinite value".to_string(),
-        ));
-    }
-
-    Ok(total_loss / n)
+    total_loss / n
 }
 
 /// Calculate the squared Euclidean distance between two vectors
@@ -263,8 +168,7 @@ pub fn logistic_loss(
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The squared Euclidean distance between x1 and x2
-/// - `Err(ModelError)` - The function returns an error if the lengths of the vectors do not match
+/// - `f64` - The squared Euclidean distance between x1 and x2
 ///
 /// # Examples
 /// ```rust
@@ -273,26 +177,17 @@ pub fn logistic_loss(
 ///
 /// let v1 = array![1.0, 2.0, 3.0];
 /// let v2 = array![4.0, 5.0, 6.0];
-/// let dist = squared_euclidean_distance_row(v1.view(), v2.view()).unwrap();
+/// let dist = squared_euclidean_distance_row(v1.view(), v2.view());
 /// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
 /// assert!((dist - 27.0).abs() < 1e-10);
 /// ```
 #[inline]
-pub fn squared_euclidean_distance_row(
-    x1: ArrayView1<f64>,
-    x2: ArrayView1<f64>,
-) -> Result<f64, ModelError> {
-    if x1.len() != x2.len() {
-        return Err(ModelError::InputValidationError(
-            "x1 and x2 must have the same length".to_string(),
-        ));
-    }
-
+pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
 
     // Calculate the sum of squares (fully vectorized)
-    Ok(diff.mapv(|x| x * x).sum())
+    diff.mapv(|x| x * x).sum()
 }
 
 /// Calculate the Manhattan distance between two vectors
@@ -307,8 +202,7 @@ pub fn squared_euclidean_distance_row(
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The Manhattan distance between x1 and x2
-/// - `Err(ModelError)` - The function returns an error if the lengths of the vectors do not match
+/// - `f64` - The Manhattan distance between x1 and x2
 ///
 /// # Examples
 /// ```rust
@@ -317,23 +211,17 @@ pub fn squared_euclidean_distance_row(
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = manhattan_distance_row(v1.view(), v2.view()).unwrap();
+/// let distance = manhattan_distance_row(v1.view(), v2.view());
 /// // |1-4| + |2-6| = 3 + 4 = 7
 /// assert!((distance - 7.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> Result<f64, ModelError> {
-    if x1.len() != x2.len() {
-        return Err(ModelError::InputValidationError(
-            "x1 and x2 must have the same length".to_string(),
-        ));
-    }
-
+pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
 
     // Calculate the sum of absolute differences (fully vectorized)
-    Ok(diff.mapv(|x| x.abs()).sum())
+    diff.mapv(|x| x.abs()).sum()
 }
 
 /// Calculate the Minkowski distance between two vectors
@@ -359,29 +247,86 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> Resul
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = minkowski_distance_row(v1.view(), v2.view(), 3.0).unwrap();
+/// let distance = minkowski_distance_row(v1.view(), v2.view(), 3.0);
 /// // Expected distance is approximately 4.497
 /// assert!((distance - 4.497).abs() < 1e-3);
 /// ```
 #[inline]
-pub fn minkowski_distance_row(
-    x1: ArrayView1<f64>,
-    x2: ArrayView1<f64>,
-    p: f64,
-) -> Result<f64, ModelError> {
-    if p < 1.0 {
-        return Err(ModelError::InputValidationError(
-            "p must be greater than or equal to 1.0".to_string(),
-        ));
-    }
-
+pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) -> f64 {
     // Calculate the difference between the two vectors
     let diff = &x1 - &x2;
 
     // Calculate the sum of absolute differences raised to power p,
     // then take the p-th root of the sum
     let sum: f64 = diff.mapv(|x| x.abs().powf(p)).sum();
-    Ok(sum.powf(1.0 / p))
+    sum.powf(1.0 / p)
+}
+
+/// Calculates the Gini impurity of a label set.
+///
+/// Gini impurity is a measure of how often a randomly chosen element from the set would be
+/// incorrectly labeled if it was randomly labeled according to the distribution of labels
+/// in the subset. It is commonly used in decision tree algorithms like CART.
+///
+/// # Parameters
+///
+/// * `y` - An `ArrayView1<f64>` of values representing class labels
+///
+/// # Returns
+///
+/// * `f64` - The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
+///
+/// # Notes
+///
+/// - The function handles floating point labels by rounding to 3 decimal places for counting.
+/// - Returns 0.0 for empty datasets.
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::gini;
+///
+/// let labels = array![0.0, 0.0, 1.0, 1.0];
+/// let gini_val = gini(labels.view());
+/// // For two classes with equal frequency, Gini = 1 - (0.5^2 + 0.5^2) = 0.5
+/// assert!((gini_val - 0.5).abs() < 1e-6);
+/// ```
+#[inline]
+pub fn gini(y: ArrayView1<f64>) -> f64 {
+    let total_samples = y.len() as f64;
+    if total_samples == 0.0 {
+        return 0.0;
+    }
+
+    // Pre-allocate capacity for the HashMap to avoid frequent reallocations
+    // A capacity of 10 is reasonable for most classification problems
+    let mut class_counts = AHashMap::with_capacity(10);
+
+    // Process all elements in the array with fold operation
+    y.fold((), |_, &value| {
+        // Handle NaN values - they should be treated as invalid input
+        if value.is_nan() {
+            return; // Skip NaN values
+        }
+
+        // Convert float to integer representation with 3 decimal places precision
+        let key = (value * 1000.0).round() as i64;
+        *class_counts.entry(key).or_insert(0) += 1;
+    });
+
+    // If all values were NaN, treat as empty dataset
+    if class_counts.is_empty() {
+        return 0.0;
+    }
+
+    // Calculate Gini impurity more efficiently
+    let mut sum_squared_proportions = 0.0;
+    for &count in class_counts.values() {
+        let p = count as f64 / total_samples;
+        sum_squared_proportions += p * p;
+    }
+
+    1.0 - sum_squared_proportions
 }
 
 /// Calculates the entropy of a label set.
@@ -451,73 +396,6 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
     }
 
     entropy
-}
-
-/// Calculates the Gini impurity of a label set.
-///
-/// Gini impurity is a measure of how often a randomly chosen element from the set would be
-/// incorrectly labeled if it was randomly labeled according to the distribution of labels
-/// in the subset. It is commonly used in decision tree algorithms like CART.
-///
-/// # Parameters
-///
-/// * `y` - An `ArrayView1<f64>` of values representing class labels
-///
-/// # Returns
-///
-/// * `f64` - The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
-///
-/// # Notes
-///
-/// - The function handles floating point labels by rounding to 3 decimal places for counting.
-/// - Returns 0.0 for empty datasets.
-///
-/// # Examples
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::gini;
-///
-/// let labels = array![0.0, 0.0, 1.0, 1.0];
-/// let gini_val = gini(labels.view());
-/// // For two classes with equal frequency, Gini = 1 - (0.5^2 + 0.5^2) = 0.5
-/// assert!((gini_val - 0.5).abs() < 1e-6);
-/// ```
-#[inline]
-pub fn gini(y: ArrayView1<f64>) -> f64 {
-    let total_samples = y.len() as f64;
-    if total_samples == 0.0 {
-        return 0.0;
-    }
-
-    // Pre-allocate capacity for the HashMap to avoid frequent reallocations
-    // A capacity of 10 is reasonable for most classification problems
-    let mut class_counts = AHashMap::with_capacity(10);
-
-    // Process all elements in the array with fold operation
-    y.fold((), |_, &value| {
-        // Handle NaN values - they should be treated as invalid input
-        if value.is_nan() {
-            return; // Skip NaN values
-        }
-
-        // Convert float to integer representation with 3 decimal places precision
-        let key = (value * 1000.0).round() as i64;
-        *class_counts.entry(key).or_insert(0) += 1;
-    });
-
-    // If all values were NaN, treat as empty dataset
-    if class_counts.is_empty() {
-        return 0.0;
-    }
-
-    // Calculate Gini impurity more efficiently
-    let mut sum_squared_proportions = 0.0;
-    for &count in class_counts.values() {
-        let p = count as f64 / total_samples;
-        sum_squared_proportions += p * p;
-    }
-
-    1.0 - sum_squared_proportions
 }
 
 /// Calculates the information gain when splitting a dataset.
@@ -782,39 +660,13 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// use rustyml::math::standard_deviation;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let std_dev = standard_deviation(values.view()).unwrap();
+/// let std_dev = standard_deviation(values.view());
 /// // Population standard deviation for [1,2,3] is approximately 0.8165
 /// assert!((std_dev - 0.8165).abs() < 1e-4);
 /// ```
 #[inline]
-pub fn standard_deviation(values: ArrayView1<f64>) -> Result<f64, ModelError> {
+pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
     let n = values.len();
-
-    // Check for empty array
-    if n == 0 {
-        return Err(ModelError::InputValidationError(
-            "Cannot calculate standard deviation with empty input".to_string(),
-        ));
-    }
-
-    // Return 0.0 for single-element arrays (no variation)
-    if n == 1 {
-        // Still need to check if the single value is valid
-        let value = values[0];
-        if !value.is_finite() {
-            return Err(ModelError::InputValidationError(
-                "Input contains NaN or infinite values".to_string(),
-            ));
-        }
-        return Ok(0.0);
-    }
-
-    // Check for invalid values (NaN or infinity) in the input
-    if values.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Input contains NaN or infinite values".to_string(),
-        ));
-    }
 
     // Use built-in methods when available for better performance
     // We can calculate variance and then take the square root
@@ -828,24 +680,8 @@ pub fn standard_deviation(values: ArrayView1<f64>) -> Result<f64, ModelError> {
         acc + diff * diff
     }) / n as f64;
 
-    // Check if variance calculation resulted in invalid value
-    if !variance.is_finite() {
-        return Err(ModelError::ProcessingError(
-            "Variance calculation resulted in NaN or infinite value".to_string(),
-        ));
-    }
-
     // Take the square root for standard deviation
-    let std_dev = variance.sqrt();
-
-    // Final check for the result
-    if !std_dev.is_finite() {
-        return Err(ModelError::ProcessingError(
-            "Standard deviation calculation resulted in NaN or infinite value".to_string(),
-        ));
-    }
-
-    Ok(std_dev)
+    variance.sqrt()
 }
 
 /// Calculates the average path length adjustment factor for isolation trees.

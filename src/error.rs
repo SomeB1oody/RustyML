@@ -21,7 +21,6 @@ use std::io::BufReader;
 /// - `ProcessingError` - indicates that there is something wrong while processing
 #[cfg(any(
     feature = "machine_learning",
-    feature = "math",
     feature = "neural_network",
     feature = "utility"
 ))]
