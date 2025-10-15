@@ -28,6 +28,10 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 /// ```
 #[inline]
 pub fn sum_of_square_total(values: ArrayView1<f64>) -> f64 {
+    // Handle empty array case
+    if values.is_empty() {
+        return 0.0;
+    }
     // Calculate the mean
     let mean = values.mean().unwrap();
     // Fully vectorized computation
@@ -668,6 +672,11 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
     let n = values.len();
 
+    // Return 0.0 for empty arrays
+    if n == 0 {
+        return 0.0;
+    }
+
     // Use built-in methods when available for better performance
     // We can calculate variance and then take the square root
 
@@ -806,7 +815,7 @@ pub fn binary_search_sigma(
             // If sum is too small, use uniform distribution
             p.fill(1.0 / n as f64);
         } else {
-            p.par_mapv_inplace(|v| v / sum_p);
+            p.mapv_inplace(|v| v / sum_p);
         }
 
         let h: f64 = p

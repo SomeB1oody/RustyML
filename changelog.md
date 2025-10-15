@@ -5,8 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.9.0] - 2025-10-15 (UTC-7)
+### Changed
+- Improve handling of empty arrays in `sum_of_square_total` and `standard_deviation` functions, and optimize probability distribution normalization
+- Organize the pooling layer and the convolutional layer under their respective modules
+
 ## [v0.9.0] - 2025-10-14 (UTC-7)
-### Added
+### Removed
 - Remove `Result` type from numerical functions
 
 ## [v0.9.0] - 2025-10-13 (UTC-7)
