@@ -571,7 +571,7 @@ impl Layer for DepthwiseConv2D {
                 let bias_correction1 = 1.0 - beta1.powi(t as i32);
                 let bias_correction2 = 1.0 - beta2.powi(t as i32);
 
-                // Update weights using the update_adam_conv function from helper_functions
+                // Update weights
                 if let (Some(weights_slice), Some(grads_slice), Some(m_slice), Some(v_slice)) = (
                     self.weights.as_slice_mut(),
                     weight_grads.as_slice(),
@@ -592,7 +592,7 @@ impl Layer for DepthwiseConv2D {
                     );
                 }
 
-                // Update bias using the update_adam_conv function from helper_functions
+                // Update bias
                 if let (
                     Some(bias_slice),
                     Some(bias_grads_slice),
@@ -634,7 +634,7 @@ impl Layer for DepthwiseConv2D {
             }
 
             if let Some(ref mut rmsprop_cache) = self.optimizer_cache.rmsprop_cache {
-                // Update weights using the update_rmsprop function from helper_functions
+                // Update weights
                 if let (Some(weights_slice), Some(grads_slice), Some(cache_slice)) = (
                     self.weights.as_slice_mut(),
                     weight_grads.as_slice(),
@@ -643,7 +643,7 @@ impl Layer for DepthwiseConv2D {
                     update_rmsprop(weights_slice, grads_slice, cache_slice, rho, epsilon, lr);
                 }
 
-                // Update bias using the update_rmsprop function from helper_functions
+                // Update bias
                 if let (Some(bias_slice), Some(bias_grads_slice), Some(bias_cache_slice)) = (
                     self.bias.as_slice_mut(),
                     bias_grads.as_slice(),

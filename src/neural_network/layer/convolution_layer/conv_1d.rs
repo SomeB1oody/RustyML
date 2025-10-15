@@ -517,7 +517,6 @@ impl Layer for Conv1D {
     update_sgd_conv!();
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Ensure gradients are available
         if let (Some(weight_gradients), Some(bias_gradients)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
@@ -570,7 +569,6 @@ impl Layer for Conv1D {
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // Ensure gradients are available
         if let (Some(weight_gradients), Some(bias_gradients)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
@@ -585,7 +583,7 @@ impl Layer for Conv1D {
             }
 
             if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
-                // Define a generic parameter update closure, also handling cache updates
+                // Define a generic parameter update closure
                 let update_parameters = |params: &mut [f32], cache: &mut [f32], grads: &[f32]| {
                     // Update cache (moving average of squared gradients) in parallel
                     cache

@@ -534,7 +534,7 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // Initialize momentum and variance (if not initialized)
+            // Initialize Adam states (if not already initialized)
             if self.optimizer_cache.adam_states.is_none() {
                 self.optimizer_cache.adam_states = Some(AdamStatesConv2D {
                     m: Array4::zeros(self.weights.dim()),
@@ -544,12 +544,12 @@ impl Layer for Conv2D {
                 });
             }
 
-            let correction1 = 1.0 - beta1.powi(t as i32);
-            let correction2 = 1.0 - beta2.powi(t as i32);
-
-            // Update weights and biases using a closure to avoid code duplication
             if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
-                // Update weights using parallel computation
+                // Compute bias correction factors
+                let bias_correction1 = 1.0 - beta1.powi(t as i32);
+                let bias_correction2 = 1.0 - beta2.powi(t as i32);
+
+                // Update weight parameters
                 if let (Some(weight_slice), Some(weight_grad_slice), Some(m_slice), Some(v_slice)) = (
                     self.weights.as_slice_mut(),
                     weight_grads.as_slice(),
@@ -565,28 +565,12 @@ impl Layer for Conv2D {
                         beta1,
                         beta2,
                         epsilon,
-                        correction1,
-                        correction2,
+                        bias_correction1,
+                        bias_correction2,
                     );
-                } else {
-                    // If slices cannot be obtained, use original sequential implementation as fallback
-                    for i in 0..self.weights.len() {
-                        let grad = weight_grads.as_slice().unwrap()[i];
-                        let m = &mut adam_states.m.as_slice_mut().unwrap()[i];
-                        let v = &mut adam_states.v.as_slice_mut().unwrap()[i];
-
-                        *m = beta1 * *m + (1.0 - beta1) * grad;
-                        *v = beta2 * *v + (1.0 - beta2) * grad * grad;
-
-                        let m_corrected = *m / correction1;
-                        let v_corrected = *v / correction2;
-
-                        self.weights.as_slice_mut().unwrap()[i] -=
-                            lr * m_corrected / (v_corrected.sqrt() + epsilon);
-                    }
                 }
 
-                // Use parallel computation to update biases
+                // Update bias parameters
                 if let (
                     Some(bias_slice),
                     Some(bias_grad_slice),
@@ -607,25 +591,9 @@ impl Layer for Conv2D {
                         beta1,
                         beta2,
                         epsilon,
-                        correction1,
-                        correction2,
+                        bias_correction1,
+                        bias_correction2,
                     );
-                } else {
-                    // If slices cannot be obtained, use original sequential implementation as fallback
-                    for i in 0..self.bias.len() {
-                        let grad = bias_grads.as_slice().unwrap()[i];
-                        let m = &mut adam_states.m_bias.as_slice_mut().unwrap()[i];
-                        let v = &mut adam_states.v_bias.as_slice_mut().unwrap()[i];
-
-                        *m = beta1 * *m + (1.0 - beta1) * grad;
-                        *v = beta2 * *v + (1.0 - beta2) * grad * grad;
-
-                        let m_corrected = *m / correction1;
-                        let v_corrected = *v / correction2;
-
-                        self.bias.as_slice_mut().unwrap()[i] -=
-                            lr * m_corrected / (v_corrected.sqrt() + epsilon);
-                    }
                 }
             }
         }
@@ -635,7 +603,7 @@ impl Layer for Conv2D {
         if let (Some(weight_grads), Some(bias_grads)) =
             (&self.weight_gradients, &self.bias_gradients)
         {
-            // Initialize cache (if not initialized yet)
+            // Initialize RMSprop cache (if not already initialized)
             if self.optimizer_cache.rmsprop_cache.is_none() {
                 self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv2D {
                     cache: Array4::zeros(self.weights.dim()),
@@ -650,7 +618,6 @@ impl Layer for Conv2D {
                     weight_grads.as_slice(),
                     rmsprop_cache.cache.as_slice_mut(),
                 ) {
-                    // Use closure to update weights
                     update_rmsprop(
                         weight_slice,
                         weight_grad_slice,
@@ -659,16 +626,6 @@ impl Layer for Conv2D {
                         epsilon,
                         lr,
                     );
-                } else {
-                    // Fallback to original loop implementation
-                    for i in 0..self.weights.len() {
-                        let grad = weight_grads.as_slice().unwrap()[i];
-                        let cache = &mut rmsprop_cache.cache.as_slice_mut().unwrap()[i];
-
-                        *cache = rho * *cache + (1.0 - rho) * grad * grad;
-                        self.weights.as_slice_mut().unwrap()[i] -=
-                            lr * grad / (cache.sqrt() + epsilon);
-                    }
                 }
 
                 // Update biases
@@ -677,7 +634,6 @@ impl Layer for Conv2D {
                     bias_grads.as_slice(),
                     rmsprop_cache.bias.as_slice_mut(),
                 ) {
-                    // Use the same closure to update biases
                     update_rmsprop(
                         bias_slice,
                         bias_grad_slice,
@@ -686,16 +642,6 @@ impl Layer for Conv2D {
                         epsilon,
                         lr,
                     );
-                } else {
-                    // Fallback to original loop implementation
-                    for i in 0..self.bias.len() {
-                        let grad = bias_grads.as_slice().unwrap()[i];
-                        let cache = &mut rmsprop_cache.bias.as_slice_mut().unwrap()[i];
-
-                        *cache = rho * *cache + (1.0 - rho) * grad * grad;
-                        self.bias.as_slice_mut().unwrap()[i] -=
-                            lr * grad / (cache.sqrt() + epsilon);
-                    }
                 }
             }
         }
