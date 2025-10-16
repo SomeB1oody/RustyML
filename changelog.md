@@ -11,7 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Improve handling of empty arrays in `sum_of_square_total` and `standard_deviation` functions, and optimize probability distribution normalization
-- Organize the pooling layer and the convolutional layer under their respective modules
+- Organize the pooling layers, recurrent layers, and the convolutional layers under their respective modules
 
 ## [v0.9.0] - 2025-10-14 (UTC-7)
 ### Removed

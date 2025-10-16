@@ -56,12 +56,12 @@ Complete neural network framework with flexible architecture design:
 完整的神经网络框架，具有灵活的架构设计：
 
 - **Layers | 层**:
-  - Dense (Fully connected) | 全连接层
-  - RNN (Recurrent Neural Network) | 循环神经网络
-  - LSTM (Long Short-Term Memory) | 长短期记忆网络
-  - Convolution | 卷积层
-  - Pooling (Max Pooling 1D/2D/3D, Global Pooling) | 池化层（最大池化1D/2D/3D，全局池化）
-  - Dropout | Dropout层
+  - Dense: Fully connected layers with customizable activation functions | Dense层: 具有可定制激活功能的全连接层
+  - Activation: Standalone activation functions (ReLU, Sigmoid, Tanh, Softmax, etc.) | 激活函数: 独立激活函数（ReLU, Sigmoid, Tanh， Softmax等）
+  - Pooling Layers: Max pooling and average pooling operations for 1D, 2D, and 3D data | 池化层: 对1D、2D和3D数据进行最大池化和平均池化操作
+  - Global Pooling: Global max pooling and global average pooling for 1D, 2D, and 3D tensors | 全局池化层: 对1D、2D和3D张量进行全局最大池化和全局平均池化
+  - Recurrent Layers: Sequential Modeling Layers like RNN, LSTM, and GRU | 循环层: 序列建模层，如RNN, LSTM和GRU
+  - Dropout: Regularization layer to prevent overfitting during training | Dropout层：正则化层，防止训练过程中的过拟合
 
 - **Optimizers | 优化器**:
   - SGD (Stochastic Gradient Descent) | 随机梯度下降

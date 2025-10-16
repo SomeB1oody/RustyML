@@ -8,85 +8,6 @@ use super::*;
 /// overhead is amortized by computational gains from parallelization.
 const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Internal gate structure for LSTM cell operations
-///
-/// This structure represents a single gate (input, forget, cell, or output) within an LSTM cell.
-/// Each gate contains the weights, biases, gradients, and optimizer cache needed for
-/// forward and backward propagation through the gate.
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input connections with shape (input_dim, units)
-/// - `recurrent_kernel` - Weight matrix for recurrent connections with shape (units, units)
-/// - `bias` - Bias vector with shape (1, units)
-/// - `grad_kernel` - Optional gradient for input weights, accumulated during backpropagation
-/// - `grad_recurrent_kernel` - Optional gradient for recurrent weights, accumulated during backpropagation
-/// - `grad_bias` - Optional gradient for bias terms, accumulated during backpropagation
-/// - `optimizer_cache` - Cache for storing optimizer-specific state (Adam, RMSprop momentum, etc.)
-struct Gate {
-    kernel: Array2<f32>,
-    recurrent_kernel: Array2<f32>,
-    bias: Array2<f32>,
-    grad_kernel: Option<Array2<f32>>,
-    grad_recurrent_kernel: Option<Array2<f32>>,
-    grad_bias: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCache,
-}
-
-impl Gate {
-    /// Creates a new gate with randomly initialized weights
-    ///
-    /// # Parameters
-    ///
-    /// - `input_dim` - Dimensionality of the input features
-    /// - `units` - Number of units (neurons) in this gate
-    /// - `is_forget_gate` - Whether this is a forget gate (affects bias initialization)
-    ///
-    /// # Returns
-    ///
-    /// * `Gate` - A new `Gate` instance with:
-    ///     - Xavier/Glorot initialization for kernel weights
-    ///     - Orthogonal initialization for recurrent_kernel weights
-    ///     - Forget gate bias initialized to 1.0, other gates to 0.0
-    ///     - None gradients (will be allocated during first backward pass)
-    ///     - Default optimizer cache
-    pub fn new(input_dim: usize, units: usize, is_forget_gate: bool) -> Self {
-        // Xavier/Glorot initialization for input kernel
-        let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
-
-        // Orthogonal initialization for recurrent kernel
-        let mut recurrent_kernel = Array::random((units, units), Uniform::new(-1.0, 1.0));
-        if units > 0 {
-            // Simplified orthogonalization using QR decomposition approximation
-            // For better numerical stability, normalize each column
-            for mut col in recurrent_kernel.columns_mut() {
-                let norm = col.iter().map(|x| x * x).sum::<f32>().sqrt();
-                if norm > 1e-8 {
-                    col /= norm;
-                }
-            }
-        }
-
-        // Forget gate bias should be initialized to 1.0 to prevent early vanishing gradients
-        let bias = if is_forget_gate {
-            Array::ones((1, units))
-        } else {
-            Array::zeros((1, units))
-        };
-
-        Self {
-            kernel,
-            recurrent_kernel,
-            bias,
-            grad_kernel: None,
-            grad_recurrent_kernel: None,
-            grad_bias: None,
-            optimizer_cache: OptimizerCache::default(),
-        }
-    }
-}
-
 /// Long Short-Term Memory (LSTM) neural network layer
 ///
 /// LSTM is a type of recurrent neural network (RNN) architecture that is capable of learning
@@ -199,10 +120,10 @@ impl LSTM {
         Self {
             input_dim,
             units,
-            input_gate: Gate::new(input_dim, units, false),
-            forget_gate: Gate::new(input_dim, units, true), // forget gate bias = 1.0
-            cell_gate: Gate::new(input_dim, units, false),
-            output_gate: Gate::new(input_dim, units, false),
+            input_gate: Gate::new(input_dim, units, 0.0),
+            forget_gate: Gate::new(input_dim, units, 1.0), // forget gate bias = 1.0
+            cell_gate: Gate::new(input_dim, units, 0.0),
+            output_gate: Gate::new(input_dim, units, 0.0),
             input_cache: None,
             hidden_cache: None,
             cell_cache: None,
@@ -282,11 +203,6 @@ impl Layer for LSTM {
         hs.push(h_prev.clone());
         cs.push(c_prev.clone());
 
-        // Compute gate value: x_t @ kernel + h_prev @ recurrent_kernel + bias
-        fn compute(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) -> Array2<f32> {
-            x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
-        }
-
         // Determine whether to use parallel execution based on computational load
         let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
 
@@ -299,24 +215,24 @@ impl Layer for LSTM {
                 let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
                     || {
                         rayon::join(
-                            || compute(&self.input_gate, &x_t, &h_prev),
-                            || compute(&self.forget_gate, &x_t, &h_prev),
+                            || compute_gate_value(&self.input_gate, &x_t, &h_prev),
+                            || compute_gate_value(&self.forget_gate, &x_t, &h_prev),
                         )
                     },
                     || {
                         rayon::join(
-                            || compute(&self.cell_gate, &x_t, &h_prev),
-                            || compute(&self.output_gate, &x_t, &h_prev),
+                            || compute_gate_value(&self.cell_gate, &x_t, &h_prev),
+                            || compute_gate_value(&self.output_gate, &x_t, &h_prev),
                         )
                     },
                 );
                 (i_raw, f_raw, g_raw, o_raw)
             } else {
                 (
-                    compute(&self.input_gate, &x_t, &h_prev),
-                    compute(&self.forget_gate, &x_t, &h_prev),
-                    compute(&self.cell_gate, &x_t, &h_prev),
-                    compute(&self.output_gate, &x_t, &h_prev),
+                    compute_gate_value(&self.input_gate, &x_t, &h_prev),
+                    compute_gate_value(&self.forget_gate, &x_t, &h_prev),
+                    compute_gate_value(&self.cell_gate, &x_t, &h_prev),
+                    compute_gate_value(&self.output_gate, &x_t, &h_prev),
                 )
             };
 
@@ -394,13 +310,6 @@ impl Layer for LSTM {
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        // Helper function to extract cache
-        fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
-            cache
-                .take()
-                .ok_or_else(|| ModelError::ProcessingError(error_msg.to_string()))
-        }
-
         let error_msg = "Forward pass has not been run";
         let x3 = take_cache(&mut self.input_cache, error_msg)?;
         let hs = take_cache(&mut self.hidden_cache, error_msg)?;
@@ -452,16 +361,8 @@ impl Layer for LSTM {
             let o_t = &o_vals[t];
 
             // Gradient through output activation
-            let grad_h_pre_activation = if self.activation != Activation::Linear {
-                if self.activation == Activation::Softmax {
-                    Activation::softmax_backward(h_t, &grad_h)
-                } else {
-                    let d_act = Activation::activation_derivative(h_t, &self.activation);
-                    d_act * &grad_h
-                }
-            } else {
-                grad_h.clone()
-            };
+            let grad_h_pre_activation =
+                compute_output_activation_gradient(h_t, &grad_h, &self.activation);
 
             // Gradient through h_t = o_t * tanh(c_t)
             let grad_o_t = &grad_h_pre_activation * c_t_activated;
@@ -592,32 +493,26 @@ impl Layer for LSTM {
             grad_c = grad_c_prev;
         }
 
-        // Store gradients using closure
-        let store_gradients = |gate: &mut Gate, grad_kernel, grad_recurrent, grad_bias| {
-            gate.grad_kernel = Some(grad_kernel);
-            gate.grad_recurrent_kernel = Some(grad_recurrent);
-            gate.grad_bias = Some(grad_bias);
-        };
-
-        store_gradients(
+        // Store gradients
+        store_gate_gradients(
             &mut self.input_gate,
             grad_i_kernel,
             grad_i_recurrent,
             grad_i_bias,
         );
-        store_gradients(
+        store_gate_gradients(
             &mut self.forget_gate,
             grad_f_kernel,
             grad_f_recurrent,
             grad_f_bias,
         );
-        store_gradients(
+        store_gate_gradients(
             &mut self.cell_gate,
             grad_g_kernel,
             grad_g_recurrent,
             grad_g_bias,
         );
-        store_gradients(
+        store_gate_gradients(
             &mut self.output_gate,
             grad_o_kernel,
             grad_o_recurrent,
@@ -642,82 +537,14 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {
-        // Helper to update a single gate's parameters
-        fn update_gate(gate: &mut Gate, lr: f32) {
-            if let (Some(gk), Some(grk), Some(gb)) = (
-                &gate.grad_kernel,
-                &gate.grad_recurrent_kernel,
-                &gate.grad_bias,
-            ) {
-                // Apply gradient clipping to prevent exploding gradients
-                const CLIP_VALUE: f32 = 5.0;
-                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-
-                gate.kernel = &gate.kernel - &(lr * &gk_clipped);
-                gate.recurrent_kernel = &gate.recurrent_kernel - &(lr * &grk_clipped);
-                gate.bias = &gate.bias - &(lr * &gb_clipped);
-            }
-        }
-
         // Update all four gates sequentially (overhead of parallelization outweighs benefits)
-        update_gate(&mut self.input_gate, lr);
-        update_gate(&mut self.forget_gate, lr);
-        update_gate(&mut self.cell_gate, lr);
-        update_gate(&mut self.output_gate, lr);
+        update_gate_sgd(&mut self.input_gate, lr);
+        update_gate_sgd(&mut self.forget_gate, lr);
+        update_gate_sgd(&mut self.cell_gate, lr);
+        update_gate_sgd(&mut self.output_gate, lr);
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Helper to update a single gate's parameters with Adam
-        fn update_gate_adam(
-            gate: &mut Gate,
-            input_dim: usize,
-            units: usize,
-            lr: f32,
-            beta1: f32,
-            beta2: f32,
-            epsilon: f32,
-            t: u64,
-        ) {
-            // Initialize Adam states if needed
-            if gate.optimizer_cache.adam_states.is_none() {
-                gate.optimizer_cache.adam_states = Some(AdamStates::new(
-                    (input_dim, units),
-                    Some((units, units)),
-                    (1, units),
-                ));
-            }
-
-            if let (Some(gk), Some(grk), Some(gb)) = (
-                &gate.grad_kernel,
-                &gate.grad_recurrent_kernel,
-                &gate.grad_bias,
-            ) {
-                // Apply gradient clipping before Adam update
-                const CLIP_VALUE: f32 = 5.0;
-                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-
-                let adam_states = gate.optimizer_cache.adam_states.as_mut().unwrap();
-                let (k_update, rk_update, b_update) = adam_states.update_parameter(
-                    &gk_clipped,
-                    Some(&grk_clipped),
-                    &gb_clipped,
-                    beta1,
-                    beta2,
-                    epsilon,
-                    t,
-                    lr,
-                );
-
-                gate.kernel = &gate.kernel - &k_update;
-                gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update.unwrap();
-                gate.bias = &gate.bias - &b_update;
-            }
-        }
-
         // Update all four gates sequentially (optimizer updates are already expensive)
         update_gate_adam(
             &mut self.input_gate,
@@ -762,51 +589,6 @@ impl Layer for LSTM {
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // Helper to update a single gate's parameters with RMSprop
-        fn update_gate_rmsprop(
-            gate: &mut Gate,
-            input_dim: usize,
-            units: usize,
-            lr: f32,
-            rho: f32,
-            epsilon: f32,
-        ) {
-            // Initialize RMSprop cache if needed
-            if gate.optimizer_cache.rmsprop_cache.is_none() {
-                gate.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
-                    (input_dim, units),
-                    Some((units, units)),
-                    (1, units),
-                ));
-            }
-
-            if let (Some(gk), Some(grk), Some(gb)) = (
-                &gate.grad_kernel,
-                &gate.grad_recurrent_kernel,
-                &gate.grad_bias,
-            ) {
-                // Apply gradient clipping before RMSprop update
-                const CLIP_VALUE: f32 = 5.0;
-                let gk_clipped = gk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let grk_clipped = grk.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-                let gb_clipped = gb.mapv(|x| x.clamp(-CLIP_VALUE, CLIP_VALUE));
-
-                if let Some(ref mut cache) = gate.optimizer_cache.rmsprop_cache {
-                    cache.update_parameters(
-                        &mut gate.kernel,
-                        Some(&mut gate.recurrent_kernel),
-                        &mut gate.bias,
-                        &gk_clipped,
-                        Some(&grk_clipped),
-                        &gb_clipped,
-                        rho,
-                        lr,
-                        epsilon,
-                    );
-                }
-            }
-        }
-
         // Update all four gates sequentially
         update_gate_rmsprop(
             &mut self.input_gate,
