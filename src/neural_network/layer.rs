@@ -198,6 +198,8 @@ pub mod convolution_layer;
 pub mod dense;
 /// A layer that flattens a 4D tensor into a 2D tensor
 pub mod flatten;
+/// A GRU (Gated Recurrent Unit) layer implementation
+pub mod gru;
 /// A module containing helper functions for neural network layers
 mod helper_functions;
 /// Container for different types of neural network layer weights
@@ -214,6 +216,7 @@ pub mod simple_rnn;
 pub use convolution_layer::*;
 pub use dense::*;
 pub use flatten::*;
+pub use gru::*;
 pub use layer_weight::*;
 pub use lstm::*;
 pub use pooling_layer::*;

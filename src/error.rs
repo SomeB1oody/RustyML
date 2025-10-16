@@ -34,7 +34,6 @@ pub enum ModelError {
 
 #[cfg(any(
     feature = "machine_learning",
-    feature = "math",
     feature = "neural_network",
     feature = "utility"
 ))]
@@ -56,7 +55,6 @@ impl std::fmt::Display for ModelError {
 
 #[cfg(any(
     feature = "machine_learning",
-    feature = "math",
     feature = "neural_network",
     feature = "utility"
 ))]

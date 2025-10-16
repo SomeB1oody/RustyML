@@ -19,6 +19,7 @@ mod global_average_pooling_3d_test;
 mod global_max_pooling_1d_test;
 mod global_max_pooling_2d_test;
 mod global_max_pooling_3d_test;
+mod gru_test;
 mod layer_weight_test;
 mod loss_function_test;
 mod lstm_test;

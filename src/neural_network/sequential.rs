@@ -673,6 +673,17 @@ impl Sequential {
                     )));
                 }
             }
+            serialize_weight::SerializableLayerWeight::GRU(w) => {
+                let layer_any: &mut dyn Any = layer;
+                if let Some(gru_layer) = layer_any.downcast_mut::<GRU>() {
+                    w.apply_to_layer(gru_layer)?;
+                } else {
+                    return Err(IoError::StdIoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Expected GRU layer but got {}", expected_type),
+                    )));
+                }
+            }
             serialize_weight::SerializableLayerWeight::Conv1D(w) => {
                 let layer_any: &mut dyn Any = layer;
                 if let Some(conv_layer) = layer_any.downcast_mut::<Conv1D>() {

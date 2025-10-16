@@ -19,6 +19,7 @@ pub enum LayerWeight<'a> {
     Dense(DenseLayerWeight<'a>),
     SimpleRNN(SimpleRNNLayerWeight<'a>),
     LSTM(LSTMLayerWeight<'a>),
+    GRU(GRULayerWeight<'a>),
     Conv1D(Conv1DLayerWeight<'a>),
     Conv2D(Conv2DLayerWeight<'a>),
     SeparableConv2DLayer(SeparableConv2DLayerWeight<'a>),
@@ -80,6 +81,35 @@ pub struct LSTMLayerWeight<'a> {
     pub forget: LSTMGateWeight<'a>,
     pub cell: LSTMGateWeight<'a>,
     pub output: LSTMGateWeight<'a>,
+}
+
+/// Weights for a single gate in a GRU layer
+///
+/// # Fields
+///
+/// - `kernel` - Weight matrix for input features
+/// - `recurrent_kernel` - Weight matrix for recurrent connections
+/// - `bias` - Bias vector for the gate
+pub struct GRUGateWeight<'a> {
+    pub kernel: &'a Array2<f32>,
+    pub recurrent_kernel: &'a Array2<f32>,
+    pub bias: &'a Array2<f32>,
+}
+
+/// Weights for a Gated Recurrent Unit (GRU) layer
+///
+/// Contains weights for the three gates that control information flow in a GRU cell:
+/// reset gate, update gate, and candidate gate.
+///
+/// # Fields
+///
+/// - `reset` - Weights for the reset gate, which controls what information to forget
+/// - `update` - Weights for the update gate, which controls how much to update the hidden state
+/// - `candidate` - Weights for the candidate gate, which proposes new hidden state values
+pub struct GRULayerWeight<'a> {
+    pub reset: GRUGateWeight<'a>,
+    pub update: GRUGateWeight<'a>,
+    pub candidate: GRUGateWeight<'a>,
 }
 
 /// Weights for a 1D convolutional layer

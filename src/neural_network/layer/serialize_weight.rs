@@ -8,6 +8,7 @@ pub enum SerializableLayerWeight {
     Dense(SerializableDenseWeight),
     SimpleRNN(SerializableSimpleRNNWeight),
     LSTM(SerializableLSTMWeight),
+    GRU(SerializableGRUWeight),
     Conv1D(SerializableConv1DWeight),
     Conv2D(SerializableConv2DWeight),
     Conv3D(SerializableConv3DWeight),
@@ -65,6 +66,51 @@ pub struct SerializableLSTMWeight {
     pub forget: SerializableLSTMGateWeight,
     pub cell: SerializableLSTMGateWeight,
     pub output: SerializableLSTMGateWeight,
+}
+
+/// Serializable representation of a single GRU gate's weights
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableGRUGateWeight {
+    pub kernel: Vec<Vec<f32>>,
+    pub recurrent_kernel: Vec<Vec<f32>>,
+    pub bias: Vec<Vec<f32>>,
+}
+
+/// Serializable representation of a GRU layer's weights
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableGRUWeight {
+    pub reset: SerializableGRUGateWeight,
+    pub update: SerializableGRUGateWeight,
+    pub candidate: SerializableGRUGateWeight,
+}
+
+impl ApplyWeights<GRU> for SerializableGRUWeight {
+    fn apply_to_layer(&self, layer: &mut GRU) -> Result<(), IoError> {
+        let reset_kernel = vec2_to_array2(&self.reset.kernel)?;
+        let reset_recurrent = vec2_to_array2(&self.reset.recurrent_kernel)?;
+        let reset_bias = vec2_to_array2(&self.reset.bias)?;
+
+        let update_kernel = vec2_to_array2(&self.update.kernel)?;
+        let update_recurrent = vec2_to_array2(&self.update.recurrent_kernel)?;
+        let update_bias = vec2_to_array2(&self.update.bias)?;
+
+        let candidate_kernel = vec2_to_array2(&self.candidate.kernel)?;
+        let candidate_recurrent = vec2_to_array2(&self.candidate.recurrent_kernel)?;
+        let candidate_bias = vec2_to_array2(&self.candidate.bias)?;
+
+        layer.set_weights(
+            reset_kernel,
+            reset_recurrent,
+            reset_bias,
+            update_kernel,
+            update_recurrent,
+            update_bias,
+            candidate_kernel,
+            candidate_recurrent,
+            candidate_bias,
+        );
+        Ok(())
+    }
 }
 
 impl ApplyWeights<LSTM> for SerializableLSTMWeight {
@@ -259,6 +305,58 @@ impl SerializableLayerWeight {
                         .map(|row| row.to_vec())
                         .collect(),
                     bias: w.output.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                },
+            }),
+            LayerWeight::GRU(w) => SerializableLayerWeight::GRU(SerializableGRUWeight {
+                reset: SerializableGRUGateWeight {
+                    kernel: w
+                        .reset
+                        .kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    recurrent_kernel: w
+                        .reset
+                        .recurrent_kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    bias: w.reset.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                },
+                update: SerializableGRUGateWeight {
+                    kernel: w
+                        .update
+                        .kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    recurrent_kernel: w
+                        .update
+                        .recurrent_kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    bias: w.update.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                },
+                candidate: SerializableGRUGateWeight {
+                    kernel: w
+                        .candidate
+                        .kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    recurrent_kernel: w
+                        .candidate
+                        .recurrent_kernel
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
+                    bias: w
+                        .candidate
+                        .bias
+                        .outer_iter()
+                        .map(|row| row.to_vec())
+                        .collect(),
                 },
             }),
             LayerWeight::Conv1D(w) => SerializableLayerWeight::Conv1D(SerializableConv1DWeight {

@@ -637,8 +637,9 @@ pub mod dataset;
 /// ## Layer Types
 /// - **Dense**: Fully connected layers with customizable activation functions
 /// - **Activation**: Standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, etc.)
-/// - **Pooling Layers**: Max pooling operations for 1D, 2D, and 3D data (MaxPooling1D, MaxPooling2D, MaxPooling3D)
-/// - **Global Pooling**: Global max pooling for 1D, 2D, and 3D tensors
+/// - **Pooling Layers**: Max pooling and average pooling operations for 1D, 2D, and 3D data
+/// - **Global Pooling**: Global max pooling and global average pooling for 1D, 2D, and 3D tensors
+/// - **Recurrent Layers**: Sequential Modeling Layers like RNN, LSTM, and GRU
 /// - **Dropout**: Regularization layer to prevent overfitting during training
 ///
 /// ## Optimization Algorithms
