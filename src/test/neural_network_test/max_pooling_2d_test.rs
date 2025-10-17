@@ -28,7 +28,7 @@ fn max_pooling_2d_test() {
     );
 
     // Perform forward propagation
-    let output = pool_layer.forward(&x);
+    let output = pool_layer.forward(&x).unwrap();
 
     // Check if output shape is correct - should be [2, 3, 3, 3]
     assert_eq!(output.shape(), &[2, 3, 3, 3]);
@@ -116,7 +116,7 @@ fn max_pooling_2d_edge_cases() {
         None,             // Default stride
     );
 
-    let output = pool_layer.forward(&input_data);
+    let output = pool_layer.forward(&input_data).unwrap();
     // Output should be [1, 1, 1, 1]
     assert_eq!(output.shape(), &[1, 1, 1, 1]);
 
@@ -129,7 +129,7 @@ fn max_pooling_2d_edge_cases() {
         Some((2, 1)),     // Asymmetric stride
     );
 
-    let output = pool_layer.forward(&input_data);
+    let output = pool_layer.forward(&input_data).unwrap();
     // Output should be [1, 2, 2, 3]
     assert_eq!(output.shape(), &[1, 2, 2, 3]);
 

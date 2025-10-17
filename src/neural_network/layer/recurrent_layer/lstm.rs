@@ -52,7 +52,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// - `f_cache` - Cached forget gate activations for each timestep
 /// - `g_cache` - Cached cell gate activations for each timestep
 /// - `o_cache` - Cached output gate activations for each timestep
-/// - `activation` - Activation function applied to final output (usually Tanh)
+/// - `activation` - Activation layer from activation_layer module
 ///
 /// # Example
 /// ```rust
@@ -65,7 +65,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(LSTM::new(4, 3, Activation::Tanh))
+/// model.add(LSTM::new(4, 3, Tanh::new()))
 ///      .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
 /// // Train the model
@@ -76,7 +76,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// println!("LSTM output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
-pub struct LSTM {
+pub struct LSTM<T: ActivationLayer> {
     input_dim: usize,
     units: usize,
 
@@ -98,25 +98,25 @@ pub struct LSTM {
     g_cache: Option<Vec<Array2<f32>>>, // cell gate values (tanh applied)
     o_cache: Option<Vec<Array2<f32>>>, // output gate values (sigmoid applied)
 
-    activation: Activation,
+    activation: T,
 }
 
-impl LSTM {
+impl<T: ActivationLayer> LSTM<T> {
     /// Creates a new LSTM layer with specified parameters
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation function applied to the final output (commonly Tanh or Linear)
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
     /// * `LSTM` - A new `LSTM` instance with:
     ///     - Four gates (input, forget, cell, output) initialized with random weights
     ///     - All caches set to None (will be allocated during first forward pass)
-    ///     - Specified activation function for output transformation
-    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
+    ///     - Activation layer for output transformation
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         Self {
             input_dim,
             units,
@@ -180,10 +180,22 @@ impl LSTM {
     }
 }
 
-impl Layer for LSTM {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for LSTM<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
+        let x3 = input
+            .view()
+            .into_dimensionality::<ndarray::Ix3>()
+            .unwrap()
+            .to_owned();
+
         // Input shape: (batch, timesteps, input_dim)
-        let x3 = input.clone().into_dimensionality::<ndarray::Ix3>().unwrap();
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.clone());
 
@@ -239,26 +251,29 @@ impl Layer for LSTM {
             // Apply activations to all 4 gates (parallel or sequential)
             let (i_t, f_t, g_t, o_t) = if use_parallel {
                 let ((i_t, f_t), (g_t, o_t)) = rayon::join(
+                    || rayon::join(|| apply_sigmoid(i_raw), || apply_sigmoid(f_raw)),
                     || {
                         rayon::join(
-                            || Activation::apply_activation(&i_raw, &Activation::Sigmoid),
-                            || Activation::apply_activation(&f_raw, &Activation::Sigmoid),
-                        )
-                    },
-                    || {
-                        rayon::join(
-                            || Activation::apply_activation(&g_raw, &Activation::Tanh),
-                            || Activation::apply_activation(&o_raw, &Activation::Sigmoid),
+                            || {
+                                g_raw.mapv(|x| {
+                                    let clipped_x = x.clamp(-500.0, 500.0);
+                                    clipped_x.tanh()
+                                })
+                            },
+                            || apply_sigmoid(o_raw),
                         )
                     },
                 );
                 (i_t, f_t, g_t, o_t)
             } else {
                 (
-                    Activation::apply_activation(&i_raw, &Activation::Sigmoid),
-                    Activation::apply_activation(&f_raw, &Activation::Sigmoid),
-                    Activation::apply_activation(&g_raw, &Activation::Tanh),
-                    Activation::apply_activation(&o_raw, &Activation::Sigmoid),
+                    apply_sigmoid(i_raw),
+                    apply_sigmoid(f_raw),
+                    g_raw.mapv(|x| {
+                        let clipped_x = x.clamp(-500.0, 500.0);
+                        clipped_x.tanh()
+                    }),
+                    apply_sigmoid(o_raw),
                 )
             };
 
@@ -266,17 +281,13 @@ impl Layer for LSTM {
             let c_t = &f_t * &c_prev + &i_t * &g_t;
 
             // Apply tanh to cell state
-            let c_t_activated = Activation::apply_activation(&c_t, &Activation::Tanh);
+            let c_t_activated = c_t.mapv(|x| {
+                let clipped_x = x.clamp(-500.0, 500.0);
+                clipped_x.tanh()
+            });
 
             // Update hidden state: h_t = o_t * tanh(c_t)
             let h_t = &o_t * &c_t_activated;
-
-            // Apply output activation if not Linear
-            let h_t = if self.activation != Activation::Linear {
-                Activation::apply_activation(&h_t, &self.activation)
-            } else {
-                h_t
-            };
 
             // Cache values
             i_vals.push(i_t);
@@ -300,15 +311,15 @@ impl Layer for LSTM {
         self.g_cache = Some(g_vals);
         self.o_cache = Some(o_vals);
 
-        // Return last hidden state
-        h_prev.into_dyn()
+        // Apply activation
+        self.activation.forward(&h_prev.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        let grad_h_t = grad_output
-            .clone()
-            .into_dimensionality::<ndarray::Ix2>()
-            .unwrap();
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
+        let grad_h_t = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
 
         let error_msg = "Forward pass has not been run";
         let x3 = take_cache(&mut self.input_cache, error_msg)?;
@@ -351,7 +362,6 @@ impl Layer for LSTM {
 
         // Backpropagation through time
         for t in (0..timesteps).rev() {
-            let h_t = &hs[t + 1];
             let h_prev = &hs[t];
             let c_prev = &cs[t];
             let c_t_activated = &cs_activated[t];
@@ -360,14 +370,9 @@ impl Layer for LSTM {
             let g_t = &g_vals[t];
             let o_t = &o_vals[t];
 
-            // Gradient through output activation
-            let grad_h_pre_activation =
-                compute_output_activation_gradient(h_t, &grad_h, &self.activation);
-
             // Gradient through h_t = o_t * tanh(c_t)
-            let grad_o_t = &grad_h_pre_activation * c_t_activated;
-            grad_c =
-                grad_c + &(&grad_h_pre_activation * o_t * &(1.0 - c_t_activated * c_t_activated));
+            let grad_o_t = &grad_h * c_t_activated;
+            grad_c = grad_c + &(&grad_h * o_t * &(1.0 - c_t_activated * c_t_activated));
 
             // Gradient through c_t = f_t * c_prev + i_t * g_t
             let grad_f_t = &grad_c * c_prev;

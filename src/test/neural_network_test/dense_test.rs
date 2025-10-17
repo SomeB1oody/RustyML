@@ -3,10 +3,10 @@ use super::*;
 #[test]
 fn test_dense_forward_pass_dimensions() {
     // Test forward propagation dimension correctness
-    let mut dense = Dense::new(4, 3, Activation::ReLU);
+    let mut dense = Dense::new(4, 3, ReLU::new());
     let input = Array::ones((2, 4)).into_dyn(); // batch_size=2, input_dim=4
 
-    let output = dense.forward(&input);
+    let output = dense.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 3]); // batch_size=2, output_dim=3
     println!(
         "Forward pass dimension test passed: {:?} -> {:?}",
@@ -23,23 +23,24 @@ fn test_dense_activation_functions() {
         .into_dyn();
 
     // Test ReLU activation function
-    let mut dense_relu = Dense::new(2, 2, Activation::ReLU);
+    let mut dense_relu = Dense::new(2, 2, ReLU::new());
     let output_relu = dense_relu.forward(&input);
 
     // Test Sigmoid activation function
-    let mut dense_sigmoid = Dense::new(2, 2, Activation::Sigmoid);
+    let mut dense_sigmoid = Dense::new(2, 2, Sigmoid::new());
     let output_sigmoid = dense_sigmoid.forward(&input);
 
     // Test Tanh activation function
-    let mut dense_tanh = Dense::new(2, 2, Activation::Tanh);
-    let output_tanh = dense_tanh.forward(&input);
+    let mut dense_tanh = Dense::new(2, 2, Tanh::new());
+    let output_tanh = dense_tanh.forward(&input).unwrap();
 
     println!("ReLU output: {:?}", output_relu);
     println!("Sigmoid output: {:?}", output_sigmoid);
     println!("Tanh output: {:?}", output_tanh);
 
     // Verify Sigmoid output is in (0,1) range
-    let sigmoid_2d = output_sigmoid
+    let sigmoid_output = output_sigmoid.unwrap();
+    let sigmoid_2d = sigmoid_output
         .as_standard_layout()
         .into_dimensionality::<ndarray::Ix2>()
         .unwrap();
@@ -89,7 +90,7 @@ fn test_dense_learning_capability() {
 
     // Build model
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear));
+    model.add(Dense::new(2, 1, Linear::new()));
     model.compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Record initial prediction
@@ -139,9 +140,9 @@ fn test_dense_batch_processing() {
 
     for batch_size in batch_sizes {
         let input = Array::ones((batch_size, 4)).into_dyn();
-        let mut dense = Dense::new(4, 3, Activation::ReLU);
+        let mut dense = Dense::new(4, 3, ReLU::new());
 
-        let output = dense.forward(&input);
+        let output = dense.forward(&input).unwrap();
         assert_eq!(
             output.shape()[0],
             batch_size,
@@ -165,7 +166,7 @@ fn test_dense_batch_processing() {
 #[test]
 fn test_dense_parameter_count() {
     // Test parameter count correctness
-    let dense = Dense::new(10, 5, Activation::ReLU);
+    let dense = Dense::new(10, 5, ReLU::new());
     let expected_params = 10 * 5 + 5; // weights + bias
     assert_eq!(
         dense.param_count(),
@@ -179,7 +180,7 @@ fn test_dense_parameter_count() {
     // Test different layer sizes
     let sizes = vec![(1, 1), (100, 50), (784, 128), (512, 10)];
     for (input_dim, output_dim) in sizes {
-        let layer = Dense::new(input_dim, output_dim, Activation::Linear);
+        let layer = Dense::new(input_dim, output_dim, Linear::new());
         let expected = input_dim * output_dim + output_dim;
         assert_eq!(
             layer.param_count(),

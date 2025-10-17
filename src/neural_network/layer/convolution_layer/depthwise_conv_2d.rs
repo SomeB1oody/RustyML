@@ -22,6 +22,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// - `padding` - Padding strategy (Valid or Same)
 /// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
 /// - `bias` - 1D bias vector with shape \[filters\]
+/// - `activation` - Activation layer from activation_layer module
 /// - `input` - Cached input tensor for backward pass
 /// - `input_shape` - Shape of the input tensor
 /// - `weight_gradients` - Gradients with respect to weights
@@ -36,13 +37,13 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// // Create Sequential model
 /// let mut model = Sequential::new();
 ///
-/// // Create and initialize DepthwiseConv2D layer
+/// // Create and initialize DepthwiseConv2D layer with ReLU activation
 /// let mut depthwise_layer = DepthwiseConv2D::new(
-///     3,                     // filters
-///     (2, 2),               // kernel_size
-///     (1, 1),               // strides
-///     PaddingType::Valid,   // padding
-///     Some(Activation::ReLU) // activation
+///     3,                        // filters
+///     (2, 2),                  // kernel_size
+///     (1, 1),                  // strides
+///     PaddingType::Valid,      // padding
+///     ReLU::new() // activation
 /// );
 /// depthwise_layer.initialize_weights(3);
 ///
@@ -86,14 +87,14 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///     assert!(*value >= 0.0);
 /// }
 /// ```
-pub struct DepthwiseConv2D {
+pub struct DepthwiseConv2D<T: ActivationLayer> {
     filters: usize,
     kernel_size: (usize, usize),
     strides: (usize, usize),
     padding: PaddingType,
     weights: Array4<f32>,
     bias: Array1<f32>,
-    activation: Option<Activation>,
+    activation: T,
     input: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array4<f32>>,
@@ -101,7 +102,7 @@ pub struct DepthwiseConv2D {
     optimizer_cache: OptimizerCacheConv2D,
 }
 
-impl DepthwiseConv2D {
+impl<T: ActivationLayer> DepthwiseConv2D<T> {
     /// Creates a new DepthwiseConv2D layer.
     ///
     /// # Parameters
@@ -110,6 +111,7 @@ impl DepthwiseConv2D {
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `padding` - Padding strategy (Valid or Same)
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
@@ -119,7 +121,7 @@ impl DepthwiseConv2D {
         kernel_size: (usize, usize),
         strides: (usize, usize),
         padding: PaddingType,
-        activation: Option<Activation>,
+        activation: T,
     ) -> Self {
         let (kernel_height, kernel_width) = kernel_size;
 
@@ -135,11 +137,11 @@ impl DepthwiseConv2D {
             padding,
             weights,
             bias,
+            activation,
             input: None,
             input_shape: Vec::new(),
             weight_gradients: None,
             bias_gradients: None,
-            activation,
             optimizer_cache: OptimizerCacheConv2D {
                 adam_states: None,
                 rmsprop_cache: None,
@@ -253,7 +255,7 @@ impl DepthwiseConv2D {
     fn compute_batch_gradients(
         &self,
         input_array: &ArrayViewD<f32>,
-        grad_output_array: &ArrayD<f32>,
+        grad_upstream: &Tensor,
         batch_idx: usize,
         channels: usize,
         input_height: usize,
@@ -268,7 +270,7 @@ impl DepthwiseConv2D {
 
         for c in 0..channels {
             let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
-            let grad_channel = grad_output_array.slice(s![batch_idx, c, .., ..]);
+            let grad_channel = grad_upstream.slice(s![batch_idx, c, .., ..]);
 
             // Apply padding to input if needed
             let padded_input = if self.padding == PaddingType::Same {
@@ -319,12 +321,20 @@ impl DepthwiseConv2D {
     }
 }
 
-impl Layer for DepthwiseConv2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for DepthwiseConv2D<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
         self.input = Some(input.clone());
         self.input_shape = input.shape().to_vec();
 
-        let input_array = input.view();
+        let input_array = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
+
         let (batch_size, channels, height, width) = (
             input_array.shape()[0],
             input_array.shape()[1],
@@ -409,23 +419,21 @@ impl Layer for DepthwiseConv2D {
             }
         }
 
-        let mut output = output.into_dyn();
+        let output = output.into_dyn();
 
-        // Apply activation function
-        if let Some(activation) = &self.activation {
-            Activation::apply_activation_inplace(activation, &mut output);
-        }
-
-        output
+        // Apply activation
+        self.activation.forward(&output.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         let input = self.input.as_ref().ok_or_else(|| {
             ModelError::ProcessingError("Forward pass has not been run".to_string())
         })?;
 
         let input_array = input.view();
-        let mut grad_output_array = grad_output.to_owned().into_dyn();
 
         let (batch_size, channels, input_height, input_width) = (
             input_array.shape()[0],
@@ -435,16 +443,11 @@ impl Layer for DepthwiseConv2D {
         );
 
         let (_, _, output_height, output_width) = (
-            grad_output_array.shape()[0],
-            grad_output_array.shape()[1],
-            grad_output_array.shape()[2],
-            grad_output_array.shape()[3],
+            grad_upstream.shape()[0],
+            grad_upstream.shape()[1],
+            grad_upstream.shape()[2],
+            grad_upstream.shape()[3],
         );
-
-        // Apply activation derivative
-        if let Some(activation) = &self.activation {
-            Activation::activation_derivative_inplace(activation, &mut grad_output_array);
-        }
 
         // Initialize gradients
         let mut weight_grads = Array4::zeros(self.weights.raw_dim());
@@ -455,7 +458,7 @@ impl Layer for DepthwiseConv2D {
         for c in 0..channels {
             let mut channel_sum = 0.0;
             for b in 0..batch_size {
-                channel_sum += grad_output_array.slice(s![b, c, .., ..]).sum();
+                channel_sum += grad_upstream.slice(s![b, c, .., ..]).sum();
             }
             bias_grads[c] = channel_sum;
         }
@@ -474,7 +477,7 @@ impl Layer for DepthwiseConv2D {
                 .map(|b| {
                     self.compute_batch_gradients(
                         &input_array,
-                        &grad_output_array,
+                        &grad_upstream,
                         b,
                         channels,
                         input_height,
@@ -501,7 +504,7 @@ impl Layer for DepthwiseConv2D {
             for b in 0..batch_size {
                 let (batch_weight_grads, batch_input_grads) = self.compute_batch_gradients(
                     &input_array,
-                    &grad_output_array,
+                    &grad_upstream,
                     b,
                     channels,
                     input_height,

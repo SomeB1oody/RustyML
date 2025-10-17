@@ -23,7 +23,7 @@ fn test_average_pooling_3d_forward() {
     let input = Array5::from_elem((1, 1, 4, 4, 4), 8.0).into_dyn();
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Check the output shape
     assert_eq!(output.shape(), &[1, 1, 2, 2, 2]);
@@ -44,7 +44,7 @@ fn test_average_pooling_3d_with_strides() {
         Array5::from_shape_fn((1, 1, 6, 6, 6), |(_, _, d, h, w)| (d + h + w) as f32).into_dyn();
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Check the output shape (dimensions of 6 reduced to 2 with stride=3)
     assert_eq!(output.shape(), &[1, 1, 2, 2, 2]);
@@ -100,7 +100,7 @@ fn test_average_pooling_3d_multiple_channels() {
     .into_dyn();
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Check the output shape
     assert_eq!(output.shape(), &[2, 3, 2, 2, 2]);
@@ -121,7 +121,7 @@ fn test_average_pooling_3d_edge_cases() {
     let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, Some((2, 2, 2)));
 
     let input = Array5::ones((1, 1, 3, 3, 3)).into_dyn();
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Output shape should be [1, 1, 1, 1, 1] as there is only one full pooling window
     assert_eq!(output.shape(), &[1, 1, 1, 1, 1]);
@@ -143,7 +143,7 @@ fn test_average_pooling_3d_gradient_flow() {
     .into_dyn();
 
     // Forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Create a specific gradient tensor
     let mut grad_output = ArrayD::zeros(output.raw_dim());

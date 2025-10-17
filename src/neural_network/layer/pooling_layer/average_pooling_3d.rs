@@ -108,7 +108,14 @@ impl AveragePooling3D {
 }
 
 impl Layer for AveragePooling3D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
+
         let input_shape = input.shape();
 
         // Cache input for backpropagation
@@ -184,7 +191,7 @@ impl Layer for AveragePooling3D {
             }
         }
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

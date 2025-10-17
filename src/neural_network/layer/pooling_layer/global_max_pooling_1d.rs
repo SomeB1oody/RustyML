@@ -65,16 +65,16 @@ impl GlobalMaxPooling1D {
 }
 
 impl Layer for GlobalMaxPooling1D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
         // Store the input shape for backpropagation
         self.input_shape = input.shape().to_vec();
-
-        // Verify input is 3D: [batch_size, channels, length]
-        assert_eq!(
-            self.input_shape.len(),
-            3,
-            "Input shape must be 3-dimensional: [batch_size, channels, length]"
-        );
 
         let batch_size = self.input_shape[0];
         let channels = self.input_shape[1];
@@ -121,7 +121,7 @@ impl Layer for GlobalMaxPooling1D {
         // Cache the positions of maximum values for backpropagation
         self.max_positions = Some(max_positions);
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

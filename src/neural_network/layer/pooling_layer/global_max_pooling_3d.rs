@@ -65,16 +65,16 @@ impl GlobalMaxPooling3D {
 }
 
 impl Layer for GlobalMaxPooling3D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
+
         // Store the input shape for backpropagation
         self.input_shape = input.shape().to_vec();
-
-        // Verify input is 5D: [batch_size, channels, depth, height, width]
-        assert_eq!(
-            self.input_shape.len(),
-            5,
-            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
-        );
 
         let batch_size = self.input_shape[0];
         let channels = self.input_shape[1];
@@ -127,7 +127,7 @@ impl Layer for GlobalMaxPooling3D {
         // Cache the positions of maximum values for backpropagation
         self.max_positions = Some(max_positions);
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

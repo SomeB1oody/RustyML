@@ -13,12 +13,12 @@ fn test_flatten_in_sequential() {
     let mut model = Sequential::new();
     model
         .add(Conv2D::new(
-            6,                      // Number of filters
-            (3, 3),                 // Kernel size
-            vec![2, 3, 4, 4],       // Input shape
-            (1, 1),                 // Stride
-            PaddingType::Valid,     // No padding
-            Some(Activation::ReLU), // ReLU activation function
+            6,                  // Number of filters
+            (3, 3),             // Kernel size
+            vec![2, 3, 4, 4],   // Input shape
+            (1, 1),             // Stride
+            PaddingType::Valid, // No padding
+            ReLU::new(),        // ReLU activation function
         ))
         .add(MaxPooling2D::new(
             (2, 2),           // Pooling window size
@@ -26,7 +26,7 @@ fn test_flatten_in_sequential() {
             None,             // Use default stride
         ))
         .add(Flatten::new(vec![2, 6, 1, 1])) // Flatten layer
-        .add(Dense::new(6, 1, Activation::Sigmoid)) // Fully connected layer
+        .add(Dense::new(6, 1, Sigmoid::new())) // Fully connected layer
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Print model structure
@@ -83,20 +83,20 @@ fn test_multiple_layers_with_flatten() {
     let mut model = Sequential::new();
     model
         .add(Conv2D::new(
-            8,                      // 8 filters
-            (3, 3),                 // 3x3 kernel
-            vec![2, 1, 8, 8],       // Input shape
-            (1, 1),                 // Stride
-            PaddingType::Same,      // Same padding
-            Some(Activation::ReLU), // ReLU activation
+            8,                 // 8 filters
+            (3, 3),            // 3x3 kernel
+            vec![2, 1, 8, 8],  // Input shape
+            (1, 1),            // Stride
+            PaddingType::Same, // Same padding
+            ReLU::new(),       // ReLU activation
         ))
         .add(Conv2D::new(
-            16,                     // 16 filters
-            (3, 3),                 // 3x3 kernel
-            vec![2, 8, 8, 8],       // Input shape (after first convolution)
-            (1, 1),                 // Stride
-            PaddingType::Valid,     // No padding
-            Some(Activation::ReLU), // ReLU activation
+            16,                 // 16 filters
+            (3, 3),             // 3x3 kernel
+            vec![2, 8, 8, 8],   // Input shape (after first convolution)
+            (1, 1),             // Stride
+            PaddingType::Valid, // No padding
+            ReLU::new(),        // ReLU activation
         ))
         .add(MaxPooling2D::new(
             (2, 2),            // 2x2 pooling window
@@ -104,8 +104,8 @@ fn test_multiple_layers_with_flatten() {
             Some((2, 2)),      // 2x2 stride
         ))
         .add(Flatten::new(vec![2, 16, 3, 3])) // Flatten layer
-        .add(Dense::new(16 * 3 * 3, 20, Activation::ReLU)) // Fully connected layer
-        .add(Dense::new(20, 10, Activation::Softmax)) // Output layer
+        .add(Dense::new(16 * 3 * 3, 20, ReLU::new())) // Fully connected layer
+        .add(Dense::new(20, 10, Softmax::new())) // Output layer
         .compile(
             Adam::new(0.001, 0.9, 0.999, 1e-8),
             CategoricalCrossEntropy::new(),
@@ -133,11 +133,11 @@ fn test_flatten_3d() {
     let input = Array3::ones((2, 10, 5)).into_dyn(); // batch=2, features=10, length=5
     let mut flatten = Flatten::new(vec![2, 10, 5]);
 
-    let output = flatten.forward(&input);
+    let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 50]); // 10 * 5 = 50
 
     // Test backward pass
-    let grad_output = Array2::ones((2, 50)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_output = Array2::ones((2, 50)).into_dyn();
     let grad_input = flatten.backward(&grad_output).unwrap();
     assert_eq!(grad_input.shape(), input.shape());
 }
@@ -147,11 +147,11 @@ fn test_flatten_4d() {
     let input = Array4::ones((2, 3, 4, 4)).into_dyn(); // batch=2, channels=3, height=4, width=4
     let mut flatten = Flatten::new(vec![2, 3, 4, 4]);
 
-    let output = flatten.forward(&input);
+    let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 48]); // 3 * 4 * 4 = 48
 
     // Test backward pass
-    let grad_output = Array2::ones((2, 48)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_output = Array2::ones((2, 48)).into_dyn();
     let grad_input = flatten.backward(&grad_output).unwrap();
     assert_eq!(grad_input.shape(), input.shape());
 }
@@ -161,23 +161,11 @@ fn test_flatten_5d() {
     let input = Array5::ones((2, 3, 4, 8, 8)).into_dyn(); // batch=2, channels=3, depth=4, height=8, width=8
     let mut flatten = Flatten::new(vec![2, 3, 4, 8, 8]);
 
-    let output = flatten.forward(&input);
+    let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 768]); // 3 * 4 * 8 * 8 = 768
 
     // Test backward pass
-    let grad_output = Array2::ones((2, 768)).into_dyn(); // 修复：使用 Array2 而不是 Array3
+    let grad_output = Array2::ones((2, 768)).into_dyn();
     let grad_input = flatten.backward(&grad_output).unwrap();
     assert_eq!(grad_input.shape(), input.shape());
-}
-
-#[test]
-#[should_panic(expected = "Input shape must be 3D, 4D, or 5D")]
-fn test_invalid_input_shape_2d() {
-    Flatten::new(vec![2, 10]); // 2D input should panic
-}
-
-#[test]
-#[should_panic(expected = "Input shape must be 3D, 4D, or 5D")]
-fn test_invalid_input_shape_6d() {
-    Flatten::new(vec![2, 3, 4, 5, 6, 7]); // 6D input should panic
 }

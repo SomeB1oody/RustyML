@@ -4,11 +4,11 @@ use super::*;
 fn test_depthwise_conv2d_creation() {
     // Create DepthwiseConv2D layer
     let layer = DepthwiseConv2D::new(
-        3,                      // filters
-        (3, 3),                 // kernel_size
-        (1, 1),                 // strides
-        PaddingType::Valid,     // padding
-        Some(Activation::ReLU), // activation
+        3,                  // filters
+        (3, 3),             // kernel_size
+        (1, 1),             // strides
+        PaddingType::Valid, // padding
+        ReLU::new(),        // activation
     );
 
     // Verify layer type
@@ -51,12 +51,12 @@ fn test_depthwise_conv2d_forward() {
         (3, 3),             // kernel_size
         (1, 1),             // strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     layer.initialize_weights(channels);
 
     // Forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape
     // Input: [2, 3, 6, 6], kernel (3,3), stride (1,1), valid padding
@@ -74,11 +74,11 @@ fn test_depthwise_conv2d_sequential_model() {
 
     // Create and initialize DepthwiseConv2D layer
     let mut depthwise_layer = DepthwiseConv2D::new(
-        3,                      // filters
-        (2, 2),                 // kernel_size
-        (1, 1),                 // strides
-        PaddingType::Valid,     // padding
-        Some(Activation::ReLU), // activation
+        3,                  // filters
+        (2, 2),             // kernel_size
+        (1, 1),             // strides
+        PaddingType::Valid, // padding
+        ReLU::new(),        // activation
     );
     depthwise_layer.initialize_weights(3);
 
@@ -133,7 +133,7 @@ fn test_depthwise_conv2d_same_padding() {
         (3, 3),            // kernel_size
         (1, 1),            // strides
         PaddingType::Same, // padding
-        None,              // no activation
+        Linear::new(),     // no activation
     );
     depthwise_layer.initialize_weights(2);
 
@@ -163,7 +163,7 @@ fn test_depthwise_conv2d_different_strides() {
         (3, 3),             // kernel_size
         (2, 2),             // strides - larger strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     depthwise_layer.initialize_weights(2);
 
@@ -191,11 +191,11 @@ fn test_depthwise_conv2d_training() {
     let mut model = Sequential::new();
 
     let mut depthwise_layer = DepthwiseConv2D::new(
-        2,                      // filters
-        (3, 3),                 // kernel_size
-        (1, 1),                 // strides
-        PaddingType::Valid,     // padding
-        Some(Activation::ReLU), // activation
+        2,                  // filters
+        (3, 3),             // kernel_size
+        (1, 1),             // strides
+        PaddingType::Valid, // padding
+        ReLU::new(),        // activation
     );
     depthwise_layer.initialize_weights(2);
 
@@ -230,7 +230,7 @@ fn test_depthwise_conv2d_backward() {
         (2, 2),             // kernel_size
         (1, 1),             // strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     layer.initialize_weights(input_channels);
 
@@ -239,7 +239,7 @@ fn test_depthwise_conv2d_backward() {
         Array4::from_shape_fn((1, 2, 3, 3), |(_, c, h, w)| (c * 10 + h * 3 + w) as f32).into_dyn();
 
     // Forward propagation
-    let output = layer.forward(&input_data);
+    let output = layer.forward(&input_data).unwrap();
     assert_eq!(output.shape(), &[1, 2, 2, 2]);
 
     // Create gradient output
@@ -260,7 +260,7 @@ fn test_depthwise_conv2d_channel_independence() {
         (2, 2),             // kernel_size
         (1, 1),             // strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     layer.initialize_weights(2);
 
@@ -284,7 +284,7 @@ fn test_depthwise_conv2d_channel_independence() {
     let input = input_data.into_dyn();
 
     // Forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Output shape should be [1, 2, 2, 2]
     assert_eq!(output.shape(), &[1, 2, 2, 2]);
@@ -304,12 +304,12 @@ fn test_depthwise_conv2d_edge_cases() {
         (1, 1),             // kernel_size
         (1, 1),             // strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     layer_1x1.initialize_weights(1);
 
     let input_1x1 = Array4::ones((1, 1, 2, 2)).into_dyn();
-    let output_1x1 = layer_1x1.forward(&input_1x1);
+    let output_1x1 = layer_1x1.forward(&input_1x1).unwrap();
     assert_eq!(output_1x1.shape(), &[1, 1, 2, 2]);
 
     // 2. Large strides resulting in small output
@@ -318,12 +318,12 @@ fn test_depthwise_conv2d_edge_cases() {
         (2, 2),             // kernel_size
         (3, 3),             // large strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     layer_large_stride.initialize_weights(1);
 
     let input_large = Array4::ones((1, 1, 5, 5)).into_dyn();
-    let output_large = layer_large_stride.forward(&input_large);
+    let output_large = layer_large_stride.forward(&input_large).unwrap();
     assert_eq!(output_large.shape(), &[1, 1, 2, 2]);
 }
 
@@ -337,7 +337,7 @@ fn test_depthwise_conv2d_multiple_batches() {
         (2, 2),             // kernel_size
         (1, 1),             // strides
         PaddingType::Valid, // padding
-        None,               // no activation
+        Linear::new(),      // no activation
     );
     depthwise_layer.initialize_weights(3);
 

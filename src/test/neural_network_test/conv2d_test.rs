@@ -13,12 +13,12 @@ fn conv2d_test() {
     let mut model = Sequential::new();
     model
         .add(Conv2D::new(
-            3,                      // Number of filters
-            (3, 3),                 // Kernel size
-            vec![2, 1, 5, 5],       // Input shape
-            (1, 1),                 // Stride
-            PaddingType::Valid,     // No padding
-            Some(Activation::ReLU), // ReLU activation function
+            3,                  // Number of filters
+            (3, 3),             // Kernel size
+            vec![2, 1, 5, 5],   // Input shape
+            (1, 1),             // Stride
+            PaddingType::Valid, // No padding
+            ReLU::new(),        // ReLU activation function
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -39,12 +39,12 @@ fn conv2d_test() {
     let mut model2 = Sequential::new();
     model2
         .add(Conv2D::new(
-            2,                         // Number of filters
-            (3, 3),                    // Kernel size
-            vec![2, 1, 5, 5],          // Input shape
-            (2, 2),                    // Larger stride
-            PaddingType::Same,         // Same padding
-            Some(Activation::Sigmoid), // Sigmoid activation function
+            2,                 // Number of filters
+            (3, 3),            // Kernel size
+            vec![2, 1, 5, 5],  // Input shape
+            (2, 2),            // Larger stride
+            PaddingType::Same, // Same padding
+            Sigmoid::new(),    // Sigmoid activation function
         ))
         .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 

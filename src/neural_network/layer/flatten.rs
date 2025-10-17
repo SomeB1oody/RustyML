@@ -67,12 +67,6 @@ impl Flatten {
     ///
     /// * `Flatten` - A new `Flatten` layer instance
     pub fn new(input_shape: Vec<usize>) -> Self {
-        assert!(
-            input_shape.len() >= 3 && input_shape.len() <= 5,
-            "Input shape must be 3D, 4D, or 5D, got {}D",
-            input_shape.len()
-        );
-
         let flattened_features = input_shape[1..].iter().product();
 
         Flatten {
@@ -83,14 +77,15 @@ impl Flatten {
 }
 
 impl Layer for Flatten {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input dimensions
         let input_shape = input.shape();
-        assert!(
-            input_shape.len() >= 3 && input_shape.len() <= 5,
-            "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
-            input_shape.len()
-        );
+        if input_shape.len() < 3 || input_shape.len() > 5 {
+            return Err(ModelError::InputValidationError(format!(
+                "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
+                input_shape.len()
+            )));
+        }
 
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
@@ -99,10 +94,10 @@ impl Layer for Flatten {
         let flattened_features: usize = input_shape[1..].iter().product();
 
         // Reshape to flatten the tensor
-        input
+        Ok(input
             .to_shape(IxDyn(&[batch_size, flattened_features]))
             .unwrap()
-            .to_owned()
+            .to_owned())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

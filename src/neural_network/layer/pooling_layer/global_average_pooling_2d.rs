@@ -66,16 +66,16 @@ impl GlobalAveragePooling2D {
 }
 
 impl Layer for GlobalAveragePooling2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Verify input is 4D: [batch_size, channels, height, width]
-        let shape = input.shape();
-        assert_eq!(
-            shape.len(),
-            4,
-            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
-        );
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
 
         // Extract dimensions
+        let shape = input.shape();
         let (batch_size, channels, height, width) = (shape[0], shape[1], shape[2], shape[3]);
 
         // Store input shape and cache input for backpropagation
@@ -112,7 +112,7 @@ impl Layer for GlobalAveragePooling2D {
             output[[b, c]] = val;
         }
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

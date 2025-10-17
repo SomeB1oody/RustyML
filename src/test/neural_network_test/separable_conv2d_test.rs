@@ -9,13 +9,13 @@ fn test_separable_conv2d_basic() {
     let mut model = Sequential::new();
     model
         .add(SeparableConv2D::new(
-            32,                     // filters
-            (3, 3),                 // kernel_size
-            vec![1, 3, 16, 16],     // input_shape
-            (1, 1),                 // strides
-            PaddingType::Same,      // padding
-            1,                      // depth_multiplier
-            Some(Activation::ReLU), // activation
+            32,                 // filters
+            (3, 3),             // kernel_size
+            vec![1, 3, 16, 16], // input_shape
+            (1, 1),             // strides
+            PaddingType::Same,  // padding
+            1,                  // depth_multiplier
+            ReLU::new(),        // activation
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -47,7 +47,7 @@ fn test_separable_conv2d_different_depth_multiplier() {
             (1, 1),            // strides
             PaddingType::Same, // padding
             2,                 // depth_multiplier = 2
-            None,              // no activation
+            Linear::new(),     // no activation
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -64,13 +64,13 @@ fn test_separable_conv2d_valid_padding() {
     let mut model = Sequential::new();
     model
         .add(SeparableConv2D::new(
-            8,                         // filters
-            (3, 3),                    // kernel_size
-            vec![1, 2, 10, 10],        // input_shape
-            (1, 1),                    // strides
-            PaddingType::Valid,        // valid padding
-            1,                         // depth_multiplier
-            Some(Activation::Sigmoid), // sigmoid activation
+            8,                  // filters
+            (3, 3),             // kernel_size
+            vec![1, 2, 10, 10], // input_shape
+            (1, 1),             // strides
+            PaddingType::Valid, // valid padding
+            1,                  // depth_multiplier
+            Sigmoid::new(),     // sigmoid activation
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -92,13 +92,13 @@ fn test_separable_conv2d_with_strides() {
     let mut model = Sequential::new();
     model
         .add(SeparableConv2D::new(
-            64,                     // filters
-            (3, 3),                 // kernel_size
-            vec![1, 3, 32, 32],     // input_shape
-            (2, 2),                 // strides = 2
-            PaddingType::Same,      // same padding
-            1,                      // depth_multiplier
-            Some(Activation::Tanh), // tanh activation
+            64,                 // filters
+            (3, 3),             // kernel_size
+            vec![1, 3, 32, 32], // input_shape
+            (2, 2),             // strides = 2
+            PaddingType::Same,  // same padding
+            1,                  // depth_multiplier
+            Tanh::new(),        // tanh activation
         ))
         .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
@@ -122,13 +122,13 @@ fn test_separable_conv2d_training() {
     let mut model = Sequential::new();
     model
         .add(SeparableConv2D::new(
-            16,                     // filters
-            (3, 3),                 // kernel_size
-            vec![2, 3, 8, 8],       // input_shape
-            (1, 1),                 // strides
-            PaddingType::Same,      // same padding
-            1,                      // depth_multiplier
-            Some(Activation::ReLU), // activation
+            16,                // filters
+            (3, 3),            // kernel_size
+            vec![2, 3, 8, 8],  // input_shape
+            (1, 1),            // strides
+            PaddingType::Same, // same padding
+            1,                 // depth_multiplier
+            ReLU::new(),       // activation
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -155,7 +155,7 @@ fn test_separable_conv2d_multiple_training_calls() {
             (1, 1),            // strides
             PaddingType::Same, // padding
             1,                 // depth_multiplier
-            None,              // no activation
+            Linear::new(),     // no activation
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -183,7 +183,7 @@ fn test_separable_conv2d_different_optimizers() {
             (1, 1),
             PaddingType::Same,
             1,
-            None,
+            Linear::new(),
         ))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -200,7 +200,7 @@ fn test_separable_conv2d_different_optimizers() {
             (1, 1),
             PaddingType::Same,
             1,
-            None,
+            Linear::new(),
         ))
         .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
@@ -217,7 +217,7 @@ fn test_separable_conv2d_different_optimizers() {
             (1, 1),
             PaddingType::Same,
             1,
-            None,
+            Linear::new(),
         ))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
@@ -242,7 +242,7 @@ fn test_separable_conv2d_batch_processing() {
                 (1, 1),
                 PaddingType::Same,
                 1,
-                None,
+                Linear::new(),
             ))
             .compile(SGD::new(0.01), MeanSquaredError::new());
 
@@ -258,13 +258,13 @@ fn test_separable_conv2d_large_kernel() {
     let mut model = Sequential::new();
     model
         .add(SeparableConv2D::new(
-            64,                     // filters
-            (5, 5),                 // larger kernel
-            vec![1, 4, 32, 32],     // input_shape
-            (1, 1),                 // strides
-            PaddingType::Same,      // padding
-            1,                      // depth_multiplier
-            Some(Activation::ReLU), // activation
+            64,                 // filters
+            (5, 5),             // larger kernel
+            vec![1, 4, 32, 32], // input_shape
+            (1, 1),             // strides
+            PaddingType::Same,  // padding
+            1,                  // depth_multiplier
+            ReLU::new(),        // activation
         ))
         .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
@@ -282,7 +282,7 @@ fn test_separable_conv2d_get_weights() {
         (1, 1),
         PaddingType::Same,
         1,
-        None,
+        Linear::new(),
     ));
 
     let weights = model.get_weights();
@@ -306,7 +306,7 @@ fn test_separable_conv2d_output_shape_calculation() {
         (2, 2),
         PaddingType::Valid,
         1,
-        None,
+        Linear::new(),
     );
 
     // Valid padding with stride 2: (64-3)/2 + 1 = 31

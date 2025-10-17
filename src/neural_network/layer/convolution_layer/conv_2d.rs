@@ -19,7 +19,7 @@ const CONV_2D_PARALLEL_THRESHOLD: usize = 10000;
 /// - `padding` - Type of padding to apply (`Valid` or `Same`).
 /// - `weights` - 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\].
 /// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Optional activation function applied after the convolution.
+/// - `activation` - Activation layer from activation_layer module
 /// - `input_cache` - Cached input from the forward pass, used during backpropagation.
 /// - `input_shape` - Shape of the input tensor.
 /// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
@@ -58,7 +58,7 @@ const CONV_2D_PARALLEL_THRESHOLD: usize = 10000;
 ///         vec![2, 1, 5, 5],       // Input shape
 ///         (1, 1),                 // Stride
 ///         PaddingType::Valid,     // No padding
-///         Some(Activation::ReLU), // ReLU activation function
+///         ReLU::new(), // ReLU activation layer
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -75,14 +75,14 @@ const CONV_2D_PARALLEL_THRESHOLD: usize = 10000;
 /// // Check if output shape is correct - should be [2, 3, 3, 3]
 /// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
 /// ```
-pub struct Conv2D {
+pub struct Conv2D<T: ActivationLayer> {
     filters: usize,
     kernel_size: (usize, usize),
     strides: (usize, usize),
     padding: PaddingType,
     weights: Array4<f32>,
     bias: Array2<f32>,
-    activation: Option<Activation>,
+    activation: T,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array4<f32>>,
@@ -90,7 +90,7 @@ pub struct Conv2D {
     optimizer_cache: OptimizerCacheConv2D,
 }
 
-impl Conv2D {
+impl<T: ActivationLayer> Conv2D<T> {
     /// Creates a new 2D convolutional layer with the specified parameters.
     ///
     /// # Parameters
@@ -100,7 +100,7 @@ impl Conv2D {
     /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\].
     /// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
     /// - `padding` - Type of padding to apply (`Valid` or `Same`).
-    /// - `activation` - Optional activation function to apply after the convolution.
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
@@ -116,15 +116,8 @@ impl Conv2D {
         input_shape: Vec<usize>,
         strides: (usize, usize),
         padding: PaddingType,
-        activation: Option<Activation>,
+        activation: T,
     ) -> Self {
-        // verify input is 4D: [batch_size, channels, height, width]
-        assert_eq!(
-            input_shape.len(),
-            4,
-            "Input tensor must be 4-dimensional: [batch_size, channels, height, width]"
-        );
-
         // Shape is [batch_size, channels, height, width]
         let channels = input_shape[1];
 
@@ -328,23 +321,29 @@ impl Conv2D {
     }
 }
 
-impl Layer for Conv2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for Conv2D<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
         // Perform convolution operation
-        let mut output = self.convolve(input);
+        let output = self.convolve(input);
 
-        // Apply activation function
-        if let Some(activation) = &self.activation {
-            Activation::apply_activation_inplace(activation, &mut output);
-        }
-
-        output
+        // Apply activation
+        self.activation.forward(&output.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         if let Some(input) = &self.input_cache {
             let original_input_shape = input.shape();
 
@@ -354,17 +353,9 @@ impl Layer for Conv2D {
 
             let batch_size = input_shape[0];
             let channels = input_shape[1];
-            let grad_shape = grad_output.shape();
-            let grad_output = grad_output.clone();
+            let grad_shape = grad_upstream.shape();
 
-            // Apply activation derivative to the gradient
-            let gradient = if let Some(activation) = &self.activation {
-                let mut grad = grad_output.clone();
-                Activation::activation_derivative_inplace(activation, &mut grad);
-                grad
-            } else {
-                grad_output.clone()
-            };
+            let gradient = grad_upstream.clone();
 
             // Initialize gradients for weights and biases
             let mut weight_grads = Array4::zeros(self.weights.dim());

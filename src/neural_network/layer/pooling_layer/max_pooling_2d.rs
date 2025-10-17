@@ -214,7 +214,14 @@ impl MaxPooling2D {
 }
 
 impl Layer for MaxPooling2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
@@ -224,7 +231,7 @@ impl Layer for MaxPooling2D {
         // Store maximum value positions for backpropagation
         self.max_positions = Some(max_positions);
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

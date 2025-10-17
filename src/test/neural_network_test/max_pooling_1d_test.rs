@@ -60,7 +60,7 @@ fn test_max_pooling_1d_backward() {
     let mut pool_layer = MaxPooling1D::new(2, 2, vec![1, 1, 4]);
 
     // Forward propagation
-    let output = pool_layer.forward(&x);
+    let output = pool_layer.forward(&x).unwrap();
     assert_eq!(output.shape(), &[1, 1, 2]);
     assert_relative_eq!(output[[0, 0, 0]], 1.0); // Max value of first window
     assert_relative_eq!(output[[0, 0, 1]], 3.0); // Max value of second window

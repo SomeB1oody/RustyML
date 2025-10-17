@@ -137,9 +137,9 @@
 //! // Build a neural network
 //! let mut model = Sequential::new();
 //! model
-//!     .add(Dense::new(784, 128, Activation::ReLU))
-//!     .add(Dense::new(128, 64, Activation::ReLU))
-//!     .add(Dense::new(64, 10, Activation::Softmax))
+//!     .add(Dense::new(784, 128, ReLU::new()))
+//!     .add(Dense::new(128, 64, ReLU::new()))
+//!     .add(Dense::new(64, 10, Softmax::new()))
 //!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());
 //!
 //! // Display model structure
@@ -154,9 +154,9 @@
 //! // Create a new model with the same architecture
 //! let mut new_model = Sequential::new();
 //! new_model
-//!     .add(Dense::new(784, 128, Activation::ReLU))
-//!     .add(Dense::new(128, 64, Activation::ReLU))
-//!     .add(Dense::new(64, 10, Activation::Softmax));
+//!     .add(Dense::new(784, 128, ReLU::new()))
+//!     .add(Dense::new(128, 64, ReLU::new()))
+//!     .add(Dense::new(64, 10, Softmax::new()));
 //!
 //! // Load weights from file
 //! new_model.load_from_path("model.json").unwrap();
@@ -636,7 +636,7 @@ pub mod dataset;
 ///
 /// ## Layer Types
 /// - **Dense**: Fully connected layers with customizable activation functions
-/// - **Activation**: Standalone activation functions (ReLU, Sigmoid, Tanh, Softmax, etc.)
+/// - **Activation**: Standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, Linear, etc.)
 /// - **Pooling Layers**: Max pooling and average pooling operations for 1D, 2D, and 3D data
 /// - **Global Pooling**: Global max pooling and global average pooling for 1D, 2D, and 3D tensors
 /// - **Recurrent Layers**: Sequential Modeling Layers like RNN, LSTM, and GRU
@@ -675,9 +675,9 @@ pub mod dataset;
 ///
 /// // Build sequential model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 8, Activation::ReLU))   // Input layer: 4 -> 8
-///      .add(Dense::new(8, 3, Activation::ReLU))   // Hidden layer: 8 -> 3
-///      .add(Dense::new(3, 1, Activation::Linear)); // Output layer: 3 -> 1
+/// model.add(Dense::new(4, 8, ReLU::new()))   // Input layer: 4 -> 8
+///      .add(Dense::new(8, 3, ReLU::new()))   // Hidden layer: 8 -> 3
+///      .add(Dense::new(3, 1, Linear::new())); // Output layer: 3 -> 1
 ///
 /// // Compile with optimizer and loss function
 /// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());

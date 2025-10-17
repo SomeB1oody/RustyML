@@ -24,8 +24,8 @@ pub struct SerializableDenseWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<Dense> for SerializableDenseWeight {
-    fn apply_to_layer(&self, layer: &mut Dense) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<Dense<T>> for SerializableDenseWeight {
+    fn apply_to_layer(&self, layer: &mut Dense<T>) -> Result<(), IoError> {
         let weight_array = vec2_to_array2(&self.weight)?;
         let bias_array = vec2_to_array2(&self.bias)?;
         layer.set_weights(weight_array, bias_array);
@@ -41,8 +41,8 @@ pub struct SerializableSimpleRNNWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<SimpleRNN> for SerializableSimpleRNNWeight {
-    fn apply_to_layer(&self, layer: &mut SimpleRNN) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<SimpleRNN<T>> for SerializableSimpleRNNWeight {
+    fn apply_to_layer(&self, layer: &mut SimpleRNN<T>) -> Result<(), IoError> {
         let kernel = vec2_to_array2(&self.kernel)?;
         let recurrent_kernel = vec2_to_array2(&self.recurrent_kernel)?;
         let bias = vec2_to_array2(&self.bias)?;
@@ -84,8 +84,8 @@ pub struct SerializableGRUWeight {
     pub candidate: SerializableGRUGateWeight,
 }
 
-impl ApplyWeights<GRU> for SerializableGRUWeight {
-    fn apply_to_layer(&self, layer: &mut GRU) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<GRU<T>> for SerializableGRUWeight {
+    fn apply_to_layer(&self, layer: &mut GRU<T>) -> Result<(), IoError> {
         let reset_kernel = vec2_to_array2(&self.reset.kernel)?;
         let reset_recurrent = vec2_to_array2(&self.reset.recurrent_kernel)?;
         let reset_bias = vec2_to_array2(&self.reset.bias)?;
@@ -113,8 +113,8 @@ impl ApplyWeights<GRU> for SerializableGRUWeight {
     }
 }
 
-impl ApplyWeights<LSTM> for SerializableLSTMWeight {
-    fn apply_to_layer(&self, layer: &mut LSTM) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<LSTM<T>> for SerializableLSTMWeight {
+    fn apply_to_layer(&self, layer: &mut LSTM<T>) -> Result<(), IoError> {
         let input_kernel = vec2_to_array2(&self.input.kernel)?;
         let input_recurrent = vec2_to_array2(&self.input.recurrent_kernel)?;
         let input_bias = vec2_to_array2(&self.input.bias)?;
@@ -156,8 +156,8 @@ pub struct SerializableConv1DWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<Conv1D> for SerializableConv1DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv1D) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<Conv1D<T>> for SerializableConv1DWeight {
+    fn apply_to_layer(&self, layer: &mut Conv1D<T>) -> Result<(), IoError> {
         let weight_array = vec3_to_array3(&self.weight)?;
         let bias_array = vec2_to_array2(&self.bias)?;
         layer.set_weights(weight_array, bias_array);
@@ -172,8 +172,8 @@ pub struct SerializableConv2DWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<Conv2D> for SerializableConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv2D) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<Conv2D<T>> for SerializableConv2DWeight {
+    fn apply_to_layer(&self, layer: &mut Conv2D<T>) -> Result<(), IoError> {
         let weight_array = vec4_to_array4(&self.weight)?;
         let bias_array = vec2_to_array2(&self.bias)?;
         layer.set_weights(weight_array, bias_array);
@@ -188,8 +188,8 @@ pub struct SerializableConv3DWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<Conv3D> for SerializableConv3DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv3D) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<Conv3D<T>> for SerializableConv3DWeight {
+    fn apply_to_layer(&self, layer: &mut Conv3D<T>) -> Result<(), IoError> {
         let weight_array = vec5_to_array5(&self.weight)?;
         let bias_array = vec2_to_array2(&self.bias)?;
         layer.set_weights(weight_array, bias_array);
@@ -205,8 +205,8 @@ pub struct SerializableSeparableConv2DWeight {
     pub bias: Vec<Vec<f32>>,
 }
 
-impl ApplyWeights<SeparableConv2D> for SerializableSeparableConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut SeparableConv2D) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<SeparableConv2D<T>> for SerializableSeparableConv2DWeight {
+    fn apply_to_layer(&self, layer: &mut SeparableConv2D<T>) -> Result<(), IoError> {
         let depthwise_weight = vec4_to_array4(&self.depthwise_weight)?;
         let pointwise_weight = vec4_to_array4(&self.pointwise_weight)?;
         let bias_array = vec2_to_array2(&self.bias)?;
@@ -222,8 +222,8 @@ pub struct SerializableDepthwiseConv2DWeight {
     pub bias: Vec<f32>,
 }
 
-impl ApplyWeights<DepthwiseConv2D> for SerializableDepthwiseConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut DepthwiseConv2D) -> Result<(), IoError> {
+impl<T: ActivationLayer> ApplyWeights<DepthwiseConv2D<T>> for SerializableDepthwiseConv2DWeight {
+    fn apply_to_layer(&self, layer: &mut DepthwiseConv2D<T>) -> Result<(), IoError> {
         let weight_array = vec4_to_array4(&self.weight)?;
         let bias_array = Array1::from_vec(self.bias.clone());
         layer.set_weights(weight_array, bias_array);
@@ -539,4 +539,137 @@ fn vec5_to_array5(vec: &[Vec<Vec<Vec<Vec<f32>>>>]) -> Result<Array5<f32>, IoErro
             e.to_string(),
         ))
     })
+}
+
+/// A macro that attempts to apply weights to different activation layer types.
+///
+/// This macro tries to downcast a generic layer to specific layer types with different
+/// activation functions (ReLU, Sigmoid, Softmax, Tanh) and applies the given weights
+/// if the downcast is successful.
+///
+/// # Parameters
+///
+/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
+/// - `$weight` - The weight structure to apply to the layer
+/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
+/// - `$layer_name` - String literal of the layer name (used for debugging)
+///
+/// # Returns
+///
+/// - `true` - If the layer was successfully downcast and weights were applied
+/// - `false` - If none of the activation types matched
+macro_rules! try_apply_with_activations {
+    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr) => {{
+        if let Some(layer) = $layer_any.downcast_mut::<$layer_type<ReLU>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Sigmoid>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Softmax>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Tanh>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else {
+            false
+        }
+    }};
+}
+
+/// A macro that applies weights to a layer and handles type mismatch errors.
+///
+/// This macro uses `try_apply_with_activations!` to attempt weight application and
+/// returns an error if the layer type doesn't match the expected type.
+///
+/// # Parameters
+///
+/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
+/// - `$weight` - The weight structure to apply to the layer
+/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
+/// - `$layer_name` - String literal of the layer name (for error messages)
+/// - `$expected_type` - String describing the expected layer type (for error messages)
+macro_rules! apply_layer_weights {
+    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
+        let applied = try_apply_with_activations!($layer_any, $weight, $layer_type, $layer_name);
+        if !applied {
+            return Err(IoError::StdIoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Expected {} layer but got {}", $layer_name, $expected_type),
+            )));
+        }
+    }};
+}
+
+/// Applies serializable weights to a neural network layer.
+///
+/// This function takes a mutable reference to a layer and applies the appropriate weights
+/// based on the layer type. It handles type checking and downcasting to ensure weights
+/// are applied to the correct layer type.
+///
+/// # Parameters
+///
+/// - `layer` - Mutable reference to the layer that will receive the weights
+/// - `weights` - Reference to the serializable weights to apply
+/// - `expected_type` - String describing the expected layer type (used for error messages)
+///
+/// # Returns
+///
+/// - `Ok(())` - Weights were successfully applied to the layer
+/// - `Err(IoError)` - Layer type mismatch or weight application failed
+pub fn apply_weights_to_layer(
+    layer: &mut dyn Layer,
+    weights: &SerializableLayerWeight,
+    expected_type: &str,
+) -> Result<(), IoError> {
+    use std::any::Any;
+    let layer_any: &mut dyn Any = layer;
+
+    match weights {
+        SerializableLayerWeight::Dense(w) => {
+            apply_layer_weights!(layer_any, w, Dense, "Dense", expected_type);
+        }
+        SerializableLayerWeight::SimpleRNN(w) => {
+            apply_layer_weights!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);
+        }
+        SerializableLayerWeight::LSTM(w) => {
+            apply_layer_weights!(layer_any, w, LSTM, "LSTM", expected_type);
+        }
+        SerializableLayerWeight::GRU(w) => {
+            apply_layer_weights!(layer_any, w, GRU, "GRU", expected_type);
+        }
+        SerializableLayerWeight::Conv1D(w) => {
+            apply_layer_weights!(layer_any, w, Conv1D, "Conv1D", expected_type);
+        }
+        SerializableLayerWeight::Conv2D(w) => {
+            apply_layer_weights!(layer_any, w, Conv2D, "Conv2D", expected_type);
+        }
+        SerializableLayerWeight::Conv3D(w) => {
+            apply_layer_weights!(layer_any, w, Conv3D, "Conv3D", expected_type);
+        }
+        SerializableLayerWeight::SeparableConv2D(w) => {
+            apply_layer_weights!(
+                layer_any,
+                w,
+                SeparableConv2D,
+                "SeparableConv2D",
+                expected_type
+            );
+        }
+        SerializableLayerWeight::DepthwiseConv2D(w) => {
+            apply_layer_weights!(
+                layer_any,
+                w,
+                DepthwiseConv2D,
+                "DepthwiseConv2D",
+                expected_type
+            );
+        }
+        SerializableLayerWeight::Empty => {
+            // No weights to set for empty layers
+        }
+    }
+
+    Ok(())
 }

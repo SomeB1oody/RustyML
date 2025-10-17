@@ -56,7 +56,7 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// // Create GRU layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(GRU::new(4, 3, Activation::Tanh))
+/// model.add(GRU::new(4, 3, Tanh::new()))
 ///      .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
 /// // Train the model
@@ -67,7 +67,7 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 /// println!("GRU output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
-pub struct GRU {
+pub struct GRU<T: ActivationLayer> {
     input_dim: usize,
     units: usize,
 
@@ -86,25 +86,25 @@ pub struct GRU {
     h_candidate_cache: Option<Vec<Array2<f32>>>, // candidate hidden state values (tanh applied)
     rh_cache: Option<Vec<Array2<f32>>>, // r_t * h_{t-1}
 
-    activation: Activation,
+    activation: T,
 }
 
-impl GRU {
+impl<T: ActivationLayer> GRU<T> {
     /// Creates a new GRU layer with specified parameters
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation function applied to the final output (commonly Tanh or Linear)
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
     /// * `GRU` - A new `GRU` instance with:
     ///     - Three gates (reset, update, candidate) initialized with random weights
     ///     - All caches set to None (will be allocated during first forward pass)
-    ///     - Specified activation function for output transformation
-    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
+    ///     - activation layer for output transformation
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         Self {
             input_dim,
             units,
@@ -158,10 +158,22 @@ impl GRU {
     }
 }
 
-impl Layer for GRU {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for GRU<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
+        let x3 = input
+            .view()
+            .into_dimensionality::<ndarray::Ix3>()
+            .unwrap()
+            .to_owned();
+
         // Input shape: (batch, timesteps, input_dim)
-        let x3 = input.clone().into_dimensionality::<ndarray::Ix3>().unwrap();
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.clone());
 
@@ -199,15 +211,9 @@ impl Layer for GRU {
 
             // Apply sigmoid activation to gates (parallel or sequential)
             let (r_t, z_t) = if use_parallel {
-                rayon::join(
-                    || Activation::apply_activation(&r_raw, &Activation::Sigmoid),
-                    || Activation::apply_activation(&z_raw, &Activation::Sigmoid),
-                )
+                rayon::join(|| apply_sigmoid(r_raw), || apply_sigmoid(z_raw))
             } else {
-                (
-                    Activation::apply_activation(&r_raw, &Activation::Sigmoid),
-                    Activation::apply_activation(&z_raw, &Activation::Sigmoid),
-                )
+                (apply_sigmoid(r_raw), apply_sigmoid(z_raw))
             };
 
             // Compute r_t * h_{t-1}
@@ -217,17 +223,13 @@ impl Layer for GRU {
             let h_candidate_raw = x_t.dot(&self.candidate_gate.kernel)
                 + r_h.dot(&self.candidate_gate.recurrent_kernel)
                 + &self.candidate_gate.bias;
-            let h_candidate = Activation::apply_activation(&h_candidate_raw, &Activation::Tanh);
+            let h_candidate = h_candidate_raw.mapv(|x| {
+                let clipped_x = x.clamp(-500.0, 500.0);
+                clipped_x.tanh()
+            });
 
             // Update hidden state: h_t = (1 - z_t) * h_{t-1} + z_t * h̃_t
             let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
-
-            // Apply output activation if not Linear
-            let h_t = if self.activation != Activation::Linear {
-                Activation::apply_activation(&h_t, &self.activation)
-            } else {
-                h_t
-            };
 
             // Cache values
             r_vals.push(r_t);
@@ -246,15 +248,15 @@ impl Layer for GRU {
         self.h_candidate_cache = Some(h_candidate_vals);
         self.rh_cache = Some(rh_vals);
 
-        // Return last hidden state
-        h_prev.into_dyn()
+        // Apply activation
+        self.activation.forward(&h_prev.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        let grad_h_t = grad_output
-            .clone()
-            .into_dimensionality::<ndarray::Ix2>()
-            .unwrap();
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
+        let grad_h_t = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
 
         let error_msg = "Forward pass has not been run";
         let x3 = take_cache(&mut self.input_cache, error_msg)?;
@@ -290,21 +292,16 @@ impl Layer for GRU {
 
         // Backpropagation through time
         for t in (0..timesteps).rev() {
-            let h_t = &hs[t + 1];
             let h_prev = &hs[t];
             let r_t = &r_vals[t];
             let z_t = &z_vals[t];
             let h_candidate = &h_candidate_vals[t];
             let r_h = &rh_vals[t];
 
-            // Gradient through output activation
-            let grad_h_pre_activation =
-                compute_output_activation_gradient(h_t, &grad_h, &self.activation);
-
             // Gradient through h_t = (1 - z_t) * h_{t-1} + z_t * h̃_t
-            let grad_z_t = &grad_h_pre_activation * (h_candidate - h_prev);
-            let grad_h_candidate = &grad_h_pre_activation * z_t;
-            let grad_h_prev_from_update = &grad_h_pre_activation * &(1.0 - z_t);
+            let grad_z_t = &grad_h * (h_candidate - h_prev);
+            let grad_h_candidate = &grad_h * z_t;
+            let grad_h_prev_from_update = &grad_h * &(1.0 - z_t);
 
             // Gradient through h̃_t = tanh(...)
             let grad_h_candidate_raw = &grad_h_candidate * &(1.0 - h_candidate * h_candidate); // tanh derivative

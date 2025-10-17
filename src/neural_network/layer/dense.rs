@@ -28,8 +28,7 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 /// - `output_dim` - Output dimension size
 /// - `weights` - Weight matrix with shape (input_dim, output_dim)
 /// - `bias` - Bias vector with shape (1, output_dim)
-/// - `activation` - Activation function for the layer
-/// - `activation_output` - Cached output after activation for use in backward pass
+/// - `activation` - Activation layer from activation_layer module
 ///
 /// ## Cache
 /// - `input_cache` - Cache of the input from forward pass for use in backward pass
@@ -48,7 +47,8 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, Activation::ReLU)).add(Dense::new(3, 1, Activation::ReLU));
+/// model.add(Dense::new(4, 3, ReLU::new()))
+///     .add(Dense::new(3, 1, ReLU::new()));
 /// model.compile(SGD::new(0.01), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
@@ -61,7 +61,7 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 /// let prediction = model.predict(&x);
 /// println!("Prediction results: {:?}", prediction);
 /// ```
-pub struct Dense {
+pub struct Dense<T: ActivationLayer> {
     input_dim: usize,
     output_dim: usize,
     weights: Array2<f32>,
@@ -70,23 +70,22 @@ pub struct Dense {
     grad_weights: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
     optimizer_cache: OptimizerCache,
-    activation: Activation,
-    activation_output: Option<Array2<f32>>,
+    activation: T,
 }
 
-impl Dense {
-    /// Creates a new dense layer with specific activation function.
+impl<T: ActivationLayer> Dense<T> {
+    /// Creates a new dense layer with optional activation layer.
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
-    /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
-    /// -  `activation` - Activation function applied to the final output (commonly Tanh or Linear)
+    /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
     /// * `Dense` - A new `Dense` layer instance with specified dimensions
-    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
         let weights = Array::random((input_dim, units), Uniform::new(-limit, limit));
         let bias = Array::zeros((1, units));
@@ -99,43 +98,10 @@ impl Dense {
             grad_weights: None,
             grad_bias: None,
             activation,
-            activation_output: None,
             optimizer_cache: OptimizerCache {
                 adam_states: None,
                 rmsprop_cache: None,
             },
-        }
-    }
-
-    /// Performs matrix multiplication with automatic parallel/sequential selection.
-    fn matmul<S1, S2>(
-        &self,
-        a: &ArrayBase<S1, ndarray::Ix2>,
-        b: &ArrayBase<S2, ndarray::Ix2>,
-    ) -> Array2<f32>
-    where
-        S1: ndarray::Data<Elem = f32>,
-        S2: ndarray::Data<Elem = f32>,
-    {
-        if self.input_dim * self.output_dim >= DENSE_PARALLEL_THRESHOLD {
-            // Use ndarray's parallel dot operation (with rayon)
-            a.dot(b)
-        } else {
-            // Use sequential computation for small matrices
-            let (m, k) = (a.nrows(), a.ncols());
-            let (_, n) = (b.nrows(), b.ncols());
-            let mut result = Array2::zeros((m, n));
-
-            for i in 0..m {
-                for j in 0..n {
-                    let mut sum = 0.0;
-                    for p in 0..k {
-                        sum += a[[i, p]] * b[[p, j]];
-                    }
-                    result[[i, j]] = sum;
-                }
-            }
-            result
         }
     }
 
@@ -151,58 +117,126 @@ impl Dense {
     }
 }
 
-impl Layer for Dense {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for Dense<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 2D
+        if input.ndim() != 2 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 2D".to_string(),
+            ));
+        }
+
+        let input_2d = input
+            .view()
+            .into_dimensionality::<ndarray::Ix2>()
+            .unwrap()
+            .to_owned();
+
         // Input shape is [batch_size, input_dim]
-        let input_2d = input.clone().into_dimensionality::<ndarray::Ix2>().unwrap();
         self.input_cache = Some(input_2d.clone());
 
         // Use adaptive parallel/sequential matrix multiplication
-        let z = self.matmul(&input_2d, &self.weights) + &self.bias;
+        let total_ops = self.input_dim * self.output_dim;
+        let z = if total_ops < DENSE_PARALLEL_THRESHOLD {
+            // Sequential computation using dot
+            input_2d.dot(&self.weights) + &self.bias
+        } else {
+            // Parallel computation using par_iter
+            let batch_size = input_2d.nrows();
+            let mut result = Array2::<f32>::zeros((batch_size, self.output_dim));
 
-        let a = Activation::apply_activation(&z, &self.activation);
-        self.activation_output = Some(a.clone());
-        a.into_dyn()
+            result
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .zip(input_2d.axis_iter(Axis(0)))
+                .for_each(|(mut out_row, in_row)| {
+                    for j in 0..self.output_dim {
+                        let mut sum = self.bias[[0, j]];
+                        for k in 0..self.input_dim {
+                            sum += in_row[k] * self.weights[[k, j]];
+                        }
+                        out_row[j] = sum;
+                    }
+                });
+
+            result
+        };
+
+        // Apply activation
+        self.activation.forward(&z.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass if activation layer exists
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         // Convert gradient to 2D array with shape [batch_size, output_dim]
-        let mut grad_upstream = grad_output
-            .clone()
-            .into_dimensionality::<ndarray::Ix2>()
-            .unwrap();
-
-        // Get activation output cache
-        let a = self.activation_output.take().ok_or_else(|| {
-            ModelError::ProcessingError(String::from("Forward pass has not been run"))
-        })?;
-
-        // Apply activation derivative
-        if self.activation == Activation::Softmax {
-            grad_upstream = Activation::softmax_backward(&a, &grad_upstream);
-        } else {
-            let deriv = Activation::activation_derivative(&a, &self.activation);
-            grad_upstream = deriv * grad_upstream;
-        }
+        let grad_upstream_2d = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
 
         // Get input cache
         let input = self.input_cache.take().ok_or_else(|| {
             ModelError::ProcessingError(String::from("Forward pass has not been run"))
         })?;
 
-        // Calculate weight gradients using adaptive matrix multiplication
-        // grad_w = input^T * grad_upstream
-        let grad_w = self.matmul(&input.t(), &grad_upstream);
+        let total_ops = self.input_dim * self.output_dim;
+
+        // Calculate weight gradients: grad_w = input^T * grad_upstream
+        let grad_w = if total_ops < DENSE_PARALLEL_THRESHOLD {
+            // Sequential computation using dot
+            input.t().dot(&grad_upstream_2d)
+        } else {
+            // Parallel computation using par_iter
+            let mut result = Array2::<f32>::zeros((self.input_dim, self.output_dim));
+
+            result
+                .axis_iter_mut(Axis(1))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(j, mut out_col)| {
+                    for i in 0..self.input_dim {
+                        let mut sum = 0.0;
+                        for k in 0..input.nrows() {
+                            sum += input[[k, i]] * grad_upstream_2d[[k, j]];
+                        }
+                        out_col[i] = sum;
+                    }
+                });
+
+            result
+        };
 
         // Calculate bias gradients by summing over batch dimension
-        let grad_b = grad_upstream.sum_axis(Axis(0)).insert_axis(Axis(0));
+        let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-        self.grad_weights = Some(grad_w);
-        self.grad_bias = Some(grad_b);
+        // Ensure arrays are contiguous before storing (as_standard_layout() ensures contiguous memory layout)
+        self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
+        self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
-        // Calculate gradients to be passed to previous layer
-        // grad_input = grad_upstream * weights^T
-        let grad_input = self.matmul(&grad_upstream, &self.weights.t());
+        // Calculate gradients to be passed to previous layer: grad_input = grad_upstream * weights^T
+        let grad_input = if total_ops < DENSE_PARALLEL_THRESHOLD {
+            // Sequential computation using dot
+            grad_upstream_2d.dot(&self.weights.t())
+        } else {
+            // Parallel computation using par_iter
+            let batch_size = grad_upstream_2d.nrows();
+            let mut result = Array2::<f32>::zeros((batch_size, self.input_dim));
+
+            result
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .zip(grad_upstream_2d.axis_iter(Axis(0)))
+                .for_each(|(mut out_row, grad_row)| {
+                    for j in 0..self.input_dim {
+                        let mut sum = 0.0;
+                        for k in 0..self.output_dim {
+                            sum += grad_row[k] * self.weights[[j, k]];
+                        }
+                        out_row[j] = sum;
+                    }
+                });
+
+            result
+        };
 
         Ok(grad_input.into_dyn())
     }

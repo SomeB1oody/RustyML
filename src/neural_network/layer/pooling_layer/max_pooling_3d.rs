@@ -220,7 +220,14 @@ impl MaxPooling3D {
 }
 
 impl Layer for MaxPooling3D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
@@ -230,7 +237,7 @@ impl Layer for MaxPooling3D {
         // Store maximum value positions for backpropagation
         self.max_positions = Some(max_positions);
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

@@ -14,13 +14,13 @@ fn test_sequential_new() {
 #[test]
 fn test_sequential_add_layer() {
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 3, Activation::ReLU));
+    model.add(Dense::new(4, 3, ReLU::new()));
 
     // Test that one layer was added
     let weights = model.get_weights();
     assert_eq!(weights.len(), 1);
 
-    model.add(Dense::new(3, 1, Activation::Sigmoid));
+    model.add(Dense::new(3, 1, Sigmoid::new()));
 
     // Test that second layer was added
     let weights = model.get_weights();
@@ -31,8 +31,8 @@ fn test_sequential_add_layer() {
 fn test_sequential_method_chaining() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid))
+        .add(Dense::new(4, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Test that both layers were added
@@ -44,8 +44,8 @@ fn test_sequential_method_chaining() {
 fn test_sequential_fit_success() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid))
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let x = Array::ones((3, 2)).into_dyn();
@@ -58,7 +58,7 @@ fn test_sequential_fit_success() {
 #[test]
 fn test_sequential_fit_no_optimizer() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::ReLU));
+    model.add(Dense::new(2, 1, ReLU::new()));
 
     let x = Array::ones((3, 2)).into_dyn();
     let y = Array::ones((3, 1)).into_dyn();
@@ -89,8 +89,8 @@ fn test_sequential_fit_no_layers() {
 fn test_sequential_predict() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid));
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()));
 
     let x = Array::ones((3, 2)).into_dyn();
     let prediction = model.predict(&x);
@@ -102,9 +102,9 @@ fn test_sequential_predict() {
 fn test_sequential_summary() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Activation::ReLU))
-        .add(Dense::new(3, 2, Activation::Sigmoid))
-        .add(Dense::new(2, 1, Activation::Tanh));
+        .add(Dense::new(4, 3, ReLU::new()))
+        .add(Dense::new(3, 2, Sigmoid::new()))
+        .add(Dense::new(2, 1, Tanh::new()));
 
     // Test that summary doesn't panic
     model.summary();
@@ -114,8 +114,8 @@ fn test_sequential_summary() {
 fn test_sequential_get_weights() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid));
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()));
 
     let weights = model.get_weights();
     assert_eq!(weights.len(), 2);
@@ -133,8 +133,8 @@ fn test_sequential_get_weights() {
 fn test_sequential_different_optimizers() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(3, 2, Activation::ReLU))
-        .add(Dense::new(2, 1, Activation::Sigmoid))
+        .add(Dense::new(3, 2, ReLU::new()))
+        .add(Dense::new(2, 1, Sigmoid::new()))
         .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanAbsoluteError::new());
 
     let x = Array::ones((2, 3)).into_dyn();
@@ -148,10 +148,10 @@ fn test_sequential_different_optimizers() {
 fn test_sequential_complex_model() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 8, Activation::ReLU))
-        .add(Dense::new(8, 4, Activation::ReLU))
-        .add(Dense::new(4, 2, Activation::Tanh))
-        .add(Dense::new(2, 1, Activation::Sigmoid))
+        .add(Dense::new(4, 8, ReLU::new()))
+        .add(Dense::new(8, 4, ReLU::new()))
+        .add(Dense::new(4, 2, Tanh::new()))
+        .add(Dense::new(2, 1, Sigmoid::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let x = Array::ones((5, 4)).into_dyn();
@@ -168,10 +168,10 @@ fn test_sequential_complex_model() {
 fn test_sequential_different_activations() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(3, 4, Activation::ReLU))
-        .add(Dense::new(4, 3, Activation::Tanh))
-        .add(Dense::new(3, 2, Activation::Sigmoid))
-        .add(Dense::new(2, 1, Activation::ReLU))
+        .add(Dense::new(3, 4, ReLU::new()))
+        .add(Dense::new(4, 3, Tanh::new()))
+        .add(Dense::new(3, 2, Sigmoid::new()))
+        .add(Dense::new(2, 1, ReLU::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let x = Array::ones((2, 3)).into_dyn();
@@ -195,8 +195,8 @@ fn test_sequential_empty_model_summary() {
 fn test_sequential_predict_before_compile() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid));
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()));
 
     let x = Array::ones((2, 2)).into_dyn();
 
@@ -209,8 +209,8 @@ fn test_sequential_predict_before_compile() {
 fn test_sequential_multiple_fit_calls() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Sigmoid))
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Sigmoid::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     let x = Array::ones((3, 2)).into_dyn();

@@ -27,7 +27,7 @@ fn test_global_average_pooling_1d_forward() {
 
     // Create layer and perform forward propagation
     let mut layer = GlobalAveragePooling1D::new();
-    let output = layer.forward(&input_data);
+    let output = layer.forward(&input_data).unwrap();
 
     // Verify output shape - should be [batch_size, channels]
     assert_eq!(output.shape(), &[batch_size, channels]);
@@ -138,7 +138,7 @@ fn test_global_average_pooling_1d_zero_input() {
 
     // Create layer and perform forward propagation
     let mut layer = GlobalAveragePooling1D::new();
-    let output = layer.forward(&input_data);
+    let output = layer.forward(&input_data).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[2, 3]);

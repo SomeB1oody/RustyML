@@ -26,7 +26,7 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 /// - `depthwise_weights` - 4D array for depthwise filters with shape \[depth_multiplier, channels, kernel_height, kernel_width\].
 /// - `pointwise_weights` - 4D array for pointwise filters with shape \[filters, channels * depth_multiplier, 1, 1\].
 /// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Optional activation function applied after the convolution.
+/// - `activation` - Activation layer from activation_layer module.
 /// - `input_cache` - Cached input from the forward pass, used during backpropagation.
 /// - `depthwise_output_cache` - Cached depthwise output, used during backpropagation.
 /// - `input_shape` - Shape of the input tensor.
@@ -56,20 +56,20 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(SeparableConv2D::new(
-///         64,                     // Number of output filters
-///         (3, 3),                 // Kernel size
-///         vec![2, 3, 32, 32],     // Input shape
-///         (1, 1),                 // Stride
-///         PaddingType::Same,      // Same padding
-///         1,                      // Depth multiplier
-///         Some(Activation::ReLU), // ReLU activation
+///         64,                          // Number of output filters
+///         (3, 3),                      // Kernel size
+///         vec![2, 3, 32, 32],          // Input shape
+///         (1, 1),                      // Stride
+///         PaddingType::Same,           // Same padding
+///         1,                           // Depth multiplier
+///         ReLU::new(), // ReLU activation layer
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
 /// ```
-pub struct SeparableConv2D {
+pub struct SeparableConv2D<T: ActivationLayer> {
     filters: usize,
     kernel_size: (usize, usize),
     strides: (usize, usize),
@@ -78,7 +78,7 @@ pub struct SeparableConv2D {
     depthwise_weights: Array4<f32>,
     pointwise_weights: Array4<f32>,
     bias: Array2<f32>,
-    activation: Option<Activation>,
+    activation: T,
     input_cache: Option<Tensor>,
     depthwise_output_cache: Option<Tensor>,
     input_shape: Vec<usize>,
@@ -88,7 +88,7 @@ pub struct SeparableConv2D {
     optimizer_cache: OptimizerCacheConv2D,
 }
 
-impl SeparableConv2D {
+impl<T: ActivationLayer> SeparableConv2D<T> {
     /// Creates a new 2D separable convolutional layer with the specified parameters.
     ///
     /// # Parameters
@@ -99,7 +99,7 @@ impl SeparableConv2D {
     /// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
     /// - `padding` - Type of padding to apply (`Valid` or `Same`).
     /// - `depth_multiplier` - Number of depthwise convolution filters per input channel.
-    /// - `activation` - Optional activation function to apply after the convolution.
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax).
     ///
     /// # Returns
     ///
@@ -118,15 +118,8 @@ impl SeparableConv2D {
         strides: (usize, usize),
         padding: PaddingType,
         depth_multiplier: usize,
-        activation: Option<Activation>,
+        activation: T,
     ) -> Self {
-        // Verify input is 4D: [batch_size, channels, height, width]
-        assert_eq!(
-            input_shape.len(),
-            4,
-            "Input tensor must be 4-dimensional: [batch_size, channels, height, width]"
-        );
-
         let channels = input_shape[1];
 
         // Initialize depthwise weights using Xavier initialization
@@ -370,8 +363,15 @@ impl SeparableConv2D {
     }
 }
 
-impl Layer for SeparableConv2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D tensor
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
@@ -379,21 +379,20 @@ impl Layer for SeparableConv2D {
         let depthwise_output = self.depthwise_convolve(input);
 
         // Step 2: Pointwise convolution (1x1) - combines depthwise outputs
-        let mut output = self.pointwise_convolve(&depthwise_output);
+        let output = self.pointwise_convolve(&depthwise_output);
 
         // Cache depthwise output after pointwise conv to save memory if no activation
         // (activation derivative doesn't need depthwise output, only backward does)
         self.depthwise_output_cache = Some(depthwise_output);
 
-        // Step 3: Apply activation function
-        if let Some(activation) = &self.activation {
-            Activation::apply_activation_inplace(activation, &mut output);
-        }
-
-        output
+        // Apply activation
+        self.activation.forward(&output.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         if let (Some(input), Some(depthwise_output)) =
             (&self.input_cache, &self.depthwise_output_cache)
         {
@@ -402,14 +401,7 @@ impl Layer for SeparableConv2D {
             let channels = input_shape[1];
             let depthwise_shape = depthwise_output.shape();
 
-            // Apply activation derivative if needed
-            let gradient = if let Some(activation) = &self.activation {
-                let mut grad = grad_output.to_owned().into_dyn();
-                Activation::activation_derivative_inplace(activation, &mut grad);
-                grad
-            } else {
-                grad_output.to_owned().into_dyn()
-            };
+            let gradient = grad_upstream;
 
             // Initialize gradients
             let mut pointwise_weight_grads = Array4::zeros(self.pointwise_weights.dim());

@@ -116,7 +116,7 @@ fn test_max_pooling_3d_forward_pass() {
     input[[0, 0, 2, 2, 2]] = 3.0;
     input[[0, 0, 3, 3, 3]] = 7.0; // This should be the max value for the last pooling window
 
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[1, 1, 2, 2, 2]);
@@ -139,7 +139,7 @@ fn test_max_pooling_3d_different_strides() {
         let mut layer = MaxPooling3D::new(pool_size, vec![1, 1, 4, 4, 4], strides);
 
         let input = ArrayD::ones(vec![1, 1, 4, 4, 4]);
-        let output = layer.forward(&input);
+        let output = layer.forward(&input).unwrap();
 
         assert_eq!(
             output.shape(),
@@ -178,7 +178,7 @@ fn test_max_pooling_3d_multiple_channels() {
         }
     }
 
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[2, 3, 2, 2, 2]);
@@ -206,7 +206,7 @@ fn test_max_pooling_3d_backward_pass() {
     // Create input and perform forward pass
     let input = ArrayD::from_shape_fn(vec![1, 1, 4, 4, 4], |idx| (idx[2] * idx[3] * idx[4]) as f32);
 
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Create gradient output
     let grad_output = ArrayD::ones(output.raw_dim());
@@ -227,7 +227,7 @@ fn test_max_pooling_3d_edge_cases() {
     let mut layer = MaxPooling3D::new((1, 1, 1), vec![1, 1, 1, 1, 1], None);
 
     let input = ArrayD::ones(vec![1, 1, 1, 1, 1]);
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
     assert_eq!(output.shape(), &[1, 1, 1, 1, 1]);
     assert_eq!(output[[0, 0, 0, 0, 0]], 1.0);
 
@@ -235,6 +235,6 @@ fn test_max_pooling_3d_edge_cases() {
     let mut layer2 = MaxPooling3D::new((2, 2, 2), vec![10, 5, 4, 4, 4], None);
 
     let input2 = ArrayD::ones(vec![10, 5, 4, 4, 4]);
-    let output2 = layer2.forward(&input2);
+    let output2 = layer2.forward(&input2).unwrap();
     assert_eq!(output2.shape(), &[10, 5, 2, 2, 2]);
 }

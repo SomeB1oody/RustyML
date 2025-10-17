@@ -10,7 +10,7 @@ fn test_lstm_layer() {
     // Build model: an LSTM layer with Tanh activation function
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(4, 3, Activation::Tanh))
+        .add(LSTM::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -34,7 +34,7 @@ fn test_lstm_layer_basic() {
     // Build model: an LSTM layer with Tanh activation function
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(4, 3, Activation::Tanh))
+        .add(LSTM::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -59,7 +59,7 @@ fn test_lstm_different_activations() {
     // Test ReLU activation function
     let mut model_relu = Sequential::new();
     model_relu
-        .add(LSTM::new(2, 6, Activation::ReLU))
+        .add(LSTM::new(2, 6, ReLU::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_relu.fit(&x, &y, 3).unwrap();
@@ -68,7 +68,7 @@ fn test_lstm_different_activations() {
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(LSTM::new(2, 6, Activation::Sigmoid))
+        .add(LSTM::new(2, 6, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
@@ -98,8 +98,8 @@ fn test_lstm_sequential_composition() {
     // Build a model containing LSTM and Dense layers
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(3, 6, Activation::Tanh))
-        .add(Dense::new(6, 4, Activation::Sigmoid))
+        .add(LSTM::new(3, 6, Tanh::new()))
+        .add(Dense::new(6, 4, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -149,8 +149,8 @@ fn test_lstm_sequence_learning() {
 
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 12, Activation::Tanh))
-        .add(Dense::new(12, 1, Activation::Sigmoid))
+        .add(LSTM::new(input_dim, 12, Tanh::new()))
+        .add(Dense::new(12, 1, Sigmoid::new()))
         .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Train for sequence learning
@@ -204,7 +204,7 @@ fn test_lstm_state_evolution() {
 
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, units, Activation::Tanh))
+        .add(LSTM::new(input_dim, units, Tanh::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Test multiple training steps to see evolution
@@ -280,9 +280,9 @@ fn test_lstm_temporal_xor() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 16, Activation::Tanh))
-        .add(Dense::new(16, 8, Activation::ReLU))
-        .add(Dense::new(8, 1, Activation::Sigmoid))
+        .add(LSTM::new(input_dim, 16, Tanh::new()))
+        .add(Dense::new(16, 8, ReLU::new()))
+        .add(Dense::new(8, 1, Sigmoid::new()))
         .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Temporal XOR Task ===");
@@ -391,9 +391,9 @@ fn test_lstm_parity_check() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 32, Activation::Tanh)) // Increased from 24 to 32
-        .add(Dense::new(32, 16, Activation::Tanh)) // Changed from ReLU to Tanh
-        .add(Dense::new(16, 1, Activation::Sigmoid))
+        .add(LSTM::new(input_dim, 32, Tanh::new())) // Increased from 24 to 32
+        .add(Dense::new(32, 16, Tanh::new())) // Changed from ReLU to Tanh
+        .add(Dense::new(16, 1, Sigmoid::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Parity Check Task ===");

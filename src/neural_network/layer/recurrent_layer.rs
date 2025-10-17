@@ -258,34 +258,14 @@ fn update_gate_rmsprop(
     }
 }
 
-/// Computes gradient through output activation function
+/// Applies stable sigmoid activation to an array
 ///
-/// This helper function handles the backward pass through the output activation,
-/// including special handling for softmax and linear activations.
-///
-/// # Parameters
-///
-/// - `h_t` - The activated output at timestep t
-/// - `grad_h` - The gradient flowing back from the next layer
-/// - `activation` - The activation function used
-///
-/// # Returns
-///
-/// The gradient before the output activation is applied
+/// Uses clipping to prevent numerical overflow before computing sigmoid.
+/// This is used by both GRU and LSTM gates.
 #[inline]
-fn compute_output_activation_gradient(
-    h_t: &Array2<f32>,
-    grad_h: &Array2<f32>,
-    activation: &Activation,
-) -> Array2<f32> {
-    if *activation != Activation::Linear {
-        if *activation == Activation::Softmax {
-            Activation::softmax_backward(h_t, grad_h)
-        } else {
-            let d_act = Activation::activation_derivative(h_t, activation);
-            d_act * grad_h
-        }
-    } else {
-        grad_h.clone()
-    }
+fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
+    arr.mapv(|x| {
+        let clipped_x = x.clamp(-500.0, 500.0);
+        1.0 / (1.0 + (-clipped_x).exp())
+    })
 }

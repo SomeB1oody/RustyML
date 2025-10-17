@@ -66,16 +66,16 @@ impl GlobalAveragePooling3D {
 }
 
 impl Layer for GlobalAveragePooling3D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Verify input is 5D: [batch_size, channels, depth, height, width]
-        let shape = input.shape();
-        assert_eq!(
-            shape.len(),
-            5,
-            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
-        );
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
 
         // Extract dimensions
+        let shape = input.shape();
         let (batch_size, channels, depth, height, width) =
             (shape[0], shape[1], shape[2], shape[3], shape[4]);
 
@@ -115,7 +115,7 @@ impl Layer for GlobalAveragePooling3D {
             output[[b, c]] = val;
         }
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

@@ -5,7 +5,7 @@ use super::*;
 /// This trait provides the core functionality that all neural network layers must implement,
 /// including forward and backward propagation, as well as parameter updates for different
 /// optimization algorithms
-pub trait Layer: std::any::Any {
+pub trait Layer: std::any::Any + Send + Sync {
     /// Performs forward propagation through the layer.
     ///
     /// # Parameters
@@ -15,7 +15,7 @@ pub trait Layer: std::any::Any {
     /// # Returns
     ///
     /// * `Tensor` - The output tensor after forward computation
-    fn forward(&mut self, input: &Tensor) -> Tensor;
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError>;
 
     /// Performs backward propagation through the layer.
     ///
@@ -170,3 +170,27 @@ pub trait ApplyWeights<L> {
     /// - `Err(IoError)` - Weight shape mismatch or conversion error
     fn apply_to_layer(&self, layer: &mut L) -> Result<(), IoError>;
 }
+
+/// A marker trait for activation layers in neural networks.
+///
+/// This trait extends the base `Layer` trait to specifically mark layers that provide
+/// activation functions. Activation layers are special types of neural network layers
+/// that apply non-linear transformations to their inputs, enabling neural networks
+/// to learn complex patterns and relationships.
+///
+/// # Purpose
+///
+/// The `ActivationLayer` trait serves as a type constraint and marker for layers that:
+/// - Apply element-wise non-linear transformations to input data
+/// - Don't have trainable parameters (weights or biases)
+/// - Preserve the input tensor shape in their output
+/// - Can be used as activation functions in other layers (e.g., Dense, Convolutional layers)
+///
+/// # Common Activation Functions
+///
+/// This trait is implemented by various activation layer types:
+/// - **ReLU** (Rectified Linear Unit): `f(x) = max(0, x)`
+/// - **Sigmoid**: `f(x) = 1 / (1 + e^(-x))`
+/// - **Tanh** (Hyperbolic Tangent): `f(x) = tanh(x)`
+/// - **Softmax**: `f(x_i) = e^(x_i) / Σ(e^(x_j))` for probability distributions
+pub trait ActivationLayer: Layer {}

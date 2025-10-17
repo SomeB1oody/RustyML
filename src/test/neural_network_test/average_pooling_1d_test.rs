@@ -18,7 +18,7 @@ fn test_average_pooling_1d_shape() {
     for (pool_size, stride, expected_length) in test_cases {
         let mut layer = AveragePooling1D::new(pool_size, vec![2, 3, 10], Some(stride));
 
-        let output = layer.forward(&input_data);
+        let output = layer.forward(&input_data).unwrap();
 
         // Verify output shape
         assert_eq!(output.shape(), &[2, 3, expected_length]);
@@ -55,7 +55,7 @@ fn test_average_pooling_1d_forward() {
     let mut layer = AveragePooling1D::new(2, vec![2, 3, 8], Some(2));
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[2, 3, 4]);
@@ -99,7 +99,7 @@ fn test_average_pooling_1d_backward() {
     let mut layer = AveragePooling1D::new(2, vec![1, 1, 4], Some(1));
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape and values
     assert_eq!(output.shape(), &[1, 1, 3]);
@@ -186,7 +186,7 @@ fn test_average_pooling_1d_odd_window_size() {
     let mut layer = AveragePooling1D::new(3, vec![1, 1, 5], Some(1));
 
     // Perform forward propagation
-    let output = layer.forward(&input);
+    let output = layer.forward(&input).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[1, 1, 3]);

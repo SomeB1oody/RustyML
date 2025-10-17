@@ -116,7 +116,14 @@ impl AveragePooling1D {
 }
 
 impl Layer for AveragePooling1D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
         // Cache input for backward pass
         self.input_cache = Some(input.clone());
 
@@ -166,7 +173,7 @@ impl Layer for AveragePooling1D {
             }
         }
 
-        output
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

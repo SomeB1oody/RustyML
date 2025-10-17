@@ -9,8 +9,8 @@ fn adam_test() {
     // Build the model: add two Dense layers, use Adam optimizer (learning rate, beta1, beta2, epsilon) with MSE loss function
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::ReLU));
+        .add(Dense::new(4, 3, ReLU::new()))
+        .add(Dense::new(3, 1, ReLU::new()));
     model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -33,8 +33,8 @@ fn rmsprop_test() {
     // Build the model, add two Dense layers; choose RMSprop optimizer when compiling
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::ReLU));
+        .add(Dense::new(4, 3, ReLU::new()))
+        .add(Dense::new(3, 1, ReLU::new()));
     model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure (summary)

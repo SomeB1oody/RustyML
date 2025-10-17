@@ -10,7 +10,7 @@ fn test_gru_layer() {
     // Build model: a GRU layer with Tanh activation function
     let mut model = Sequential::new();
     model
-        .add(GRU::new(4, 3, Activation::Tanh))
+        .add(GRU::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -34,7 +34,7 @@ fn test_gru_layer_basic() {
     // Build model: a GRU layer with Tanh activation function
     let mut model = Sequential::new();
     model
-        .add(GRU::new(4, 3, Activation::Tanh))
+        .add(GRU::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -59,7 +59,7 @@ fn test_gru_different_activations() {
     // Test ReLU activation function
     let mut model_relu = Sequential::new();
     model_relu
-        .add(GRU::new(2, 6, Activation::ReLU))
+        .add(GRU::new(2, 6, ReLU::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_relu.fit(&x, &y, 3).unwrap();
@@ -68,7 +68,7 @@ fn test_gru_different_activations() {
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(GRU::new(2, 6, Activation::Sigmoid))
+        .add(GRU::new(2, 6, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
@@ -98,8 +98,8 @@ fn test_gru_sequential_composition() {
     // Build a model containing GRU and Dense layers
     let mut model = Sequential::new();
     model
-        .add(GRU::new(3, 6, Activation::Tanh))
-        .add(Dense::new(6, 4, Activation::Sigmoid))
+        .add(GRU::new(3, 6, Tanh::new()))
+        .add(Dense::new(6, 4, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -149,8 +149,8 @@ fn test_gru_sequence_learning() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 12, Activation::Tanh))
-        .add(Dense::new(12, 1, Activation::Sigmoid))
+        .add(GRU::new(input_dim, 12, Tanh::new()))
+        .add(Dense::new(12, 1, Sigmoid::new()))
         .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Train for sequence learning
@@ -204,7 +204,7 @@ fn test_gru_state_evolution() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, units, Activation::Tanh))
+        .add(GRU::new(input_dim, units, Tanh::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Test multiple training steps to see evolution
@@ -280,9 +280,9 @@ fn test_gru_temporal_xor() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 16, Activation::Tanh))
-        .add(Dense::new(16, 8, Activation::ReLU))
-        .add(Dense::new(8, 1, Activation::Sigmoid))
+        .add(GRU::new(input_dim, 16, Tanh::new()))
+        .add(Dense::new(16, 8, ReLU::new()))
+        .add(Dense::new(8, 1, Sigmoid::new()))
         .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Temporal XOR Task (GRU) ===");
@@ -391,9 +391,9 @@ fn test_gru_parity_check() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 32, Activation::Tanh))
-        .add(Dense::new(32, 16, Activation::Tanh))
-        .add(Dense::new(16, 1, Activation::Sigmoid))
+        .add(GRU::new(input_dim, 32, Tanh::new()))
+        .add(Dense::new(32, 16, Tanh::new()))
+        .add(Dense::new(16, 1, Tanh::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Parity Check Task (GRU) ===");
@@ -504,8 +504,8 @@ fn test_gru_vs_simple_rnn() {
     // Train GRU model
     let mut model_gru = Sequential::new();
     model_gru
-        .add(GRU::new(input_dim, 8, Activation::Tanh))
-        .add(Dense::new(8, 1, Activation::Sigmoid))
+        .add(GRU::new(input_dim, 8, Tanh::new()))
+        .add(Dense::new(8, 1, Sigmoid::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Training GRU ===");
@@ -514,8 +514,8 @@ fn test_gru_vs_simple_rnn() {
     // Train SimpleRNN model
     let mut model_rnn = Sequential::new();
     model_rnn
-        .add(SimpleRNN::new(input_dim, 8, Activation::Tanh))
-        .add(Dense::new(8, 1, Activation::Sigmoid))
+        .add(SimpleRNN::new(input_dim, 8, Tanh::new()))
+        .add(Dense::new(8, 1, Sigmoid::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     println!("\n=== Training SimpleRNN ===");
@@ -559,7 +559,7 @@ fn test_gru_gradient_flow() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(4, 5, Activation::Tanh))
+        .add(GRU::new(4, 5, Tanh::new()))
         .compile(SGD::new(0.1), MeanSquaredError::new());
 
     // Get initial weights

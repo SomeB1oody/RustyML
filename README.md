@@ -79,8 +79,8 @@ Complete neural network framework with flexible architecture design:
 - **Models | 模型**:
   - Sequential architecture for feed-forward networks | 用于前馈网络的顺序架构
 
-- **Activation Functions | 激活函数**:
-  - ReLU, Tanh, Sigmoid, Softmax, Linear | ReLU、双曲正切、Sigmoid、Softmax、线性
+- **Activation layers | 激活层**:
+  - ReLU, Tanh, Sigmoid, Softmax
 
 ### Utility | 工具 (`features = ["utility"]`)
 Data preprocessing and dimensionality reduction utilities:  
@@ -257,9 +257,9 @@ let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 // Build a neural network   
 let mut model = Sequential::new();  
 model  
-    .add(Dense::new(784, 128, Activation::ReLU))    
-    .add(Dense::new(128, 64, Activation::ReLU))    
-    .add(Dense::new(64, 10, Activation::Softmax))    
+    .add(Dense::new(784, 128, ReLU::new()))    
+    .add(Dense::new(128, 64, ReLU::new()))    
+    .add(Dense::new(64, 10, Softmax::new()))    
     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());  
 // Display model structure   
 model.summary();  
@@ -273,9 +273,9 @@ model.save_to_path("model.json").unwrap();
 // Create a new model with the same architecture  
 let mut new_model = Sequential::new();
 new_model  
-    .add(Dense::new(784, 128, Activation::ReLU))    
-    .add(Dense::new(128, 64, Activation::ReLU))    
-    .add(Dense::new(64, 10, Activation::Softmax));
+    .add(Dense::new(784, 128, ReLU::new()))    
+    .add(Dense::new(128, 64, ReLU::new()))    
+    .add(Dense::new(64, 10, Softmax::new()));
   
 // Load weights from file  
 new_model.load_from_path("model.json").unwrap();  

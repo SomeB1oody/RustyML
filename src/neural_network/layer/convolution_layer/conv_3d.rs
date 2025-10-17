@@ -19,7 +19,7 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 /// - `padding` - Type of padding to apply (`Valid` or `Same`).
 /// - `weights` - 5D array of filter weights with shape \[filters, channels, kernel_depth, kernel_height, kernel_width\].
 /// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Optional activation function applied after the convolution.
+/// - `activation` - Activation layer from activation_layer module.
 /// - `input_cache` - Cached input from the forward pass, used during backpropagation.
 /// - `input_shape` - Shape of the input tensor.
 /// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
@@ -58,7 +58,7 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 ///         vec![2, 1, 8, 8, 8],       // Input shape
 ///         (1, 1, 1),                 // Stride
 ///         PaddingType::Valid,        // No padding
-///         Some(Activation::ReLU),    // ReLU activation function
+///         ReLU::new(), // ReLU activation layer
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -75,14 +75,14 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 /// // Check if output shape is correct - should be [2, 3, 6, 6, 6]
 /// assert_eq!(prediction.shape(), &[2, 3, 6, 6, 6]);
 /// ```
-pub struct Conv3D {
+pub struct Conv3D<T: ActivationLayer> {
     filters: usize,
     kernel_size: (usize, usize, usize),
     strides: (usize, usize, usize),
     padding: PaddingType,
     weights: Array5<f32>,
     bias: Array2<f32>,
-    activation: Option<Activation>,
+    activation: T,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array5<f32>>,
@@ -90,7 +90,7 @@ pub struct Conv3D {
     optimizer_cache: OptimizerCacheConv3D,
 }
 
-impl Conv3D {
+impl<T: ActivationLayer> Conv3D<T> {
     /// Creates a new Conv3D layer.
     ///
     /// # Parameters
@@ -100,7 +100,7 @@ impl Conv3D {
     /// - `input_shape` - Expected input shape as \[batch_size, channels, depth, height, width\]
     /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
     /// - `padding` - Padding type (Valid or Same)
-    /// - `activation` - Optional activation function
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
@@ -111,15 +111,8 @@ impl Conv3D {
         input_shape: Vec<usize>,
         strides: (usize, usize, usize),
         padding: PaddingType,
-        activation: Option<Activation>,
+        activation: T,
     ) -> Self {
-        // verify input is 5D: [batch_size, channels, depth, height, width]
-        assert_eq!(
-            input_shape.len(),
-            5,
-            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
-        );
-
         let channels = input_shape[1];
         let (kd, kh, kw) = kernel_size;
 
@@ -189,8 +182,8 @@ impl Conv3D {
     ///
     /// # Parameters
     ///
-    /// - `weights` - 5D array of filter weights with shape [filters, channels, kernel_depth, kernel_height, kernel_width]
-    /// - `bias` - 2D array of bias values with shape [1, filters]
+    /// - `weights` - 5D array of filter weights with shape \[filters, channels, kernel_depth, kernel_height, kernel_width\]
+    /// - `bias` - 2D array of bias values with shape \[1, filters\]
     pub fn set_weights(&mut self, weights: Array5<f32>, bias: Array2<f32>) {
         self.weights = weights;
         self.bias = bias;
@@ -601,29 +594,30 @@ impl Conv3D {
     }
 }
 
-impl Layer for Conv3D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Convert input to Array5
-        let input_array = input
-            .view()
-            .into_dimensionality::<ndarray::Ix5>()
-            .expect("Input must be 5-dimensional for Conv3D");
+impl<T: ActivationLayer> Layer for Conv3D<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
 
         // Cache input for backward pass
         self.input_cache = Some(input.clone());
 
         // Perform convolution
-        let mut output = self.conv3d(input_array).into_dyn();
+        let input_array = input.view().into_dimensionality::<ndarray::Ix5>().unwrap();
+        let output = self.conv3d(input_array);
 
-        // Apply activation function if specified
-        if let Some(activation) = &self.activation {
-            Activation::apply_activation_inplace(activation, &mut output);
-        }
-
-        output
+        // Apply activation
+        self.activation.forward(&output.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         let input = self.input_cache.as_ref().ok_or_else(|| {
             ModelError::ProcessingError("Input cache not available for backward pass".to_string())
         })?;
@@ -634,19 +628,7 @@ impl Layer for Conv3D {
             .unwrap()
             .to_owned();
 
-        let mut grad_output_array = grad_output
-            .view()
-            .into_dimensionality::<ndarray::Ix5>()
-            .unwrap()
-            .to_owned()
-            .into_dyn();
-
-        // Apply activation function derivative if specified
-        if let Some(activation) = &self.activation {
-            Activation::activation_derivative_inplace(activation, &mut grad_output_array);
-        }
-
-        let grad_input = self.compute_gradients(&input_array, &grad_output_array);
+        let grad_input = self.compute_gradients(&input_array, &grad_upstream);
 
         Ok(grad_input.into_dyn())
     }

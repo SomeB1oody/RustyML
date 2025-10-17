@@ -4,7 +4,7 @@ use super::*;
 ///
 /// SimpleRNN applies a standard recurrent operation where the output from the previous
 /// timestep is used as additional input to the current timestep. This implementation
-/// supports various activation functions, with tanh as the default.
+/// supports optional activation functions from the activation_layer module.
 ///
 /// # Dimensions
 ///
@@ -19,7 +19,7 @@ use super::*;
 /// - `kernel` - Weight matrix connecting inputs to the recurrent layer (shape: input_dim, units)
 /// - `recurrent_kernel` - Weight matrix connecting previous hidden states to the current state (shape: units, units)
 /// - `bias` - Bias vector for the layer (shape: 1, units)
-/// - `activation` - Activation function to use (default: tanh)
+/// - `activation` - Activation layer from activation_layer module
 ///
 /// ## Cache
 /// - `input_cache` - Cache of input tensors from forward pass (shape: batch, timesteps, input_dim)
@@ -41,10 +41,10 @@ use super::*;
 /// let x = Array::ones((2, 5, 4)).into_dyn();
 /// let y = Array::ones((2, 3)).into_dyn();
 ///
-/// // Build model: one SimpleRnn layer with tanh activation
+/// // Build model: one SimpleRnn layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new(4, 3, Activation::Tanh))
+/// .add(SimpleRNN::new(4, 3, Tanh::new()))
 /// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
 /// // Print structure
@@ -57,7 +57,7 @@ use super::*;
 /// let pred = model.predict(&x);
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
-pub struct SimpleRNN {
+pub struct SimpleRNN<T: ActivationLayer> {
     input_dim: usize,
     units: usize,
     kernel: Array2<f32>,
@@ -69,22 +69,22 @@ pub struct SimpleRNN {
     grad_recurrent_kernel: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
     optimizer_cache: OptimizerCache,
-    activation: Activation,
+    activation: T,
 }
 
-impl SimpleRNN {
-    /// Creates a new SimpleRNN layer with the specified dimensions and activation function.
+impl<T: ActivationLayer> SimpleRNN<T> {
+    /// Creates a new SimpleRNN layer with the specified dimensions and optional activation layer.
     ///
     /// # Parameters
     ///
     /// - `input_dim` - The size of each input sample
     /// - `units` - The dimensionality of the output space
-    /// - `activation` - The activation function to use
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
     /// * `SimpleRNN` - A new SimpleRNN instance with the specified activation
-    pub fn new(input_dim: usize, units: usize, activation: Activation) -> Self {
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
         let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
@@ -104,10 +104,7 @@ impl SimpleRNN {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            optimizer_cache: OptimizerCache {
-                adam_states: None,
-                rmsprop_cache: None,
-            },
+            optimizer_cache: OptimizerCache::default(),
             activation,
         }
     }
@@ -178,30 +175,50 @@ impl SimpleRNN {
     }
 }
 
-impl Layer for SimpleRNN {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for SimpleRNN<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
+        let x3 = input
+            .view()
+            .into_dimensionality::<ndarray::Ix3>()
+            .unwrap()
+            .to_owned();
+
         // Input shape=(batch, timesteps, input_dim)
-        let x3 = input.clone().into_dimensionality::<ndarray::Ix3>().unwrap();
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.clone());
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut hs = Vec::with_capacity(timesteps + 1);
+        let mut linear_outputs = Vec::with_capacity(timesteps);
         hs.push(h_prev.clone());
 
         // Sequential timestep processing (required for RNN)
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
 
-            // Compute: h_t = activation(x_t @ W + h_{t-1} @ U + b)
+            // Compute: z = x_t @ W + h_{t-1} @ U + b
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
+            linear_outputs.push(z.clone());
 
-            let h_t = Activation::apply_activation(&z, &self.activation);
+            // Apply activation
+            let h_t = self
+                .activation
+                .forward(&z.into_dyn())?
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
+
             h_prev = h_t.clone();
             hs.push(h_prev.clone());
         }
         self.hidden_state_cache = Some(hs);
-        h_prev.into_dyn() // Return hidden state of the last timestep
+        Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -242,12 +259,14 @@ impl Layer for SimpleRNN {
         let mut grad_h = grad_h_t;
         // Backpropagation Through Time (BPTT)
         for t in (0..timesteps).rev() {
-            let h_t = &hs[t + 1];
             let h_tm1 = &hs[t];
 
-            // Compute activation derivative
-            let d_act = Activation::activation_derivative(h_t, &self.activation);
-            let d_z = d_act * &grad_h;
+            // Apply activation backward pass
+            let d_z = {
+                let grad_h_dyn = grad_h.clone().into_dyn();
+                let grad_z_dyn = self.activation.backward(&grad_h_dyn)?;
+                grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
+            };
 
             // Accumulate gradients for weights
             let x_t = x3.index_axis(Axis(1), t);

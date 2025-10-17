@@ -66,16 +66,16 @@ impl GlobalAveragePooling1D {
 }
 
 impl Layer for GlobalAveragePooling1D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
-        // Verify input is 3D: [batch_size, channels, length]
-        let shape = input.shape();
-        assert_eq!(
-            shape.len(),
-            3,
-            "Input shape must be 3-dimensional: [batch_size, channels, length]"
-        );
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
 
         // Extract dimensions
+        let shape = input.shape();
         let (batch_size, channels, length) = (shape[0], shape[1], shape[2]);
 
         // Store input shape and cache input for backpropagation
@@ -110,7 +110,7 @@ impl Layer for GlobalAveragePooling1D {
             output[[b, c]] = val;
         }
 
-        output
+        Ok(output)
     }
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Check if we have cached the input

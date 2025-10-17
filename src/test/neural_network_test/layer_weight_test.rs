@@ -5,8 +5,8 @@ fn test_get_weights() {
     // Create and compile the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Activation::ReLU))
-        .add(SimpleRNN::new(3, 2, Activation::Tanh));
+        .add(Dense::new(4, 3, ReLU::new()))
+        .add(SimpleRNN::new(3, 2, Tanh::new()));
     model.compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Get all layer weights

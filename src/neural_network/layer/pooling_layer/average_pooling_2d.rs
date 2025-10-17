@@ -205,12 +205,19 @@ impl AveragePooling2D {
 }
 
 impl Layer for AveragePooling2D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
         // Save input for backpropagation
         self.input_cache = Some(input.clone());
 
         // Perform average pooling
-        self.avg_pool(input)
+        Ok(self.avg_pool(input))
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

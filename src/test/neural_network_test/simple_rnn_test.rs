@@ -10,7 +10,7 @@ fn test_simple_rnn_layer() {
     // Build model: one SimpleRnn layer with tanh activation
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(4, 3, Activation::Tanh))
+        .add(SimpleRNN::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print structure
@@ -34,7 +34,7 @@ fn test_simple_rnn_layer_basic() {
     // Build model: one SimpleRNN layer with tanh activation
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(4, 3, Activation::Tanh))
+        .add(SimpleRNN::new(4, 3, Tanh::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -59,7 +59,7 @@ fn test_simple_rnn_different_activations() {
     // Test ReLU activation function
     let mut model_relu = Sequential::new();
     model_relu
-        .add(SimpleRNN::new(2, 6, Activation::ReLU))
+        .add(SimpleRNN::new(2, 6, ReLU::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_relu.fit(&x, &y, 3).unwrap();
@@ -68,7 +68,7 @@ fn test_simple_rnn_different_activations() {
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(SimpleRNN::new(2, 6, Activation::Sigmoid))
+        .add(SimpleRNN::new(2, 6, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
@@ -98,8 +98,8 @@ fn test_simple_rnn_sequential_composition() {
     // Build model with SimpleRNN and Dense layers
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(3, 6, Activation::Tanh))
-        .add(Dense::new(6, 4, Activation::Sigmoid))
+        .add(SimpleRNN::new(3, 6, Tanh::new()))
+        .add(Dense::new(6, 4, Sigmoid::new()))
         .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 
     // Print model structure
@@ -128,7 +128,7 @@ fn test_simple_rnn_overfitting() {
 
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(3, 7, Activation::Tanh))
+        .add(SimpleRNN::new(3, 7, Tanh::new()))
         .compile(RMSprop::new(0.01, 0.9, 1e-8), MeanSquaredError::new());
 
     // Train long enough to overfit
@@ -181,8 +181,8 @@ fn test_simple_rnn_sequence_memory() {
 
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(input_dim, 12, Activation::Tanh))
-        .add(Dense::new(12, 2, Activation::Softmax))
+        .add(SimpleRNN::new(input_dim, 12, Tanh::new()))
+        .add(Dense::new(12, 2, Softmax::new()))
         .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     // Train the memory task
@@ -258,7 +258,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
     let (x_short, y_short) = create_sequence_data(short_seq_len);
     let mut model_short = Sequential::new();
     model_short
-        .add(SimpleRNN::new(input_dim, units, Activation::Tanh))
+        .add(SimpleRNN::new(input_dim, units, Tanh::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     let initial_loss_short = {
@@ -279,7 +279,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
     let (x_long, y_long) = create_sequence_data(long_seq_len);
     let mut model_long = Sequential::new();
     model_long
-        .add(SimpleRNN::new(input_dim, units, Activation::Tanh))
+        .add(SimpleRNN::new(input_dim, units, Tanh::new()))
         .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
 
     let initial_loss_long = {

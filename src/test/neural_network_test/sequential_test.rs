@@ -9,9 +9,9 @@ fn fit_with_batches_test() {
     // build a neural network
     let mut model = Sequential::new();
     model
-        .add(Dense::new(784, 128, Activation::ReLU))
-        .add(Dense::new(128, 64, Activation::ReLU))
-        .add(Dense::new(64, 10, Activation::Softmax))
+        .add(Dense::new(784, 128, ReLU::new()))
+        .add(Dense::new(128, 64, ReLU::new()))
+        .add(Dense::new(64, 10, Softmax::new()))
         .compile(
             Adam::new(0.001, 0.9, 0.999, 1e-8),
             CategoricalCrossEntropy::new(),
@@ -42,7 +42,7 @@ fn test_fit_linear_regression_convergence() {
     // Build a simple network to learn the linear relationship
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear)) // Single linear layer
+        .add(Dense::new(1, 1, Linear::new())) // Single linear layer
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Record initial predictions
@@ -112,8 +112,8 @@ fn test_fit_classification_convergence() {
     // Build classification network with smaller learning rate
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 4, Activation::ReLU))
-        .add(Dense::new(4, 2, Activation::Softmax))
+        .add(Dense::new(2, 4, ReLU::new()))
+        .add(Dense::new(4, 2, Softmax::new()))
         .compile(
             Adam::new(0.01, 0.9, 0.999, 1e-8),
             CategoricalCrossEntropy::new(),
@@ -199,8 +199,8 @@ fn test_fit_parameter_updates() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, Activation::ReLU))
-        .add(Dense::new(3, 1, Activation::Linear))
+        .add(Dense::new(2, 3, ReLU::new()))
+        .add(Dense::new(3, 1, Linear::new()))
         .compile(SGD::new(0.01), MeanSquaredError::new());
 
     // Get weights before training
@@ -249,7 +249,7 @@ fn test_fit_parameter_updates() {
 #[test]
 fn test_fit_error_handling() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear));
+    model.add(Dense::new(2, 1, Linear::new()));
 
     // Test 1: Uncompiled model should return error
     let x = Array::ones((5, 2)).into_dyn();

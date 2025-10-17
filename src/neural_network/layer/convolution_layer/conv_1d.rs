@@ -19,7 +19,7 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 /// - `padding` - Type of padding to apply (`Valid` or `Same`).
 /// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\].
 /// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Optional activation function applied after the convolution.
+/// - `activation` - Activation layer from activation_layer module.
 /// - `input_cache` - Cached input from the forward pass, used during backpropagation.
 /// - `input_shape` - Shape of the input tensor.
 /// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
@@ -58,7 +58,7 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 ///         vec![2, 1, 10],         // Input shape
 ///         1,                      // Stride
 ///         PaddingType::Valid,     // No padding
-///         Some(Activation::ReLU), // ReLU activation function
+///         ReLU::new(), // ReLU activation layer
 ///     ))
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
 ///
@@ -75,14 +75,14 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 /// // Check if output shape is correct - should be [2, 3, 8]
 /// assert_eq!(prediction.shape(), &[2, 3, 8]);
 /// ```
-pub struct Conv1D {
+pub struct Conv1D<T: ActivationLayer> {
     filters: usize,
     kernel_size: usize,
     stride: usize,
     padding: PaddingType,
     weights: Array3<f32>,
     bias: Array2<f32>,
-    activation: Option<Activation>,
+    activation: T,
     input_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array3<f32>>,
@@ -90,8 +90,8 @@ pub struct Conv1D {
     optimizer_cache: OptimizerCacheConv1D,
 }
 
-impl Conv1D {
-    /// Creates a new Conv1D layer.
+impl<T: ActivationLayer> Conv1D<T> {
+    /// Creates a new Conv1D layer with optional activation layer.
     ///
     /// # Parameters
     ///
@@ -100,7 +100,7 @@ impl Conv1D {
     /// - `input_shape` - Shape of input tensor \[batch_size, channels, length\]
     /// - `stride` - Stride for the convolution operation
     /// - `padding` - Padding type (Valid or Same)
-    /// - `activation` - Optional activation function
+    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
@@ -111,14 +111,8 @@ impl Conv1D {
         input_shape: Vec<usize>,
         stride: usize,
         padding: PaddingType,
-        activation: Option<Activation>,
+        activation: T,
     ) -> Self {
-        // verify input is 3D: [batch_size, channels, length]
-        assert_eq!(
-            input_shape.len(),
-            3,
-            "Input tensor must be 3-dimensional: [batch_size, channels, length]"
-        );
         let input_channels = input_shape[1];
 
         // Initialize weights using Xavier initialization for convolutional layers
@@ -389,23 +383,29 @@ impl Conv1D {
     }
 }
 
-impl Layer for Conv1D {
-    fn forward(&mut self, input: &Tensor) -> Tensor {
+impl<T: ActivationLayer> Layer for Conv1D<T> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
         // Cache input for backpropagation
         self.input_cache = Some(input.clone());
 
         // Perform convolution
-        let mut output = self.conv1d(input);
+        let output = self.conv1d(input);
 
-        // Apply activation function
-        if let Some(activation) = &self.activation {
-            Activation::apply_activation_inplace(activation, &mut output);
-        }
-
-        output
+        // Apply activation
+        self.activation.forward(&output.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+        // Apply activation backward pass
+        let grad_upstream = self.activation.backward(grad_output)?;
+
         // Retrieve cached input from forward pass
         let input = self.input_cache.as_ref().ok_or_else(|| {
             ModelError::ProcessingError("No cached input for backward pass".to_string())
@@ -416,13 +416,7 @@ impl Layer for Conv1D {
         let input_channels = input_shape[1];
         let input_length = input_shape[2];
 
-        // Apply activation function derivatives
-        let mut grad_output = grad_output.clone();
-        if let Some(ref activation) = self.activation {
-            Activation::activation_derivative_inplace(activation, &mut grad_output);
-        }
-
-        let grad_output_3d = grad_output
+        let grad_upstream_3d = grad_upstream
             .into_dimensionality::<ndarray::Ix3>()
             .map_err(|e| {
                 ModelError::ProcessingError(format!("Failed to convert gradient output: {}", e))
@@ -438,7 +432,7 @@ impl Layer for Conv1D {
             .into_dimensionality::<ndarray::Ix3>()
             .map_err(|e| ModelError::ProcessingError(format!("Failed to convert input: {}", e)))?;
 
-        let output_length = grad_output_3d.shape()[2];
+        let output_length = grad_upstream_3d.shape()[2];
 
         // Determine whether to use parallel or sequential execution
         let total_ops = batch_size * self.filters * output_length;
@@ -450,7 +444,7 @@ impl Layer for Conv1D {
                 .map(|batch| {
                     self.compute_batch_gradients(
                         batch,
-                        &grad_output_3d,
+                        &grad_upstream_3d,
                         &input_3d,
                         input_channels,
                         input_length,
@@ -475,7 +469,7 @@ impl Layer for Conv1D {
                 let (local_weight_grads, local_bias_grads, local_input_grads) = self
                     .compute_batch_gradients(
                         batch,
-                        &grad_output_3d,
+                        &grad_upstream_3d,
                         &input_3d,
                         input_channels,
                         input_length,
