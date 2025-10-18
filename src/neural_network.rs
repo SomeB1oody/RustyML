@@ -1,3 +1,9 @@
+use crate::error::{IoError, ModelError};
+use ndarray::prelude::*;
+
+/// Type alias for n-dimensional arrays used as tensors in the neural network
+pub type Tensor = ArrayD<f32>;
+
 /// Module that contains neural network layer implementations
 pub mod layer;
 /// Module that contains loss function implementations
@@ -14,9 +20,3 @@ pub use loss_function::*;
 pub use optimizer::*;
 pub use sequential::*;
 pub use traits::*;
-
-use crate::error::{IoError, ModelError};
-use ndarray::prelude::*;
-
-/// Type alias for n-dimensional arrays used as tensors in the neural network
-pub type Tensor = ArrayD<f32>;

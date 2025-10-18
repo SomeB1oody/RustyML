@@ -126,14 +126,10 @@ impl<T: ActivationLayer> Layer for Dense<T> {
             ));
         }
 
-        let input_2d = input
-            .view()
-            .into_dimensionality::<ndarray::Ix2>()
-            .unwrap()
-            .to_owned();
+        let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
         // Input shape is [batch_size, input_dim]
-        self.input_cache = Some(input_2d.clone());
+        self.input_cache = Some(input_2d.to_owned());
 
         // Use adaptive parallel/sequential matrix multiplication
         let total_ops = self.input_dim * self.output_dim;

@@ -184,15 +184,11 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
             ));
         }
 
-        let x3 = input
-            .view()
-            .into_dimensionality::<ndarray::Ix3>()
-            .unwrap()
-            .to_owned();
+        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 
         // Input shape=(batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-        self.input_cache = Some(x3.clone());
+        self.input_cache = Some(x3.to_owned());
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut hs = Vec::with_capacity(timesteps + 1);

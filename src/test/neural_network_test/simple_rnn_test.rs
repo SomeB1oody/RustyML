@@ -132,7 +132,7 @@ fn test_simple_rnn_overfitting() {
         .compile(RMSprop::new(0.01, 0.9, 1e-8), MeanSquaredError::new());
 
     // Train long enough to overfit
-    model.fit(&x, &y, 50).unwrap();
+    model.fit(&x, &y, 200).unwrap();
 
     // Predictions should be very close to target values
     let pred = model.predict(&x);
