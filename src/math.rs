@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use ndarray::{Array1, ArrayView1};
+use ndarray::prelude::*;
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 

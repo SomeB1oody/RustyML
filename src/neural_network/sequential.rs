@@ -1,6 +1,10 @@
 use super::*;
+use crate::error::IoError;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::seq::SliceRandom;
+use serde_json::{from_reader, to_writer_pretty};
+use std::fs::File;
+use std::io::{BufWriter, Write};
 
 /// A Sequential neural network model for building and training feedforward networks.
 ///
@@ -183,6 +187,8 @@ impl Sequential {
         // Forward pass
         let mut output = x.clone();
         for layer in &mut self.layers {
+            layer.set_training_if_mode_dependent(true);
+
             output = match layer.forward(&output) {
                 Ok(output) => output,
                 Err(e) => return Err(e),
@@ -417,6 +423,8 @@ impl Sequential {
 
         let mut output = x.clone();
         for layer in &mut self.layers {
+            layer.set_training_if_mode_dependent(false);
+
             output = match layer.forward(&output) {
                 Ok(output) => output,
                 Err(e) => panic!("Failed to forward pass: {}", e),
@@ -543,11 +551,6 @@ impl Sequential {
     /// - `Err(IoError::StdIoError)` - File creation or write operation failed
     /// - `Err(IoError::JsonError)` - Serialization to JSON failed
     pub fn save_to_path(&self, path: &str) -> Result<(), IoError> {
-        use crate::error::IoError;
-        use serde_json::to_writer_pretty;
-        use std::fs::File;
-        use std::io::{BufWriter, Write};
-
         // Convert layers to serializable format
         let serializable_layers = self
             .layers
@@ -603,9 +606,6 @@ impl Sequential {
     /// - `Err(IoError::JsonError)` - Deserialization from JSON failed
     /// - `Err(IoError::ModelStructureMismatch)` - Model structure doesn't match saved weights
     pub fn load_from_path(&mut self, path: &str) -> Result<(), IoError> {
-        use crate::error::IoError;
-        use serde_json::from_reader;
-
         // Open and buffer the file for reading
         let reader = IoError::load_in_buf_reader(path)?;
 

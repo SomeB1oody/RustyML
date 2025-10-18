@@ -187,11 +187,12 @@ pub mod flatten;
 mod helper_functions;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
-/// LSTM (Long Short-Term Memory) neural network layer implementation
 /// Pooling layer for neural networks
 pub mod pooling_layer;
 /// Recurrent layer for neural networks
 pub mod recurrent_layer;
+/// A module containing regularization layers for neural networks
+pub mod regularization_layer;
 /// A module containing helper functions and structs for serializing neural network weights
 pub mod serialize_weight;
 
@@ -202,4 +203,5 @@ pub use flatten::*;
 pub use layer_weight::*;
 pub use pooling_layer::*;
 pub use recurrent_layer::*;
+pub use regularization_layer::*;
 pub use serialize_weight::*;

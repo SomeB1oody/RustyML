@@ -12,6 +12,7 @@ mod conv2d_test;
 mod conv3d_test;
 mod dense_test;
 mod depthwise_conv2d_test;
+mod dropout_test;
 mod flatten_test;
 mod global_average_pooling_1d_test;
 mod global_average_pooling_2d_test;
@@ -30,6 +31,9 @@ mod optimizer_test;
 mod separable_conv2d_test;
 mod sequential_test;
 mod simple_rnn_test;
+mod spatial_dropout_1d_test;
+mod spatial_dropout_2d_test;
+mod spatial_dropout_3d_test;
 
 fn generate_data(batch_size: usize, channels: usize, length: usize) -> Tensor {
     let mut input_data = Tensor::zeros(IxDyn(&[batch_size, channels, length]));

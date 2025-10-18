@@ -102,6 +102,23 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///   - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for convolutional layers
     ///   - `LayerWeight::Empty` for layers with no trainable parameters
     fn get_weights(&self) -> LayerWeight<'_>;
+
+    /// Sets the training mode if the layer is mode-dependent.
+    ///
+    /// This method allows layers that behave differently during training and inference
+    /// to switch between modes. Layers that don't depend on training mode (like Dense,
+    /// Activation, Pooling layers) can use the default no-op implementation.
+    ///
+    /// Layers implementing `ModeDependentLayer` trait should override this method
+    /// to call their `set_training()` method.
+    ///
+    /// # Parameters
+    ///
+    /// * `_is_training` - `true` for training mode, `false` for inference mode
+    fn set_training_if_mode_dependent(&mut self, _is_training: bool) {
+        // Default implementation: do nothing
+        // Only mode-dependent layers need to override this
+    }
 }
 
 /// Defines the interface for loss functions used in neural network training.
@@ -185,12 +202,4 @@ pub trait ApplyWeights<L> {
 /// - Don't have trainable parameters (weights or biases)
 /// - Preserve the input tensor shape in their output
 /// - Can be used as activation functions in other layers (e.g., Dense, Convolutional layers)
-///
-/// # Common Activation Functions
-///
-/// This trait is implemented by various activation layer types:
-/// - **ReLU** (Rectified Linear Unit): `f(x) = max(0, x)`
-/// - **Sigmoid**: `f(x) = 1 / (1 + e^(-x))`
-/// - **Tanh** (Hyperbolic Tangent): `f(x) = tanh(x)`
-/// - **Softmax**: `f(x_i) = e^(x_i) / Σ(e^(x_j))` for probability distributions
 pub trait ActivationLayer: Layer {}

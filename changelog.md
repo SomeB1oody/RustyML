@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.9.0] - 2025-10-17 (UTC-7)
+### Added
+- Introduce regularization layers with Dropout and SpatialDropout support
+
 ## [v0.9.0] - 2025-10-16 (UTC-7)
 ### Added
 - The activation function implements the `Layer` trait and can be called as a layer
