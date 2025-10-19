@@ -41,7 +41,7 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// let mut ms = MeanShift::default();
 ///
 /// // Fit the model and predict cluster labels
-/// let labels = ms.fit_predict(data.view()).unwrap();
+/// let labels = ms.fit_predict(&data).unwrap();
 ///
 /// // Get the cluster centers
 /// let centers = ms.get_cluster_centers().clone().unwrap();
@@ -166,7 +166,10 @@ impl MeanShift {
     ///
     /// - `Ok(&mut Self)` - A mutable reference to the fitted model
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         preliminary_check(x, None)?;
 
         let n_samples = x.shape()[0];
@@ -372,7 +375,7 @@ impl MeanShift {
         self.n_samples_per_center = Some(Array1::from(center_counts));
 
         // Calculate cost using kernel density estimation
-        let calculate_cost = |x: ArrayView2<f64>,
+        let calculate_cost = |x: &ArrayBase<S, Ix2>,
                               centers: &[Array1<f64>],
                               bandwidth: f64,
                               use_parallel: bool|
@@ -524,7 +527,10 @@ impl MeanShift {
     /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
     /// - `Err(ModelError::NotFitted)` - If fitting succeeded but labels were not set
-    pub fn fit_predict(&mut self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    where
+        S: Data<Elem = f64> + Sync + Send,
+    {
         self.fit(x)?;
         self.labels.clone().ok_or(ModelError::NotFitted)
     }
@@ -538,7 +544,10 @@ impl MeanShift {
     /// # Returns
     ///
     /// * `Vec<usize>` - A vector of indices representing the initial seed points.
-    fn get_bin_seeds(&self, x: ArrayView2<f64>) -> Vec<usize> {
+    fn get_bin_seeds<S>(&self, x: &ArrayBase<S, Ix2>) -> Vec<usize>
+    where
+        S: Data<Elem = f64> + Sync + Send,
+    {
         let n_samples = x.shape()[0];
         let n_features = x.shape()[1];
 
@@ -604,12 +613,15 @@ impl MeanShift {
 ///
 /// - `Ok(f64)` - The estimated bandwidth
 /// - `Err(ModelError::InputValidationError)` - quantile is not in range \[0, 1\]
-pub fn estimate_bandwidth(
-    x: ArrayView2<f64>,
+pub fn estimate_bandwidth<S>(
+    x: &ArrayBase<S, Ix2>,
     quantile: Option<f64>,
     n_samples: Option<usize>,
     random_state: Option<u64>,
-) -> Result<f64, ModelError> {
+) -> Result<f64, ModelError>
+where
+    S: Data<Elem = f64>,
+{
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
         return Err(ModelError::InputValidationError(
@@ -633,7 +645,6 @@ pub fn estimate_bandwidth(
         x.to_owned()
     } else {
         // Random sampling
-        use rand::seq::SliceRandom;
         let mut indices: Vec<usize> = (0..n_samples_total).collect();
         indices.shuffle(&mut rng);
         let indices = &indices[..n_samples];

@@ -41,7 +41,7 @@ const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 /// let y_train = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0]);
 ///
 /// // Train the model
-/// model.fit(x_train.view(), y_train.view()).unwrap();
+/// model.fit(&x_train, &y_train).unwrap();
 ///
 /// // Create test data
 /// let x_test = Array2::from_shape_vec((2, 2), vec![
@@ -50,7 +50,7 @@ const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 /// ]).unwrap();
 ///
 /// // Make predictions
-/// let predictions = model.predict(x_test.view());
+/// let predictions = model.predict(&x_test);
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogisticRegression {
@@ -160,7 +160,14 @@ impl LogisticRegression {
     ///
     /// - `Ok(&mut Self)` - A mutable reference to the trained model, allowing for method chaining
     /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Preliminary check
         preliminary_check(x, Some(y))?;
 
@@ -227,7 +234,7 @@ impl LogisticRegression {
             };
 
             // Calculate prediction errors
-            let errors = &sigmoid_preds - &y;
+            let errors = &sigmoid_preds - y;
 
             // Calculate gradients
             let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
@@ -351,7 +358,10 @@ impl LogisticRegression {
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If input is invalid or feature dimensions don't match
     /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during prediction
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         if self.weights.is_none() {
             return Err(ModelError::NotFitted);
@@ -419,7 +429,10 @@ impl LogisticRegression {
     ///
     /// - `Ok(Array1<f64>)` - A 1D array containing the probability of each sample belonging to the positive class
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    fn predict_proba(&self, x: &ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         if let Some(weights) = &self.weights {
             let mut predictions = x.dot(weights);
 
@@ -447,20 +460,21 @@ impl LogisticRegression {
     ///
     /// - `train_x` - Training features as a 2D array where each row represents a sample and each column represents a feature
     /// - `train_y` - Target values as a 1D array corresponding to the training samples
-    /// - `test_x` - Test features for which predictions are to be made
     ///
     /// # Returns
     ///
     /// - `Ok(Array1<i32>)` - Predicted class labels for the test samples
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(
+    pub fn fit_predict<S>(
         &mut self,
-        train_x: ArrayView2<f64>,
-        train_y: ArrayView1<f64>,
-        test_x: ArrayView2<f64>,
-    ) -> Result<Array1<i32>, ModelError> {
+        train_x: &ArrayBase<S, Ix2>,
+        train_y: &ArrayBase<S, Ix1>,
+    ) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         self.fit(train_x, train_y)?;
-        Ok(self.predict(test_x)?)
+        Ok(self.predict(train_x)?)
     }
 
     model_save_and_load_methods!(LogisticRegression);
@@ -491,13 +505,16 @@ impl LogisticRegression {
 /// let training_y = array![0.0, 0.0, 1.0, 1.0, 0.0];
 ///
 /// // Transform features to polynomial features
-/// let poly_training_x = generate_polynomial_features(training_x.view(), 2);
+/// let poly_training_x = generate_polynomial_features(&training_x, 2);
 ///
 /// // Create and train a logistic regression model with polynomial features
 /// let mut model = LogisticRegression::default();
-/// model.fit(poly_training_x.view(), training_y.view()).unwrap();
+/// model.fit(&poly_training_x, &training_y).unwrap();
 /// ```
-pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2<f64> {
+pub fn generate_polynomial_features<S>(x: &ArrayBase<S, Ix2>, degree: usize) -> Array2<f64>
+where
+    S: Data<Elem = f64> + Send + Sync,
+{
     let (n_samples, n_features) = x.dim();
 
     // Calculate the number of output features (excluding constant term)
@@ -534,8 +551,8 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
         let mut col_idx = n_features; // Start from n_features, no +1 offset
 
         // Define an inner recursive function to generate combinations
-        fn add_combinations(
-            x: ArrayView2<f64>,
+        fn add_combinations<S>(
+            x: &ArrayBase<S, Ix2>,
             result: &mut Array2<f64>,
             col_idx: &mut usize,
             n_samples: usize,
@@ -544,7 +561,9 @@ pub fn generate_polynomial_features(x: ArrayView2<f64>, degree: usize) -> Array2
             current_degree: usize,
             start_feature: usize,
             combination: &mut Vec<usize>,
-        ) {
+        ) where
+            S: Data<Elem = f64> + Send + Sync,
+        {
             // If we've reached the target degree, compute the feature value
             if current_degree == degree {
                 // Store current column index and increment to avoid race conditions

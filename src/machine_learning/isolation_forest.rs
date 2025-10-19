@@ -30,8 +30,8 @@ const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
 ///
 /// let mut model = IsolationForest::new(100, 256, None, Some(42)).unwrap();
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
-/// model.fit(data.view()).unwrap();
-/// let scores = model.predict(data.view()).unwrap();
+/// model.fit(&data).unwrap();
+/// let scores = model.predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IsolationForest {
@@ -152,7 +152,10 @@ impl IsolationForest {
     ///     - Input data is empty
     ///     - Input contains NaN or infinite values
     ///     - Tree building fails
-    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Use preliminary_check for input validation
         preliminary_check(x, None)?;
 
@@ -232,13 +235,16 @@ impl IsolationForest {
     }
 
     /// Recursively builds an isolation tree by randomly selecting features and split points.
-    fn build_isolation_tree(
+    fn build_isolation_tree<S>(
         &self,
-        x: ArrayView2<f64>,
+        x: &ArrayBase<S, Ix2>,
         indices: &[usize],
         current_depth: usize,
         rng: &mut StdRng,
-    ) -> Result<Node, ModelError> {
+    ) -> Result<Node, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Stopping criteria: max depth reached or node has only one sample
         if current_depth >= self.max_depth || indices.len() <= 1 {
             // Create a leaf node with the sample size as the value
@@ -383,7 +389,10 @@ impl IsolationForest {
     ///     - Input data is empty
     ///     - Feature dimension does not match training data
     ///     - Input contains NaN or infinite values
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         if self.trees.is_none() {
             return Err(ModelError::NotFitted);
@@ -430,7 +439,10 @@ impl IsolationForest {
     /// # Returns
     ///
     /// * `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores for the training data, or `ModelError` if fitting or prediction fails
-    pub fn fit_predict(&mut self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         self.fit(x)?;
         self.predict(x)
     }

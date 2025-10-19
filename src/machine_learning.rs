@@ -3,6 +3,7 @@ use crate::math::*;
 use ahash::{AHashMap, AHashSet};
 use helper_functions::*;
 use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::Data;
 use ndarray::prelude::*;
 use rand::prelude::*;
 use rand::rng;

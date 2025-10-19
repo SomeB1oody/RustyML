@@ -38,11 +38,11 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// let y = Array1::from_vec(raw_y);
 ///
 /// // Train the model
-/// model.fit(x.view(), y.view()).unwrap();
+/// model.fit(&x, &y).unwrap();
 ///
 /// // Make predictions
 /// let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
-/// let predictions = model.predict(new_data.view());
+/// let predictions = model.predict(&new_data);
 ///
 /// // Save the trained model to a file
 /// model.save_to_path("linear_regression_model.json").unwrap();
@@ -51,7 +51,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
 ///
 /// // Use the loaded model for predictions
-/// let loaded_predictions = loaded_model.predict(new_data.view());
+/// let loaded_predictions = loaded_model.predict(&new_data);
 ///
 /// // Since Clone is implemented, the model can be easily cloned
 /// let model_copy = model.clone();
@@ -167,7 +167,14 @@ impl LinearRegression {
     ///
     /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
     /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
 
@@ -213,7 +220,7 @@ impl LinearRegression {
             }
 
             // Calculate errors - use borrowing to avoid moving predictions
-            error_vec.assign(&(&predictions - &y));
+            error_vec.assign(&(&predictions - y));
 
             // Calculate cost using math module's sum_of_squared_errors
             let sse = sum_of_squared_errors(&predictions, &y);
@@ -359,7 +366,10 @@ impl LinearRegression {
     /// - `Ok(Vec<f64>)` - A vector of predictions
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If number of features does not match training data
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         if self.coefficients.is_none() {
             return Err(ModelError::NotFitted);
@@ -420,11 +430,14 @@ impl LinearRegression {
     ///
     /// - `Ok(Vec<f64>)` - The predicted values for the input data
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(
+    pub fn fit_predict<S>(
         &mut self,
-        x: ArrayView2<f64>,
-        y: ArrayView1<f64>,
-    ) -> Result<Array1<f64>, ModelError> {
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         self.fit(x, y)?;
         Ok(self.predict(x)?)
     }

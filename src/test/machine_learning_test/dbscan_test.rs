@@ -64,7 +64,7 @@ fn test_fit_simple_data() {
     ]);
 
     let mut dbscan = DBSCAN::new(0.5, 3, DistanceCalculationMetric::Euclidean).unwrap();
-    dbscan.fit(data.view()).unwrap();
+    dbscan.fit(&data.view()).unwrap();
 
     let labels = match dbscan.get_labels() {
         Some(labels) => labels,
@@ -112,9 +112,11 @@ fn test_predict() {
     ]);
 
     let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    dbscan.fit(train_data.view()).unwrap();
+    dbscan.fit(&train_data.view()).unwrap();
 
-    let predictions = dbscan.predict(train_data.view(), new_data.view()).unwrap();
+    let predictions = dbscan
+        .predict(&train_data.view(), &new_data.view())
+        .unwrap();
     assert_eq!(predictions.len(), new_data.nrows());
 }
 
@@ -130,7 +132,7 @@ fn test_fit_predict() {
     ]);
 
     let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    let labels = dbscan.fit_predict(data.view()).unwrap();
+    let labels = dbscan.fit_predict(&data.view()).unwrap();
     let model_labels = match dbscan.get_labels() {
         Some(labels) => labels,
         None => panic!("Expected labels to be Some"),
@@ -148,7 +150,7 @@ fn test_predict_before_fit() {
     let new_data = arr2(&[[1.0, 2.1]]);
 
     let dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    match dbscan.predict(data.view(), new_data.view()) {
+    match dbscan.predict(&data.view(), &new_data.view()) {
         Err(ModelError::NotFitted) => assert!(true),
         _ => panic!("Expected NotFitted error"),
     }
@@ -160,7 +162,7 @@ fn test_empty_data() {
     let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
 
     // Test with empty dataset
-    match dbscan.fit(data.view()) {
+    match dbscan.fit(&data.view()) {
         Err(ModelError::InputValidationError(_)) => assert!(true),
         _ => panic!("Expected InputValidationError"),
     }
@@ -178,14 +180,14 @@ fn test_different_metrics() {
 
     // Test with different distance metrics
     let mut euclidean_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    euclidean_dbscan.fit(data.view()).unwrap();
+    euclidean_dbscan.fit(&data.view()).unwrap();
     let euclidean_labels = match euclidean_dbscan.get_labels() {
         Some(labels) => labels,
         None => panic!("Expected labels to be Some"),
     };
 
     let mut manhattan_dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    manhattan_dbscan.fit(data.view()).unwrap();
+    manhattan_dbscan.fit(&data.view()).unwrap();
     let manhattan_labels = match manhattan_dbscan.get_labels() {
         Some(labels) => labels,
         None => panic!("Expected labels to be Some"),

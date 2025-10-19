@@ -93,7 +93,7 @@
 //! let y = Array1::from_vec(raw_y);
 //!
 //! // Train the model
-//! model.fit(x.view(), y.view()).unwrap();
+//! model.fit(&x, &y).unwrap();
 //!
 //! // Make predictions
 //! let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
@@ -443,13 +443,13 @@ pub mod math;
 /// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// let y = array![6.0, 9.0, 12.0];
-/// model.fit(x.view(), y.view()).unwrap();
+/// model.fit(&x, &y).unwrap();
 ///
 /// // K-means clustering example
 /// let mut kmeans = KMeans::new(3, 100, 1e-4, Some(42)).unwrap();
 /// let data = array![[1.0, 2.0], [1.5, 1.8], [5.0, 8.0], [8.0, 8.0]];
-/// kmeans.fit(data.view()).unwrap();
-/// let labels = kmeans.predict(data.view()).unwrap();
+/// kmeans.fit(&data).unwrap();
+/// let labels = kmeans.predict(&data).unwrap();
 /// ```
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;

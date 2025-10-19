@@ -218,14 +218,14 @@ impl Node {
 /// };
 ///
 /// let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
-/// tree.fit(x_train.view(), y_train.view()).unwrap();
+/// tree.fit(&x_train, &y_train).unwrap();
 ///
 /// // Make predictions
 /// let x_test = array![[5.0, 3.2, 1.2, 0.2], [6.5, 3.0, 5.2, 2.0]];
-/// let predictions = tree.predict(x_test.view()).unwrap();
+/// let predictions = tree.predict(&x_test).unwrap();
 ///
 /// // Get probability estimates for classification
-/// let probabilities = tree.predict_proba(x_test.view()).unwrap();
+/// let probabilities = tree.predict_proba(&x_test).unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionTree {
@@ -324,7 +324,14 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Result<&mut Self, ModelError>` - A mutable reference to `self` for method chaining, or a `ModelError` if training fails.
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
 
@@ -408,14 +415,17 @@ impl DecisionTree {
     }
 
     /// Recursively builds a decision tree node by finding optimal splits with progress tracking.
-    fn build_tree_with_progress(
+    fn build_tree_with_progress<S>(
         &self,
-        x: ArrayView2<f64>,
-        y: ArrayView1<f64>,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
         indices: &[usize],
         depth: usize,
         progress_bar: &ProgressBar,
-    ) -> Result<Node, ModelError> {
+    ) -> Result<Node, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         progress_bar.inc(1);
         progress_bar.set_message(format!("{}", depth));
 
@@ -430,7 +440,7 @@ impl DecisionTree {
         }
 
         // Find the best split
-        let split_result = self.find_best_split(x, y, indices)?;
+        let split_result = self.find_best_split(&x, &y, indices)?;
 
         if let Some((feature_idx, threshold, left_indices, right_indices, impurity_decrease)) =
             split_result
@@ -473,12 +483,15 @@ impl DecisionTree {
 
     /// Finds the best feature and threshold to split the given samples.
     /// Uses parallel evaluation when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
-    fn find_best_split(
+    fn find_best_split<S>(
         &self,
-        x: ArrayView2<f64>,
-        y: ArrayView1<f64>,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
         indices: &[usize],
-    ) -> Result<Option<(usize, f64, Vec<usize>, Vec<usize>, f64)>, ModelError> {
+    ) -> Result<Option<(usize, f64, Vec<usize>, Vec<usize>, f64)>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Calculate parent impurity once
         let parent_impurity = self.calculate_impurity(y, indices);
 
@@ -555,7 +568,10 @@ impl DecisionTree {
     }
 
     /// Calculates the impurity measure for the given samples based on the algorithm type.
-    fn calculate_impurity(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
+    fn calculate_impurity<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> f64
+    where
+        S: Data<Elem = f64>,
+    {
         if indices.is_empty() {
             return 0.0;
         }
@@ -579,14 +595,20 @@ impl DecisionTree {
     }
 
     /// Calculates mean squared error for regression samples.
-    fn calculate_mse(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
+    fn calculate_mse<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> f64
+    where
+        S: Data<Elem = f64>,
+    {
         // Collect subset values into an Array1 to use math::variance
         let subset: Array1<f64> = indices.iter().map(|&i| y[i]).collect();
         variance(&subset)
     }
 
     /// Checks if all samples in the given indices have the same label (pure node).
-    fn is_pure(&self, y: ArrayView1<f64>, indices: &[usize]) -> bool {
+    fn is_pure<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> bool
+    where
+        S: Data<Elem = f64>,
+    {
         if indices.is_empty() {
             return true;
         }
@@ -596,7 +618,10 @@ impl DecisionTree {
     }
 
     /// Creates a leaf node with the appropriate prediction value based on the task type.
-    fn create_leaf(&self, y: ArrayView1<f64>, indices: &[usize]) -> Node {
+    fn create_leaf<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> Node
+    where
+        S: Data<Elem = f64>,
+    {
         if self.is_classifier {
             // Count occurrences of each class
             let n_classes = self.n_classes.unwrap();
@@ -696,7 +721,10 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Result<Array1<f64>, ModelError>` - A 1D array of predicted values with shape (n_samples,), or a `ModelError` if prediction fails.
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         if self.root.is_none() {
             return Err(ModelError::NotFitted);
         }
@@ -752,19 +780,20 @@ impl DecisionTree {
     ///
     /// - `x_train` - Training features as a 2D array with shape (n_train_samples, n_features).
     /// - `y_train` - Training labels as a 1D array with shape (n_train_samples,).
-    /// - `x_test` - Test features as a 2D array with shape (n_test_samples, n_features).
     ///
     /// # Returns
     ///
     /// * `Result<Array1<f64>, ModelError>` - A 1D array of predictions for the test data with shape (n_test_samples,), or a `ModelError` if training or prediction fails.
-    pub fn fit_predict(
+    pub fn fit_predict<S>(
         &mut self,
-        x_train: ArrayView2<f64>,
-        y_train: ArrayView1<f64>,
-        x_test: ArrayView2<f64>,
-    ) -> Result<Array1<f64>, ModelError> {
+        x_train: &ArrayBase<S, Ix2>,
+        y_train: &ArrayBase<S, Ix1>,
+    ) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         self.fit(x_train, y_train)?;
-        self.predict(x_test)
+        self.predict(x_train)
     }
 
     /// Predicts class probabilities for multiple samples (classification only).
@@ -777,7 +806,10 @@ impl DecisionTree {
     /// # Returns
     ///
     /// * `Result<Array2<f64>, ModelError>` - A 2D array of class probabilities with shape (n_samples, n_classes), where each row sums to 1.0, or a `ModelError` if prediction fails.
-    pub fn predict_proba(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
+    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         if !self.is_classifier {
             return Err(ModelError::TreeError(
                 "predict_proba is only available for classification",

@@ -53,7 +53,7 @@ fn test_knn_fit() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Verify training data is stored
     assert!(matches!(knn.get_x_train(), Some(_)));
@@ -91,7 +91,7 @@ fn test_knn_fit() {
 
     // Test that the model can actually make predictions (functional test)
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![3.5, 4.5]).unwrap();
-    let predictions = knn.predict(x_test.view());
+    let predictions = knn.predict(&x_test.view());
     assert!(
         predictions.is_ok(),
         "Model should be able to make predictions after fitting"
@@ -127,16 +127,16 @@ fn test_knn_predict_euclidean_uniform() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test data: should be classified as class 0
     let x_test1 = Array2::<f64>::from_shape_vec((1, 2), vec![1.5, 1.5]).unwrap();
-    let predictions1 = knn.predict(x_test1.view()).unwrap();
+    let predictions1 = knn.predict(&x_test1.view()).unwrap();
     assert_eq!(predictions1, array![0]);
 
     // Test data: should be classified as class 1
     let x_test2 = Array2::<f64>::from_shape_vec((1, 2), vec![5.5, 5.5]).unwrap();
-    let predictions2 = knn.predict(x_test2.view()).unwrap();
+    let predictions2 = knn.predict(&x_test2.view()).unwrap();
     assert_eq!(predictions2, array![1]);
 }
 
@@ -164,11 +164,11 @@ fn test_knn_predict_manhattan() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test data: should still be classified as class 0 with manhattan distance
     let x_test1 = Array2::<f64>::from_shape_vec((1, 2), vec![1.5, 1.5]).unwrap();
-    let predictions1 = knn.predict(x_test1.view()).unwrap();
+    let predictions1 = knn.predict(&x_test1.view()).unwrap();
     assert_eq!(predictions1, array![0]);
 }
 
@@ -197,12 +197,12 @@ fn test_knn_with_k3() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // With k=3, this point has 2 nearest neighbors of class 0 and 1 of class 1
     // So it should predict class 0
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![3.0, 3.0]).unwrap();
-    let predictions = knn.predict(x_test.view()).unwrap();
+    let predictions = knn.predict(&x_test.view()).unwrap();
     assert_eq!(predictions, array![0]);
 }
 
@@ -232,12 +232,12 @@ fn test_knn_distance_weights() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // With distance weights, this point should be predicted as class 1
     // because the nearest neighbors are of class 1
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![4.0, 4.0]).unwrap();
-    let predictions = knn.predict(x_test.view()).unwrap();
+    let predictions = knn.predict(&x_test.view()).unwrap();
     assert_eq!(predictions, array![1]);
 }
 
@@ -248,7 +248,7 @@ fn test_knn_empty_train() {
 
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![1.0, 1.0]).unwrap();
     assert!(matches!(
-        knn.predict(x_test.view()),
+        knn.predict(&x_test.view()),
         Err(ModelError::NotFitted)
     ));
 }
@@ -275,7 +275,7 @@ fn test_knn_string_labels() {
         "dog".to_string(),
     ]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test predictions
     let x_test = Array2::<f64>::from_shape_vec(
@@ -287,71 +287,8 @@ fn test_knn_string_labels() {
     )
     .unwrap();
 
-    let predictions = knn.predict(x_test.view()).unwrap();
+    let predictions = knn.predict(&x_test.view()).unwrap();
     assert_eq!(predictions, array!["cat".to_string(), "dog".to_string()]);
-}
-
-#[test]
-fn test_fit_predict() {
-    // Create a new KNN model with k=3, uniform weights and euclidean metric
-    let mut knn = KNN::<i32>::new(
-        3,
-        WeightingStrategy::Uniform,
-        DistanceCalculationMetric::Euclidean,
-    )
-    .unwrap();
-
-    // Create training data
-    // Features: 2D points
-    let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0], [5.0, 6.0], [6.0, 7.0]];
-
-    // Labels: classes 0 and 1
-    let y_train = array![0, 0, 0, 1, 1];
-
-    // Test data
-    let x_test = array![
-        [1.5, 2.5], // Should be classified as 0 (closer to first 3 points)
-        [5.5, 6.5]  // Should be classified as 1 (closer to last 2 points)
-    ];
-
-    // Use fit_predict to get predictions
-    let predictions = knn
-        .fit_predict(x_train.view(), y_train.view(), x_test.view())
-        .unwrap();
-
-    // Verify predictions
-    assert_eq!(predictions.len(), 2);
-    assert_eq!(predictions[0], 0);
-    assert_eq!(predictions[1], 1);
-
-    // Verify the model has been fitted
-    assert!(knn.get_x_train().is_some());
-    assert!(knn.get_y_train_encoded().is_some());
-}
-
-#[test]
-fn test_fit_predict_empty_data() {
-    // Test with empty test data
-    let mut knn = KNN::<i32>::new(
-        3,
-        WeightingStrategy::Uniform,
-        DistanceCalculationMetric::Euclidean,
-    )
-    .unwrap();
-
-    let x_train = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
-    let y_train = array![0, 0, 1];
-
-    // Empty test data
-    let x_test = Array2::<f64>::zeros((0, 2));
-
-    // Should return empty predictions vector
-    assert_eq!(
-        knn.fit_predict(x_train.view(), y_train.view(), x_test.view()),
-        Err(ModelError::InputValidationError(
-            "Input data is empty".to_string()
-        ))
-    );
 }
 
 // Test predict_parallel method with euclidean distance and uniform weights
@@ -378,16 +315,16 @@ fn test_knn_predict_parallel_euclidean_uniform() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test data: should be classified as class 0
     let x_test1 = Array2::<f64>::from_shape_vec((1, 2), vec![1.5, 1.5]).unwrap();
-    let predictions1 = knn.predict_parallel(x_test1.view()).unwrap();
+    let predictions1 = knn.predict_parallel(&x_test1.view()).unwrap();
     assert_eq!(predictions1, array![0]);
 
     // Test data: should be classified as class 1
     let x_test2 = Array2::<f64>::from_shape_vec((1, 2), vec![5.5, 5.5]).unwrap();
-    let predictions2 = knn.predict_parallel(x_test2.view()).unwrap();
+    let predictions2 = knn.predict_parallel(&x_test2.view()).unwrap();
     assert_eq!(predictions2, array![1]);
 }
 
@@ -417,7 +354,7 @@ fn test_knn_predict_parallel_multiple_samples() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Multiple test samples
     let x_test = Array2::<f64>::from_shape_vec(
@@ -431,7 +368,7 @@ fn test_knn_predict_parallel_multiple_samples() {
     )
     .unwrap();
 
-    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions = knn.predict_parallel(&x_test.view()).unwrap();
     assert_eq!(predictions, array![0, 0, 1, 1]);
 }
 
@@ -461,12 +398,12 @@ fn test_knn_predict_parallel_distance_weights() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // With distance weights, this point should be predicted as class 1
     // because the nearest neighbors are of class 1
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![4.0, 4.0]).unwrap();
-    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions = knn.predict_parallel(&x_test.view()).unwrap();
     assert_eq!(predictions, array![1]);
 }
 
@@ -492,7 +429,7 @@ fn test_knn_predict_parallel_string_labels() {
         "dog".to_string(),
     ]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test predictions
     let x_test = Array2::<f64>::from_shape_vec(
@@ -504,7 +441,7 @@ fn test_knn_predict_parallel_string_labels() {
     )
     .unwrap();
 
-    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions = knn.predict_parallel(&x_test.view()).unwrap();
     assert_eq!(predictions, array!["cat".to_string(), "dog".to_string()]);
 }
 
@@ -538,7 +475,7 @@ fn test_knn_predict_consistency() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 0, 0, 1, 1, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test data
     let x_test = Array2::<f64>::from_shape_vec(
@@ -552,8 +489,8 @@ fn test_knn_predict_consistency() {
     )
     .unwrap();
 
-    let predictions_seq = knn.predict(x_test.view()).unwrap();
-    let predictions_par = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions_seq = knn.predict(&x_test.view()).unwrap();
+    let predictions_par = knn.predict_parallel(&x_test.view()).unwrap();
 
     // Both methods should produce identical results
     assert_eq!(predictions_seq, predictions_par);
@@ -585,7 +522,7 @@ fn test_knn_predict_parallel_manhattan() {
 
     let y_train = Array1::<i32>::from_vec(vec![0, 0, 0, 1, 1, 1]);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test data
     let x_test = Array2::<f64>::from_shape_vec(
@@ -597,7 +534,7 @@ fn test_knn_predict_parallel_manhattan() {
     )
     .unwrap();
 
-    let predictions = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions = knn.predict_parallel(&x_test.view()).unwrap();
     assert_eq!(predictions, array![0, 1]);
 }
 
@@ -633,7 +570,7 @@ fn test_knn_predict_parallel_large_k() {
     let x_train = Array2::<f64>::from_shape_vec((200, 2), x_train_vec).unwrap();
     let y_train = Array1::<i32>::from_vec(y_train_vec);
 
-    knn.fit(x_train.view(), y_train.view()).unwrap();
+    knn.fit(&x_train.view(), &y_train.view()).unwrap();
 
     // Test samples
     let x_test = Array2::<f64>::from_shape_vec(
@@ -645,8 +582,8 @@ fn test_knn_predict_parallel_large_k() {
     )
     .unwrap();
 
-    let predictions_seq = knn.predict(x_test.view()).unwrap();
-    let predictions_par = knn.predict_parallel(x_test.view()).unwrap();
+    let predictions_seq = knn.predict(&x_test.view()).unwrap();
+    let predictions_par = knn.predict_parallel(&x_test.view()).unwrap();
 
     // Both should produce the same results
     assert_eq!(predictions_seq, predictions_par);

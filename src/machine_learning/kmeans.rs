@@ -63,7 +63,7 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// ).unwrap();
 ///
 /// // Fit the model to the data
-/// kmeans.fit(data.view()).unwrap();
+/// kmeans.fit(&data).unwrap();
 ///
 /// // Get cluster labels for all training samples
 /// let labels = kmeans.get_labels().unwrap();
@@ -88,12 +88,12 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 ///          2.2, 7.8]) // Close to third cluster
 ///     .unwrap();
 ///
-/// let predicted_labels = kmeans.predict(new_data.view()).unwrap();
+/// let predicted_labels = kmeans.predict(&new_data).unwrap();
 /// println!("Predicted labels for new data: {:?}", predicted_labels);
 ///
 /// // Alternative: fit and predict in one step
 /// let mut kmeans2 = KMeans::default(); // Uses default parameters
-/// let labels = kmeans2.fit_predict(data.view()).unwrap();
+/// let labels = kmeans2.fit_predict(&data).unwrap();
 /// println!("Labels from fit_predict: {:?}", labels);
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -216,7 +216,10 @@ impl KMeans {
     /// # Parameters
     ///
     /// * `data` - Training data as a 2D array
-    fn init_centroids(&mut self, data: ArrayView2<f64>) -> Result<(), ModelError> {
+    fn init_centroids<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         let n_samples = data.shape()[0];
         let n_features = data.shape()[1];
 
@@ -293,7 +296,10 @@ impl KMeans {
     ///
     /// - `&mut Self` - A mutable reference to self for method chaining
     /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    pub fn fit(&mut self, data: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         preliminary_check(data, None)?;
 
         let n_samples = data.shape()[0];
@@ -483,7 +489,10 @@ impl KMeans {
     /// - `Array1<usize>` - An array of cluster indices for each input data point
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If input data is invalid or has incorrect dimensions
-    pub fn predict(&self, data: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
+    pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         if self.centroids.is_none() {
             return Err(ModelError::NotFitted);
         }
@@ -543,7 +552,10 @@ impl KMeans {
     ///
     /// - `Ok(Array1<usize>)` - An array of cluster indices for each input data point
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(&mut self, data: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         self.fit(data)?;
         Ok(self.labels.clone().unwrap())
     }

@@ -40,11 +40,11 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 /// ).expect("Failed to create SVC");
 ///
 /// // Train the model
-/// svc.fit(x_train.view(), y_train.view()).expect("Failed to train SVM");
+/// svc.fit(&x_train, &y_train).expect("Failed to train SVM");
 ///
 /// // Make predictions
 /// let x_test = Array2::from_shape_vec((2, 2), vec![0.5, 0.5, 0.8, 0.8]).unwrap();
-/// let predictions = svc.predict(x_test.view()).expect("Failed to predict");
+/// let predictions = svc.predict(&x_test).expect("Failed to predict");
 /// println!("Predictions: {:?}", predictions);
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -195,7 +195,10 @@ impl SVC {
     /// # Returns
     ///
     /// * `Array2<f64>` - The computed kernel matrix
-    fn compute_kernel_matrix(&self, x: ArrayView2<f64>) -> Array2<f64> {
+    fn compute_kernel_matrix<S>(&self, x: &ArrayBase<S, Ix2>) -> Array2<f64>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         let n_samples = x.nrows();
         let mut kernel_matrix = Array2::<f64>::zeros((n_samples, n_samples));
 
@@ -321,7 +324,14 @@ impl SVC {
     ///
     /// - `Ok(&mut Self)` - The fitted model (for method chaining)
     /// - `Err(ModelError)` - If there's an error during fitting
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Use preliminary_check for basic input validation
         preliminary_check(x, Some(y))?;
 
@@ -550,7 +560,10 @@ impl SVC {
     /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If input data is invalid
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Check model fitting status
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
@@ -632,7 +645,10 @@ impl SVC {
     /// - `Ok(Array1<f64>)` - The decision function values
     /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If input data is invalid
-    pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Check model fitting status
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
@@ -705,15 +721,18 @@ impl SVC {
     /// # Returns
     ///
     /// * `usize` - Number of alpha values changed (0 or 1)
-    fn examine_example(
+    fn examine_example<S>(
         &self,
         i2: usize,
         alphas: &mut Array1<f64>,
         kernel_matrix: &Array2<f64>,
-        y: ArrayView1<f64>,
+        y: &ArrayBase<S, Ix1>,
         b: &mut f64,
         error_cache: &mut Array1<f64>,
-    ) -> usize {
+    ) -> usize
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         let y2 = y[i2];
         let alpha2 = alphas[i2];
         let e2 = error_cache[i2];
@@ -824,16 +843,19 @@ impl SVC {
     /// # Returns
     ///
     /// * `bool` - `true` if the alpha values were changed, `false` otherwise
-    fn take_step(
+    fn take_step<S>(
         &self,
         i1: usize,
         i2: usize,
         alphas: &mut Array1<f64>,
         kernel_matrix: &Array2<f64>,
-        y: ArrayView1<f64>,
+        y: &ArrayBase<S, Ix1>,
         b: &mut f64,
         error_cache: &mut Array1<f64>,
-    ) -> bool {
+    ) -> bool
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         if i1 == i2 {
             return false;
         }
@@ -929,7 +951,7 @@ impl SVC {
         alphas[i2] = alpha2_new;
 
         // Update error cache
-        self.update_error_cache(alphas, kernel_matrix, y, *b, error_cache);
+        self.update_error_cache(alphas, kernel_matrix, &y, *b, error_cache);
 
         true
     }
@@ -943,14 +965,16 @@ impl SVC {
     /// - `y` - Target labels
     /// - `b` - Current bias term
     /// - `error_cache` - Error cache to update
-    fn update_error_cache(
+    fn update_error_cache<S>(
         &self,
         alphas: &Array1<f64>,
         kernel_matrix: &Array2<f64>,
-        y: ArrayView1<f64>,
+        y: &ArrayBase<S, Ix1>,
         b: f64,
         error_cache: &mut Array1<f64>,
-    ) {
+    ) where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         let n_samples = alphas.len();
         if n_samples >= SVC_PARALLEL_THRESHOLD {
             error_cache
@@ -979,14 +1003,17 @@ impl SVC {
     /// # Returns
     ///
     /// * `f64` - The decision function value
-    fn decision_function_internal(
+    fn decision_function_internal<S>(
         &self,
         i: usize,
         alphas: &Array1<f64>,
         kernel_matrix: &Array2<f64>,
-        y: ArrayView1<f64>,
+        y: &ArrayBase<S, Ix1>,
         b: f64,
-    ) -> f64 {
+    ) -> f64
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         let n_samples = alphas.len();
 
         // Compute sum

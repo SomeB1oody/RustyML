@@ -37,7 +37,7 @@ fn test_getters_before_fit() {
 }
 
 #[test]
-fn test_fit_predict_simple_case() -> Result<(), ModelError> {
+fn test_fit_predict_simple_case() {
     // Create a larger training dataset
     let x = arr2(&[
         [1.0, 1.0],
@@ -69,7 +69,7 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     .unwrap();
 
     // Fit the model
-    model.fit(x.view(), y.view())?;
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Test that weights and bias are now available
     assert!(model.get_weights().is_some());
@@ -77,7 +77,7 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     assert!(model.get_actual_iterations().is_some());
 
     // Test predictions
-    let predictions = model.predict(x.view())?;
+    let predictions = model.predict(&x.view()).unwrap();
     assert_eq!(predictions.len(), 12); // Updated to new number of data points
 
     let mut correct_count = 0;
@@ -104,7 +104,7 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
     let y_expected = arr1(&[1.0, -1.0, 1.0, -1.0]);
 
     // Make predictions on new data
-    let test_predictions = model.predict(x_test.view())?;
+    let test_predictions = model.predict(&x_test.view()).unwrap();
 
     // Check prediction accuracy on new data
     let mut test_correct = 0;
@@ -120,28 +120,24 @@ fn test_fit_predict_simple_case() -> Result<(), ModelError> {
         test_predictions.len()
     );
     assert!(test_correct >= 2); // Require at least 2/4 correct
-
-    Ok(())
 }
 
 #[test]
-fn test_decision_function() -> Result<(), ModelError> {
+fn test_decision_function() {
     // Create a simple dataset
     let x = arr2(&[[2.0, 2.0], [-2.0, -2.0]]);
 
     let y = arr1(&[1.0, -1.0]);
 
     let mut model = LinearSVC::default();
-    model.fit(x.view(), y.view())?;
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Get decision values
-    let decision_values = model.decision_function(x.view())?;
+    let decision_values = model.decision_function(&x.view()).unwrap();
 
     // Decision values should have the same sign as labels
     assert!(decision_values[0] > 0.0);
     assert!(decision_values[1] < 0.0);
-
-    Ok(())
 }
 
 #[test]
@@ -158,8 +154,8 @@ fn test_different_penalties() {
     let y = arr1(&[1.0, 1.0, -1.0, -1.0]);
 
     // Fit both models
-    let _ = model_l1.fit(x.view(), y.view());
-    let _ = model_l2.fit(x.view(), y.view());
+    let _ = model_l1.fit(&x.view(), &y.view());
+    let _ = model_l2.fit(&x.view(), &y.view());
 
     // The weights should be different due to the different penalties
     if let (Some(w1), Some(w2)) = (model_l1.get_weights(), model_l2.get_weights()) {
@@ -173,10 +169,10 @@ fn test_error_handling() {
 
     // Attempt to predict without fitting should return error
     let x = arr2(&[[1.0, 2.0]]);
-    assert!(model.predict(x.view()).is_err());
+    assert!(model.predict(&x.view()).is_err());
 
     // Attempt to get decision function without fitting should return error
-    assert!(model.decision_function(x.view()).is_err());
+    assert!(model.decision_function(&x.view()).is_err());
 }
 
 #[test]
@@ -189,5 +185,5 @@ fn test_fit_with_invalid_data() {
     // y has 3 samples but x has only 2
     let y = arr1(&[1.0, -1.0, 1.0]);
 
-    assert!(model.fit(x.view(), y.view()).is_err());
+    assert!(model.fit(&x.view(), &y.view()).is_err());
 }

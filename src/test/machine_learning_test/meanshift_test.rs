@@ -63,7 +63,7 @@ fn test_meanshift_fit() {
     let data = create_test_data();
 
     let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
-    ms.fit(data.view()).unwrap();
+    ms.fit(&data.view()).unwrap();
 
     // Check that all attributes are accessible after fitting
     assert!(ms.get_cluster_centers().is_some());
@@ -91,7 +91,7 @@ fn test_meanshift_predict() {
     let data = create_test_data();
 
     let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
-    ms.fit(data.view()).unwrap();
+    ms.fit(&data.view()).unwrap();
 
     // Create some new test points
     let test_points = arr2(&[
@@ -117,7 +117,7 @@ fn test_meanshift_fit_predict() {
     let data = create_test_data();
 
     let mut ms = MeanShift::new(2.0, None, None, None, Some(true)).unwrap();
-    let labels = ms.fit_predict(data.view()).unwrap();
+    let labels = ms.fit_predict(&data.view()).unwrap();
 
     assert_eq!(labels.len(), data.dim().0);
 
@@ -138,8 +138,8 @@ fn test_bin_seeding() {
     let mut ms1 = MeanShift::new(2.0, None, None, Some(false), None).unwrap();
     let mut ms2 = MeanShift::new(2.0, None, None, Some(true), None).unwrap();
 
-    ms1.fit(data.view()).unwrap();
-    ms2.fit(data.view()).unwrap();
+    ms1.fit(&data.view()).unwrap();
+    ms2.fit(&data.view()).unwrap();
 
     // Both methods should fit successfully
     assert!(ms1.get_cluster_centers().is_some());
@@ -153,23 +153,23 @@ fn test_estimate_bandwidth() {
     let data = create_test_data();
 
     // Default parameters
-    let bw1 = estimate_bandwidth(data.view(), None, None, None).unwrap();
+    let bw1 = estimate_bandwidth(&data.view(), None, None, None).unwrap();
     assert!(bw1 > 0.0);
 
     // Specified quantile
-    let bw2 = estimate_bandwidth(data.view(), Some(0.3), None, None).unwrap();
+    let bw2 = estimate_bandwidth(&data.view(), Some(0.3), None, None).unwrap();
     assert!(bw2 > 0.0);
 
     // Specified n_samples
-    let bw3 = estimate_bandwidth(data.view(), None, Some(50), None).unwrap();
+    let bw3 = estimate_bandwidth(&data.view(), None, Some(50), None).unwrap();
     assert!(bw3 > 0.0);
 
     // Specified random_state
-    let bw4 = estimate_bandwidth(data.view(), None, None, Some(42)).unwrap();
+    let bw4 = estimate_bandwidth(&data.view(), None, None, Some(42)).unwrap();
     assert!(bw4 > 0.0);
 
     // Using the same random seed should yield the same result
-    let bw5 = estimate_bandwidth(data.view(), None, None, Some(42)).unwrap();
+    let bw5 = estimate_bandwidth(&data.view(), None, None, Some(42)).unwrap();
     assert_eq!(bw4, bw5);
 }
 
@@ -179,7 +179,7 @@ fn test_cluster_all_parameter() {
 
     // With cluster_all = false, some points may not be assigned to clusters
     let mut ms1 = MeanShift::new(1.0, None, None, None, Some(false)).unwrap();
-    ms1.fit(data.view()).unwrap();
+    ms1.fit(&data.view()).unwrap();
     let labels1 = match ms1.get_labels() {
         Some(labels) => labels,
         None => panic!("Labels should be available after fitting"),
@@ -187,7 +187,7 @@ fn test_cluster_all_parameter() {
 
     // With cluster_all = true, all points should be assigned to clusters
     let mut ms2 = MeanShift::new(1.0, None, None, None, Some(true)).unwrap();
-    ms2.fit(data.view()).unwrap();
+    ms2.fit(&data.view()).unwrap();
     let labels2 = match ms2.get_labels() {
         Some(labels) => labels,
         None => panic!("Labels should be available after fitting"),
@@ -203,7 +203,7 @@ fn test_fit_with_max_iterations() {
 
     // Set a very low max_iter to force early stopping
     let mut ms = MeanShift::new(2.0, Some(1), None, None, None).unwrap();
-    ms.fit(data.view()).unwrap();
+    ms.fit(&data.view()).unwrap();
 
     // Should complete successfully and n_iter should be 1
     assert_eq!(ms.get_actual_iterations().unwrap(), 1);

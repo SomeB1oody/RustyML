@@ -57,10 +57,10 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.25), Some(42)).unwrap();
 ///
-/// model.fit(x_train.view(), y_train.view()).unwrap();
+/// model.fit(&x_train, &y_train).unwrap();
 ///
 /// // Make predictions
-/// let predictions = model.predict(x_test.view()).unwrap();
+/// let predictions = model.predict(&x_test).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearSVC {
@@ -163,7 +163,10 @@ impl LinearSVC {
     }
 
     /// Validates input data dimensions and values
-    fn validate_input_data(&self, x: ArrayView2<f64>) -> Result<(), ModelError> {
+    fn validate_input_data<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check for empty input
         if x.is_empty() {
             return Err(ModelError::InputValidationError(
@@ -241,7 +244,14 @@ impl LinearSVC {
     /// - `Ok(&mut Self)`: Reference to self if training succeeds
     /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
     /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<f64>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
 
@@ -268,7 +278,7 @@ impl LinearSVC {
         let batch_size = Self::calculate_batch_size(n_samples);
 
         // Define cost calculation closure
-        let calculate_cost = |x: ArrayView2<f64>,
+        let calculate_cost = |x: &ArrayBase<S, Ix2>,
                               y: &Array1<f64>,
                               weights: &Array1<f64>,
                               bias: f64,
@@ -457,7 +467,10 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Array of predictions (0.0 or 1.0) for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         if self.weights.is_none() {
             return Err(ModelError::NotFitted);
@@ -486,7 +499,10 @@ impl LinearSVC {
     /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
     /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
     /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
-    pub fn decision_function(&self, x: ArrayView2<f64>) -> Result<Array1<f64>, ModelError> {
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         let weights = match self.get_weights() {
             Some(weights) => weights,

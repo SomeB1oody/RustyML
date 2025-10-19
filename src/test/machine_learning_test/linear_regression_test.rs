@@ -47,7 +47,7 @@ fn test_fit_and_predict() {
     let y = Array1::from_vec(y_vec);
 
     let mut model = LinearRegression::new(true, 0.01, 10000, 1e-8, None).unwrap();
-    model.fit(x.view(), y.view()).unwrap();
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
     let coefficients = match model.get_coefficients() {
@@ -63,7 +63,7 @@ fn test_fit_and_predict() {
     let test_x_vec = vec![vec![5.0], vec![6.0]];
     let test_x =
         Array2::from_shape_vec((2, 1), test_x_vec.into_iter().flatten().collect()).unwrap();
-    let predictions = model.predict(test_x.view()).unwrap();
+    let predictions = model.predict(&test_x.view()).unwrap();
 
     assert!((predictions[0] - 11.0).abs() < 0.2);
     assert!((predictions[1] - 13.0).abs() < 0.2);
@@ -94,7 +94,7 @@ fn test_multivariate_regression() {
 
     // Create model and train
     let mut model = LinearRegression::new(true, 0.005, 20000, 1e-10, None).unwrap();
-    model.fit(x.view(), y.view()).unwrap();
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Check if coefficients and intercept are close to expected values
     let coefficients = match model.get_coefficients() {
@@ -126,7 +126,7 @@ fn test_multivariate_regression() {
     let test_x_vec = vec![vec![5.0, 5.0], vec![2.0, 4.0]];
     let test_x =
         Array2::from_shape_vec((2, 2), test_x_vec.into_iter().flatten().collect()).unwrap();
-    let predictions = model.predict(test_x.view()).unwrap();
+    let predictions = model.predict(&test_x.view()).unwrap();
 
     assert!(
         (predictions[0] - 26.0).abs() < 0.5,
@@ -150,7 +150,7 @@ fn test_no_intercept() {
     let y = Array1::from_vec(y_vec);
 
     let mut model = LinearRegression::new(false, 0.01, 10000, 1e-8, None).unwrap();
-    model.fit(x.view(), y.view()).unwrap();
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Check if coefficient is close to expected value (around 2.0)
     let coefficients = match model.get_coefficients() {
@@ -175,12 +175,11 @@ fn test_linear_regression_fit_predict() {
     let x_vec = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0], vec![5.0]];
     let y_vec = vec![5.0, 7.0, 9.0, 11.0, 13.0];
 
-    // 将Vec转换为ndarray的Array
     let x = Array2::from_shape_vec((5, 1), x_vec.into_iter().flatten().collect()).unwrap();
     let y = Array1::from_vec(y_vec);
 
     // Use the fit_predict method
-    let predictions = model.fit_predict(x.view(), y.view()).unwrap();
+    let predictions = model.fit_predict(&x.view(), &y.view()).unwrap();
 
     // Verify predictions are close to actual values
     assert_eq!(predictions.len(), y.len());

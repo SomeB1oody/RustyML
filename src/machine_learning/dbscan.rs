@@ -30,7 +30,7 @@ const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
 /// ]).unwrap();
 ///
 /// let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-/// let labels = dbscan.fit_predict(data.view()).unwrap();
+/// let labels = dbscan.fit_predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DBSCAN {
@@ -139,7 +139,10 @@ impl DBSCAN {
     /// Find all neighbors of point `p` (points within eps distance)
     ///
     /// Uses parallelization for datasets larger than a threshold to improve performance
-    fn region_query(&self, data: ArrayView2<f64>, p: usize) -> Result<Vec<usize>, ModelError> {
+    fn region_query<S>(&self, data: &ArrayBase<S, Ix2>, p: usize) -> Result<Vec<usize>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Bounds check
         if p >= data.nrows() {
             return Err(ModelError::InputValidationError(format!(
@@ -182,7 +185,7 @@ impl DBSCAN {
     ///
     /// # Parameters
     ///
-    /// * `data` - Input data as a 2D array where each row is a sample
+    /// * `data` - Input data as a reference 2D array in ndarray where each row is a sample
     ///
     /// # Returns
     ///
@@ -193,8 +196,11 @@ impl DBSCAN {
     ///
     /// After fitting, cluster labels can be accessed via `get_labels()` method.
     /// Labels of -1 indicate noise points (outliers).
-    pub fn fit(&mut self, data: ArrayView2<f64>) -> Result<&mut Self, ModelError> {
-        preliminary_check(data, None)?;
+    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
+        preliminary_check(&data, None)?;
 
         // Check if dataset is empty
         let n_samples = data.nrows();
@@ -227,7 +233,7 @@ impl DBSCAN {
                 continue;
             }
 
-            let neighbors = self.region_query(data, p).map_err(|e| {
+            let neighbors = self.region_query(&data, p).map_err(|e| {
                 ModelError::ProcessingError(format!("Region query failed: {:?}", e))
             })?;
 
@@ -251,7 +257,7 @@ impl DBSCAN {
                 // Assign to current cluster (could be noise or unvisited)
                 labels[q] = cluster_id;
 
-                let q_neighbors = self.region_query(data, q).map_err(|e| {
+                let q_neighbors = self.region_query(&data, q).map_err(|e| {
                     ModelError::ProcessingError(format!(
                         "Region query failed for point {}: {:?}",
                         q, e
@@ -320,11 +326,14 @@ impl DBSCAN {
     ///
     /// New points are assigned to the nearest cluster if they are within `eps` distance
     /// of a core point, otherwise they are labeled as noise (-1)
-    pub fn predict(
+    pub fn predict<S>(
         &self,
-        trained_data: ArrayView2<f64>,
-        new_data: ArrayView2<f64>,
-    ) -> Result<Array1<i32>, ModelError> {
+        trained_data: &ArrayBase<S, Ix2>,
+        new_data: &ArrayBase<S, Ix2>,
+    ) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Ensure the model has been trained
         let labels = self.labels_.as_ref().ok_or(ModelError::NotFitted)?;
         let core_samples = self
@@ -438,7 +447,10 @@ impl DBSCAN {
     ///
     /// This is equivalent to calling `fit()` followed by `get_labels()`,
     /// but more convenient when you don't need to reuse the model.
-    pub fn fit_predict(&mut self, data: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         self.fit(data)?;
         Ok(self.labels_.as_ref().unwrap().clone())
     }

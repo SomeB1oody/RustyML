@@ -18,7 +18,13 @@ use super::*;
 ///
 /// - `Ok(())` - If all validation checks pass
 /// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
-pub fn preliminary_check(x: ArrayView2<f64>, y: Option<ArrayView1<f64>>) -> Result<(), ModelError> {
+pub fn preliminary_check<S>(
+    x: &ArrayBase<S, Ix2>,
+    y: Option<&ArrayBase<S, Ix1>>,
+) -> Result<(), ModelError>
+where
+    S: Data<Elem = f64>,
+{
     if x.nrows() == 0 {
         return Err(ModelError::InputValidationError(
             "Input data is empty".to_string(),

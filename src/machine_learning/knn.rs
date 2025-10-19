@@ -55,7 +55,7 @@ pub enum WeightingStrategy {
 /// let mut knn = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
 ///
 /// // Fit the model
-/// knn.fit(x_train.view(), y_train.view()).unwrap();
+/// knn.fit(&x_train, &y_train).unwrap();
 ///
 /// // Predict new samples
 /// let x_test = array![
@@ -63,7 +63,7 @@ pub enum WeightingStrategy {
 ///     [5.5, 6.5]   // Should be closer to class "B" points
 /// ];
 ///
-/// let predictions = knn.predict(x_test.view()).unwrap();
+/// let predictions = knn.predict(&x_test).unwrap();
 /// println!("Predictions: {:?}", predictions);  // Should print ["A", "B"]
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +166,15 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// KNN is a lazy learning algorithm, and the calculation is done in the prediction phase.
     /// Labels are internally encoded as indices for efficient parallel computation.
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<T>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S1, S2>(
+        &mut self,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = T>,
+    {
         preliminary_check(x, None)?;
 
         if x.nrows() < self.k {
@@ -216,7 +224,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// - `Ok(Array1<T>)` - Predicted labels
     /// - `Err(ModelError)` - If model is not fitted or input is invalid
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<T>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         use super::preliminary_check;
 
         // check if model is fitted
@@ -281,7 +292,10 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     ///
     /// - `Ok(Array1<T>)` - Predicted labels
     /// - `Err(ModelError)` - If model is not fitted or input is invalid
-    pub fn predict_parallel(&self, x: ArrayView2<f64>) -> Result<Array1<T>, ModelError> {
+    pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         use super::preliminary_check;
 
         // check if model is fitted
@@ -514,20 +528,22 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// - `x_train` - The training feature matrix with shape (n_samples, n_features)
     /// - `y_train` - The training target values
-    /// - `x_test` - The test feature matrix with shape (n_samples, n_features)
     ///
     /// # Returns
     ///
     /// - `Ok(Array1<T>)` - Array of predicted values
     /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
-    pub fn fit_predict(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        x_train: ArrayView2<f64>,
-        y_train: ArrayView1<T>,
-        x_test: ArrayView2<f64>,
-    ) -> Result<Array1<T>, ModelError> {
+        x_train: &ArrayBase<S1, Ix2>,
+        y_train: &ArrayBase<S2, Ix1>,
+    ) -> Result<Array1<T>, ModelError>
+    where
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = T>,
+    {
         self.fit(x_train, y_train)?;
-        Ok(self.predict(x_test)?)
+        Ok(self.predict(x_train)?)
     }
 }
 

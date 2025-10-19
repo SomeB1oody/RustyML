@@ -11,7 +11,8 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Change optimizer computation to adaptive parallel thresholds
-- Change the parameters that require arrays in reference to use a more general solution
+- Change the parameters that require arrays in reference to use a more general solution for `math` module
+- Change the parameters that require arrays in reference to use a more general solution for `machine_learning` module
 
 ### Changed
 - Streamline tensor handling and improve training stability in recurrent and dense layers

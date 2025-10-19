@@ -40,13 +40,13 @@ fn test_fit_and_predict_simple_case() {
     let y = arr1(&[1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 
     let mut model = LogisticRegression::default();
-    model.fit(x.view(), y.view()).unwrap();
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Check if weights exist
     assert!(matches!(model.get_weights(), Some(_)));
 
     // Predict training data
-    let predictions = model.predict(x.view()).unwrap();
+    let predictions = model.predict(&x.view()).unwrap();
 
     let correct_predictions = predictions
         .iter()
@@ -68,10 +68,10 @@ fn test_predict_proba() {
     let x = arr2(&[[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
     let y = arr1(&[0.0, 0.0, 0.0, 1.0]);
 
-    model.fit(x.view(), y.view()).unwrap();
+    model.fit(&x.view(), &y.view()).unwrap();
 
     // Check predictions
-    let predictions = model.predict(x.view()).unwrap();
+    let predictions = model.predict(&x.view()).unwrap();
     assert_eq!(predictions.len(), 4);
 }
 
@@ -80,12 +80,12 @@ fn test_generate_polynomial_features() {
     let x = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
 
     // Test degree = 1 (should return intercept + original features)
-    let poly_features_1 = generate_polynomial_features(x.view(), 1);
+    let poly_features_1 = generate_polynomial_features(&x.view(), 1);
     let expected_degree_1 = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     assert_eq!(poly_features_1, expected_degree_1);
 
     // Test degree = 2
-    let poly_features_2 = generate_polynomial_features(x.view(), 2);
+    let poly_features_2 = generate_polynomial_features(&x.view(), 2);
     let expected_degree_2 = arr2(&[[1.0, 2.0, 1.0, 2.0, 4.0], [3.0, 4.0, 9.0, 12.0, 16.0]]);
 
     assert_eq!(poly_features_2.shape(), expected_degree_2.shape());
@@ -107,61 +107,16 @@ fn test_fit_with_intercept() {
     let y = arr1(&[0.0, 0.0, 1.0, 1.0]);
 
     let mut model_with_intercept = LogisticRegression::new(true, 0.1, 1000, 1e-6, None).unwrap();
-    model_with_intercept.fit(x.view(), y.view()).unwrap();
+    model_with_intercept.fit(&x.view(), &y.view()).unwrap();
 
     // Training without intercept
     let mut model_without_intercept =
         LogisticRegression::new(false, 0.1, 1000, 1e-6, None).unwrap();
-    model_without_intercept.fit(x.view(), y.view()).unwrap();
+    model_without_intercept.fit(&x.view(), &y.view()).unwrap();
 
     // Check predictions from both models
-    let predictions_with_intercept = model_with_intercept.predict(x.view()).unwrap();
+    let predictions_with_intercept = model_with_intercept.predict(&x.view()).unwrap();
 
     // The model with intercept should fit this data better
     assert_eq!(predictions_with_intercept, arr1(&[0, 0, 1, 1]));
-}
-
-#[test]
-fn test_fit_predict() {
-    // Create a simple logistic regression instance
-    let mut model = LogisticRegression::new(true, 0.01, 10000, 1e-5, None).unwrap();
-
-    // Create training data: simple 2D features
-    // For example: two features forming two linearly separable classes
-    let train_x = Array2::from_shape_vec(
-        (4, 2),
-        vec![
-            0.0, 0.0, // Class 0
-            0.0, 1.0, // Class 1
-            1.0, 0.0, // Class 1
-            1.0, 1.0, // Class 1
-        ],
-    )
-    .unwrap();
-
-    // Corresponding target values: 0 for first class, 1 for second class
-    let train_y = Array1::from_vec(vec![0.0, 1.0, 1.0, 1.0]);
-
-    // Create test data
-    let test_x = Array2::from_shape_vec(
-        (2, 2),
-        vec![
-            0.0, 0.2, // Should be close to class 0
-            0.9, 0.8, // Should predict class 1
-        ],
-    )
-    .unwrap();
-
-    // Use fit_predict method for prediction
-    let predictions = model
-        .fit_predict(train_x.view(), train_y.view(), test_x.view())
-        .unwrap();
-
-    // Assert: Check that the predictions are a 1D array of length 2 (number of test samples)
-    assert_eq!(predictions.len(), 2);
-
-    // Check if predictions match expectations
-    // Since the training data is simple, we expect first prediction as 0, second as 1
-    assert_eq!(predictions[0], 0);
-    assert_eq!(predictions[1], 1);
 }
