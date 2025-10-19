@@ -382,7 +382,7 @@ impl TSNE {
                 .into_par_iter()
                 .enumerate()
                 .for_each(|(i, mut row)| {
-                    let (p_i, _) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
+                    let (p_i, _) = binary_search_sigma(&distances.slice(s![i, ..]), perplexity);
                     for (j, &prob) in p_i.iter().enumerate() {
                         if i != j {
                             row[j] = prob;
@@ -392,7 +392,7 @@ impl TSNE {
         } else {
             // Sequential computation for small datasets
             for (i, mut row) in p.axis_iter_mut(Axis(0)).enumerate() {
-                let (p_i, _) = binary_search_sigma(distances.slice(s![i, ..]), perplexity);
+                let (p_i, _) = binary_search_sigma(&distances.slice(s![i, ..]), perplexity);
                 for (j, &prob) in p_i.iter().enumerate() {
                     if i != j {
                         row[j] = prob;

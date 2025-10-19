@@ -337,9 +337,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// Calculates the distance between two points based on the selected metric
     fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         match self.metric {
-            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(a, b).sqrt(),
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(a, b),
-            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(a, b, p),
+            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b).sqrt(),
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b),
+            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&a, &b, p),
         }
     }
 

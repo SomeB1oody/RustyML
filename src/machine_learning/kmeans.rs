@@ -198,7 +198,7 @@ impl KMeans {
         let mut min_idx = 0;
 
         for (i, centroid) in centroids.outer_iter().enumerate() {
-            let dist = squared_euclidean_distance_row(sample, centroid);
+            let dist = squared_euclidean_distance_row(&sample, &centroid);
             if dist < min_dist {
                 min_dist = dist;
                 min_idx = i;
@@ -246,7 +246,7 @@ impl KMeans {
                         .rows()
                         .into_iter()
                         .take(k)
-                        .map(|centroid| squared_euclidean_distance_row(sample, centroid))
+                        .map(|centroid| squared_euclidean_distance_row(&sample, &centroid))
                         .collect::<Vec<_>>()
                         .into_iter()
                         .fold(f64::MAX, f64::min)
@@ -342,7 +342,7 @@ impl KMeans {
                     for (cluster_idx, centroid) in
                         self.centroids.as_ref().unwrap().outer_iter().enumerate()
                     {
-                        let dist = squared_euclidean_distance_row(sample, centroid);
+                        let dist = squared_euclidean_distance_row(&sample, &centroid);
                         if dist < min_dist {
                             min_dist = dist;
                             min_cluster = cluster_idx;

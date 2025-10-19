@@ -215,8 +215,8 @@ impl LinearRegression {
             // Calculate errors - use borrowing to avoid moving predictions
             error_vec.assign(&(&predictions - &y));
 
-            // Calculate cost
-            let sse = error_vec.dot(&error_vec);
+            // Calculate cost using math module's sum_of_squared_errors
+            let sse = sum_of_squared_errors(&predictions, &y);
 
             let regularization_term = match &self.regularization_type {
                 None => 0.0,

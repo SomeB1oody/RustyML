@@ -565,12 +565,12 @@ impl DecisionTree {
                 Algorithm::CART => {
                     let subset = y.select(Axis(0), indices);
                     let subset_view: ArrayView1<f64> = subset.view();
-                    gini(subset_view)
+                    gini(&subset_view)
                 }
                 Algorithm::ID3 | Algorithm::C45 => {
                     let subset = y.select(Axis(0), indices);
                     let subset_view: ArrayView1<f64> = subset.view();
-                    entropy(subset_view)
+                    entropy(&subset_view)
                 }
             }
         } else {
@@ -582,7 +582,7 @@ impl DecisionTree {
     fn calculate_mse(&self, y: ArrayView1<f64>, indices: &[usize]) -> f64 {
         // Collect subset values into an Array1 to use math::variance
         let subset: Array1<f64> = indices.iter().map(|&i| y[i]).collect();
-        variance(subset.view())
+        variance(&subset)
     }
 
     /// Checks if all samples in the given indices have the same label (pure node).

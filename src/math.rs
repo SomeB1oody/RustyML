@@ -1,4 +1,5 @@
 use ahash::AHashMap;
+use ndarray::Data;
 use ndarray::prelude::*;
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
@@ -10,7 +11,7 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 ///
 /// # Parameters
 ///
-/// * `values` - An ndarray `ArrayView1<f64>` of observed values
+/// * `values` - A reference of observed values in ndarray
 ///
 /// # Returns
 ///
@@ -22,12 +23,15 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 /// use ndarray::array;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let sst = sum_of_square_total(values.view());
+/// let sst = sum_of_square_total(&values);
 /// // Mean is 2.0, so SST = (1-2)^2 + (2-2)^2 + (3-2)^2 = 1 + 0 + 1 = 2.0
 /// assert!((sst - 2.0).abs() < 1e-5);
 /// ```
 #[inline]
-pub fn sum_of_square_total(values: ArrayView1<f64>) -> f64 {
+pub fn sum_of_square_total<S>(values: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     // Handle empty array case
     if values.is_empty() {
         return 0.0;
@@ -42,8 +46,8 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> f64 {
 ///
 /// # Parameters
 ///
-/// - `predicted` - Predicted values vector (y') as ndarray `ArrayView1<f64>`
-/// - `actual` - Actual values vector (y) as ndarray `ArrayView1<f64>`
+/// - `predicted` - Predicted values vector (y') as a reference in ndarray
+/// - `actual` - Actual values vector (y) as a reference in ndarray
 ///
 /// # Returns
 ///
@@ -56,12 +60,19 @@ pub fn sum_of_square_total(values: ArrayView1<f64>) -> f64 {
 ///
 /// let predicted = array![2.0, 3.0];
 /// let actual = array![1.0, 3.0];
-/// let sse = sum_of_squared_errors(predicted.view(), actual.view());
+/// let sse = sum_of_squared_errors(&predicted, &actual);
 /// // (2-1)^2 + (3-3)^2 = 1 + 0 = 1
 /// assert!((sse - 1.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn sum_of_squared_errors(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
+pub fn sum_of_squared_errors<S1, S2>(
+    predicted: &ArrayBase<S1, Ix1>,
+    actual: &ArrayBase<S2, Ix1>,
+) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
     let sum: f64 = predicted
         .iter()
         .zip(actual.iter())
@@ -126,8 +137,8 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// # Parameters
 ///
-/// - `logits` - `ArrayView1<f64>` of raw model outputs (logits, before sigmoid)
-/// - `actual_labels` - `ArrayView1<f64>` of actual binary labels (0 or 1)
+/// - `logits` - A reference in ndarray of raw model outputs (logits, before sigmoid)
+/// - `actual_labels` - A reference in ndarray of actual binary labels (0 or 1)
 ///
 /// # Returns
 ///
@@ -140,12 +151,16 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// let logits = array![0.0, 2.0, -1.0];
 /// let actual_labels = array![0.0, 1.0, 0.0];
-/// let loss = logistic_loss(logits.view(), actual_labels.view());
+/// let loss = logistic_loss(&logits, &actual_labels);
 /// // Expected average loss is approximately 0.37778
 /// assert!((loss - 0.37778).abs() < 1e-5);
 /// ```
 #[inline]
-pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) -> f64 {
+pub fn logistic_loss<S1, S2>(logits: &ArrayBase<S1, Ix1>, actual_labels: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
     // Using a vectorized approach to calculate log loss
     let n = logits.len() as f64;
 
@@ -167,8 +182,8 @@ pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) ->
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as ndarray `ArrayView1<f64>`
-/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// - `x1` - First vector as a reference in ndarray
+/// - `x2` - Second vector as a reference in ndarray
 ///
 /// # Returns
 ///
@@ -181,14 +196,21 @@ pub fn logistic_loss(logits: ArrayView1<f64>, actual_labels: ArrayView1<f64>) ->
 ///
 /// let v1 = array![1.0, 2.0, 3.0];
 /// let v2 = array![4.0, 5.0, 6.0];
-/// let dist = squared_euclidean_distance_row(v1.view(), v2.view());
+/// let dist = squared_euclidean_distance_row(&v1, &v2);
 /// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
 /// assert!((dist - 27.0).abs() < 1e-10);
 /// ```
 #[inline]
-pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
+pub fn squared_euclidean_distance_row<S1, S2>(
+    x1: &ArrayBase<S1, Ix1>,
+    x2: &ArrayBase<S2, Ix1>,
+) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
     // Calculate the difference between the two vectors
-    let diff = &x1 - &x2;
+    let diff = x1 - x2;
 
     // Calculate the sum of squares (fully vectorized)
     diff.mapv(|x| x * x).sum()
@@ -201,8 +223,8 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as ndarray `ArrayView1<f64>`
-/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// - `x1` - First vector as ndarray a reference in ndarray
+/// - `x2` - Second vector as ndarray a reference in ndarray
 ///
 /// # Returns
 ///
@@ -215,14 +237,18 @@ pub fn squared_euclidean_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) 
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = manhattan_distance_row(v1.view(), v2.view());
+/// let distance = manhattan_distance_row(&v1, &v2);
 /// // |1-4| + |2-6| = 3 + 4 = 7
 /// assert!((distance - 7.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
+pub fn manhattan_distance_row<S1, S2>(x1: &ArrayBase<S1, Ix1>, x2: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
     // Calculate the difference between the two vectors
-    let diff = &x1 - &x2;
+    let diff = x1 - x2;
 
     // Calculate the sum of absolute differences (fully vectorized)
     diff.mapv(|x| x.abs()).sum()
@@ -235,8 +261,8 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as ndarray `ArrayView1<f64>`
-/// - `x2` - Second vector as ndarray `ArrayView1<f64>`
+/// - `x1` - First vector as a reference in ndarray
+/// - `x2` - Second vector as a reference in ndarray
 /// - `p` - The order of the norm (p ≥ 1.0)
 ///
 /// # Returns
@@ -251,14 +277,22 @@ pub fn manhattan_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
 ///
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let distance = minkowski_distance_row(v1.view(), v2.view(), 3.0);
+/// let distance = minkowski_distance_row(&v1, &v2, 3.0);
 /// // Expected distance is approximately 4.497
 /// assert!((distance - 4.497).abs() < 1e-3);
 /// ```
 #[inline]
-pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) -> f64 {
+pub fn minkowski_distance_row<S1, S2>(
+    x1: &ArrayBase<S1, Ix1>,
+    x2: &ArrayBase<S2, Ix1>,
+    p: f64,
+) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
     // Calculate the difference between the two vectors
-    let diff = &x1 - &x2;
+    let diff = x1 - x2;
 
     // Calculate the sum of absolute differences raised to power p,
     // then take the p-th root of the sum
@@ -274,7 +308,7 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 ///
 /// # Parameters
 ///
-/// * `y` - An `ArrayView1<f64>` of values representing class labels
+/// * `y` - A reference in ndarray of values representing class labels
 ///
 /// # Returns
 ///
@@ -291,12 +325,15 @@ pub fn minkowski_distance_row(x1: ArrayView1<f64>, x2: ArrayView1<f64>, p: f64) 
 /// use rustyml::math::gini;
 ///
 /// let labels = array![0.0, 0.0, 1.0, 1.0];
-/// let gini_val = gini(labels.view());
+/// let gini_val = gini(&labels);
 /// // For two classes with equal frequency, Gini = 1 - (0.5^2 + 0.5^2) = 0.5
 /// assert!((gini_val - 0.5).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn gini(y: ArrayView1<f64>) -> f64 {
+pub fn gini<S>(y: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     let total_samples = y.len() as f64;
     if total_samples == 0.0 {
         return 0.0;
@@ -340,7 +377,7 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 ///
 /// # Parameters
 ///
-/// * `y` - An `ArrayView1<f64>` of values representing class labels
+/// * `y` - A reference in ndarray of values representing class labels
 ///
 /// # Returns
 ///
@@ -357,12 +394,15 @@ pub fn gini(y: ArrayView1<f64>) -> f64 {
 /// use rustyml::math::entropy;
 ///
 /// let labels = array![0.0, 1.0, 1.0, 0.0];
-/// let ent = entropy(labels.view());
+/// let ent = entropy(&labels);
 /// // For two classes with equal frequency, entropy = 1.0
 /// assert!((ent - 1.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn entropy(y: ArrayView1<f64>) -> f64 {
+pub fn entropy<S>(y: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     let total_samples = y.len() as f64;
     if total_samples == 0.0 {
         return 0.0;
@@ -410,9 +450,9 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 ///
 /// # Parameters
 ///
-/// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
-/// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
-/// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
+/// - `y` - A reference in ndarray representing class labels in the parent node
+/// - `left_y` - A reference in ndarray representing class labels in the left child node
+/// - `right_y` - A reference in ndarray representing class labels in the right child node
 ///
 /// # Returns
 ///
@@ -430,16 +470,21 @@ pub fn entropy(y: ArrayView1<f64>) -> f64 {
 /// let parent = array![0.0, 0.0, 1.0, 1.0];
 /// let left = array![0.0, 0.0];
 /// let right = array![1.0, 1.0];
-/// let ig = information_gain(parent.view(), left.view(), right.view());
+/// let ig = information_gain(&parent, &left, &right);
 /// // Entropy(parent)=1.0, Entropy(left)=Entropy(right)=0, so IG = 1.0
 /// assert!((ig - 1.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn information_gain(
-    y: ArrayView1<f64>,
-    left_y: ArrayView1<f64>,
-    right_y: ArrayView1<f64>,
-) -> f64 {
+pub fn information_gain<S1, S2, S3>(
+    y: &ArrayBase<S1, Ix1>,
+    left_y: &ArrayBase<S2, Ix1>,
+    right_y: &ArrayBase<S3, Ix1>,
+) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+    S3: Data<Elem = f64>,
+{
     // Calculate sample counts once
     let n = y.len() as f64;
 
@@ -482,9 +527,9 @@ pub fn information_gain(
 ///
 /// # Parameters
 ///
-/// - `y` - An `ArrayView1<f64>` representing class labels in the parent node
-/// - `left_y` - An `ArrayView1<f64>` representing class labels in the left child node
-/// - `right_y` - An `ArrayView1<f64>` representing class labels in the right child node
+/// - `y` - A reference in ndarray representing class labels in the parent node
+/// - `left_y` - A reference in ndarray representing class labels in the left child node
+/// - `right_y` - A reference in ndarray representing class labels in the right child node
 ///
 /// # Returns
 ///
@@ -503,12 +548,21 @@ pub fn information_gain(
 /// let parent = array![0.0, 0.0, 1.0, 1.0];
 /// let left = array![0.0, 0.0];
 /// let right = array![1.0, 1.0];
-/// let gr = gain_ratio(parent.view(), left.view(), right.view());
+/// let gr = gain_ratio(&parent, &left, &right);
 /// // With equal splits, gain ratio should be 1.0
 /// assert!((gr - 1.0).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayView1<f64>) -> f64 {
+pub fn gain_ratio<S1, S2, S3>(
+    y: &ArrayBase<S1, Ix1>,
+    left_y: &ArrayBase<S2, Ix1>,
+    right_y: &ArrayBase<S3, Ix1>,
+) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+    S3: Data<Elem = f64>,
+{
     // Early return if parent is empty or either split is empty
     if y.is_empty() || left_y.is_empty() || right_y.is_empty() {
         return 0.0;
@@ -556,7 +610,7 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
 ///
 /// # Arguments
 ///
-/// * `y` - An `ArrayView1<f64>` of values for which to calculate the MSE
+/// * `y` - A reference in ndarray of values for which to calculate the MSE
 ///
 /// # Returns
 ///
@@ -568,12 +622,15 @@ pub fn gain_ratio(y: ArrayView1<f64>, left_y: ArrayView1<f64>, right_y: ArrayVie
 /// use rustyml::math::variance;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let mse = variance(values.view());
+/// let mse = variance(&values);
 /// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ≈ 0.66667
 /// assert!((mse - 0.6666667).abs() < 1e-6);
 /// ```
 #[inline]
-pub fn variance(y: ArrayView1<f64>) -> f64 {
+pub fn variance<S>(y: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     let n = y.len();
 
     // Return 0.0 for empty arrays
@@ -603,54 +660,11 @@ pub fn variance(y: ArrayView1<f64>) -> f64 {
     sum_squared_diff / n as f64
 }
 
-/// Calculates the leaf node adjustment factor c(n)
-///
-/// # Parameters
-///
-/// * `n` - Number of samples
-///
-/// # Returns
-///
-/// * `f64` - The adjustment factor
-///
-/// # Notes
-///
-/// Formula: c(n) = 2 * (H(n-1)) - (2*(n-1)/n)
-/// where H(n-1) can be approximated by ln(n-1) + gamma, gamma is Euler's constant
-///
-/// # Examples
-/// ```rust
-/// use rustyml::math::average_path_length_factor;
-///
-/// let factor = average_path_length_factor(10.0);
-/// // For n = 10, the factor is approximately 3.748
-/// assert!((factor - 3.748).abs() < 0.01);
-/// ```
-#[inline]
-pub fn average_path_length_factor(n: f64) -> f64 {
-    // Handle invalid inputs
-    if !n.is_finite() || n <= 1.0 {
-        return 0.0;
-    }
-
-    // Calculate n-1 once as it's used multiple times
-    let n_minus_1 = n - 1.0;
-
-    // Calculate first term: 2 * (ln(n-1) + gamma)
-    let harmonic_term = 2.0 * (n_minus_1.ln() + EULER_GAMMA);
-
-    // Calculate second term: 2 * (n-1)/n
-    let correction_term = 2.0 * n_minus_1 / n;
-
-    // Combine terms
-    harmonic_term - correction_term
-}
-
 /// Calculates the standard deviation of a set of values
 ///
 /// # Parameters
 ///
-/// * `values` - An `ArrayView1<f64>` of values
+/// * `values` - A reference in ndarray of values
 ///
 /// # Returns
 ///
@@ -664,12 +678,15 @@ pub fn average_path_length_factor(n: f64) -> f64 {
 /// use rustyml::math::standard_deviation;
 ///
 /// let values = array![1.0, 2.0, 3.0];
-/// let std_dev = standard_deviation(values.view());
+/// let std_dev = standard_deviation(&values);
 /// // Population standard deviation for [1,2,3] is approximately 0.8165
 /// assert!((std_dev - 0.8165).abs() < 1e-4);
 /// ```
 #[inline]
-pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
+pub fn standard_deviation<S>(values: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     let n = values.len();
 
     // Return 0.0 for empty arrays
@@ -678,7 +695,7 @@ pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
     }
 
     // Use built-in methods when available for better performance
-    // We can calculate variance and then take the square root
+    // calculate variance and then take the square root
 
     // First calculate the mean efficiently
     let mean = values.mean().unwrap(); // Safe since we've validated input
@@ -727,23 +744,23 @@ pub fn standard_deviation(values: ArrayView1<f64>) -> f64 {
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::math::c;
+/// use rustyml::math::average_path_length_factor;
 ///
 /// // Small sample size - exact calculation
-/// let factor_small = c(10);
+/// let factor_small = average_path_length_factor(10);
 /// // factor_small ≈ 3.748
 ///
 /// // Large sample size - logarithmic approximation
-/// let factor_large = c(1000);
+/// let factor_large = average_path_length_factor(1000);
 /// // factor_large ≈ 13.815
 ///
 /// // Edge cases
-/// assert_eq!(c(0), 0.0);  // Degenerate case
-/// assert_eq!(c(1), 0.0);  // Single sample
-/// assert_eq!(c(2), 1.0);  // Single split
+/// assert_eq!(average_path_length_factor(0), 0.0);  // Degenerate case
+/// assert_eq!(average_path_length_factor(1), 0.0);  // Single sample
+/// assert_eq!(average_path_length_factor(2), 1.0);  // Single split
 /// ```
 #[inline]
-pub fn c(n: usize) -> f64 {
+pub fn average_path_length_factor(n: usize) -> f64 {
     if n <= 1 {
         return 0.0;
     }
@@ -767,7 +784,7 @@ pub fn c(n: usize) -> f64 {
 ///
 /// # Parameters
 ///
-/// - `distances` - Vector of squared Euclidean distances from a point to all others.
+/// - `distances` - A reference in ndarray of squared Euclidean distances from a point to all others.
 /// - `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
 ///
 /// # Returns
@@ -783,15 +800,18 @@ pub fn c(n: usize) -> f64 {
 ///
 /// let distances = array![0.0, 1.0, 4.0, 9.0, 16.0];
 /// let target_perplexity = 2.0;
-/// let (probabilities, sigma) = binary_search_sigma(distances.view(), target_perplexity);
+/// let (probabilities, sigma) = binary_search_sigma(&distances, target_perplexity);
 /// // The function returns probabilities and sigma that achieve the target perplexity
 /// assert_eq!(probabilities.len(), 5);
 /// assert!(sigma > 0.0);
 /// ```
-pub fn binary_search_sigma(
-    distances: ArrayView1<f64>,
+pub fn binary_search_sigma<S>(
+    distances: &ArrayBase<S, Ix1>,
     target_perplexity: f64,
-) -> (Array1<f64>, f64) {
+) -> (Array1<f64>, f64)
+where
+    S: Data<Elem = f64>,
+{
     let tol = 1e-5;
     let mut sigma_min: f64 = 1e-20;
     let mut sigma_max: f64 = 1e20;

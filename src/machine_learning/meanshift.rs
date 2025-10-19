@@ -208,7 +208,7 @@ impl MeanShift {
                         .into_par_iter()
                         .map(|i| {
                             let point = x.row(i);
-                            let dist = squared_euclidean_distance_row(center.view(), point);
+                            let dist = squared_euclidean_distance_row(&center, &point);
                             Ok((-gamma * dist).exp())
                         })
                         .collect()
@@ -216,7 +216,7 @@ impl MeanShift {
                     (0..n_samples)
                         .map(|i| {
                             let point = x.row(i);
-                            let dist = squared_euclidean_distance_row(center.view(), point);
+                            let dist = squared_euclidean_distance_row(&center, &point);
                             Ok((-gamma * dist).exp())
                         })
                         .collect()
@@ -241,8 +241,7 @@ impl MeanShift {
                 }
 
                 // Check convergence using squared distance to avoid sqrt
-                let shift_squared =
-                    squared_euclidean_distance_row(center.view(), new_center.view());
+                let shift_squared = squared_euclidean_distance_row(&center, &new_center);
                 center = new_center;
 
                 completed_iterations += 1;
@@ -304,8 +303,7 @@ impl MeanShift {
 
             // Find closest existing center within bandwidth
             for (i, unique_center) in unique_centers.iter_mut().enumerate() {
-                let distance_squared =
-                    squared_euclidean_distance_row(center.view(), unique_center.view());
+                let distance_squared = squared_euclidean_distance_row(&center, &unique_center);
 
                 if distance_squared < bandwidth_squared {
                     // Update existing center using weighted average
@@ -345,7 +343,7 @@ impl MeanShift {
             let mut label = 0;
 
             for (j, center) in unique_centers.iter().enumerate() {
-                let dist_squared = squared_euclidean_distance_row(point, center.view());
+                let dist_squared = squared_euclidean_distance_row(&point, &center);
                 if dist_squared < min_dist_squared {
                     min_dist_squared = dist_squared;
                     label = j;
@@ -389,8 +387,7 @@ impl MeanShift {
                 let kernel_sum: Result<f64, ModelError> = centers
                     .iter()
                     .map(|center| -> Result<f64, ModelError> {
-                        let dist_squared =
-                            squared_euclidean_distance_row(point.view(), center.view());
+                        let dist_squared = squared_euclidean_distance_row(&point, &center);
                         Ok((-gamma * dist_squared).exp())
                     })
                     .sum();
@@ -491,7 +488,7 @@ impl MeanShift {
 
             for j in 0..n_clusters {
                 let center = centers.row(j);
-                let dist_squared = squared_euclidean_distance_row(point, center);
+                let dist_squared = squared_euclidean_distance_row(&point, &center);
                 if dist_squared < min_dist_squared {
                     min_dist_squared = dist_squared;
                     label = j;

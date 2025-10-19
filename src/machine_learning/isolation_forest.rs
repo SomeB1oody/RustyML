@@ -300,7 +300,7 @@ impl IsolationForest {
             NodeType::Leaf { value, .. } => {
                 // value stores the number of samples in this leaf
                 // Add the average path length adjustment for unresolved samples
-                current_depth as f64 + c(*value as usize)
+                current_depth as f64 + average_path_length_factor(*value as usize)
             }
             NodeType::Internal {
                 feature_index,
@@ -360,7 +360,7 @@ impl IsolationForest {
             / trees.len() as f64;
 
         // Normalize using c(max_samples)
-        let c_n = c(self.max_samples);
+        let c_n = average_path_length_factor(self.max_samples);
 
         // Anomaly score: s(x, n) = 2^(-E(h(x))/c(n))
         let score = 2.0_f64.powf(-avg_path_length / c_n);

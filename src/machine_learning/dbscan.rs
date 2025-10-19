@@ -129,10 +129,10 @@ impl DBSCAN {
     fn compute_distance(&self, p_row: ArrayView1<f64>, q_row: ArrayView1<f64>) -> f64 {
         match self.metric {
             DistanceCalculationMetric::Euclidean => {
-                squared_euclidean_distance_row(p_row, q_row).sqrt()
+                squared_euclidean_distance_row(&p_row, &q_row).sqrt()
             }
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(p_row, q_row),
-            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(p_row, q_row, p),
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&p_row, &q_row),
+            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&p_row, &q_row, p),
         }
     }
 

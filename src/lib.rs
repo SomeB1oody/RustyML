@@ -387,13 +387,13 @@ pub mod error;
 ///
 /// // Decision tree impurity measures
 /// let labels = array![0.0, 1.0, 1.0, 0.0];
-/// let ent = entropy(labels.view());
-/// let gini_val = gini(labels.view());
+/// let ent = entropy(&labels);
+/// let gini_val = gini(&labels);
 ///
 /// // Distance calculations
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let dist = squared_euclidean_distance_row(v1.view(), v2.view());
+/// let dist = squared_euclidean_distance_row(&v1, &v2);
 ///
 /// // Activation function
 /// let activated = sigmoid(0.5);
