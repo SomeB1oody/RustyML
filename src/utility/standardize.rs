@@ -44,7 +44,7 @@ pub enum StandardizationAxis {
 /// use rustyml::utility::{standardize, StandardizationAxis};
 ///
 /// let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-/// let result = standardize(data.view(), StandardizationAxis::Column, 1e-8).unwrap();
+/// let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
 /// // Each column will have mean ≈ 0 and std ≈ 1
 /// ```
 ///
@@ -57,12 +57,12 @@ pub enum StandardizationAxis {
 /// - Uses parallel computation for improved performance on large datasets
 /// - NaN and infinite values in input will result in an error
 pub fn standardize<S, D>(
-    data: ArrayBase<S, D>,
+    data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
     epsilon: f64,
 ) -> Result<Array<f64, D>, ModelError>
 where
-    S: ndarray::Data<Elem = f64>,
+    S: Data<Elem = f64>,
     D: Dimension,
 {
     // Input validation

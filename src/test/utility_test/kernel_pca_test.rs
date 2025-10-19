@@ -103,7 +103,7 @@ fn test_fit_invalid_inputs() {
 
     // Test empty input
     let empty = Array2::<f64>::zeros((0, 5));
-    assert!(kpca.fit(empty.view()).is_err());
+    assert!(kpca.fit(&empty.view()).is_err());
 
     // Test case where n_components is 0 (should fail at construction)
     let kpca_zero_result = KernelPCA::new(KernelType::Linear, 0);
@@ -112,7 +112,7 @@ fn test_fit_invalid_inputs() {
     // Test case where sample count is less than n_components
     let mut kpca_large = KernelPCA::new(KernelType::Linear, 5).unwrap();
     let small_data = Array2::<f64>::zeros((3, 3));
-    assert!(kpca_large.fit(small_data.view()).is_err());
+    assert!(kpca_large.fit(&small_data.view()).is_err());
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn test_fit_simple_case() {
     )
     .unwrap();
 
-    let result = kpca.fit(data.view());
+    let result = kpca.fit(&data.view());
     assert!(result.is_ok());
 
     // Verify that the model is correctly fitted
@@ -145,7 +145,7 @@ fn test_transform_not_fitted() {
     let kpca = KernelPCA::default();
     let data = Array2::<f64>::zeros((5, 3));
 
-    assert!(kpca.transform(data.view()).is_err());
+    assert!(kpca.transform(&data.view()).is_err());
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_fit_transform() {
     )
     .unwrap();
 
-    let result = kpca.fit_transform(data.view());
+    let result = kpca.fit_transform(&data.view());
     assert!(result.is_ok());
 
     let transformed = result.unwrap();
@@ -179,13 +179,13 @@ fn test_fit_and_transform() {
     .unwrap();
 
     // First fit
-    let fit_result = kpca.fit(train_data.view());
+    let fit_result = kpca.fit(&train_data.view());
     assert!(fit_result.is_ok());
 
     // Then transform new data
     let test_data = Array2::from_shape_vec((2, 3), vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0]).unwrap();
 
-    let transform_result = kpca.transform(test_data.view());
+    let transform_result = kpca.transform(&test_data.view());
     assert!(transform_result.is_ok());
 
     let transformed = transform_result.unwrap();
@@ -220,7 +220,7 @@ fn test_different_kernel_types() {
 
     for kernel in kernels {
         let mut kpca = KernelPCA::new(kernel, 2).unwrap();
-        let result = kpca.fit_transform(data.view());
+        let result = kpca.fit_transform(&data.view());
         assert!(result.is_ok());
     }
 }
@@ -328,12 +328,12 @@ fn test_fit_validation() {
     // Test data with NaN
     let data_with_nan =
         Array2::from_shape_vec((3, 2), vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0]).unwrap();
-    assert!(kpca.fit(data_with_nan.view()).is_err());
+    assert!(kpca.fit(&data_with_nan.view()).is_err());
 
     // Test data with infinity
     let data_with_inf =
         Array2::from_shape_vec((3, 2), vec![1.0, 2.0, f64::INFINITY, 4.0, 5.0, 6.0]).unwrap();
-    assert!(kpca.fit(data_with_inf.view()).is_err());
+    assert!(kpca.fit(&data_with_inf.view()).is_err());
 }
 
 #[test]
@@ -346,13 +346,13 @@ fn test_transform_validation() {
         ],
     )
     .unwrap();
-    kpca.fit(train_data.view()).unwrap();
+    kpca.fit(&train_data.view()).unwrap();
 
     // Test empty data
     let empty = Array2::<f64>::zeros((0, 3));
-    assert!(kpca.transform(empty.view()).is_err());
+    assert!(kpca.transform(&empty.view()).is_err());
 
     // Test mismatched feature count
     let wrong_features = Array2::<f64>::zeros((2, 5));
-    assert!(kpca.transform(wrong_features.view()).is_err());
+    assert!(kpca.transform(&wrong_features.view()).is_err());
 }

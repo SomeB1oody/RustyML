@@ -37,7 +37,7 @@ const TSNE_PARALLEL_THRESHOLD: usize = 1000;
 /// let data = Array2::<f64>::ones((100, 50));
 ///
 /// // Apply t-SNE dimensionality reduction
-/// let embedding = tsne.fit_transform(data.view()).unwrap();
+/// let embedding = tsne.fit_transform(&data).unwrap();
 ///
 /// // `embedding` now contains 100 samples in 3 dimensions
 /// assert_eq!(embedding.shape(), &[100, 3]);
@@ -175,7 +175,10 @@ impl TSNE {
     ///
     /// - `Ok(Array2<f64>)` - A matrix of reduced dimensionality representations where each row corresponds to the original sample
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
-    pub fn fit_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
+    pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Validate input data
         if x.is_empty() {
             return Err(ModelError::InputValidationError(
@@ -332,7 +335,13 @@ impl TSNE {
     }
 
     // Optimized distance computation using more efficient approach
-    fn compute_pairwise_distances(&self, x: &ArrayView2<f64>) -> Result<Array2<f64>, ModelError> {
+    fn compute_pairwise_distances<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+    ) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         let n_samples = x.nrows();
         let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
 

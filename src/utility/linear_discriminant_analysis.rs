@@ -27,14 +27,14 @@ const LDA_PARALLEL_THRESHOLD: usize = 100;
 ///
 /// // Create and fit LDA model
 /// let mut lda = LDA::new().unwrap();
-/// lda.fit(x.view(), y.view()).unwrap();
+/// lda.fit(&x, &y).unwrap();
 ///
 /// // Make predictions
 /// let x_new = Array2::from_shape_vec((2, 2), vec![1.2, 2.2, 5.2, 4.8]).unwrap();
-/// let predictions = lda.predict(x_new.view()).unwrap();
+/// let predictions = lda.predict(&x_new).unwrap();
 ///
 /// // Transform data to lower dimension
-/// let x_transformed = lda.transform(x.view(), 1).unwrap();
+/// let x_transformed = lda.transform(&x, 1).unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LDA {
@@ -89,7 +89,15 @@ impl LDA {
     /// - `Ok(&mut Self)` - Reference to self
     /// - `Err(ModelError::InputValidationError)` - If input validation fails
     /// - `Err(ModelError::ProcessingError)` - If matrix operations fail
-    pub fn fit(&mut self, x: ArrayView2<f64>, y: ArrayView1<i32>) -> Result<&mut Self, ModelError> {
+    pub fn fit<S1, S2>(
+        &mut self,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = i32>,
+    {
         // Input validation
         if x.nrows() != y.len() {
             return Err(ModelError::InputValidationError(format!(
@@ -358,7 +366,10 @@ impl LDA {
     /// - `Ok(Array1<i32>)` - Array of predicted class labels
     /// - `Err(ModelError::InputValidationError)` - If input does not match the expectation
     /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<i32>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         if self.classes.is_none() || self.means.is_none() || self.cov_inv.is_none() {
             return Err(ModelError::NotFitted);
@@ -437,11 +448,14 @@ impl LDA {
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
     /// - `Err(ModelError::NotFitted)` - If not fitted
-    pub fn transform(
+    pub fn transform<S>(
         &self,
-        x: ArrayView2<f64>,
+        x: &ArrayBase<S, Ix2>,
         n_components: usize,
-    ) -> Result<Array2<f64>, ModelError> {
+    ) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
         let proj = self.projection.as_ref().ok_or(ModelError::NotFitted)?;
 
@@ -494,12 +508,16 @@ impl LDA {
     ///
     /// - `Ok(Array2<f64>)` - Transformed data matrix
     /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
-    pub fn fit_transform(
+    pub fn fit_transform<S1, S2>(
         &mut self,
-        x: ArrayView2<f64>,
-        y: ArrayView1<i32>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
         n_components: usize,
-    ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    where
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = i32>,
+    {
         self.fit(x, y)?;
         Ok(self.transform(x, n_components)?)
     }

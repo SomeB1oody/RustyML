@@ -1,6 +1,11 @@
 pub use super::KernelType;
 use super::*;
 
+/// Threshold for switching between sequential and parallel computation.
+/// When the number of samples is less than this threshold, sequential computation is used.
+/// Otherwise, parallel computation is used to improve performance on large datasets.
+const KERNEL_PCA_PARALLEL_THRESHOLD: usize = 100;
+
 /// A Kernel Principal Component Analysis implementation.
 ///
 /// KernelPCA performs a non-linear dimensionality reduction by using
@@ -37,7 +42,7 @@ use super::*;
 /// ).unwrap();
 ///
 /// // Fit the model and transform the data
-/// let transformed = kpca.fit_transform(data.view()).unwrap();
+/// let transformed = kpca.fit_transform(&data).unwrap();
 ///
 /// // The transformed data now has 2 columns instead of 3
 /// assert_eq!(transformed.ncols(), 2);
@@ -48,7 +53,7 @@ use super::*;
 ///     [2.0, 3.0, 4.0],
 ///     [5.0, 6.0, 7.0],
 /// ]);
-/// let new_transformed = kpca.transform(new_data.view()).unwrap();
+/// let new_transformed = kpca.transform(&new_data).unwrap();
 /// assert_eq!(new_transformed.ncols(), 2);
 /// assert_eq!(new_transformed.nrows(), 2);
 /// ```
@@ -77,7 +82,10 @@ pub struct KernelPCA {
 /// # Returns
 ///
 /// * `f64` - The computed kernel value as a floating-point number
-pub fn compute_kernel(x: &ArrayView1<f64>, y: &ArrayView1<f64>, kernel: &KernelType) -> f64 {
+pub fn compute_kernel<S>(x: &ArrayBase<S, Ix1>, y: &ArrayBase<S, Ix1>, kernel: &KernelType) -> f64
+where
+    S: Data<Elem = f64>,
+{
     match kernel {
         KernelType::Linear => x.dot(y),
         KernelType::Poly {
@@ -223,7 +231,10 @@ impl KernelPCA {
     ///
     /// - `Ok(&mut Self)` - containing a mutable reference to the fitted model
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn std::error::Error>> {
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Box<dyn std::error::Error>>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         if x.is_empty() {
             return Err(Box::new(ModelError::InputValidationError(
                 "Input data cannot be empty".to_string(),
@@ -263,17 +274,25 @@ impl KernelPCA {
         );
         progress_bar.set_message("Computing kernel matrix");
 
-        let kernel_vals: Vec<((usize, usize), f64)> = (0..n_samples)
-            .into_par_iter()
-            .flat_map(|i| {
-                let mut local_results = Vec::new();
-                for j in i..n_samples {
-                    let k_val = compute_kernel(&x.row(i), &x.row(j), &self.kernel);
-                    local_results.push(((i, j), k_val));
-                }
-                local_results
-            })
-            .collect();
+        // Closure for kernel computation logic (shared between sequential and parallel)
+        let compute_kernel_row = |i: usize| {
+            let mut local_results = Vec::new();
+            for j in i..n_samples {
+                let k_val = compute_kernel(&x.row(i), &x.row(j), &self.kernel);
+                local_results.push(((i, j), k_val));
+            }
+            local_results
+        };
+
+        // Use adaptive parallelization based on dataset size
+        let kernel_vals: Vec<((usize, usize), f64)> = if n_samples < KERNEL_PCA_PARALLEL_THRESHOLD {
+            (0..n_samples).flat_map(compute_kernel_row).collect()
+        } else {
+            (0..n_samples)
+                .into_par_iter()
+                .flat_map(compute_kernel_row)
+                .collect()
+        };
 
         for ((i, j), k_val) in kernel_vals {
             k_matrix[[i, j]] = k_val;
@@ -358,7 +377,13 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` containing the transformed data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` if the model hasn't been fitted or computation errors occur
-    pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+    pub fn transform<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         // Check if model is fitted
         let (x_fit, eigenvectors, row_means, total_mean) = match (
             &self.x_fit,
@@ -392,19 +417,26 @@ impl KernelPCA {
         // Pre-allocate kernel matrix
         let mut k_new = Array2::<f64>::zeros((n_train, n_new));
 
-        // Calculate kernel values in parallel with better memory access pattern
-        let kernel_values: Vec<Vec<f64>> = (0..n_new)
-            .into_par_iter()
-            .map(|j| {
-                let x_j = x.row(j);
-                let mut column_values = Vec::with_capacity(n_train);
-                for i in 0..n_train {
-                    let k_val = compute_kernel(&x_fit.row(i), &x_j, &self.kernel);
-                    column_values.push(k_val);
-                }
-                column_values
-            })
-            .collect();
+        // Closure for computing kernel column (shared between sequential and parallel)
+        let compute_kernel_column = |j: usize| {
+            let x_j = x.row(j);
+            let mut column_values = Vec::with_capacity(n_train);
+            for i in 0..n_train {
+                let k_val = compute_kernel(&x_fit.row(i), &x_j, &self.kernel);
+                column_values.push(k_val);
+            }
+            column_values
+        };
+
+        // Calculate kernel values with adaptive parallelization
+        let kernel_values: Vec<Vec<f64>> = if n_new < KERNEL_PCA_PARALLEL_THRESHOLD {
+            (0..n_new).map(compute_kernel_column).collect()
+        } else {
+            (0..n_new)
+                .into_par_iter()
+                .map(compute_kernel_column)
+                .collect()
+        };
 
         // Fill the kernel matrix from computed values
         for (j, column_values) in kernel_values.iter().enumerate() {
@@ -413,11 +445,15 @@ impl KernelPCA {
             }
         }
 
-        // Precompute column means efficiently
-        let column_means: Vec<f64> = (0..n_new)
-            .into_par_iter()
-            .map(|j| k_new.column(j).sum() / n_train as f64)
-            .collect();
+        // Closure for computing column means (shared between sequential and parallel)
+        let compute_mean = |j: usize| k_new.column(j).sum() / n_train as f64;
+
+        // Precompute column means with adaptive parallelization
+        let column_means: Vec<f64> = if n_new < KERNEL_PCA_PARALLEL_THRESHOLD {
+            (0..n_new).map(compute_mean).collect()
+        } else {
+            (0..n_new).into_par_iter().map(compute_mean).collect()
+        };
 
         // Center the kernel matrix in-place
         k_new.indexed_iter_mut().for_each(|((i, j), val)| {
@@ -442,10 +478,13 @@ impl KernelPCA {
     ///
     /// - `Ok(Array2<f64>)` - containing the transformed data (projection of the input data)
     /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    pub fn fit_transform(
+    pub fn fit_transform<S>(
         &mut self,
-        x: ArrayView2<f64>,
-    ) -> Result<Array2<f64>, Box<dyn std::error::Error>> {
+        x: &ArrayBase<S, Ix2>,
+    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
         self.fit(x)?;
         self.transform(x)
     }

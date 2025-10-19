@@ -36,10 +36,10 @@ const PCA_PARALLEL_THRESHOLD: usize = 64;
 /// let mut pca = PCA::new(2).expect("Failed to create PCA model");
 ///
 /// // Fit the model to the data
-/// pca.fit(data.view()).expect("Failed to fit PCA model");
+/// pca.fit(&data).expect("Failed to fit PCA model");
 ///
 /// // Transform the data to the principal component space
-/// let transformed = pca.transform(data.view()).expect("Failed to transform data");
+/// let transformed = pca.transform(&data).expect("Failed to transform data");
 /// println!("Transformed data:\n{:?}", transformed);
 ///
 /// // Get the explained variance ratio
@@ -47,7 +47,7 @@ const PCA_PARALLEL_THRESHOLD: usize = 64;
 /// println!("Explained variance ratio: {:?}", variance_ratio);
 ///
 /// // Transform back to original space
-/// let reconstructed = pca.inverse_transform(transformed.view()).expect("Failed to inverse transform");
+/// let reconstructed = pca.inverse_transform(&transformed).expect("Failed to inverse transform");
 /// println!("Reconstructed data:\n{:?}", reconstructed);
 /// ```
 ///
@@ -138,7 +138,10 @@ impl PCA {
     get_field!(get_n_components, n_components, usize);
 
     /// Validates input data for NaN and infinite values
-    fn validate_input_data(&self, x: ArrayView2<f64>) -> Result<(), ModelError> {
+    fn validate_input_data<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if input data is empty
         if x.nrows() == 0 {
             return Err(ModelError::InputValidationError(
@@ -185,7 +188,10 @@ impl PCA {
     /// - Centers the data by subtracting the mean
     /// - Computes SVD directly instead of eigendecomposition
     /// - Sorts components by explained variance
-    pub fn fit(&mut self, x: ArrayView2<f64>) -> Result<&mut Self, Box<dyn Error>> {
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Box<dyn Error>>
+    where
+        S: Data<Elem = f64>,
+    {
         // Validate input data
         self.validate_input_data(x)?;
 
@@ -203,7 +209,7 @@ impl PCA {
         let mean = x.mean_axis(Axis(0)).ok_or("Failed to compute mean")?;
 
         // Center the data more efficiently using broadcasting
-        let x_centered = &x - &mean;
+        let x_centered = x - &mean;
 
         // Use SVD for more stable computation
         let x_slice = x_centered
@@ -284,7 +290,10 @@ impl PCA {
     /// - Input data is empty
     /// - Input data contains NaN or infinite values
     /// - Number of features does not match the training data
-    pub fn transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    where
+        S: Data<Elem = f64>,
+    {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
@@ -301,7 +310,7 @@ impl PCA {
         }
 
         // Center data using broadcasting (more efficient than manual subtraction)
-        let x_centered = &x - mean;
+        let x_centered = x - mean;
 
         // Direct matrix multiplication for transformation
         let transformed = x_centered.dot(&components.t());
@@ -319,7 +328,10 @@ impl PCA {
     ///
     /// - `Ok(Array2<f64>)` - The transformed data if successful
     /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
-    pub fn fit_transform(&mut self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
+    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    where
+        S: Data<Elem = f64>,
+    {
         self.fit(x)?;
         self.transform(x)
     }
@@ -342,7 +354,10 @@ impl PCA {
     /// - Input data is empty
     /// - Input data contains NaN or infinite values
     /// - Number of components does not match the model's n_components
-    pub fn inverse_transform(&self, x: ArrayView2<f64>) -> Result<Array2<f64>, Box<dyn Error>> {
+    pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    where
+        S: Data<Elem = f64>,
+    {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 

@@ -15,7 +15,7 @@ fn calculate_mean_and_std(values: impl Iterator<Item = f64>) -> (f64, f64) {
 #[test]
 fn test_standardize_global() {
     let data = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     // After global standardization, the entire array should have mean ≈ 0 and std ≈ 1
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
@@ -31,7 +31,7 @@ fn test_standardize_global() {
 fn test_standardize_by_columns() {
     let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     let data2 = data.clone();
-    let result = standardize(data, StandardizationAxis::Column, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Column, EPSILON).unwrap();
 
     // Check mean and standard deviation for each column
     for col_idx in 0..data2.ncols() {
@@ -47,7 +47,7 @@ fn test_standardize_by_columns() {
 fn test_standardize_by_rows() {
     let data = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
     let data2 = data.clone();
-    let result = standardize(data, StandardizationAxis::Row, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Row, EPSILON).unwrap();
 
     // Check mean and standard deviation for each row
     for row_idx in 0..data2.nrows() {
@@ -62,7 +62,7 @@ fn test_standardize_by_rows() {
 #[test]
 fn test_standardize_single_value() {
     let data = array![[5.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     // Single value should be standardized to 0 (since variance is 0, so (x-mean)/epsilon = 0)
     assert_abs_diff_eq!(result[[0, 0]], 0.0, epsilon = 1e-10);
@@ -71,7 +71,7 @@ fn test_standardize_single_value() {
 #[test]
 fn test_standardize_identical_values() {
     let data = array![[3.0, 3.0, 3.0], [3.0, 3.0, 3.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     // When all values are identical, standardization should result in all zeros
     for &val in result.iter() {
@@ -82,7 +82,7 @@ fn test_standardize_identical_values() {
 #[test]
 fn test_standardize_1d_array() {
     let data = Array1::from(vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
     let variance: f64 =
@@ -97,7 +97,7 @@ fn test_standardize_1d_array() {
 fn test_standardize_3d_array() {
     let data =
         Array::from_shape_vec((2, 2, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]).unwrap();
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
     let variance: f64 =
@@ -112,7 +112,7 @@ fn test_standardize_3d_array() {
 fn test_standardize_preserve_shape() {
     let data = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]];
     let original_shape = data.shape().to_vec();
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     assert_eq!(result.shape(), &original_shape[..]);
 }
@@ -120,7 +120,7 @@ fn test_standardize_preserve_shape() {
 #[test]
 fn test_standardize_with_negative_values() {
     let data = array![[-1.0, -2.0], [3.0, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
     let variance: f64 =
@@ -135,7 +135,7 @@ fn test_standardize_with_negative_values() {
 #[test]
 fn test_standardize_empty_array() {
     let data: Array2<f64> = Array2::zeros((0, 0));
-    let result = standardize(data, StandardizationAxis::Global, EPSILON);
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -146,7 +146,7 @@ fn test_standardize_empty_array() {
 #[test]
 fn test_standardize_nan_values() {
     let data = array![[1.0, f64::NAN], [3.0, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON);
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -157,7 +157,7 @@ fn test_standardize_nan_values() {
 #[test]
 fn test_standardize_infinite_values() {
     let data = array![[1.0, 2.0], [f64::INFINITY, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON);
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -168,7 +168,7 @@ fn test_standardize_infinite_values() {
 #[test]
 fn test_standardize_negative_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, -1e-8);
+    let result = standardize(&data, StandardizationAxis::Global, -1e-8);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -179,7 +179,7 @@ fn test_standardize_negative_epsilon() {
 #[test]
 fn test_standardize_zero_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, 0.0);
+    let result = standardize(&data, StandardizationAxis::Global, 0.0);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -190,7 +190,7 @@ fn test_standardize_zero_epsilon() {
 #[test]
 fn test_standardize_infinite_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
-    let result = standardize(data, StandardizationAxis::Global, f64::INFINITY);
+    let result = standardize(&data, StandardizationAxis::Global, f64::INFINITY);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
     if let Err(ModelError::InputValidationError(msg)) = result {
@@ -201,7 +201,7 @@ fn test_standardize_infinite_epsilon() {
 #[test]
 fn test_standardize_row_1d_array() {
     let data = Array1::from(vec![1.0, 2.0, 3.0]);
-    let result = standardize(data, StandardizationAxis::Row, EPSILON);
+    let result = standardize(&data, StandardizationAxis::Row, EPSILON);
 
     // 1D array cannot be standardized by rows
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
@@ -210,7 +210,7 @@ fn test_standardize_row_1d_array() {
 #[test]
 fn test_standardize_column_1d_array() {
     let data = Array1::from(vec![1.0, 2.0, 3.0]);
-    let result = standardize(data, StandardizationAxis::Column, EPSILON);
+    let result = standardize(&data, StandardizationAxis::Column, EPSILON);
 
     // 1D array cannot be standardized by columns
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
@@ -219,7 +219,7 @@ fn test_standardize_column_1d_array() {
 #[test]
 fn test_standardize_large_values() {
     let data = array![[1e6, 2e6], [3e6, 4e6]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
     let variance: f64 =
@@ -233,7 +233,7 @@ fn test_standardize_large_values() {
 #[test]
 fn test_standardize_small_values() {
     let data = array![[1e-6, 2e-6], [3e-6, 4e-6]];
-    let result = standardize(data, StandardizationAxis::Global, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global, EPSILON).unwrap();
 
     let mean: f64 = result.iter().sum::<f64>() / result.len() as f64;
     let variance: f64 =
@@ -285,7 +285,7 @@ fn test_standardize_column_axis_large_array() {
     // Test column standardization on large array
     let data = Array2::from_shape_fn((100, 50), |(i, j)| (i as f64 + j as f64) * 0.1);
     let data2 = data.clone();
-    let result = standardize(data, StandardizationAxis::Column, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Column, EPSILON).unwrap();
 
     // Check mean and standard deviation for each column
     for col_idx in 0..data2.ncols() {
@@ -302,7 +302,7 @@ fn test_standardize_row_axis_large_array() {
     // Test row standardization on large array
     let data = Array2::from_shape_fn((50, 100), |(i, j)| (i as f64 + j as f64) * 0.1);
     let data2 = data.clone();
-    let result = standardize(data, StandardizationAxis::Row, EPSILON).unwrap();
+    let result = standardize(&data, StandardizationAxis::Row, EPSILON).unwrap();
 
     // Check mean and standard deviation for each row
     for row_idx in 0..data2.nrows() {

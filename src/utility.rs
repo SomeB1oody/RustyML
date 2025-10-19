@@ -1,6 +1,7 @@
 use crate::error::ModelError;
 use ahash::{AHashMap, AHashSet};
 use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::Data;
 use ndarray::prelude::*;
 use rand::prelude::*;
 use rayon::prelude::*;

@@ -44,7 +44,7 @@ fn test_fit_basic() {
     let y = arr1(&[0, 0, 0, 1, 1, 1]);
 
     let mut lda = LDA::new().unwrap();
-    let result = lda.fit(x.view(), y.view());
+    let result = lda.fit(&x.view(), &y.view());
     assert!(result.is_ok());
 
     // Verify model properties after fitting
@@ -87,17 +87,17 @@ fn test_fit_validation_errors() {
     // Test empty data
     let x_empty = Array2::<f64>::zeros((0, 2));
     let y_empty = Array1::<i32>::zeros(0);
-    assert!(matches!(lda.fit(x_empty.view(), y_empty.view()), Err(_)));
+    assert!(matches!(lda.fit(&x_empty.view(), &y_empty.view()), Err(_)));
 
     // Test mismatched sample count and label count
     let x = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     let y = arr1(&[0]);
-    assert!(matches!(lda.fit(x.view(), y.view()), Err(_)));
+    assert!(matches!(lda.fit(&x.view(), &y.view()), Err(_)));
 
     // Test case with only one class
     let x = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
     let y = arr1(&[0, 0]);
-    assert!(matches!(lda.fit(x.view(), y.view()), Err(_)));
+    assert!(matches!(lda.fit(&x.view(), &y.view()), Err(_)));
 }
 
 #[test]
@@ -120,9 +120,9 @@ fn test_predict() {
     ]);
 
     let mut lda = LDA::new().unwrap();
-    lda.fit(x.view(), y.view()).unwrap();
+    lda.fit(&x.view(), &y.view()).unwrap();
 
-    let predictions = lda.predict(x_test.view()).unwrap();
+    let predictions = lda.predict(&x_test.view()).unwrap();
     assert_eq!(predictions.len(), 2);
     assert_eq!(predictions[0], 0);
     assert_eq!(predictions[1], 1);
@@ -130,15 +130,12 @@ fn test_predict() {
     // Test prediction on unfitted model
     let lda_unfitted = LDA::new().unwrap();
     assert!(matches!(
-        lda_unfitted.predict(x_test.view()),
+        lda_unfitted.predict(&x_test.view()),
         Err(ModelError::NotFitted)
     ));
 
     // Test empty input
-    assert!(matches!(
-        lda.predict(Array2::<f64>::zeros((0, 2)).view()),
-        Err(_)
-    ));
+    assert!(matches!(lda.predict(&Array2::<f64>::zeros((0, 2))), Err(_)));
 }
 
 #[test]
@@ -155,10 +152,10 @@ fn test_transform() {
     let y = arr1(&[0, 0, 0, 1, 1, 1]);
 
     let mut lda = LDA::new().unwrap();
-    lda.fit(x.view(), y.view()).unwrap();
+    lda.fit(&x.view(), &y.view()).unwrap();
 
     // Transform data
-    let transformed = lda.transform(x.view(), 1).unwrap();
+    let transformed = lda.transform(&x.view(), 1).unwrap();
     assert_eq!(transformed.shape(), &[6, 1]);
 
     // Check if transformed data shows expected separation - same class should cluster together
@@ -178,13 +175,13 @@ fn test_transform() {
     }
 
     // Test invalid component count
-    assert!(matches!(lda.transform(x.view(), 0), Err(_)));
-    assert!(matches!(lda.transform(x.view(), 2), Err(_)));
+    assert!(matches!(lda.transform(&x.view(), 0), Err(_)));
+    assert!(matches!(lda.transform(&x.view(), 2), Err(_)));
 
     // Test unfitted model
     let lda_unfitted = LDA::new().unwrap();
     assert!(matches!(
-        lda_unfitted.transform(x.view(), 1),
+        lda_unfitted.transform(&x.view(), 1),
         Err(ModelError::NotFitted)
     ));
 }
@@ -205,7 +202,7 @@ fn test_fit_transform() {
     let mut lda = LDA::new().unwrap();
 
     // Test fit_transform
-    let transformed = lda.fit_transform(x.view(), y.view(), 1).unwrap();
+    let transformed = lda.fit_transform(&x.view(), &y.view(), 1).unwrap();
     assert_eq!(transformed.shape(), &[6, 1]);
 
     // Verify the model has been fitted
@@ -216,7 +213,7 @@ fn test_fit_transform() {
     assert!(lda.get_projection().is_some());
 
     // Transformed data should match separate transform call
-    let transformed_separate = lda.transform(x.view(), 1).unwrap();
+    let transformed_separate = lda.transform(&x.view(), 1).unwrap();
     for i in 0..transformed.len() {
         assert_relative_eq!(
             transformed[[i, 0]],

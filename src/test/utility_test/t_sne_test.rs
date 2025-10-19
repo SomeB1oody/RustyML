@@ -176,7 +176,7 @@ fn test_tsne_fit_transform_simple() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_ok());
 
     let embedding = result.unwrap();
@@ -192,7 +192,7 @@ fn test_tsne_empty_input() {
     let data = Array2::<f64>::zeros((0, 0));
     let tsne = TSNE::default();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -219,7 +219,7 @@ fn test_tsne_nan_input() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -246,7 +246,7 @@ fn test_tsne_infinite_input() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -273,7 +273,7 @@ fn test_tsne_perplexity_exceeds_samples() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -300,7 +300,7 @@ fn test_tsne_dim_exceeds_samples() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
@@ -347,8 +347,8 @@ fn test_tsne_reproducibility() {
     )
     .unwrap();
 
-    let embedding1 = tsne1.fit_transform(data.view()).unwrap();
-    let embedding2 = tsne2.fit_transform(data.view()).unwrap();
+    let embedding1 = tsne1.fit_transform(&data.view()).unwrap();
+    let embedding2 = tsne2.fit_transform(&data.view()).unwrap();
 
     // Results should be identical with same random state
     assert_eq!(embedding1.shape(), embedding2.shape());
@@ -396,8 +396,8 @@ fn test_tsne_different_random_states() {
     )
     .unwrap();
 
-    let embedding1 = tsne1.fit_transform(data.view()).unwrap();
-    let embedding2 = tsne2.fit_transform(data.view()).unwrap();
+    let embedding1 = tsne1.fit_transform(&data.view()).unwrap();
+    let embedding2 = tsne2.fit_transform(&data.view()).unwrap();
 
     // Results should be different with different random states
     let mut has_difference = false;
@@ -436,7 +436,7 @@ fn test_tsne_3d_embedding() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_ok());
 
     let embedding = result.unwrap();
@@ -463,7 +463,7 @@ fn test_tsne_centered_output() {
     )
     .unwrap();
 
-    let embedding = tsne.fit_transform(data.view()).unwrap();
+    let embedding = tsne.fit_transform(&data.view()).unwrap();
 
     // Calculate mean along each dimension
     let mean_0: f64 = embedding.column(0).iter().sum::<f64>() / embedding.nrows() as f64;
@@ -502,7 +502,7 @@ fn test_tsne_larger_dataset() {
     )
     .unwrap();
 
-    let result = tsne.fit_transform(data.view());
+    let result = tsne.fit_transform(&data.view());
     assert!(result.is_ok());
 
     let embedding = result.unwrap();

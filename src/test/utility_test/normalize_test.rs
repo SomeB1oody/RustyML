@@ -30,7 +30,7 @@ fn assert_arrays_approx_equal<D>(
 fn test_normalize_global_l2() {
     let data = array![[3.0, 4.0], [1.0, 2.0]];
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Global,
         NormalizationOrder::L2,
     )
@@ -50,7 +50,7 @@ fn test_normalize_global_l2() {
 #[test]
 fn test_normalize_row_l2() {
     let data = array![[3.0, 4.0], [5.0, 12.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 
     // First row: norm = sqrt(3^2 + 4^2) = 5
     // Second row: norm = sqrt(5^2 + 12^2) = 13
@@ -70,7 +70,7 @@ fn test_normalize_row_l2() {
 fn test_normalize_column_l2() {
     let data = array![[3.0, 4.0], [4.0, 3.0]];
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Column,
         NormalizationOrder::L2,
     )
@@ -93,7 +93,7 @@ fn test_normalize_column_l2() {
 #[test]
 fn test_normalize_l1() {
     let data = array![[3.0, 4.0], [1.0, 2.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L1).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L1).unwrap();
 
     // First row: L1 norm = |3| + |4| = 7
     // Second row: L1 norm = |1| + |2| = 3
@@ -112,7 +112,12 @@ fn test_normalize_l1() {
 #[test]
 fn test_normalize_max() {
     let data = array![[3.0, -8.0], [6.0, 2.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::Max).unwrap();
+    let result = normalize(
+        &data.view(),
+        NormalizationAxis::Row,
+        NormalizationOrder::Max,
+    )
+    .unwrap();
 
     // First row: Max norm = max(|3|, |-8|) = 8
     // Second row: Max norm = max(|6|, |2|) = 6
@@ -136,7 +141,7 @@ fn test_normalize_lp() {
     let data = array![[2.0, 4.0], [1.0, 3.0]];
     let p = 3.0;
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(p),
     )
@@ -155,7 +160,7 @@ fn test_normalize_lp() {
 #[test]
 fn test_normalize_zero_vector() {
     let data = array![[0.0, 0.0], [1.0, 2.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 
     // First row is all zeros, should remain zero
     // Second row: norm = sqrt(1^2 + 2^2) = sqrt(5)
@@ -169,7 +174,7 @@ fn test_normalize_zero_vector() {
 #[test]
 fn test_normalize_3d_row() {
     let data = array![[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 
     // Verify result shape
     assert_eq!(result.shape(), data.shape());
@@ -188,7 +193,7 @@ fn test_normalize_3d_row() {
 fn test_normalize_1d_global() {
     let data = array![3.0, 4.0, 5.0];
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Global,
         NormalizationOrder::L2,
     )
@@ -205,7 +210,7 @@ fn test_normalize_1d_global() {
 fn test_normalize_empty_array() {
     let data: Array2<f64> = array![[]];
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Global,
         NormalizationOrder::L2,
     );
@@ -217,7 +222,7 @@ fn test_normalize_empty_array() {
 #[test]
 fn test_normalize_nan_input() {
     let data = array![[1.0, f64::NAN], [2.0, 3.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
 }
@@ -226,7 +231,7 @@ fn test_normalize_nan_input() {
 #[test]
 fn test_normalize_infinite_input() {
     let data = array![[1.0, f64::INFINITY], [2.0, 3.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
 
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
 }
@@ -238,14 +243,14 @@ fn test_normalize_invalid_lp_parameter() {
 
     // Test p <= 0
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(0.0),
     );
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
 
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(-1.0),
     );
@@ -253,7 +258,7 @@ fn test_normalize_invalid_lp_parameter() {
 
     // Test p as infinity
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(f64::INFINITY),
     );
@@ -261,7 +266,7 @@ fn test_normalize_invalid_lp_parameter() {
 
     // Test p as NaN
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(f64::NAN),
     );
@@ -273,11 +278,11 @@ fn test_normalize_invalid_lp_parameter() {
 fn test_normalize_1d_row_column_error() {
     let data = array![1.0, 2.0, 3.0];
 
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
     assert!(matches!(result, Err(ModelError::InputValidationError(_))));
 
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Column,
         NormalizationOrder::L2,
     );
@@ -288,7 +293,7 @@ fn test_normalize_1d_row_column_error() {
 #[test]
 fn test_normalize_negative_values() {
     let data = array![[-3.0, 4.0], [-1.0, -2.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 
     // First row: norm = sqrt((-3)^2 + 4^2) = 5
     // Second row: norm = sqrt((-1)^2 + (-2)^2) = sqrt(5)
@@ -302,7 +307,7 @@ fn test_normalize_negative_values() {
 #[test]
 fn test_normalize_very_small_values() {
     let data = array![[1e-16, 2e-16], [1.0, 2.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 
     // First row norm is very small, should be set to zero
     // Second row: norm = sqrt(5)
@@ -319,7 +324,7 @@ fn test_normalize_large_array_performance() {
     let data = Array2::from_shape_fn((size, size), |(i, j)| (i + j) as f64);
 
     let start = std::time::Instant::now();
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
+    let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
     let duration = start.elapsed();
 
     assert!(result.is_ok());
@@ -331,7 +336,7 @@ fn test_normalize_large_array_performance() {
 fn test_normalize_single_element() {
     let data = array![[5.0]];
     let result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Global,
         NormalizationOrder::L2,
     )
@@ -348,15 +353,15 @@ fn test_normalize_axis_consistency() {
 
     // For a 2x2 matrix, row and column normalization should produce different results
     let row_result =
-        normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+        normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
     let col_result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Column,
         NormalizationOrder::L2,
     )
     .unwrap();
     let global_result = normalize(
-        data.view(),
+        &data.view(),
         NormalizationAxis::Global,
         NormalizationOrder::L2,
     )
@@ -377,7 +382,12 @@ fn test_normalize_axis_consistency() {
 #[test]
 fn test_normalize_max_all_negative() {
     let data = array![[-3.0, -8.0, -2.0], [-6.0, -4.0, -1.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::Max).unwrap();
+    let result = normalize(
+        &data.view(),
+        NormalizationAxis::Row,
+        NormalizationOrder::Max,
+    )
+    .unwrap();
 
     // First row: Max norm = max(|-3|, |-8|, |-2|) = 8
     // Second row: Max norm = max(|-6|, |-4|, |-1|) = 6
@@ -402,7 +412,12 @@ fn test_normalize_max_all_negative() {
 #[test]
 fn test_normalize_max_mixed_signs() {
     let data = array![[-5.0, 3.0, -2.0], [4.0, -7.0, 1.0]];
-    let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::Max).unwrap();
+    let result = normalize(
+        &data.view(),
+        NormalizationAxis::Row,
+        NormalizationOrder::Max,
+    )
+    .unwrap();
 
     // First row: Max norm = max(|-5|, |3|, |-2|) = 5
     // Second row: Max norm = max(|4|, |-7|, |1|) = 7

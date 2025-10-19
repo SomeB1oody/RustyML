@@ -36,7 +36,10 @@ use super::*;
 ///
 /// Panics if any label is negative or if the specified num_classes is smaller
 /// than the maximum label + 1.
-pub fn to_categorical(labels: &Array1<i32>, num_classes: Option<usize>) -> Array2<f64> {
+pub fn to_categorical<S>(labels: &ArrayBase<S, Ix1>, num_classes: Option<usize>) -> Array2<f64>
+where
+    S: Data<Elem = i32>,
+{
     let n_samples = labels.len();
 
     // Check for negative labels
@@ -47,7 +50,7 @@ pub fn to_categorical(labels: &Array1<i32>, num_classes: Option<usize>) -> Array
     }
 
     // Determine number of classes
-    let max_label = labels.par_iter().max().copied().unwrap_or(0) as usize;
+    let max_label = labels.iter().max().copied().unwrap_or(0) as usize;
     let n_classes = match num_classes {
         Some(n) => {
             if n < max_label + 1 {
@@ -178,7 +181,10 @@ where
 ///
 /// This function finds the class with the highest probability for each sample,
 /// making it suitable for converting model predictions back to class labels.
-pub fn to_sparse_categorical(categorical: &Array2<f64>) -> Array1<i32> {
+pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Array1<i32>
+where
+    S: Data<Elem = f64>,
+{
     categorical
         .rows()
         .into_iter()

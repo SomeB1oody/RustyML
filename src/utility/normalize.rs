@@ -58,7 +58,7 @@ pub enum NormalizationOrder {
 ///
 /// # Parameters
 ///
-/// - `data` - Input array data as `ArrayBase` with arbitrary dimensions and f64 elements
+/// - `data` - Input array data with arbitrary dimensions and f64 elements
 /// - `axis` - The axis along which to perform normalization (Row/Column/Global)
 /// - `order` - The norm order to use for normalization (L1/L2/Max/Lp)
 ///
@@ -75,7 +75,7 @@ pub enum NormalizationOrder {
 /// use rustyml::utility::{normalize, NormalizationAxis, NormalizationOrder};
 ///
 /// let data = array![[3.0, 4.0], [1.0, 2.0]];
-/// let result = normalize(data.view(), NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
+/// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 /// // Each row will have L2 norm = 1
 /// ```
 ///
@@ -87,12 +87,12 @@ pub enum NormalizationOrder {
 /// - Zero norms are handled by setting the corresponding elements to zero
 /// - NaN and infinite values in input will result in an error
 pub fn normalize<S, D>(
-    data: ArrayBase<S, D>,
+    data: &ArrayBase<S, D>,
     axis: NormalizationAxis,
     order: NormalizationOrder,
 ) -> Result<Array<f64, D>, ModelError>
 where
-    S: ndarray::Data<Elem = f64>,
+    S: Data<Elem = f64>,
     D: Dimension,
 {
     // Input validation
