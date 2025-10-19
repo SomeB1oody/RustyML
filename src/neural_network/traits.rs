@@ -88,6 +88,14 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// - `_epsilon` - Small constant for numerical stability
     fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32);
 
+    /// Updates the layer parameters using AdaGrad optimizer.
+    ///
+    /// # Parameters
+    ///
+    /// - `_lr` - Learning rate for parameter updates
+    /// - `_epsilon` - Small constant for numerical stability
+    fn update_parameters_ada_grad(&mut self, _lr: f32, _epsilon: f32);
+
     /// Returns a reference to all weights in the layer.
     ///
     /// This method provides access to all weight matrices and bias vectors used by the layer.

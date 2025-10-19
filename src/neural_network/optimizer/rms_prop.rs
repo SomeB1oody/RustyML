@@ -1,7 +1,6 @@
-use super::super::{Layer, Optimizer};
-use ndarray::{Array2, Array3, Array4, Array5};
+use super::*;
 
-/// RMSprop optimizer implementation.
+/// RMSprop (Root Mean Square Propagation) optimizer
 ///
 /// An optimization algorithm that adapts the learning rate for each parameter
 /// using a moving average of squared gradients.

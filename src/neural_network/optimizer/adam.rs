@@ -1,7 +1,6 @@
-use super::super::{Layer, Optimizer};
-use ndarray::{Array2, Array3, Array4, Array5};
+use super::*;
 
-/// Adam optimizer implementation.
+/// Adam (Adaptive Moment Estimation) optimizer
 ///
 /// An optimization algorithm that computes individual adaptive learning
 /// rates for different parameters from estimates of first and second moments

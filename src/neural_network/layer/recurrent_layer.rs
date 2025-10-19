@@ -258,6 +258,50 @@ fn update_gate_rmsprop(
     }
 }
 
+/// Updates a single gate's parameters using AdaGrad optimizer with gradient clipping
+///
+/// # Parameters
+///
+/// - `gate` - The gate to update
+/// - `input_dim` - Input dimensionality (for initializing optimizer state if needed)
+/// - `units` - Number of units (for initializing optimizer state if needed)
+/// - `lr` - Learning rate
+/// - `epsilon` - Small constant for numerical stability
+fn update_gate_ada_grad(gate: &mut Gate, input_dim: usize, units: usize, lr: f32, epsilon: f32) {
+    // Initialize AdaGrad cache if needed
+    if gate.optimizer_cache.ada_grad_cache.is_none() {
+        gate.optimizer_cache.ada_grad_cache = Some(AdaGradStates::new(
+            (input_dim, units),
+            Some((units, units)),
+            (1, units),
+        ));
+    }
+
+    if let (Some(gk), Some(grk), Some(gb)) = (
+        &gate.grad_kernel,
+        &gate.grad_recurrent_kernel,
+        &gate.grad_bias,
+    ) {
+        // Apply gradient clipping before AdaGrad update
+        let gk_clipped = gk.mapv(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
+        let grk_clipped = grk.mapv(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
+        let gb_clipped = gb.mapv(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
+
+        let ada_grad_cache = gate.optimizer_cache.ada_grad_cache.as_mut().unwrap();
+        let (k_update, rk_update, b_update) = ada_grad_cache.update_parameter(
+            &gk_clipped,
+            Some(&grk_clipped),
+            &gb_clipped,
+            epsilon,
+            lr,
+        );
+
+        gate.kernel = &gate.kernel - &k_update;
+        gate.recurrent_kernel = &gate.recurrent_kernel - &rk_update.unwrap();
+        gate.bias = &gate.bias - &b_update;
+    }
+}
+
 /// Applies stable sigmoid activation to an array
 ///
 /// Uses clipping to prevent numerical overflow before computing sigmoid.

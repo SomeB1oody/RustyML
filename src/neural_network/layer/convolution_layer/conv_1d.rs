@@ -144,6 +144,7 @@ impl<T: ActivationLayer> Conv1D<T> {
             optimizer_cache: OptimizerCacheConv1D {
                 adam_states: None,
                 rmsprop_cache: None,
+                ada_grad_cache: None,
             },
         }
     }
@@ -614,6 +615,58 @@ impl<T: ActivationLayer> Layer for Conv1D<T> {
                         bias_gradients.as_slice().unwrap(),
                     );
                 }
+            }
+        }
+    }
+
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        if let (Some(weight_gradients), Some(bias_gradients)) =
+            (&self.weight_gradients, &self.bias_gradients)
+        {
+            // Initialize AdaGrad cache (if not already initialized)
+            if self.optimizer_cache.ada_grad_cache.is_none() {
+                use crate::neural_network::optimizer::AdaGradStatesConv1D;
+
+                self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv1D {
+                    accumulator: Array3::zeros(self.weights.dim()),
+                    accumulator_bias: Array2::zeros(self.bias.dim()),
+                });
+            }
+
+            if let Some(ada_grad_cache) = &mut self.optimizer_cache.ada_grad_cache {
+                // Define a generic parameter update closure for AdaGrad
+                let update_parameters =
+                    |params: &mut [f32], accumulator: &mut [f32], grads: &[f32]| {
+                        // Update accumulator (accumulated squared gradients) in parallel
+                        accumulator.par_iter_mut().zip(grads.par_iter()).for_each(
+                            |(acc, &grad)| {
+                                *acc += grad * grad;
+                            },
+                        );
+
+                        // Update parameters in parallel
+                        params
+                            .par_iter_mut()
+                            .zip(grads.par_iter())
+                            .zip(accumulator.par_iter())
+                            .for_each(|((param, &grad), &acc_val)| {
+                                *param -= lr * grad / (acc_val.sqrt() + epsilon);
+                            });
+                    };
+
+                // Update weight parameters
+                update_parameters(
+                    self.weights.as_slice_mut().unwrap(),
+                    ada_grad_cache.accumulator.as_slice_mut().unwrap(),
+                    weight_gradients.as_slice().unwrap(),
+                );
+
+                // Update bias parameters
+                update_parameters(
+                    self.bias.as_slice_mut().unwrap(),
+                    ada_grad_cache.accumulator_bias.as_slice_mut().unwrap(),
+                    bias_gradients.as_slice().unwrap(),
+                );
             }
         }
     }

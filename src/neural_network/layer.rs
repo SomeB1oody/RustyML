@@ -1,7 +1,6 @@
 use super::*;
 use helper_functions::*;
 use ndarray::Zip;
-use ndarray::prelude::*;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;
@@ -62,6 +61,10 @@ macro_rules! no_trainable_parameters_layer_functions {
         }
 
         fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32) {
+            // This layer have no trainable parameters
+        }
+
+        fn update_parameters_ada_grad(&mut self, _lr: f32, _epsilon: f32) {
             // This layer have no trainable parameters
         }
 

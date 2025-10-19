@@ -166,6 +166,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
             optimizer_cache: OptimizerCacheConv2D {
                 adam_states: None,
                 rmsprop_cache: None,
+                ada_grad_cache: None,
             },
         }
     }
@@ -791,6 +792,94 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
                         lr,
                     );
                 }
+            }
+        }
+    }
+
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        if let (
+            Some(depthwise_weight_gradients),
+            Some(pointwise_weight_gradients),
+            Some(bias_gradients),
+        ) = (
+            &self.depthwise_weight_gradients,
+            &self.pointwise_weight_gradients,
+            &self.bias_gradients,
+        ) {
+            // Initialize AdaGrad cache (if not already initialized)
+            if self.optimizer_cache.ada_grad_cache.is_none() {
+                use crate::neural_network::optimizer::AdaGradStatesConv2D;
+
+                let total_depthwise_params = self.depthwise_weights.len();
+                let total_pointwise_params = self.pointwise_weights.len();
+                let total_params = total_depthwise_params + total_pointwise_params;
+
+                self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv2D {
+                    accumulator: Array4::zeros((total_params, 1, 1, 1)),
+                    accumulator_bias: Array2::zeros(self.bias.dim()),
+                });
+            }
+
+            if let Some(ada_grad_cache) = &mut self.optimizer_cache.ada_grad_cache {
+                let depthwise_len = self.depthwise_weights.len();
+                let pointwise_len = self.pointwise_weights.len();
+
+                // Define a generic parameter update closure for AdaGrad
+                let update_parameters =
+                    |params: &mut [f32], accumulator: &mut [f32], grads: &[f32]| {
+                        // Update accumulator (accumulated squared gradients) in parallel
+                        accumulator.par_iter_mut().zip(grads.par_iter()).for_each(
+                            |(acc, &grad)| {
+                                *acc += grad * grad;
+                            },
+                        );
+
+                        // Update parameters in parallel
+                        params
+                            .par_iter_mut()
+                            .zip(grads.par_iter())
+                            .zip(accumulator.par_iter())
+                            .for_each(|((param, &grad), &acc_val)| {
+                                *param -= lr * grad / (acc_val.sqrt() + epsilon);
+                            });
+                    };
+
+                // Update depthwise weight parameters
+                if let (Some(weights_slice), Some(grads_slice)) = (
+                    self.depthwise_weights.as_slice_mut(),
+                    depthwise_weight_gradients.as_slice(),
+                ) {
+                    if let Some(accumulator_full_slice) = ada_grad_cache.accumulator.as_slice_mut()
+                    {
+                        if let Some(accumulator_slice) =
+                            accumulator_full_slice.get_mut(..depthwise_len)
+                        {
+                            update_parameters(weights_slice, accumulator_slice, grads_slice);
+                        }
+                    }
+                }
+
+                // Update pointwise weight parameters
+                if let (Some(weights_slice), Some(grads_slice)) = (
+                    self.pointwise_weights.as_slice_mut(),
+                    pointwise_weight_gradients.as_slice(),
+                ) {
+                    if let Some(accumulator_full_slice) = ada_grad_cache.accumulator.as_slice_mut()
+                    {
+                        if let Some(accumulator_slice) = accumulator_full_slice
+                            .get_mut(depthwise_len..depthwise_len + pointwise_len)
+                        {
+                            update_parameters(weights_slice, accumulator_slice, grads_slice);
+                        }
+                    }
+                }
+
+                // Update bias parameters
+                update_parameters(
+                    self.bias.as_slice_mut().unwrap(),
+                    ada_grad_cache.accumulator_bias.as_slice_mut().unwrap(),
+                    bias_gradients.as_slice().unwrap(),
+                );
             }
         }
     }

@@ -4,6 +4,7 @@ use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::prelude::*;
 
 mod activation_test;
+mod ada_grad_test;
 mod average_pooling_1d_test;
 mod average_pooling_2d_test;
 mod average_pooling_3d_test;

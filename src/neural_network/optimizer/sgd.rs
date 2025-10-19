@@ -1,7 +1,6 @@
-use super::super::{Layer, Optimizer};
-use rayon::prelude::*;
+use super::*;
 
-/// Stochastic Gradient Descent (SGD) optimizer.
+/// SGD (Stochastic Gradient Descent) optimizer
 ///
 /// A simple optimization algorithm that updates parameters in the direction
 /// of the negative gradient, scaled by the learning rate.
@@ -76,12 +75,12 @@ impl SGD {
     /// - `grad_bias` - Reference to bias gradient matrix
     /// - `lr` - Learning rate
     pub fn update_sgd_parameters_rnn(
-        kernel: &mut ndarray::Array2<f32>,
-        grad_kernel: &ndarray::Array2<f32>,
-        recurrent_kernel: &mut ndarray::Array2<f32>,
-        grad_recurrent_kernel: &ndarray::Array2<f32>,
-        bias: &mut ndarray::Array2<f32>,
-        grad_bias: &ndarray::Array2<f32>,
+        kernel: &mut Array2<f32>,
+        grad_kernel: &Array2<f32>,
+        recurrent_kernel: &mut Array2<f32>,
+        grad_recurrent_kernel: &Array2<f32>,
+        bias: &mut Array2<f32>,
+        grad_bias: &Array2<f32>,
         lr: f32,
     ) {
         rayon::join(

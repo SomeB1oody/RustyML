@@ -1,12 +1,19 @@
-/// Adam optimizer implementation
+use super::traits::{Layer, Optimizer};
+use ndarray::prelude::*;
+use rayon::prelude::*;
+
+/// AdaGrad (Adaptive Gradient Algorithm) optimizer
+pub mod ada_grad;
+/// Adam (Adaptive Moment Estimation) optimizer
 pub mod adam;
-/// RMSprop optimizer implementation
-pub mod rmsprop;
-/// Stochastic Gradient Descent (SGD) optimizer
+/// RMSprop (Root Mean Square Propagation) optimizer
+pub mod rms_prop;
+/// SGD (Stochastic Gradient Descent) optimizer
 pub mod sgd;
 
+pub use ada_grad::*;
 pub use adam::*;
-pub use rmsprop::*;
+pub use rms_prop::*;
 pub use sgd::*;
 
 /// Cache structure for storing optimization algorithm states.
@@ -18,10 +25,12 @@ pub use sgd::*;
 ///
 /// - `adam_states` - Optional cache storage for Adam optimizer states (momentum and velocity terms)
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages
+/// - `ada_grad_cache` - Optional cache storage for AdaGrad optimizer accumulated squared gradients
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCache {
     pub adam_states: Option<AdamStates>,
     pub rmsprop_cache: Option<RMSpropCache>,
+    pub ada_grad_cache: Option<AdaGradStates>,
 }
 
 /// Optimizer cache for 1D convolutional layer
@@ -36,10 +45,13 @@ pub struct OptimizerCache {
 ///
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer state including
 ///   exponentially decaying averages of squared gradients for weights and biases
+///
+/// - `ada_grad_cache` - Optional cache storage for AdaGrad optimizer accumulated squared gradients
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheConv1D {
     pub adam_states: Option<AdamStatesConv1D>,
     pub rmsprop_cache: Option<RMSpropCacheConv1D>,
+    pub ada_grad_cache: Option<AdaGradStatesConv1D>,
 }
 
 /// Cache structure for storing optimization algorithm states for Conv2D layer.
@@ -52,10 +64,12 @@ pub struct OptimizerCacheConv1D {
 ///
 /// - `adam_states` - Optional cache storage for Adam optimizer states (momentum and velocity terms) for feature extraction layers
 /// - `rmsprop_cache` - Optional cache storage for RMSprop optimizer running averages for feature extraction layers
+/// - `ada_grad_cache` - Optional cache storage for AdaGrad optimizer accumulated squared gradients
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheConv2D {
     pub adam_states: Option<AdamStatesConv2D>,
     pub rmsprop_cache: Option<RMSpropCacheConv2D>,
+    pub ada_grad_cache: Option<AdaGradStatesConv2D>,
 }
 
 /// Optimizer cache for 3D convolutional layers
@@ -76,8 +90,11 @@ pub struct OptimizerCacheConv2D {
 ///
 /// - `rmsprop_cache` - Optional cache for RMSprop optimizer state variables including
 ///   exponentially decaying averages of squared gradients for weights and biases
+///
+/// - `ada_grad_cache` - Optional cache storage for AdaGrad optimizer accumulated squared gradients
 #[derive(Debug, Clone, Default)]
 pub struct OptimizerCacheConv3D {
     pub adam_states: Option<AdamStatesConv3D>,
     pub rmsprop_cache: Option<RMSpropCacheConv3D>,
+    pub ada_grad_cache: Option<AdaGradStatesConv3D>,
 }

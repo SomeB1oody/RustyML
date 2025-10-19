@@ -625,6 +625,32 @@ impl<T: ActivationLayer> Layer for LSTM<T> {
         );
     }
 
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        // Update all four gates sequentially
+        update_gate_ada_grad(
+            &mut self.input_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+        update_gate_ada_grad(
+            &mut self.forget_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+        update_gate_ada_grad(&mut self.cell_gate, self.input_dim, self.units, lr, epsilon);
+        update_gate_ada_grad(
+            &mut self.output_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+    }
+
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::LSTM(LSTMLayerWeight {
             input: LSTMGateWeight {

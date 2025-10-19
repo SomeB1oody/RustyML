@@ -488,6 +488,31 @@ impl<T: ActivationLayer> Layer for GRU<T> {
         );
     }
 
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        // Update all three gates sequentially
+        update_gate_ada_grad(
+            &mut self.reset_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+        update_gate_ada_grad(
+            &mut self.update_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+        update_gate_ada_grad(
+            &mut self.candidate_gate,
+            self.input_dim,
+            self.units,
+            lr,
+            epsilon,
+        );
+    }
+
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::GRU(GRULayerWeight {
             reset: GRUGateWeight {

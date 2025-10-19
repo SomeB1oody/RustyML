@@ -101,6 +101,7 @@ impl<T: ActivationLayer> Dense<T> {
             optimizer_cache: OptimizerCache {
                 adam_states: None,
                 rmsprop_cache: None,
+                ada_grad_cache: None,
             },
         }
     }
@@ -312,6 +313,31 @@ impl<T: ActivationLayer> Layer for Dense<T> {
                     epsilon,
                 );
             }
+        }
+    }
+
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        // Initialize AdaGrad cache (if not already initialized)
+        if self.optimizer_cache.ada_grad_cache.is_none() {
+            let dims_w = (self.input_dim, self.output_dim);
+            let dims_b = (1, self.output_dim);
+
+            self.optimizer_cache.ada_grad_cache = Some(AdaGradStates::new(
+                dims_w, None, // No recurrent weights
+                dims_b,
+            ));
+        }
+
+        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
+            let ada_grad_cache = self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
+            let (w_update, _, b_update) = ada_grad_cache.update_parameter(
+                grad_w, None, // No recurrent weights
+                grad_b, epsilon, lr,
+            );
+
+            // Apply updates
+            self.weights = &self.weights - &w_update;
+            self.bias = &self.bias - &b_update;
         }
     }
 

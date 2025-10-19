@@ -381,6 +381,33 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
         }
     }
 
+    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
+        // Initialize AdaGrad cache (if not already initialized)
+        if self.optimizer_cache.ada_grad_cache.is_none() {
+            let dims_k = (self.input_dim, self.units);
+            let dims_r = (self.units, self.units);
+            let dims_b = (1, self.units);
+
+            self.optimizer_cache.ada_grad_cache =
+                Some(AdaGradStates::new(dims_k, Some(dims_r), dims_b));
+        }
+
+        if let (Some(gk), Some(grk), Some(gb)) = (
+            &self.grad_kernel,
+            &self.grad_recurrent_kernel,
+            &self.grad_bias,
+        ) {
+            let ada_grad_cache = self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
+            let (k_update, rk_update, b_update) =
+                ada_grad_cache.update_parameter(gk, Some(grk), gb, epsilon, lr);
+
+            // Apply updates
+            self.kernel = &self.kernel - &k_update;
+            self.recurrent_kernel = &self.recurrent_kernel - &rk_update.unwrap();
+            self.bias = &self.bias - &b_update;
+        }
+    }
+
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::SimpleRNN(SimpleRNNLayerWeight {
             kernel: &self.kernel,
