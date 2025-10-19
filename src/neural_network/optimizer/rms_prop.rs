@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for switching between sequential and parallel computation.
+/// For arrays smaller than this threshold, sequential computation is used
+/// to avoid parallelization overhead.
+const RMS_PROP_PARALLEL_THRESHOLD: usize = 1024;
+
 /// RMSprop (Root Mean Square Propagation) optimizer
 ///
 /// An optimization algorithm that adapts the learning rate for each parameter
@@ -111,11 +116,25 @@ impl RMSpropCache {
         lr: f32,
         epsilon: f32,
     ) {
-        // Update cache
-        *cache = cache.mapv(|x| x * rho) + &(grad.mapv(|x| x * x) * (1.0 - rho));
+        let use_parallel = param.len() >= RMS_PROP_PARALLEL_THRESHOLD;
 
-        // Apply parameter update
-        *param = &*param - &(lr * grad / &(cache.mapv(f32::sqrt) + epsilon));
+        if use_parallel {
+            // Parallel computation for large arrays
+            let (new_cache, new_param) = rayon::join(
+                || cache.mapv(|x| x * rho) + &(grad.mapv(|x| x * x) * (1.0 - rho)),
+                || {
+                    let temp_cache =
+                        cache.mapv(|x| x * rho) + &(grad.mapv(|x| x * x) * (1.0 - rho));
+                    &*param - &(lr * grad / &(temp_cache.mapv(f32::sqrt) + epsilon))
+                },
+            );
+            *cache = new_cache;
+            *param = new_param;
+        } else {
+            // Sequential computation for small arrays
+            *cache = cache.mapv(|x| x * rho) + &(grad.mapv(|x| x * x) * (1.0 - rho));
+            *param = &*param - &(lr * grad / &(cache.mapv(f32::sqrt) + epsilon));
+        }
     }
 
     /// Updates all parameters using RMSprop optimization algorithm

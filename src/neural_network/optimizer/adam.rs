@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for switching between sequential and parallel computation.
+/// For arrays smaller than this threshold, sequential computation is used
+/// to avoid parallelization overhead.
+const ADAM_PARALLEL_THRESHOLD: usize = 1024;
+
 /// Adam (Adaptive Moment Estimation) optimizer
 ///
 /// An optimization algorithm that computes individual adaptive learning
@@ -161,30 +166,50 @@ impl AdamStates {
         // Update bias parameter state
         Self::update_adam_param(&mut self.m_bias, &mut self.v_bias, grad_bias, beta1, beta2);
 
-        // Calculate bias-corrected states
-        let (m_hat, v_hat) = rayon::join(
-            || self.m.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
-            || self.v.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
-        );
+        // Determine whether to use parallel computation
+        let use_parallel = self.m.len() >= ADAM_PARALLEL_THRESHOLD;
 
-        let (m_hat_bias, v_hat_bias) = rayon::join(
-            || self.m_bias.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
-            || self.v_bias.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
-        );
+        // Calculate bias-corrected states and final updates
+        let (param_update, bias_update) = if use_parallel {
+            let (m_hat, v_hat) = rayon::join(
+                || self.m.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
+                || self.v.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
+            );
 
-        // Calculate final updates
-        let (param_update, bias_update) = rayon::join(
-            || lr * &m_hat / &(v_hat.mapv(f32::sqrt) + epsilon),
-            || lr * &m_hat_bias / &(v_hat_bias.mapv(f32::sqrt) + epsilon),
-        );
+            let (m_hat_bias, v_hat_bias) = rayon::join(
+                || self.m_bias.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
+                || self.v_bias.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
+            );
+
+            rayon::join(
+                || lr * &m_hat / &(v_hat.mapv(f32::sqrt) + epsilon),
+                || lr * &m_hat_bias / &(v_hat_bias.mapv(f32::sqrt) + epsilon),
+            )
+        } else {
+            let m_hat = self.m.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
+            let v_hat = self.v.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+            let m_hat_bias = self.m_bias.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
+            let v_hat_bias = self.v_bias.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+
+            (
+                lr * &m_hat / &(v_hat.mapv(f32::sqrt) + epsilon),
+                lr * &m_hat_bias / &(v_hat_bias.mapv(f32::sqrt) + epsilon),
+            )
+        };
 
         // Calculate recurrent parameter update (if exists)
         let recurrent_update = recurrent_update.map(|(m_r, v_r)| {
-            let (m_hat_r, v_hat_r) = rayon::join(
-                || m_r.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
-                || v_r.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
-            );
-            lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon)
+            if use_parallel {
+                let (m_hat_r, v_hat_r) = rayon::join(
+                    || m_r.mapv(|x| x / (1.0 - beta1.powi(t as i32))),
+                    || v_r.mapv(|x| x / (1.0 - beta2.powi(t as i32))),
+                );
+                lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon)
+            } else {
+                let m_hat_r = m_r.mapv(|x| x / (1.0 - beta1.powi(t as i32)));
+                let v_hat_r = v_r.mapv(|x| x / (1.0 - beta2.powi(t as i32)));
+                lr * &m_hat_r / &(v_hat_r.mapv(f32::sqrt) + epsilon)
+            }
         });
 
         (param_update, recurrent_update, bias_update)
@@ -208,14 +233,21 @@ impl AdamStates {
         beta1: f32,
         beta2: f32,
     ) {
-        // Parallel update computation
-        let (m_updated, v_updated) = rayon::join(
-            || m.mapv(|x| x * beta1) + &(g * (1.0 - beta1)),
-            || v.mapv(|x| x * beta2) + &(g.mapv(|x| x * x) * (1.0 - beta2)),
-        );
+        let use_parallel = m.len() >= ADAM_PARALLEL_THRESHOLD;
 
-        *m = m_updated;
-        *v = v_updated;
+        if use_parallel {
+            // Parallel update computation for large arrays
+            let (m_updated, v_updated) = rayon::join(
+                || m.mapv(|x| x * beta1) + &(g * (1.0 - beta1)),
+                || v.mapv(|x| x * beta2) + &(g.mapv(|x| x * x) * (1.0 - beta2)),
+            );
+            *m = m_updated;
+            *v = v_updated;
+        } else {
+            // Sequential update computation for small arrays
+            *m = m.mapv(|x| x * beta1) + &(g * (1.0 - beta1));
+            *v = v.mapv(|x| x * beta2) + &(g.mapv(|x| x * x) * (1.0 - beta2));
+        }
     }
 }
 

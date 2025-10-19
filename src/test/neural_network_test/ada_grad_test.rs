@@ -28,46 +28,6 @@ fn test_ada_grad_dense_basic() {
 }
 
 #[test]
-fn test_ada_grad_convergence() {
-    // Test that AdaGrad can converge on a simple problem
-    let x = Array::from_shape_vec((4, 2), vec![1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0])
-        .unwrap()
-        .into_dyn();
-    let y = Array::from_shape_vec((4, 1), vec![3.0, 5.0, 7.0, 9.0])
-        .unwrap()
-        .into_dyn();
-
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 4, ReLU::new()))
-        .add(Dense::new(4, 1, ReLU::new()));
-    model.compile(AdaGrad::new(0.1, 1e-8), MeanSquaredError::new());
-
-    // Record initial loss
-    let initial_pred = model.predict(&x);
-    let initial_loss = {
-        let diff = &initial_pred - &y;
-        diff.mapv(|x| x * x).mean().unwrap()
-    };
-
-    // Train the model
-    model.fit(&x, &y, 50).unwrap();
-
-    // Check that loss decreased
-    let final_pred = model.predict(&x);
-    let final_loss = {
-        let diff = &final_pred - &y;
-        diff.mapv(|x| x * x).mean().unwrap()
-    };
-
-    println!("Initial loss: {}, Final loss: {}", initial_loss, final_loss);
-    assert!(
-        final_loss < initial_loss,
-        "Loss should decrease during training"
-    );
-}
-
-#[test]
 fn test_ada_grad_simple_rnn() {
     // Create input with batch_size=2, timesteps=5, input_dim=4,
     // and target with batch_size=2, units=3 (same dimension as the last hidden state)

@@ -6,6 +6,12 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.9.0] - 2025-10-18 (UTC-7)
+### Added
+- Introduce `AdaGrad` (Adaptive Gradient Algorithm) optimizer
+
+### Changed
+- Change optimizer computation to adaptive parallel thresholds
+
 ### Changed
 - Streamline tensor handling and improve training stability in recurrent and dense layers
 

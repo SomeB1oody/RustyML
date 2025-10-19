@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for switching between sequential and parallel computation.
+/// For arrays smaller than this threshold, sequential computation is used
+/// to avoid parallelization overhead.
+const SGD_PARALLEL_THRESHOLD: usize = 1024;
+
 /// SGD (Stochastic Gradient Descent) optimizer
 ///
 /// A simple optimization algorithm that updates parameters in the direction
@@ -26,7 +31,7 @@ impl SGD {
         Self { learning_rate }
     }
 
-    /// Simultaneously update two sets of parameters in parallel
+    /// Simultaneously update two sets of parameters (with automatic parallel/sequential selection)
     ///
     /// # Parameters
     ///
@@ -42,28 +47,35 @@ impl SGD {
         bias_grads: &[f32],
         lr: f32,
     ) {
-        rayon::join(
-            || {
-                // Update weights
-                weights
+        let use_parallel =
+            weights.len() >= SGD_PARALLEL_THRESHOLD || bias.len() >= SGD_PARALLEL_THRESHOLD;
+
+        let update_fn = |params: &mut [f32], grads: &[f32]| {
+            if use_parallel {
+                params
                     .par_iter_mut()
-                    .zip(weight_grads.par_iter())
-                    .for_each(|(w, wg)| {
-                        *w -= *wg * lr;
-                    });
-            },
-            || {
-                // Update bias
-                bias.par_iter_mut()
-                    .zip(bias_grads.par_iter())
-                    .for_each(|(b, bg)| {
-                        *b -= *bg * lr;
-                    });
-            },
-        );
+                    .zip(grads.par_iter())
+                    .for_each(|(p, g)| *p -= *g * lr);
+            } else {
+                params
+                    .iter_mut()
+                    .zip(grads.iter())
+                    .for_each(|(p, g)| *p -= *g * lr);
+            }
+        };
+
+        if use_parallel {
+            rayon::join(
+                || update_fn(weights, weight_grads),
+                || update_fn(bias, bias_grads),
+            );
+        } else {
+            update_fn(weights, weight_grads);
+            update_fn(bias, bias_grads);
+        }
     }
 
-    /// Update three sets of RNN parameters in parallel: kernel, recurrent_kernel and bias
+    /// Update three sets of RNN parameters: kernel, recurrent_kernel and bias (with automatic parallel/sequential selection)
     ///
     /// # Parameters
     ///
@@ -83,18 +95,28 @@ impl SGD {
         grad_bias: &Array2<f32>,
         lr: f32,
     ) {
-        rayon::join(
-            || {
-                rayon::join(
-                    || *kernel = kernel.clone() - (grad_kernel.clone() * lr),
-                    || {
-                        *recurrent_kernel =
-                            recurrent_kernel.clone() - (grad_recurrent_kernel.clone() * lr)
-                    },
-                )
-            },
-            || *bias = bias.clone() - (grad_bias.clone() * lr),
-        );
+        let use_parallel = kernel.len() >= SGD_PARALLEL_THRESHOLD
+            || recurrent_kernel.len() >= SGD_PARALLEL_THRESHOLD
+            || bias.len() >= SGD_PARALLEL_THRESHOLD;
+
+        if use_parallel {
+            rayon::join(
+                || {
+                    rayon::join(
+                        || *kernel = kernel.clone() - (grad_kernel.clone() * lr),
+                        || {
+                            *recurrent_kernel =
+                                recurrent_kernel.clone() - (grad_recurrent_kernel.clone() * lr)
+                        },
+                    )
+                },
+                || *bias = bias.clone() - (grad_bias.clone() * lr),
+            );
+        } else {
+            *kernel = kernel.clone() - (grad_kernel.clone() * lr);
+            *recurrent_kernel = recurrent_kernel.clone() - (grad_recurrent_kernel.clone() * lr);
+            *bias = bias.clone() - (grad_bias.clone() * lr);
+        }
     }
 }
 

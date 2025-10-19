@@ -1,5 +1,10 @@
 use super::*;
 
+/// Threshold for switching between sequential and parallel computation.
+/// For arrays smaller than this threshold, sequential computation is used
+/// to avoid parallelization overhead.
+const ADA_GRAD_PARALLEL_THRESHOLD: usize = 1024;
+
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
 ///
 /// An adaptive learning rate optimization algorithm that adjusts the learning rate
@@ -108,8 +113,20 @@ impl AdaGradStates {
         epsilon: f32,
         lr: f32,
     ) -> (Array2<f32>, Option<Array2<f32>>, Array2<f32>) {
-        // Update main parameter accumulator
-        Self::update_ada_grad_param(&mut self.accumulator, grad_param);
+        // Determine whether to use parallel computation
+        let use_parallel = self.accumulator.len() >= ADA_GRAD_PARALLEL_THRESHOLD;
+
+        if use_parallel {
+            // Parallel update for accumulators
+            rayon::join(
+                || Self::update_ada_grad_param(&mut self.accumulator, grad_param),
+                || Self::update_ada_grad_param(&mut self.accumulator_bias, grad_bias),
+            );
+        } else {
+            // Sequential update for accumulators
+            Self::update_ada_grad_param(&mut self.accumulator, grad_param);
+            Self::update_ada_grad_param(&mut self.accumulator_bias, grad_bias);
+        }
 
         // Update recurrent parameter accumulator (if exists)
         let recurrent_accumulator = if let (Some(acc_r), Some(g_r)) =
@@ -121,14 +138,18 @@ impl AdaGradStates {
             None
         };
 
-        // Update bias parameter accumulator
-        Self::update_ada_grad_param(&mut self.accumulator_bias, grad_bias);
-
         // Calculate final updates
-        let (param_update, bias_update) = rayon::join(
-            || lr * grad_param / &(self.accumulator.mapv(f32::sqrt) + epsilon),
-            || lr * grad_bias / &(self.accumulator_bias.mapv(f32::sqrt) + epsilon),
-        );
+        let (param_update, bias_update) = if use_parallel {
+            rayon::join(
+                || lr * grad_param / &(self.accumulator.mapv(f32::sqrt) + epsilon),
+                || lr * grad_bias / &(self.accumulator_bias.mapv(f32::sqrt) + epsilon),
+            )
+        } else {
+            (
+                lr * grad_param / &(self.accumulator.mapv(f32::sqrt) + epsilon),
+                lr * grad_bias / &(self.accumulator_bias.mapv(f32::sqrt) + epsilon),
+            )
+        };
 
         // Calculate recurrent parameter update (if exists)
         let recurrent_update = recurrent_accumulator
