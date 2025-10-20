@@ -14,6 +14,7 @@ pub enum SerializableLayerWeight {
     Conv3D(SerializableConv3DWeight),
     SeparableConv2D(SerializableSeparableConv2DWeight),
     DepthwiseConv2D(SerializableDepthwiseConv2DWeight),
+    BatchNormalization(SerializableBatchNormalizationWeight),
     Empty,
 }
 
@@ -231,6 +232,51 @@ impl<T: ActivationLayer> ApplyWeights<DepthwiseConv2D<T>> for SerializableDepthw
     }
 }
 
+/// Serializable representation of a BatchNormalization layer's weights
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableBatchNormalizationWeight {
+    pub gamma: Vec<f32>,
+    pub beta: Vec<f32>,
+    pub running_mean: Vec<f32>,
+    pub running_var: Vec<f32>,
+    pub shape: Vec<usize>,
+}
+
+impl ApplyWeights<BatchNormalization> for SerializableBatchNormalizationWeight {
+    fn apply_to_layer(&self, layer: &mut BatchNormalization) -> Result<(), IoError> {
+        let gamma =
+            ArrayD::from_shape_vec(self.shape.as_slice(), self.gamma.clone()).map_err(|e| {
+                IoError::StdIoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    e.to_string(),
+                ))
+            })?;
+        let beta =
+            ArrayD::from_shape_vec(self.shape.as_slice(), self.beta.clone()).map_err(|e| {
+                IoError::StdIoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    e.to_string(),
+                ))
+            })?;
+        let running_mean = ArrayD::from_shape_vec(self.shape.as_slice(), self.running_mean.clone())
+            .map_err(|e| {
+                IoError::StdIoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    e.to_string(),
+                ))
+            })?;
+        let running_var = ArrayD::from_shape_vec(self.shape.as_slice(), self.running_var.clone())
+            .map_err(|e| {
+            IoError::StdIoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            ))
+        })?;
+        layer.set_weights(gamma, beta, running_mean, running_var);
+        Ok(())
+    }
+}
+
 impl SerializableLayerWeight {
     /// Converts LayerWeight references to owned SerializableLayerWeight
     pub fn from_layer_weight(weight: &LayerWeight) -> Self {
@@ -430,6 +476,15 @@ impl SerializableLayerWeight {
                         })
                         .collect(),
                     bias: w.bias.to_vec(),
+                })
+            }
+            LayerWeight::BatchNormalization(w) => {
+                SerializableLayerWeight::BatchNormalization(SerializableBatchNormalizationWeight {
+                    gamma: w.gamma.iter().cloned().collect(),
+                    beta: w.beta.iter().cloned().collect(),
+                    running_mean: w.running_mean.iter().cloned().collect(),
+                    running_var: w.running_var.iter().cloned().collect(),
+                    shape: w.gamma.shape().to_vec(),
                 })
             }
             LayerWeight::Empty => SerializableLayerWeight::Empty,
@@ -665,6 +720,19 @@ pub fn apply_weights_to_layer(
                 "DepthwiseConv2D",
                 expected_type
             );
+        }
+        SerializableLayerWeight::BatchNormalization(w) => {
+            if let Some(layer) = layer_any.downcast_mut::<BatchNormalization>() {
+                w.apply_to_layer(layer)?;
+            } else {
+                return Err(IoError::StdIoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Expected BatchNormalization layer but got {}",
+                        expected_type
+                    ),
+                )));
+            }
         }
         SerializableLayerWeight::Empty => {
             // No weights to set for empty layers

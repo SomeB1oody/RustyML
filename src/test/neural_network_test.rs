@@ -8,6 +8,7 @@ mod ada_grad_test;
 mod average_pooling_1d_test;
 mod average_pooling_2d_test;
 mod average_pooling_3d_test;
+mod batch_normalization_test;
 mod conv1d_test;
 mod conv2d_test;
 mod conv3d_test;

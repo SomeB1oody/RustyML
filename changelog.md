@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.9.0] - 2025-10-20 (UTC-7)
+### Added
+- Add Batch Normalization layer
+
 ## [v0.9.0] - 2025-10-19 (UTC-7)
 ### Changed
 - Change the parameters that require arrays in reference to use a more general solution for `utility` module

@@ -128,6 +128,7 @@ macro_rules! mode_dependent_layer_trait {
     };
 }
 
+pub mod batch_normalization;
 /// Dropout layer for neural networks
 pub mod dropout;
 /// Spatial Dropout layer for 1D data
@@ -137,6 +138,7 @@ pub mod spatial_dropout_2d;
 /// Spatial Dropout layer for 3D data
 pub mod spatial_dropout_3d;
 
+pub use batch_normalization::*;
 pub use dropout::*;
 pub use spatial_dropout_1d::*;
 pub use spatial_dropout_2d::*;

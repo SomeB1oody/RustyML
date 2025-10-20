@@ -14,6 +14,7 @@ use ndarray::prelude::*;
 /// - `Conv1D` - Contains weights for 1D convolutional layers
 /// - `Conv2D` - Contains weights for 2D convolutional layers
 /// - `Conv3D` - Contains weights for 3D convolutional layers
+/// - `BatchNormalization` - Contains weights for batch normalization layers
 /// - `Empty` - Represents a layer with no trainable parameters
 pub enum LayerWeight<'a> {
     Dense(DenseLayerWeight<'a>),
@@ -25,6 +26,7 @@ pub enum LayerWeight<'a> {
     SeparableConv2DLayer(SeparableConv2DLayerWeight<'a>),
     DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight<'a>),
     Conv3D(Conv3DLayerWeight<'a>),
+    BatchNormalization(BatchNormalizationLayerWeight<'a>),
     Empty,
 }
 
@@ -167,4 +169,19 @@ pub struct SeparableConv2DLayerWeight<'a> {
 pub struct DepthwiseConv2DLayerWeight<'a> {
     pub weight: &'a Array4<f32>,
     pub bias: &'a Array1<f32>,
+}
+
+/// Weights for a batch normalization layer
+///
+/// # Fields
+///
+/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
+/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
+/// - `running_mean` - Exponentially weighted moving average of batch means (updated during training, used during inference)
+/// - `running_var` - Exponentially weighted moving average of batch variances (updated during training, used during inference)
+pub struct BatchNormalizationLayerWeight<'a> {
+    pub gamma: &'a ArrayD<f32>,
+    pub beta: &'a ArrayD<f32>,
+    pub running_mean: &'a ArrayD<f32>,
+    pub running_var: &'a ArrayD<f32>,
 }
