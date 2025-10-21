@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.9.0] - 2025-10-21 (UTC-7)
+### Changed
+- Modularize weight serialization by introducing dedicated files for each layer type
+
 ## [v0.9.0] - 2025-10-20 (UTC-7)
 ### Added
 - Add Batch Normalization layer

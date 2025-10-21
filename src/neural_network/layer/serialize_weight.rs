@@ -1,6 +1,23 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+/// Serializable representation of a Dense layer's weights
+pub mod serializable_dense_weight;
+/// Serializable representation of a single gate's weights
+pub mod serializable_gate_weight;
+/// Serializable representation of a GRU layer's weights
+mod serializable_gru_weight;
+/// Serializable representation of an LSTM layer's weights
+pub mod serializable_lstm_weight;
+/// Serializable representation of a SimpleRNN layer's weights
+pub mod serializable_simple_rnn_weight;
+
+pub use serializable_dense_weight::*;
+pub use serializable_gate_weight::*;
+pub use serializable_gru_weight::*;
+pub use serializable_lstm_weight::*;
+pub use serializable_simple_rnn_weight::*;
+
 /// Enum containing all possible serializable layer weight types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -16,73 +33,6 @@ pub enum SerializableLayerWeight {
     DepthwiseConv2D(SerializableDepthwiseConv2DWeight),
     BatchNormalization(SerializableBatchNormalizationWeight),
     Empty,
-}
-
-/// Serializable representation of a Dense layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableDenseWeight {
-    pub weight: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<Dense<T>> for SerializableDenseWeight {
-    fn apply_to_layer(&self, layer: &mut Dense<T>) -> Result<(), IoError> {
-        let weight_array = vec2_to_array2(&self.weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(weight_array, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a SimpleRNN layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableSimpleRNNWeight {
-    pub kernel: Vec<Vec<f32>>,
-    pub recurrent_kernel: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<SimpleRNN<T>> for SerializableSimpleRNNWeight {
-    fn apply_to_layer(&self, layer: &mut SimpleRNN<T>) -> Result<(), IoError> {
-        let kernel = vec2_to_array2(&self.kernel)?;
-        let recurrent_kernel = vec2_to_array2(&self.recurrent_kernel)?;
-        let bias = vec2_to_array2(&self.bias)?;
-        layer.set_weights(kernel, recurrent_kernel, bias);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a single LSTM gate's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableLSTMGateWeight {
-    pub kernel: Vec<Vec<f32>>,
-    pub recurrent_kernel: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-/// Serializable representation of an LSTM layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableLSTMWeight {
-    pub input: SerializableLSTMGateWeight,
-    pub forget: SerializableLSTMGateWeight,
-    pub cell: SerializableLSTMGateWeight,
-    pub output: SerializableLSTMGateWeight,
-}
-
-/// Serializable representation of a single GRU gate's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableGRUGateWeight {
-    pub kernel: Vec<Vec<f32>>,
-    pub recurrent_kernel: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-/// Serializable representation of a GRU layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableGRUWeight {
-    pub reset: SerializableGRUGateWeight,
-    pub update: SerializableGRUGateWeight,
-    pub candidate: SerializableGRUGateWeight,
 }
 
 impl<T: ActivationLayer> ApplyWeights<GRU<T>> for SerializableGRUWeight {
@@ -297,7 +247,7 @@ impl SerializableLayerWeight {
                 })
             }
             LayerWeight::LSTM(w) => SerializableLayerWeight::LSTM(SerializableLSTMWeight {
-                input: SerializableLSTMGateWeight {
+                input: SerializableGateWeight {
                     kernel: w
                         .input
                         .kernel
@@ -312,7 +262,7 @@ impl SerializableLayerWeight {
                         .collect(),
                     bias: w.input.bias.outer_iter().map(|row| row.to_vec()).collect(),
                 },
-                forget: SerializableLSTMGateWeight {
+                forget: SerializableGateWeight {
                     kernel: w
                         .forget
                         .kernel
@@ -327,7 +277,7 @@ impl SerializableLayerWeight {
                         .collect(),
                     bias: w.forget.bias.outer_iter().map(|row| row.to_vec()).collect(),
                 },
-                cell: SerializableLSTMGateWeight {
+                cell: SerializableGateWeight {
                     kernel: w.cell.kernel.outer_iter().map(|row| row.to_vec()).collect(),
                     recurrent_kernel: w
                         .cell
@@ -337,7 +287,7 @@ impl SerializableLayerWeight {
                         .collect(),
                     bias: w.cell.bias.outer_iter().map(|row| row.to_vec()).collect(),
                 },
-                output: SerializableLSTMGateWeight {
+                output: SerializableGateWeight {
                     kernel: w
                         .output
                         .kernel
@@ -354,7 +304,7 @@ impl SerializableLayerWeight {
                 },
             }),
             LayerWeight::GRU(w) => SerializableLayerWeight::GRU(SerializableGRUWeight {
-                reset: SerializableGRUGateWeight {
+                reset: SerializableGateWeight {
                     kernel: w
                         .reset
                         .kernel
@@ -369,7 +319,7 @@ impl SerializableLayerWeight {
                         .collect(),
                     bias: w.reset.bias.outer_iter().map(|row| row.to_vec()).collect(),
                 },
-                update: SerializableGRUGateWeight {
+                update: SerializableGateWeight {
                     kernel: w
                         .update
                         .kernel
@@ -384,7 +334,7 @@ impl SerializableLayerWeight {
                         .collect(),
                     bias: w.update.bias.outer_iter().map(|row| row.to_vec()).collect(),
                 },
-                candidate: SerializableGRUGateWeight {
+                candidate: SerializableGateWeight {
                     kernel: w
                         .candidate
                         .kernel

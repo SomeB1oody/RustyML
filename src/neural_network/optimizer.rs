@@ -1,4 +1,4 @@
-use super::traits::{Layer, Optimizer};
+use super::neural_network_trait::{Layer, Optimizer};
 use ndarray::prelude::*;
 use rayon::prelude::*;
 

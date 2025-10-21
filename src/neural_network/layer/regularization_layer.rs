@@ -128,6 +128,7 @@ macro_rules! mode_dependent_layer_trait {
     };
 }
 
+/// Batch Normalization layer for neural networks
 pub mod batch_normalization;
 /// Dropout layer for neural networks
 pub mod dropout;
