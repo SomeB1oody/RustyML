@@ -1,21 +1,39 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+/// Serializable representation of a BatchNormalization layer's weights
+pub mod serializable_batch_normalization_weight;
+/// Serializable representation of a Conv1D layer's weights
+pub mod serializable_conv_1d_weight;
+/// Serializable representation of a Conv2D layer's weights
+pub mod serializable_conv_2d_weight;
+/// Serializable representation of a Conv3D layer's weights
+pub mod serializable_conv_3d_weight;
 /// Serializable representation of a Dense layer's weights
 pub mod serializable_dense_weight;
+/// Serializable representation of a DepthwiseConv2D layer's weights
+pub mod serializable_depthwise_conv_2d_weight;
 /// Serializable representation of a single gate's weights
 pub mod serializable_gate_weight;
 /// Serializable representation of a GRU layer's weights
 mod serializable_gru_weight;
 /// Serializable representation of an LSTM layer's weights
 pub mod serializable_lstm_weight;
+/// Serializable representation of a SeparableConv2D layer's weights
+pub mod serializable_separable_conv_2d_weight;
 /// Serializable representation of a SimpleRNN layer's weights
 pub mod serializable_simple_rnn_weight;
 
+pub use serializable_batch_normalization_weight::*;
+pub use serializable_conv_1d_weight::*;
+pub use serializable_conv_2d_weight::*;
+pub use serializable_conv_3d_weight::*;
 pub use serializable_dense_weight::*;
+pub use serializable_depthwise_conv_2d_weight::*;
 pub use serializable_gate_weight::*;
 pub use serializable_gru_weight::*;
 pub use serializable_lstm_weight::*;
+pub use serializable_separable_conv_2d_weight::*;
 pub use serializable_simple_rnn_weight::*;
 
 /// Enum containing all possible serializable layer weight types
@@ -33,198 +51,6 @@ pub enum SerializableLayerWeight {
     DepthwiseConv2D(SerializableDepthwiseConv2DWeight),
     BatchNormalization(SerializableBatchNormalizationWeight),
     Empty,
-}
-
-impl<T: ActivationLayer> ApplyWeights<GRU<T>> for SerializableGRUWeight {
-    fn apply_to_layer(&self, layer: &mut GRU<T>) -> Result<(), IoError> {
-        let reset_kernel = vec2_to_array2(&self.reset.kernel)?;
-        let reset_recurrent = vec2_to_array2(&self.reset.recurrent_kernel)?;
-        let reset_bias = vec2_to_array2(&self.reset.bias)?;
-
-        let update_kernel = vec2_to_array2(&self.update.kernel)?;
-        let update_recurrent = vec2_to_array2(&self.update.recurrent_kernel)?;
-        let update_bias = vec2_to_array2(&self.update.bias)?;
-
-        let candidate_kernel = vec2_to_array2(&self.candidate.kernel)?;
-        let candidate_recurrent = vec2_to_array2(&self.candidate.recurrent_kernel)?;
-        let candidate_bias = vec2_to_array2(&self.candidate.bias)?;
-
-        layer.set_weights(
-            reset_kernel,
-            reset_recurrent,
-            reset_bias,
-            update_kernel,
-            update_recurrent,
-            update_bias,
-            candidate_kernel,
-            candidate_recurrent,
-            candidate_bias,
-        );
-        Ok(())
-    }
-}
-
-impl<T: ActivationLayer> ApplyWeights<LSTM<T>> for SerializableLSTMWeight {
-    fn apply_to_layer(&self, layer: &mut LSTM<T>) -> Result<(), IoError> {
-        let input_kernel = vec2_to_array2(&self.input.kernel)?;
-        let input_recurrent = vec2_to_array2(&self.input.recurrent_kernel)?;
-        let input_bias = vec2_to_array2(&self.input.bias)?;
-
-        let forget_kernel = vec2_to_array2(&self.forget.kernel)?;
-        let forget_recurrent = vec2_to_array2(&self.forget.recurrent_kernel)?;
-        let forget_bias = vec2_to_array2(&self.forget.bias)?;
-
-        let cell_kernel = vec2_to_array2(&self.cell.kernel)?;
-        let cell_recurrent = vec2_to_array2(&self.cell.recurrent_kernel)?;
-        let cell_bias = vec2_to_array2(&self.cell.bias)?;
-
-        let output_kernel = vec2_to_array2(&self.output.kernel)?;
-        let output_recurrent = vec2_to_array2(&self.output.recurrent_kernel)?;
-        let output_bias = vec2_to_array2(&self.output.bias)?;
-
-        layer.set_weights(
-            input_kernel,
-            input_recurrent,
-            input_bias,
-            forget_kernel,
-            forget_recurrent,
-            forget_bias,
-            cell_kernel,
-            cell_recurrent,
-            cell_bias,
-            output_kernel,
-            output_recurrent,
-            output_bias,
-        );
-        Ok(())
-    }
-}
-
-/// Serializable representation of a Conv1D layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableConv1DWeight {
-    pub weight: Vec<Vec<Vec<f32>>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<Conv1D<T>> for SerializableConv1DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv1D<T>) -> Result<(), IoError> {
-        let weight_array = vec3_to_array3(&self.weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(weight_array, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a Conv2D layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableConv2DWeight {
-    pub weight: Vec<Vec<Vec<Vec<f32>>>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<Conv2D<T>> for SerializableConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv2D<T>) -> Result<(), IoError> {
-        let weight_array = vec4_to_array4(&self.weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(weight_array, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a Conv3D layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableConv3DWeight {
-    pub weight: Vec<Vec<Vec<Vec<Vec<f32>>>>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<Conv3D<T>> for SerializableConv3DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv3D<T>) -> Result<(), IoError> {
-        let weight_array = vec5_to_array5(&self.weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(weight_array, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a SeparableConv2D layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableSeparableConv2DWeight {
-    pub depthwise_weight: Vec<Vec<Vec<Vec<f32>>>>,
-    pub pointwise_weight: Vec<Vec<Vec<Vec<f32>>>>,
-    pub bias: Vec<Vec<f32>>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<SeparableConv2D<T>> for SerializableSeparableConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut SeparableConv2D<T>) -> Result<(), IoError> {
-        let depthwise_weight = vec4_to_array4(&self.depthwise_weight)?;
-        let pointwise_weight = vec4_to_array4(&self.pointwise_weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(depthwise_weight, pointwise_weight, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a DepthwiseConv2D layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableDepthwiseConv2DWeight {
-    pub weight: Vec<Vec<Vec<Vec<f32>>>>,
-    pub bias: Vec<f32>,
-}
-
-impl<T: ActivationLayer> ApplyWeights<DepthwiseConv2D<T>> for SerializableDepthwiseConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut DepthwiseConv2D<T>) -> Result<(), IoError> {
-        let weight_array = vec4_to_array4(&self.weight)?;
-        let bias_array = Array1::from_vec(self.bias.clone());
-        layer.set_weights(weight_array, bias_array);
-        Ok(())
-    }
-}
-
-/// Serializable representation of a BatchNormalization layer's weights
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableBatchNormalizationWeight {
-    pub gamma: Vec<f32>,
-    pub beta: Vec<f32>,
-    pub running_mean: Vec<f32>,
-    pub running_var: Vec<f32>,
-    pub shape: Vec<usize>,
-}
-
-impl ApplyWeights<BatchNormalization> for SerializableBatchNormalizationWeight {
-    fn apply_to_layer(&self, layer: &mut BatchNormalization) -> Result<(), IoError> {
-        let gamma =
-            ArrayD::from_shape_vec(self.shape.as_slice(), self.gamma.clone()).map_err(|e| {
-                IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))
-            })?;
-        let beta =
-            ArrayD::from_shape_vec(self.shape.as_slice(), self.beta.clone()).map_err(|e| {
-                IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))
-            })?;
-        let running_mean = ArrayD::from_shape_vec(self.shape.as_slice(), self.running_mean.clone())
-            .map_err(|e| {
-                IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))
-            })?;
-        let running_var = ArrayD::from_shape_vec(self.shape.as_slice(), self.running_var.clone())
-            .map_err(|e| {
-            IoError::StdIoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                e.to_string(),
-            ))
-        })?;
-        layer.set_weights(gamma, beta, running_mean, running_var);
-        Ok(())
-    }
 }
 
 impl SerializableLayerWeight {
