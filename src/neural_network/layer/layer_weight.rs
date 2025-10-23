@@ -15,6 +15,7 @@ use ndarray::prelude::*;
 /// - `Conv2D` - Contains weights for 2D convolutional layers
 /// - `Conv3D` - Contains weights for 3D convolutional layers
 /// - `BatchNormalization` - Contains weights for batch normalization layers
+/// - `LayerNormalizationLayer` - Contains weights for layer normalization layers
 /// - `Empty` - Represents a layer with no trainable parameters
 pub enum LayerWeight<'a> {
     Dense(DenseLayerWeight<'a>),
@@ -27,6 +28,7 @@ pub enum LayerWeight<'a> {
     DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight<'a>),
     Conv3D(Conv3DLayerWeight<'a>),
     BatchNormalization(BatchNormalizationLayerWeight<'a>),
+    LayerNormalizationLayer(LayerNormalizationLayerWeight<'a>),
     Empty,
 }
 
@@ -184,4 +186,15 @@ pub struct BatchNormalizationLayerWeight<'a> {
     pub beta: &'a ArrayD<f32>,
     pub running_mean: &'a ArrayD<f32>,
     pub running_var: &'a ArrayD<f32>,
+}
+
+/// Weights for a layer normalization layer
+///
+/// # Fields
+///
+/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
+/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
+pub struct LayerNormalizationLayerWeight<'a> {
+    pub gamma: &'a ArrayD<f32>,
+    pub beta: &'a ArrayD<f32>,
 }

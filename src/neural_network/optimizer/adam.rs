@@ -316,3 +316,24 @@ pub struct AdamStatesConv3D {
     pub m_bias: Array2<f32>,
     pub v_bias: Array2<f32>,
 }
+
+/// Stores and manages optimization state for the Adam optimizer algorithm for Normalization layers.
+///
+/// This struct is specifically designed to handle the optimization state for normalization layers
+/// (e.g., BatchNormalization, LayerNormalization) that have gamma (scale) and beta (shift) parameters.
+/// It maintains the first and second moment estimates (moving averages of gradients and squared gradients)
+/// for these parameters used in the Adam optimization algorithm.
+///
+/// # Fields
+///
+/// - `m_gamma` - First moment tensor (moving average of gradients) for gamma (scale) parameter
+/// - `v_gamma` - Second moment tensor (moving average of squared gradients) for gamma parameter
+/// - `m_beta` - First moment tensor for beta (shift) parameter
+/// - `v_beta` - Second moment tensor for beta parameter
+#[derive(Debug, Clone, Default)]
+pub struct AdamStatesNormalizationLayer {
+    pub m_gamma: Tensor,
+    pub v_gamma: Tensor,
+    pub m_beta: Tensor,
+    pub v_beta: Tensor,
+}

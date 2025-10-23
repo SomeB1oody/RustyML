@@ -220,3 +220,20 @@ pub struct AdaGradStatesConv3D {
     pub accumulator: Array5<f32>,
     pub accumulator_bias: Array2<f32>,
 }
+
+/// Stores and manages optimization state for the AdaGrad optimizer algorithm for Normalization layers.
+///
+/// This struct is specifically designed to handle the optimization state for normalization layers
+/// (e.g., BatchNormalization, LayerNormalization) that have gamma (scale) and beta (shift) parameters.
+/// AdaGrad maintains accumulated squared gradients for each parameter, which are used to adapt
+/// the learning rate per parameter.
+///
+/// # Fields
+///
+/// - `acc_grad_gamma` - Accumulated squared gradients for gamma (scale) parameter
+/// - `acc_grad_beta` - Accumulated squared gradients for beta (shift) parameter
+#[derive(Debug, Clone, Default)]
+pub struct AdaGradStatesNormalizationLayer {
+    pub acc_grad_gamma: Tensor,
+    pub acc_grad_beta: Tensor,
+}

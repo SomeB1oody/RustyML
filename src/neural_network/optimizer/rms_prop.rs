@@ -246,3 +246,19 @@ pub struct RMSpropCacheConv3D {
     pub cache: Array5<f32>,
     pub bias: Array2<f32>,
 }
+
+/// Cache structure for the RMSprop optimization algorithm for Normalization layers.
+///
+/// This specialized cache is designed for normalization layers (e.g., BatchNormalization,
+/// LayerNormalization) that have gamma (scale) and beta (shift) parameters. It maintains
+/// moving averages of squared gradients for these parameters.
+///
+/// # Fields
+///
+/// - `cache_gamma` - Moving average of squared gradients for gamma (scale) parameter
+/// - `cache_beta` - Moving average of squared gradients for beta (shift) parameter
+#[derive(Debug, Clone, Default)]
+pub struct RMSpropCacheNormalizationLayer {
+    pub cache_gamma: Tensor,
+    pub cache_beta: Tensor,
+}

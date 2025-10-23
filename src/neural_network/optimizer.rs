@@ -1,3 +1,4 @@
+use super::Tensor;
 use super::neural_network_trait::{Layer, Optimizer};
 use ndarray::prelude::*;
 use rayon::prelude::*;
@@ -97,4 +98,32 @@ pub struct OptimizerCacheConv3D {
     pub adam_states: Option<AdamStatesConv3D>,
     pub rmsprop_cache: Option<RMSpropCacheConv3D>,
     pub ada_grad_cache: Option<AdaGradStatesConv3D>,
+}
+
+/// Optimizer cache for normalization layers
+///
+/// This structure serves as a unified cache container for different optimization algorithms
+/// used with normalization layers (e.g., BatchNormalization, LayerNormalization). It stores
+/// algorithm-specific state variables that are required to maintain optimization momentum
+/// and adaptive learning rates for gamma (scale) and beta (shift) parameters across training iterations.
+///
+/// The cache supports multiple optimization algorithms and only stores the state for
+/// the currently active optimizer, helping to manage memory efficiently while providing
+/// the flexibility to switch between different optimization strategies.
+///
+/// # Fields
+///
+/// - `adam_states` - Optional cache for Adam optimizer state variables including first
+///   and second moment estimates for gamma and beta parameters
+///
+/// - `rmsprop_cache` - Optional cache for RMSprop optimizer state variables including
+///   exponentially decaying averages of squared gradients for gamma and beta parameters
+///
+/// - `ada_grad_cache` - Optional cache storage for AdaGrad optimizer accumulated squared gradients
+///   for gamma and beta parameters
+#[derive(Debug, Clone, Default)]
+pub struct OptimizerCacheNormalizationLayer {
+    pub adam_states: Option<AdamStatesNormalizationLayer>,
+    pub rmsprop_cache: Option<RMSpropCacheNormalizationLayer>,
+    pub ada_grad_cache: Option<AdaGradStatesNormalizationLayer>,
 }

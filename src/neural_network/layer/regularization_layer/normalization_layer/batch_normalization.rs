@@ -67,17 +67,8 @@ pub struct BatchNormalization {
     // Gradients
     grad_gamma: Option<Tensor>,
     grad_beta: Option<Tensor>,
-    // Adam optimizer state
-    m_gamma: Option<Tensor>,
-    v_gamma: Option<Tensor>,
-    m_beta: Option<Tensor>,
-    v_beta: Option<Tensor>,
-    // RMSprop optimizer state
-    cache_gamma: Option<Tensor>,
-    cache_beta: Option<Tensor>,
-    // AdaGrad optimizer state
-    acc_grad_gamma: Option<Tensor>,
-    acc_grad_beta: Option<Tensor>,
+    // Optimizer cache
+    optimizer_cache: OptimizerCacheNormalizationLayer,
 }
 
 impl BatchNormalization {
@@ -118,14 +109,7 @@ impl BatchNormalization {
             x_centered: None,
             grad_gamma: None,
             grad_beta: None,
-            m_gamma: None,
-            v_gamma: None,
-            m_beta: None,
-            v_beta: None,
-            cache_gamma: None,
-            cache_beta: None,
-            acc_grad_gamma: None,
-            acc_grad_beta: None,
+            optimizer_cache: OptimizerCacheNormalizationLayer::default(),
         }
     }
 
@@ -375,18 +359,7 @@ impl Layer for BatchNormalization {
     }
 
     fn output_shape(&self) -> String {
-        if !self.input_shape.is_empty() {
-            format!(
-                "({})",
-                self.input_shape
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        } else {
-            String::from("Unknown")
-        }
+        normalization_layer_output_shape!(self)
     }
 
     fn param_count(&self) -> TrainingParameters {
@@ -394,110 +367,19 @@ impl Layer for BatchNormalization {
     }
 
     fn update_parameters_sgd(&mut self, lr: f32) {
-        if let Some(grad_gamma) = &self.grad_gamma {
-            self.gamma = &self.gamma - &(grad_gamma * lr);
-        }
-        if let Some(grad_beta) = &self.grad_beta {
-            self.beta = &self.beta - &(grad_beta * lr);
-        }
+        normalization_layer_update_parameters_sgd!(self, lr)
     }
 
     fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize moment estimates if not already done
-        if self.m_gamma.is_none() {
-            self.m_gamma = Some(Tensor::zeros(self.gamma.raw_dim()));
-            self.v_gamma = Some(Tensor::zeros(self.gamma.raw_dim()));
-            self.m_beta = Some(Tensor::zeros(self.beta.raw_dim()));
-            self.v_beta = Some(Tensor::zeros(self.beta.raw_dim()));
-        }
-
-        if let Some(grad_gamma) = &self.grad_gamma {
-            let m_gamma = self.m_gamma.as_mut().unwrap();
-            let v_gamma = self.v_gamma.as_mut().unwrap();
-
-            // Update biased first moment estimate
-            *m_gamma = m_gamma.clone() * beta1 + grad_gamma * (1.0 - beta1);
-
-            // Update biased second raw moment estimate
-            *v_gamma = v_gamma.clone() * beta2 + &(grad_gamma * grad_gamma) * (1.0 - beta2);
-
-            // Compute bias-corrected first moment estimate
-            let m_hat = m_gamma.clone() / (1.0 - beta1.powi(t as i32));
-
-            // Compute bias-corrected second raw moment estimate
-            let v_hat = v_gamma.clone() / (1.0 - beta2.powi(t as i32));
-
-            // Update parameters
-            self.gamma = &self.gamma - &(&m_hat / &(v_hat.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
-
-        if let Some(grad_beta) = &self.grad_beta {
-            let m_beta = self.m_beta.as_mut().unwrap();
-            let v_beta = self.v_beta.as_mut().unwrap();
-
-            *m_beta = m_beta.clone() * beta1 + grad_beta * (1.0 - beta1);
-            *v_beta = v_beta.clone() * beta2 + &(grad_beta * grad_beta) * (1.0 - beta2);
-
-            let m_hat = m_beta.clone() / (1.0 - beta1.powi(t as i32));
-            let v_hat = v_beta.clone() / (1.0 - beta2.powi(t as i32));
-
-            self.beta = &self.beta - &(&m_hat / &(v_hat.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
+        normalization_layer_update_parameters_adam!(self, lr, beta1, beta2, epsilon, t)
     }
 
     fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        // Initialize cache if not already done
-        if self.cache_gamma.is_none() {
-            self.cache_gamma = Some(Tensor::zeros(self.gamma.raw_dim()));
-            self.cache_beta = Some(Tensor::zeros(self.beta.raw_dim()));
-        }
-
-        if let Some(grad_gamma) = &self.grad_gamma {
-            let cache_gamma = self.cache_gamma.as_mut().unwrap();
-
-            // Update cache
-            *cache_gamma = cache_gamma.clone() * rho + &(grad_gamma * grad_gamma) * (1.0 - rho);
-
-            // Update parameters
-            self.gamma =
-                &self.gamma - &(grad_gamma / &(cache_gamma.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
-
-        if let Some(grad_beta) = &self.grad_beta {
-            let cache_beta = self.cache_beta.as_mut().unwrap();
-
-            *cache_beta = cache_beta.clone() * rho + &(grad_beta * grad_beta) * (1.0 - rho);
-
-            self.beta = &self.beta - &(grad_beta / &(cache_beta.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
+        normalization_layer_update_parameters_rmsprop!(self, lr, rho, epsilon)
     }
 
     fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        // Initialize accumulated gradient if not already done
-        if self.acc_grad_gamma.is_none() {
-            self.acc_grad_gamma = Some(Tensor::zeros(self.gamma.raw_dim()));
-            self.acc_grad_beta = Some(Tensor::zeros(self.beta.raw_dim()));
-        }
-
-        if let Some(grad_gamma) = &self.grad_gamma {
-            let acc_grad_gamma = self.acc_grad_gamma.as_mut().unwrap();
-
-            // Accumulate squared gradients
-            *acc_grad_gamma = acc_grad_gamma.clone() + &(grad_gamma * grad_gamma);
-
-            // Update parameters
-            self.gamma =
-                &self.gamma - &(grad_gamma / &(acc_grad_gamma.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
-
-        if let Some(grad_beta) = &self.grad_beta {
-            let acc_grad_beta = self.acc_grad_beta.as_mut().unwrap();
-
-            *acc_grad_beta = acc_grad_beta.clone() + &(grad_beta * grad_beta);
-
-            self.beta =
-                &self.beta - &(grad_beta / &(acc_grad_beta.mapv(|x| x.sqrt()) + epsilon) * lr);
-        }
+        normalization_layer_update_parameters_ada_grad!(self, lr, epsilon)
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
