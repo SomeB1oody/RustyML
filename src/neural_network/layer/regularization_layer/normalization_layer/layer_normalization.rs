@@ -191,7 +191,10 @@ impl Layer for LayerNormalization {
             let mut x_centered = Tensor::zeros(input.raw_dim());
             let mut squared_diff = Tensor::zeros(input.raw_dim());
 
-            let norm_dim_size: usize = input.shape()[axis_idx..].iter().product();
+            // Calculate strides for index mapping
+            let input_shape = input.shape();
+            let axis_size = input_shape[axis_idx];
+            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
 
             x_centered
                 .as_slice_mut()
@@ -201,8 +204,10 @@ impl Layer for LayerNormalization {
                 .zip(input.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, ((centered, sq_diff), &val))| {
-                    let norm_idx = i % norm_dim_size;
-                    let mean_val = mean.as_slice().unwrap()[norm_idx];
+                    // Map flat index to position in mean array
+                    let mean_idx =
+                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
+                    let mean_val = mean.as_slice().unwrap()[mean_idx];
                     let diff = val - mean_val;
                     *centered = diff;
                     *sq_diff = diff * diff;
@@ -228,7 +233,10 @@ impl Layer for LayerNormalization {
         let x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
             // Parallel normalization
             let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
-            let norm_dim_size: usize = input.shape()[axis_idx..].iter().product();
+
+            let input_shape = input.shape();
+            let axis_size = input_shape[axis_idx];
+            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
 
             x_normalized
                 .as_slice_mut()
@@ -237,8 +245,9 @@ impl Layer for LayerNormalization {
                 .zip(x_centered.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (norm, &centered))| {
-                    let norm_idx = i % norm_dim_size;
-                    let std_val = std_dev.as_slice().unwrap()[norm_idx];
+                    let std_idx =
+                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
+                    let std_val = std_dev.as_slice().unwrap()[std_idx];
                     *norm = centered / std_val;
                 });
 
@@ -273,7 +282,9 @@ impl Layer for LayerNormalization {
         let output = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
             // Parallel scale and shift
             let mut output = Tensor::zeros(x_normalized.raw_dim());
-            let norm_dim_size: usize = input.shape()[axis_idx..].iter().product();
+
+            let input_shape = input.shape();
+            let norm_dim_size: usize = input_shape[axis_idx..].iter().product();
 
             output
                 .as_slice_mut()
@@ -282,9 +293,9 @@ impl Layer for LayerNormalization {
                 .zip(x_normalized.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (out, &norm))| {
-                    let norm_idx = i % norm_dim_size;
-                    let gamma_val = gamma_broadcast.as_slice().unwrap()[norm_idx];
-                    let beta_val = beta_broadcast.as_slice().unwrap()[norm_idx];
+                    let param_idx = i % norm_dim_size;
+                    let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
+                    let beta_val = beta_broadcast.as_slice().unwrap()[param_idx];
                     *out = norm * gamma_val + beta_val;
                 });
 
@@ -357,7 +368,9 @@ impl Layer for LayerNormalization {
         let grad_x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
             // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
-            let norm_dim_size: usize = grad_output.shape()[axis_idx..].iter().product();
+
+            let output_shape = grad_output.shape();
+            let norm_dim_size: usize = output_shape[axis_idx..].iter().product();
 
             grad_x_norm
                 .as_slice_mut()
@@ -366,8 +379,8 @@ impl Layer for LayerNormalization {
                 .zip(grad_output.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (g_norm, &g_out))| {
-                    let norm_idx = i % norm_dim_size;
-                    let gamma_val = gamma_broadcast.as_slice().unwrap()[norm_idx];
+                    let param_idx = i % norm_dim_size;
+                    let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
                     *g_norm = g_out * gamma_val;
                 });
             grad_x_norm
@@ -402,7 +415,10 @@ impl Layer for LayerNormalization {
         let grad_input = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
             // Parallel computation
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-            let norm_dim_size: usize = grad_output.shape()[axis_idx..].iter().product();
+
+            let output_shape = grad_output.shape();
+            let axis_size = output_shape[axis_idx];
+            let after_axis_size: usize = output_shape[axis_idx + 1..].iter().product();
 
             grad_inp
                 .as_slice_mut()
@@ -412,10 +428,11 @@ impl Layer for LayerNormalization {
                 .zip(x_centered.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, ((g_inp, &g_norm), &x_cent))| {
-                    let norm_idx = i % norm_dim_size;
-                    let inv_std_val = inv_std.as_slice().unwrap()[norm_idx];
-                    let grad_var_val = grad_var.as_slice().unwrap()[norm_idx];
-                    let grad_mean_val = grad_mean.as_slice().unwrap()[norm_idx];
+                    let stat_idx =
+                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
+                    let inv_std_val = inv_std.as_slice().unwrap()[stat_idx];
+                    let grad_var_val = grad_var.as_slice().unwrap()[stat_idx];
+                    let grad_mean_val = grad_mean.as_slice().unwrap()[stat_idx];
 
                     *g_inp = g_norm * inv_std_val
                         + grad_var_val * x_cent * 2.0 / norm_size
