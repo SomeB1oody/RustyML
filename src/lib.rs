@@ -72,7 +72,7 @@
 //! [dependencies]
 //! rustyml = { version = "0.8.0", features = ["machine_learning"] }
 //! # Or use features = ["full"] to enable all modules
-//! # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
+//! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 //! ```
 //!
 //! In your Rust code, write:
@@ -121,8 +121,8 @@
 //! ```toml
 //! [dependencies]
 //! rustyml = { version = "0.8.0", features = ["neural_network"] }
-//! # Or use features = ["full"] to enable all modules
-//! # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
+//! # Or use `features = ["full"]` to enable all modules
+//! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 //! ```
 //!
 //! In your Rust code, write:

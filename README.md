@@ -239,9 +239,9 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = {version = "0.8.0", features = ["neural_network"]} 
+rustyml = {version = "0.9.0", features = ["neural_network"]} 
 # or use `features = ["full"]` to enable all features
-# Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
+# Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 ```
 
 In your Rust code, write:
