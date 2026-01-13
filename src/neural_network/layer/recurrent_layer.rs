@@ -56,10 +56,10 @@ impl Gate {
     pub fn new(input_dim: usize, units: usize, bias_init_value: f32) -> Self {
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
+        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
 
         // Orthogonal initialization for recurrent kernel
-        let mut recurrent_kernel = Array::random((units, units), Uniform::new(-1.0, 1.0));
+        let mut recurrent_kernel = Array::random((units, units), Uniform::new(-1.0, 1.0).unwrap());
         if units > 0 {
             // Simplified orthogonalization using QR decomposition approximation
             // For better numerical stability, normalize each column

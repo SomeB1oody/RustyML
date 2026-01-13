@@ -117,7 +117,10 @@ impl Layer for SpatialDropout2D {
 
         // Generate mask for channels: shape (batch_size, channels)
         // Each channel is either fully kept or fully dropped
-        let mut mask_2d = Tensor::random(IxDyn(&[batch_size, channels]), Uniform::new(0.0, 1.0));
+        let mut mask_2d = Tensor::random(
+            IxDyn(&[batch_size, channels]),
+            Uniform::new(0.0, 1.0).unwrap(),
+        );
 
         // Apply threshold to create binary mask with parallel or sequential computation
         apply_spatial_dropout_threshold(

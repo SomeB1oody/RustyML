@@ -87,7 +87,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
     pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit));
+        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
 
         // Orthogonal initialization for recurrent kernel to maintain gradient flow
         let recurrent_kernel = Self::orthogonal_init(units);
@@ -113,7 +113,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
     /// This helps prevent gradient vanishing/exploding in RNNs
     fn orthogonal_init(size: usize) -> Array2<f32> {
         // Generate a random matrix
-        let mut matrix = Array::random((size, size), Uniform::new(-1.0, 1.0));
+        let mut matrix = Array::random((size, size), Uniform::new(-1.0, 1.0).unwrap());
 
         // Apply Gram-Schmidt orthogonalization
         for i in 0..size {

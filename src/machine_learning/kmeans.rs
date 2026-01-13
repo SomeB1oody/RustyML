@@ -1,5 +1,5 @@
 use super::*;
-use ndarray_rand::rand::{RngCore, thread_rng};
+use ndarray_rand::rand::{RngCore, rng};
 use std::ops::AddAssign;
 
 /// Threshold for parallelization in KMeans clustering.
@@ -228,7 +228,7 @@ impl KMeans {
 
         let mut rng = match self.random_seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::seed_from_u64(thread_rng().next_u64()),
+            None => StdRng::seed_from_u64(rng().next_u64()),
         };
 
         // K-means++ initialization method

@@ -122,7 +122,10 @@ impl<T: ActivationLayer> Conv3D<T> {
         let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
         // Initialize weights with Xavier initialization
-        let weights = Array5::random((filters, channels, kd, kh, kw), Uniform::new(-limit, limit));
+        let weights = Array5::random(
+            (filters, channels, kd, kh, kw),
+            Uniform::new(-limit, limit).unwrap(),
+        );
 
         // Initialize bias to zeros
         let bias = Array2::zeros((1, filters));

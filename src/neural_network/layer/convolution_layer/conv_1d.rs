@@ -123,7 +123,7 @@ impl<T: ActivationLayer> Conv1D<T> {
 
         let weights = Array3::random(
             (filters, input_channels, kernel_size),
-            Uniform::new(-weight_bound, weight_bound),
+            Uniform::new(-weight_bound, weight_bound).unwrap(),
         );
 
         // Initialize bias to zero

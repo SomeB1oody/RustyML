@@ -87,7 +87,7 @@ impl<T: ActivationLayer> Dense<T> {
     /// * `Dense` - A new `Dense` layer instance with specified dimensions
     pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let weights = Array::random((input_dim, units), Uniform::new(-limit, limit));
+        let weights = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
         let bias = Array::zeros((1, units));
         Self {
             input_dim,

@@ -130,7 +130,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
 
         let depthwise_weights = Array4::random(
             (depth_multiplier, channels, kernel_size.0, kernel_size.1),
-            Uniform::new(-depthwise_bound, depthwise_bound),
+            Uniform::new(-depthwise_bound, depthwise_bound).unwrap(),
         );
 
         // Initialize pointwise weights using Xavier initialization
@@ -141,7 +141,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
 
         let pointwise_weights = Array4::random(
             (filters, channels * depth_multiplier, 1, 1),
-            Uniform::new(-pointwise_bound, pointwise_bound),
+            Uniform::new(-pointwise_bound, pointwise_bound).unwrap(),
         );
 
         // Initialize biases to zero

@@ -100,7 +100,7 @@ impl Layer for Dropout {
         }
 
         // Generate random mask: 1 with probability (1 - rate), 0 with probability rate
-        let mut mask = Tensor::random(input.raw_dim(), Uniform::new(0.0, 1.0));
+        let mut mask = Tensor::random(input.raw_dim(), Uniform::new(0.0, 1.0).unwrap());
 
         // Apply threshold to create binary mask with parallel or sequential computation
         if input.len() >= DROPOUT_PARALLEL_THRESHOLD {
