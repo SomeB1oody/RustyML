@@ -6,6 +6,9 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.10.0] - 2026-01-12 (UTC-7)
+### Added
+- Add Instance Normalization layer
+
 ### Changed
 - Update dependencies and improve random initialization error handling
 

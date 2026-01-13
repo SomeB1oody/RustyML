@@ -17,6 +17,8 @@ pub mod serializable_depthwise_conv_2d_weight;
 pub mod serializable_gate_weight;
 /// Serializable representation of a GRU layer's weights
 mod serializable_gru_weight;
+/// Serializable representation of an instance normalization layer's weights
+mod serializable_instance_normalization;
 /// Serializable representation of a LayerNormalization layer's weights
 pub mod serializable_layer_normalization_weight;
 /// Serializable representation of an LSTM layer's weights
@@ -34,6 +36,7 @@ pub use serializable_dense_weight::*;
 pub use serializable_depthwise_conv_2d_weight::*;
 pub use serializable_gate_weight::*;
 pub use serializable_gru_weight::*;
+pub use serializable_instance_normalization::*;
 pub use serializable_layer_normalization_weight::*;
 pub use serializable_lstm_weight::*;
 pub use serializable_separable_conv_2d_weight::*;
@@ -54,6 +57,7 @@ pub enum SerializableLayerWeight {
     DepthwiseConv2D(SerializableDepthwiseConv2DWeight),
     BatchNormalization(SerializableBatchNormalizationWeight),
     LayerNormalization(SerializableLayerNormalizationWeight),
+    InstanceNormalization(SerializableInstanceNormalizationWeight),
     Empty,
 }
 
@@ -273,6 +277,15 @@ impl SerializableLayerWeight {
                     beta: w.beta.iter().cloned().collect(),
                     shape: w.gamma.shape().to_vec(),
                 })
+            }
+            LayerWeight::InstanceNormalizationLayer(w) => {
+                SerializableLayerWeight::InstanceNormalization(
+                    SerializableInstanceNormalizationWeight {
+                        gamma: w.gamma.iter().cloned().collect(),
+                        beta: w.beta.iter().cloned().collect(),
+                        shape: w.gamma.shape().to_vec(),
+                    },
+                )
             }
             LayerWeight::Empty => SerializableLayerWeight::Empty,
         }
@@ -529,6 +542,19 @@ pub fn apply_weights_to_layer(
                     std::io::ErrorKind::InvalidData,
                     format!(
                         "Expected LayerNormalization layer but got {}",
+                        expected_type
+                    ),
+                )));
+            }
+        }
+        SerializableLayerWeight::InstanceNormalization(w) => {
+            if let Some(layer) = layer_any.downcast_mut::<InstanceNormalization>() {
+                w.apply_to_layer(layer)?;
+            } else {
+                return Err(IoError::StdIoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Expected InstanceNormalization layer but got {}",
                         expected_type
                     ),
                 )));

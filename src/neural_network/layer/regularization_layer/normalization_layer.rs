@@ -153,8 +153,11 @@ macro_rules! normalization_layer_update_parameters_ada_grad {
 
 /// Batch Normalization layer for neural networks
 pub mod batch_normalization;
+/// Instance Normalization layer for neural networks
+mod instance_normalization;
 /// Layer Normalization layer for neural networks
 pub mod layer_normalization;
 
 pub use batch_normalization::*;
+pub use instance_normalization::*;
 pub use layer_normalization::*;

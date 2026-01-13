@@ -342,7 +342,6 @@ macro_rules! model_save_and_load_methods {
 /// - **JsonError**: JSON serialization/deserialization failures
 #[cfg(any(
     feature = "machine_learning",
-    feature = "math",
     feature = "neural_network",
     feature = "utility"
 ))]
@@ -640,7 +639,7 @@ pub mod dataset;
 /// - **Pooling Layers**: Max pooling and average pooling operations for 1D, 2D, and 3D data
 /// - **Global Pooling**: Global max pooling and global average pooling for 1D, 2D, and 3D tensors
 /// - **Recurrent Layers**: Sequential Modeling Layers like RNN, LSTM, and GRU
-/// - **Dropout**: Regularization layer to prevent overfitting during training
+/// - **Regularization layers**: Regularization layer to prevent overfitting during training
 ///
 /// ## Optimization Algorithms
 /// - **SGD**: Stochastic Gradient Descent with momentum support
