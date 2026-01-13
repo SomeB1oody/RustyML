@@ -25,13 +25,13 @@ full = ["dataset", "machine_learning", "neural_network", "utility", "math", "met
 [dependencies]
 ndarray = { version = "0.17.2", features = ["rayon", "serde"], optional = true }
 rand = { version = "0.9.2", optional = true }
-nalgebra = { version = "0.34.0", optional = true }
+nalgebra = { version = "0.34.1", optional = true }
 statrs = { version = "0.18.0", optional = true }
 rand_distr = { version = "0.5.1", optional = true }
 rayon = { version = "1.11.0", optional = true }
 ndarray-rand = { version = "0.16.0", optional = true }
 ahash = { version = "0.8.12", features = ["serde"], optional = true }
-indicatif = { version = "0.18.0", optional = true }
+indicatif = { version = "0.18.3", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.149", optional = true}
 

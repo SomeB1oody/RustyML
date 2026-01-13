@@ -226,9 +226,9 @@ checksum = "f2d1aab06663bdce00d6ca5e5ed586ec8d18033a771906c993a1e3755b368d85"
 
 [[package]]
 name = "indicatif"
-version = "0.18.0"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a646d946d06bedbbc4cac4c218acf4bbf2d87757a784857025f4d447e4e1cd"
+checksum = "9375e112e4b463ec1b1c6c011953545c65a30164fbab5b581df32b3abf0dcb88"
 dependencies = [
  "console",
  "portable-atomic",
@@ -306,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "nalgebra"
-version = "0.34.0"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cd59afb6639828b33677758314a4a1a745c15c02bc597095b851c8fd915cf49"
+checksum = "c4d5b3eff5cd580f93da45e64715e8c20a3996342f1e466599cf7a267a0c2f5f"
 dependencies = [
  "approx",
  "glam 0.14.0",
@@ -602,7 +602,7 @@ dependencies = [
  "ahash",
  "approx",
  "indicatif",
- "nalgebra 0.34.0",
+ "nalgebra 0.34.1",
  "ndarray",
  "ndarray-rand",
  "rand 0.9.2",
