@@ -151,13 +151,101 @@ macro_rules! normalization_layer_update_parameters_ada_grad {
     }};
 }
 
+/// Common implementation for computing gamma and beta gradients in normalization layers
+///
+/// This macro computes the gradients for gamma and beta parameters by summing over
+/// all spatial dimensions and batch dimensions for each channel. It handles both
+/// parallel and sequential computation based on the total number of elements.
+///
+/// # Parameters
+///
+/// - `$grad_gamma:expr` - Mutable tensor to store gamma gradients
+/// - `$grad_beta:expr` - Mutable tensor to store beta gradients
+/// - `$grad_output:expr` - Gradient from the next layer
+/// - `$x_normalized:expr` - Normalized input from forward pass
+/// - `$batch_size:expr` - Number of samples in the batch
+/// - `$num_channels:expr` - Number of channels
+/// - `$spatial_size:expr` - Size of spatial dimensions (product of all spatial dims)
+/// - `$total_elements:expr` - Total number of elements in the tensor
+/// - `$parallel_threshold:expr` - Threshold for switching to parallel computation
+macro_rules! compute_normalization_layer_parameter_gradients {
+    (
+        $grad_gamma:expr,
+        $grad_beta:expr,
+        $grad_output:expr,
+        $x_normalized:expr,
+        $batch_size:expr,
+        $num_channels:expr,
+        $spatial_size:expr,
+        $total_elements:expr,
+        $parallel_threshold:expr
+    ) => {{
+        if $total_elements >= $parallel_threshold {
+            // Parallel computation of parameter gradients
+            // Compute both gamma and beta gradients in a single pass
+            let (grad_gamma_vec, grad_beta_vec): (Vec<f32>, Vec<f32>) = (0..$num_channels)
+                .into_par_iter()
+                .map(|channel_idx| {
+                    let mut gamma_sum = 0.0f32;
+                    let mut beta_sum = 0.0f32;
+
+                    for batch_idx in 0..$batch_size {
+                        let start = (batch_idx * $num_channels + channel_idx) * $spatial_size;
+                        let end = start + $spatial_size;
+
+                        for i in start..end {
+                            let grad_out = $grad_output.as_slice().unwrap()[i];
+                            gamma_sum += grad_out * $x_normalized.as_slice().unwrap()[i];
+                            beta_sum += grad_out;
+                        }
+                    }
+
+                    (gamma_sum, beta_sum)
+                })
+                .unzip();
+
+            $grad_gamma
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(&grad_gamma_vec);
+            $grad_beta
+                .as_slice_mut()
+                .unwrap()
+                .copy_from_slice(&grad_beta_vec);
+        } else {
+            // Sequential computation
+            for channel_idx in 0..$num_channels {
+                let mut gamma_sum = 0.0f32;
+                let mut beta_sum = 0.0f32;
+
+                for batch_idx in 0..$batch_size {
+                    let start = (batch_idx * $num_channels + channel_idx) * $spatial_size;
+                    let end = start + $spatial_size;
+
+                    for i in start..end {
+                        gamma_sum += $grad_output.as_slice().unwrap()[i]
+                            * $x_normalized.as_slice().unwrap()[i];
+                        beta_sum += $grad_output.as_slice().unwrap()[i];
+                    }
+                }
+
+                $grad_gamma.as_slice_mut().unwrap()[channel_idx] = gamma_sum;
+                $grad_beta.as_slice_mut().unwrap()[channel_idx] = beta_sum;
+            }
+        }
+    }};
+}
+
 /// Batch Normalization layer for neural networks
 pub mod batch_normalization;
+/// Group Normalization layer for neural networks
+pub mod group_normalization;
 /// Instance Normalization layer for neural networks
-mod instance_normalization;
+pub mod instance_normalization;
 /// Layer Normalization layer for neural networks
 pub mod layer_normalization;
 
 pub use batch_normalization::*;
+pub use group_normalization::*;
 pub use instance_normalization::*;
 pub use layer_normalization::*;

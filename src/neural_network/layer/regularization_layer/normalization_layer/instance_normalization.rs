@@ -376,67 +376,17 @@ impl Layer for InstanceNormalization {
         let mut grad_gamma = Tensor::zeros(self.gamma.raw_dim());
         let mut grad_beta = Tensor::zeros(self.beta.raw_dim());
 
-        if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation of parameter gradients
-            let grad_gamma_slice = grad_gamma.as_slice_mut().unwrap();
-            let grad_beta_slice = grad_beta.as_slice_mut().unwrap();
-
-            let grad_gamma_vec: Vec<f32> = (0..num_channels)
-                .into_par_iter()
-                .map(|channel_idx| {
-                    let mut sum = 0.0f32;
-                    for batch_idx in 0..batch_size {
-                        let start = (batch_idx * num_channels + channel_idx) * spatial_size;
-                        let end = start + spatial_size;
-
-                        for i in start..end {
-                            sum += grad_output.as_slice().unwrap()[i]
-                                * x_normalized.as_slice().unwrap()[i];
-                        }
-                    }
-                    sum
-                })
-                .collect();
-
-            let grad_beta_vec: Vec<f32> = (0..num_channels)
-                .into_par_iter()
-                .map(|channel_idx| {
-                    let mut sum = 0.0f32;
-                    for batch_idx in 0..batch_size {
-                        let start = (batch_idx * num_channels + channel_idx) * spatial_size;
-                        let end = start + spatial_size;
-
-                        sum += grad_output.as_slice().unwrap()[start..end]
-                            .iter()
-                            .sum::<f32>();
-                    }
-                    sum
-                })
-                .collect();
-
-            grad_gamma_slice.copy_from_slice(&grad_gamma_vec);
-            grad_beta_slice.copy_from_slice(&grad_beta_vec);
-        } else {
-            // Sequential computation
-            for channel_idx in 0..num_channels {
-                let mut gamma_sum = 0.0f32;
-                let mut beta_sum = 0.0f32;
-
-                for batch_idx in 0..batch_size {
-                    let start = (batch_idx * num_channels + channel_idx) * spatial_size;
-                    let end = start + spatial_size;
-
-                    for i in start..end {
-                        gamma_sum += grad_output.as_slice().unwrap()[i]
-                            * x_normalized.as_slice().unwrap()[i];
-                        beta_sum += grad_output.as_slice().unwrap()[i];
-                    }
-                }
-
-                grad_gamma.as_slice_mut().unwrap()[channel_idx] = gamma_sum;
-                grad_beta.as_slice_mut().unwrap()[channel_idx] = beta_sum;
-            }
-        }
+        compute_normalization_layer_parameter_gradients!(
+            grad_gamma,
+            grad_beta,
+            grad_output,
+            x_normalized,
+            batch_size,
+            num_channels,
+            spatial_size,
+            total_elements,
+            INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD
+        );
 
         self.grad_gamma = Some(grad_gamma);
         self.grad_beta = Some(grad_beta);

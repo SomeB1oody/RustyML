@@ -17,6 +17,7 @@ use ndarray::prelude::*;
 /// - `BatchNormalization` - Contains weights for batch normalization layers
 /// - `LayerNormalizationLayer` - Contains weights for layer normalization layers
 /// - `InstanceNormalizationLayer` - Contains weights for instance normalization layers
+/// - `GroupNormalizationLayer` - Contains weights for group normalization layers
 /// - `Empty` - Represents a layer with no trainable parameters
 pub enum LayerWeight<'a> {
     Dense(DenseLayerWeight<'a>),
@@ -31,6 +32,7 @@ pub enum LayerWeight<'a> {
     BatchNormalization(BatchNormalizationLayerWeight<'a>),
     LayerNormalizationLayer(LayerNormalizationLayerWeight<'a>),
     InstanceNormalizationLayer(InstanceNormalizationLayerWeight<'a>),
+    GroupNormalizationLayer(GroupNormalizationLayerWeight<'a>),
     Empty,
 }
 
@@ -208,6 +210,17 @@ pub struct LayerNormalizationLayerWeight<'a> {
 /// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
 /// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
 pub struct InstanceNormalizationLayerWeight<'a> {
+    pub gamma: &'a ArrayD<f32>,
+    pub beta: &'a ArrayD<f32>,
+}
+
+/// Weights for a group normalization layer
+///
+/// # Fields
+///
+/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
+/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
+pub struct GroupNormalizationLayerWeight<'a> {
     pub gamma: &'a ArrayD<f32>,
     pub beta: &'a ArrayD<f32>,
 }

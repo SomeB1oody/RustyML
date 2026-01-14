@@ -22,6 +22,7 @@ mod global_average_pooling_3d_test;
 mod global_max_pooling_1d_test;
 mod global_max_pooling_2d_test;
 mod global_max_pooling_3d_test;
+mod group_normalization_test;
 mod gru_test;
 mod instance_normalization_test;
 mod layer_normalization_test;
