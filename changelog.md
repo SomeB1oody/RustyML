@@ -11,6 +11,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 
 ### Changed
 - Refactor AdaGrad parameter update logic in convolutional layers by introducing a reusable macro to reduce duplication and improve maintainability
+- Refactor forward pass in `train_batch` and `forward` to prevent unnecessary cloning.
 
 ## [v0.9.1] - 2026-01-12 (UTC-7)
 ### Added

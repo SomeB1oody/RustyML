@@ -184,15 +184,17 @@ impl Sequential {
     /// - `Ok(f32)` - The loss value for this batch
     /// - `Err(ModelError)` - If training fails
     fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, ModelError> {
-        // Forward pass
-        let mut output = x.clone();
-        for layer in &mut self.layers {
-            layer.set_training_if_mode_dependent(true);
+        // Forward pass - first layer takes input reference, subsequent layers take owned tensors
+        let mut layers_iter = self.layers.iter_mut();
+        let first_layer = layers_iter
+            .next()
+            .ok_or_else(|| ModelError::InputValidationError("No layers in model".to_string()))?;
+        first_layer.set_training_if_mode_dependent(true);
+        let mut output = first_layer.forward(x)?;
 
-            output = match layer.forward(&output) {
-                Ok(output) => output,
-                Err(e) => return Err(e),
-            };
+        for layer in layers_iter {
+            layer.set_training_if_mode_dependent(true);
+            output = layer.forward(&output)?;
         }
 
         // Calculate loss
@@ -421,14 +423,14 @@ impl Sequential {
             panic!("Input tensor cannot be empty");
         }
 
-        let mut output = x.clone();
-        for layer in &mut self.layers {
-            layer.set_training_if_mode_dependent(false);
+        let mut layers_iter = self.layers.iter_mut();
+        let first_layer = layers_iter.next().expect("Model has no layers");
+        first_layer.set_training_if_mode_dependent(false);
+        let mut output = first_layer.forward(x).expect("Failed to forward pass");
 
-            output = match layer.forward(&output) {
-                Ok(output) => output,
-                Err(e) => panic!("Failed to forward pass: {}", e),
-            };
+        for layer in layers_iter {
+            layer.set_training_if_mode_dependent(false);
+            output = layer.forward(&output).expect("Failed to forward pass");
         }
         output
     }
