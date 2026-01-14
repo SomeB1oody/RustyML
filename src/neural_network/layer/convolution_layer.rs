@@ -40,6 +40,57 @@ macro_rules! update_sgd_conv {
     };
 }
 
+/// A macro that generates the AdaGrad parameter update logic for convolutional layers.
+///
+/// This macro creates a standardized block of code that applies AdaGrad updates
+/// to both weights and biases of convolutional layers. It defines a closure that
+/// updates the accumulator and parameters in parallel, then applies it to weights and biases.
+///
+/// # Usage
+/// This macro should be used inside the AdaGrad update condition where:
+/// - `self.optimizer_cache.ada_grad_cache` exists
+/// - `weight_gradients` and `bias_gradients` are available
+/// - `lr` and `epsilon` are defined
+macro_rules! update_adagrad_conv {
+    ($self:expr, $weight_gradients:expr, $bias_gradients:expr, $lr:expr, $epsilon:expr) => {
+        if let Some(ada_grad_cache) = &mut $self.optimizer_cache.ada_grad_cache {
+            // Define a generic parameter update closure for AdaGrad
+            let update_parameters = |params: &mut [f32], accumulator: &mut [f32], grads: &[f32]| {
+                // Update accumulator (accumulated squared gradients) in parallel
+                accumulator
+                    .par_iter_mut()
+                    .zip(grads.par_iter())
+                    .for_each(|(acc, &grad)| {
+                        *acc += grad * grad;
+                    });
+
+                // Update parameters in parallel
+                params
+                    .par_iter_mut()
+                    .zip(grads.par_iter())
+                    .zip(accumulator.par_iter())
+                    .for_each(|((param, &grad), &acc_val)| {
+                        *param -= $lr * grad / (acc_val.sqrt() + $epsilon);
+                    });
+            };
+
+            // Update weight parameters
+            update_parameters(
+                $self.weights.as_slice_mut().unwrap(),
+                ada_grad_cache.accumulator.as_slice_mut().unwrap(),
+                $weight_gradients.as_slice().unwrap(),
+            );
+
+            // Update bias parameters
+            update_parameters(
+                $self.bias.as_slice_mut().unwrap(),
+                ada_grad_cache.accumulator_bias.as_slice_mut().unwrap(),
+                $bias_gradients.as_slice().unwrap(),
+            );
+        }
+    };
+}
+
 /// 1D Convolutional Layer
 pub mod conv_1d;
 /// 2D Convolutional Layer

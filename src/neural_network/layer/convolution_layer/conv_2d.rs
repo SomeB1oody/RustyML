@@ -653,41 +653,7 @@ impl<T: ActivationLayer> Layer for Conv2D<T> {
                 });
             }
 
-            if let Some(ada_grad_cache) = &mut self.optimizer_cache.ada_grad_cache {
-                // Define a generic parameter update closure for AdaGrad
-                let update_parameters =
-                    |params: &mut [f32], accumulator: &mut [f32], grads: &[f32]| {
-                        // Update accumulator (accumulated squared gradients) in parallel
-                        accumulator.par_iter_mut().zip(grads.par_iter()).for_each(
-                            |(acc, &grad)| {
-                                *acc += grad * grad;
-                            },
-                        );
-
-                        // Update parameters in parallel
-                        params
-                            .par_iter_mut()
-                            .zip(grads.par_iter())
-                            .zip(accumulator.par_iter())
-                            .for_each(|((param, &grad), &acc_val)| {
-                                *param -= lr * grad / (acc_val.sqrt() + epsilon);
-                            });
-                    };
-
-                // Update weight parameters
-                update_parameters(
-                    self.weights.as_slice_mut().unwrap(),
-                    ada_grad_cache.accumulator.as_slice_mut().unwrap(),
-                    weight_gradients.as_slice().unwrap(),
-                );
-
-                // Update bias parameters
-                update_parameters(
-                    self.bias.as_slice_mut().unwrap(),
-                    ada_grad_cache.accumulator_bias.as_slice_mut().unwrap(),
-                    bias_gradients.as_slice().unwrap(),
-                );
-            }
+            update_adagrad_conv!(self, weight_gradients, bias_gradients, lr, epsilon);
         }
     }
 
