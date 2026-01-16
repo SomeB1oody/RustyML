@@ -70,7 +70,7 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = { version = "0.8.0", features = ["machine_learning"] }
+//! rustyml = { version = "0.9.1", features = ["machine_learning"] }
 //! # Or use features = ["full"] to enable all modules
 //! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 //! ```
@@ -120,7 +120,7 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = { version = "0.8.0", features = ["neural_network"] }
+//! rustyml = { version = "0.9.1", features = ["neural_network"] }
 //! # Or use `features = ["full"]` to enable all modules
 //! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 //! ```
