@@ -69,6 +69,8 @@ impl SerializableLayerWeight {
     /// Converts LayerWeight references to owned SerializableLayerWeight
     pub fn from_layer_weight(weight: &LayerWeight) -> Self {
         match weight {
+            LayerWeight::Empty => SerializableLayerWeight::Empty,
+
             LayerWeight::Dense(w) => SerializableLayerWeight::Dense(SerializableDenseWeight {
                 weight: w.weight.outer_iter().map(|row| row.to_vec()).collect(),
                 bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
@@ -298,7 +300,6 @@ impl SerializableLayerWeight {
                     shape: w.gamma.shape().to_vec(),
                 })
             }
-            LayerWeight::Empty => SerializableLayerWeight::Empty,
         }
     }
 }

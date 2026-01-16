@@ -38,8 +38,11 @@ macro_rules! mode_dependent_layer_trait {
 
 /// Dropout layers for neural networks
 pub mod dropout_layer;
+/// Noise injection layers for neural networks
+pub mod noise_injection_layer;
 /// Normalization layers for neural networks
-mod normalization_layer;
+pub mod normalization_layer;
 
 pub use dropout_layer::*;
+pub use noise_injection_layer::*;
 pub use normalization_layer::*;

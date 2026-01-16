@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.9.1] - 2026-01-12 (UTC-7)
+## [v0.9.1] - 2026-01-15 (UTC-7)
+### Added
+- Add Gaussian Noise layer
+
+## [v0.9.1] - 2026-01-13 (UTC-7)
 ### Added
 - Add Group Normalization layer
 

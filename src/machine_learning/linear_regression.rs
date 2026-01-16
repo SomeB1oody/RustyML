@@ -58,6 +58,9 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// // Since Debug is implemented, detailed model information can be printed
 /// println!("{:?}", model);
+///
+/// // Clean up: remove the created file
+/// std::fs::remove_file("linear_regression_model.json").unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearRegression {

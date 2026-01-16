@@ -66,6 +66,9 @@ use std::io::{BufWriter, Write};
 /// // Make predictions with loaded model
 /// let predictions = new_model.predict(&x);
 /// println!("Predictions shape: {:?}", predictions.shape());
+///
+/// // Clean up: remove the created file
+/// std::fs::remove_file("model.json").unwrap();
 /// ```
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
