@@ -16,6 +16,7 @@ mod dense_test;
 mod depthwise_conv2d_test;
 mod dropout_test;
 mod flatten_test;
+mod gaussian_dropout_test;
 mod global_average_pooling_1d_test;
 mod global_average_pooling_2d_test;
 mod global_average_pooling_3d_test;
