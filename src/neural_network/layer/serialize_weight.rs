@@ -445,7 +445,7 @@ macro_rules! try_apply_with_activations {
     }};
 }
 
-/// A macro that applies weights to a layer and handles type mismatch errors.
+/// A macro that applies weights to a layer with activation functions and handles type mismatch errors.
 ///
 /// This macro uses `try_apply_with_activations!` to attempt weight application and
 /// returns an error if the layer type doesn't match the expected type.
@@ -457,10 +457,35 @@ macro_rules! try_apply_with_activations {
 /// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
 /// - `$layer_name` - String literal of the layer name (for error messages)
 /// - `$expected_type` - String describing the expected layer type (for error messages)
-macro_rules! apply_layer_weights {
+macro_rules! apply_weights_with_activations {
     ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
         let applied = try_apply_with_activations!($layer_any, $weight, $layer_type, $layer_name);
         if !applied {
+            return Err(IoError::StdIoError(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Expected {} layer but got {}", $layer_name, $expected_type),
+            )));
+        }
+    }};
+}
+
+/// A macro that applies weights to a simple layer (without activation functions) and handles type mismatch errors.
+///
+/// This macro attempts to downcast the layer to the specified type and applies weights.
+/// Returns an error if the downcast fails.
+///
+/// # Parameters
+///
+/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
+/// - `$weight` - The weight structure to apply to the layer
+/// - `$layer_type` - The specific layer type (e.g., BatchNormalization, LayerNormalization)
+/// - `$layer_name` - String literal of the layer name (for error messages)
+/// - `$expected_type` - String describing the expected layer type (for error messages)
+macro_rules! apply_weights_simple {
+    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
+        if let Some(layer) = $layer_any.downcast_mut::<$layer_type>() {
+            $weight.apply_to_layer(layer)?;
+        } else {
             return Err(IoError::StdIoError(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Expected {} layer but got {}", $layer_name, $expected_type),
@@ -494,29 +519,32 @@ pub fn apply_weights_to_layer(
     let layer_any: &mut dyn Any = layer;
 
     match weights {
+        // No weights to set for empty layers
+        SerializableLayerWeight::Empty => {}
+
         SerializableLayerWeight::Dense(w) => {
-            apply_layer_weights!(layer_any, w, Dense, "Dense", expected_type);
+            apply_weights_with_activations!(layer_any, w, Dense, "Dense", expected_type);
         }
         SerializableLayerWeight::SimpleRNN(w) => {
-            apply_layer_weights!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);
+            apply_weights_with_activations!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);
         }
         SerializableLayerWeight::LSTM(w) => {
-            apply_layer_weights!(layer_any, w, LSTM, "LSTM", expected_type);
+            apply_weights_with_activations!(layer_any, w, LSTM, "LSTM", expected_type);
         }
         SerializableLayerWeight::GRU(w) => {
-            apply_layer_weights!(layer_any, w, GRU, "GRU", expected_type);
+            apply_weights_with_activations!(layer_any, w, GRU, "GRU", expected_type);
         }
         SerializableLayerWeight::Conv1D(w) => {
-            apply_layer_weights!(layer_any, w, Conv1D, "Conv1D", expected_type);
+            apply_weights_with_activations!(layer_any, w, Conv1D, "Conv1D", expected_type);
         }
         SerializableLayerWeight::Conv2D(w) => {
-            apply_layer_weights!(layer_any, w, Conv2D, "Conv2D", expected_type);
+            apply_weights_with_activations!(layer_any, w, Conv2D, "Conv2D", expected_type);
         }
         SerializableLayerWeight::Conv3D(w) => {
-            apply_layer_weights!(layer_any, w, Conv3D, "Conv3D", expected_type);
+            apply_weights_with_activations!(layer_any, w, Conv3D, "Conv3D", expected_type);
         }
         SerializableLayerWeight::SeparableConv2D(w) => {
-            apply_layer_weights!(
+            apply_weights_with_activations!(
                 layer_any,
                 w,
                 SeparableConv2D,
@@ -525,7 +553,7 @@ pub fn apply_weights_to_layer(
             );
         }
         SerializableLayerWeight::DepthwiseConv2D(w) => {
-            apply_layer_weights!(
+            apply_weights_with_activations!(
                 layer_any,
                 w,
                 DepthwiseConv2D,
@@ -534,59 +562,40 @@ pub fn apply_weights_to_layer(
             );
         }
         SerializableLayerWeight::BatchNormalization(w) => {
-            if let Some(layer) = layer_any.downcast_mut::<BatchNormalization>() {
-                w.apply_to_layer(layer)?;
-            } else {
-                return Err(IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Expected BatchNormalization layer but got {}",
-                        expected_type
-                    ),
-                )));
-            }
+            apply_weights_simple!(
+                layer_any,
+                w,
+                BatchNormalization,
+                "BatchNormalization",
+                expected_type
+            );
         }
         SerializableLayerWeight::LayerNormalization(w) => {
-            if let Some(layer) = layer_any.downcast_mut::<LayerNormalization>() {
-                w.apply_to_layer(layer)?;
-            } else {
-                return Err(IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Expected LayerNormalization layer but got {}",
-                        expected_type
-                    ),
-                )));
-            }
+            apply_weights_simple!(
+                layer_any,
+                w,
+                LayerNormalization,
+                "LayerNormalization",
+                expected_type
+            );
         }
         SerializableLayerWeight::InstanceNormalization(w) => {
-            if let Some(layer) = layer_any.downcast_mut::<InstanceNormalization>() {
-                w.apply_to_layer(layer)?;
-            } else {
-                return Err(IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Expected InstanceNormalization layer but got {}",
-                        expected_type
-                    ),
-                )));
-            }
+            apply_weights_simple!(
+                layer_any,
+                w,
+                InstanceNormalization,
+                "InstanceNormalization",
+                expected_type
+            );
         }
         SerializableLayerWeight::GroupNormalization(w) => {
-            if let Some(layer) = layer_any.downcast_mut::<GroupNormalization>() {
-                w.apply_to_layer(layer)?;
-            } else {
-                return Err(IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Expected GroupNormalization layer but got {}",
-                        expected_type
-                    ),
-                )));
-            }
-        }
-        SerializableLayerWeight::Empty => {
-            // No weights to set for empty layers
+            apply_weights_simple!(
+                layer_any,
+                w,
+                GroupNormalization,
+                "GroupNormalization",
+                expected_type
+            );
         }
     }
 

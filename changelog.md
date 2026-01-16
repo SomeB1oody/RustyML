@@ -9,6 +9,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Added
 - Add Gaussian Noise layer
 
+### Changed
+- Refactor weight serialization with dedicated macros for activation-based and simple layers.
+
 ## [v0.9.1] - 2026-01-13 (UTC-7)
 ### Added
 - Add Group Normalization layer
