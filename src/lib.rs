@@ -77,9 +77,8 @@
 //!
 //! In your Rust code, write:
 //! ```rust, ignore
-//! use rustyml::machine_learning::linear_regression::*;
-//! // or just use `rustyml::prelude::*;`
-//! use ndarray::{Array1, Array2, array};
+//! use rustyml::machine_learning::linear_regression::*; // or `use rustyml::prelude::*`
+//! use ndarray::{Array1, Array2};
 //!
 //! // Create a linear regression model
 //! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
@@ -93,11 +92,11 @@
 //! let y = Array1::from_vec(raw_y);
 //!
 //! // Train the model
-//! model.fit(&x, &y).unwrap();
+//! model.fit(&x.view(), &y.view()).unwrap();
 //!
 //! // Make predictions
 //! let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
-//! let predictions = model.predict(new_data.view());
+//! let _predictions = model.predict(&new_data.view());
 //!
 //! // Save the trained model to a file
 //! model.save_to_path("linear_regression_model.json").unwrap();
@@ -106,10 +105,10 @@
 //! let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
 //!
 //! // Use the loaded model for predictions
-//! let loaded_predictions = loaded_model.predict(new_data.view());
+//! let _loaded_predictions = loaded_model.predict(&new_data.view());
 //!
 //! // Since Clone is implemented, the model can be easily cloned
-//! let model_copy = model.clone();
+//! let _model_copy = model.clone();
 //!
 //! // Since Debug is implemented, detailed model information can be printed
 //! println!("{:?}", model);

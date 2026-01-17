@@ -1,5 +1,4 @@
 use super::*;
-use rand_distr::Normal;
 
 /// Gaussian Dropout layer for neural networks, which multiplies inputs with random samples
 /// drawn from a Gaussian (normal) distribution during training time.

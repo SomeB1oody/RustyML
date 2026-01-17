@@ -1,5 +1,4 @@
 use super::*;
-use rand_distr::Normal;
 
 /// Gaussian Noise layer for neural networks, which adds random Gaussian (normal) noise
 /// to the input during training time, helping prevent overfitting and improving robustness.

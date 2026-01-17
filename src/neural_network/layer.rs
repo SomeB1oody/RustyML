@@ -3,6 +3,7 @@ use helper_functions::*;
 use ndarray::Zip;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::Uniform;
+use rand_distr::Normal;
 use rayon::prelude::*;
 
 /// Enumeration representing different types of training parameters for neural network layers.

@@ -195,42 +195,41 @@ rustyml = {version = "0.9.1", features = ["machine_learning"]}
 In your Rust code, write: 
 在你的Rust代码里写：
 ``` rust
-use rustyml::machine_learning::linear_regression::*; 
-// or just use `rustyml::prelude::*;`  
-use ndarray::{Array1, Array2, array};  
-  
-// Create a linear regression model  
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();  
-  
-// Prepare training data   
-let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];  
-let raw_y = vec![6.0, 9.0, 12.0];  
-  
-// Convert Vec to ndarray types   
-let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();  
-let y = Array1::from_vec(raw_y);  
-  
-// Train the model    
-model.fit(x.view(), y.view()).unwrap();  
-  
-// Make predictions    
-let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();  
-let predictions = model.predict(new_data.view());  
-  
-// Save the trained model to a file   
-model.save_to_path("linear_regression_model.json").unwrap();  
-  
-// Load the model from the file   
-let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();  
-  
-// Use the loaded model for predictions    
-let loaded_predictions = loaded_model.predict(new_data.view());  
-  
-// Since Clone is implemented, the model can be easily cloned  
-let model_copy = model.clone();  
-  
-// Since Debug is implemented, detailed model information can be printed  
-println!("{:?}", model);  
+use rustyml::machine_learning::linear_regression::*; // or `use rustyml::prelude::*`
+use ndarray::{Array1, Array2};
+    
+// Create a linear regression model
+let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+
+// Prepare training data
+let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
+let raw_y = vec![6.0, 9.0, 12.0];
+
+// Convert Vec to ndarray types
+let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
+let y = Array1::from_vec(raw_y);
+
+// Train the model
+model.fit(&x.view(), &y.view()).unwrap();
+
+// Make predictions
+let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
+let _predictions = model.predict(&new_data.view());
+
+// Save the trained model to a file
+model.save_to_path("linear_regression_model.json").unwrap();
+
+// Load the model from the file
+let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
+
+// Use the loaded model for predictions
+let _loaded_predictions = loaded_model.predict(&new_data.view());
+
+// Since Clone is implemented, the model can be easily cloned
+let _model_copy = model.clone();
+
+// Since Debug is implemented, detailed model information can be printed
+println!("{:?}", model);
 ```
 
 ### Neural Network Example | 神经网络示例

@@ -5,6 +5,9 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.10.0] - 2026-01-17 (UTC-7)
+- update usage examples in `lib.rs` and `README.md`
+
 ## [v0.9.1] - 2026-01-16 (UTC-7)
 - Add Gaussian Dropout layer
 
