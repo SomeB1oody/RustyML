@@ -1,7 +1,6 @@
 use ahash::AHashMap;
 use ndarray::Data;
 use ndarray::prelude::*;
-use statrs::distribution::{Discrete, Hypergeometric};
 
 /// Calculates the Mean Squared Error between predicted and actual values.
 ///
@@ -662,6 +661,71 @@ fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
     h
 }
 
+/// Computes the logarithm of the binomial coefficient C(n, k) using the log-gamma function.
+/// This approach avoids overflow for large values by working in log space.
+///
+/// Returns ln(C(n, k)) = ln(n! / (k! * (n-k)!))
+fn log_binomial_coefficient(n: u64, k: u64) -> f64 {
+    if k > n {
+        return f64::NEG_INFINITY; // C(n, k) = 0 when k > n
+    }
+    if k == 0 || k == n {
+        return 0.0; // C(n, 0) = C(n, n) = 1, ln(1) = 0
+    }
+
+    // Use the more efficient k if k > n/2
+    let k = if k > n - k { n - k } else { k };
+
+    // Compute ln(n!) - ln(k!) - ln((n-k)!)
+    // Using Stirling's approximation would be faster but less accurate
+    // Instead, we compute the sum directly
+    let mut result = 0.0;
+    for i in 0..k {
+        result += ((n - i) as f64).ln() - ((i + 1) as f64).ln();
+    }
+    result
+}
+
+/// Computes the probability mass function (PMF) of the hypergeometric distribution.
+///
+/// The hypergeometric distribution models the probability of k successes in n draws,
+/// without replacement, from a finite population of size N that contains exactly K successes.
+///
+/// PMF: P(X = k) = C(K, k) * C(N-K, n-k) / C(N, n)
+///
+/// # Parameters
+/// - `n_population`: Total population size (N)
+/// - `n_successes`: Number of success states in the population (K)
+/// - `n_draws`: Number of draws (n)
+/// - `k`: Number of observed successes
+///
+/// # Returns
+/// The probability of observing exactly k successes
+fn hypergeometric_pmf(n_population: u64, n_successes: u64, n_draws: u64, k: u64) -> f64 {
+    // Check validity of parameters
+    if n_successes > n_population || n_draws > n_population {
+        return 0.0;
+    }
+
+    let n_failures = n_population - n_successes;
+
+    // Check if k is in the valid range
+    if k > n_successes || k > n_draws {
+        return 0.0;
+    }
+    if n_draws - k > n_failures {
+        return 0.0;
+    }
+
+    // Compute in log space to avoid overflow
+    // ln(P) = ln(C(K,k)) + ln(C(N-K, n-k)) - ln(C(N, n))
+    let log_prob = log_binomial_coefficient(n_successes, k)
+        + log_binomial_coefficient(n_failures, n_draws - k)
+        - log_binomial_coefficient(n_population, n_draws);
+
+    log_prob.exp()
+}
+
 /// Computes the expected mutual information (EMI).
 /// For each pair (a_i, b_j), assume that n_ij follows a Hypergeometric distribution with parameters:
 /// - Total population size: n
@@ -675,18 +739,20 @@ fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: 
     // For each pair of clusters (ground truth and predicted)
     for &a_i in row_sums {
         for &b_j in col_sums {
-            // Create a hypergeometric distribution with parameters: total = n, successes = a_i, draws = b_j
-            let hyper = match Hypergeometric::new(n as u64, a_i as u64, b_j as u64) {
-                Ok(dist) => dist,
-                Err(_) => continue, // Skip if parameters are invalid
-            };
+            // Skip invalid parameter combinations
+            if a_i > n || b_j > n {
+                continue;
+            }
+
             // Valid range for k: from max(0, a_i+b_j-n) to min(a_i, b_j)
             let lower_bound = if a_i + b_j > n { a_i + b_j - n } else { 0 };
             // Skip k=0 since it contributes 0 to MI, so start from 1
             let lower = if lower_bound < 1 { 1 } else { lower_bound };
             let upper = std::cmp::min(a_i, b_j);
+
             for k in lower..=upper {
-                let p = hyper.pmf(k as u64);
+                // Calculate PMF using our own hypergeometric distribution implementation
+                let p = hypergeometric_pmf(n as u64, a_i as u64, b_j as u64, k as u64);
                 let term = (k as f64 / n as f64)
                     * ((n as f64 * k as f64) / (a_i as f64 * b_j as f64)).ln();
                 emi += p * term;

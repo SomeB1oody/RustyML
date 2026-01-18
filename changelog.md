@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.10.0] - 2026-01-18 (UTC-7)
+### Changed
+- Remove `statrs` dependency and replace with custom hypergeometric PMF/log-binomial calculations.
+
 ## [v0.10.0] - 2026-01-17 (UTC-7)
 ### Changed
 - update usage examples in `lib.rs` and `README.md`

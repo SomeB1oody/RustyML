@@ -7,7 +7,6 @@ use super::super::{LossFunction, Tensor};
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::array;
-/// use statrs::function::exponential::integral;
 ///
 /// // Create a binary cross entropy loss function
 /// let bce_loss = BinaryCrossEntropy::new();
