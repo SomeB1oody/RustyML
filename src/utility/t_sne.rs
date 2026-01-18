@@ -1,6 +1,6 @@
 use super::*;
 use crate::math::binary_search_sigma;
-use rand_distr::StandardNormal;
+use ndarray_rand::rand_distr::StandardNormal;
 
 /// Threshold for determining whether to use parallel computation in t-SNE.
 /// Parallel processing is only beneficial when the number of samples exceeds this threshold,

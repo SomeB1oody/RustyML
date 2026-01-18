@@ -2,16 +2,9 @@
 A comprehensive machine learning and deep learning library written in pure Rust.  
 一个用纯Rust编写的全面机器学习和深度学习库。
 
-[![Rust Version](https://img.shields.io/badge/Rust-v.1.85-brown)](https://www.rust-lang.org/)  
-[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)  
-[![ndarray](https://img.shields.io/badge/ndrarray-0.16.1-blue)](https://crates.io/crates/ndarray)  
-[![rand](https://img.shields.io/badge/rand-0.9.2-blue)](https://crates.io/crates/rand)  
-[![nalgebra](https://img.shields.io/badge/nalgebra-0.34.0-blue)](https://crates.io/crates/nalgebra)  
-[![statrs](https://img.shields.io/badge/statrs-0.18.0-blue)](https://crates.io/crates/statrs)  
-[![rand_distr](https://img.shields.io/badge/rand_distr-0.5.1-blue)](https://crates.io/crates/rand_distr)  
-[![rayon](https://img.shields.io/badge/rayon-1.11.0-blue)](https://crates.io/crates/rayon)  
-[![ndarray-rand](https://img.shields.io/badge/ndarray_rand-0.15.0-blue)](https://crates.io/crates/ndarray-rand)  
-[![ahash](https://img.shields.io/badge/ahash-0.8.12-blue)](https://crates.io/crates/ahash)
+[![Rust Version](https://img.shields.io/badge/Rust-v.1.85-brown)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
+[![Crates](https://img.shields.io/badge/crates.io-v0.9.1-brown)](https://crates.io/crates/rustyml)
 
 ## Overview | 概述
 RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.  
@@ -23,8 +16,6 @@ RustyML 旨在成为一个功能丰富的机器学习和深度学习框架，充
 - **Rich Algorithm Collection** | 丰富的算法集合: Supervised, unsupervised learning, and neural networks | 监督学习、无监督学习和神经网络
 - **Comprehensive Metrics** | 全面的评估指标: Evaluation tools for regression, classification, and clustering | 回归、分类和聚类的评估工具
 - **Model Persistence** | 模型持久化: Save and load trained models with JSON serialization | 通过JSON序列化保存和加载训练好的模型
-- **Standard Datasets** | 标准数据集: Built-in access to benchmark datasets for experimentation | 内置基准数据集用于实验
-- **Feature Gated** | 特性门控: Modular design allowing you to compile only what you need | 模块化设计，只编译您需要的功能
 
 ## Architecture | 架构
 
@@ -155,30 +146,6 @@ Access to standardized datasets for experimentation:
 - Wine Quality (red and white wines) | 葡萄酒质量数据集（红葡萄酒和白葡萄酒）
 - Titanic | 泰坦尼克号数据集
 
-## Vision | 愿景
-While the library is in its early stages, Rust AI aims to evolve into a comprehensive crate that includes:  
-虽然该库处于早期阶段，但Rust AI旨在发展成为一个包含以下内容的综合性crate：
-- **Classical Machine Learning Algorithms | 经典机器学习算法**:
-  - Linear and Logistic Regression | 线性和逻辑回归
-  - Decision Trees | 决策树
-  - Clustering algorithms (K-means, MeanShift, KNN) | 聚类算法(K均值, MeanShift, KNN)
-  - Dimensionality reduction technique (PCA) | 降维技术(PCA)
-
-- **Deep Learning | 深度学习**:
-  - Neural network building blocks | 神经网络构建模块
-  - Convolutional neural networks | 卷积神经网络
-  - Recurrent neural networks | 循环神经网络
-  - Optimization algorithms | 优化算法
-
-- **Transformer Architecture | Transformer架构**:
-  - Self-attention mechanisms | 自注意力机制
-  - Multi-head attention | 多头注意力
-  - Encoder-decoder architectures | 编码器-解码器架构
-  - Pre-training and fine-tuning capabilities | 预训练和微调能力
-
-- **Utilities | 实用工具**:
-  - Data preprocessing | 数据预处理
-
 ## Getting Started | 开始使用
 
 ### Machine Learning Example | 机器学习示例
@@ -304,15 +271,7 @@ The crate uses feature flags for modular compilation:
 | `math`             | Mathematical utilities                                 | 数学工具                                     |  
 | `dataset`          | Standard datasets                                      | 标准数据集                                    | 
 | `default`          | Enables `machine_learning` and `neural_network`        | 开启`machine_learning`和`neural_network`功能  |
-| `full`             | Enables all features                                   | 启用所有功能                                   |  
-
-## Design Principles | 设计原则
-
-- **Safety First**: Extensive input validation and comprehensive error types | **安全第一**: 广泛的输入验证和全面的错误类型
-- **Performance**: Parallel processing via Rayon, efficient memory layouts with ndarray | **性能**: 通过Rayon实现并行处理，使用ndarray实现高效内存布局
-- **Ergonomics**: Intuitive API design following Rust conventions | **人体工学**: 遵循Rust约定的直观API设计
-- **Flexibility**: Customizable hyperparameters and configuration options | **灵活性**: 可自定义的超参数和配置选项
-- **Reliability**: Robust implementations tested against standard datasets | **可靠性**: 经过标准数据集测试的健壮实现
+| `full`             | Enables all features                                   | 启用所有功能                                   |
 
 ## Project Status | 项目状态
 RustyML is in active development. While the API is stabilizing, breaking changes may occur in minor version updates until version 1.0.0.
@@ -332,8 +291,3 @@ Contributions are welcome! If you're interested in helping build a robust machin
 ## License | 许可证
 Licensed under the [MIT License](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE). See LICENSE file for details.  
 根据[MIT许可证](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)授权。有关详细信息，请参阅LICENSE文件。
-  
----  
-
-_RustyML - Bringing the power and safety of Rust to machine learning and AI._  
-_RustyML - 将Rust的强大性能和安全特性引入机器学习和人工智能领域。_

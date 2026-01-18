@@ -11,16 +11,6 @@
 //! with production use in mind, featuring robust error handling, parallel processing optimization,
 //! and comprehensive input validation.
 //!
-//! ## Key Features
-//!
-//! - **Pure Rust Implementation**: No external C/C++ dependencies, ensuring memory safety and portability
-//! - **Parallel Processing**: Leverages Rayon for efficient multi-threaded computation
-//! - **Rich Algorithm Collection**: Supervised, unsupervised learning, and neural networks
-//! - **Comprehensive Metrics**: Evaluation tools for regression, classification, and clustering
-//! - **Model Persistence**: Save and load trained models with JSON serialization
-//! - **Standard Datasets**: Built-in access to benchmark datasets for experimentation
-//! - **Feature Gated**: Modular design allowing you to compile only what you need
-//!
 //! ## Architecture
 //!
 //! The library is organized into six main modules, each gated by feature flags:
@@ -182,14 +172,6 @@
 //! | `dataset` | Standard datasets |
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
-//!
-//! ## Design Principles
-//!
-//! - **Safety First**: Extensive input validation and comprehensive error types
-//! - **Performance**: Parallel processing via Rayon, efficient memory layouts with ndarray
-//! - **Ergonomics**: Intuitive API design following Rust conventions
-//! - **Flexibility**: Customizable hyperparameters and configuration options
-//! - **Reliability**: Robust implementations tested against standard datasets
 
 /// A macro that generates a getter method for any field.
 ///
