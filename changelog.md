@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.10.0] - 2026-01-17 (UTC-7)
 ### Changed
 - update usage examples in `lib.rs` and `README.md`
+- Refactor metric functions to use generic `ArrayBase` for increased flexibility
 
 ### Removed
 - Remove `rand_distr` dependency

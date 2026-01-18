@@ -556,19 +556,19 @@ pub mod utility;
 /// // Regression evaluation
 /// let predictions = array![3.0, 2.0, 3.5, 4.1];
 /// let actuals = array![2.8, 2.1, 3.3, 4.2];
-/// let mse = mean_squared_error(actuals.view(), predictions.view());
-/// let r2 = r2_score(predictions.view(), actuals.view());
+/// let mse = mean_squared_error(&actuals.view(), &predictions.view());
+/// let r2 = r2_score(&predictions.view(), &actuals.view());
 ///
 /// // Classification evaluation with confusion matrix
 /// let predicted = array![1.0, 0.0, 1.0, 1.0, 0.0];
 /// let actual = array![1.0, 0.0, 0.0, 1.0, 1.0];
-/// let cm = ConfusionMatrix::new(predicted.view(), actual.view());
+/// let cm = ConfusionMatrix::new(&predicted.view(), &actual.view());
 /// println!("F1 Score: {:.3}", cm.f1_score());
 ///
 /// // AUC-ROC for binary classification
 /// let scores = array![0.1, 0.4, 0.35, 0.8];
 /// let labels = array![false, true, false, true];
-/// let auc = calculate_auc(scores.view(), labels.view());
+/// let auc = calculate_auc(&scores.view(), &labels.view());
 /// ```
 #[cfg(feature = "metric")]
 pub mod metric;

@@ -1,5 +1,6 @@
 use ahash::AHashMap;
-use ndarray::ArrayView1;
+use ndarray::Data;
+use ndarray::prelude::*;
 use statrs::distribution::{Discrete, Hypergeometric};
 
 /// Calculates the Mean Squared Error between predicted and actual values.
@@ -10,8 +11,8 @@ use statrs::distribution::{Discrete, Hypergeometric};
 ///
 /// # Parameters
 ///
-/// - `y_true` - An `ArrayView1<f64>` containing the ground truth (correct) values
-/// - `y_pred` - An `ArrayView1<f64>` containing the predicted values
+/// - `y_true` - An array containing the ground truth (correct) values
+/// - `y_pred` - An array containing the predicted values
 ///
 /// # Returns
 ///
@@ -28,14 +29,16 @@ use statrs::distribution::{Discrete, Hypergeometric};
 ///
 /// let actual = array![3.0, -0.5, 2.0, 7.0];
 /// let predicted = array![2.5, 0.0, 2.1, 7.8];
-/// let mse = mean_squared_error(actual.view(), predicted.view());
+/// let mse = mean_squared_error(&actual, &predicted);
 /// // MSE = ((3.0-2.5)² + (-0.5-0.0)² + (2.0-2.1)² + (7.0-7.8)²) / 4
 /// //    = (0.25 + 0.25 + 0.01 + 0.64) / 4 ≈ 0.2875
 /// println!("{}", mse);
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
-#[inline]
-pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f64 {
+pub fn mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     if y_true.len() != y_pred.len() {
         panic!(
             "Input arrays must have the same length. Predicted: {}, Actual: {}",
@@ -72,8 +75,8 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 ///
 /// # Arguments
 ///
-/// - `predictions` - A slice of f64 values containing the predicted values
-/// - `targets` - A slice of f64 values containing the actual/target values
+/// - `predictions` - An array containing the predicted values
+/// - `targets` - An array containing the actual/target values
 ///
 /// # Returns
 ///
@@ -90,12 +93,17 @@ pub fn mean_squared_error(y_true: ArrayView1<f64>, y_pred: ArrayView1<f64>) -> f
 ///
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
-/// let rmse = root_mean_squared_error(predictions.view(), targets.view());
+/// let rmse = root_mean_squared_error(&predictions, &targets);
 /// // RMSE = sqrt(((2-1)^2 + (3-2)^2 + (4-3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
-#[inline]
-pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
+pub fn root_mean_squared_error<S>(
+    predictions: &ArrayBase<S, Ix1>,
+    targets: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = f64>,
+{
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
         return 0.0;
@@ -140,8 +148,8 @@ pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1
 ///
 /// # Arguments
 ///
-/// - `predictions` - An `ArrayView1<f64>` containing the predicted values
-/// - `targets` - An `ArrayView1<f64>` containing the actual/target values
+/// - `predictions` - An array containing the predicted values
+/// - `targets` - An array containing the actual/target values
 ///
 /// # Returns
 ///
@@ -158,12 +166,14 @@ pub fn root_mean_squared_error(predictions: ArrayView1<f64>, targets: ArrayView1
 ///
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
-/// let mae = mean_absolute_error(predictions.view(), targets.view());
+/// let mae = mean_absolute_error(&predictions, &targets);
 /// // MAE = (|2-1| + |3-2| + |4-3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
-#[inline]
-pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64>) -> f64 {
+pub fn mean_absolute_error<S>(predictions: &ArrayBase<S, Ix1>, targets: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     // Check if inputs are empty
     if predictions.is_empty() || targets.is_empty() {
         return 0.0;
@@ -199,8 +209,8 @@ pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64
 ///
 /// # Parameters
 ///
-/// - `predicted` - `ArrayView1<f64>` of predicted values
-/// - `actual` - `ArrayView1<f64>` of actual/target values
+/// - `predicted` - An array of predicted values
+/// - `actual` - An array of actual/target values
 ///
 /// # Returns
 ///
@@ -224,12 +234,14 @@ pub fn mean_absolute_error(predictions: ArrayView1<f64>, targets: ArrayView1<f64
 ///
 /// let predicted = array![2.0, 3.0, 4.0];
 /// let actual = array![1.0, 3.0, 5.0];
-/// let r2 = r2_score(predicted.view(), actual.view());
+/// let r2 = r2_score(&predicted, &actual);
 /// // For actual values [1,3,5], mean=3, SSE = 1+0+1 = 2, SST = 4+0+4 = 8, so R2 = 1 - (2/8) = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
-#[inline]
-pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
+pub fn r2_score<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     // Validate inputs first
     if predicted.is_empty() || actual.is_empty() {
         return 0.0;
@@ -296,7 +308,7 @@ pub fn r2_score(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
 /// let actual = arr1(&[1.0, 0.0, 1.0, 0.0, 1.0]);
 ///
 /// // Create confusion matrix
-/// let cm = ConfusionMatrix::new(predicted.view(), actual.view());
+/// let cm = ConfusionMatrix::new(&predicted, &actual);
 ///
 /// // Calculate performance metrics
 /// println!("Accuracy: {:.2}", cm.accuracy());
@@ -335,7 +347,10 @@ impl ConfusionMatrix {
     ///
     /// - Panics if the two arrays have different lengths
     /// - Panics if input array is empty
-    pub fn new(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> Self {
+    pub fn new<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> Self
+    where
+        S: Data<Elem = f64>,
+    {
         if predicted.len() != actual.len() {
             panic!(
                 "Input arrays must have the same length. Predicted: {}, Actual: {}",
@@ -534,13 +549,15 @@ impl ConfusionMatrix {
 ///
 /// let predicted = array![0.0, 1.0, 1.0];
 /// let actual = array![0.0, 0.0, 1.0];
-/// let acc = accuracy(predicted.view(), actual.view());
+/// let acc = accuracy(&predicted, &actual);
 ///
 /// // Two out of three predictions are correct: accuracy = 2/3 ≈ 0.6666666666666667
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
-#[inline]
-pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
+pub fn accuracy<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
     if predicted.len() != actual.len() {
         panic!(
             "Input arrays must have the same length. Predicted: {}, Actual: {}",
@@ -566,7 +583,6 @@ pub fn accuracy(predicted: ArrayView1<f64>, actual: ArrayView1<f64>) -> f64 {
 /// - The contingency matrix
 /// - Row sums (sizes of clusters in the ground truth)
 /// - Column sums (sizes of clusters in the predicted labels)
-#[inline]
 fn contingency_matrix(
     labels_true: &[usize],
     labels_pred: &[usize],
@@ -614,7 +630,6 @@ fn contingency_matrix(
 
 /// Computes the mutual information (MI) using the formula:
 /// MI = Σ_{i,j} (n_ij/n) * ln((n * n_ij) / (a_i * b_j))
-#[inline]
 fn mutual_information(
     contingency: &Vec<Vec<usize>>,
     n: usize,
@@ -636,7 +651,6 @@ fn mutual_information(
 }
 
 /// Computes the entropy H = - Σ_i (p_i * ln(p_i))
-#[inline]
 fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
     let mut h = 0.0;
     for &count in counts {
@@ -656,7 +670,6 @@ fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
 ///
 /// EMI = Σ_{i,j} Σ_{k=max(0, a_i+b_j-n)}^{min(a_i, b_j)}
 ///       P(k) * (k/n) * ln((n * k) / (a_i * b_j))
-#[inline]
 fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: usize) -> f64 {
     let mut emi = 0.0;
     // For each pair of clusters (ground truth and predicted)
@@ -719,14 +732,16 @@ fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: 
 /// let true_labels = array![0, 0, 1, 1, 2, 2];
 /// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let nmi = normalized_mutual_info(true_labels.view(), pred_labels.view());
+/// let nmi = normalized_mutual_info(&true_labels, &pred_labels);
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
-#[inline]
-pub fn normalized_mutual_info(
-    labels_true: ArrayView1<usize>,
-    labels_pred: ArrayView1<usize>,
-) -> f64 {
+pub fn normalized_mutual_info<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
     if labels_true.len() != labels_pred.len() {
         panic!(
             "Input arrays must have the same length. Predicted: {}, Actual: {}",
@@ -795,11 +810,16 @@ pub fn normalized_mutual_info(
 /// let true_labels = array![0, 0, 1, 1, 2, 2];
 /// let pred_labels = array![0, 0, 1, 2, 1, 2];
 ///
-/// let ami = adjusted_mutual_info(true_labels.view(), pred_labels.view());
+/// let ami = adjusted_mutual_info(&true_labels, &pred_labels);
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
-#[inline]
-pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayView1<usize>) -> f64 {
+pub fn adjusted_mutual_info<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
     if labels_true.len() != labels_pred.len() {
         panic!(
             "Input arrays must have the same length. Predicted: {}, Actual: {}",
@@ -860,7 +880,7 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 ///
 /// let scores = array![0.1, 0.4, 0.35, 0.8];
 /// let labels = array![false, true, false, true];
-/// let auc = calculate_auc(scores.view(), labels.view());
+/// let auc = calculate_auc(&scores, &labels);
 /// println!("AUC-ROC: {}", auc);
 /// ```
 ///
@@ -869,8 +889,11 @@ pub fn adjusted_mutual_info(labels_true: ArrayView1<usize>, labels_pred: ArrayVi
 /// The implementation handles tied scores by assigning average ranks to tied elements.
 /// It implements the AUC calculation based on the Mann-Whitney U statistic, which is
 /// mathematically equivalent to the area under the ROC curve.
-#[inline]
-pub fn calculate_auc(scores: ArrayView1<f64>, labels: ArrayView1<bool>) -> f64 {
+pub fn calculate_auc<S1, S2>(scores: &ArrayBase<S1, Ix1>, labels: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = bool>,
+{
     if scores.len() != labels.len() {
         panic!(
             "Input arrays must have the same length. Predicted: {}, Actual: {}",
