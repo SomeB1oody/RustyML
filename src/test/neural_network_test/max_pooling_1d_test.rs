@@ -20,12 +20,18 @@ fn test_max_pooling_1d() {
     // Test MaxPooling1D using Sequential model
     let mut model = Sequential::new();
     model
-        .add(MaxPooling1D::new(
-            2,             // pool window size
-            2,             // stride
-            vec![2, 3, 8], // input shape
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            MaxPooling1D::new(
+                2,             // pool window size
+                2,             // stride
+                vec![2, 3, 8], // input shape
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Output shape should be [2, 3, 4]
     let output = model.predict(&x);
@@ -57,7 +63,7 @@ fn test_max_pooling_1d_backward() {
     let x = input_data.clone().into_dyn();
 
     // Create MaxPooling1D layer
-    let mut pool_layer = MaxPooling1D::new(2, 2, vec![1, 1, 4]);
+    let mut pool_layer = MaxPooling1D::new(2, 2, vec![1, 1, 4]).unwrap();
 
     // Forward propagation
     let output = pool_layer.forward(&x).unwrap();

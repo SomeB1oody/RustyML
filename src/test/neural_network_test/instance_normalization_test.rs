@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_instance_normalization_forward_pass_dimensions() {
     // Test forward propagation dimension correctness
-    let mut in_layer = InstanceNormalization::new(vec![4, 3, 8], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![4, 3, 8], 1, 1e-5).unwrap();
     let input = Array3::ones((4, 3, 8)).into_dyn(); // batch=4, channels=3, spatial=8
 
     let output = in_layer.forward(&input).unwrap();
@@ -18,7 +18,7 @@ fn test_instance_normalization_forward_pass_dimensions() {
 #[test]
 fn test_instance_normalization_3d_input() {
     // Test instance normalization with 3D input (batch, channels, spatial)
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     // Create input with varying values
     let input = Array::from_shape_vec(
@@ -72,7 +72,7 @@ fn test_instance_normalization_4d_input() {
     let width = 4;
 
     let mut in_layer =
-        InstanceNormalization::new(vec![batch_size, channels, height, width], 1, 1e-5);
+        InstanceNormalization::new(vec![batch_size, channels, height, width], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((batch_size, channels, height, width), |(b, c, h, w)| {
         (b * 100 + c * 10 + h + w) as f32
@@ -116,7 +116,7 @@ fn test_instance_normalization_custom_channel_axis() {
     let channels = 3;
 
     let mut in_layer =
-        InstanceNormalization::new(vec![batch_size, height, width, channels], 3, 1e-5);
+        InstanceNormalization::new(vec![batch_size, height, width, channels], 3, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((batch_size, height, width, channels), |(b, h, w, c)| {
         (b * 100 + c * 10 + h + w) as f32
@@ -134,22 +134,16 @@ fn test_instance_normalization_custom_channel_axis() {
 #[test]
 fn test_instance_normalization_invalid_channel_axis() {
     // Test that channel axis cannot be 0 (batch axis)
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 0, 1e-5);
+    let in_layer = InstanceNormalization::new(vec![2, 3, 4], 0, 1e-5);
 
-    let input = Array3::ones((2, 3, 4)).into_dyn();
-
-    let result = in_layer.forward(&input);
-    assert!(
-        result.is_err(),
-        "Should return error when channel axis is 0"
-    );
-    println!("Invalid channel axis (0) test passed");
+    assert!(in_layer.is_err());
+    println!("Invalid channel axis test passed");
 }
 
 #[test]
 fn test_instance_normalization_invalid_input_dimensions() {
     // Test that input must be at least 3D
-    let mut in_layer = InstanceNormalization::new(vec![4, 8], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![4, 8], 1, 1e-5).unwrap();
 
     let input = Array2::ones((4, 8)).into_dyn();
 
@@ -164,7 +158,7 @@ fn test_instance_normalization_invalid_input_dimensions() {
 #[test]
 fn test_instance_normalization_training_mode() {
     // Test that instance normalization works in training mode
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 8], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 8], 1, 1e-5).unwrap();
 
     let input =
         Array::from_shape_fn((2, 3, 8), |(b, c, s)| (b * 100 + c * 10 + s) as f32).into_dyn();
@@ -194,7 +188,7 @@ fn test_instance_normalization_training_mode() {
 #[test]
 fn test_instance_normalization_inference_mode() {
     // Test that instance normalization works in inference mode
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let train_input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -216,7 +210,7 @@ fn test_instance_normalization_inference_mode() {
 #[test]
 fn test_instance_normalization_backward_pass() {
     // Test backward pass gradient computation
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b * 10 + c * 5 + s) as f32).into_dyn();
 
@@ -250,7 +244,7 @@ fn test_instance_normalization_backward_pass() {
 #[test]
 fn test_instance_normalization_parameter_update_sgd() {
     // Test parameter update with SGD optimizer
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -300,7 +294,7 @@ fn test_instance_normalization_parameter_update_sgd() {
 #[test]
 fn test_instance_normalization_parameter_update_adam() {
     // Test parameter update with Adam optimizer
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -350,7 +344,7 @@ fn test_instance_normalization_parameter_update_adam() {
 #[test]
 fn test_instance_normalization_parameter_update_rmsprop() {
     // Test parameter update with RMSprop optimizer
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -400,7 +394,7 @@ fn test_instance_normalization_parameter_update_rmsprop() {
 #[test]
 fn test_instance_normalization_parameter_update_adagrad() {
     // Test parameter update with AdaGrad optimizer
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -450,7 +444,7 @@ fn test_instance_normalization_parameter_update_adagrad() {
 #[test]
 fn test_instance_normalization_parameter_count() {
     // Test parameter count correctness
-    let in_layer = InstanceNormalization::new(vec![4, 8, 16], 1, 1e-5);
+    let in_layer = InstanceNormalization::new(vec![4, 8, 16], 1, 1e-5).unwrap();
     let expected_params = 8 + 8; // gamma + beta (one per channel)
     assert_eq!(
         in_layer.param_count(),
@@ -465,7 +459,7 @@ fn test_instance_normalization_parameter_count() {
 #[test]
 fn test_instance_normalization_layer_type() {
     // Test layer type identification
-    let in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
     assert_eq!(in_layer.layer_type(), "InstanceNormalization");
     println!("Layer type test passed");
 }
@@ -473,7 +467,7 @@ fn test_instance_normalization_layer_type() {
 #[test]
 fn test_instance_normalization_output_shape() {
     // Test output shape string formatting
-    let in_layer = InstanceNormalization::new(vec![4, 8, 16], 1, 1e-5);
+    let in_layer = InstanceNormalization::new(vec![4, 8, 16], 1, 1e-5).unwrap();
     let output_shape = in_layer.output_shape();
     assert_eq!(output_shape, "(4, 8, 16)");
     println!("Output shape test passed: {}", output_shape);
@@ -482,7 +476,7 @@ fn test_instance_normalization_output_shape() {
 #[test]
 fn test_instance_normalization_set_weights() {
     // Test manual weight setting
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let new_gamma = Array::from_vec(vec![2.0, 2.0, 2.0]).into_dyn();
     let new_beta = Array::from_vec(vec![1.0, 1.0, 1.0]).into_dyn();
@@ -507,7 +501,7 @@ fn test_instance_normalization_set_weights() {
 #[test]
 fn test_instance_normalization_epsilon_effect() {
     // Test that epsilon prevents division by zero
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     // Create input where each instance has constant values (zero variance)
     let mut input_vec = vec![0.0; 2 * 3 * 4];
@@ -551,12 +545,12 @@ fn test_instance_normalization_vs_batch_normalization() {
         Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b * 100 + c * 10 + s) as f32).into_dyn();
 
     // Instance normalization (normalizes each channel of each sample independently)
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
     in_layer.set_training(true);
     let in_output = in_layer.forward(&input).unwrap();
 
     // Batch normalization (normalizes across batch for each channel)
-    let mut bn = BatchNormalization::new(vec![2, 3, 4], 0.9, 1e-5);
+    let mut bn = BatchNormalization::new(vec![2, 3, 4], 0.9, 1e-5).unwrap();
     bn.set_training(true);
     let bn_output = bn.forward(&input).unwrap();
 
@@ -581,7 +575,8 @@ fn test_instance_normalization_large_batch_parallel() {
     let channels = 16;
     let spatial = 32;
 
-    let mut in_layer = InstanceNormalization::new(vec![batch_size, channels, spatial], 1, 1e-5);
+    let mut in_layer =
+        InstanceNormalization::new(vec![batch_size, channels, spatial], 1, 1e-5).unwrap();
     let input = Array::from_shape_fn((batch_size, channels, spatial), |(b, c, s)| {
         (b * 1000 + c * 100 + s) as f32
     })
@@ -612,7 +607,7 @@ fn test_instance_normalization_large_batch_parallel() {
 #[test]
 fn test_instance_normalization_gradient_flow() {
     // Test that gradients flow properly through the layer
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (b + c + s) as f32).into_dyn();
 
@@ -640,7 +635,7 @@ fn test_instance_normalization_gradient_flow() {
 #[test]
 fn test_instance_normalization_multiple_forward_backward() {
     // Test multiple forward and backward passes
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     for i in 0..5 {
         let input = Array::from_shape_fn((2, 3, 4), |(b, c, s)| (i + b + c + s) as f32).into_dyn();
@@ -664,7 +659,7 @@ fn test_instance_normalization_multiple_forward_backward() {
 #[test]
 fn test_instance_normalization_serialization() {
     // Test weight serialization and deserialization
-    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5);
+    let mut in_layer = InstanceNormalization::new(vec![2, 3, 4], 1, 1e-5).unwrap();
 
     // Do a forward pass to initialize
     let input = Array3::ones((2, 3, 4)).into_dyn();
@@ -694,7 +689,7 @@ fn test_instance_normalization_different_spatial_sizes() {
     let spatial_sizes = vec![4, 8, 16, 32];
 
     for spatial_size in spatial_sizes {
-        let mut in_layer = InstanceNormalization::new(vec![2, 3, spatial_size], 1, 1e-5);
+        let mut in_layer = InstanceNormalization::new(vec![2, 3, spatial_size], 1, 1e-5).unwrap();
         let input = Array::from_shape_fn((2, 3, spatial_size), |(b, c, s)| {
             (b * 100 + c * 10 + s) as f32
         })
@@ -722,13 +717,13 @@ fn test_instance_normalization_different_spatial_sizes() {
 fn test_instance_normalization_with_sequential_model() {
     // Test instance normalization integration with Sequential model
     let mut model = Sequential::new();
-    model.add(Dense::new(12, 24, Linear::new()));
+    model.add(Dense::new(12, 24, Linear::new()).unwrap());
     // Reshape to 3D for instance norm: from (2, 24) to (2, 3, 8)
     // Note: In practice you'd need a reshape layer, but for testing we'll verify shapes separately
 
     let input = Array::ones((2, 12)).into_dyn();
     let target = Array::ones((2, 24)).into_dyn();
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Test forward pass
     let output = model.predict(&input);
@@ -751,7 +746,8 @@ fn test_instance_normalization_5d_input() {
     let width = 3;
 
     let mut in_layer =
-        InstanceNormalization::new(vec![batch_size, channels, depth, height, width], 1, 1e-5);
+        InstanceNormalization::new(vec![batch_size, channels, depth, height, width], 1, 1e-5)
+            .unwrap();
 
     let input = Array::from_shape_fn(
         (batch_size, channels, depth, height, width),

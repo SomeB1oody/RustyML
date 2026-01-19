@@ -65,8 +65,8 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(LSTM::new(4, 3, Tanh::new()))
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+/// model.add(LSTM::new(4, 3, Tanh::new()).unwrap())
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -112,18 +112,21 @@ impl<T: ActivationLayer> LSTM<T> {
     ///
     /// # Returns
     ///
-    /// * `LSTM` - A new `LSTM` instance with:
+    /// * `Result<LSTM, ModelError>` - A new `LSTM` instance with:
     ///     - Four gates (input, forget, cell, output) initialized with random weights
     ///     - All caches set to None (will be allocated during first forward pass)
     ///     - Activation layer for output transformation
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
-        Self {
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+        // Validate input dimensions and units
+        validate_recurrent_dimensions(input_dim, units)?;
+
+        Ok(Self {
             input_dim,
             units,
-            input_gate: Gate::new(input_dim, units, 0.0),
-            forget_gate: Gate::new(input_dim, units, 1.0), // forget gate bias = 1.0
-            cell_gate: Gate::new(input_dim, units, 0.0),
-            output_gate: Gate::new(input_dim, units, 0.0),
+            input_gate: Gate::new(input_dim, units, 0.0)?,
+            forget_gate: Gate::new(input_dim, units, 1.0)?, // forget gate bias = 1.0
+            cell_gate: Gate::new(input_dim, units, 0.0)?,
+            output_gate: Gate::new(input_dim, units, 0.0)?,
             input_cache: None,
             hidden_cache: None,
             cell_cache: None,
@@ -133,7 +136,7 @@ impl<T: ActivationLayer> LSTM<T> {
             g_cache: None,
             o_cache: None,
             activation,
-        }
+        })
     }
 
     /// Sets the weights for all four gates in this LSTM layer.
@@ -183,11 +186,7 @@ impl<T: ActivationLayer> LSTM<T> {
 impl<T: ActivationLayer> Layer for LSTM<T> {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 3D
-        if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
-        }
+        validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 

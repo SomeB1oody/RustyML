@@ -60,7 +60,7 @@ const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Softmax::new())
-///     .compile(SGD::new(0.01), CategoricalCrossEntropy::new());
+///     .compile(SGD::new(0.01).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);

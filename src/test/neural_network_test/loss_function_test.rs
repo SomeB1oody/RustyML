@@ -9,9 +9,9 @@ fn mse_test() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Print model structure (summary)
     model.summary();
@@ -33,9 +33,9 @@ fn mae_test() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model.compile(SGD::new(0.01), MeanAbsoluteError::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model.compile(SGD::new(0.01).unwrap(), MeanAbsoluteError::new());
 
     // Print model structure (summary)
     model.summary();
@@ -57,9 +57,9 @@ fn binary_cross_entropy_test() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model.compile(SGD::new(0.01), BinaryCrossEntropy::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model.compile(SGD::new(0.01).unwrap(), BinaryCrossEntropy::new());
 
     // Print model structure (summary)
     model.summary();
@@ -81,9 +81,9 @@ fn categorical_cross_entropy_test() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model.compile(SGD::new(0.01), CategoricalCrossEntropy::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model.compile(SGD::new(0.01).unwrap(), CategoricalCrossEntropy::new());
 
     // Print model structure (summary)
     model.summary();
@@ -108,9 +108,12 @@ fn sparse_categorical_cross_entropy_test() {
     // Build the model, note that the second Dense layer must use Dense::new(3, 3) because it's a multi-class task
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 3, ReLU::new()));
-    model.compile(SGD::new(0.01), SparseCategoricalCrossEntropy::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 3, ReLU::new()).unwrap());
+    model.compile(
+        SGD::new(0.01).unwrap(),
+        SparseCategoricalCrossEntropy::new(),
+    );
 
     // Print model structure (summary)
     model.summary();

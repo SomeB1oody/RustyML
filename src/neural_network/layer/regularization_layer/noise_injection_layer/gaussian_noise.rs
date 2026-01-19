@@ -19,7 +19,7 @@ use super::*;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianNoise layer with standard deviation of 0.1
-/// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128]);
+/// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128]).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -43,22 +43,19 @@ impl GaussianNoise {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the GaussianNoise layer.
+    /// * `Result<Self, ModelError>` - A new instance of the GaussianNoise layer, or an error if validation fails.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if stddev is negative.
-    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Self {
-        assert!(
-            stddev >= 0.0,
-            "Standard deviation must be non-negative, got {}",
-            stddev
-        );
-        GaussianNoise {
+    /// Returns `ModelError::InputValidationError` if stddev is negative.
+    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        validate_stddev(stddev)?;
+
+        Ok(GaussianNoise {
             stddev,
             input_shape,
             training: true,
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -66,21 +63,8 @@ impl GaussianNoise {
 
 impl Layer for GaussianNoise {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        // Validate standard deviation
-        if self.stddev < 0.0 {
-            return Err(ModelError::InputValidationError(
-                "Standard deviation cannot be negative".to_string(),
-            ));
-        }
-
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
+        validate_stddev(self.stddev)?;
+        validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when stddev is 0, pass input through unchanged
         if !self.training || self.stddev == 0.0 {

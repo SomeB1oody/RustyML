@@ -9,7 +9,7 @@ fn test_global_average_pooling_3d_basic_functionality() {
     model.add(GlobalAveragePooling3D::new());
 
     // Compile the model
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create test input tensor: [batch_size, channels, depth, height, width]
     let input_data = Array::from_elem(IxDyn(&[2, 3, 4, 4, 4]), 2.0);
@@ -33,7 +33,7 @@ fn test_global_average_pooling_3d_with_random_values() {
     // Create a Sequential model
     let mut model = Sequential::new();
     model.add(GlobalAveragePooling3D::new());
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create test tensor with known values
     let mut input_data = Array::zeros(IxDyn(&[1, 2, 2, 2, 2]));
@@ -105,7 +105,7 @@ fn test_global_average_pooling_3d_gradient_computation() {
 fn test_global_average_pooling_3d_multiple_batches_and_channels() {
     let mut model = Sequential::new();
     model.add(GlobalAveragePooling3D::new());
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create multi-batch, multi-channel test data
     let mut input_data = Array::zeros(IxDyn(&[3, 4, 3, 3, 3]));
@@ -142,7 +142,7 @@ fn test_global_average_pooling_3d_multiple_batches_and_channels() {
 fn test_global_average_pooling_3d_different_spatial_dimensions() {
     let mut model = Sequential::new();
     model.add(GlobalAveragePooling3D::new());
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Test with different spatial dimensions
     let input_data = Array::from_elem(IxDyn(&[1, 2, 5, 6, 7]), 4.0);
@@ -192,7 +192,7 @@ fn test_global_average_pooling_3d_with_sequential_training() {
     // Create a more complex model for training tests
     let mut model = Sequential::new();
     model.add(GlobalAveragePooling3D::new());
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create training data
     let x = Array::ones(IxDyn(&[2, 2, 3, 3, 3]));

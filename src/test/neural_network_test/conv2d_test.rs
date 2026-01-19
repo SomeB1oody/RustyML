@@ -12,15 +12,21 @@ fn conv2d_test() {
     // Build model: add a Conv2D layer with 3 filters and 3x3 kernel
     let mut model = Sequential::new();
     model
-        .add(Conv2D::new(
-            3,                  // Number of filters
-            (3, 3),             // Kernel size
-            vec![2, 1, 5, 5],   // Input shape
-            (1, 1),             // Stride
-            PaddingType::Valid, // No padding
-            ReLU::new(),        // ReLU activation function
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv2D::new(
+                3,                  // Number of filters
+                (3, 3),             // Kernel size
+                vec![2, 1, 5, 5],   // Input shape
+                (1, 1),             // Stride
+                PaddingType::Valid, // No padding
+                ReLU::new(),        // ReLU activation function
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Print model structure
     model.summary();
@@ -38,15 +44,21 @@ fn conv2d_test() {
     // Create another convolution layer with different padding strategy and stride
     let mut model2 = Sequential::new();
     model2
-        .add(Conv2D::new(
-            2,                 // Number of filters
-            (3, 3),            // Kernel size
-            vec![2, 1, 5, 5],  // Input shape
-            (2, 2),            // Larger stride
-            PaddingType::Same, // Same padding
-            Sigmoid::new(),    // Sigmoid activation function
-        ))
-        .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv2D::new(
+                2,                 // Number of filters
+                (3, 3),            // Kernel size
+                vec![2, 1, 5, 5],  // Input shape
+                (2, 2),            // Larger stride
+                PaddingType::Same, // Same padding
+                Sigmoid::new(),    // Sigmoid activation function
+            )
+            .unwrap(),
+        )
+        .compile(
+            Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Create appropriate target tensor - for Same padding and stride (2,2), output size should be 3x3
     let y2 = Array4::ones((2, 2, 3, 3)).into_dyn();

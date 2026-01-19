@@ -9,9 +9,10 @@ fn test_gru_layer() {
 
     // Build model: a GRU layer with Tanh activation function
     let mut model = Sequential::new();
-    model
-        .add(GRU::new(4, 3, Tanh::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.add(GRU::new(4, 3, Tanh::new()).unwrap()).compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Print model structure
     model.summary();
@@ -33,9 +34,10 @@ fn test_gru_layer_basic() {
 
     // Build model: a GRU layer with Tanh activation function
     let mut model = Sequential::new();
-    model
-        .add(GRU::new(4, 3, Tanh::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.add(GRU::new(4, 3, Tanh::new()).unwrap()).compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Print model structure
     model.summary();
@@ -59,8 +61,11 @@ fn test_gru_different_activations() {
     // Test ReLU activation function
     let mut model_relu = Sequential::new();
     model_relu
-        .add(GRU::new(2, 6, ReLU::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(2, 6, ReLU::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     model_relu.fit(&x, &y, 3).unwrap();
     let pred_relu = model_relu.predict(&x);
@@ -68,8 +73,11 @@ fn test_gru_different_activations() {
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(GRU::new(2, 6, Sigmoid::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(2, 6, Sigmoid::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
     let pred_sigmoid = model_sigmoid.predict(&x);
@@ -98,9 +106,12 @@ fn test_gru_sequential_composition() {
     // Build a model containing GRU and Dense layers
     let mut model = Sequential::new();
     model
-        .add(GRU::new(3, 6, Tanh::new()))
-        .add(Dense::new(6, 4, Sigmoid::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(3, 6, Tanh::new()).unwrap())
+        .add(Dense::new(6, 4, Sigmoid::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Print model structure
     model.summary();
@@ -149,9 +160,12 @@ fn test_gru_sequence_learning() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 12, Tanh::new()))
-        .add(Dense::new(12, 1, Sigmoid::new()))
-        .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(input_dim, 12, Tanh::new()).unwrap())
+        .add(Dense::new(12, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.005, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Train for sequence learning
     model.fit(&x, &y, 80).unwrap();
@@ -204,8 +218,11 @@ fn test_gru_state_evolution() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, units, Tanh::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(input_dim, units, Tanh::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Test multiple training steps to see evolution
     let mut predictions = Vec::new();
@@ -280,10 +297,13 @@ fn test_gru_temporal_xor() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 16, Tanh::new()))
-        .add(Dense::new(16, 8, ReLU::new()))
-        .add(Dense::new(8, 1, Sigmoid::new()))
-        .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(input_dim, 16, Tanh::new()).unwrap())
+        .add(Dense::new(16, 8, ReLU::new()).unwrap())
+        .add(Dense::new(8, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.005, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Temporal XOR Task (GRU) ===");
     model.summary();
@@ -350,7 +370,7 @@ fn test_gru_temporal_xor() {
         accuracy * 100.0
     );
 
-    println!(" GRU successfully learned temporal XOR pattern!");
+    println!("GRU successfully learned temporal XOR pattern!");
 }
 
 #[test]
@@ -391,10 +411,13 @@ fn test_gru_parity_check() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(GRU::new(input_dim, 32, Tanh::new()))
-        .add(Dense::new(32, 16, Tanh::new()))
-        .add(Dense::new(16, 1, Tanh::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(input_dim, 32, Tanh::new()).unwrap())
+        .add(Dense::new(32, 16, Tanh::new()).unwrap())
+        .add(Dense::new(16, 1, Tanh::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Parity Check Task (GRU) ===");
     model.summary();
@@ -448,7 +471,7 @@ fn test_gru_parity_check() {
             if count_ones % 2 == 1 { "odd" } else { "even" },
             if predicted > 0.5 { "odd" } else { "even" },
             if target > 0.5 { "odd" } else { "even" },
-            if is_correct { "" } else { "" }
+            if is_correct { "correct" } else { "false" }
         );
     }
 
@@ -462,7 +485,7 @@ fn test_gru_parity_check() {
         accuracy * 100.0
     );
 
-    println!(" GRU successfully learned parity check!");
+    println!("GRU successfully learned parity check!");
 }
 
 #[test]
@@ -504,9 +527,12 @@ fn test_gru_vs_simple_rnn() {
     // Train GRU model
     let mut model_gru = Sequential::new();
     model_gru
-        .add(GRU::new(input_dim, 8, Tanh::new()))
-        .add(Dense::new(8, 1, Sigmoid::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(input_dim, 8, Tanh::new()).unwrap())
+        .add(Dense::new(8, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Training GRU ===");
     model_gru.fit(&x, &y, 50).unwrap();
@@ -514,9 +540,12 @@ fn test_gru_vs_simple_rnn() {
     // Train SimpleRNN model
     let mut model_rnn = Sequential::new();
     model_rnn
-        .add(SimpleRNN::new(input_dim, 8, Tanh::new()))
-        .add(Dense::new(8, 1, Sigmoid::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(SimpleRNN::new(input_dim, 8, Tanh::new()).unwrap())
+        .add(Dense::new(8, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Training SimpleRNN ===");
     model_rnn.fit(&x, &y, 50).unwrap();
@@ -546,7 +575,7 @@ fn test_gru_vs_simple_rnn() {
         "GRU should learn this task reasonably well"
     );
 
-    println!(" GRU performed well on long-term dependency task!");
+    println!("GRU performed well on long-term dependency task!");
 }
 
 #[test]
@@ -559,8 +588,8 @@ fn test_gru_gradient_flow() {
 
     let mut model = Sequential::new();
     model
-        .add(GRU::new(4, 5, Tanh::new()))
-        .compile(SGD::new(0.1), MeanSquaredError::new());
+        .add(GRU::new(4, 5, Tanh::new()).unwrap())
+        .compile(SGD::new(0.1).unwrap(), MeanSquaredError::new());
 
     // Get initial weights
     let initial_weights = model.get_weights();
@@ -609,5 +638,5 @@ fn test_gru_gradient_flow() {
     );
     assert!(bias_diff > 1e-5, "Bias should change during training");
 
-    println!(" Gradients flow properly through GRU!");
+    println!("Gradients flow properly through GRU!");
 }

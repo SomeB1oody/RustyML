@@ -223,10 +223,10 @@ let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
 // Build a neural network   
 let mut model = Sequential::new();  
 model  
-    .add(Dense::new(784, 128, ReLU::new()))    
-    .add(Dense::new(128, 64, ReLU::new()))    
-    .add(Dense::new(64, 10, Softmax::new()))    
-    .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());  
+    .add(Dense::new(784, 128, ReLU::new()).unwrap())    
+    .add(Dense::new(128, 64, ReLU::new()).unwrap())    
+    .add(Dense::new(64, 10, Softmax::new()).unwrap())    
+    .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());  
 // Display model structure   
 model.summary();  
   
@@ -239,15 +239,15 @@ model.save_to_path("model.json").unwrap();
 // Create a new model with the same architecture  
 let mut new_model = Sequential::new();
 new_model  
-    .add(Dense::new(784, 128, ReLU::new()))    
-    .add(Dense::new(128, 64, ReLU::new()))    
-    .add(Dense::new(64, 10, Softmax::new()));
+    .add(Dense::new(784, 128, ReLU::new()).unwrap())    
+    .add(Dense::new(128, 64, ReLU::new()).unwrap())    
+    .add(Dense::new(64, 10, Softmax::new()).unwrap());
   
 // Load weights from file  
 new_model.load_from_path("model.json").unwrap();  
   
 // Compile before using (required for training, optional for prediction)    
-new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8), CategoricalCrossEntropy::new());  
+new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());  
   
 // Make predictions with loaded model  
 let predictions = new_model.predict(&x);  

@@ -48,8 +48,8 @@ const MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///         (2, 2),           // Pool window size
 ///         vec![2, 3, 6, 6], // Input shape
 ///         None,             // Use default stride (2,2)
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Create target tensor - corresponding to the pooled shape
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
@@ -86,29 +86,26 @@ impl MaxPooling2D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the MaxPooling2D layer.
+    /// * `Result<Self, ModelError>` - A new instance of the MaxPooling2D layer or an error.
     pub fn new(
         pool_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize)>,
-    ) -> Self {
-        // Verify input is 4D: [batch_size, channels, height, width]
-        assert_eq!(
-            input_shape.len(),
-            4,
-            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
-        );
-
-        // If stride is not specified, use the same stride as pool size
+    ) -> Result<Self, ModelError> {
         let strides = strides.unwrap_or(pool_size);
 
-        MaxPooling2D {
+        // input validation
+        validate_input_shape_dims(&input_shape, 4, "MaxPooling2D")?;
+        validate_pool_size_2d(pool_size)?;
+        validate_strides_2d(strides)?;
+
+        Ok(MaxPooling2D {
             pool_size,
             strides,
             input_shape,
             input_cache: None,
             max_positions: None,
-        }
+        })
     }
 
     /// Calculates the output shape of the max pooling layer.

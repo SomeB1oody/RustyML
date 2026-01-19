@@ -38,11 +38,14 @@ macro_rules! mode_dependent_layer_trait {
 
 /// Dropout layers for neural networks
 pub mod dropout_layer;
+/// Input validation functions for regularization layers
+mod input_validation_function;
 /// Noise injection layers for neural networks
 pub mod noise_injection_layer;
 /// Normalization layers for neural networks
 pub mod normalization_layer;
 
 pub use dropout_layer::*;
+use input_validation_function::*;
 pub use noise_injection_layer::*;
 pub use normalization_layer::*;

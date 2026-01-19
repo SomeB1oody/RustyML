@@ -26,7 +26,7 @@ const SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD: usize = 64;
 /// use ndarray::Array4;
 ///
 /// // Create a SpatialDropout2D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout2D::new(0.2, vec![32, 64, 28, 28]);
+/// let mut spatial_dropout = SpatialDropout2D::new(0.2, vec![32, 64, 28, 28]).unwrap();
 ///
 /// // Create input tensor (batch_size=32, channels=64, height=28, width=28)
 /// let input = Array4::ones((32, 64, 28, 28)).into_dyn();
@@ -51,18 +51,20 @@ impl SpatialDropout2D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the SpatialDropout2D layer.
+    /// * `Result<Self, ModelError>` - A new instance of the SpatialDropout2D layer, or an error if validation fails.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if rate is not between 0 and 1.
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Self {
-        SpatialDropout2D {
+    /// Returns `ModelError::InputValidationError` if rate is not between 0 and 1.
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        validate_rate(rate, "Dropout rate")?;
+
+        Ok(SpatialDropout2D {
             rate,
             input_shape,
             mask: None,
             training: true,
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -70,28 +72,13 @@ impl SpatialDropout2D {
 
 impl Layer for SpatialDropout2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        if self.rate < 0.0 || self.rate > 1.0 {
-            return Err(ModelError::InputValidationError(
-                "Dropout rate cannot be less than 0 or greater than 1".to_string(),
-            ));
-        }
-
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
-
-        // Validate input is 4D (batch_size, channels, height, width)
-        if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(format!(
-                "SpatialDropout2D expects 4D input (batch_size, channels, height, width), got {}D",
-                input.ndim()
-            )));
-        }
+        validate_rate(self.rate, "Dropout rate")?;
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_input_ndim(
+            input.ndim(),
+            4,
+            "SpatialDropout2D (batch_size, channels, height, width)",
+        )?;
 
         if !self.training {
             // During inference, pass input through unchanged

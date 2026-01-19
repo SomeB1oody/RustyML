@@ -44,8 +44,8 @@ use super::*;
 /// // Build model: one SimpleRnn layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new(4, 3, Tanh::new()))
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+/// .add(SimpleRNN::new(4, 3, Tanh::new()).unwrap())
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
 /// model.summary();
@@ -83,8 +83,10 @@ impl<T: ActivationLayer> SimpleRNN<T> {
     ///
     /// # Returns
     ///
-    /// * `SimpleRNN` - A new SimpleRNN instance with the specified activation
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
+    /// * `Result<SimpleRNN, ModelError>` - A new SimpleRNN instance with the specified activation
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+        validate_recurrent_dimensions(input_dim, units)?;
+
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
         let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
@@ -93,7 +95,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
         let recurrent_kernel = Self::orthogonal_init(units);
 
         let bias = Array::zeros((1, units));
-        SimpleRNN {
+        Ok(SimpleRNN {
             input_dim,
             units,
             kernel,
@@ -106,7 +108,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
             grad_bias: None,
             optimizer_cache: OptimizerCache::default(),
             activation,
-        }
+        })
     }
 
     /// Generate an orthogonal matrix using Gram-Schmidt orthogonalization
@@ -178,11 +180,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
 impl<T: ActivationLayer> Layer for SimpleRNN<T> {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 3D
-        if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
-        }
+        validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 

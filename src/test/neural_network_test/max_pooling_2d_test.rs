@@ -25,7 +25,8 @@ fn max_pooling_2d_test() {
         (2, 2),           // Pool window size
         vec![2, 3, 6, 6], // Input shape
         Some((2, 2)),     // Stride
-    );
+    )
+    .unwrap();
 
     // Perform forward propagation
     let output = pool_layer.forward(&x).unwrap();
@@ -55,12 +56,18 @@ fn max_pooling_2d_test() {
     // Test using MaxPooling2D in a model
     let mut model = Sequential::new();
     model
-        .add(MaxPooling2D::new(
-            (2, 2),           // Pool window size
-            vec![2, 3, 6, 6], // Input shape
-            None,             // Use default stride (2,2)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            MaxPooling2D::new(
+                (2, 2),           // Pool window size
+                vec![2, 3, 6, 6], // Input shape
+                None,             // Use default stride (2,2)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Create target tensor - corresponding to the pooled shape
     let y = Array4::ones((2, 3, 3, 3)).into_dyn();
@@ -81,12 +88,18 @@ fn max_pooling_2d_test() {
     // Test different stride cases
     let mut model2 = Sequential::new();
     model2
-        .add(MaxPooling2D::new(
-            (3, 3),           // Larger pool window size
-            vec![2, 3, 6, 6], // Input shape
-            Some((1, 1)),     // Smaller stride
-        ))
-        .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(
+            MaxPooling2D::new(
+                (3, 3),           // Larger pool window size
+                vec![2, 3, 6, 6], // Input shape
+                Some((1, 1)),     // Smaller stride
+            )
+            .unwrap(),
+        )
+        .compile(
+            Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Print second model structure
     model2.summary();
@@ -114,7 +127,8 @@ fn max_pooling_2d_edge_cases() {
         (2, 2),           // Pool window equals input size
         vec![1, 1, 2, 2], // Input shape
         None,             // Default stride
-    );
+    )
+    .unwrap();
 
     let output = pool_layer.forward(&input_data).unwrap();
     // Output should be [1, 1, 1, 1]
@@ -127,7 +141,8 @@ fn max_pooling_2d_edge_cases() {
         (3, 2),           // Asymmetric pool window
         vec![1, 2, 5, 4], // Input shape
         Some((2, 1)),     // Asymmetric stride
-    );
+    )
+    .unwrap();
 
     let output = pool_layer.forward(&input_data).unwrap();
     // Output should be [1, 2, 2, 3]

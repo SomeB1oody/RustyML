@@ -99,6 +99,8 @@ pub mod conv_2d;
 pub mod conv_3d;
 /// 2D Depthwise Convolutional Layer
 pub mod depthwise_conv_2d;
+/// Input validation functions for convolutional layers
+mod input_validation_function;
 /// 2D Separable Convolutional Layer
 pub mod separable_conv_2d;
 
@@ -106,4 +108,5 @@ pub use conv_1d::*;
 pub use conv_2d::*;
 pub use conv_3d::*;
 pub use depthwise_conv_2d::*;
+use input_validation_function::*;
 pub use separable_conv_2d::*;

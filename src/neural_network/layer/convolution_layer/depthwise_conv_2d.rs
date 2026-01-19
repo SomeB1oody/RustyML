@@ -44,13 +44,13 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///     (1, 1),                  // strides
 ///     PaddingType::Valid,      // padding
 ///     ReLU::new() // activation
-/// );
+/// ).unwrap();
 /// depthwise_layer.initialize_weights(3);
 ///
 /// // Add layer and compile model
 /// model
 ///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01), MeanSquaredError::new());
+///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // Create test input data: [batch_size, channels, height, width]
 /// let batch_size = 1;
@@ -115,14 +115,26 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
     ///
     /// # Returns
     ///
-    /// * `DepthwiseConv2D` - A new `DepthwiseConv2D` instance with randomly initialized weights
+    /// * `Result<DepthwiseConv2D, ModelError>` - A new `DepthwiseConv2D` instance with randomly initialized weights or an error
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `filters` is 0
+    /// - Any kernel dimension is 0
+    /// - Any stride is 0
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
         strides: (usize, usize),
         padding: PaddingType,
         activation: T,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Input validation
+        validate_filters(filters)?;
+        validate_kernel_size_2d(kernel_size)?;
+        validate_strides_2d(strides)?;
+
         let (kernel_height, kernel_width) = kernel_size;
 
         // For depthwise convolution, each filter processes one input channel
@@ -130,7 +142,7 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
         let weights = Array4::zeros((filters, 1, kernel_height, kernel_width));
         let bias = Array1::zeros(filters);
 
-        Self {
+        Ok(Self {
             filters,
             kernel_size,
             strides,
@@ -147,7 +159,7 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
                 rmsprop_cache: None,
                 ada_grad_cache: None,
             },
-        }
+        })
     }
 
     /// Initializes the layer with random weights using Xavier initialization.

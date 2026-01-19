@@ -42,7 +42,7 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 /// use ndarray::Array2;
 ///
 /// // Create a BatchNormalization layer
-/// let mut bn = BatchNormalization::new(vec![32, 128], 0.99, 1e-5);
+/// let mut bn = BatchNormalization::new(vec![32, 128], 0.99, 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -82,8 +82,19 @@ impl BatchNormalization {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the BatchNormalization layer.
-    pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Self {
+    /// * `Result<Self, ModelError>` - A new instance of the BatchNormalization layer, or an error if validation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `input_shape` is empty
+    /// - `momentum` is not between 0.0 and 1.0
+    /// - `epsilon` is not positive
+    pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, ModelError> {
+        validate_input_shape_not_empty(&input_shape)?;
+        validate_momentum(momentum)?;
+        validate_epsilon(epsilon)?;
+
         // For batch normalization, we normalize across the batch dimension (first dimension)
         // So the parameters should have the shape of the feature dimensions
         let param_shape = if input_shape.len() > 1 {
@@ -94,7 +105,7 @@ impl BatchNormalization {
 
         let param_shape_ndarray = param_shape.as_slice();
 
-        BatchNormalization {
+        Ok(BatchNormalization {
             epsilon,
             momentum,
             input_shape,
@@ -110,7 +121,7 @@ impl BatchNormalization {
             grad_gamma: None,
             grad_beta: None,
             optimizer_cache: OptimizerCacheNormalizationLayer::default(),
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -139,14 +150,7 @@ impl BatchNormalization {
 
 impl Layer for BatchNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
+        validate_input_shape(input.shape(), &self.input_shape)?;
 
         if self.training {
             let total_elements = input.len();

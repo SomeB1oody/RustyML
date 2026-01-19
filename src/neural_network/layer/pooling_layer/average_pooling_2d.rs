@@ -58,8 +58,8 @@ const AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///  (2, 2),           // Pooling window size
 ///  vec![2, 3, 4, 4], // Input shape
 ///  Some((2, 2)),     // Strides (optional, defaults to pool_size if None)
-///  ))
-///  .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///  ).unwrap())
+///  .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 ///  // Output shape should be [2, 3, 2, 2]
 ///  let output = model.predict(&x);
@@ -98,27 +98,25 @@ impl AveragePooling2D {
     ///
     /// # Returns
     ///
-    /// * `AveragePooling2D` - A new `AveragePooling2D` layer instance
+    /// * `Result<AveragePooling2D, ModelError>` - A new `AveragePooling2D` layer instance or an error
     pub fn new(
         pool_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize)>,
-    ) -> Self {
-        // Verify input is 4D: [batch_size, channels, height, width]
-        assert_eq!(
-            input_shape.len(),
-            4,
-            "Input shape must be 4-dimensional: [batch_size, channels, height, width]"
-        );
-
+    ) -> Result<Self, ModelError> {
         let strides = strides.unwrap_or(pool_size);
 
-        AveragePooling2D {
+        // input validation
+        validate_input_shape_dims(&input_shape, 4, "AveragePooling2D")?;
+        validate_pool_size_2d(pool_size)?;
+        validate_strides_2d(strides)?;
+
+        Ok(AveragePooling2D {
             pool_size,
             strides,
             input_shape,
             input_cache: None,
-        }
+        })
     }
 
     /// Performs average pooling operation.

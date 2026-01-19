@@ -101,7 +101,7 @@ fn test_global_max_pooling_3d_with_sequential() {
     model.add(GlobalMaxPooling3D::new());
 
     // Compile model
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create test input: [batch_size, channels, depth, height, width] = [2, 3, 4, 5, 5]
     let input_data = Array::from_elem(IxDyn(&[2, 3, 4, 5, 5]), 1.0);
@@ -180,7 +180,7 @@ fn test_global_max_pooling_3d_sequential_training() {
     model.add(GlobalMaxPooling3D::new());
 
     // Compile model
-    model.compile(SGD::new(0.1), MeanSquaredError::new());
+    model.compile(SGD::new(0.1).unwrap(), MeanSquaredError::new());
 
     // Create training data
     let x = Array::from_elem(IxDyn(&[4, 2, 3, 3, 3]), 1.0);

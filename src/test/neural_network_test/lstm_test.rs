@@ -9,9 +9,10 @@ fn test_lstm_layer() {
 
     // Build model: an LSTM layer with Tanh activation function
     let mut model = Sequential::new();
-    model
-        .add(LSTM::new(4, 3, Tanh::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.add(LSTM::new(4, 3, Tanh::new()).unwrap()).compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Print model structure
     model.summary();
@@ -33,9 +34,10 @@ fn test_lstm_layer_basic() {
 
     // Build model: an LSTM layer with Tanh activation function
     let mut model = Sequential::new();
-    model
-        .add(LSTM::new(4, 3, Tanh::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.add(LSTM::new(4, 3, Tanh::new()).unwrap()).compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Print model structure
     model.summary();
@@ -59,8 +61,11 @@ fn test_lstm_different_activations() {
     // Test ReLU activation function
     let mut model_relu = Sequential::new();
     model_relu
-        .add(LSTM::new(2, 6, ReLU::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(2, 6, ReLU::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     model_relu.fit(&x, &y, 3).unwrap();
     let pred_relu = model_relu.predict(&x);
@@ -68,8 +73,11 @@ fn test_lstm_different_activations() {
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(LSTM::new(2, 6, Sigmoid::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(2, 6, Sigmoid::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
     let pred_sigmoid = model_sigmoid.predict(&x);
@@ -98,9 +106,12 @@ fn test_lstm_sequential_composition() {
     // Build a model containing LSTM and Dense layers
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(3, 6, Tanh::new()))
-        .add(Dense::new(6, 4, Sigmoid::new()))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(3, 6, Tanh::new()).unwrap())
+        .add(Dense::new(6, 4, Sigmoid::new()).unwrap())
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Print model structure
     model.summary();
@@ -149,9 +160,12 @@ fn test_lstm_sequence_learning() {
 
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 12, Tanh::new()))
-        .add(Dense::new(12, 1, Sigmoid::new()))
-        .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(input_dim, 12, Tanh::new()).unwrap())
+        .add(Dense::new(12, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.005, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Train for sequence learning
     model.fit(&x, &y, 80).unwrap();
@@ -204,8 +218,11 @@ fn test_lstm_state_evolution() {
 
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, units, Tanh::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(input_dim, units, Tanh::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Test multiple training steps to see evolution
     let mut predictions = Vec::new();
@@ -280,10 +297,13 @@ fn test_lstm_temporal_xor() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 16, Tanh::new()))
-        .add(Dense::new(16, 8, ReLU::new()))
-        .add(Dense::new(8, 1, Sigmoid::new()))
-        .compile(Adam::new(0.005, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(input_dim, 16, Tanh::new()).unwrap())
+        .add(Dense::new(16, 8, ReLU::new()).unwrap())
+        .add(Dense::new(8, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.005, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Temporal XOR Task ===");
     model.summary();
@@ -391,10 +411,13 @@ fn test_lstm_parity_check() {
     // Build model
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(input_dim, 32, Tanh::new())) // Increased from 24 to 32
-        .add(Dense::new(32, 16, Tanh::new())) // Changed from ReLU to Tanh
-        .add(Dense::new(16, 1, Sigmoid::new()))
-        .compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(input_dim, 32, Tanh::new()).unwrap()) // Increased from 24 to 32
+        .add(Dense::new(32, 16, Tanh::new()).unwrap()) // Changed from ReLU to Tanh
+        .add(Dense::new(16, 1, Sigmoid::new()).unwrap())
+        .compile(
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     println!("\n=== Parity Check Task ===");
     model.summary();

@@ -55,8 +55,8 @@ const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///         2,              // Pool window size
 ///         vec![2, 3, 8],  // Input shape
 ///         Some(2),        // Stride (optional, defaults to pool_size if None)
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
 /// let output = model.predict(&x);
@@ -95,23 +95,26 @@ impl AveragePooling1D {
     ///
     /// # Returns
     ///
-    /// * `AveragePooling1D` - A new `AveragePooling1D` layer instance
-    pub fn new(pool_size: usize, input_shape: Vec<usize>, stride: Option<usize>) -> Self {
-        // verify input is 3D: [batch_size, channels, length]
-        assert_eq!(
-            input_shape.len(),
-            3,
-            "Input shape must be 3-dimensional: [batch_size, channels, length]"
-        );
-
+    /// * `Result<AveragePooling1D, ModelError>` - A new `AveragePooling1D` layer instance or an error
+    pub fn new(
+        pool_size: usize,
+        input_shape: Vec<usize>,
+        stride: Option<usize>,
+    ) -> Result<Self, ModelError> {
         let stride = stride.unwrap_or(pool_size);
 
-        AveragePooling1D {
+        // input validation
+        validate_input_shape_dims(&input_shape, 3, "AveragePooling1D")?;
+        validate_all_dims_positive(&input_shape)?;
+        validate_pool_size_1d(pool_size, input_shape[2])?;
+        validate_stride_1d(stride)?;
+
+        Ok(AveragePooling1D {
             pool_size,
             stride,
             input_shape,
             input_cache: None,
-        }
+        })
     }
 }
 

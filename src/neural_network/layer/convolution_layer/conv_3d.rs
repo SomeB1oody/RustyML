@@ -59,8 +59,8 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 ///         (1, 1, 1),                 // Stride
 ///         PaddingType::Valid,        // No padding
 ///         ReLU::new(), // ReLU activation layer
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -104,7 +104,16 @@ impl<T: ActivationLayer> Conv3D<T> {
     ///
     /// # Returns
     ///
-    /// * `Conv3D` - A new `Conv3D` layer instance
+    /// * `Result<Conv3D, ModelError>` - A new `Conv3D` layer instance or an error
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `filters` is 0
+    /// - Any kernel dimension is 0
+    /// - Any stride is 0
+    /// - `input_shape` is not 5D
+    /// - Any input dimension is 0
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),
@@ -112,7 +121,13 @@ impl<T: ActivationLayer> Conv3D<T> {
         strides: (usize, usize, usize),
         padding: PaddingType,
         activation: T,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Validate input arguments
+        validate_filters(filters)?;
+        validate_kernel_size_3d(kernel_size)?;
+        validate_strides_3d(strides)?;
+        validate_input_shape_3d(&input_shape)?;
+
         let channels = input_shape[1];
         let (kd, kh, kw) = kernel_size;
 
@@ -130,7 +145,7 @@ impl<T: ActivationLayer> Conv3D<T> {
         // Initialize bias to zeros
         let bias = Array2::zeros((1, filters));
 
-        Conv3D {
+        Ok(Conv3D {
             filters,
             kernel_size,
             strides,
@@ -147,7 +162,7 @@ impl<T: ActivationLayer> Conv3D<T> {
                 rmsprop_cache: None,
                 ada_grad_cache: None,
             },
-        }
+        })
     }
 
     /// Calculates the output shape for 3D convolution.

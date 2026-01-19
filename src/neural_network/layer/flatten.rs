@@ -36,8 +36,8 @@ use super::*;
 /// // Build a model containing a Flatten layer
 /// let mut model = Sequential::new();
 /// model
-///     .add(Flatten::new(vec![2, 3, 4, 4]))
-///     .compile(SGD::new(0.01), MeanSquaredError::new());
+///     .add(Flatten::new(vec![2, 3, 4, 4]).unwrap())
+///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();
@@ -66,13 +66,31 @@ impl Flatten {
     /// # Returns
     ///
     /// * `Flatten` - A new `Flatten` layer instance
-    pub fn new(input_shape: Vec<usize>) -> Self {
+    pub fn new(input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        // Validate input shape dimensions
+        if input_shape.len() < 2 {
+            return Err(ModelError::InputValidationError(format!(
+                "Input shape must have at least 2 dimensions [batch_size, features...], got {}D",
+                input_shape.len()
+            )));
+        }
+
+        // Ensure all dimensions are greater than 0
+        for (i, &dim) in input_shape.iter().enumerate() {
+            if dim == 0 {
+                return Err(ModelError::InputValidationError(format!(
+                    "Dimension {} must be greater than 0, got {}",
+                    i, dim
+                )));
+            }
+        }
+
         let flattened_features = input_shape[1..].iter().product();
 
-        Flatten {
+        Ok(Flatten {
             flattened_features,
             input_cache: None,
-        }
+        })
     }
 }
 

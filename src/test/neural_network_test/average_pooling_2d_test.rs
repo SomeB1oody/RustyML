@@ -22,12 +22,18 @@ fn average_pooling_basic_test() {
     // Test AveragePooling with Sequential model
     let mut model = Sequential::new();
     model
-        .add(AveragePooling2D::new(
-            (2, 2),           // Pooling window size
-            vec![2, 3, 4, 4], // Input shape
-            Some((2, 2)),     // Strides (optional)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            AveragePooling2D::new(
+                (2, 2),           // Pooling window size
+                vec![2, 3, 4, 4], // Input shape
+                Some((2, 2)),     // Strides (optional)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Output shape should be [2, 3, 2, 2]
     let output = model.predict(&x);
@@ -70,12 +76,18 @@ fn average_pooling_non_even_input_test() {
     // Pooling window size (3,3), stride (2,2)
     let mut model = Sequential::new();
     model
-        .add(AveragePooling2D::new(
-            (3, 3),           // Pooling window size
-            vec![2, 3, 5, 5], // Input shape
-            Some((2, 2)),     // Strides (optional)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            AveragePooling2D::new(
+                (3, 3),           // Pooling window size
+                vec![2, 3, 5, 5], // Input shape
+                Some((2, 2)),     // Strides (optional)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Output shape should be [2, 3, 2, 2]
     // (5-3)/2+1 = 2
@@ -105,12 +117,18 @@ fn average_pooling_different_strides_test() {
     // Pooling with stride (1,1)
     let mut model = Sequential::new();
     model
-        .add(AveragePooling2D::new(
-            (2, 2),           // Pooling window size
-            vec![1, 1, 6, 6], // Input shape
-            Some((1, 1)),     // Strides (optional)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            AveragePooling2D::new(
+                (2, 2),           // Pooling window size
+                vec![1, 1, 6, 6], // Input shape
+                Some((1, 1)),     // Strides (optional)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Output shape should be [1, 1, 5, 5]
     // (6-2)/1+1 = 5
@@ -131,12 +149,18 @@ fn average_pooling_backprop_test() {
     // Create model and train
     let mut model = Sequential::new();
     model
-        .add(AveragePooling2D::new(
-            (2, 2),           // Pooling window size
-            vec![2, 2, 4, 4], // Input shape
-            Some((2, 2)),     // Strides (optional)
-        ))
-        .compile(RMSprop::new(0.01, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            AveragePooling2D::new(
+                (2, 2),           // Pooling window size
+                vec![2, 2, 4, 4], // Input shape
+                Some((2, 2)),     // Strides (optional)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.01, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Train the model
     let result = model.fit(&input_data, &target_data, 5);

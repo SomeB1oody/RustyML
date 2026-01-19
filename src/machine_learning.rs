@@ -1,7 +1,6 @@
 use crate::error::ModelError;
 use crate::math::*;
 use ahash::{AHashMap, AHashSet};
-use helper_functions::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Data;
 use ndarray::prelude::*;
@@ -83,11 +82,12 @@ pub mod linear_svc;
 pub mod linear_discriminant_analysis;
 
 /// This module provides helper functions for machine learning models
-mod helper_functions;
+mod helper_function;
 
 pub use crate::utility::KernelType;
 pub use dbscan::*;
 pub use decision_tree::*;
+use helper_function::*;
 pub use isolation_forest::*;
 pub use kmeans::*;
 pub use knn::*;

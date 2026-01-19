@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn test_spatial_dropout_1d_forward_pass_dimensions() {
     // Test that spatial dropout preserves input dimensions
-    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     let input = Array3::ones((2, 8, 10)).into_dyn();
 
     let output = dropout.forward(&input).unwrap();
@@ -18,7 +18,7 @@ fn test_spatial_dropout_1d_forward_pass_dimensions() {
 #[test]
 fn test_spatial_dropout_1d_training_mode() {
     // Test that spatial dropout drops entire channels during training
-    let mut dropout = SpatialDropout1D::new(0.5, vec![10, 20, 50]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![10, 20, 50]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::ones((10, 20, 50)).into_dyn();
@@ -73,7 +73,7 @@ fn test_spatial_dropout_1d_training_mode() {
 #[test]
 fn test_spatial_dropout_1d_channel_consistency() {
     // Test that when a channel is kept, all spatial positions have the same mask value
-    let mut dropout = SpatialDropout1D::new(0.3, vec![5, 10, 20]);
+    let mut dropout = SpatialDropout1D::new(0.3, vec![5, 10, 20]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::from_shape_fn((5, 10, 20), |(b, c, l)| (b * 200 + c * 20 + l + 1) as f32)
@@ -109,7 +109,7 @@ fn test_spatial_dropout_1d_channel_consistency() {
 #[test]
 fn test_spatial_dropout_1d_inference_mode() {
     // Test that dropout passes through input unchanged during inference
-    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     dropout.set_training(false);
 
     let input =
@@ -125,7 +125,7 @@ fn test_spatial_dropout_1d_inference_mode() {
 #[test]
 fn test_spatial_dropout_1d_rate_zero() {
     // Test that dropout with rate=0 keeps all values
-    let mut dropout = SpatialDropout1D::new(0.0, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.0, vec![2, 8, 10]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::ones((2, 8, 10)).into_dyn();
@@ -139,7 +139,7 @@ fn test_spatial_dropout_1d_rate_zero() {
 #[test]
 fn test_spatial_dropout_1d_rate_one() {
     // Test that dropout with rate=1 drops all values
-    let mut dropout = SpatialDropout1D::new(1.0, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(1.0, vec![2, 8, 10]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::ones((2, 8, 10)).into_dyn();
@@ -155,20 +155,18 @@ fn test_spatial_dropout_1d_rate_one() {
 #[test]
 fn test_spatial_dropout_1d_invalid_rate() {
     // Test that invalid rates are caught
-    let mut dropout_negative = SpatialDropout1D::new(-0.1, vec![2, 8, 10]);
-    let mut dropout_over_one = SpatialDropout1D::new(1.5, vec![2, 8, 10]);
+    let dropout_negative = SpatialDropout1D::new(-0.1, vec![2, 8, 10]);
+    let dropout_over_one = SpatialDropout1D::new(1.5, vec![2, 8, 10]);
 
-    let input = Array3::ones((2, 8, 10)).into_dyn();
-
-    assert!(dropout_negative.forward(&input).is_err());
-    assert!(dropout_over_one.forward(&input).is_err());
+    assert!(dropout_negative.is_err());
+    assert!(dropout_over_one.is_err());
     println!("SpatialDropout1D invalid rate test passed");
 }
 
 #[test]
 fn test_spatial_dropout_1d_shape_validation() {
     // Test that shape mismatch is detected
-    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     let wrong_input = Array3::ones((3, 8, 10)).into_dyn();
 
     let result = dropout.forward(&wrong_input);
@@ -179,7 +177,7 @@ fn test_spatial_dropout_1d_shape_validation() {
 #[test]
 fn test_spatial_dropout_1d_dimension_validation() {
     // Test that non-3D input is rejected
-    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
 
     // Test 2D input
     let input_2d = Array::ones((2, 8)).into_dyn();
@@ -197,7 +195,7 @@ fn test_spatial_dropout_1d_dimension_validation() {
 #[test]
 fn test_spatial_dropout_1d_backward_pass() {
     // Test backward pass preserves gradient dimensions and applies mask
-    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::ones((2, 8, 10)).into_dyn();
@@ -235,7 +233,7 @@ fn test_spatial_dropout_1d_different_rates() {
     let rates = vec![0.1, 0.3, 0.5, 0.7, 0.9];
 
     for rate in rates {
-        let mut dropout = SpatialDropout1D::new(rate, vec![10, 50, 20]);
+        let mut dropout = SpatialDropout1D::new(rate, vec![10, 50, 20]).unwrap();
         dropout.set_training(true);
 
         let input = Array3::ones((10, 50, 20)).into_dyn();
@@ -277,7 +275,7 @@ fn test_spatial_dropout_1d_different_rates() {
 #[test]
 fn test_spatial_dropout_1d_maintains_expected_value() {
     // Test that inverted dropout maintains expected value
-    let mut dropout = SpatialDropout1D::new(0.5, vec![20, 30, 40]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![20, 30, 40]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::from_elem((20, 30, 40), 2.0).into_dyn();
@@ -299,7 +297,7 @@ fn test_spatial_dropout_1d_maintains_expected_value() {
 #[test]
 fn test_spatial_dropout_1d_layer_type() {
     // Test that layer type is correctly reported
-    let dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     assert_eq!(dropout.layer_type(), "SpatialDropout1D");
     println!("SpatialDropout1D layer type test passed");
 }
@@ -307,7 +305,7 @@ fn test_spatial_dropout_1d_layer_type() {
 #[test]
 fn test_spatial_dropout_1d_output_shape() {
     // Test that output shape is correctly reported
-    let dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]);
+    let dropout = SpatialDropout1D::new(0.5, vec![2, 8, 10]).unwrap();
     let shape_str = dropout.output_shape();
     assert!(shape_str.contains("2") && shape_str.contains("8") && shape_str.contains("10"));
     println!("SpatialDropout1D output shape test passed: {}", shape_str);
@@ -316,7 +314,7 @@ fn test_spatial_dropout_1d_output_shape() {
 #[test]
 fn test_spatial_dropout_1d_consistency_across_calls() {
     // Test that each forward pass generates different masks
-    let mut dropout = SpatialDropout1D::new(0.5, vec![5, 10, 20]);
+    let mut dropout = SpatialDropout1D::new(0.5, vec![5, 10, 20]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::ones((5, 10, 20)).into_dyn();
@@ -335,7 +333,8 @@ fn test_spatial_dropout_1d_various_shapes() {
     let shapes = vec![(1, 4, 8), (4, 16, 32), (8, 32, 64), (16, 8, 128)];
 
     for (batch_size, channels, length) in shapes.iter() {
-        let mut dropout = SpatialDropout1D::new(0.5, vec![*batch_size, *channels, *length]);
+        let mut dropout =
+            SpatialDropout1D::new(0.5, vec![*batch_size, *channels, *length]).unwrap();
         dropout.set_training(true);
 
         let input = Array3::ones((*batch_size, *channels, *length)).into_dyn();
@@ -355,7 +354,7 @@ fn test_spatial_dropout_1d_scaling() {
     let rate = 0.5;
     let expected_scale = 1.0 / (1.0 - rate);
 
-    let mut dropout = SpatialDropout1D::new(rate, vec![2, 10, 5]);
+    let mut dropout = SpatialDropout1D::new(rate, vec![2, 10, 5]).unwrap();
     dropout.set_training(true);
 
     let input = Array3::from_elem((2, 10, 5), 1.0).into_dyn();

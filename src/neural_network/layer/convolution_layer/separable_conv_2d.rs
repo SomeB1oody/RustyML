@@ -63,8 +63,8 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 ///         PaddingType::Same,           // Same padding
 ///         1,                           // Depth multiplier
 ///         ReLU::new(), // ReLU activation layer
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
@@ -103,7 +103,18 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
     ///
     /// # Returns
     ///
-    /// * `SeparableConv2D` - A new `SeparableConv2D` layer instance.
+    /// * `Result<SeparableConv2D, ModelError>` - A new `SeparableConv2D` layer instance or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `filters` is 0
+    /// - Any kernel dimension is 0
+    /// - Any stride is 0
+    /// - `depth_multiplier` is 0
+    /// - `input_shape` is not 4D
+    /// - Input channels is 0
+    /// - Input dimensions are less than kernel size
     ///
     /// # Notes
     ///
@@ -119,7 +130,14 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         padding: PaddingType,
         depth_multiplier: usize,
         activation: T,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Validate input parameters
+        validate_filters(filters)?;
+        validate_kernel_size_2d(kernel_size)?;
+        validate_strides_2d(strides)?;
+        validate_depth_multiplier(depth_multiplier)?;
+        validate_input_shape_2d(&input_shape, kernel_size)?;
+
         let channels = input_shape[1];
 
         // Initialize depthwise weights using Xavier initialization
@@ -147,7 +165,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         // Initialize biases to zero
         let bias = Array2::zeros((1, filters));
 
-        SeparableConv2D {
+        Ok(SeparableConv2D {
             filters,
             kernel_size,
             strides,
@@ -168,7 +186,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
                 rmsprop_cache: None,
                 ada_grad_cache: None,
             },
-        }
+        })
     }
 
     /// Calculates the output shape of the separable convolutional layer.

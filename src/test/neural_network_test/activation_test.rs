@@ -10,11 +10,14 @@ fn with_activation_test() {
     // Here we use Sigmoid activation for the first layer and Softmax for the second layer (you can modify as needed)
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, Sigmoid::new()))
-        .add(Dense::new(3, 1, Softmax::new()));
+        .add(Dense::new(4, 3, Sigmoid::new()).unwrap())
+        .add(Dense::new(3, 1, Softmax::new()).unwrap());
 
     // Choose an optimizer, e.g., RMSprop, Adam or SGD - using RMSprop as an example here
-    model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Print model structure
     model.summary();
@@ -361,11 +364,14 @@ fn activation_integration_test() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 4, ReLU::new()))
-        .add(Dense::new(4, 4, Tanh::new()))
-        .add(Dense::new(4, 2, Sigmoid::new()));
+        .add(Dense::new(2, 4, ReLU::new()).unwrap())
+        .add(Dense::new(4, 4, Tanh::new()).unwrap())
+        .add(Dense::new(4, 2, Sigmoid::new()).unwrap());
 
-    model.compile(Adam::new(0.01, 0.9, 0.999, 1e-8), MeanSquaredError::new());
+    model.compile(
+        Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Train for a few epochs
     model.fit(&x, &y, 5).unwrap();

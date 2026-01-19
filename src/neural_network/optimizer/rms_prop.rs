@@ -32,13 +32,18 @@ impl RMSprop {
     ///
     /// # Returns
     ///
-    /// * `RMSprop` - A new RMSprop optimizer instance
-    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Self {
-        Self {
+    /// * `Result<Self, ModelError>` - A new RMSprop optimizer instance or an error
+    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, ModelError> {
+        // input validation
+        validate_learning_rate(learning_rate)?;
+        validate_decay_rate(rho, "rho")?;
+        validate_epsilon(epsilon)?;
+
+        Ok(Self {
             learning_rate,
             rho,
             epsilon,
-        }
+        })
     }
 }
 

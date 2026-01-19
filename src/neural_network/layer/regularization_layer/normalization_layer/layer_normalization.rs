@@ -52,7 +52,7 @@ pub enum LayerNormalizationAxis {
 /// use ndarray::Array2;
 ///
 /// // Create a LayerNormalization layer
-/// let mut ln = LayerNormalization::new(vec![32, 128], LayerNormalizationAxis::Default, 1e-5);
+/// let mut ln = LayerNormalization::new(vec![32, 128], LayerNormalizationAxis::Default, 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -81,17 +81,27 @@ pub struct LayerNormalization {
 
 impl LayerNormalization {
     /// Creates a new LayerNormalization layer.
+    ///
     /// # Parameters
     ///
     /// - `input_shape` - Shape of the input tensor.
-    /// - `normalized_axis` - The axis along which to normalize (Default for last axis, Custom(usize) for specific axis).    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).    ///    /// # Returns
+    /// - `normalized_axis` - The axis along which to normalize (Default for last axis, Custom(usize) for specific axis).
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).
     ///
-    /// * `Self` - A new instance of the LayerNormalization layer.
+    /// # Returns
+    ///
+    /// * `Result<Self, ModelError>` - A new instance of the LayerNormalization layer, or an error if validation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if `epsilon` is not positive or not finite.
     pub fn new(
         input_shape: Vec<usize>,
         normalized_axis: LayerNormalizationAxis,
         epsilon: f32,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        validate_epsilon(epsilon)?;
+
         // For layer normalization, we normalize across specified feature dimensions
         // The parameters should have the shape of the normalized dimensions
         let axis = match normalized_axis {
@@ -113,7 +123,7 @@ impl LayerNormalization {
 
         let param_shape_ndarray = param_shape.as_slice();
 
-        LayerNormalization {
+        Ok(LayerNormalization {
             epsilon,
             normalized_axis,
             input_shape,
@@ -127,7 +137,7 @@ impl LayerNormalization {
             grad_gamma: None,
             grad_beta: None,
             optimizer_cache: OptimizerCacheNormalizationLayer::default(),
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -146,14 +156,7 @@ impl LayerNormalization {
 
 impl Layer for LayerNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
+        validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Determine the axis to normalize along
         let axis_idx = match self.normalized_axis {

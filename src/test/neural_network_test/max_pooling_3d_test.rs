@@ -26,12 +26,18 @@ fn test_max_pooling_3d_with_sequential() {
     // Test MaxPooling3D with Sequential model
     let mut model = Sequential::new();
     model
-        .add(MaxPooling3D::new(
-            (2, 2, 2),           // Pool window size
-            vec![2, 3, 4, 4, 4], // Input shape
-            None,                // Use default stride (2,2,2)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            MaxPooling3D::new(
+                (2, 2, 2),           // Pool window size
+                vec![2, 3, 4, 4, 4], // Input shape
+                None,                // Use default stride (2,2,2)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Create target tensor - corresponding to the pooled shape
     let y = Array5::ones((2, 3, 2, 2, 2)).into_dyn();
@@ -90,7 +96,8 @@ fn test_max_pooling_3d_layer_properties() {
         (2, 2, 2),
         vec![1, 2, 6, 6, 6],
         Some((1, 1, 1)), // Custom stride
-    );
+    )
+    .unwrap();
 
     // Verify output shape calculation
     assert_eq!(layer.output_shape(), "(1, 2, 5, 5, 5)");
@@ -105,7 +112,7 @@ fn test_max_pooling_3d_layer_properties() {
 #[test]
 fn test_max_pooling_3d_forward_pass() {
     // Test forward pass
-    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None);
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None).unwrap();
 
     // Create test input
     let mut input = ArrayD::zeros(vec![1, 1, 4, 4, 4]);
@@ -136,7 +143,7 @@ fn test_max_pooling_3d_different_strides() {
     ];
 
     for (pool_size, strides, expected_shape) in test_cases {
-        let mut layer = MaxPooling3D::new(pool_size, vec![1, 1, 4, 4, 4], strides);
+        let mut layer = MaxPooling3D::new(pool_size, vec![1, 1, 4, 4, 4], strides).unwrap();
 
         let input = ArrayD::ones(vec![1, 1, 4, 4, 4]);
         let output = layer.forward(&input).unwrap();
@@ -161,7 +168,8 @@ fn test_max_pooling_3d_multiple_channels() {
         (2, 2, 2),
         vec![2, 3, 4, 4, 4], // 2 batches, 3 channels
         None,
-    );
+    )
+    .unwrap();
 
     let mut input = ArrayD::zeros(vec![2, 3, 4, 4, 4]);
 
@@ -201,7 +209,7 @@ fn test_max_pooling_3d_multiple_channels() {
 #[test]
 fn test_max_pooling_3d_backward_pass() {
     // Test backward propagation
-    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None);
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None).unwrap();
 
     // Create input and perform forward pass
     let input = ArrayD::from_shape_fn(vec![1, 1, 4, 4, 4], |idx| (idx[2] * idx[3] * idx[4]) as f32);
@@ -224,7 +232,7 @@ fn test_max_pooling_3d_edge_cases() {
     // Test edge cases
 
     // 1. Minimum possible input
-    let mut layer = MaxPooling3D::new((1, 1, 1), vec![1, 1, 1, 1, 1], None);
+    let mut layer = MaxPooling3D::new((1, 1, 1), vec![1, 1, 1, 1, 1], None).unwrap();
 
     let input = ArrayD::ones(vec![1, 1, 1, 1, 1]);
     let output = layer.forward(&input).unwrap();
@@ -232,7 +240,7 @@ fn test_max_pooling_3d_edge_cases() {
     assert_eq!(output[[0, 0, 0, 0, 0]], 1.0);
 
     // 2. Large batch size
-    let mut layer2 = MaxPooling3D::new((2, 2, 2), vec![10, 5, 4, 4, 4], None);
+    let mut layer2 = MaxPooling3D::new((2, 2, 2), vec![10, 5, 4, 4, 4], None).unwrap();
 
     let input2 = ArrayD::ones(vec![10, 5, 4, 4, 4]);
     let output2 = layer2.forward(&input2).unwrap();

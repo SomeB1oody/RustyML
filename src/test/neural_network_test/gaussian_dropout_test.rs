@@ -3,37 +3,55 @@ use super::*;
 #[test]
 fn test_gaussian_dropout_new() {
     // Test creating a new GaussianDropout layer
-    let dropout_layer = GaussianDropout::new(0.3, vec![32, 128]);
+    let dropout_layer = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
     assert_eq!(dropout_layer.layer_type(), "GaussianDropout");
     assert_eq!(dropout_layer.output_shape(), "[32, 128]");
     println!("GaussianDropout creation test passed");
 }
 
 #[test]
-#[should_panic(expected = "Dropout rate must be in [0, 1)")]
 fn test_gaussian_dropout_negative_rate() {
-    // Test that negative rate panics
-    GaussianDropout::new(-0.1, vec![32, 128]);
+    // Test that negative rate returns an InputValidationError
+    let result = GaussianDropout::new(-0.1, vec![32, 128]);
+    assert!(result.is_err());
+    if let Err(ModelError::InputValidationError(msg)) = result {
+        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
+        assert!(msg.contains("-0.1"));
+    } else {
+        panic!("Expected InputValidationError");
+    }
 }
 
 #[test]
-#[should_panic(expected = "Dropout rate must be in [0, 1)")]
 fn test_gaussian_dropout_rate_equals_one() {
-    // Test that rate=1.0 panics (must be strictly less than 1)
-    GaussianDropout::new(1.0, vec![32, 128]);
+    // Test that rate=1.0 returns an InputValidationError
+    let result = GaussianDropout::new(1.0, vec![32, 128]);
+    assert!(result.is_err());
+    if let Err(ModelError::InputValidationError(msg)) = result {
+        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
+        assert!(msg.contains("1"));
+    } else {
+        panic!("Expected InputValidationError");
+    }
 }
 
 #[test]
-#[should_panic(expected = "Dropout rate must be in [0, 1)")]
 fn test_gaussian_dropout_rate_over_one() {
-    // Test that rate>1.0 panics
-    GaussianDropout::new(1.5, vec![32, 128]);
+    // Test that rate>1.0 returns an InputValidationError
+    let result = GaussianDropout::new(1.5, vec![32, 128]);
+    assert!(result.is_err());
+    if let Err(ModelError::InputValidationError(msg)) = result {
+        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
+        assert!(msg.contains("1.5"));
+    } else {
+        panic!("Expected InputValidationError");
+    }
 }
 
 #[test]
 fn test_gaussian_dropout_forward_dimensions() {
     // Test that GaussianDropout preserves input dimensions
-    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]);
+    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]).unwrap();
     let input = Array::ones((2, 10)).into_dyn();
 
     let output = dropout.forward(&input).unwrap();
@@ -48,7 +66,7 @@ fn test_gaussian_dropout_forward_dimensions() {
 #[test]
 fn test_gaussian_dropout_training_mode() {
     // Test that GaussianDropout applies multiplicative noise during training
-    let mut dropout = GaussianDropout::new(0.5, vec![100]);
+    let mut dropout = GaussianDropout::new(0.5, vec![100]).unwrap();
     dropout.set_training(true);
 
     let input = Array::from_elem((100,), 10.0).into_dyn();
@@ -75,7 +93,7 @@ fn test_gaussian_dropout_training_mode() {
 #[test]
 fn test_gaussian_dropout_inference_mode() {
     // Test that GaussianDropout passes through input unchanged during inference
-    let mut dropout = GaussianDropout::new(0.5, vec![2, 10]);
+    let mut dropout = GaussianDropout::new(0.5, vec![2, 10]).unwrap();
     dropout.set_training(false);
 
     let input = Array::from_shape_fn((2, 10), |(i, j)| (i * 10 + j) as f32).into_dyn();
@@ -89,7 +107,7 @@ fn test_gaussian_dropout_inference_mode() {
 #[test]
 fn test_gaussian_dropout_rate_zero() {
     // Test that GaussianDropout with rate=0 passes through input unchanged
-    let mut dropout = GaussianDropout::new(0.0, vec![2, 10]);
+    let mut dropout = GaussianDropout::new(0.0, vec![2, 10]).unwrap();
     dropout.set_training(true);
 
     let input = Array::ones((2, 10)).into_dyn();
@@ -103,7 +121,7 @@ fn test_gaussian_dropout_rate_zero() {
 #[test]
 fn test_gaussian_dropout_shape_validation() {
     // Test that shape mismatch is detected
-    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]);
+    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]).unwrap();
     let wrong_input = Array::ones((3, 10)).into_dyn();
 
     let result = dropout.forward(&wrong_input);
@@ -114,7 +132,7 @@ fn test_gaussian_dropout_shape_validation() {
 #[test]
 fn test_gaussian_dropout_backward_pass() {
     // Test backward pass preserves gradient dimensions
-    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]);
+    let mut dropout = GaussianDropout::new(0.3, vec![2, 10]).unwrap();
     dropout.set_training(true);
 
     let input = Array::ones((2, 10)).into_dyn();
@@ -138,7 +156,7 @@ fn test_gaussian_dropout_different_rates() {
     let rates = vec![0.1, 0.3, 0.5, 0.7, 0.9];
 
     for rate in rates {
-        let mut dropout = GaussianDropout::new(rate, vec![1000]);
+        let mut dropout = GaussianDropout::new(rate, vec![1000]).unwrap();
         dropout.set_training(true);
 
         let input = Array::from_elem((1000,), 5.0).into_dyn();
@@ -178,7 +196,7 @@ fn test_gaussian_dropout_multidimensional() {
     let shapes = vec![vec![10], vec![5, 10], vec![2, 3, 4], vec![2, 3, 4, 5]];
 
     for shape in shapes {
-        let mut dropout = GaussianDropout::new(0.3, shape.clone());
+        let mut dropout = GaussianDropout::new(0.3, shape.clone()).unwrap();
         dropout.set_training(true);
 
         let input = Array::ones(shape.as_slice()).into_dyn();
@@ -200,7 +218,7 @@ fn test_gaussian_dropout_multidimensional() {
 #[test]
 fn test_gaussian_dropout_layer_type() {
     // Test that layer type is correctly reported
-    let dropout = GaussianDropout::new(0.3, vec![10]);
+    let dropout = GaussianDropout::new(0.3, vec![10]).unwrap();
     assert_eq!(dropout.layer_type(), "GaussianDropout");
     println!("GaussianDropout layer type test passed");
 }
@@ -208,7 +226,7 @@ fn test_gaussian_dropout_layer_type() {
 #[test]
 fn test_gaussian_dropout_output_shape() {
     // Test that output shape is correctly reported
-    let dropout = GaussianDropout::new(0.3, vec![2, 10]);
+    let dropout = GaussianDropout::new(0.3, vec![2, 10]).unwrap();
     let shape_str = dropout.output_shape();
     assert!(shape_str.contains("2") && shape_str.contains("10"));
     println!("GaussianDropout output shape test passed: {}", shape_str);
@@ -217,7 +235,7 @@ fn test_gaussian_dropout_output_shape() {
 #[test]
 fn test_gaussian_dropout_consistency_across_calls() {
     // Test that each forward pass generates different noise
-    let mut dropout = GaussianDropout::new(0.5, vec![100]);
+    let mut dropout = GaussianDropout::new(0.5, vec![100]).unwrap();
     dropout.set_training(true);
 
     let input = Array::from_elem((100,), 5.0).into_dyn();
@@ -233,7 +251,7 @@ fn test_gaussian_dropout_consistency_across_calls() {
 #[test]
 fn test_gaussian_dropout_no_zeros() {
     // Test that GaussianDropout never produces exact zeros (unlike standard dropout)
-    let mut dropout = GaussianDropout::new(0.9, vec![1000]);
+    let mut dropout = GaussianDropout::new(0.9, vec![1000]).unwrap();
     dropout.set_training(true);
 
     let input = Array::from_elem((1000,), 1.0).into_dyn();
@@ -259,7 +277,7 @@ fn test_gaussian_dropout_no_zeros() {
 #[test]
 fn test_gaussian_dropout_statistical_properties() {
     // Test that the noise follows expected statistical properties
-    let mut dropout = GaussianDropout::new(0.5, vec![10000]);
+    let mut dropout = GaussianDropout::new(0.5, vec![10000]).unwrap();
     dropout.set_training(true);
 
     let input = Array::from_elem((10000,), 10.0).into_dyn();
@@ -311,7 +329,7 @@ fn test_gaussian_dropout_stddev_formula() {
     ];
 
     for (rate, expected_stddev) in test_cases {
-        let mut dropout = GaussianDropout::new(rate, vec![5000]);
+        let mut dropout = GaussianDropout::new(rate, vec![5000]).unwrap();
         dropout.set_training(true);
 
         let input = Array::from_elem((5000,), 100.0).into_dyn();

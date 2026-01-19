@@ -9,11 +9,11 @@ fn fit_with_batches_test() {
     // build a neural network
     let mut model = Sequential::new();
     model
-        .add(Dense::new(784, 128, ReLU::new()))
-        .add(Dense::new(128, 64, ReLU::new()))
-        .add(Dense::new(64, 10, Softmax::new()))
+        .add(Dense::new(784, 128, ReLU::new()).unwrap())
+        .add(Dense::new(128, 64, ReLU::new()).unwrap())
+        .add(Dense::new(64, 10, Softmax::new()).unwrap())
         .compile(
-            Adam::new(0.001, 0.9, 0.999, 1e-8),
+            Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
             CategoricalCrossEntropy::new(),
         );
 
@@ -42,8 +42,8 @@ fn test_fit_linear_regression_convergence() {
     // Build a simple network to learn the linear relationship
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Linear::new())) // Single linear layer
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Dense::new(1, 1, Linear::new()).unwrap()) // Single linear layer
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Record initial predictions
     let initial_predictions = model.predict(&x);
@@ -112,10 +112,10 @@ fn test_fit_classification_convergence() {
     // Build classification network with smaller learning rate
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 4, ReLU::new()))
-        .add(Dense::new(4, 2, Softmax::new()))
+        .add(Dense::new(2, 4, ReLU::new()).unwrap())
+        .add(Dense::new(4, 2, Softmax::new()).unwrap())
         .compile(
-            Adam::new(0.01, 0.9, 0.999, 1e-8),
+            Adam::new(0.01, 0.9, 0.999, 1e-8).unwrap(),
             CategoricalCrossEntropy::new(),
         ); // Smaller learning rate
 
@@ -199,9 +199,9 @@ fn test_fit_parameter_updates() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Linear::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Dense::new(2, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, Linear::new()).unwrap())
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Get weights before training
     let initial_weights = model.get_weights();
@@ -249,7 +249,7 @@ fn test_fit_parameter_updates() {
 #[test]
 fn test_fit_error_handling() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Linear::new()));
+    model.add(Dense::new(2, 1, Linear::new()).unwrap());
 
     // Test 1: Uncompiled model should return error
     let x = Array::ones((5, 2)).into_dyn();
@@ -259,7 +259,7 @@ fn test_fit_error_handling() {
     assert!(result.is_err(), "Uncompiled model should return error");
 
     // Compile the model
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Test 2: Empty data should return error
     let empty_x = Array::zeros((0, 2)).into_dyn();

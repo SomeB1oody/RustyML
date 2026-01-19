@@ -26,7 +26,7 @@ const SPATIAL_DROPOUT_1D_PARALLEL_THRESHOLD: usize = 64;
 /// use ndarray::Array3;
 ///
 /// // Create a SpatialDropout1D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout1D::new(0.2, vec![32, 64, 128]);
+/// let mut spatial_dropout = SpatialDropout1D::new(0.2, vec![32, 64, 128]).unwrap();
 ///
 /// // Create input tensor (batch_size=32, channels=64, length=128)
 /// let input = Array3::ones((32, 64, 128)).into_dyn();
@@ -51,18 +51,20 @@ impl SpatialDropout1D {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the SpatialDropout1D layer.
+    /// * `Result<Self, ModelError>` - A new instance of the SpatialDropout1D layer, or an error if validation fails.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if rate is not between 0 and 1.
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Self {
-        SpatialDropout1D {
+    /// Returns `ModelError::InputValidationError` if rate is not between 0 and 1.
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        validate_rate(rate, "Dropout rate")?;
+
+        Ok(SpatialDropout1D {
             rate,
             input_shape,
             mask: None,
             training: true,
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -70,28 +72,13 @@ impl SpatialDropout1D {
 
 impl Layer for SpatialDropout1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        if self.rate < 0.0 || self.rate > 1.0 {
-            return Err(ModelError::InputValidationError(
-                "Dropout rate cannot be less than 0 or greater than 1".to_string(),
-            ));
-        }
-
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
-
-        // Validate input is 3D (batch_size, channels, length)
-        if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(format!(
-                "SpatialDropout1D expects 3D input (batch_size, channels, length), got {}D",
-                input.ndim()
-            )));
-        }
+        validate_rate(self.rate, "Dropout rate")?;
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_input_ndim(
+            input.ndim(),
+            3,
+            "SpatialDropout1D (batch_size, channels, length)",
+        )?;
 
         if !self.training {
             // During inference, pass input through unchanged

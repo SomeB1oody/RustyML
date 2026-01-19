@@ -192,6 +192,8 @@ pub mod global_max_pooling_1d;
 pub mod global_max_pooling_2d;
 /// Global Max Pooling layer 3D Layer
 pub mod global_max_pooling_3d;
+/// Input validation functions for pooling layers
+mod input_validation_function;
 /// Max Pooling layer 1D Layer
 pub mod max_pooling_1d;
 /// Max Pooling layer 2D Layer
@@ -208,6 +210,7 @@ pub use global_average_pooling_3d::*;
 pub use global_max_pooling_1d::*;
 pub use global_max_pooling_2d::*;
 pub use global_max_pooling_3d::*;
+use input_validation_function::*;
 pub use max_pooling_1d::*;
 pub use max_pooling_2d::*;
 pub use max_pooling_3d::*;

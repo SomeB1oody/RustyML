@@ -24,7 +24,7 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate
-/// let mut dropout = Dropout::new(0.5, vec![32, 128]);
+/// let mut dropout = Dropout::new(0.5, vec![32, 128]).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -49,18 +49,20 @@ impl Dropout {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the Dropout layer.
+    /// * `Result<Self, ModelError>` - A new instance of the Dropout layer, or an error if validation fails.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if rate is not between 0 and 1.
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Self {
-        Dropout {
+    /// Returns `ModelError::InputValidationError` if rate is not between 0 and 1.
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        validate_rate(rate, "Dropout rate")?;
+
+        Ok(Dropout {
             rate,
             input_shape,
             mask: None,
             training: true,
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -68,20 +70,8 @@ impl Dropout {
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        if self.rate < 0.0 || self.rate > 1.0 {
-            return Err(ModelError::InputValidationError(
-                "Dropout rate cannot be less than 0 or greater than 1".to_string(),
-            ));
-        }
-
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
+        validate_rate(self.rate, "Dropout rate")?;
+        validate_input_shape(input.shape(), &self.input_shape)?;
 
         if !self.training {
             // During inference, pass input through unchanged

@@ -10,15 +10,18 @@ fn test_conv1d_sequential_with_sgd() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Conv1D::new(
-            3,                  // filters
-            3,                  // kernel_size
-            vec![2, 1, 10],     // input_shape
-            1,                  // stride
-            PaddingType::Valid, // padding
-            ReLU::new(),        // activation
-        ))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv1D::new(
+                3,                  // filters
+                3,                  // kernel_size
+                vec![2, 1, 10],     // input_shape
+                1,                  // stride
+                PaddingType::Valid, // padding
+                ReLU::new(),        // activation
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Print the model structure
     model.summary();
@@ -50,15 +53,21 @@ fn test_conv1d_sequential_with_rmsprop() {
     // Build the model
     let mut model = Sequential::new();
     model
-        .add(Conv1D::new(
-            2,                  // filters
-            3,                  // kernel_size
-            vec![3, 2, 8],      // input_shape
-            1,                  // stride
-            PaddingType::Valid, // padding
-            Tanh::new(),        // activation
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv1D::new(
+                2,                  // filters
+                3,                  // kernel_size
+                vec![3, 2, 8],      // input_shape
+                1,                  // stride
+                PaddingType::Valid, // padding
+                Tanh::new(),        // activation
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     model.summary();
 
@@ -88,12 +97,13 @@ fn test_conv1d_different_strides() {
         2, // stride = 2
         PaddingType::Valid,
         ReLU::new(),
-    );
+    )
+    .unwrap();
 
     let mut model = Sequential::new();
     model
         .add(stride_2_conv)
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let prediction = model.predict(&x);
     assert_eq!(prediction.shape(), &[1, 1, 9]);
@@ -108,15 +118,18 @@ fn test_conv1d_multiple_channels() {
 
     let mut model = Sequential::new();
     model
-        .add(Conv1D::new(
-            5,                  // filters
-            3,                  // kernel_size
-            vec![2, 3, 15],     // input_shape (3 channels)
-            1,                  // stride
-            PaddingType::Valid, // padding
-            ReLU::new(),        // activation
-        ))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv1D::new(
+                5,                  // filters
+                3,                  // kernel_size
+                vec![2, 3, 15],     // input_shape (3 channels)
+                1,                  // stride
+                PaddingType::Valid, // padding
+                ReLU::new(),        // activation
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     model.summary();
 
@@ -137,15 +150,8 @@ fn test_conv1d_activation_functions() {
     // Test ReLU activation function
     let mut relu_model = Sequential::new();
     relu_model
-        .add(Conv1D::new(
-            1,
-            3,
-            vec![1, 1, 5],
-            1,
-            PaddingType::Valid,
-            ReLU::new(),
-        ))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Conv1D::new(1, 3, vec![1, 1, 5], 1, PaddingType::Valid, ReLU::new()).unwrap())
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let relu_output = relu_model.predict(&x);
     // ReLU output should be non-negative
@@ -156,15 +162,8 @@ fn test_conv1d_activation_functions() {
     // Test Sigmoid activation function
     let mut sigmoid_model = Sequential::new();
     sigmoid_model
-        .add(Conv1D::new(
-            1,
-            3,
-            vec![1, 1, 5],
-            1,
-            PaddingType::Valid,
-            Sigmoid::new(),
-        ))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Conv1D::new(1, 3, vec![1, 1, 5], 1, PaddingType::Valid, Sigmoid::new()).unwrap())
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let sigmoid_output = sigmoid_model.predict(&x);
     // Sigmoid output should be within [0, 1]
@@ -182,7 +181,8 @@ fn test_conv1d_parameter_count() {
         1,
         PaddingType::Valid,
         ReLU::new(),
-    );
+    )
+    .unwrap();
 
     // Parameter count = weights + bias = (4 * 2 * 3) + (1 * 4) = 24 + 4 = 28
     assert_eq!(conv1d.param_count(), TrainingParameters::Trainable(28));

@@ -49,7 +49,7 @@ const SIGMOID_PARALLEL_THRESHOLD: usize = 1000;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Sigmoid::new())
-///     .compile(SGD::new(0.01), MeanSquaredError::new());
+///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);

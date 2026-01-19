@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn test_layer_normalization_forward_pass_dimensions() {
     // Test forward propagation dimension correctness with default axis
-    let mut ln = LayerNormalization::new(vec![4, 8], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![4, 8], LayerNormalizationAxis::Default, 1e-5).unwrap();
     let input = Array::ones((4, 8)).into_dyn(); // batch_size=4, features=8
 
     let output = ln.forward(&input).unwrap();
@@ -18,7 +19,8 @@ fn test_layer_normalization_forward_pass_dimensions() {
 #[test]
 fn test_layer_normalization_default_axis() {
     // Test that layer normalization properly normalizes along the last axis (default)
-    let mut ln = LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     // Create input with non-zero mean and variance
     let input = Array::from_shape_vec(
@@ -55,7 +57,8 @@ fn test_layer_normalization_default_axis() {
 #[test]
 fn test_layer_normalization_custom_axis() {
     // Test layer normalization with custom axis (axis 0)
-    let mut ln = LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Custom(0), 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Custom(0), 1e-5).unwrap();
 
     let input = Array::from_shape_vec(
         (3, 4),
@@ -90,7 +93,8 @@ fn test_layer_normalization_custom_axis() {
 #[test]
 fn test_layer_normalization_invalid_axis() {
     // Test that invalid axis returns an error
-    let mut ln = LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Custom(5), 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Custom(5), 1e-5).unwrap();
 
     let input = Array::ones((3, 4)).into_dyn();
 
@@ -102,7 +106,8 @@ fn test_layer_normalization_invalid_axis() {
 #[test]
 fn test_layer_normalization_training_mode() {
     // Test that layer normalization works in training mode
-    let mut ln = LayerNormalization::new(vec![2, 6], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 6], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec(
         (2, 6),
@@ -136,7 +141,8 @@ fn test_layer_normalization_training_mode() {
 #[test]
 fn test_layer_normalization_inference_mode() {
     // Test that layer normalization works in inference mode
-    let mut ln = LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 4), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
         .unwrap()
@@ -162,7 +168,8 @@ fn test_layer_normalization_inference_mode() {
 #[test]
 fn test_layer_normalization_backward_pass() {
     // Test backward pass gradient computation
-    let mut ln = LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec(
         (3, 4),
@@ -199,7 +206,8 @@ fn test_layer_normalization_backward_pass() {
 #[test]
 fn test_layer_normalization_parameter_update_sgd() {
     // Test parameter update with SGD optimizer
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
@@ -251,7 +259,8 @@ fn test_layer_normalization_parameter_update_sgd() {
 #[test]
 fn test_layer_normalization_parameter_update_adam() {
     // Test parameter update with Adam optimizer
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
@@ -303,7 +312,8 @@ fn test_layer_normalization_parameter_update_adam() {
 #[test]
 fn test_layer_normalization_parameter_update_rmsprop() {
     // Test parameter update with RMSprop optimizer
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
@@ -355,7 +365,8 @@ fn test_layer_normalization_parameter_update_rmsprop() {
 #[test]
 fn test_layer_normalization_parameter_update_adagrad() {
     // Test parameter update with AdaGrad optimizer
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 3), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
         .unwrap()
@@ -415,7 +426,8 @@ fn test_layer_normalization_different_batch_sizes() {
             vec![batch_size, features],
             LayerNormalizationAxis::Default,
             1e-5,
-        );
+        )
+        .unwrap();
         let input =
             Array::from_shape_fn((batch_size, features), |(i, j)| (i * features + j) as f32)
                 .into_dyn();
@@ -441,7 +453,7 @@ fn test_layer_normalization_different_batch_sizes() {
 #[test]
 fn test_layer_normalization_parameter_count() {
     // Test parameter count correctness
-    let ln = LayerNormalization::new(vec![4, 10], LayerNormalizationAxis::Default, 1e-5);
+    let ln = LayerNormalization::new(vec![4, 10], LayerNormalizationAxis::Default, 1e-5).unwrap();
     let expected_params = 10 + 10; // gamma + beta
     assert_eq!(
         ln.param_count(),
@@ -456,7 +468,7 @@ fn test_layer_normalization_parameter_count() {
 #[test]
 fn test_layer_normalization_layer_type() {
     // Test layer type identification
-    let ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
     assert_eq!(ln.layer_type(), "LayerNormalization");
     println!("Layer type test passed");
 }
@@ -464,7 +476,7 @@ fn test_layer_normalization_layer_type() {
 #[test]
 fn test_layer_normalization_output_shape() {
     // Test output shape string formatting
-    let ln = LayerNormalization::new(vec![4, 8], LayerNormalizationAxis::Default, 1e-5);
+    let ln = LayerNormalization::new(vec![4, 8], LayerNormalizationAxis::Default, 1e-5).unwrap();
     let output_shape = ln.output_shape();
     assert_eq!(output_shape, "(4, 8)");
     println!("Output shape test passed: {}", output_shape);
@@ -474,14 +486,10 @@ fn test_layer_normalization_output_shape() {
 fn test_layer_normalization_with_sequential_model() {
     // Test layer normalization integration with Sequential model
     let mut model = Sequential::new();
-    model.add(Dense::new(4, 8, Linear::new()));
-    model.add(LayerNormalization::new(
-        vec![2, 8],
-        LayerNormalizationAxis::Default,
-        1e-5,
-    ));
-    model.add(Dense::new(8, 1, Linear::new()));
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
+    model.add(Dense::new(4, 8, Linear::new()).unwrap());
+    model.add(LayerNormalization::new(vec![2, 8], LayerNormalizationAxis::Default, 1e-5).unwrap());
+    model.add(Dense::new(8, 1, Linear::new()).unwrap());
+    model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let input = Array::ones((2, 4)).into_dyn();
     let target = Array::ones((2, 1)).into_dyn();
@@ -500,7 +508,8 @@ fn test_layer_normalization_with_sequential_model() {
 #[test]
 fn test_layer_normalization_set_weights() {
     // Test manual weight setting
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let new_gamma = Array::from_vec(vec![2.0, 2.0, 2.0]).into_dyn();
     let new_beta = Array::from_vec(vec![1.0, 1.0, 1.0]).into_dyn();
@@ -533,7 +542,8 @@ fn test_layer_normalization_3d_input() {
         vec![batch_size, sequence_len, features],
         LayerNormalizationAxis::Default,
         1e-5,
-    );
+    )
+    .unwrap();
 
     let input = Array::from_shape_fn((batch_size, sequence_len, features), |(i, j, k)| {
         (i * 100 + j * 10 + k) as f32
@@ -551,7 +561,8 @@ fn test_layer_normalization_3d_input() {
 #[test]
 fn test_layer_normalization_epsilon_effect() {
     // Test that epsilon prevents division by zero
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     // Create input with constant values (zero variance)
     let input = Array::from_shape_vec((2, 3), vec![5.0, 5.0, 5.0, 3.0, 3.0, 3.0])
@@ -589,12 +600,13 @@ fn test_layer_normalization_vs_batch_normalization_difference() {
     .into_dyn();
 
     // Layer normalization (normalizes across features for each sample)
-    let mut ln = LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
     ln.set_training(true);
     let ln_output = ln.forward(&input).unwrap();
 
     // Batch normalization (normalizes across batch for each feature)
-    let mut bn = BatchNormalization::new(vec![3, 4], 0.9, 1e-5);
+    let mut bn = BatchNormalization::new(vec![3, 4], 0.9, 1e-5).unwrap();
     bn.set_training(true);
     let bn_output = bn.forward(&input).unwrap();
 
@@ -624,7 +636,8 @@ fn test_layer_normalization_vs_batch_normalization_difference() {
 #[test]
 fn test_layer_normalization_gradient_flow() {
     // Test that gradients flow properly through the layer
-    let mut ln = LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     let input = Array::from_shape_vec((2, 4), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
         .unwrap()
@@ -655,7 +668,8 @@ fn test_layer_normalization_gradient_flow() {
 #[test]
 fn test_layer_normalization_multiple_forward_backward() {
     // Test multiple forward and backward passes
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     for i in 0..5 {
         let input = Array::from_shape_fn((2, 3), |(b, f)| (i + b + f) as f32).into_dyn();
@@ -679,7 +693,8 @@ fn test_layer_normalization_multiple_forward_backward() {
 #[test]
 fn test_layer_normalization_serialization() {
     // Test weight serialization and deserialization
-    let mut ln = LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5);
+    let mut ln =
+        LayerNormalization::new(vec![2, 3], LayerNormalizationAxis::Default, 1e-5).unwrap();
 
     // Do a forward pass to initialize
     let input = Array::ones((2, 3)).into_dyn();

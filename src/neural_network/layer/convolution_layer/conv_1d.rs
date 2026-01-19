@@ -59,8 +59,8 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 ///         1,                      // Stride
 ///         PaddingType::Valid,     // No padding
 ///         ReLU::new(), // ReLU activation layer
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -104,7 +104,17 @@ impl<T: ActivationLayer> Conv1D<T> {
     ///
     /// # Returns
     ///
-    /// * `Conv1D` - A new `Conv1D` layer instance
+    /// * `Result<Conv1D, ModelError>` - A new `Conv1D` layer instance or an error
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `filters` is 0
+    /// - `kernel_size` is 0
+    /// - `stride` is 0
+    /// - `input_shape` is not 3D
+    /// - Input channels is 0
+    /// - Input length is less than kernel size
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -112,7 +122,13 @@ impl<T: ActivationLayer> Conv1D<T> {
         stride: usize,
         padding: PaddingType,
         activation: T,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        // Validate input parameters
+        validate_filters(filters)?;
+        validate_kernel_size_1d(kernel_size)?;
+        validate_strides_1d(stride)?;
+        validate_input_shape_1d(&input_shape, kernel_size)?;
+
         let input_channels = input_shape[1];
 
         // Initialize weights using Xavier initialization for convolutional layers
@@ -129,7 +145,7 @@ impl<T: ActivationLayer> Conv1D<T> {
         // Initialize bias to zero
         let bias = Array2::zeros((1, filters));
 
-        Self {
+        Ok(Self {
             filters,
             kernel_size,
             stride,
@@ -146,7 +162,7 @@ impl<T: ActivationLayer> Conv1D<T> {
                 rmsprop_cache: None,
                 ada_grad_cache: None,
             },
-        }
+        })
     }
 
     /// Calculates the output shape after convolution.

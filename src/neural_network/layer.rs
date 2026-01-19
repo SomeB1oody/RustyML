@@ -1,5 +1,4 @@
 use super::*;
-use helper_functions::*;
 use ndarray::Zip;
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand_distr::{Normal, Uniform};
@@ -187,7 +186,7 @@ pub mod dense;
 /// A layer that flattens a 4D tensor into a 2D tensor
 pub mod flatten;
 /// A module containing helper functions for neural network layers
-mod helper_functions;
+mod helper_function;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
 /// Pooling layer for neural networks
@@ -203,6 +202,7 @@ pub use activation_layer::*;
 pub use convolution_layer::*;
 pub use dense::*;
 pub use flatten::*;
+use helper_function::*;
 pub use layer_weight::*;
 pub use pooling_layer::*;
 pub use recurrent_layer::*;

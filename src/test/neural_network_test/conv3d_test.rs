@@ -1,226 +1,299 @@
 use super::*;
 
 #[test]
-fn test_sequential_new() {
-    let model = Sequential::new();
-    // Test that we can create a new model without errors
-    // We can't access private fields directly, but we can test behavior
+fn test_conv3d_sequential_with_sgd() {
+    // Create a 5D input tensor: [batch_size, channels, depth, height, width]
+    let x = Array5::ones((2, 1, 8, 8, 8)).into_dyn();
+    // Create a target tensor - assume output size is 6x6x6 (Valid padding)
+    let y = Array5::ones((2, 3, 6, 6, 6)).into_dyn();
 
-    // Test that get_weights returns empty vector for new model
-    let weights = model.get_weights();
-    assert_eq!(weights.len(), 0);
-}
-
-#[test]
-fn test_sequential_add_layer() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(4, 3, ReLU::new()));
-
-    // Test that one layer was added
-    let weights = model.get_weights();
-    assert_eq!(weights.len(), 1);
-
-    model.add(Dense::new(3, 1, Sigmoid::new()));
-
-    // Test that second layer was added
-    let weights = model.get_weights();
-    assert_eq!(weights.len(), 2);
-}
-
-#[test]
-fn test_sequential_method_chaining() {
+    // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv3D::new(
+                3,                   // filters
+                (3, 3, 3),           // kernel_size
+                vec![2, 1, 8, 8, 8], // input_shape
+                (1, 1, 1),           // stride
+                PaddingType::Valid,  // padding
+                ReLU::new(),         // activation
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    // Test that both layers were added
-    let weights = model.get_weights();
-    assert_eq!(weights.len(), 2);
+    // Print the model structure
+    model.summary();
+
+    // Train the model
+    let result = model.fit(&x, &y, 3);
+    assert!(result.is_ok());
+
+    // Make predictions
+    let prediction = model.predict(&x);
+    assert_eq!(prediction.shape(), &[2, 3, 6, 6, 6]);
+
+    // Verify that the predictions are non-negative (ReLU activation function)
+    for value in prediction.iter() {
+        assert!(*value >= 0.0);
+    }
 }
 
 #[test]
-fn test_sequential_fit_success() {
+fn test_conv3d_sequential_with_rmsprop() {
+    // Create more complex training data
+    let x = Array5::from_shape_fn((2, 2, 6, 6, 6), |(b, c, d, h, w)| {
+        ((b * 2 + c * 3 + d + h + w) as f32).sin() * 0.5
+    })
+    .into_dyn();
+
+    let y = Array5::zeros((2, 2, 4, 4, 4)).into_dyn(); // Valid padding output
+
+    // Build the model
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv3D::new(
+                2,                   // filters
+                (3, 3, 3),           // kernel_size
+                vec![2, 2, 6, 6, 6], // input_shape
+                (1, 1, 1),           // stride
+                PaddingType::Valid,  // padding
+                Tanh::new(),         // activation
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
-    let x = Array::ones((3, 2)).into_dyn();
-    let y = Array::ones((3, 1)).into_dyn();
+    model.summary();
+
+    // Train the model
+    let result = model.fit(&x, &y, 4);
+    assert!(result.is_ok());
+
+    // Make predictions
+    let prediction = model.predict(&x);
+    assert_eq!(prediction.shape(), &[2, 2, 4, 4, 4]);
+
+    // Verify that Tanh output is within [-1, 1]
+    for value in prediction.iter() {
+        assert!(*value >= -1.0 && *value <= 1.0);
+    }
+}
+
+#[test]
+fn test_conv3d_different_strides() {
+    let x = Array5::ones((1, 1, 10, 10, 10)).into_dyn();
+
+    // Test with different stride values
+    let stride_2_conv = Conv3D::new(
+        1,
+        (3, 3, 3),
+        vec![1, 1, 10, 10, 10],
+        (2, 2, 2), // stride = 2
+        PaddingType::Valid,
+        ReLU::new(),
+    )
+    .unwrap();
+
+    let mut model = Sequential::new();
+    model
+        .add(stride_2_conv)
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+
+    let prediction = model.predict(&x);
+    assert_eq!(prediction.shape(), &[1, 1, 4, 4, 4]);
+}
+
+#[test]
+fn test_conv3d_multiple_channels() {
+    // Test multi-channel input
+    let x = Array5::from_shape_fn((2, 3, 6, 6, 6), |(b, c, d, h, w)| {
+        (b + c + d + h + w) as f32 * 0.1
+    })
+    .into_dyn();
+
+    let y = Array5::ones((2, 5, 4, 4, 4)).into_dyn();
+
+    let mut model = Sequential::new();
+    model
+        .add(
+            Conv3D::new(
+                5,                   // filters
+                (3, 3, 3),           // kernel_size
+                vec![2, 3, 6, 6, 6], // input_shape (3 channels)
+                (1, 1, 1),           // stride
+                PaddingType::Valid,  // padding
+                ReLU::new(),         // activation
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+
+    model.summary();
 
     let result = model.fit(&x, &y, 2);
     assert!(result.is_ok());
-}
 
-#[test]
-fn test_sequential_fit_no_optimizer() {
-    let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, ReLU::new()));
-
-    let x = Array::ones((3, 2)).into_dyn();
-    let y = Array::ones((3, 1)).into_dyn();
-
-    let result = model.fit(&x, &y, 1);
-    assert!(result.is_err());
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Optimizer not specified"));
-    }
-}
-
-#[test]
-fn test_sequential_fit_no_layers() {
-    let mut model = Sequential::new();
-    model.compile(SGD::new(0.01), MeanSquaredError::new());
-
-    let x = Array::ones((3, 2)).into_dyn();
-    let y = Array::ones((3, 1)).into_dyn();
-
-    let result = model.fit(&x, &y, 1);
-    assert!(result.is_err());
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Layers not specified"));
-    }
-}
-
-#[test]
-fn test_sequential_predict() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()));
-
-    let x = Array::ones((3, 2)).into_dyn();
     let prediction = model.predict(&x);
-
-    assert_eq!(prediction.shape(), &[3, 1]);
+    assert_eq!(prediction.shape(), &[2, 5, 4, 4, 4]);
 }
 
 #[test]
-fn test_sequential_summary() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 2, Sigmoid::new()))
-        .add(Dense::new(2, 1, Tanh::new()));
+fn test_conv3d_activation_functions() {
+    let x = Array5::from_shape_fn((1, 1, 4, 4, 4), |(_, _, d, _, _)| {
+        d as f32 - 2.0 // Generate negative values to test activation functions
+    })
+    .into_dyn();
 
-    // Test that summary doesn't panic
-    model.summary();
-}
+    // Test ReLU activation function
+    let mut relu_model = Sequential::new();
+    relu_model
+        .add(
+            Conv3D::new(
+                1,
+                (2, 2, 2),
+                vec![1, 1, 4, 4, 4],
+                (1, 1, 1),
+                PaddingType::Valid,
+                ReLU::new(),
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-#[test]
-fn test_sequential_get_weights() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()));
+    let relu_output = relu_model.predict(&x);
+    // ReLU output should be non-negative
+    for value in relu_output.iter() {
+        assert!(*value >= 0.0);
+    }
 
-    let weights = model.get_weights();
-    assert_eq!(weights.len(), 2);
+    // Test Sigmoid activation function
+    let mut sigmoid_model = Sequential::new();
+    sigmoid_model
+        .add(
+            Conv3D::new(
+                1,
+                (2, 2, 2),
+                vec![1, 1, 4, 4, 4],
+                (1, 1, 1),
+                PaddingType::Valid,
+                Sigmoid::new(),
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    // Check that the first layer returns Dense weights
-    if let LayerWeight::Dense(dense_weights) = &weights[0] {
-        assert_eq!(dense_weights.weight.shape(), &[2, 3]);
-        assert_eq!(dense_weights.bias.shape(), &[1, 3]);
-    } else {
-        panic!("Expected Dense layer weights");
+    let sigmoid_output = sigmoid_model.predict(&x);
+    // Sigmoid output should be within [0, 1]
+    for value in sigmoid_output.iter() {
+        assert!(*value >= 0.0 && *value <= 1.0);
     }
 }
 
 #[test]
-fn test_sequential_different_optimizers() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(3, 2, ReLU::new()))
-        .add(Dense::new(2, 1, Sigmoid::new()))
-        .compile(Adam::new(0.001, 0.9, 0.999, 1e-8), MeanAbsoluteError::new());
+fn test_conv3d_parameter_count() {
+    let conv3d = Conv3D::new(
+        4,                   // filters
+        (3, 3, 3),           // kernel_size
+        vec![2, 2, 5, 5, 5], // input_shape (2 channels)
+        (1, 1, 1),
+        PaddingType::Valid,
+        ReLU::new(),
+    )
+    .unwrap();
 
-    let x = Array::ones((2, 3)).into_dyn();
-    let y = Array::ones((2, 1)).into_dyn();
-
-    let result = model.fit(&x, &y, 1);
-    assert!(result.is_ok());
+    // Parameter count = weights + bias = (4 * 2 * 3 * 3 * 3) + (1 * 4) = 216 + 4 = 220
+    assert_eq!(conv3d.param_count(), TrainingParameters::Trainable(220));
 }
 
 #[test]
-fn test_sequential_complex_model() {
+fn test_conv3d_same_padding() {
+    let x = Array5::ones((1, 1, 8, 8, 8)).into_dyn();
+
+    // Test with Same padding
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 8, ReLU::new()))
-        .add(Dense::new(8, 4, ReLU::new()))
-        .add(Dense::new(4, 2, Tanh::new()))
-        .add(Dense::new(2, 1, Sigmoid::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv3D::new(
+                2,
+                (3, 3, 3),
+                vec![1, 1, 8, 8, 8],
+                (1, 1, 1),
+                PaddingType::Same,
+                ReLU::new(),
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let x = Array::ones((5, 4)).into_dyn();
-    let y = Array::zeros((5, 1)).into_dyn();
+    let prediction = model.predict(&x);
+    // With Same padding and stride 1, output should have the same spatial dimensions
+    assert_eq!(prediction.shape(), &[1, 2, 8, 8, 8]);
+}
+
+#[test]
+fn test_conv3d_with_adam() {
+    // Test Conv3D with Adam optimizer
+    let x = Array5::from_shape_fn((2, 1, 6, 6, 6), |(b, _, d, h, w)| {
+        ((b + d + h + w) as f32) * 0.1
+    })
+    .into_dyn();
+
+    let y = Array5::ones((2, 2, 4, 4, 4)).into_dyn();
+
+    let mut model = Sequential::new();
+    model
+        .add(
+            Conv3D::new(
+                2,
+                (3, 3, 3),
+                vec![2, 1, 6, 6, 6],
+                (1, 1, 1),
+                PaddingType::Valid,
+                ReLU::new(),
+            )
+            .unwrap(),
+        )
+        .compile(
+            Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
+
+    model.summary();
 
     let result = model.fit(&x, &y, 3);
     assert!(result.is_ok());
 
     let prediction = model.predict(&x);
-    assert_eq!(prediction.shape(), &[5, 1]);
+    assert_eq!(prediction.shape(), &[2, 2, 4, 4, 4]);
 }
 
 #[test]
-fn test_sequential_different_activations() {
+fn test_conv3d_asymmetric_stride() {
+    // Test with asymmetric strides
+    let x = Array5::ones((1, 1, 12, 8, 10)).into_dyn();
+
     let mut model = Sequential::new();
     model
-        .add(Dense::new(3, 4, ReLU::new()))
-        .add(Dense::new(4, 3, Tanh::new()))
-        .add(Dense::new(3, 2, Sigmoid::new()))
-        .add(Dense::new(2, 1, ReLU::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
-
-    let x = Array::ones((2, 3)).into_dyn();
-    let y = Array::ones((2, 1)).into_dyn();
-
-    let result = model.fit(&x, &y, 2);
-    assert!(result.is_ok());
+        .add(
+            Conv3D::new(
+                1,
+                (3, 3, 3),
+                vec![1, 1, 12, 8, 10],
+                (2, 1, 2), // Different strides for each dimension
+                PaddingType::Valid,
+                ReLU::new(),
+            )
+            .unwrap(),
+        )
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let prediction = model.predict(&x);
-    assert_eq!(prediction.shape(), &[2, 1]);
-}
-
-#[test]
-fn test_sequential_empty_model_summary() {
-    let model = Sequential::new();
-    // Test that summary works even for empty model
-    model.summary();
-}
-
-#[test]
-fn test_sequential_predict_before_compile() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()));
-
-    let x = Array::ones((2, 2)).into_dyn();
-
-    // Should be able to predict even without compiling
-    let prediction = model.predict(&x);
-    assert_eq!(prediction.shape(), &[2, 1]);
-}
-
-#[test]
-fn test_sequential_multiple_fit_calls() {
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, ReLU::new()))
-        .add(Dense::new(3, 1, Sigmoid::new()))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
-
-    let x = Array::ones((3, 2)).into_dyn();
-    let y = Array::ones((3, 1)).into_dyn();
-
-    // First fit
-    let result1 = model.fit(&x, &y, 1);
-    assert!(result1.is_ok());
-
-    // Second fit should also work
-    let result2 = model.fit(&x, &y, 1);
-    assert!(result2.is_ok());
+    // Output: depth = (12-3)/2+1 = 5, height = (8-3)/1+1 = 6, width = (10-3)/2+1 = 4
+    assert_eq!(prediction.shape(), &[1, 1, 5, 6, 4]);
 }

@@ -11,7 +11,7 @@ fn test_global_average_pooling_2d() {
     // Add GlobalAveragePooling2D layer
     model
         .add(GlobalAveragePooling2D::new())
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Print model structure
     model.summary();

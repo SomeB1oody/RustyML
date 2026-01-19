@@ -38,15 +38,26 @@ impl Adam {
     ///
     /// # Returns
     ///
-    /// * `Adam` - A new Adam optimizer instance
-    pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Self {
-        Self {
+    /// * `Result<Self, ModelError>` - A new Adam optimizer instance or an error
+    pub fn new(
+        learning_rate: f32,
+        beta1: f32,
+        beta2: f32,
+        epsilon: f32,
+    ) -> Result<Self, ModelError> {
+        // input validation
+        validate_learning_rate(learning_rate)?;
+        validate_decay_rate(beta1, "beta1")?;
+        validate_decay_rate(beta2, "beta2")?;
+        validate_epsilon(epsilon)?;
+
+        Ok(Self {
             learning_rate,
             beta1,
             beta2,
             epsilon,
             t: 0,
-        }
+        })
     }
 }
 

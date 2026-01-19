@@ -12,22 +12,28 @@ fn test_flatten_in_sequential() {
     // Build model: convolution layer -> max pooling layer -> flatten layer -> fully connected layer
     let mut model = Sequential::new();
     model
-        .add(Conv2D::new(
-            6,                  // Number of filters
-            (3, 3),             // Kernel size
-            vec![2, 3, 4, 4],   // Input shape
-            (1, 1),             // Stride
-            PaddingType::Valid, // No padding
-            ReLU::new(),        // ReLU activation function
-        ))
-        .add(MaxPooling2D::new(
-            (2, 2),           // Pooling window size
-            vec![2, 6, 2, 2], // Input shape (after convolution)
-            None,             // Use default stride
-        ))
-        .add(Flatten::new(vec![2, 6, 1, 1])) // Flatten layer
-        .add(Dense::new(6, 1, Sigmoid::new())) // Fully connected layer
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(
+            Conv2D::new(
+                6,                  // Number of filters
+                (3, 3),             // Kernel size
+                vec![2, 3, 4, 4],   // Input shape
+                (1, 1),             // Stride
+                PaddingType::Valid, // No padding
+                ReLU::new(),        // ReLU activation function
+            )
+            .unwrap(),
+        )
+        .add(
+            MaxPooling2D::new(
+                (2, 2),           // Pooling window size
+                vec![2, 6, 2, 2], // Input shape (after convolution)
+                None,             // Use default stride
+            )
+            .unwrap(),
+        )
+        .add(Flatten::new(vec![2, 6, 1, 1]).unwrap()) // Flatten layer
+        .add(Dense::new(6, 1, Sigmoid::new()).unwrap()) // Fully connected layer
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Print model structure
     model.summary();
@@ -57,8 +63,8 @@ fn test_flatten_only_model() {
     // Create model with only Flatten layer
     let mut model = Sequential::new();
     model
-        .add(Flatten::new(vec![2, 3, 4, 4]))
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .add(Flatten::new(vec![2, 3, 4, 4]).unwrap())
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Print model structure
     model.summary();
@@ -82,32 +88,41 @@ fn test_multiple_layers_with_flatten() {
     // one flatten layer and two dense layers
     let mut model = Sequential::new();
     model
-        .add(Conv2D::new(
-            8,                 // 8 filters
-            (3, 3),            // 3x3 kernel
-            vec![2, 1, 8, 8],  // Input shape
-            (1, 1),            // Stride
-            PaddingType::Same, // Same padding
-            ReLU::new(),       // ReLU activation
-        ))
-        .add(Conv2D::new(
-            16,                 // 16 filters
-            (3, 3),             // 3x3 kernel
-            vec![2, 8, 8, 8],   // Input shape (after first convolution)
-            (1, 1),             // Stride
-            PaddingType::Valid, // No padding
-            ReLU::new(),        // ReLU activation
-        ))
-        .add(MaxPooling2D::new(
-            (2, 2),            // 2x2 pooling window
-            vec![2, 16, 6, 6], // Input shape (after second convolution)
-            Some((2, 2)),      // 2x2 stride
-        ))
-        .add(Flatten::new(vec![2, 16, 3, 3])) // Flatten layer
-        .add(Dense::new(16 * 3 * 3, 20, ReLU::new())) // Fully connected layer
-        .add(Dense::new(20, 10, Softmax::new())) // Output layer
+        .add(
+            Conv2D::new(
+                8,                 // 8 filters
+                (3, 3),            // 3x3 kernel
+                vec![2, 1, 8, 8],  // Input shape
+                (1, 1),            // Stride
+                PaddingType::Same, // Same padding
+                ReLU::new(),       // ReLU activation
+            )
+            .unwrap(),
+        )
+        .add(
+            Conv2D::new(
+                16,                 // 16 filters
+                (3, 3),             // 3x3 kernel
+                vec![2, 8, 8, 8],   // Input shape (after first convolution)
+                (1, 1),             // Stride
+                PaddingType::Valid, // No padding
+                ReLU::new(),        // ReLU activation
+            )
+            .unwrap(),
+        )
+        .add(
+            MaxPooling2D::new(
+                (2, 2),            // 2x2 pooling window
+                vec![2, 16, 6, 6], // Input shape (after second convolution)
+                Some((2, 2)),      // 2x2 stride
+            )
+            .unwrap(),
+        )
+        .add(Flatten::new(vec![2, 16, 3, 3]).unwrap()) // Flatten layer
+        .add(Dense::new(16 * 3 * 3, 20, ReLU::new()).unwrap()) // Fully connected layer
+        .add(Dense::new(20, 10, Softmax::new()).unwrap()) // Output layer
         .compile(
-            Adam::new(0.001, 0.9, 0.999, 1e-8),
+            Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
             CategoricalCrossEntropy::new(),
         );
 
@@ -131,7 +146,7 @@ fn test_multiple_layers_with_flatten() {
 #[test]
 fn test_flatten_3d() {
     let input = Array3::ones((2, 10, 5)).into_dyn(); // batch=2, features=10, length=5
-    let mut flatten = Flatten::new(vec![2, 10, 5]);
+    let mut flatten = Flatten::new(vec![2, 10, 5]).unwrap();
 
     let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 50]); // 10 * 5 = 50
@@ -145,7 +160,7 @@ fn test_flatten_3d() {
 #[test]
 fn test_flatten_4d() {
     let input = Array4::ones((2, 3, 4, 4)).into_dyn(); // batch=2, channels=3, height=4, width=4
-    let mut flatten = Flatten::new(vec![2, 3, 4, 4]);
+    let mut flatten = Flatten::new(vec![2, 3, 4, 4]).unwrap();
 
     let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 48]); // 3 * 4 * 4 = 48
@@ -159,7 +174,7 @@ fn test_flatten_4d() {
 #[test]
 fn test_flatten_5d() {
     let input = Array5::ones((2, 3, 4, 8, 8)).into_dyn(); // batch=2, channels=3, depth=4, height=8, width=8
-    let mut flatten = Flatten::new(vec![2, 3, 4, 8, 8]);
+    let mut flatten = Flatten::new(vec![2, 3, 4, 8, 8]).unwrap();
 
     let output = flatten.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 768]); // 3 * 4 * 8 * 8 = 768

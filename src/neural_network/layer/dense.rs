@@ -47,9 +47,9 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, ReLU::new()))
-///     .add(Dense::new(3, 1, ReLU::new()));
-/// model.compile(SGD::new(0.01), MeanSquaredError::new());
+/// model.add(Dense::new(4, 3, ReLU::new()).unwrap())
+///     .add(Dense::new(3, 1, ReLU::new()).unwrap());
+/// model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
 /// model.summary();
@@ -85,11 +85,23 @@ impl<T: ActivationLayer> Dense<T> {
     /// # Returns
     ///
     /// * `Dense` - A new `Dense` layer instance with specified dimensions
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+        // Validate that dimensions are greater than zero
+        if input_dim == 0 {
+            return Err(ModelError::InputValidationError(
+                "input_dim must be greater than 0".to_string(),
+            ));
+        }
+        if units == 0 {
+            return Err(ModelError::InputValidationError(
+                "units must be greater than 0".to_string(),
+            ));
+        }
+
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
         let weights = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
         let bias = Array::zeros((1, units));
-        Self {
+        Ok(Self {
             input_dim,
             output_dim: units,
             weights,
@@ -103,7 +115,7 @@ impl<T: ActivationLayer> Dense<T> {
                 rmsprop_cache: None,
                 ada_grad_cache: None,
             },
-        }
+        })
     }
 
     /// Sets the weights and bias for this layer.

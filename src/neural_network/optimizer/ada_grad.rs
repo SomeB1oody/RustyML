@@ -30,12 +30,16 @@ impl AdaGrad {
     ///
     /// # Returns
     ///
-    /// * `AdaGrad` - A new AdaGrad optimizer instance
-    pub fn new(learning_rate: f32, epsilon: f32) -> Self {
-        Self {
+    /// * `Result<Self, ModelError>` - A new AdaGrad optimizer instance or an error
+    pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, ModelError> {
+        // input validation
+        validate_positive_finite(learning_rate, "learning_rate")?;
+        validate_positive_finite(epsilon, "epsilon")?;
+
+        Ok(Self {
             learning_rate,
             epsilon,
-        }
+        })
     }
 }
 

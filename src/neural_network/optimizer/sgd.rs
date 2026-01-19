@@ -26,9 +26,12 @@ impl SGD {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new SGD optimizer instance
-    pub fn new(learning_rate: f32) -> Self {
-        Self { learning_rate }
+    /// * `Result<Self, ModelError>` - A new SGD optimizer instance or an error
+    pub fn new(learning_rate: f32) -> Result<Self, ModelError> {
+        // input validation
+        validate_learning_rate(learning_rate)?;
+
+        Ok(Self { learning_rate })
     }
 
     /// Simultaneously update two sets of parameters (with automatic parallel/sequential selection)

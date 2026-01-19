@@ -9,9 +9,9 @@ fn test_ada_grad_dense_basic() {
     // Build the model: add two Dense layers, use AdaGrad optimizer with MSE loss function
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model.compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(4, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model.compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Print model structure
     model.summary();
@@ -37,8 +37,8 @@ fn test_ada_grad_simple_rnn() {
     // Build model: one SimpleRNN layer with Tanh activation
     let mut model = Sequential::new();
     model
-        .add(SimpleRNN::new(4, 3, Tanh::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(SimpleRNN::new(4, 3, Tanh::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Print structure
     model.summary();
@@ -63,8 +63,8 @@ fn test_ada_grad_lstm() {
     // Create LSTM layer with 4 input features, 3 units, Tanh activation
     let mut model = Sequential::new();
     model
-        .add(LSTM::new(4, 3, Tanh::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(LSTM::new(4, 3, Tanh::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Train the model
     model.fit(&input, &target, 3).unwrap();
@@ -86,8 +86,8 @@ fn test_ada_grad_gru() {
     // Create GRU layer with 5 input features, 4 units, Tanh activation
     let mut model = Sequential::new();
     model
-        .add(GRU::new(5, 4, Tanh::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(GRU::new(5, 4, Tanh::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Train the model
     model.fit(&input, &target, 3).unwrap();
@@ -109,15 +109,18 @@ fn test_ada_grad_conv1d() {
     // Create Conv1D layer
     let mut model = Sequential::new();
     model
-        .add(Conv1D::new(
-            4,                  // filters
-            3,                  // kernel_size
-            vec![2, 3, 10],     // input_shape
-            1,                  // stride
-            PaddingType::Valid, // padding
-            ReLU::new(),        // activation
-        ))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv1D::new(
+                4,                  // filters
+                3,                  // kernel_size
+                vec![2, 3, 10],     // input_shape
+                1,                  // stride
+                PaddingType::Valid, // padding
+                ReLU::new(),        // activation
+            )
+            .unwrap(),
+        )
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Train the model
     model.fit(&input, &target, 3).unwrap();
@@ -139,15 +142,18 @@ fn test_ada_grad_conv2d() {
     // Create Conv2D layer
     let mut model = Sequential::new();
     model
-        .add(Conv2D::new(
-            8,                  // filters
-            (3, 3),             // kernel_size
-            vec![2, 3, 8, 8],   // input_shape
-            (1, 1),             // stride
-            PaddingType::Valid, // padding
-            ReLU::new(),        // activation
-        ))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv2D::new(
+                8,                  // filters
+                (3, 3),             // kernel_size
+                vec![2, 3, 8, 8],   // input_shape
+                (1, 1),             // stride
+                PaddingType::Valid, // padding
+                ReLU::new(),        // activation
+            )
+            .unwrap(),
+        )
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Train the model
     model.fit(&input, &target, 3).unwrap();
@@ -169,15 +175,18 @@ fn test_ada_grad_conv3d() {
     // Create Conv3D layer
     let mut model = Sequential::new();
     model
-        .add(Conv3D::new(
-            4,                   // filters
-            (2, 2, 2),           // kernel_size
-            vec![2, 2, 4, 4, 4], // input_shape
-            (1, 1, 1),           // stride
-            PaddingType::Valid,  // padding
-            ReLU::new(),         // activation
-        ))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(
+            Conv3D::new(
+                4,                   // filters
+                (2, 2, 2),           // kernel_size
+                vec![2, 2, 4, 4, 4], // input_shape
+                (1, 1, 1),           // stride
+                PaddingType::Valid,  // padding
+                ReLU::new(),         // activation
+            )
+            .unwrap(),
+        )
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
 
     // Train the model
     model.fit(&input, &target, 3).unwrap();
@@ -198,10 +207,10 @@ fn test_ada_grad_mixed_layers() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(10, 16, ReLU::new()))
-        .add(Dense::new(16, 8, ReLU::new()))
-        .add(Dense::new(8, 2, Sigmoid::new()));
-    model.compile(AdaGrad::new(0.05, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(10, 16, ReLU::new()).unwrap())
+        .add(Dense::new(16, 8, ReLU::new()).unwrap())
+        .add(Dense::new(8, 2, Sigmoid::new()).unwrap());
+    model.compile(AdaGrad::new(0.05, 1e-8).unwrap(), MeanSquaredError::new());
 
     model.summary();
 
@@ -227,18 +236,18 @@ fn test_ada_grad_learning_rate_effect() {
     // Model with higher learning rate
     let mut model_high_lr = Sequential::new();
     model_high_lr
-        .add(Dense::new(5, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model_high_lr.compile(AdaGrad::new(0.1, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(5, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model_high_lr.compile(AdaGrad::new(0.1, 1e-8).unwrap(), MeanSquaredError::new());
     model_high_lr.fit(&x, &y, 5).unwrap();
     let pred_high = model_high_lr.predict(&x);
 
     // Model with lower learning rate
     let mut model_low_lr = Sequential::new();
     model_low_lr
-        .add(Dense::new(5, 3, ReLU::new()))
-        .add(Dense::new(3, 1, ReLU::new()));
-    model_low_lr.compile(AdaGrad::new(0.001, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(5, 3, ReLU::new()).unwrap())
+        .add(Dense::new(3, 1, ReLU::new()).unwrap());
+    model_low_lr.compile(AdaGrad::new(0.001, 1e-8).unwrap(), MeanSquaredError::new());
     model_low_lr.fit(&x, &y, 5).unwrap();
     let pred_low = model_low_lr.predict(&x);
 
@@ -260,24 +269,24 @@ fn test_ada_grad_with_different_activations() {
     // Test with ReLU
     let mut model_relu = Sequential::new();
     model_relu
-        .add(Dense::new(4, 2, ReLU::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(4, 2, ReLU::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_relu.fit(&x, &y, 3).unwrap();
     let pred_relu = model_relu.predict(&x);
 
     // Test with Sigmoid
     let mut model_sigmoid = Sequential::new();
     model_sigmoid
-        .add(Dense::new(4, 2, Sigmoid::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(4, 2, Sigmoid::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_sigmoid.fit(&x, &y, 3).unwrap();
     let pred_sigmoid = model_sigmoid.predict(&x);
 
     // Test with Tanh
     let mut model_tanh = Sequential::new();
     model_tanh
-        .add(Dense::new(4, 2, Tanh::new()))
-        .compile(AdaGrad::new(0.01, 1e-8), MeanSquaredError::new());
+        .add(Dense::new(4, 2, Tanh::new()).unwrap())
+        .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_tanh.fit(&x, &y, 3).unwrap();
     let pred_tanh = model_tanh.predict(&x);
 

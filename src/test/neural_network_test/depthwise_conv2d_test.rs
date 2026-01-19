@@ -9,7 +9,8 @@ fn test_depthwise_conv2d_creation() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
-    );
+    )
+    .unwrap();
 
     // Verify layer type
     assert_eq!(layer.layer_type(), "DepthwiseConv2D");
@@ -52,7 +53,8 @@ fn test_depthwise_conv2d_forward() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     layer.initialize_weights(channels);
 
     // Forward propagation
@@ -79,13 +81,14 @@ fn test_depthwise_conv2d_sequential_model() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
-    );
+    )
+    .unwrap();
     depthwise_layer.initialize_weights(3);
 
     // Add layer and compile model
     model
         .add(depthwise_layer)
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create test input data: [batch_size, channels, height, width]
     let batch_size = 1;
@@ -134,12 +137,13 @@ fn test_depthwise_conv2d_same_padding() {
         (1, 1),            // strides
         PaddingType::Same, // padding
         Linear::new(),     // no activation
-    );
+    )
+    .unwrap();
     depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create input data
     let input_data =
@@ -164,12 +168,13 @@ fn test_depthwise_conv2d_different_strides() {
         (2, 2),             // strides - larger strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create input data
     let input_data =
@@ -196,12 +201,13 @@ fn test_depthwise_conv2d_training() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
-    );
+    )
+    .unwrap();
     depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
-        .compile(SGD::new(0.1), MeanSquaredError::new());
+        .compile(SGD::new(0.1).unwrap(), MeanSquaredError::new());
 
     // Create training data
     let input_data = Array4::from_shape_fn((4, 2, 5, 5), |(b, c, h, w)| {
@@ -231,7 +237,8 @@ fn test_depthwise_conv2d_backward() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     layer.initialize_weights(input_channels);
 
     // Create simple input data
@@ -261,7 +268,8 @@ fn test_depthwise_conv2d_channel_independence() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     layer.initialize_weights(2);
 
     // Create special input: first channel all 1s, second channel all 2s
@@ -305,7 +313,8 @@ fn test_depthwise_conv2d_edge_cases() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     layer_1x1.initialize_weights(1);
 
     let input_1x1 = Array4::ones((1, 1, 2, 2)).into_dyn();
@@ -319,7 +328,8 @@ fn test_depthwise_conv2d_edge_cases() {
         (3, 3),             // large strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     layer_large_stride.initialize_weights(1);
 
     let input_large = Array4::ones((1, 1, 5, 5)).into_dyn();
@@ -338,12 +348,13 @@ fn test_depthwise_conv2d_multiple_batches() {
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
-    );
+    )
+    .unwrap();
     depthwise_layer.initialize_weights(3);
 
     model
         .add(depthwise_layer)
-        .compile(SGD::new(0.01), MeanSquaredError::new());
+        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Create multi-batch input data
     let batch_size = 5;

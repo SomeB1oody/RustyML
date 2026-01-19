@@ -16,7 +16,7 @@ fn test_average_pooling_1d_shape() {
     ];
 
     for (pool_size, stride, expected_length) in test_cases {
-        let mut layer = AveragePooling1D::new(pool_size, vec![2, 3, 10], Some(stride));
+        let mut layer = AveragePooling1D::new(pool_size, vec![2, 3, 10], Some(stride)).unwrap();
 
         let output = layer.forward(&input_data).unwrap();
 
@@ -52,7 +52,7 @@ fn test_average_pooling_1d_forward() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=2, stride=2
-    let mut layer = AveragePooling1D::new(2, vec![2, 3, 8], Some(2));
+    let mut layer = AveragePooling1D::new(2, vec![2, 3, 8], Some(2)).unwrap();
 
     // Perform forward propagation
     let output = layer.forward(&input).unwrap();
@@ -96,7 +96,7 @@ fn test_average_pooling_1d_backward() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=2, stride=1
-    let mut layer = AveragePooling1D::new(2, vec![1, 1, 4], Some(1));
+    let mut layer = AveragePooling1D::new(2, vec![1, 1, 4], Some(1)).unwrap();
 
     // Perform forward propagation
     let output = layer.forward(&input).unwrap();
@@ -149,12 +149,18 @@ fn test_average_pooling_1d_with_sequential() {
     // Create Sequential model
     let mut model = Sequential::new();
     model
-        .add(AveragePooling1D::new(
-            2,             // Pool size
-            vec![2, 3, 8], // Input shape
-            Some(2),       // Stride (optional)
-        ))
-        .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+        .add(
+            AveragePooling1D::new(
+                2,             // Pool size
+                vec![2, 3, 8], // Input shape
+                Some(2),       // Stride (optional)
+            )
+            .unwrap(),
+        )
+        .compile(
+            RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+            MeanSquaredError::new(),
+        );
 
     // Perform prediction
     let output = model.predict(&x);
@@ -183,7 +189,7 @@ fn test_average_pooling_1d_odd_window_size() {
     let input = input_data.clone().into_dyn();
 
     // Create pooling layer, pool size=3, stride=1
-    let mut layer = AveragePooling1D::new(3, vec![1, 1, 5], Some(1));
+    let mut layer = AveragePooling1D::new(3, vec![1, 1, 5], Some(1)).unwrap();
 
     // Perform forward propagation
     let output = layer.forward(&input).unwrap();
@@ -199,7 +205,7 @@ fn test_average_pooling_1d_odd_window_size() {
 
 #[test]
 fn test_layer_type_and_output_shape() {
-    let layer = AveragePooling1D::new(2, vec![1, 3, 10], Some(2));
+    let layer = AveragePooling1D::new(2, vec![1, 3, 10], Some(2)).unwrap();
 
     // Test layer type
     assert_eq!(layer.layer_type(), "AveragePooling1D");

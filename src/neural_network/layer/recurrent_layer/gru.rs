@@ -56,8 +56,8 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// // Create GRU layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(GRU::new(4, 3, Tanh::new()))
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+/// model.add(GRU::new(4, 3, Tanh::new()).unwrap())
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -100,17 +100,20 @@ impl<T: ActivationLayer> GRU<T> {
     ///
     /// # Returns
     ///
-    /// * `GRU` - A new `GRU` instance with:
+    /// * `Result<GRU, ModelError>` - A new `GRU` instance with:
     ///     - Three gates (reset, update, candidate) initialized with random weights
     ///     - All caches set to None (will be allocated during first forward pass)
     ///     - activation layer for output transformation
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Self {
-        Self {
+    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+        // Validate that dimensions are greater than 0
+        validate_recurrent_dimensions(input_dim, units)?;
+
+        Ok(Self {
             input_dim,
             units,
-            reset_gate: Gate::new(input_dim, units, 0.0),
-            update_gate: Gate::new(input_dim, units, 0.0),
-            candidate_gate: Gate::new(input_dim, units, 0.0),
+            reset_gate: Gate::new(input_dim, units, 0.0)?,
+            update_gate: Gate::new(input_dim, units, 0.0)?,
+            candidate_gate: Gate::new(input_dim, units, 0.0)?,
             input_cache: None,
             hidden_cache: None,
             r_cache: None,
@@ -118,7 +121,7 @@ impl<T: ActivationLayer> GRU<T> {
             h_candidate_cache: None,
             rh_cache: None,
             activation,
-        }
+        })
     }
 
     /// Sets the weights for all three gates in this GRU layer.
@@ -161,11 +164,7 @@ impl<T: ActivationLayer> GRU<T> {
 impl<T: ActivationLayer> Layer for GRU<T> {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 3D
-        if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
-        }
+        validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 

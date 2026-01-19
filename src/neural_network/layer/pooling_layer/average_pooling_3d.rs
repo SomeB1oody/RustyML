@@ -36,11 +36,11 @@ const AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 ///     (2, 2, 2),                    // Pooling window size: 2×2×2
 ///     vec![1, 16, 32, 32, 32],      // Input shape: [batch, channels, depth, height, width]
 ///     Some((2, 2, 2)),              // Strides: move by 2 in each dimension
-/// ));
+/// ).unwrap());
 ///
 /// // Compile the model with optimizer and loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8),    // RMSprop optimizer
+///     RMSprop::new(0.001, 0.9, 1e-8).unwrap(),    // RMSprop optimizer
 ///     MeanSquaredError::new()            // Mean squared error loss
 /// );
 ///
@@ -83,27 +83,25 @@ impl AveragePooling3D {
     ///
     /// # Returns
     ///
-    /// * `AveragePooling3D` - A new `AveragePooling3D` instance
+    /// * `Result<AveragePooling3D, ModelError>` - A new `AveragePooling3D` instance or an error
     pub fn new(
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize, usize)>,
-    ) -> Self {
-        // Verify input is 5D: [batch_size, channels, depth, height, width]
-        assert_eq!(
-            input_shape.len(),
-            5,
-            "Input tensor must be 5-dimensional: [batch_size, channels, depth, height, width]"
-        );
-
+    ) -> Result<Self, ModelError> {
         let strides = strides.unwrap_or(pool_size);
 
-        Self {
+        // input validation
+        validate_input_shape_dims(&input_shape, 5, "AveragePooling3D")?;
+        validate_pool_size_3d(pool_size)?;
+        validate_strides_3d(strides)?;
+
+        Ok(Self {
             pool_size,
             strides,
             input_shape,
             input_cache: None,
-        }
+        })
     }
 }
 

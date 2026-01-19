@@ -55,8 +55,8 @@ const MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///         2,              // pool window size
 ///         2,              // stride
 ///         vec![2, 3, 8],  // input shape
-///     ))
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+///     ).unwrap())
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
 /// let output = model.predict(&x);
@@ -96,22 +96,24 @@ impl MaxPooling1D {
     ///
     /// # Returns
     ///
-    /// * `MaxPooling1D` - a new instance of `MaxPooling1D`
-    pub fn new(pool_size: usize, stride: usize, input_shape: Vec<usize>) -> Self {
-        // verify input is 3D: [batch_size, channels, length]
-        assert_eq!(
-            input_shape.len(),
-            3,
-            "Input shape must be 3-dimensional: [batch_size, channels, length]"
-        );
+    /// * `Result<MaxPooling1D, ModelError>` - a new instance of `MaxPooling1D` or an error
+    pub fn new(
+        pool_size: usize,
+        stride: usize,
+        input_shape: Vec<usize>,
+    ) -> Result<Self, ModelError> {
+        // input validation
+        validate_input_shape_dims(&input_shape, 3, "MaxPooling1D")?;
+        validate_pool_size_1d(pool_size, input_shape[2])?;
+        validate_stride_1d(stride)?;
 
-        MaxPooling1D {
+        Ok(MaxPooling1D {
             pool_size,
             stride,
             input_shape,
             input_cache: None,
             max_positions: None,
-        }
+        })
     }
 }
 

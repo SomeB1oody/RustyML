@@ -23,7 +23,7 @@ use super::*;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianDropout layer with dropout rate of 0.3
-/// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128]);
+/// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -42,28 +42,25 @@ impl GaussianDropout {
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate, must be between 0 and 1. The standard deviation of the
+    /// - `rate` - Dropout rate, must be between 0 and 1 (exclusive). The standard deviation of the
     ///   multiplicative Gaussian noise will be computed as sqrt(rate / (1 - rate)).
     /// - `input_shape` - Shape of the input tensor.
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the GaussianDropout layer.
+    /// * `Result<Self, ModelError>` - A new instance of the GaussianDropout layer, or an error if validation fails.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if rate is not between 0 and 1.
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Self {
-        assert!(
-            rate >= 0.0 && rate < 1.0,
-            "Dropout rate must be in [0, 1), got {}",
-            rate
-        );
-        GaussianDropout {
+    /// Returns `ModelError::InputValidationError` if rate is not in range [0, 1).
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+        validate_rate_exclusive(rate, "Dropout rate")?;
+
+        Ok(GaussianDropout {
             rate,
             input_shape,
             training: true,
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -71,21 +68,8 @@ impl GaussianDropout {
 
 impl Layer for GaussianDropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        // Validate dropout rate
-        if self.rate < 0.0 || self.rate >= 1.0 {
-            return Err(ModelError::InputValidationError(
-                "Dropout rate must be in range [0, 1)".to_string(),
-            ));
-        }
-
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
+        validate_rate_exclusive(self.rate, "Dropout rate")?;
+        validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when rate is 0, pass input through unchanged
         if !self.training || self.rate == 0.0 {

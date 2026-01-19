@@ -45,7 +45,7 @@ macro_rules! channel_range {
 ///
 /// // Create a GroupNormalization layer for input shape [batch, channels, spatial]
 /// // with 4 groups dividing 8 channels
-/// let mut gn_layer = GroupNormalization::new(vec![4, 8, 32], 4, 1, 1e-5);
+/// let mut gn_layer = GroupNormalization::new(vec![4, 8, 32], 4, 1, 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array3::ones((4, 8, 32)).into_dyn();
@@ -87,7 +87,15 @@ impl GroupNormalization {
     ///
     /// # Returns
     ///
-    /// * `Self` - A new instance of the GroupNormalization layer.
+    /// * `Result<Self, ModelError>` - A new instance of the GroupNormalization layer, or an error if validation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `input_shape` is empty
+    /// - `num_groups` is 0
+    /// - `epsilon` is not positive
+    /// - `channel_axis` is out of bounds or is 0 (batch axis)
     ///
     /// # Note
     ///
@@ -98,7 +106,12 @@ impl GroupNormalization {
         num_groups: usize,
         channel_axis: usize,
         epsilon: f32,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
+        validate_input_shape_not_empty(&input_shape)?;
+        validate_num_groups_positive(num_groups)?;
+        validate_epsilon(epsilon)?;
+        validate_channel_axis_with_shape(channel_axis, &input_shape)?;
+
         // For group normalization, parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > channel_axis {
             let num_channels = input_shape[channel_axis];
@@ -111,7 +124,7 @@ impl GroupNormalization {
 
         let param_shape_ndarray = param_shape.as_slice();
 
-        GroupNormalization {
+        Ok(GroupNormalization {
             num_groups,
             epsilon,
             channel_axis,
@@ -126,7 +139,7 @@ impl GroupNormalization {
             grad_gamma: None,
             grad_beta: None,
             optimizer_cache: OptimizerCacheNormalizationLayer::default(),
-        }
+        })
     }
 
     mode_dependent_layer_set_training!();
@@ -145,49 +158,15 @@ impl GroupNormalization {
 
 impl Layer for GroupNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        // Validate input shape matches expected shape
-        if !self.input_shape.is_empty() && input.shape() != self.input_shape.as_slice() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input shape mismatch: expected {:?}, got {:?}",
-                self.input_shape,
-                input.shape()
-            )));
-        }
-
-        // Group normalization expects at least 3D input: [batch, channels, ...]
-        if input.ndim() < 3 {
-            return Err(ModelError::InputValidationError(format!(
-                "Group normalization expects at least 3D input, got {}D",
-                input.ndim()
-            )));
-        }
-
-        // Validate channel axis
-        if self.channel_axis == 0 {
-            return Err(ModelError::InputValidationError(
-                "Channel axis cannot be 0 (batch axis)".to_string(),
-            ));
-        }
-
-        if self.channel_axis >= input.ndim() {
-            return Err(ModelError::InputValidationError(format!(
-                "Channel axis {} is out of bounds for input with {} dimensions",
-                self.channel_axis,
-                input.ndim()
-            )));
-        }
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
+        validate_channel_axis(self.channel_axis, input.ndim())?;
 
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let num_channels = input_shape[self.channel_axis];
 
-        // Validate num_groups
-        if num_channels % self.num_groups != 0 {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of channels ({}) must be divisible by num_groups ({})",
-                num_channels, self.num_groups
-            )));
-        }
+        validate_num_groups(num_channels, self.num_groups)?;
 
         let channels_per_group = num_channels / self.num_groups;
 

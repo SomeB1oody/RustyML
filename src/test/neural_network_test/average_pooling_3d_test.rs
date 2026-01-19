@@ -5,7 +5,7 @@ fn test_average_pooling_3d_basic() {
     // Create a 3D average pooling layer
     let pool_size = (2, 2, 2);
     let input_shape = vec![1, 2, 4, 4, 4];
-    let layer = AveragePooling3D::new(pool_size, input_shape.clone(), None);
+    let layer = AveragePooling3D::new(pool_size, input_shape.clone(), None).unwrap();
 
     // Check the basic properties of the layer
     assert_eq!(layer.layer_type(), "AveragePooling3D");
@@ -17,7 +17,7 @@ fn test_average_pooling_3d_basic() {
 fn test_average_pooling_3d_forward() {
     // Create test data
     let input_shape = vec![1, 1, 4, 4, 4];
-    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None);
+    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None).unwrap();
 
     // Create the input tensor, all values are 8.0, so the average value of the 2x2x2 pooling window should also be 8.0
     let input = Array5::from_elem((1, 1, 4, 4, 4), 8.0).into_dyn();
@@ -37,7 +37,7 @@ fn test_average_pooling_3d_forward() {
 #[test]
 fn test_average_pooling_3d_with_strides() {
     let input_shape = vec![1, 1, 6, 6, 6];
-    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, Some((3, 3, 3)));
+    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, Some((3, 3, 3))).unwrap();
 
     // Create the input tensor
     let input =
@@ -56,14 +56,20 @@ fn test_average_pooling_3d_sequential_model() {
     let mut model = Sequential::new();
 
     // Add an AveragePooling3D layer
-    model.add(AveragePooling3D::new(
-        (2, 2, 2),           // Pooling window size
-        vec![1, 2, 8, 8, 8], // Input shape
-        Some((2, 2, 2)),     // Strides
-    ));
+    model.add(
+        AveragePooling3D::new(
+            (2, 2, 2),           // Pooling window size
+            vec![1, 2, 8, 8, 8], // Input shape
+            Some((2, 2, 2)),     // Strides
+        )
+        .unwrap(),
+    );
 
     // Compile the model
-    model.compile(RMSprop::new(0.001, 0.9, 1e-8), MeanSquaredError::new());
+    model.compile(
+        RMSprop::new(0.001, 0.9, 1e-8).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Create input data
     let input_data = Array5::from_shape_fn((1, 2, 8, 8, 8), |(_, c, d, h, w)| {
@@ -91,7 +97,7 @@ fn test_average_pooling_3d_sequential_model() {
 #[test]
 fn test_average_pooling_3d_multiple_channels() {
     let input_shape = vec![2, 3, 4, 4, 4]; // Batch size=2, channels=3
-    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None);
+    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None).unwrap();
 
     // Create multi-channel input
     let input = Array5::from_shape_fn((2, 3, 4, 4, 4), |(b, c, d, h, w)| {
@@ -118,7 +124,7 @@ fn test_average_pooling_3d_multiple_channels() {
 fn test_average_pooling_3d_edge_cases() {
     // Test edge case: pooling window exceeds input boundaries
     let input_shape = vec![1, 1, 3, 3, 3];
-    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, Some((2, 2, 2)));
+    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, Some((2, 2, 2))).unwrap();
 
     let input = Array5::ones((1, 1, 3, 3, 3)).into_dyn();
     let output = layer.forward(&input).unwrap();
@@ -134,7 +140,7 @@ fn test_average_pooling_3d_edge_cases() {
 fn test_average_pooling_3d_gradient_flow() {
     // Test if gradient flow is correct
     let input_shape = vec![1, 1, 4, 4, 4];
-    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None);
+    let mut layer = AveragePooling3D::new((2, 2, 2), input_shape, None).unwrap();
 
     // Create input tensor with varying values
     let input = Array5::from_shape_fn((1, 1, 4, 4, 4), |(_, _, d, h, w)| {

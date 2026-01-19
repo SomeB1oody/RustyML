@@ -1,12 +1,12 @@
-use super::Tensor;
-use super::neural_network_trait::{Layer, Optimizer};
-use ndarray::prelude::*;
+use super::*;
 use rayon::prelude::*;
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
 pub mod ada_grad;
 /// Adam (Adaptive Moment Estimation) optimizer
 pub mod adam;
+/// Input validation functions for optimizers
+mod input_validation_function;
 /// RMSprop (Root Mean Square Propagation) optimizer
 pub mod rms_prop;
 /// SGD (Stochastic Gradient Descent) optimizer
@@ -14,6 +14,7 @@ pub mod sgd;
 
 pub use ada_grad::*;
 pub use adam::*;
+use input_validation_function::*;
 pub use rms_prop::*;
 pub use sgd::*;
 
