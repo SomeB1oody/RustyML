@@ -10,7 +10,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - Introduce comprehensive input validation for optimizers and layers
 
 ## [v0.10.0] - 2026-01-18 (UTC-7)
-### Changed
+### Removed
 - Remove `statrs` dependency and replace with custom hypergeometric PMF/log-binomial calculations.
 
 ## [v0.10.0] - 2026-01-17 (UTC-7)
