@@ -20,10 +20,6 @@ pub enum WeightingStrategy {
 /// A non-parametric classification algorithm that classifies new data points
 /// based on the majority class of its k nearest neighbors.
 ///
-/// # Type Parameters
-///
-/// * `T` - The type of target values. Must implement `Clone`, `Hash`, and `Eq` traits.
-///
 /// # Fields
 ///
 /// - `k` - Number of neighbors to consider for classification
@@ -83,10 +79,13 @@ pub struct KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
-    /// Creates a new KNN classifier with default parameters:
-    /// - k = 5
-    /// - weights = Uniform
-    /// - metric = Euclidean
+    /// Creates a new KNN classifier with default parameters.
+    ///
+    /// # Default Values
+    ///
+    /// - `k` - 5
+    /// - `weighting_strategy` - WeightingStrategy::Uniform
+    /// - `metric` - DistanceCalculationMetric::Euclidean
     fn default() -> Self {
         KNN {
             k: 5,
@@ -100,18 +99,21 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
-    /// Creates a new KNN classifier with the specified parameters
+    /// Creates a new KNN classifier with the specified parameters.
     ///
     /// # Parameters
     ///
     /// - `k` - Number of neighbors to use for classification
-    /// - `weights` - Weighting strategy for neighbor votes (Uniform or Distance)
+    /// - `weighting_strategy` - Weighting strategy for neighbor votes (Uniform or Distance)
     /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
     ///
     /// # Returns
     ///
     /// - `Ok(Self)` - A new KNN classifier instance
-    /// - `Err(ModelError::InputValidationError)` - If k is 0
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If k is 0
     pub fn new(
         k: usize,
         weighting_strategy: WeightingStrategy,
@@ -150,7 +152,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         Option<&(AHashMap<T, usize>, Vec<T>)>
     );
 
-    /// Fits the KNN classifier to the training data
+    /// Fits the KNN classifier to the training data.
+    ///
+    /// KNN is a lazy learning algorithm, and the actual calculation is done in the prediction phase.
+    /// Labels are internally encoded as indices for efficient parallel computation.
     ///
     /// # Parameters
     ///
@@ -159,13 +164,11 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - The instance
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Ok(&mut Self)` - The instance of KNN after being fitted
     ///
-    /// # Notes
+    /// # Errors
     ///
-    /// KNN is a lazy learning algorithm, and the calculation is done in the prediction phase.
-    /// Labels are internally encoded as indices for efficient parallel computation.
+    /// - `ModelError::InputValidationError` - If the number of samples is less than k or input validation fails
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -222,8 +225,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Predicted labels
-    /// - `Err(ModelError)` - If model is not fitted or input is invalid
+    /// - `Ok(Array1<T>)` - Predicted labels for each input sample
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been trained using `fit`
+    /// - `ModelError::InputValidationError` - If input dimension mismatch or input is empty
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -290,8 +297,12 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Predicted labels
-    /// - `Err(ModelError)` - If model is not fitted or input is invalid
+    /// - `Ok(Array1<T>)` - Predicted labels for each input sample
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been trained
+    /// - `ModelError::InputValidationError` - If input dimension mismatch or input is empty
     pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -520,9 +531,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         Ok(result)
     }
 
-    /// Fits the model with the training data and immediately predicts on the given test data.
+    /// Fits the model with the training data and immediately predicts on the given training data.
     ///
-    /// This is a convenience method that combines the `fit` and `predict` steps into one operation
+    /// This is a convenience method that combines the `fit` and `predict` steps into one operation.
     ///
     /// # Parameters
     ///
@@ -531,8 +542,11 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<T>)` - Array of predicted values
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Ok(Array1<T>)` - Array of predicted values for the training data
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If training data is invalid or samples < k
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,

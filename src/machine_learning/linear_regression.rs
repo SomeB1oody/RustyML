@@ -74,23 +74,23 @@ pub struct LinearRegression {
     regularization_type: Option<RegularizationType>,
 }
 
-/// Creates a new LinearRegression instance with default parameter values.
-///
-/// # Default Values
-///
-/// - `coefficients` - `None` - Model coefficients are not initialized until training
-/// - `intercept` - `None` - Model intercept is not initialized until training
-/// - `fit_intercept` - `true` - Include an intercept term in the linear model
-/// - `learning_rate` - `0.01` - Learning rate for gradient descent optimization
-/// - `max_iter` - `1000` - Maximum number of iterations for gradient descent
-/// - `tol` - `1e-5` - Convergence tolerance (0.00001) for stopping criteria
-/// - `n_iter` - `None` - Number of actual iterations performed (set after training)
-/// - `regularization_type` - `None` - No regularization applied by default
-///
-/// # Returns
-///
-/// * `LinearRegression` - A new instance with sensible default parameters for most use cases
 impl Default for LinearRegression {
+    /// Creates a new LinearRegression instance with default parameter values.
+    ///
+    /// # Default Values
+    ///
+    /// - `coefficients` - `None` - Model coefficients are not initialized until training
+    /// - `intercept` - `None` - Model intercept is not initialized until training
+    /// - `fit_intercept` - `true` - Include an intercept term in the linear model
+    /// - `learning_rate` - `0.01` - Learning rate for gradient descent optimization
+    /// - `max_iter` - `1000` - Maximum number of iterations for gradient descent
+    /// - `tol` - `1e-5` - Convergence tolerance (0.00001) for stopping criteria
+    /// - `n_iter` - `None` - Number of actual iterations performed (set after training)
+    /// - `regularization_type` - `None` - No regularization applied by default
+    ///
+    /// # Returns
+    ///
+    /// - `LinearRegression` - A new instance with sensible default parameters for most use cases
     fn default() -> Self {
         Self {
             coefficients: None,
@@ -106,19 +106,26 @@ impl Default for LinearRegression {
 }
 
 impl LinearRegression {
-    /// Creates a new linear regression model with custom parameters
+    /// Creates a new linear regression model with custom parameters.
+    ///
+    /// This constructor validates all input parameters to ensure they are within
+    /// acceptable numerical ranges before returning the model instance.
     ///
     /// # Parameters
     ///
-    /// - `fit_intercept` - Whether to calculate the intercept for this model. If set to false, no intercept will be used in calculations
-    /// - `learning_rate` - The learning rate for gradient descent optimization. Typical values range from 0.001 to 0.1
-    /// - `max_iterations` - Maximum number of iterations for gradient descent. The algorithm will stop early if convergence is reached
-    /// - `tolerance` - The tolerance for stopping criteria. If the cost change between iterations is less than this value, training stops
-    /// - `regularization_type` - Optional regularization to prevent overfitting. Can be L1, L2, or None
+    /// - `fit_intercept` - Whether to calculate the intercept for this model
+    /// - `learning_rate` - The learning rate for gradient descent optimization
+    /// - `max_iterations` - Maximum number of iterations for gradient descent
+    /// - `tolerance` - The tolerance for stopping criteria
+    /// - `regularization_type` - Optional regularization to prevent overfitting (L1, L2, or None)
     ///
     /// # Returns
     ///
-    /// * `LinearRegression` - A new instance of LinearRegression with the specified configuration
+    /// - `Result<Self, ModelError>` - A new instance of LinearRegression, or an error if parameters are invalid
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If learning_rate, max_iterations or tolerance is invalid
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -159,7 +166,10 @@ impl LinearRegression {
     get_field_as_ref!(get_coefficients, coefficients, Option<&Array1<f64>>);
     get_field!(get_intercept, intercept, Option<f64>);
 
-    /// Fits the linear regression model using gradient descent
+    /// Fits the linear regression model using gradient descent.
+    ///
+    /// Iteratively updates the model's coefficients and intercept to minimize the cost function.
+    /// The process includes real-time progress tracking and early stopping if convergence is reached.
     ///
     /// # Parameters
     ///
@@ -168,8 +178,17 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut self)` - Returns mutable reference to self for method chaining
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
+    /// - `Result<&mut Self, ModelError>` - Returns mutable reference to self for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::ProcessingError` - If numerical issues like NaN or infinity occur during training
+    /// - `ModelError::InputValidationError` - If input dimensions are inconsistent
+    ///
+    /// # Performance
+    ///
+    /// Parallel computation is automatically used for L1 regularization and gradient updates
+    /// when the number of features exceeds `LINEAR_REGRESSION_PARALLEL_THRESHOLD` (200).
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -358,17 +377,23 @@ impl LinearRegression {
         Ok(self)
     }
 
-    /// Makes predictions using the trained model
+    /// Makes predictions using the trained model.
+    ///
+    /// Applies the learned coefficients and intercept to the provided feature matrix.
     ///
     /// # Parameters
     ///
-    /// * `x` - Prediction data, each row is a sample, each column is a feature
+    /// - `x` - Prediction data, each row is a sample, each column is a feature
     ///
     /// # Returns
     ///
-    /// - `Ok(Vec<f64>)` - A vector of predictions
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If number of features does not match training data
+    /// - `Result<Array1<f64>, ModelError>` - A vector of predictions
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been trained yet
+    /// - `ModelError::InputValidationError` - If features count doesn't match or data contains invalid values
+    /// - `ModelError::ProcessingError` - If prediction results in non-finite values
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -422,17 +447,21 @@ impl LinearRegression {
 
     /// Fits the model to the training data and then makes predictions on the same data.
     ///
-    /// This is a convenience method that combines the `fit` and `predict` methods into one call.
+    /// A convenience method that sequentially executes `fit` and then `predict`.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input features matrix where each inner vector represents a training example
+    /// - `x` - The input features matrix
     /// - `y` - The target values corresponding to each training example
     ///
     /// # Returns
     ///
-    /// - `Ok(Vec<f64>)` - The predicted values for the input data
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Result<Array1<f64>, ModelError>` - The predicted values for the input data
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is invalid
+    /// - `ModelError::ProcessingError` - If an error occurs during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,

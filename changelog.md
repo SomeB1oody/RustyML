@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.10.1] - 2026-01-20 (UTC-7)
+### Changed
+- Update documentation of `machine_learning` module
+
 ## [v0.10.0] - 2026-01-19 (UTC-7)
 ### Changed
 - Introduce comprehensive input validation for optimizers and layers

@@ -16,8 +16,11 @@ use super::*;
 ///
 /// # Returns
 ///
-/// - `Ok(())` - If all validation checks pass
-/// - `Err(ModelError::InputValidationError)` - If any validation check fails, with an informative error message
+/// - `result` - `Ok(())` if all validation checks pass, otherwise a `ModelError`
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If the input data is empty, contains non-finite values, or if dimensions of `x` and `y` mismatch
 pub fn preliminary_check<S>(
     x: &ArrayBase<S, Ix2>,
     y: Option<&ArrayBase<S, Ix1>>,
@@ -67,12 +70,15 @@ where
 ///
 /// # Parameters
 ///
-/// * `learning_rate` - The learning rate value to validate
+/// - `learning_rate` - The learning rate value to validate
 ///
 /// # Returns
 ///
-/// - `Ok(())` - If the learning rate is valid (positive and finite)
-/// - `Err(ModelError::InputValidationError)` - If the learning rate is invalid (non-positive, NaN, or infinite)
+/// - `result` - `Ok(())` if the learning rate is valid, otherwise a `ModelError`
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If the learning rate is non-positive, NaN, or infinite
 pub fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
     if learning_rate <= 0.0 || !learning_rate.is_finite() {
         return Err(ModelError::InputValidationError(format!(
@@ -91,12 +97,15 @@ pub fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
 ///
 /// # Parameters
 ///
-/// * `max_iterations` - The maximum number of iterations to validate
+/// - `max_iterations` - The maximum number of iterations to validate
 ///
 /// # Returns
 ///
-/// - `Ok(())` - If the maximum iterations value is valid (greater than 0)
-/// - `Err(ModelError::InputValidationError)` - If the maximum iterations value is 0
+/// - `result` - `Ok(())` if the maximum iterations value is valid, otherwise a `ModelError`
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If the maximum iterations value is 0
 pub fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> {
     if max_iterations == 0 {
         return Err(ModelError::InputValidationError(
@@ -115,12 +124,15 @@ pub fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> 
 ///
 /// # Parameters
 ///
-/// * `tolerance` - The convergence tolerance value to validate
+/// - `tolerance` - The convergence tolerance value to validate
 ///
 /// # Returns
 ///
-/// - `Ok(())` - If the tolerance is valid (positive and finite)
-/// - `Err(ModelError::InputValidationError)` - If the tolerance is invalid (non-positive, NaN, or infinite)
+/// - `result` - `Ok(())` if the tolerance is valid, otherwise a `ModelError`
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If the tolerance is non-positive, NaN, or infinite
 pub fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
     if tolerance <= 0.0 || !tolerance.is_finite() {
         return Err(ModelError::InputValidationError(format!(
@@ -142,16 +154,15 @@ pub fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
 ///
 /// # Parameters
 ///
-/// * `reg_type` - An optional regularization type with its strength parameter
+/// - `reg_type` - An optional regularization type with its strength parameter
 ///
 /// # Returns
 ///
-/// - `Ok(())` - If the regularization configuration is valid
-/// - `Err(ModelError::InputValidationError)` - If the regularization alpha is negative, NaN, or infinite
+/// - `result` - `Ok(())` if the regularization configuration is valid, otherwise a `ModelError`
 ///
-/// # Side Effects
+/// # Errors
 ///
-/// - Prints a warning to stderr if alpha is 0.0, recommending to use None instead
+/// - `ModelError::InputValidationError` - If the regularization alpha is negative, NaN, or infinite
 pub fn validate_regulation_type(reg_type: Option<RegularizationType>) -> Result<(), ModelError> {
     if let Some(reg) = &reg_type {
         match reg {

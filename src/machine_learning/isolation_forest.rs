@@ -43,19 +43,17 @@ pub struct IsolationForest {
     n_features: usize,
 }
 
-/// Creates an Isolation Forest with default parameters.
-///
-/// # Default Values
-///
-/// - `trees` - None (not fitted)
-/// - `n_estimators` - 100
-/// - `max_samples` - 256
-/// - `max_depth` - 8 (ceil(log2(256)))
-/// - `random_state` - None
-/// - `n_features` - 0
-/// - `parallel_threshold_trees` - DEFAULT_PARALLEL_THRESHOLD_TREES
-/// - `parallel_threshold_samples` - DEFAULT_PARALLEL_THRESHOLD_SAMPLES
 impl Default for IsolationForest {
+    /// Creates an Isolation Forest with default parameters.
+    ///
+    /// # Default Values
+    ///
+    /// - `trees` - None (not fitted)
+    /// - `n_estimators` - 100
+    /// - `max_samples` - 256
+    /// - `max_depth` - 8 (ceil(log2(256)))
+    /// - `random_state` - None
+    /// - `n_features` - 0
     fn default() -> Self {
         Self {
             trees: None,
@@ -80,10 +78,14 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// * `Result<IsolationForest, ModelError>` - A new unfitted `IsolationForest` instance, or `ModelError` if:
-    ///     - `n_estimators` is 0
-    ///     - `max_samples` is 0
-    ///     - `max_depth` (if provided) is 0
+    /// - `Result<Self, ModelError>` - A new unfitted `IsolationForest` instance
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if:
+    /// - `n_estimators` is 0
+    /// - `max_samples` is 0
+    /// - `max_depth` (if provided) is 0
     pub fn new(
         n_estimators: usize,
         max_samples: usize,
@@ -139,19 +141,26 @@ impl IsolationForest {
     /// Trains the Isolation Forest model on the provided dataset.
     ///
     /// Builds multiple isolation trees by randomly sampling subsets of the data and
-    /// recursively partitioning them using random feature splits. Uses parallelization
-    /// when the number of trees exceeds the threshold.
+    /// recursively partitioning them using random feature splits.
     ///
     /// # Parameters
     ///
-    /// * `x` - Training data as a 2D array where rows are samples and columns are features
+    /// - `x` - Training data as a 2D array where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// * `Result<&mut Self, ModelError>` - A mutable reference to self if successful, or `ModelError` if:
-    ///     - Input data is empty
-    ///     - Input contains NaN or infinite values
-    ///     - Tree building fails
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to self if successful
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError` if:
+    /// - Input data is empty
+    /// - Input contains NaN or infinite values
+    /// - Tree building fails
+    ///
+    /// # Performance
+    ///
+    /// Uses parallelization when the number of trees exceeds `DEFAULT_PARALLEL_THRESHOLD_TREES`.
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -338,13 +347,17 @@ impl IsolationForest {
     ///
     /// # Parameters
     ///
-    /// * `sample` - A single data sample as a slice of feature values
+    /// - `sample` - A single data sample as a slice of feature values
     ///
     /// # Returns
     ///
-    /// * `Result<f64, ModelError>` - The anomaly score between 0 and 1, or `ModelError` if:
-    ///     - Model has not been fitted
-    ///     - Sample feature dimension does not match training data
+    /// - `Result<f64, ModelError>` - The anomaly score between 0 and 1
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError` if:
+    /// - Model has not been fitted
+    /// - Sample feature dimension does not match training data
     pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, ModelError> {
         if self.trees.is_none() {
             return Err(ModelError::NotFitted);
@@ -376,19 +389,25 @@ impl IsolationForest {
 
     /// Predicts anomaly scores for multiple samples.
     ///
-    /// Uses parallelization when the number of samples exceeds the threshold.
-    ///
     /// # Parameters
     ///
-    /// * `x` - Input data as a 2D array where rows are samples and columns are features
+    /// - `x` - Input data as a 2D array where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// * `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores, or `ModelError` if:
-    ///     - Model has not been fitted
-    ///     - Input data is empty
-    ///     - Feature dimension does not match training data
-    ///     - Input contains NaN or infinite values
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError` if:
+    /// - Model has not been fitted
+    /// - Input data is empty
+    /// - Feature dimension does not match training data
+    /// - Input contains NaN or infinite values
+    ///
+    /// # Performance
+    ///
+    /// Uses parallelization when the number of samples exceeds `DEFAULT_PARALLEL_THRESHOLD_SAMPLES`.
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -434,11 +453,15 @@ impl IsolationForest {
     ///
     /// # Parameters
     ///
-    /// * `x` - Training and prediction data as a 2D array
+    /// - `x` - Training and prediction data as a 2D array
     ///
     /// # Returns
     ///
-    /// * `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores for the training data, or `ModelError` if fitting or prediction fails
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores for the training data
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError` if fitting or prediction fails.
     pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,

@@ -64,11 +64,13 @@ pub struct SVC {
 impl Default for SVC {
     /// Creates an SVC instance with default parameters
     ///
-    /// Default configuration:
-    /// - Kernel function: RBF (Radial Basis Function) with gamma=0.1
-    /// - Regularization parameter: 1.0
-    /// - Convergence tolerance: 0.001
-    /// - Maximum iterations: 1000
+    /// # Default Values
+    ///
+    /// - `kernel` - RBF (Radial Basis Function) with gamma=0.1
+    /// - `regularization_param` - 1.0
+    /// - `tol` - 0.001
+    /// - `max_iter` - 1000
+    /// - `eps` - 1e-8
     fn default() -> Self {
         SVC {
             kernel: KernelType::RBF { gamma: 0.1 },
@@ -97,8 +99,11 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - A new SVC instance with the specified parameters
-    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid
+    /// - `Result<Self, ModelError>` - A new SVC instance if parameters are valid
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `regularization_param` is non-positive or non-finite, or if `tol` or `max_iter` fail validation
     pub fn new(
         kernel: KernelType,
         regularization_param: f64,
@@ -315,15 +320,25 @@ impl SVC {
 
     /// Fits the SVC model to the training data
     ///
+    /// Uses the Sequential Minimal Optimization (SMO) algorithm to find the optimal hyperplane.
+    ///
     /// # Parameters
     ///
     /// - `x` - Training data matrix where each row is a sample
-    /// - `y` - Target labels (should be +1 or -1)
+    /// - `y` - Target labels (must be +1.0 or -1.0)
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - The fitted model (for method chaining)
-    /// - `Err(ModelError)` - If there's an error during fitting
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to the fitted model
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is empty or labels are not +1/-1
+    /// - `ModelError::ProcessingError` - If the model fails to converge, no support vectors are found, or numerical instability occurs
+    ///
+    /// # Performance
+    ///
+    /// Parallel computation is automatically enabled for various internal operations (kernel matrix calculation, error cache updates, etc.) when the number of samples exceeds 100.
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -553,13 +568,21 @@ impl SVC {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input samples, where each row is a sample
+    /// - `x` - The input samples matrix where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<f64>)` - The predicted class labels (+1 or -1)
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array containing predicted class labels (+1.0 or -1.0)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been fitted yet
+    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimensions mismatch
+    /// - `ModelError::ProcessingError` - If numerical issues occur during decision function calculation
+    ///
+    /// # Performance
+    ///
+    /// Parallel computation is used for batch prediction when the number of samples exceeds 100.
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -638,13 +661,20 @@ impl SVC {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input samples, where each row is a sample
+    /// - `x` - The input samples matrix where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<f64>)` - The decision function values
-    /// - `Err(ModelError::NotFitted)` - If the model hasn't been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input data is invalid
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array containing the raw decision function values (distance to hyperplane)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been fitted yet
+    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimensions mismatch
+    ///
+    /// # Performance
+    ///
+    /// Parallel computation is used when the number of samples exceeds 100.
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,

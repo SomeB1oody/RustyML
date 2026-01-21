@@ -108,19 +108,19 @@ pub struct KMeans {
     n_iter: Option<usize>,
 }
 
-/// implement Default for KMeans
-///
-/// # Default Values
-///
-/// - `n_clusters` - 8
-/// - `max_iter` - 300
-/// - `tolerance` - 1e-4
-/// - `random_seed` - None
-///
-/// # Returns
-///
-/// * `KMeans` - a new `KMeans` instance with default values
 impl Default for KMeans {
+    /// implement Default for KMeans
+    ///
+    /// # Default Values
+    ///
+    /// - `n_clusters` - 8
+    /// - `max_iter` - 300
+    /// - `tolerance` - 1e-4
+    /// - `random_seed` - None
+    ///
+    /// # Returns
+    ///
+    /// * `KMeans` - a new `KMeans` instance with default values
     fn default() -> Self {
         // Default values are guaranteed to be valid, so unwrap is safe here
         KMeans::new(8, 300, 1e-4, None).expect("Default KMeans parameters should be valid")
@@ -133,14 +133,17 @@ impl KMeans {
     /// # Parameters
     ///
     /// - `n_clusters` - Number of clusters to form (must be greater than 0)
-    /// - `max_iter` - Maximum number of iterations for the algorithm (must be greater than 0)
-    /// - `tol` - Convergence tolerance, the algorithm stops when the centroids move less than this value (must be positive and finite)
+    /// - `max_iterations` - Maximum number of iterations for the algorithm (must be greater than 0)
+    /// - `tolerance` - Convergence tolerance; the algorithm stops when centroids move less than this value
     /// - `random_seed` - Optional seed for random number generation to ensure reproducibility
     ///
     /// # Returns
     ///
-    /// * `Ok(KMeans)` - A new KMeans instance with the specified configuration
-    /// * `Err(ModelError::InputValidationError)` - If any parameter is invalid
+    /// - `Result<Self, ModelError>` - A new KMeans instance if parameters are valid
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `n_clusters` or `max_iterations` is 0, or `tolerance` is non-positive/non-finite
     pub fn new(
         n_clusters: usize,
         max_iterations: usize,
@@ -290,12 +293,19 @@ impl KMeans {
     ///
     /// # Parameters
     ///
-    /// * `data` - Training data as a 2D array where each row is a sample
+    /// - `data` - Training data as a 2D array where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `&mut Self` - A mutable reference to self for method chaining
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to self for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the number of samples is less than `n_clusters` or data contains invalid values
+    ///
+    /// # Performance
+    ///
+    /// Parallel processing is used when the number of samples is greater than or equal to 1000.
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64>,
@@ -482,13 +492,16 @@ impl KMeans {
     ///
     /// # Parameters
     ///
-    /// * `data` - New data points for which to predict cluster assignments
+    /// - `data` - New data points for which to predict cluster assignments
     ///
     /// # Returns
     ///
-    /// - `Array1<usize>` - An array of cluster indices for each input data point
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input data is invalid or has incorrect dimensions
+    /// - `Result<Array1<usize>, ModelError>` - An array of cluster indices for each input data point
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted yet
+    /// - `ModelError::InputValidationError` - If input data is empty, contains invalid values, or has incorrect feature dimensions
     pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -542,16 +555,19 @@ impl KMeans {
 
     /// Fits the model and predicts cluster indices for the input data.
     ///
-    /// This is equivalent to calling `fit` followed by `predict`, but more efficient.
+    /// This is equivalent to calling `fit` followed by `predict`.
     ///
     /// # Parameters
     ///
-    /// * `data` - Training data as a 2D array
+    /// - `data` - Training data as a 2D array
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<usize>)` - An array of cluster indices for each input data point
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Result<Array1<usize>, ModelError>` - An array of cluster indices for each input data point
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is invalid or smaller than the number of clusters
     pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
     where
         S: Data<Elem = f64>,

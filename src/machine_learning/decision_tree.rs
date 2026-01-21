@@ -41,12 +41,18 @@ pub struct DecisionTreeParams {
     pub random_state: Option<u64>,
 }
 
-/// Default hyperparameters for decision tree.
-///
-/// Provides sensible defaults: no depth limit (`max_depth = None`), minimum 2 samples to split (`min_samples_split = 2`),
-/// minimum 1 sample per leaf (`min_samples_leaf = 1`), no minimum impurity decrease requirement (`min_impurity_decrease = 0.0`),
-/// and no random state (`random_state = None`).
 impl Default for DecisionTreeParams {
+    /// Default hyperparameters for decision tree.
+    ///
+    /// Provides sensible defaults for a standard decision tree.
+    ///
+    /// # Default Values
+    ///
+    /// - `max_depth` - `None` (no depth limit)
+    /// - `min_samples_split` - `2`
+    /// - `min_samples_leaf` - `1`
+    /// - `min_impurity_decrease` - `0.0`
+    /// - `random_state` - `None`
     fn default() -> Self {
         Self {
             max_depth: None,
@@ -115,7 +121,7 @@ impl Node {
     ///
     /// # Returns
     ///
-    /// * `Node` - A new `Node` configured as a leaf.
+    /// - `Node` - A new `Node` configured as a leaf.
     pub fn new_leaf(value: f64, class: Option<usize>, probabilities: Option<Vec<f64>>) -> Self {
         Self {
             node_type: NodeType::Leaf {
@@ -138,7 +144,7 @@ impl Node {
     ///
     /// # Returns
     ///
-    /// * `Node` - A new `Node` configured as an internal decision node.
+    /// - `Node` - A new `Node` configured as an internal decision node.
     pub fn new_internal(feature_index: usize, threshold: f64) -> Self {
         Self {
             node_type: NodeType::Internal {
@@ -248,7 +254,11 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new untrained `DecisionTree` instance, or a `ModelError` if validation fails.
+    /// - `Result<Self, ModelError>` - A new untrained `DecisionTree` instance, or a `ModelError` if validation fails.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the algorithm is incompatible with the task type, or if hyperparameters are invalid.
     pub fn new(
         algorithm: Algorithm,
         is_classifier: bool,
@@ -310,20 +320,25 @@ impl DecisionTree {
 
     /// Trains the decision tree on the provided training data.
     ///
-    /// Builds the tree structure by recursively finding the best splits according to
-    /// the specified algorithm and stopping criteria. Uses parallel processing for
-    /// evaluating potential splits across features.
+    /// Builds the tree structure by recursively finding the best splits.
     ///
     /// # Parameters
     ///
     /// - `x` - Training features as a 2D array with shape (n_samples, n_features).
-    /// - `y` - Training labels as a 1D array with shape (n_samples,). For classification,
-    ///         labels should be non-negative integers starting from 0. For regression,
-    ///         labels can be any continuous values.
+    /// - `y` - Training labels as a 1D array.
     ///
     /// # Returns
     ///
-    /// * `Result<&mut Self, ModelError>` - A mutable reference to `self` for method chaining, or a `ModelError` if training fails.
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to `self` for method chaining.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the input data is invalid or doesn't meet minimum requirements.
+    /// - `ModelError::ProcessingError` - If class information cannot be determined.
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel processing for evaluating potential splits when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`.
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -660,11 +675,16 @@ impl DecisionTree {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature vector for a single sample as a slice of length `n_features`.
+    /// - `x` - Feature vector for a single sample as a slice of length `n_features`.
     ///
     /// # Returns
     ///
-    /// * `Result<f64, ModelError>` - The predicted value (class label for classification, continuous value for regression), or a `ModelError` if prediction fails.
+    /// - `Result<f64, ModelError>` - The predicted value, or a `ModelError` if prediction fails.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
+    /// - `ModelError::TreeError` - If the feature dimension mismatches or tree structure is broken.
     pub fn predict_one(&self, x: &[f64]) -> Result<f64, ModelError> {
         if self.root.is_none() {
             return Err(ModelError::NotFitted);
@@ -712,15 +732,23 @@ impl DecisionTree {
     }
 
     /// Predicts outputs for multiple samples.
-    /// Uses parallel processing when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix as a 2D array with shape (n_samples, n_features).
+    /// - `x` - Feature matrix as a 2D array.
     ///
     /// # Returns
     ///
-    /// * `Result<Array1<f64>, ModelError>` - A 1D array of predicted values with shape (n_samples,), or a `ModelError` if prediction fails.
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array of predicted values.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
+    /// - `ModelError::InputValidationError` - If input data is empty or dimensions mismatch.
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`.
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -774,16 +802,20 @@ impl DecisionTree {
         Ok(Array1::from_vec(predictions?))
     }
 
-    /// Trains the tree on training data and immediately makes predictions on test data.
+    /// Trains the tree on training data and immediately makes predictions.
     ///
     /// # Parameters
     ///
-    /// - `x_train` - Training features as a 2D array with shape (n_train_samples, n_features).
-    /// - `y_train` - Training labels as a 1D array with shape (n_train_samples,).
+    /// - `x_train` - Training features as a 2D array.
+    /// - `y_train` - Training labels as a 1D array.
     ///
     /// # Returns
     ///
-    /// * `Result<Array1<f64>, ModelError>` - A 1D array of predictions for the test data with shape (n_test_samples,), or a `ModelError` if training or prediction fails.
+    /// - `Result<Array1<f64>, ModelError>` - A 1D array of predictions for the training data.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If training or prediction inputs are invalid.
     pub fn fit_predict<S>(
         &mut self,
         x_train: &ArrayBase<S, Ix2>,
@@ -797,15 +829,23 @@ impl DecisionTree {
     }
 
     /// Predicts class probabilities for multiple samples (classification only).
-    /// Uses parallel processing when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix as a 2D array with shape (n_samples, n_features).
+    /// - `x` - Feature matrix as a 2D array.
     ///
     /// # Returns
     ///
-    /// * `Result<Array2<f64>, ModelError>` - A 2D array of class probabilities with shape (n_samples, n_classes), where each row sums to 1.0, or a `ModelError` if prediction fails.
+    /// - `Result<Array2<f64>, ModelError>` - A 2D array of class probabilities where each row sums to 1.0.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::TreeError` - If called on a regression tree.
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`.
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -881,11 +921,16 @@ impl DecisionTree {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature vector for a single sample as a slice of length `n_features`.
+    /// - `x` - Feature vector for a single sample as a slice.
     ///
     /// # Returns
     ///
-    /// * `Result<Vec<f64>, ModelError>` - A vector of class probabilities of length `n_classes` that sums to 1.0, or a `ModelError` if prediction fails.
+    /// - `Result<Vec<f64>, ModelError>` - A vector of class probabilities.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::TreeError` - If called on a regression tree or dimension mismatches.
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
     pub fn predict_proba_one(&self, x: &[f64]) -> Result<Vec<f64>, ModelError> {
         if !self.is_classifier {
             return Err(ModelError::TreeError(
@@ -941,14 +986,13 @@ impl DecisionTree {
 
     /// Generates a human-readable string representation of the decision tree structure.
     ///
-    /// This method creates a visual representation of the trained decision tree, showing
-    /// the hierarchical structure with internal nodes (containing split conditions) and
-    /// leaf nodes (containing predictions). The output uses tree-like formatting with
-    /// ASCII characters to represent branches and connections.
-    ///
     /// # Returns
     ///
-    /// * `Result<String, ModelError>` - A formatted string containing the tree structure, or a `ModelError::NotFitted` if the model hasn't been trained yet.
+    /// - `Result<String, ModelError>` - A formatted string containing the tree structure.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
     pub fn generate_tree_structure(&self) -> Result<String, ModelError> {
         if self.root.is_none() {
             return Err(ModelError::NotFitted);

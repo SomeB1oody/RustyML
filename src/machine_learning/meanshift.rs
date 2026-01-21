@@ -13,18 +13,17 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 ///
 /// # Fields
 ///
-/// ## Core Parameters
+/// # Fields
+///
 /// - `bandwidth` - The kernel bandwidth parameter that determines the search radius. Larger values lead to fewer clusters.
 /// - `max_iter` - Maximum number of iterations to prevent infinite loops.
 /// - `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
 /// - `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
 /// - `cluster_all` - Whether to assign all points to clusters, including potential noise.
-///
-/// ## Results (Available after fitting)
-/// - `n_samples_per_center` - Number of samples assigned to each cluster center, stored as `Option<Array1<usize>>`.
-/// - `cluster_centers` - The final cluster centers found by the algorithm, stored as `Option<Array2<f64>>`.
-/// - `labels` - Cluster labels assigned to each input sample, stored as `Option<Array1<usize>>`.
-/// - `n_iter` - The actual number of iterations performed during fitting, stored as `Option<usize>`.
+/// - `n_samples_per_center` - Number of samples assigned to each cluster center.
+/// - `cluster_centers` - The final cluster centers found by the algorithm.
+/// - `labels` - Cluster labels assigned to each input sample.
+/// - `n_iter` - The actual number of iterations performed during fitting.
 ///
 /// # Examples
 /// ```rust
@@ -64,25 +63,20 @@ pub struct MeanShift {
     n_iter: Option<usize>,
 }
 
-/// Creates a new MeanShift instance with default parameter values.
-///
-/// # Default Values
-///
-/// - `bandwidth`: `1.0` - The kernel bandwidth parameter. This is a crucial parameter that determines
-///   the search radius for each data point. A larger value will result in fewer clusters, while
-///   a smaller value will create more clusters. The default value of 1.0 is suitable for normalized data.
-/// - `max_iter`: `300` - Maximum number of iterations to prevent infinite loops during convergence.
-/// - `tol`: `1e-3` - Convergence tolerance threshold. The algorithm stops when points move less
-///   than this distance between iterations.
-/// - `bin_seeding`: `false` - Bin seeding is disabled by default. When enabled, it can significantly
-///   speed up the algorithm for large datasets by reducing the number of initial seed points.
-/// - `cluster_all`: `true` - All data points will be assigned to clusters by default, including
-///   potential outliers. When set to false, points far from any cluster center may be marked as outliers.
-///
-/// # Returns
-///
-/// * `MeanShift` - A new MeanShift instance with default parameters.
 impl Default for MeanShift {
+    /// Creates a new MeanShift instance with default parameter values.
+    ///
+    /// # Default Values
+    ///
+    /// - `bandwidth` - `1.0`. The kernel bandwidth parameter. A larger value will result in fewer clusters.
+    /// - `max_iter` - `300`. Maximum number of iterations to prevent infinite loops.
+    /// - `tol` - `1e-3`. Convergence tolerance threshold.
+    /// - `bin_seeding` - `false`. Bin seeding is disabled by default.
+    /// - `cluster_all` - `true`. All data points will be assigned to clusters by default.
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - A new MeanShift instance with default parameters.
     fn default() -> Self {
         Self::new(1.0, None, None, None, None).expect("Default parameters should be valid")
     }
@@ -101,8 +95,10 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - A new MeanShift instance with validated parameters
-    /// - `Err(ModelError::InputValidationError)` - If any parameter is invalid
+    /// - `Result<Self, ModelError>` - A Result containing a new MeanShift instance or a ModelError.
+    ///
+    /// # Errors
+    /// - `ModelError::InputValidationError` - If any parameter is invalid (e.g., non-positive bandwidth).
     pub fn new(
         bandwidth: f64,
         max_iter: Option<usize>,
@@ -160,12 +156,19 @@ impl MeanShift {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+    /// - `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - A mutable reference to the fitted model
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
+    /// - `Result<&mut Self, ModelError>` - A Result containing a mutable reference to the fitted model or a ModelError.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data fails preliminary checks.
+    ///
+    /// # Performance
+    ///
+    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -438,13 +441,20 @@ impl MeanShift {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+    /// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input data is invalid or dimensions don't match training data
+    /// - `Result<Array1<usize>, ModelError>` - A Result containing the predicted cluster labels or a ModelError.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted yet.
+    /// - `ModelError::InputValidationError` - If input data is invalid or dimensions don't match training data.
+    ///
+    /// # Performance
+    ///
+    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
     pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
         // Check if model has been fitted
         if self.cluster_centers.is_none() {
@@ -520,13 +530,16 @@ impl MeanShift {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+    /// - `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<usize>)` - containing the predicted cluster labels.
-    /// - `Err(ModelError::InputValidationError)` - Input does not match expectation
-    /// - `Err(ModelError::NotFitted)` - If fitting succeeded but labels were not set
+    /// - `Result<Array1<usize>, ModelError>` - A Result containing the predicted cluster labels or a ModelError.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data fails preliminary checks.
+    /// - `ModelError::NotFitted` - If fitting succeeded but labels were not set correctly.
     pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
     where
         S: Data<Elem = f64> + Sync + Send,
@@ -535,15 +548,24 @@ impl MeanShift {
         self.labels.clone().ok_or(ModelError::NotFitted)
     }
 
-    /// Generates initial seeds for the clustering algorithm using binning.
+    /// Estimates the bandwidth to use with the MeanShift algorithm.
+    ///
+    /// The bandwidth is estimated based on the pairwise distances between a subset of points.
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data as a ndarray Array2<f64> where each row is a sample.
+    /// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
+    /// - `quantile` - The quantile of the pairwise distances to use as the bandwidth.
+    /// - `n_samples` - The number of samples to use for the distance calculation.
+    /// - `random_state` - Seed for random number generation.
     ///
     /// # Returns
     ///
-    /// * `Vec<usize>` - A vector of indices representing the initial seed points.
+    /// - `Result<f64, ModelError>` - A Result containing the estimated bandwidth or a ModelError.
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `quantile` is not in range \[0, 1\].
     fn get_bin_seeds<S>(&self, x: &ArrayBase<S, Ix2>) -> Vec<usize>
     where
         S: Data<Elem = f64> + Sync + Send,

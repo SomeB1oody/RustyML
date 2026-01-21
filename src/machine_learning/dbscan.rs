@@ -41,13 +41,13 @@ pub struct DBSCAN {
     core_sample_indices: Option<Array1<usize>>,
 }
 
-/// Default parameters for DBSCAN model
-///
-/// Creates a DBSCAN instance with default parameters:
-/// - eps = 0.5
-/// - min_samples = 5
-/// - metric = Euclidean
 impl Default for DBSCAN {
+    /// Default parameters for DBSCAN model
+    ///
+    /// # Default Values
+    /// - eps = 0.5
+    /// - min_samples = 5
+    /// - metric = Euclidean
     fn default() -> Self {
         DBSCAN {
             eps: 0.5,
@@ -71,7 +71,12 @@ impl DBSCAN {
     /// # Returns
     ///
     /// - `Ok(DBSCAN)` - A new DBSCAN instance with the specified parameters
-    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid
+    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid (e.g., eps <= 0)
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if `eps` is non-positive or not finite,
+    /// if `min_samples` is 0, or if Minkowski `p` is non-positive or not finite.
     pub fn new(
         eps: f64,
         min_samples: usize,
@@ -184,18 +189,19 @@ impl DBSCAN {
     /// Performs DBSCAN clustering on the input data
     ///
     /// # Parameters
-    ///
-    /// * `data` - Input data as a reference 2D array in ndarray where each row is a sample
+    /// - `data` - Input data as a reference 2D array in ndarray where each row is a sample
     ///
     /// # Returns
+    /// - `Ok(&mut Self)` - The trained instance containing cluster labels and core sample indices
+    /// - `Err(ModelError::InputValidationError)` - If dataset size exceeds limit or is empty
+    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur or cluster ID overflows
     ///
-    /// - `Ok(&mut Self)` - The trained instance
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
+    /// # Errors
+    /// - `ModelError::InputValidationError` - If the number of samples exceeds `i32::MAX`
+    /// - `ModelError::ProcessingError` - If the number of discovered clusters exceeds `i32::MAX`
     ///
-    /// # Notes
-    ///
-    /// After fitting, cluster labels can be accessed via `get_labels()` method.
-    /// Labels of -1 indicate noise points (outliers).
+    /// # Performance
+    /// Uses parallel processing for region queries if the number of samples is greater than or equal to 1000.
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -320,7 +326,16 @@ impl DBSCAN {
     ///
     /// - `Ok(Array1<i32>)` - Array of predicted cluster labels
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input validation fails
+    /// - `Err(ModelError::InputValidationError)` - If input validation fails or dimensions mismatch
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If `labels_` or `core_sample_indices` are `None`
+    /// - `ModelError::InputValidationError` - If feature dimensions don't match or data contains non-finite values
+    ///
+    /// # Performance
+    ///
+    /// Processes new data points in parallel using a thread pool.
     ///
     /// # Notes
     ///
@@ -436,17 +451,16 @@ impl DBSCAN {
     ///
     /// # Parameters
     ///
-    /// * `data` - Input data as a 2D array where each row is a sample
+    /// - `data` - Input data as a 2D array where each row is a sample
     ///
     /// # Returns
     ///
     /// - `Ok(Array1<i32>)` - Array of cluster labels for each sample
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Err(ModelError)` - If fitting fails due to validation or processing errors
     ///
-    /// # Notes
+    /// # Performance
     ///
-    /// This is equivalent to calling `fit()` followed by `get_labels()`,
-    /// but more convenient when you don't need to reuse the model.
+    /// Inherits parallelization behavior from the `fit` method.
     pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,

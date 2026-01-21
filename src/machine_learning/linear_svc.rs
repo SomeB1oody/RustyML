@@ -20,13 +20,6 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// - `tol` - Training convergence tolerance
 /// - `n_iter` - Number of iterations that were actually performed during training
 ///
-/// # Features
-///
-/// - Binary classification
-/// - Stochastic gradient descent optimization
-/// - L1 or L2 regularization
-/// - Configurable convergence tolerance
-///
 /// # Example
 /// ```rust
 /// use ndarray::{Array1, Array2};
@@ -74,23 +67,20 @@ pub struct LinearSVC {
     n_iter: Option<usize>,
 }
 
-/// Creates a new LinearSVC with default parameters
-///
-/// # Default values
-///
-/// - `weights`: None (not trained)
-/// - `bias`: None (not trained)
-/// - `max_iter`: 1000
-/// - `learning_rate`: 0.001
-/// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
-/// - `fit_intercept`: true
-/// - `tol`: 1e-4
-/// - `n_iter`: None (not trained)
-///
-/// # Returns
-///
-/// - `LinearSVC` - A new LinearSVC instance with default parameters
 impl Default for LinearSVC {
+    /// Creates a new LinearSVC with default parameters
+    ///
+    /// # Default values
+    ///
+    /// - `max_iter`: 1000
+    /// - `learning_rate`: 0.001
+    /// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
+    /// - `fit_intercept`: true
+    /// - `tol`: 1e-4
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - A new LinearSVC instance with default parameters
     fn default() -> Self {
         LinearSVC {
             weights: None,
@@ -110,15 +100,15 @@ impl LinearSVC {
     ///
     /// # Parameters
     ///
-    /// - `max_iter`: Maximum number of iterations for the optimizer
-    /// - `learning_rate`: Step size for gradient descent updates
-    /// - `penalty`: Type and strength of regularization (L1(lambda) or L2(lambda))
-    /// - `fit_intercept`: Whether to calculate and use bias term
-    /// - `tol`: Convergence tolerance that stops training when reached
+    /// - `max_iter` - Maximum number of iterations for the optimizer
+    /// - `learning_rate` - Step size for gradient descent updates
+    /// - `penalty` - Type and strength of regularization (L1(lambda) or L2(lambda))
+    /// - `fit_intercept` - Whether to calculate and use bias term
+    /// - `tol` - Convergence tolerance that stops training when reached
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new LinearSVC instance with specified parameters if validation passes
+    /// - `Result<Self, ModelError>` - A Result containing the new LinearSVC instance if validation passes
     ///
     /// # Errors
     ///
@@ -230,20 +220,26 @@ impl LinearSVC {
     /// Trains the model on the provided data.
     ///
     /// Uses stochastic gradient descent to optimize the hinge loss function.
-    /// The model will continue training until either:
-    /// - Maximum iterations are reached
-    /// - Convergence is detected based on tolerance
+    /// The model will continue training until either maximum iterations are reached
+    /// or convergence is detected based on tolerance.
     ///
     /// # Parameters
     ///
-    /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
-    /// - `y`: Target values as a 1D array (should contain only 0.0 and 1.0 values)
+    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `y` - Target values as a 1D array (should contain only 0.0 and 1.0 values)
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)`: Reference to self if training succeeds
-    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to the trained model
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
+    /// - `ModelError::ProcessingError` - If numerical issues occur during training (e.g., weights become NaN)
+    ///
+    /// # Performance
+    ///
+    /// Parallel processing is automatically enabled when the batch size exceeds `LINEAR_SVC_PARALLEL_THRESHOLD` (200).
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -460,13 +456,16 @@ impl LinearSVC {
     ///
     /// # Parameters
     ///
-    /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<f64>)`: Array of predictions (0.0 or 1.0) for each sample
-    /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
-    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
+    /// - `Result<Array1<f64>, ModelError>` - Array of predicted class labels (0.0 or 1.0) for each sample
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet
+    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -484,21 +483,24 @@ impl LinearSVC {
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }
 
-    /// Calculates the decision function values (distance to the hyperplane) for each sample.
+    /// Calculates the decision function values for each sample.
     ///
-    /// This method provides raw scores rather than class predictions.
-    /// Positive values indicate class 1, negative values indicate class 0,
-    /// and the magnitude indicates confidence (distance from the decision boundary).
+    /// This method provides raw scores representing the distance to the decision hyperplane.
+    /// Positive values indicate class 1, negative values indicate class 0.
     ///
     /// # Parameters
     ///
-    /// - `x`: Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<f64>)`: Raw decision scores for each sample
-    /// - `Err(ModelError::NotFitted)`: If the model hasn't been trained yet
-    /// - `Err(ModelError::InputValidationError)`: If input data is invalid or feature dimension mismatches
+    /// - `Result<Array1<f64>, ModelError>` - Raw decision scores for each sample
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been trained yet
+    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
+    /// - `ModelError::ProcessingError` - If the computation produced NaN or infinite values
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
     where
         S: Data<Elem = f64>,

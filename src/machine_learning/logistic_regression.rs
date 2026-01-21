@@ -63,25 +63,22 @@ pub struct LogisticRegression {
     regularization_type: Option<RegularizationType>,
 }
 
-/// Creates a logistic regression model with default parameters.
-///
-/// This implementation provides sensible default values that work well for most binary
-/// classification problems as a starting point for experimentation and training.
-///
-/// # Default Values
-///
-/// - `weights`: `None` - Model weights are not initialized until training begins
-/// - `fit_intercept`: `true` - Include a bias/intercept term in the model, which is generally recommended for most datasets
-/// - `learning_rate`: `0.01` - A moderate learning rate that provides stable convergence for most problems without being too slow
-/// - `max_iter`: `100` - Maximum number of gradient descent iterations, sufficient for many simple to moderately complex problems
-/// - `tol`: `1e-4` - Convergence tolerance (0.0001), stops training when the loss change between iterations is smaller than this value
-/// - `n_iter`: `None` - Actual number of iterations performed is unknown before training
-/// - `regularization_type`: `None` - No regularization applied by default, suitable for datasets without overfitting issues
-///
-/// # Returns
-///
-/// * `Self` - A new `LogisticRegression` instance with default configuration
 impl Default for LogisticRegression {
+    /// Creates a logistic regression model with default parameters.
+    ///
+    /// This implementation provides sensible default values that work well for most binary
+    /// classification problems as a starting point for experimentation and training.
+    ///
+    /// # Default Values
+    ///
+    /// - `fit_intercept`: `true` - Include a bias/intercept term in the model, which is generally recommended for most datasets
+    /// - `learning_rate`: `0.01` - A moderate learning rate that provides stable convergence for most problems without being too slow
+    /// - `max_iter`: `100` - Maximum number of gradient descent iterations, sufficient for many simple to moderately complex problems
+    /// - `tol`: `1e-4` - Convergence tolerance (0.0001), stops training when the loss change between iterations is smaller than this value
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - A new `LogisticRegression` instance with default configuration
     fn default() -> Self {
         LogisticRegression {
             weights: None,
@@ -108,8 +105,11 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - An untrained logistic regression model instance
-    /// - `Err(ModelError::InputValidationError)` - If any parameter is invalid
+    /// - `Result<Self, ModelError>` - An untrained logistic regression model instance or validation error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If any parameter is invalid (e.g., non-positive learning rate)
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -158,8 +158,16 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - A mutable reference to the trained model, allowing for method chaining
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during training
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to the trained model or error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If target vector contains values other than 0 or 1
+    /// - `ModelError::ProcessingError` - If numerical issues (NaN/Infinity) occur during training
+    ///
+    /// # Performance
+    ///
+    /// Parallel processing is automatically enabled when the number of samples exceeds 1000.
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -350,14 +358,17 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix where each row is a sample and each column is a feature (without bias term)
+    /// - `x` - Feature matrix where each row is a sample and each column is a feature (without bias term)
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<i32>)` - A 1D array containing predicted class labels (0 or 1) for each sample
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input is invalid or feature dimensions don't match
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur during prediction
+    /// - `Result<Array1<i32>, ModelError>` - A 1D array containing predicted class labels (0 or 1)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted yet
+    /// - `ModelError::InputValidationError` - If input is empty, dimensions mismatch, or contains invalid values
+    /// - `ModelError::ProcessingError` - If numerical issues occur during probability calculation
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -458,13 +469,17 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `train_x` - Training features as a 2D array where each row represents a sample and each column represents a feature
+    /// - `train_x` - Training features as a 2D array
     /// - `train_y` - Target values as a 1D array corresponding to the training samples
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<i32>)` - Predicted class labels for the test samples
-    /// - `Err(ModelError::InputValidationError(&str))` - Input does not match expectation
+    /// - `Result<Array1<i32>, ModelError>` - Predicted class labels for the training samples
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data does not match expectations
+    /// - `ModelError::ProcessingError` - If errors occur during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         train_x: &ArrayBase<S, Ix2>,
@@ -492,7 +507,7 @@ impl LogisticRegression {
 ///
 /// # Returns
 ///
-/// * `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
+/// - `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 ///
 /// # Examples
 /// ```rust

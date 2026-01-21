@@ -154,7 +154,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = {version = "0.9.1", features = ["machine_learning"]} 
+rustyml = {version = "*", features = ["machine_learning"]} 
 # or use `features = ["full"]` to enable all features
 # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
 ```
@@ -205,7 +205,7 @@ Add the library to your `Cargo.toml`:
 将库添加到您的`Cargo.toml`文件中：
 ``` toml
 [dependencies]
-rustyml = {version = "0.9.1", features = ["neural_network"]} 
+rustyml = {version = "*", features = ["neural_network"]} 
 # or use `features = ["full"]` to enable all features
 # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
 ```
