@@ -1,5 +1,4 @@
 use super::*;
-use std::error::Error;
 
 /// Threshold for determining whether to use parallel processing in PCA computations
 /// When n_components >= this threshold, parallel processing is used for variance calculations
@@ -67,16 +66,19 @@ pub struct PCA {
     singular_values: Option<Array1<f64>>,
 }
 
-/// Default implementation for PCA
-///
-/// Creates a new PCA instance with default values:
-/// - `n_components`: 2 (common for visualization purposes)
-/// - `components`: None (computed during fitting)
-/// - `mean`: None (computed during fitting)
-/// - `explained_variance`: None (computed during fitting)
-/// - `explained_variance_ratio`: None (computed during fitting)
-/// - `singular_values`: None (computed during fitting)
 impl Default for PCA {
+    /// Default implementation for PCA
+    ///
+    /// Creates a new PCA instance with default values.
+    ///
+    /// # Default Values
+    ///
+    /// - `n_components` - 2 (common for visualization purposes)
+    /// - `components` - None (computed during fitting)
+    /// - `mean` - None (computed during fitting)
+    /// - `explained_variance` - None (computed during fitting)
+    /// - `explained_variance_ratio` - None (computed during fitting)
+    /// - `singular_values` - None (computed during fitting)
     fn default() -> Self {
         // Default to 2 components which is common for visualization purposes
         Self {
@@ -95,16 +97,15 @@ impl PCA {
     ///
     /// # Parameters
     ///
-    /// * `n_components` - Number of principal components to keep (must be > 0)
+    /// - `n_components` - Number of principal components to keep (must be > 0)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new PCA instance with the specified number of components, or an error if validation fails
+    /// - `Result<Self, ModelError>` - A new PCA instance with the specified number of components, or an error if validation fails
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `n_components` is 0
+    /// Returns `ModelError::InputValidationError` if `n_components` is 0
     pub fn new(n_components: usize) -> Result<Self, ModelError> {
         if n_components == 0 {
             return Err(ModelError::InputValidationError(
@@ -164,31 +165,25 @@ impl PCA {
         Ok(())
     }
 
-    /// Fits the PCA model
+    //// Fits the PCA model
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix, where rows are samples and columns are features
+    /// - `x` - The input data matrix, where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - The instance
-    /// - `Err(Box<dyn std::error::Error>)` - If something goes wrong
+    /// - `Result<&mut Self, ModelError>` - The instance itself if successful
     ///
     /// # Errors
     ///
-    /// Returns error if:
-    /// - Input data is empty
-    /// - Input data contains NaN or infinite values
-    /// - Number of features is 0
+    /// - `ModelError::InputValidationError` - returns if input data is empty, contains NaN/infinite values, or feature count is 0
+    /// - `ModelError::ProcessingError` - returns if internal computation (SVD, mean) fails
     ///
-    /// # Implementation Details
+    /// # Performance
     ///
-    /// - Computes the mean of each feature
-    /// - Centers the data by subtracting the mean
-    /// - Computes SVD directly instead of eigendecomposition
-    /// - Sorts components by explained variance
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Box<dyn Error>>
+    /// Parallel processing is used for variance and singular value calculations when `n_components >= 64`.
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -200,21 +195,23 @@ impl PCA {
 
         // Check if number of features is valid
         if n_features == 0 {
-            return Err(Box::new(ModelError::InputValidationError(
+            return Err(ModelError::InputValidationError(
                 "Number of features must be greater than 0".to_string(),
-            )));
+            ));
         }
 
         // Calculate feature means in parallel using ndarray's built-in method
-        let mean = x.mean_axis(Axis(0)).ok_or("Failed to compute mean")?;
+        let mean = x
+            .mean_axis(Axis(0))
+            .ok_or_else(|| ModelError::ProcessingError("Failed to compute mean".to_string()))?;
 
         // Center the data more efficiently using broadcasting
         let x_centered = x - &mean;
 
         // Use SVD for more stable computation
-        let x_slice = x_centered
-            .as_slice()
-            .ok_or("Failed to convert x_centered to slice")?;
+        let x_slice = x_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert x_centered to slice".to_string())
+        })?;
         let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
 
         // Compute SVD
@@ -226,7 +223,9 @@ impl PCA {
         let n_components = self.n_components.min(m);
 
         // Get principal components from V^T
-        let v_t = svd.v_t.ok_or("SVD did not compute V^T")?;
+        let v_t = svd
+            .v_t
+            .ok_or_else(|| ModelError::ProcessingError("SVD did not compute V^T".to_string()))?;
         let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| v_t.row(i)[j]);
 
         // Compute explained variance and singular values
@@ -276,21 +275,17 @@ impl PCA {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix to transform
+    /// - `x` - The input data matrix to transform
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - The transformed data if successful
-    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
+    /// - `Result<Array2<f64>, ModelError>` - The transformed data in PC space
     ///
     /// # Errors
     ///
-    /// Returns error if:
-    /// - Model has not been fitted
-    /// - Input data is empty
-    /// - Input data contains NaN or infinite values
-    /// - Number of features does not match the training data
-    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    /// - `ModelError::NotFitted` - returns if the model has not been fitted yet
+    /// - `ModelError::InputValidationError` - returns if input is invalid or feature dimension doesn't match
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -302,11 +297,11 @@ impl PCA {
 
         // Check feature dimension match
         if x.ncols() != mean.len() {
-            return Err(Box::new(ModelError::InputValidationError(format!(
+            return Err(ModelError::InputValidationError(format!(
                 "Number of features does not match training data: expected {}, got {}",
                 mean.len(),
                 x.ncols()
-            ))));
+            )));
         }
 
         // Center data using broadcasting (more efficient than manual subtraction)
@@ -322,13 +317,16 @@ impl PCA {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix
+    /// - `x` - The input data matrix
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - The transformed data if successful
-    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
-    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    /// - `Result<Array2<f64>, ModelError>` - The transformed data if successful
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError` - returns if fitting or transformation fails
+    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -340,21 +338,17 @@ impl PCA {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix in principal component space
+    /// - `x` - The input data matrix in principal component space
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - The reconstructed data in original space
-    /// - `Err(Box<dyn Error>)` - If something goes wrong while processing
+    /// - `Result<Array2<f64>, ModelError>` - The reconstructed data in original space
     ///
     /// # Errors
     ///
-    /// Returns error if:
-    /// - Model has not been fitted
-    /// - Input data is empty
-    /// - Input data contains NaN or infinite values
-    /// - Number of components does not match the model's n_components
-    pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Box<dyn Error>>
+    /// - `ModelError::NotFitted` - returns if the model has not been fitted yet
+    /// - `ModelError::InputValidationError` - returns if input is invalid or component count doesn't match
+    pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -366,11 +360,11 @@ impl PCA {
 
         // Check component dimension match
         if x.ncols() != components.nrows() {
-            return Err(Box::new(ModelError::InputValidationError(format!(
+            return Err(ModelError::InputValidationError(format!(
                 "Number of components does not match model: expected {}, got {}",
                 components.nrows(),
                 x.ncols()
-            ))));
+            )));
         }
 
         // Transform back to original feature space using broadcasting

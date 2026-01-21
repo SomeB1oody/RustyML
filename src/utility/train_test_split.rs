@@ -11,7 +11,11 @@ use super::*;
 ///
 /// # Returns
 ///
-/// * `Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError>` - Returns a tuple `(x_train, x_test, y_train, y_test)` if processing successfully
+/// - `Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError>` - Returns a tuple `(x_train, x_test, y_train, y_test)` if processing successfully
+///
+/// # Errors
+///
+/// - Returns `ModelError::InputValidationError` if the dataset is empty, if `x` and `y` have different lengths, if `test_size` is not between 0 and 1, or if the dataset is too small to split.
 ///
 /// # Example
 /// ```rust

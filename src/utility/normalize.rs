@@ -12,13 +12,13 @@ const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
 /// # Variants
 ///
 /// - `Row` - Normalize across rows (each row is normalized independently)
-///   - For 2D arrays: normalizes each row (samples) independently
-///   - For N-D arrays (N>2): normalizes along the last axis (features dimension)
-///   - Example: For shape (batch, height, width), normalizes along width axis
+///     - For 2D arrays: normalizes each row (samples) independently
+///     - For N-D arrays (N>2): normalizes along the last axis (features dimension)
+///     - Example: For shape (batch, height, width), normalizes along width axis
 /// - `Column` - Normalize across columns (each column is normalized independently)
-///   - For 2D arrays: normalizes each column (features) independently
-///   - For N-D arrays (N>2): normalizes along the second-to-last axis
-///   - Example: For shape (batch, height, width), normalizes along height axis
+///     - For 2D arrays: normalizes each column (features) independently
+///     - For N-D arrays (N>2): normalizes along the second-to-last axis
+///     - Example: For shape (batch, height, width), normalizes along height axis
 /// - `Global` - Normalize the entire array globally (treats all elements as a single vector)
 ///
 /// # Note on High-Dimensional Arrays
@@ -62,13 +62,6 @@ pub enum NormalizationOrder {
 /// - `axis` - The axis along which to perform normalization (Row/Column/Global)
 /// - `order` - The norm order to use for normalization (L1/L2/Max/Lp)
 ///
-/// # Returns
-///
-/// * `Result<Array<f64, D>, ModelError>` - Normalized array with same dimensions as input
-///   - `Ok(Array<f64, D>)` - Successfully normalized array
-///   - `Err(ModelError::InputValidationError)` - If input validation fails
-///   - `Err(ModelError::ProcessingError)` - If normalization computation fails
-///
 /// # Examples
 /// ```rust
 /// use ndarray::array;
@@ -78,6 +71,19 @@ pub enum NormalizationOrder {
 /// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 /// // Each row will have L2 norm = 1
 /// ```
+///
+/// # Returns
+///
+/// - `Result<Array<f64, D>, ModelError>` - Normalized array with same dimensions as input
+///
+/// # Errors
+///
+/// - Returns `ModelError::InputValidationError` if the input array is empty, contains non-finite values (NaN/Inf), or if the Lp norm parameter `p` is not positive/finite.
+/// - Returns `ModelError::ProcessingError` if the normalization computation results in non-finite values.
+///
+/// # Performance
+///
+/// - This function uses parallel processing (via rayon) when the number of elements in the target slice exceeds `NORMALIZE_PARALLEL_THRESHOLD` (10,000).
 ///
 /// # Implementation Details
 ///

@@ -56,20 +56,21 @@ pub struct TSNE {
     momentum_switch_iter: usize,
 }
 
-/// Default implementation for TSNE
-///
-/// Creates a new TSNE instance with default values:
-/// - `perplexity`: 30.0 (typical range 5-50, controls neighborhood size)
-/// - `learning_rate`: 200.0 (typical range 10-1000, controls step size in optimization)
-/// - `n_iter`: 1000 (maximum number of optimization iterations)
-/// - `dim`: 2 (target dimensionality, commonly 2 for visualization)
-/// - `random_state`: 42 (seed for random number generation for reproducibility)
-/// - `early_exaggeration`: 12.0 (factor for early exaggeration phase)
-/// - `exaggeration_iter`: 83 (approximately n_iter/12, iterations for early exaggeration)
-/// - `initial_momentum`: 0.5 (momentum for first phase of optimization)
-/// - `final_momentum`: 0.8 (momentum for second phase of optimization)  
-/// - `momentum_switch_iter`: 333 (approximately n_iter/3, when to switch momentum values)
 impl Default for TSNE {
+    /// Default implementation for TSNE
+    ///
+    /// # Default Values
+    ///
+    /// - `perplexity` - 30.0 (typical range 5-50, controls neighborhood size)
+    /// - `learning_rate` - 200.0 (typical range 10-1000, controls step size in optimization)
+    /// - `n_iter` - 1000 (maximum number of optimization iterations)
+    /// - `dim` - 2 (target dimensionality, commonly 2 for visualization)
+    /// - `random_state` - 42 (seed for random number generation for reproducibility)
+    /// - `early_exaggeration` - 12.0 (factor for early exaggeration phase)
+    /// - `exaggeration_iter` - 83 (approximately n_iter/12, iterations for early exaggeration)
+    /// - `initial_momentum` - 0.5 (momentum for first phase of optimization)
+    /// - `final_momentum` - 0.8 (momentum for second phase of optimization)
+    /// - `momentum_switch_iter` - 333 (approximately n_iter/3, when to switch momentum values)
     fn default() -> Self {
         let default_max_iter = 1000;
         TSNE {
@@ -99,14 +100,18 @@ impl TSNE {
     /// - `random_state` - Seed for random number generation. Default is 42.
     /// - `early_exaggeration` - Factor to multiply probabilities in early iterations. Default is 12.0.
     /// - `exaggeration_iter` - Number of iterations to apply early exaggeration. Default is n_iter/12.
-    /// - `initial_momentum` - Initial momentum coefficient. Must be in range [0.0, 1.0]. Default is 0.5.
-    /// - `final_momentum` - Final momentum coefficient. Must be in range [0.0, 1.0]. Default is 0.8.
+    /// - `initial_momentum` - Initial momentum coefficient. Must be in range \[0.0, 1.0\]. Default is 0.5.
+    /// - `final_momentum` - Final momentum coefficient. Must be in range \[0.0, 1.0\]. Default is 0.8.
     /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final. Default is n_iter/3.
     ///
     /// # Returns
     ///
-    /// * `Ok(TSNE)` - A new TSNE instance if all parameters are valid
-    /// * `Err(ModelError::InputValidationError)` - If any parameter is invalid
+    /// - `Result<Self, ModelError>` - A new TSNE instance if all parameters are valid, otherwise an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ModelError::InputValidationError` if any parameter is invalid (e.g., negative values where positive are expected, or momentum outside [0, 1]).
+
     pub fn new(
         perplexity: Option<f64>,
         learning_rate: Option<f64>,

@@ -81,7 +81,7 @@ pub struct KernelPCA {
 ///
 /// # Returns
 ///
-/// * `f64` - The computed kernel value as a floating-point number
+/// - `f64` - The computed kernel value as a floating-point number
 pub fn compute_kernel<S>(x: &ArrayBase<S, Ix1>, y: &ArrayBase<S, Ix1>, kernel: &KernelType) -> f64
 where
     S: Data<Elem = f64>,
@@ -102,17 +102,18 @@ where
     }
 }
 
-/// Default implementation for KernelPCA.
-///
-/// Creates a new KernelPCA instance with default values:
-/// - `kernel`: Linear kernel (no transformation, equivalent to standard PCA)
-/// - `n_components`: 2 (commonly used for visualization purposes)
-/// - `eigenvalues`: None (computed during fitting process)
-/// - `eigenvectors`: None (computed during fitting process)
-/// - `x_fit`: None (stores training data after fitting)
-/// - `row_means`: None (mean of each row in kernel matrix, computed during fitting)
-/// - `total_mean`: None (overall mean of kernel matrix, computed during fitting)
 impl Default for KernelPCA {
+    /// Default implementation for KernelPCA.
+    ///
+    /// # Default Values
+    ///
+    /// - `kernel` - Linear kernel (no transformation, equivalent to standard PCA)
+    /// - `n_components` - 2 (commonly used for visualization purposes)
+    /// - `eigenvalues` - None (computed during fitting process)
+    /// - `eigenvectors` - None (computed during fitting process)
+    /// - `x_fit` - None (stores training data after fitting)
+    /// - `row_means` - None (mean of each row in kernel matrix, computed during fitting)
+    /// - `total_mean` - None (overall mean of kernel matrix, computed during fitting)
     fn default() -> Self {
         KernelPCA {
             kernel: KernelType::Linear,
@@ -136,8 +137,11 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Ok(Self)` - A new KernelPCA instance
-    /// - `Err(ModelError::InputValidationError)` - If input parameters are invalid
+    /// - `Result<Self, ModelError>` - A new KernelPCA instance, or an error if validation fails
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `n_components` is 0 or kernel parameters (degree, gamma, coef0) are invalid
     pub fn new(kernel: KernelType, n_components: usize) -> Result<Self, ModelError> {
         // Validate n_components
         if n_components == 0 {
@@ -225,35 +229,43 @@ impl KernelPCA {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix where rows are samples and columns are features
+    /// - `x` - The input data matrix where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - containing a mutable reference to the fitted model
-    /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Box<dyn std::error::Error>>
+    /// - `Result<&mut Self, ModelError>` - A mutable reference to the fitted model
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If data is empty, contains non-finite values, or samples < `n_components`
+    /// - `ModelError::ProcessingError` - If kernel matrix cannot be converted to slice for eigendecomposition
+    ///
+    /// # Performance
+    ///
+    /// Use parallel computation when the number of samples exceeds `KERNEL_PCA_PARALLEL_THRESHOLD` (100).
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         if x.is_empty() {
-            return Err(Box::new(ModelError::InputValidationError(
+            return Err(ModelError::InputValidationError(
                 "Input data cannot be empty".to_string(),
-            )));
+            ));
         }
 
         if x.nrows() < self.n_components {
-            return Err(Box::new(ModelError::InputValidationError(format!(
+            return Err(ModelError::InputValidationError(format!(
                 "n_components={} must be less than or equal to the number of samples={}",
                 self.n_components,
                 x.nrows()
-            ))));
+            )));
         }
 
         // Check for invalid values in input data
         if x.iter().any(|&val| !val.is_finite()) {
-            return Err(Box::new(ModelError::InputValidationError(
+            return Err(ModelError::InputValidationError(
                 "Input data contains NaN or infinite values".to_string(),
-            )));
+            ));
         }
 
         let n_samples = x.nrows();
@@ -315,9 +327,9 @@ impl KernelPCA {
         });
 
         // Perform eigenvalue decomposition on the centered kernel matrix
-        let k_centered_slice = k_centered
-            .as_slice()
-            .ok_or("Failed to convert k_centered to slice")?;
+        let k_centered_slice = k_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert k_centered to slice".to_string())
+        })?;
         let k_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, k_centered_slice);
         let sym_eigen = nalgebra::SymmetricEigen::new(k_mat);
 
@@ -369,18 +381,23 @@ impl KernelPCA {
     ///
     /// Projects new data points into the principal component space.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `x` - The input data matrix where rows are samples and columns are features
+    /// - `x` - The input data matrix where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` containing the transformed data (projection of the input data)
-    /// - `Err(Box<dyn std::error::Error>)` if the model hasn't been fitted or computation errors occur
-    pub fn transform<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    /// - `Result<Array2<f64>, ModelError>` - The transformed data (projection of the input data)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model hasn't been fitted
+    /// - `ModelError::InputValidationError` - If input data is empty or feature dimensions mismatch
+    ///
+    /// # Performance
+    ///
+    /// Use parallel computation when the number of new samples exceeds `KERNEL_PCA_PARALLEL_THRESHOLD` (100).
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -394,21 +411,21 @@ impl KernelPCA {
             (Some(x_fit), Some(eigenvectors), Some(row_means), Some(total_mean)) => {
                 (x_fit, eigenvectors, row_means, *total_mean)
             }
-            _ => return Err(Box::new(ModelError::NotFitted)),
+            _ => return Err(ModelError::NotFitted),
         };
 
         if x.is_empty() {
-            return Err(Box::new(ModelError::InputValidationError(
+            return Err(ModelError::InputValidationError(
                 "Input data cannot be empty".to_string(),
-            )));
+            ));
         }
 
         if x.ncols() != x_fit.ncols() {
-            return Err(Box::new(ModelError::InputValidationError(format!(
+            return Err(ModelError::InputValidationError(format!(
                 "Number of features in new data ({}) doesn't match training data ({})",
                 x.ncols(),
                 x_fit.ncols()
-            ))));
+            )));
         }
 
         let n_train = x_fit.nrows();
@@ -472,16 +489,17 @@ impl KernelPCA {
     ///
     /// # Parameters
     ///
-    /// * `x` - The input data matrix where rows are samples and columns are features
+    /// - `x` - The input data matrix where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - containing the transformed data (projection of the input data)
-    /// - `Err(Box<dyn std::error::Error>)` - if there are validation errors or computation errors
-    pub fn fit_transform<S>(
-        &mut self,
-        x: &ArrayBase<S, Ix2>,
-    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    /// - `Result<Array2<f64>, ModelError>` - The transformed data (projection of the input data)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If there are validation errors during fitting
+    /// - `ModelError::ProcessingError` - If there are computation errors during transformation
+    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

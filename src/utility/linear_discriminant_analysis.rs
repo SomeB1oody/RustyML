@@ -26,7 +26,7 @@ const LDA_PARALLEL_THRESHOLD: usize = 100;
 /// let y = Array1::from_vec(vec![0, 0, 0, 1, 1, 1]);
 ///
 /// // Create and fit LDA model
-/// let mut lda = LDA::new().unwrap();
+/// let mut lda = LDA::new();
 /// lda.fit(&x, &y).unwrap();
 ///
 /// // Make predictions
@@ -45,10 +45,9 @@ pub struct LDA {
     projection: Option<Array2<f64>>,
 }
 
-/// Default implementation for LDA
 impl Default for LDA {
     fn default() -> Self {
-        Self::new().expect("LDA::new() should never fail")
+        Self::new()
     }
 }
 
@@ -57,15 +56,15 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// * `Ok(LDA)` - A new LDA instance with all fields set to None
-    pub fn new() -> Result<Self, ModelError> {
-        Ok(LDA {
+    /// - `LDA` - A new LDA instance with all fields set to None
+    pub fn new() -> Self {
+        LDA {
             classes: None,
             priors: None,
             means: None,
             cov_inv: None,
             projection: None,
-        })
+        }
     }
 
     get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
@@ -86,9 +85,16 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Ok(&mut Self)` - Reference to self
-    /// - `Err(ModelError::InputValidationError)` - If input validation fails
-    /// - `Err(ModelError::ProcessingError)` - If matrix operations fail
+    /// - `Result<&mut Self, ModelError>` - Reference to self if successful
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input validation fails (e.g., shape mismatch)
+    /// - `ModelError::ProcessingError` - If matrix operations fail (e.g., singular matrix)
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation for class statistics when `n_samples` >= 100.
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -359,13 +365,20 @@ impl LDA {
     ///
     /// # Parameters
     ///
-    /// * `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
+    /// - `x` - Feature matrix where each row is a sample, shape: (n_samples, n_features)
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<i32>)` - Array of predicted class labels
-    /// - `Err(ModelError::InputValidationError)` - If input does not match the expectation
-    /// - `Err(ModelError::NotFitted)` - If not fitted
+    /// - `Result<Array1<i32>, ModelError>` - Array of predicted class labels
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input does not match the expectation or contains non-finite values
+    /// - `ModelError::NotFitted` - If the model has not been trained yet
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when `n_samples` >= 100.
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -445,9 +458,12 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - Transformed data matrix
-    /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
-    /// - `Err(ModelError::NotFitted)` - If not fitted
+    /// - `Result<Array2<f64>, ModelError>` - Transformed data matrix
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input does not match expectation or `n_components` is out of range
+    /// - `ModelError::NotFitted` - If the model has not been trained yet
     pub fn transform<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -506,14 +522,18 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - Transformed data matrix
-    /// - `Err(Box<dyn std::error::Error>>)` - If something goes wrong
+    /// - `Result<Array2<f64>, ModelError>` - Transformed data matrix
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input does not match expectation, contains non-finite values, or `n_components` is out of range
+    /// - `ModelError::NotFitted` - If the model has not been trained yet
     pub fn fit_transform<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix1>,
         n_components: usize,
-    ) -> Result<Array2<f64>, Box<dyn std::error::Error>>
+    ) -> Result<Array2<f64>, ModelError>
     where
         S1: Data<Elem = f64> + Send + Sync,
         S2: Data<Elem = i32>,

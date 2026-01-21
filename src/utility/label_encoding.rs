@@ -9,13 +9,12 @@ use super::*;
 ///
 /// # Parameters
 ///
-/// * `labels` - A 1D array of integer labels (e.g., \[0, 1, 2, 1, 0\])
-/// * `num_classes` - Optional number of classes. If None, it will be inferred
-///   from the maximum label value + 1
+/// - `labels` - A 1D array of integer labels (e.g., \[0, 1, 2, 1, 0\])
+/// - `num_classes` - Optional number of classes. If None, it will be inferred from the maximum label value + 1
 ///
 /// # Returns
 ///
-/// * `Array2<f64>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
+/// - `Array2<f64>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
 ///
 /// # Examples
 ///
@@ -88,15 +87,12 @@ where
 ///
 /// # Parameters
 ///
-/// * `labels` - A slice of labels that can be compared and hashed
-/// * `num_classes` - Optional number of classes. If None, it will be inferred
-///   from the number of unique labels
+/// - `labels` - A slice of labels that can be compared and hashed
+/// - `num_classes` - Optional number of classes. If None, it will be inferred from the number of unique labels
 ///
 /// # Returns
 ///
-/// * `(Array2<f64>, AHashMap<T, usize>)` - A tuple containing:
-///   - One-hot encoded matrix of shape (n_samples, n_classes)
-///   - Mapping from original labels to class indices using AHashMap
+/// - `(Array2<f64>, AHashMap<T, usize>)` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
 ///
 /// # Examples
 ///
@@ -158,11 +154,11 @@ where
 ///
 /// # Parameters
 ///
-/// * `categorical` - A 2D one-hot encoded matrix where each row represents a sample
+/// - `categorical` - A 2D one-hot encoded matrix where each row represents a sample
 ///
 /// # Returns
 ///
-/// * `Array1<i32>` - A 1D array of integer labels in sparse categorical format
+/// - `Array1<i32>` - A 1D array of integer labels in sparse categorical format
 ///
 /// # Examples
 ///

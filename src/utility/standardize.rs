@@ -27,16 +27,13 @@ pub enum StandardizationAxis {
 ///
 /// # Parameters
 ///
-/// - `data` - Input array data as `ArrayView` with arbitrary dimensions and f64 elements
+/// - `data` - Input array data as `ArrayBase` with arbitrary dimensions and f64 elements
 /// - `axis` - The axis along which to perform standardization (Row/Column/Global)
 /// - `epsilon` - Small value added to standard deviation to prevent division by zero
 ///
 /// # Returns
 ///
-/// * `Result<Array<f64, D>, ModelError>` - Standardized array with same dimensions as input
-///   - `Ok(Array<f64, D>)` - Successfully standardized array
-///   - `Err(ModelError::InputValidationError)` - If input validation fails
-///   - `Err(ModelError::ProcessingError)` - If standardization computation fails
+/// - `Result<Array<f64, D>, ModelError>` - Standardized array with same dimensions as input
 ///
 /// # Examples
 /// ```rust
@@ -45,8 +42,16 @@ pub enum StandardizationAxis {
 ///
 /// let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
 /// let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
-/// // Each column will have mean ≈ 0 and std ≈ 1
 /// ```
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If input array is empty, contains NaN/Infinite values, or if epsilon is non-positive
+/// - `ModelError::ProcessingError` - If standardization computation fails (e.g., zero values in global axis)
+///
+/// # Performance
+///
+/// - Parallel computation is enabled when the number of elements exceeds `STANDARDIZE_PARALLEL_THRESHOLD` (10,000)
 ///
 /// # Implementation Details
 ///

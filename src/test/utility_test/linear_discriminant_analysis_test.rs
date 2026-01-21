@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_lda_new() {
-    let lda = LDA::new().unwrap();
+    let lda = LDA::new();
     assert!(lda.get_classes().is_none());
     assert!(lda.get_priors().is_none());
     assert!(lda.get_means().is_none());
@@ -22,7 +22,7 @@ fn test_lda_default() {
 
 #[test]
 fn test_getters_on_unfitted_model() {
-    let lda = LDA::new().unwrap();
+    let lda = LDA::new();
     assert!(matches!(lda.get_classes(), None));
     assert!(matches!(lda.get_priors(), None));
     assert!(matches!(lda.get_means(), None));
@@ -43,7 +43,7 @@ fn test_fit_basic() {
     ]);
     let y = arr1(&[0, 0, 0, 1, 1, 1]);
 
-    let mut lda = LDA::new().unwrap();
+    let mut lda = LDA::new();
     let result = lda.fit(&x.view(), &y.view());
     assert!(result.is_ok());
 
@@ -82,7 +82,7 @@ fn test_fit_basic() {
 
 #[test]
 fn test_fit_validation_errors() {
-    let mut lda = LDA::new().unwrap();
+    let mut lda = LDA::new();
 
     // Test empty data
     let x_empty = Array2::<f64>::zeros((0, 2));
@@ -119,7 +119,7 @@ fn test_predict() {
         [5.2, 4.8], // Should be predicted as class 1
     ]);
 
-    let mut lda = LDA::new().unwrap();
+    let mut lda = LDA::new();
     lda.fit(&x.view(), &y.view()).unwrap();
 
     let predictions = lda.predict(&x_test.view()).unwrap();
@@ -128,7 +128,7 @@ fn test_predict() {
     assert_eq!(predictions[1], 1);
 
     // Test prediction on unfitted model
-    let lda_unfitted = LDA::new().unwrap();
+    let lda_unfitted = LDA::new();
     assert!(matches!(
         lda_unfitted.predict(&x_test.view()),
         Err(ModelError::NotFitted)
@@ -151,7 +151,7 @@ fn test_transform() {
     ]);
     let y = arr1(&[0, 0, 0, 1, 1, 1]);
 
-    let mut lda = LDA::new().unwrap();
+    let mut lda = LDA::new();
     lda.fit(&x.view(), &y.view()).unwrap();
 
     // Transform data
@@ -179,7 +179,7 @@ fn test_transform() {
     assert!(matches!(lda.transform(&x.view(), 2), Err(_)));
 
     // Test unfitted model
-    let lda_unfitted = LDA::new().unwrap();
+    let lda_unfitted = LDA::new();
     assert!(matches!(
         lda_unfitted.transform(&x.view(), 1),
         Err(ModelError::NotFitted)
@@ -199,7 +199,7 @@ fn test_fit_transform() {
     ]);
     let y = arr1(&[0, 0, 0, 1, 1, 1]);
 
-    let mut lda = LDA::new().unwrap();
+    let mut lda = LDA::new();
 
     // Test fit_transform
     let transformed = lda.fit_transform(&x.view(), &y.view(), 1).unwrap();
