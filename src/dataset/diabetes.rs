@@ -13,12 +13,9 @@ static DIABETES_DATA: OnceLock<(Array1<&'static str>, Array2<f64>, Array1<f64>)>
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix with shape (768, 8) where each row represents
-///     a patient sample and each column represents a feature
-///     - `Array1<f64>`: Target labels array with shape (768,) containing binary
-///     classification outcomes (0.0 for non-diabetic, 1.0 for diabetic)
+/// - `&'static Array1<&'static str>` - Static reference to the headers of the dataset.
+/// - `&'static Array2<f64>` - Static reference to the feature matrix (768x8).
+/// - `&'static Array1<f64>` - Static reference to the binary labels (0 or 1).
 ///
 /// # Panics
 ///
@@ -63,10 +60,9 @@ fn load_diabetes_internal() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) 
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static Array1<&'static str>`: Static reference to the headers of the dataset
-///     - `&'static Array2<f64>`: Static reference to the feature matrix where each row is a sample and each column is a feature
-///     - `&'static Array1<f64>`: Static reference to class variable (0 or 1)
+/// - `&'static Array1<&'static str>`: Static reference to the headers of the dataset
+/// - `&'static Array2<f64>`: Static reference to the feature matrix where each row is a sample and each column is a feature
+/// - `&'static Array1<f64>`: Static reference to class variable (0 or 1)
 ///
 /// # Examples
 /// ```rust
@@ -77,6 +73,13 @@ fn load_diabetes_internal() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) 
 /// assert_eq!(features.shape(), &[768, 8]);
 /// assert_eq!(classes.len(), 768);
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (768 samples, 9 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_diabetes() -> (
     &'static Array1<&'static str>,
     &'static Array2<f64>,
@@ -93,10 +96,9 @@ pub fn load_diabetes() -> (
 ///
 /// # Returns
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 9 feature names plus the target label name
-///     - `Array2<f64>`: Owned feature matrix with shape (768, 8) where each row represents a patient sample and each column represents a feature (pregnancies, glucose, blood pressure, skin thickness, insulin, BMI, diabetes pedigree function, age)
-///     - `Array1<f64>`: Owned target labels array with shape (768,) containing binary classification outcomes (0.0 for non-diabetic, 1.0 for diabetic)
+/// - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 9 feature names plus the target label name
+/// - `Array2<f64>`: Owned feature matrix with shape (768, 8) where each row represents a patient sample and each column represents a feature (pregnancies, glucose, blood pressure, skin thickness, insulin, BMI, diabetes pedigree function, age)
+/// - `Array1<f64>`: Owned target labels array with shape (768,) containing binary classification outcomes (0.0 for non-diabetic, 1.0 for diabetic)
 ///
 /// # Performance Notes
 ///
@@ -118,6 +120,13 @@ pub fn load_diabetes() -> (
 /// features[[0, 0]] = 10.0;
 /// labels[0] = 1.0;
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (768 samples, 9 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_diabetes_owned() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) {
     let (headers, features, labels) = load_diabetes();
     (headers.clone(), features.clone(), labels.clone())

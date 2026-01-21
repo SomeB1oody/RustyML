@@ -84,16 +84,10 @@ fn load_boston_housing_internal() -> (Array1<&'static str>, Array2<f64>, Array1<
 /// - B: 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town
 /// - LSTAT: % lower status of the population
 ///
-/// # Target
-///
-/// - MEDV: Median value of owner-occupied homes in $1000's
-///
 /// # Returns
-///
-/// * A tuple containing:
-///     - `&'static Array1<&'static str>`: Static reference to the headers of the dataset
-///     - `&'static Array2<f64>`: Static reference to the feature matrix where each row is a sample and each column is a feature
-///     - `&'static Array1<f64>`: Static reference to median home values (MEDV) in $1000s
+/// - `&'static Array1<&'static str>` - Static reference to the headers of the dataset (13 features + MEDV)
+/// - `&'static Array2<f64>` - Static reference to the feature matrix where each row is a sample and each column is a feature
+/// - `&'static Array1<f64>` - Static reference to median home values (MEDV) in $1000s
 ///
 /// # Examples
 /// ```rust
@@ -104,6 +98,13 @@ fn load_boston_housing_internal() -> (Array1<&'static str>, Array2<f64>, Array1<
 /// assert_eq!(features.shape(), &[506, 13]);
 /// assert_eq!(medv.len(), 506);
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (2 samples, 14 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_boston_housing() -> (
     &'static Array1<&'static str>,
     &'static Array2<f64>,
@@ -113,24 +114,17 @@ pub fn load_boston_housing() -> (
     (headers, features, labels)
 }
 
-/// Loads the Boston Housing dataset and returns owned copies
+/// Loads the Boston Housing dataset and returns owned copies.
 ///
 /// Use this function when you need owned data that can be modified.
 /// For read-only access, prefer `load_boston_housing()` which returns references.
 ///
-/// The Boston Housing dataset contains information about housing values in
-/// suburbs of Boston. The dataset includes 13 features for predicting
-/// the median value of owner-occupied homes (MEDV).
-///
 /// # Returns
+/// - `Array1<&'static str>` - Owned array of 14 column headers
+/// - `Array2<f64>` - Owned feature matrix (506x13)
+/// - `Array1<f64>` - Owned target values array (MEDV)
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 14 names (13 features plus MEDV target)
-///     - `Array2<f64>`: Owned feature matrix where each row represents a housing sample and each column represents a feature
-///     - `Array1<f64>`: Owned target values array containing median home values (MEDV) in $1000s
-///
-/// # Performance Notes
-///
+/// # Performance
 /// This function creates owned copies by cloning the static data, which incurs additional memory allocation.
 /// If you only need read-only access to the data, use `load_boston_housing()` instead for better performance.
 ///
@@ -149,6 +143,13 @@ pub fn load_boston_housing() -> (
 /// features[[0, 0]] = 0.1;
 /// medv[0] = 25.5;
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (2 samples, 14 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_boston_housing_owned() -> (Array1<&'static str>, Array2<f64>, Array1<f64>) {
     let (headers, features, labels) = load_boston_housing();
     (headers.clone(), features.clone(), labels.clone())

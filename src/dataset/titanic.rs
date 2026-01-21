@@ -18,11 +18,10 @@ static TITANIC_DATA: OnceLock<(
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>`: Array of string feature headers
-///     - `Array1<&'static str>`: Array of numeric feature headers
-///     - `Array2<String>`: String features matrix (Name, Ticket, Cabin, Embarked)
-///     - `Array2<f64>`: Numeric features matrix (PassengerId, Survived, Pclass, Sex, Age, SibSp, Parch, Fare)
+/// - `Array1<&'static str>`: Array of string feature headers
+/// - `Array1<&'static str>`: Array of numeric feature headers
+/// - `Array2<String>`: String features matrix (Name, Ticket, Cabin, Embarked)
+/// - `Array2<f64>`: Numeric features matrix (PassengerId, Survived, Pclass, Sex, Age, SibSp, Parch, Fare)
 ///
 /// # Notes
 ///
@@ -201,16 +200,12 @@ fn load_titanic_internal() -> (
 /// - String headers (in original order): Name, Ticket, Cabin, Embarked
 /// - Numeric headers (in original order): PassengerId, Survived, Pclass, Sex, Age, SibSp, Parch, Fare
 ///
-/// Note: The actual order may vary if the dataset structure changes, as column types
-/// are determined dynamically by analyzing the data values.
-///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static Array1<&'static str>`: Static reference to string feature headers
-///     - `&'static Array1<&'static str>`: Static reference to numeric feature headers
-///     - `&'static Array2<String>`: Static reference to string features matrix
-///     - `&'static Array2<f64>`: Static reference to numeric features matrix
+/// - `&'static Array1<&'static str>`: Static reference to string feature headers
+/// - `&'static Array1<&'static str>`: Static reference to numeric feature headers
+/// - `&'static Array2<String>`: Static reference to string features matrix
+/// - `&'static Array2<f64>`: Static reference to numeric features matrix
 ///
 /// # Examples
 /// ```rust
@@ -226,6 +221,12 @@ fn load_titanic_internal() -> (
 /// println!("String features shape: {:?}", string_features.shape());
 /// println!("Numeric features shape: {:?}", numeric_features.shape());
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_titanic() -> (
     &'static Array1<&'static str>,
     &'static Array1<&'static str>,
@@ -264,11 +265,10 @@ pub fn load_titanic() -> (
 ///
 /// # Returns
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of string feature headers
-///     - `Array1<&'static str>`: Owned array of numeric feature headers
-///     - `Array2<String>`: Owned string features matrix
-///     - `Array2<f64>`: Owned numeric features matrix
+/// - `Array1<&'static str>`: Owned array of string feature headers
+/// - `Array1<&'static str>`: Owned array of numeric feature headers
+/// - `Array2<String>`: Owned string features matrix
+/// - `Array2<f64>`: Owned numeric features matrix
 ///
 /// # Performance Notes
 ///
@@ -290,6 +290,12 @@ pub fn load_titanic() -> (
 ///     numeric_features[[0, 0]] = 999.0;
 /// }
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_titanic_owned() -> (
     Array1<&'static str>,
     Array1<&'static str>,

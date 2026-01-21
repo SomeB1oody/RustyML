@@ -14,12 +14,9 @@ static IRIS_DATA: OnceLock<(Array1<&'static str>, Array2<f64>, Array1<&'static s
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix with shape (150, 4) where each row represents
-///     a flower sample and each column represents a feature
-///     - `Array1<&'static str>`: Target labels array with shape (150,) containing
-///     species classifications (Iris-setosa, Iris-versicolor, Iris-virginica)
+/// - `Array1<&'static str>`: Array of column headers from the dataset
+/// - `Array2<f64>`: Feature matrix with shape (150, 4) where each row represents a flower sample and each column represents a feature
+/// - `Array1<&'static str>`: Target labels array with shape (150,) containing species classifications (Iris-setosa, Iris-versicolor, Iris-virginica)
 ///
 /// # Panics
 ///
@@ -66,14 +63,13 @@ fn load_iris_internal() -> (Array1<&'static str>, Array2<f64>, Array1<&'static s
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `&'static Array1<&'static str>`: Static reference to the headers of the dataset
-///     - `&'static Array2<f64>`: Static reference to a 2D array of shape (150, 4) containing the feature measurements:
-///         - sepal length in cm
-///         - sepal width in cm
-///         - petal length in cm
-///         - petal width in cm
-///     - `&'static Array1<&'static str>`: Static reference to a 1D array of length 150 containing the species labels
+/// - `&'static Array1<&'static str>`: Static reference to the headers of the dataset
+/// - `&'static Array2<f64>`: Static reference to a 2D array of shape (150, 4) containing the feature measurements:
+///     - sepal length in cm
+///     - sepal width in cm
+///     - petal length in cm
+///     - petal width in cm
+/// - `&'static Array1<&'static str>`: Static reference to a 1D array of length 150 containing the species labels
 ///
 /// # Example
 /// ```rust
@@ -84,6 +80,13 @@ fn load_iris_internal() -> (Array1<&'static str>, Array2<f64>, Array1<&'static s
 /// assert_eq!(features.shape(), &[150, 4]);
 /// assert_eq!(labels.len(), 150);
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (150 samples, 5 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_iris() -> (
     &'static Array1<&'static str>,
     &'static Array2<f64>,
@@ -105,10 +108,9 @@ pub fn load_iris() -> (
 ///
 /// # Returns
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 5 feature names plus the target label name
-///     - `Array2<f64>`: Owned feature matrix with shape (150, 4) where each row represents a flower sample and each column represents a feature (sepal length, sepal width, petal length, petal width)
-///     - `Array1<&'static str>`: Owned target labels array with shape (150,) containing species classifications (Iris-setosa, Iris-versicolor, Iris-virginica)
+/// - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 5 feature names plus the target label name
+/// - `Array2<f64>`: Owned feature matrix with shape (150, 4) where each row represents a flower sample and each column represents a feature (sepal length, sepal width, petal length, petal width)
+/// - `Array1<&'static str>`: Owned target labels array with shape (150,) containing species classifications (Iris-setosa, Iris-versicolor, Iris-virginica)
 ///
 /// # Performance Notes
 ///
@@ -130,6 +132,13 @@ pub fn load_iris() -> (
 /// features[[0, 0]] = 5.5;
 /// labels[0] = "Modified-setosa";
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format (150 samples, 5 columns total)
+/// - Memory allocation fails during array creation
 pub fn load_iris_owned() -> (Array1<&'static str>, Array2<f64>, Array1<&'static str>) {
     let (headers, features, labels) = load_iris();
     (headers.clone(), features.clone(), labels.clone())

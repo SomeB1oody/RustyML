@@ -20,9 +20,8 @@ static WHITE_WINE_DATA: OnceLock<(Array1<&'static str>, Array2<f64>)> = OnceLock
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>` - Array of feature names (headers)
-///     - `Array2<f64>` - 2D array of wine quality features with shape (n_samples, 12)
+/// - `Array1<&'static str>` - Array of feature names (headers)
+/// - `Array2<f64>` - 2D array of wine quality features with shape (n_samples, 12)
 fn parse_wine_data(
     raw_data: &'static str,
     n_samples: usize,
@@ -61,10 +60,8 @@ fn parse_wine_data(
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix where each row represents a wine sample
-///       and each column represents a feature
+/// - `Array1<&'static str>`: Array of column headers from the dataset
+/// - `Array2<f64>`: Feature matrix where each row represents a wine sample and each column represents a feature
 ///
 /// # Panics
 ///
@@ -84,10 +81,8 @@ fn load_red_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
 ///
 /// # Returns
 ///
-/// * A tuple containing:
-///     - `Array1<&'static str>`: Array of column headers from the dataset
-///     - `Array2<f64>`: Feature matrix where each row represents a wine sample
-///       and each column represents a feature
+/// - `Array1<&'static str>`: Array of column headers from the dataset
+/// - `Array2<f64>`: Feature matrix where each row represents a wine sample and each column represents a feature
 ///
 /// # Panics
 ///
@@ -103,20 +98,19 @@ fn load_white_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
 /// Loads the red wine quality dataset with memoization for machine learning tasks.
 ///
 /// This function provides access to a curated red wine quality dataset containing
-/// physicochemical properties and quality ratings. The dataset includes 11 features
+/// physical properties and quality ratings. The dataset includes 11 features
 /// such as acidity levels, sugar content, pH, and alcohol percentage, along with
 /// quality scores ranging from 3 to 8. Uses memoization for improved performance
 /// on repeated calls.
 ///
 /// # Returns
 ///
-/// A tuple containing:
-/// * `&'static Array1<&'static str>` - Static reference to array of feature names including:
-///   - fixed acidity, volatile acidity, citric acid
-///   - residual sugar, chlorides
-///   - free sulfur dioxide, total sulfur dioxide
-///   - density, pH, sulphates, alcohol, quality
-/// * `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (1599, 12)
+/// - `&'static Array1<&'static str>` - Static reference to array of feature names including:
+///     - fixed acidity, volatile acidity, citric acid
+///     - residual sugar, chlorides
+///     - free sulfur dioxide, total sulfur dioxide
+///     - density, pH, sulphates, alcohol, quality
+/// - `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (1599, 12)
 ///   containing normalized wine quality measurements
 ///
 /// # Example
@@ -135,6 +129,13 @@ fn load_white_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
 /// // Example: Extract quality scores (last column)
 /// let quality_scores = features.column(11);  // Quality is the 12th column (index 11)
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array2<f64>) {
     let (headers, features) = RED_WINE_DATA.get_or_init(load_red_wine_quality_internal);
     (headers, features)
@@ -152,12 +153,12 @@ pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array
 /// # Returns
 ///
 /// A tuple containing:
-/// * `&'static Array1<&'static str>` - Static reference to array of feature names including:
-///   - fixed acidity, volatile acidity, citric acid
-///   - residual sugar, chlorides
-///   - free sulfur dioxide, total sulfur dioxide
-///   - density, pH, sulphates, alcohol, quality
-/// * `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (4898, 12)
+/// - `&'static Array1<&'static str>` - Static reference to an array of feature names including
+///     - fixed acidity, volatile acidity, citric acid
+///     - residual sugar, chlorides
+///     - free sulfur dioxide, total sulfur dioxide
+///     - density, pH, sulphates, alcohol, quality
+/// - `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (4898, 12)
 ///   containing normalized white wine quality measurements
 ///
 /// # Example
@@ -177,6 +178,13 @@ pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array
 /// // Example: Extract quality scores (last column)
 /// let quality_scores = features.column(11);  // Quality is the 12th column (index 11)
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_white_wine_quality() -> (&'static Array1<&'static str>, &'static Array2<f64>) {
     let (headers, features) = WHITE_WINE_DATA.get_or_init(load_white_wine_quality_internal);
     (headers, features)
@@ -189,9 +197,8 @@ pub fn load_white_wine_quality() -> (&'static Array1<&'static str>, &'static Arr
 ///
 /// # Returns
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 12 feature names
-///     - `Array2<f64>`: Owned feature matrix with shape (1599, 12) where each row represents a wine sample and each column represents a feature (fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol, quality)
+/// - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 12 feature names
+/// - `Array2<f64>`: Owned feature matrix with shape (1599, 12) where each row represents a wine sample and each column represents a feature (fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol, quality)
 ///
 /// # Performance Notes
 ///
@@ -211,6 +218,13 @@ pub fn load_white_wine_quality() -> (&'static Array1<&'static str>, &'static Arr
 /// // Example: Modify feature values (not possible with references)
 /// features[[0, 0]] = 10.0;
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_red_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
     let (headers, features) = load_red_wine_quality();
     (headers.clone(), features.clone())
@@ -223,9 +237,8 @@ pub fn load_red_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
 ///
 /// # Returns
 ///
-/// * A tuple containing owned copies of:
-///     - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 12 feature names
-///     - `Array2<f64>`: Owned feature matrix with shape (4898, 12) where each row represents a wine sample and each column represents a feature (fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol, quality)
+/// - `Array1<&'static str>`: Owned array of column headers from the dataset, containing 12 feature names
+/// - `Array2<f64>`: Owned feature matrix with shape (4898, 12) where each row represents a wine sample and each column represents a feature (fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol, quality)
 ///
 /// # Performance Notes
 ///
@@ -246,6 +259,13 @@ pub fn load_red_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
 /// // Example: Modify feature values (not possible with references)
 /// features[[0, 0]] = 10.0;
 /// ```
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - The raw data cannot be parsed as valid f64 values
+/// - The dataset structure doesn't match the expected format
+/// - Memory allocation fails during array creation
 pub fn load_white_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
     let (headers, features) = load_white_wine_quality();
     (headers.clone(), features.clone())
