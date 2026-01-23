@@ -4,18 +4,18 @@ use ndarray::prelude::*;
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 
-/// Calculates the Sum of Square Total
+/// Calculates the total sum of squares (SST).
 ///
-/// SST measures the total variability in the data, computed as the sum of squared
-/// differences between each actual value and the mean of all values.
+/// SST measures the total variability in the data as the sum of squared
+/// differences between each value and the mean of all values.
 ///
 /// # Parameters
 ///
-/// * `values` - A reference of observed values in ndarray
+/// - `values` - Observed values stored in a 1D array
 ///
 /// # Returns
 ///
-/// - `f64` - The Sum of Square Total (SST)
+/// - `f64` - Total sum of squares for the provided values
 ///
 /// # Examples
 /// ```rust
@@ -42,16 +42,18 @@ where
     values.mapv(|x| (x - mean).powi(2)).sum()
 }
 
-/// Calculate the sum of squared errors
+/// Calculates the sum of squared errors (SSE).
+///
+/// SSE measures the total squared difference between predicted values and actual labels.
 ///
 /// # Parameters
 ///
-/// - `predicted` - Predicted values vector (y') as a reference in ndarray
-/// - `actual` - Actual values vector (y) as a reference in ndarray
+/// - `predicted` - Predicted values vector
+/// - `actual` - Actual values vector
 ///
 /// # Returns
 ///
-/// - `f64` - Sum of squared errors sum((predicted_i - actual_i)^2)
+/// - `f64` - Sum of squared errors computed as sum((predicted_i - actual_i)^2)
 ///
 /// # Examples
 /// ```rust
@@ -82,27 +84,18 @@ where
     sum
 }
 
-/// Calculate the sigmoid function value for a given input
+/// Computes the logistic sigmoid for a scalar input.
 ///
-/// The sigmoid function transforms any real-valued number into the range (0, 1).
-/// It is defined as: σ(z) = 1 / (1 + e^(-z))
-///
-/// - For very large positive values, sigmoid(z) ≈ 1. When input > 500, this function returns 1.0
-/// - For very large negative values, sigmoid(z) ≈ 0. When input < -500, this function returns 0.0
+/// The sigmoid maps any real number into the open interval (0, 1) with clipping
+/// for extreme values to preserve numerical stability.
 ///
 /// # Parameters
 ///
-/// * `z` - The input value (can be any real number)
+/// - `z` - Input value to transform
 ///
 /// # Returns
 ///
-/// * A value between 0 and 1, representing the sigmoid of the input
-///
-/// # Mathematical properties
-///
-/// - sigmoid(0) = 0.5
-/// - As z approaches positive infinity, sigmoid(z) approaches 1
-/// - As z approaches negative infinity, sigmoid(z) approaches 0
+/// - `f64` - Sigmoid output in the range (0, 1)
 ///
 /// # Examples
 /// ```rust
@@ -119,10 +112,10 @@ pub fn sigmoid(z: f64) -> f64 {
     const MIN_SIGMOID_INPUT: f64 = -500.0;
 
     if z > MAX_SIGMOID_INPUT {
-        // For very large positive values, sigmoid(z) ≈ 1
+        // For very large positive values, sigmoid(z) approaches 1
         return 1.0;
     } else if z < MIN_SIGMOID_INPUT {
-        // For very large negative values, sigmoid(z) ≈ 0
+        // For very large negative values, sigmoid(z) approaches 0
         return 0.0;
     }
 
@@ -130,15 +123,15 @@ pub fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
-/// Calculate logistic regression loss (log loss)
+/// Calculates the logistic regression loss (log loss).
 ///
-/// This function computes the average cross-entropy loss for logistic regression,
-/// applying sigmoid to raw predictions before calculating loss.
+/// This computes the average cross-entropy loss by applying the sigmoid
+/// to raw logits before evaluating the log-likelihood.
 ///
 /// # Parameters
 ///
-/// - `logits` - A reference in ndarray of raw model outputs (logits, before sigmoid)
-/// - `actual_labels` - A reference in ndarray of actual binary labels (0 or 1)
+/// - `logits` - Raw model outputs (logits before sigmoid)
+/// - `actual_labels` - Binary labels (0 or 1)
 ///
 /// # Returns
 ///
@@ -178,16 +171,16 @@ where
     total_loss / n
 }
 
-/// Calculate the squared Euclidean distance between two vectors
+/// Calculates the squared Euclidean distance between two vectors.
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as a reference in ndarray
-/// - `x2` - Second vector as a reference in ndarray
+/// - `x1` - First vector
+/// - `x2` - Second vector
 ///
 /// # Returns
 ///
-/// - `f64` - The squared Euclidean distance between x1 and x2
+/// - `f64` - Squared Euclidean distance between the two vectors
 ///
 /// # Examples
 /// ```rust
@@ -216,19 +209,16 @@ where
     diff.mapv(|x| x * x).sum()
 }
 
-/// Calculate the Manhattan distance between two vectors
-///
-/// Computes the sum of absolute differences between corresponding elements
-/// of two 1D arrays, representing the Manhattan (L1) distance.
+/// Calculates the Manhattan (L1) distance between two vectors.
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as ndarray a reference in ndarray
-/// - `x2` - Second vector as ndarray a reference in ndarray
+/// - `x1` - First vector
+/// - `x2` - Second vector
 ///
 /// # Returns
 ///
-/// - `f64` - The Manhattan distance between x1 and x2
+/// - `f64` - Manhattan distance between the two vectors
 ///
 /// # Examples
 /// ```rust
@@ -254,21 +244,19 @@ where
     diff.mapv(|x| x.abs()).sum()
 }
 
-/// Calculate the Minkowski distance between two vectors
+/// Calculates the Minkowski distance between two vectors.
 ///
-/// Computes the p-norm between corresponding elements of two 1D arrays,
-/// representing the Minkowski distance with parameter p.
+/// Computes the p-norm of the difference between two 1D arrays.
 ///
 /// # Parameters
 ///
-/// - `x1` - First vector as a reference in ndarray
-/// - `x2` - Second vector as a reference in ndarray
-/// - `p` - The order of the norm (p ≥ 1.0)
+/// - `x1` - First vector
+/// - `x2` - Second vector
+/// - `p` - Order of the norm (must be at least 1.0)
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The Minkowski distance between x1 and x2
-/// - `Err(ModelError)` - The function returns an error if p is less than 1.0
+/// - `f64` - Minkowski distance between the two vectors
 ///
 /// # Examples
 /// ```rust
@@ -302,22 +290,16 @@ where
 
 /// Calculates the Gini impurity of a label set.
 ///
-/// Gini impurity is a measure of how often a randomly chosen element from the set would be
-/// incorrectly labeled if it was randomly labeled according to the distribution of labels
-/// in the subset. It is commonly used in decision tree algorithms like CART.
+/// Gini impurity measures how frequently a randomly chosen element would be
+/// mislabeled if it were randomly labeled according to the distribution of labels.
 ///
 /// # Parameters
 ///
-/// * `y` - A reference in ndarray of values representing class labels
+/// - `y` - Class labels stored in a 1D array
 ///
 /// # Returns
 ///
-/// * `f64` - The Gini impurity value of the given dataset. The value ranges from 0.0 (pure) to 1.0 (impure).
-///
-/// # Notes
-///
-/// - The function handles floating point labels by rounding to 3 decimal places for counting.
-/// - Returns 0.0 for empty datasets.
+/// - `f64` - Gini impurity in the range [0.0, 1.0]
 ///
 /// # Examples
 /// ```rust
@@ -372,21 +354,16 @@ where
 
 /// Calculates the entropy of a label set.
 ///
-/// Entropy is a measure of impurity in a dataset, commonly used in decision tree algorithms
-/// like ID3 and C4.5. It quantifies the uncertainty or randomness in the data distribution.
+/// Entropy quantifies the impurity or randomness in a dataset and is used
+/// by decision tree algorithms to evaluate split quality.
 ///
 /// # Parameters
 ///
-/// * `y` - A reference in ndarray of values representing class labels
+/// - `y` - Class labels stored in a 1D array
 ///
 /// # Returns
 ///
-/// * The entropy value of the given dataset. Lower values indicate more homogeneous data.
-///
-/// # Notes
-///
-/// - The function handles floating point labels by rounding to 3 decimal places for counting.
-/// - Returns 0.0 for empty datasets.
+/// - `f64` - Entropy value of the dataset (0.0 for homogeneous data)
 ///
 /// # Examples
 /// ```rust
@@ -444,23 +421,18 @@ where
 
 /// Calculates the information gain when splitting a dataset.
 ///
-/// Information gain measures the reduction in entropy (or impurity) achieved by
-/// splitting the dataset into two parts. It is commonly used in decision tree algorithms
-/// like ID3 and C4.5 to select the best feature for splitting.
+/// Information gain measures the reduction in entropy achieved by dividing a
+/// dataset into child nodes, guiding feature selection in decision trees.
 ///
 /// # Parameters
 ///
-/// - `y` - A reference in ndarray representing class labels in the parent node
-/// - `left_y` - A reference in ndarray representing class labels in the left child node
-/// - `right_y` - A reference in ndarray representing class labels in the right child node
+/// - `y` - Class labels in the parent node
+/// - `left_y` - Class labels in the left child node
+/// - `right_y` - Class labels in the right child node
 ///
 /// # Returns
 ///
-/// * The information gain value. Higher values indicate a more useful split.
-///
-/// # Notes
-///
-/// This function uses the entropy function to calculate impurity at each node.
+/// - `f64` - Information gain for the proposed split
 ///
 /// # Examples
 /// ```rust
@@ -521,24 +493,18 @@ where
 
 /// Calculates the gain ratio for a dataset split.
 ///
-/// Gain ratio is an extension of information gain that reduces the bias towards
-/// features with a large number of values. It is used in the C4.5 algorithm to
-/// normalize information gain by the entropy of the split itself.
+/// Gain ratio normalizes information gain by the entropy of the split to reduce
+/// bias toward features with many distinct values.
 ///
 /// # Parameters
 ///
-/// - `y` - A reference in ndarray representing class labels in the parent node
-/// - `left_y` - A reference in ndarray representing class labels in the left child node
-/// - `right_y` - A reference in ndarray representing class labels in the right child node
+/// - `y` - Class labels in the parent node
+/// - `left_y` - Class labels in the left child node
+/// - `right_y` - Class labels in the right child node
 ///
 /// # Returns
 ///
-/// * The gain ratio value. Higher values indicate a more useful split.
-///
-/// # Notes
-///
-/// - Returns 0.0 if the split information is zero to avoid division by zero.
-/// - This function uses the information_gain function as part of its calculation.
+/// - `f64` - Gain ratio value for the proposed split
 ///
 /// # Examples
 /// ```rust
@@ -603,18 +569,18 @@ where
     }
 }
 
-/// Calculates the Mean Squared Error (MSE) or variance of a set of values.
+/// Calculates the mean squared error (variance) of a set of values.
 ///
-/// The MSE is calculated as the average of the squared differences between each value
-/// and the mean of all values. It represents the variance of the dataset.
+/// The variance is the average of the squared differences between each value
+/// and the mean of all values.
 ///
-/// # Arguments
+/// # Parameters
 ///
-/// * `y` - A reference in ndarray of values for which to calculate the MSE
+/// - `y` - Values for which to calculate the variance
 ///
 /// # Returns
 ///
-/// * `f64` - The mean squared error as a f64 value, returns 0.0 if the input array is empty
+/// - `f64` - Variance of the input values (0.0 when the array is empty)
 ///
 /// # Examples
 /// ```rust
@@ -623,7 +589,7 @@ where
 ///
 /// let values = array![1.0, 2.0, 3.0];
 /// let mse = variance(&values);
-/// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ≈ 0.66667
+/// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ~= 0.66667
 /// assert!((mse - 0.6666667).abs() < 1e-6);
 /// ```
 #[inline]
@@ -660,17 +626,15 @@ where
     sum_squared_diff / n as f64
 }
 
-/// Calculates the standard deviation of a set of values
+/// Calculates the population standard deviation of a set of values.
 ///
 /// # Parameters
 ///
-/// * `values` - A reference in ndarray of values
+/// - `values` - Values to measure dispersion
 ///
 /// # Returns
 ///
-/// * `Result<f64, ModelError>` - The population standard deviation, or an error if invalid input:
-///   - Returns error for empty arrays or arrays containing NaN/infinite values
-///   - Returns 0.0 if the array contains only one element (no variation)
+/// - `f64` - Population standard deviation (0.0 when the array is empty)
 ///
 /// # Examples
 /// ```rust
@@ -712,52 +676,31 @@ where
 
 /// Calculates the average path length adjustment factor for isolation trees.
 ///
-/// This function computes the correction factor `c(n)` used in isolation forest algorithms
-/// to normalize path lengths. The adjustment accounts for the average path length of
-/// a binary search tree with `n` samples, which helps in calculating anomaly scores.
-///
-/// # Mathematical Formula
-///
-/// The formula used is:
-/// - `c(n) = 2 * H(n-1) - 2 * (n-1) / n`
-///
-/// where `H(n-1)` is the (n-1)th harmonic number, approximated as:
-/// - For large n (> 50): `H(n-1) ≈ ln(n-1) + γ` (where γ is Euler's constant)
-/// - For small n (≤ 50): `H(n-1) = Σ(1/i)` for i from 1 to n-1 (exact calculation)
+/// This is the correction factor `c(n)` used in isolation forests to normalize
+/// path lengths based on the expected height of a binary search tree.
 ///
 /// # Parameters
 ///
-/// * `n` - Number of samples in the isolation tree node (must be > 0)
+/// - `n` - Number of samples in the isolation tree node (must be greater than 0)
 ///
 /// # Returns
 ///
-/// * `f64` - The adjustment factor for average path length normalization:
-///   - Returns 0.0 for n ≤ 1 (degenerate cases)
-///   - Returns 1.0 for n = 2 (single split)
-///   - Returns calculated adjustment factor for n > 2
-///
-/// # Performance Notes
-///
-/// For efficiency, this function uses different calculation methods based on input size:
-/// - Small values (n ≤ 50): Direct harmonic number computation for accuracy
-/// - Large values (n > 50): Logarithmic approximation for performance
+/// - `f64` - Adjustment factor for path length normalization:
+///   - 0.0 for `n <= 1`
+///   - 1.0 for `n == 2`
+///   - Computed correction factor for larger `n`
 ///
 /// # Examples
 /// ```rust
 /// use rustyml::math::average_path_length_factor;
 ///
-/// // Small sample size - exact calculation
 /// let factor_small = average_path_length_factor(10);
-/// // factor_small ≈ 3.748
-///
-/// // Large sample size - logarithmic approximation
 /// let factor_large = average_path_length_factor(1000);
-/// // factor_large ≈ 13.815
-///
-/// // Edge cases
-/// assert_eq!(average_path_length_factor(0), 0.0);  // Degenerate case
-/// assert_eq!(average_path_length_factor(1), 0.0);  // Single sample
-/// assert_eq!(average_path_length_factor(2), 1.0);  // Single split
+/// assert_eq!(average_path_length_factor(0), 0.0);
+/// assert_eq!(average_path_length_factor(1), 0.0);
+/// assert_eq!(average_path_length_factor(2), 1.0);
+/// assert!(factor_small > 0.0);
+/// assert!(factor_large > factor_small);
 /// ```
 #[inline]
 pub fn average_path_length_factor(n: usize) -> f64 {
@@ -777,21 +720,19 @@ pub fn average_path_length_factor(n: usize) -> f64 {
     2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
 }
 
-/// Finds the appropriate sigma value for a single sample's distances to achieve target perplexity.
+/// Finds the sigma value that matches a target perplexity for distance-derived probabilities.
 ///
-/// This function uses binary search to find a precision parameter (sigma) that makes the
-/// perplexity of the conditional probability distribution match the target value.
+/// Uses binary search to tune the precision parameter so the resulting probability
+/// distribution has the desired perplexity.
 ///
 /// # Parameters
 ///
-/// - `distances` - A reference in ndarray of squared Euclidean distances from a point to all others.
-/// - `target_perplexity` - Desired perplexity value, controlling the effective number of neighbors.
+/// - `distances` - Squared Euclidean distances from a point to all others
+/// - `target_perplexity` - Desired perplexity controlling neighborhood size
 ///
 /// # Returns
 ///
-/// * `(Array1<f64>, f64)` - A tuple containing:
-///   - The normalized probability distribution
-///   - The found sigma value that achieves the target perplexity
+/// - `(Array1<f64>, f64)` - Probability distribution and the sigma value that achieves the target perplexity
 ///
 /// # Examples
 /// ```rust

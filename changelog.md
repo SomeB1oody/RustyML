@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.11.0] - 2026-01-22 (UTC-7)
 ### Changed
 - Restrict visibility of validation helper functions
+- Update documentation of `math` module
 
 ## [v0.11.0] - 2026-01-21 (UTC-7)
 ### Changed
