@@ -8,9 +8,3 @@ pub mod iris_raw;
 pub mod titanic_raw;
 /// This module provides access to the raw data of wine quality dataset (Red and White)
 pub mod wine_quality_raw;
-
-pub use boston_housing_raw::*;
-pub use diabetes_raw::*;
-pub use iris_raw::*;
-pub use titanic_raw::*;
-pub use wine_quality_raw::*;

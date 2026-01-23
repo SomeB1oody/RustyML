@@ -585,7 +585,6 @@ pub mod metric;
 /// - **boston_housing**: Housing price prediction dataset for regression tasks
 /// - **wine_quality**: Wine quality datasets for both red and white wines (classification/regression)
 /// - **titanic**: Famous Titanic survival prediction dataset for binary classification
-/// - **raw_data**: Access to raw data loading utilities
 ///
 /// # Data Format
 /// All datasets return tuples in the format `(headers, data, target)` where:

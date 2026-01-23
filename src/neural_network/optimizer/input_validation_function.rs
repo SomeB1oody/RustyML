@@ -10,7 +10,7 @@ use super::*;
 ///
 /// * `Ok(())` if the learning rate is positive
 /// * `Err(ModelError::InputValidationError)` if the learning rate is not positive
-pub fn validate_learning_rate(learning_rate: f32) -> Result<(), ModelError> {
+pub(super) fn validate_learning_rate(learning_rate: f32) -> Result<(), ModelError> {
     if learning_rate <= 0.0 {
         return Err(ModelError::InputValidationError(format!(
             "learning_rate must be positive, got {}",
@@ -31,7 +31,7 @@ pub fn validate_learning_rate(learning_rate: f32) -> Result<(), ModelError> {
 ///
 /// * `Ok(())` if the value is in the valid range
 /// * `Err(ModelError::InputValidationError)` if the value is out of range
-pub fn validate_decay_rate(value: f32, param_name: &str) -> Result<(), ModelError> {
+pub(super) fn validate_decay_rate(value: f32, param_name: &str) -> Result<(), ModelError> {
     if !(0.0..1.0).contains(&value) {
         return Err(ModelError::InputValidationError(format!(
             "{} must be in range [0, 1), got {}",
@@ -51,7 +51,7 @@ pub fn validate_decay_rate(value: f32, param_name: &str) -> Result<(), ModelErro
 ///
 /// * `Ok(())` if epsilon is positive
 /// * `Err(ModelError::InputValidationError)` if epsilon is not positive
-pub fn validate_epsilon(epsilon: f32) -> Result<(), ModelError> {
+pub(super) fn validate_epsilon(epsilon: f32) -> Result<(), ModelError> {
     if epsilon <= 0.0 {
         return Err(ModelError::InputValidationError(format!(
             "epsilon must be positive, got {}",
@@ -72,7 +72,7 @@ pub fn validate_epsilon(epsilon: f32) -> Result<(), ModelError> {
 ///
 /// * `Ok(())` if the value is positive and finite
 /// * `Err(ModelError::InputValidationError)` if the value is not positive or not finite
-pub fn validate_positive_finite(value: f32, param_name: &str) -> Result<(), ModelError> {
+pub(super) fn validate_positive_finite(value: f32, param_name: &str) -> Result<(), ModelError> {
     if !(value > 0.0 && value.is_finite()) {
         return Err(ModelError::InputValidationError(format!(
             "{} must be positive and finite, got {}",

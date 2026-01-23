@@ -1,4 +1,4 @@
-use super::raw_data::load_diabetes_raw_data;
+use super::raw_data::diabetes_raw::load_diabetes_raw_data;
 use ndarray::prelude::*;
 use std::sync::OnceLock;
 

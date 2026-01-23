@@ -5,7 +5,7 @@ use super::*;
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if filters is 0.
-pub fn validate_filters(filters: usize) -> Result<(), ModelError> {
+pub(super) fn validate_filters(filters: usize) -> Result<(), ModelError> {
     if filters == 0 {
         return Err(ModelError::InputValidationError(
             "Number of filters must be greater than 0".to_string(),
@@ -19,7 +19,7 @@ pub fn validate_filters(filters: usize) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if kernel_size is 0.
-pub fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), ModelError> {
+pub(super) fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), ModelError> {
     if kernel_size == 0 {
         return Err(ModelError::InputValidationError(
             "Kernel size must be greater than 0".to_string(),
@@ -33,7 +33,7 @@ pub fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if any dimension is 0.
-pub fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(), ModelError> {
+pub(super) fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(), ModelError> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 {
         return Err(ModelError::InputValidationError(
             "Kernel dimensions must be greater than 0".to_string(),
@@ -47,7 +47,9 @@ pub fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(), ModelE
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if any dimension is 0.
-pub fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Result<(), ModelError> {
+pub(super) fn validate_kernel_size_3d(
+    kernel_size: (usize, usize, usize),
+) -> Result<(), ModelError> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 || kernel_size.2 == 0 {
         return Err(ModelError::InputValidationError(
             "Kernel dimensions must be greater than 0".to_string(),
@@ -61,7 +63,7 @@ pub fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Result<(),
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if stride is 0.
-pub fn validate_strides_1d(stride: usize) -> Result<(), ModelError> {
+pub(super) fn validate_strides_1d(stride: usize) -> Result<(), ModelError> {
     if stride == 0 {
         return Err(ModelError::InputValidationError(
             "Stride must be greater than 0".to_string(),
@@ -75,7 +77,7 @@ pub fn validate_strides_1d(stride: usize) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if any stride is 0.
-pub fn validate_strides_2d(strides: (usize, usize)) -> Result<(), ModelError> {
+pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), ModelError> {
     if strides.0 == 0 || strides.1 == 0 {
         return Err(ModelError::InputValidationError(
             "Strides must be greater than 0".to_string(),
@@ -89,7 +91,7 @@ pub fn validate_strides_2d(strides: (usize, usize)) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if any stride is 0.
-pub fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), ModelError> {
+pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), ModelError> {
     if strides.0 == 0 || strides.1 == 0 || strides.2 == 0 {
         return Err(ModelError::InputValidationError(
             "Strides must be greater than 0".to_string(),
@@ -106,7 +108,7 @@ pub fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), ModelEr
 /// - Shape is not 3D
 /// - Input channels is 0
 /// - Input length is less than kernel size
-pub fn validate_input_shape_1d(
+pub(super) fn validate_input_shape_1d(
     input_shape: &[usize],
     kernel_size: usize,
 ) -> Result<(), ModelError> {
@@ -136,7 +138,7 @@ pub fn validate_input_shape_1d(
 /// - Shape is not 4D
 /// - Input channels is 0
 /// - Input dimensions are less than kernel size
-pub fn validate_input_shape_2d(
+pub(super) fn validate_input_shape_2d(
     input_shape: &[usize],
     kernel_size: (usize, usize),
 ) -> Result<(), ModelError> {
@@ -165,7 +167,7 @@ pub fn validate_input_shape_2d(
 /// Returns `ModelError::InputValidationError` if:
 /// - Shape is not 5D
 /// - Any dimension is 0
-pub fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), ModelError> {
+pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), ModelError> {
     if input_shape.len() != 5 {
         return Err(ModelError::InputValidationError(
             "Input shape must be 5-dimensional: [batch, channels, depth, height, width]"
@@ -185,7 +187,7 @@ pub fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), ModelError> 
 /// # Errors
 ///
 /// Returns `ModelError::InputValidationError` if depth_multiplier is 0.
-pub fn validate_depth_multiplier(depth_multiplier: usize) -> Result<(), ModelError> {
+pub(super) fn validate_depth_multiplier(depth_multiplier: usize) -> Result<(), ModelError> {
     if depth_multiplier == 0 {
         return Err(ModelError::InputValidationError(
             "Depth multiplier must be greater than 0".to_string(),

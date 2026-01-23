@@ -1,4 +1,6 @@
-use super::raw_data::{load_red_wine_quality_raw_data, load_white_wine_quality_raw_data};
+use super::raw_data::wine_quality_raw::{
+    load_red_wine_quality_raw_data, load_white_wine_quality_raw_data,
+};
 use ndarray::prelude::*;
 use std::sync::OnceLock;
 

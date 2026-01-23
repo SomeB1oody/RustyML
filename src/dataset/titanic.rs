@@ -1,4 +1,4 @@
-use super::raw_data::load_titanic_raw_data;
+use super::raw_data::titanic_raw::load_titanic_raw_data;
 use ndarray::prelude::*;
 use std::sync::OnceLock;
 

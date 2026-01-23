@@ -179,9 +179,9 @@ pub mod average_pooling_1d;
 /// 2D Average Pooling Layer
 pub mod average_pooling_2d;
 /// 3D Average Pooling Layer
-mod average_pooling_3d;
+pub mod average_pooling_3d;
 /// Global Average Pooling 1D Layer
-mod global_average_pooling_1d;
+pub mod global_average_pooling_1d;
 /// Global Average Pooling 2D Layer
 pub mod global_average_pooling_2d;
 /// Global Average Pooling 3D Layer

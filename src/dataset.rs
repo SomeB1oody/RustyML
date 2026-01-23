@@ -7,8 +7,8 @@ pub mod diabetes;
 /// This module provides access to the boston housing dataset
 pub mod boston_housing;
 
-/// This module provides access to the raw data
-pub mod raw_data;
+/// Internal module for raw dataset content
+mod raw_data;
 
 /// This module provides access to the titanic dataset
 pub mod titanic;
@@ -19,6 +19,5 @@ pub mod wine_quality;
 pub use boston_housing::*;
 pub use diabetes::*;
 pub use iris::*;
-pub use raw_data::*;
 pub use titanic::*;
 pub use wine_quality::*;

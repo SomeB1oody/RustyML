@@ -11,7 +11,10 @@ use super::*;
 ///
 /// * `Ok(())` if validation passes
 /// * `Err(ModelError)` if validation fails
-pub fn validate_dimension_greater_than_zero(value: usize, name: &str) -> Result<(), ModelError> {
+pub(super) fn validate_dimension_greater_than_zero(
+    value: usize,
+    name: &str,
+) -> Result<(), ModelError> {
     if value == 0 {
         return Err(ModelError::InputValidationError(format!(
             "{} must be greater than 0",
@@ -32,7 +35,10 @@ pub fn validate_dimension_greater_than_zero(value: usize, name: &str) -> Result<
 ///
 /// * `Ok(())` if validation passes
 /// * `Err(ModelError)` if validation fails
-pub fn validate_recurrent_dimensions(input_dim: usize, units: usize) -> Result<(), ModelError> {
+pub(super) fn validate_recurrent_dimensions(
+    input_dim: usize,
+    units: usize,
+) -> Result<(), ModelError> {
     validate_dimension_greater_than_zero(input_dim, "input_dim")?;
     validate_dimension_greater_than_zero(units, "units")?;
     Ok(())
@@ -48,7 +54,7 @@ pub fn validate_recurrent_dimensions(input_dim: usize, units: usize) -> Result<(
 ///
 /// * `Ok(())` if validation passes
 /// * `Err(ModelError)` if validation fails
-pub fn validate_input_3d(input: &Tensor) -> Result<(), ModelError> {
+pub(super) fn validate_input_3d(input: &Tensor) -> Result<(), ModelError> {
     if input.ndim() != 3 {
         return Err(ModelError::InputValidationError(
             "input tensor is not 3D".to_string(),

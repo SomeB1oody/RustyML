@@ -21,7 +21,7 @@ use super::*;
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the input data is empty, contains non-finite values, or if dimensions of `x` and `y` mismatch
-pub fn preliminary_check<S>(
+pub(super) fn preliminary_check<S>(
     x: &ArrayBase<S, Ix2>,
     y: Option<&ArrayBase<S, Ix1>>,
 ) -> Result<(), ModelError>
@@ -79,7 +79,7 @@ where
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the learning rate is non-positive, NaN, or infinite
-pub fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
+pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
     if learning_rate <= 0.0 || !learning_rate.is_finite() {
         return Err(ModelError::InputValidationError(format!(
             "learning_rate must be positive and finite, got {}",
@@ -106,7 +106,7 @@ pub fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the maximum iterations value is 0
-pub fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> {
+pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> {
     if max_iterations == 0 {
         return Err(ModelError::InputValidationError(
             "max_iterations must be greater than 0".to_string(),
@@ -133,7 +133,7 @@ pub fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> 
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the tolerance is non-positive, NaN, or infinite
-pub fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
+pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
     if tolerance <= 0.0 || !tolerance.is_finite() {
         return Err(ModelError::InputValidationError(format!(
             "tolerance must be positive and finite, got {}",
@@ -163,7 +163,9 @@ pub fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the regularization alpha is negative, NaN, or infinite
-pub fn validate_regulation_type(reg_type: Option<RegularizationType>) -> Result<(), ModelError> {
+pub(super) fn validate_regulation_type(
+    reg_type: Option<RegularizationType>,
+) -> Result<(), ModelError> {
     if let Some(reg) = &reg_type {
         match reg {
             RegularizationType::L1(alpha) | RegularizationType::L2(alpha) => {
