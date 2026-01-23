@@ -4,22 +4,12 @@ use ndarray::prelude::*;
 
 /// Calculates the Mean Squared Error between predicted and actual values.
 ///
-/// Mean Squared Error is a common metric for regression problems that measures
-/// the average of the squares of the errors—the average squared difference
-/// between the estimated values and the actual values.
+/// Mean Squared Error measures the average of the squared differences between predicted values and ground truth values.
 ///
 /// # Parameters
 ///
-/// - `y_true` - An array containing the ground truth (correct) values
-/// - `y_pred` - An array containing the predicted values
-///
-/// # Returns
-///
-/// * `f64` - The mean squared error value (return 0.0 if input array is empty)
-///
-/// # Panics
-///
-/// * Panics if the two arrays have different lengths
+/// - `y_true` - Ground-truth values for each sample
+/// - `y_pred` - Predicted values for each sample
 ///
 /// # Examples
 /// ```rust
@@ -29,11 +19,19 @@ use ndarray::prelude::*;
 /// let actual = array![3.0, -0.5, 2.0, 7.0];
 /// let predicted = array![2.5, 0.0, 2.1, 7.8];
 /// let mse = mean_squared_error(&actual, &predicted);
-/// // MSE = ((3.0-2.5)² + (-0.5-0.0)² + (2.0-2.1)² + (7.0-7.8)²) / 4
-/// //    = (0.25 + 0.25 + 0.01 + 0.64) / 4 ≈ 0.2875
+/// // MSE = ((3.0 - 2.5)^2 + (-0.5 - 0.0)^2 + (2.0 - 2.1)^2 + (7.0 - 7.8)^2) / 4
+/// //     = (0.25 + 0.25 + 0.01 + 0.64) / 4 = 0.2875
 /// println!("{}", mse);
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Mean squared error (returns 0.0 when the input arrays are empty)
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
 pub fn mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
@@ -69,21 +67,12 @@ where
 
 /// Calculates the Root Mean Squared Error (RMSE) between predicted and actual values.
 ///
-/// RMSE is the square root of the Mean Squared Error (MSE), providing a metric that
-/// has the same units as the original data, making it more interpretable.
+/// RMSE is the square root of the Mean Squared Error, giving a metric in the same units as the original data.
 ///
-/// # Arguments
+/// # Parameters
 ///
-/// - `predictions` - An array containing the predicted values
-/// - `targets` - An array containing the actual/target values
-///
-/// # Returns
-///
-/// * `f64` - The RMSE as a f64 value on success(return 0.0 if input array is empty)
-///
-/// # Panics
-///
-/// * Panics if the two arrays have different lengths
+/// - `predictions` - Predicted values for each sample
+/// - `targets` - Actual target values for each sample
 ///
 /// # Examples
 /// ```rust
@@ -93,9 +82,17 @@ where
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
 /// let rmse = root_mean_squared_error(&predictions, &targets);
-/// // RMSE = sqrt(((2-1)^2 + (3-2)^2 + (4-3)^2) / 3) = sqrt(3/3) = 1.0
+/// // RMSE = sqrt(((2 - 1)^2 + (3 - 2)^2 + (4 - 3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Root mean squared error (returns 0.0 when the input arrays are empty)
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
 pub fn root_mean_squared_error<S>(
     predictions: &ArrayBase<S, Ix1>,
     targets: &ArrayBase<S, Ix1>,
@@ -141,22 +138,12 @@ where
 
 /// Calculates the Mean Absolute Error (MAE) between predicted and actual values.
 ///
-/// MAE measures the average magnitude of errors between paired observations, without
-/// considering their direction. It's calculated as the average of absolute differences
-/// between predicted and target values.
+/// MAE measures the average absolute difference between predicted values and target values without considering error direction.
 ///
-/// # Arguments
+/// # Parameters
 ///
-/// - `predictions` - An array containing the predicted values
-/// - `targets` - An array containing the actual/target values
-///
-/// # Returns
-///
-/// * `f64` - The MAE as a f64 value on success(return 0.0 if input array is empty)
-///
-/// # Panics
-///
-/// * Panics if the two arrays have different lengths
+/// - `predictions` - Predicted values for each sample
+/// - `targets` - Actual target values for each sample
 ///
 /// # Examples
 /// ```rust
@@ -166,9 +153,17 @@ where
 /// let predictions = array![2.0, 3.0, 4.0];
 /// let targets = array![1.0, 2.0, 3.0];
 /// let mae = mean_absolute_error(&predictions, &targets);
-/// // MAE = (|2-1| + |3-2| + |4-3|) / 3 = (1 + 1 + 1) / 3 = 1.0
+/// // MAE = (|2 - 1| + |3 - 2| + |4 - 3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Mean absolute error (returns 0.0 when the input arrays are empty)
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
 pub fn mean_absolute_error<S>(predictions: &ArrayBase<S, Ix1>, targets: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
@@ -200,31 +195,14 @@ where
     mae
 }
 
-/// Calculate the R-squared (coefficient of determination) score
+/// Calculate the R-squared (coefficient of determination) score.
 ///
-/// R² measures how well the model explains the variance in the target variable.
-/// Formula: R² = 1 - (SSE / SST)
-/// where SSE is the sum of squared errors and SST is the total sum of squares.
+/// R^2 measures how well predictions explain the variance in the target values using the formula R^2 = 1 - (SSE / SST).
 ///
 /// # Parameters
 ///
-/// - `predicted` - An array of predicted values
-/// - `actual` - An array of actual/target values
-///
-/// # Returns
-///
-///  * `f64` - R-squared value, typically ranges from 0 to 1(return 0.0 if input array is empty)
-///
-/// # Panics
-///
-/// * Panics if the two arrays have different lengths
-///
-/// # Notes
-///
-/// - Returns 0 if SST is 0 (when all actual values are identical)
-/// - R-squared can theoretically be negative, indicating that the model performs worse
-///   than simply predicting the mean of the target variable
-/// - A value close to 1 indicates a good fit
+/// - `predicted` - Predicted values for each sample
+/// - `actual` - Actual target values for each sample
 ///
 /// # Examples
 /// ```rust
@@ -234,9 +212,17 @@ where
 /// let predicted = array![2.0, 3.0, 4.0];
 /// let actual = array![1.0, 3.0, 5.0];
 /// let r2 = r2_score(&predicted, &actual);
-/// // For actual values [1,3,5], mean=3, SSE = 1+0+1 = 2, SST = 4+0+4 = 8, so R2 = 1 - (2/8) = 0.75
+/// // For actual values [1, 3, 5], mean = 3, SSE = 1 + 0 + 1 = 2, SST = 4 + 0 + 4 = 8, so R^2 = 1 - (2/8) = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - R-squared value (returns 0.0 when the input arrays are empty)
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
 pub fn r2_score<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
@@ -279,50 +265,35 @@ where
     1.0 - (sse / sst)
 }
 
-/// Confusion Matrix for binary classification evaluation
+/// Confusion Matrix for binary classification evaluation.
 ///
-/// A confusion matrix is a table that is often used to describe the performance of a classification model
-/// on a set of test data for which the true values are known. It allows visualization of the performance
-/// of an algorithm and identification of common types of errors.
+/// Stores counts of true positives, false positives, true negatives, and false negatives for binary classifiers.
 ///
 /// # Fields
 ///
-/// - `tp` - True Positive: The number of correct positive predictions when the actual class is positive
-/// - `fp` - False Positive: The number of incorrect positive predictions when the actual class is negative (Type I error)
-/// - `tn` - True Negative: The number of correct negative predictions when the actual class is negative
-/// - `fn_` - False Negative: The number of incorrect negative predictions when the actual class is positive (Type II error)
+/// - `tp` - True positive count
+/// - `fp` - False positive count
+/// - `tn` - True negative count
+/// - `fn_` - False negative count
 ///
-/// # Performance Metrics
-///
-/// This implementation provides methods to calculate common performance metrics including:
-/// accuracy, precision, recall, specificity, and F1 score.
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use ndarray::arr1;
 /// use rustyml::metric::ConfusionMatrix;
 ///
-/// // Create arrays for predicted and actual values
 /// let predicted = arr1(&[0.9, 0.2, 0.8, 0.1, 0.7]);
 /// let actual = arr1(&[1.0, 0.0, 1.0, 0.0, 1.0]);
-///
-/// // Create confusion matrix
 /// let cm = ConfusionMatrix::new(&predicted, &actual);
 ///
-/// // Calculate performance metrics
 /// println!("Accuracy: {:.2}", cm.accuracy());
 /// println!("Precision: {:.2}", cm.precision());
 /// println!("Recall: {:.2}", cm.recall());
 /// println!("F1 Score: {:.2}", cm.f1_score());
 ///
-/// // Get the confusion matrix components
 /// let (tp, fp, tn, fn_) = cm.get_counts();
 /// println!("TP: {}, FP: {}, TN: {}, FN: {}", tp, fp, tn, fn_);
-///
-/// // Print full summary
 /// println!("{}", cm.summary());
 /// ```
-#[derive(Debug, Clone)]
 pub struct ConfusionMatrix {
     tp: usize,
     fp: usize,
@@ -331,21 +302,23 @@ pub struct ConfusionMatrix {
 }
 
 impl ConfusionMatrix {
-    /// Create a new confusion matrix
+    /// Create a new confusion matrix.
+    ///
+    /// Converts predicted probabilities and actual labels into binary outcomes using a 0.5 threshold and tallies the resulting counts.
     ///
     /// # Parameters
     ///
-    /// - `predicted` - Array of predicted labels, values >= 0.5 are considered positive class
-    /// - `actual` - Array of actual labels, values >= 0.5 are considered positive class
+    /// - `predicted` - Predicted labels or probabilities (>= 0.5 treated as positive)
+    /// - `actual` - Ground-truth labels or probabilities (>= 0.5 treated as positive)
     ///
     /// # Returns
     ///
-    /// * `Self` - A new confusion matrix if input arrays have the same length
+    /// - `Self` - Confusion matrix with populated counts
     ///
     /// # Panics
     ///
     /// - Panics if the two arrays have different lengths
-    /// - Panics if input array is empty
+    /// - Panics if input arrays are empty
     pub fn new<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> Self
     where
         S: Data<Elem = f64>,
@@ -383,26 +356,22 @@ impl ConfusionMatrix {
         Self { tp, fp, tn, fn_ }
     }
 
-    /// Get the components of the confusion matrix
+    /// Get the components of the confusion matrix.
     ///
     /// # Returns
     ///
-    /// * `(usize, usize, usize, usize)` - A tuple containing the four basic components of the confusion matrix:
-    ///     - `tp` - True Positive count
-    ///     - `fp` - False Positive count
-    ///     - `tn` - True Negative count
-    ///     - `fn_` - False Negative count
+    /// - `(usize, usize, usize, usize)` - Tuple of (tp, fp, tn, fn) counts
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
     }
 
-    /// Calculate accuracy: (TP + TN) / (TP + TN + FP + FN)
+    /// Calculate accuracy: (TP + TN) / (TP + TN + FP + FN).
     ///
-    /// Accuracy measures the proportion of correct predictions among the total number of cases examined.
+    /// Accuracy measures the proportion of correct predictions among all predictions.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing the accuracy. Returns 0.0 if there are no predictions (empty matrix).
+    /// - `f64` - Accuracy in the range [0.0, 1.0] (returns 0.0 when there are no predictions)
     pub fn accuracy(&self) -> f64 {
         let total = self.tp + self.tn + self.fp + self.fn_;
         if total == 0 {
@@ -411,25 +380,24 @@ impl ConfusionMatrix {
         (self.tp + self.tn) as f64 / total as f64
     }
 
-    /// Calculate error rate: (FP + FN) / (TP + TN + FP + FN) = 1 - Accuracy
+    /// Calculate error rate: (FP + FN) / (TP + TN + FP + FN).
     ///
-    /// Error rate measures the proportion of incorrect predictions among the total number of cases examined.
+    /// Error rate is the complement of accuracy.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing the error rate. Returns 1.0 if there are no predictions (empty matrix).
+    /// - `f64` - Error rate in the range [0.0, 1.0]
     pub fn error_rate(&self) -> f64 {
         1.0 - self.accuracy()
     }
 
-    /// Calculate precision: TP / (TP + FP)
+    /// Calculate precision: TP / (TP + FP).
     ///
-    /// Precision measures the proportion of positive identifications that were actually correct.
-    /// It answers the question: "Of all the instances predicted as positive, how many were actually positive?"
+    /// Precision measures how many predicted positives are correct.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing precision. Returns 0.0 if there are no positive predictions (TP + FP = 0).
+    /// - `f64` - Precision in the range [0.0, 1.0] (returns 0.0 when there are no positive predictions)
     pub fn precision(&self) -> f64 {
         if self.tp + self.fp == 0 {
             return 0.0;
@@ -437,14 +405,13 @@ impl ConfusionMatrix {
         self.tp as f64 / (self.tp + self.fp) as f64
     }
 
-    /// Calculate recall (sensitivity): TP / (TP + FN)
+    /// Calculate recall (sensitivity): TP / (TP + FN).
     ///
-    /// Recall measures the proportion of actual positives that were correctly identified.
-    /// It answers the question: "Of all the actual positive instances, how many were correctly predicted?"
+    /// Recall measures how many actual positives are correctly identified.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing recall. Returns 1.0 if there are no actual positive instances (TP + FN = 0).
+    /// - `f64` - Recall in the range [0.0, 1.0] (returns 1.0 when there are no actual positives)
     pub fn recall(&self) -> f64 {
         if self.tp + self.fn_ == 0 {
             return 1.0;
@@ -452,14 +419,13 @@ impl ConfusionMatrix {
         self.tp as f64 / (self.tp + self.fn_) as f64
     }
 
-    /// Calculate specificity: TN / (TN + FP)
+    /// Calculate specificity: TN / (TN + FP).
     ///
-    /// Specificity measures the proportion of actual negatives that were correctly identified.
-    /// It answers the question: "Of all the actual negative instances, how many were correctly predicted?"
+    /// Specificity measures how many actual negatives are correctly identified.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing specificity. Returns 1.0 if there are no actual negative instances (TN + FP = 0).
+    /// - `f64` - Specificity in the range [0.0, 1.0] (returns 1.0 when there are no actual negatives)
     pub fn specificity(&self) -> f64 {
         if self.tn + self.fp == 0 {
             return 1.0;
@@ -467,14 +433,13 @@ impl ConfusionMatrix {
         self.tn as f64 / (self.tn + self.fp) as f64
     }
 
-    /// Calculate F1 score: 2 * (Precision * Recall) / (Precision + Recall)
+    /// Calculate F1 score: 2 * (Precision * Recall) / (Precision + Recall).
     ///
-    /// F1 score is the harmonic mean of precision and recall, providing a balance between the two metrics.
-    /// It's particularly useful when you want to balance precision and recall and there's an uneven class distribution.
+    /// F1 score is the harmonic mean of precision and recall, balancing both metrics.
     ///
     /// # Returns
     ///
-    /// * `f64` - A float value between 0.0 and 1.0 representing the F1 score. Returns 0.0 if either precision or recall is 0.0.
+    /// - `f64` - F1 score in the range [0.0, 1.0] (returns 0.0 when both precision and recall are 0.0)
     pub fn f1_score(&self) -> f64 {
         let precision = self.precision();
         let recall = self.recall();
@@ -486,11 +451,11 @@ impl ConfusionMatrix {
         2.0 * (precision * recall) / (precision + recall)
     }
 
-    /// Generate a formatted summary of the confusion matrix and all performance metrics
+    /// Generate a formatted summary of the confusion matrix and derived metrics.
     ///
     /// # Returns
     ///
-    /// * `String` - A formatted string containing a visual representation of the confusion matrix and all calculated performance metrics with 4 decimal places of precision.
+    /// - `String` - Text summary containing matrix counts and metrics with four decimal places
     pub fn summary(&self) -> String {
         format!(
             "Confusion Matrix:\n\
@@ -520,26 +485,14 @@ impl ConfusionMatrix {
     }
 }
 
-/// Calculate the accuracy of a classification model
+/// Calculate the accuracy of a classification model.
 ///
-/// Accuracy is defined as the proportion of correctly predicted samples
-/// over the total number of samples.
-/// For binary classification, predicted and actual values should be 0.0 or 1.0.
-/// For multi-class classification, values should be numeric class labels.
+/// Accuracy is the proportion of correctly predicted samples over all samples.
 ///
 /// # Parameters
 ///
-/// - `predicted` - Array of predicted class labels
-/// - `actual` - Array of actual class labels
-///
-/// # Returns
-///
-/// * `f64` - The accuracy score between 0.0 and 1.0
-///
-/// # Panics
-///
-/// - Panics if the two arrays have different lengths
-/// - Panics if input array is empty
+/// - `predicted` - Predicted class labels
+/// - `actual` - Ground-truth class labels
 ///
 /// # Examples
 /// ```rust
@@ -549,10 +502,17 @@ impl ConfusionMatrix {
 /// let predicted = array![0.0, 1.0, 1.0];
 /// let actual = array![0.0, 0.0, 1.0];
 /// let acc = accuracy(&predicted, &actual);
-///
-/// // Two out of three predictions are correct: accuracy = 2/3 ≈ 0.6666666666666667
 /// assert!((acc - 0.6666666666666667).abs() < 1e-6);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Accuracy in the range [0.0, 1.0]
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
+/// - Panics if input arrays are empty
 pub fn accuracy<S>(predicted: &ArrayBase<S, Ix1>, actual: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
@@ -628,7 +588,7 @@ fn contingency_matrix(
 }
 
 /// Computes the mutual information (MI) using the formula:
-/// MI = Σ_{i,j} (n_ij/n) * ln((n * n_ij) / (a_i * b_j))
+/// MI = sum_{i,j} (n_ij/n) * ln((n * n_ij) / (a_i * b_j))
 fn mutual_information(
     contingency: &Vec<Vec<usize>>,
     n: usize,
@@ -649,7 +609,7 @@ fn mutual_information(
     mi
 }
 
-/// Computes the entropy H = - Σ_i (p_i * ln(p_i))
+/// Computes the entropy H = - sum_i (p_i * ln(p_i))
 fn entropy_nats(counts: &Vec<usize>, n: usize) -> f64 {
     let mut h = 0.0;
     for &count in counts {
@@ -732,7 +692,7 @@ fn hypergeometric_pmf(n_population: u64, n_successes: u64, n_draws: u64, k: u64)
 /// - Number of successes: a_i
 /// - Number of draws: b_j
 ///
-/// EMI = Σ_{i,j} Σ_{k=max(0, a_i+b_j-n)}^{min(a_i, b_j)}
+/// EMI = sum_{i,j} sum_{k=max(0, a_i+b_j-n)}^{min(a_i, b_j)}
 ///       P(k) * (k/n) * ln((n * k) / (a_i * b_j))
 fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: usize) -> f64 {
     let mut emi = 0.0;
@@ -762,33 +722,14 @@ fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: 
     emi
 }
 
-/// Calculates the Normalized Mutual Information (NMI) between two cluster label assignments.(Unit: nat)
+/// Calculates the Normalized Mutual Information (NMI) between two cluster label assignments.
 ///
-/// NMI measures the agreement between two cluster assignments, normalized by the geometric
-/// mean of their entropies. The score ranges from 0 to 1, where 1 indicates perfect agreement
-/// and 0 indicates no mutual information between the clusterings.
-///
-/// The formula used is:
-/// NMI = MI(U, V) / sqrt(H(U) * H(V))
-///
-/// where:
-/// - MI(U, V) is the mutual information between clusterings U and V
-/// - H(U) and H(V) are the entropies of the clusterings
-/// - sqrt represents the square root function
+/// NMI measures agreement between cluster assignments by normalizing mutual information with the geometric mean of individual entropies.
 ///
 /// # Parameters
 ///
-/// - `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
-/// - `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
-///
-/// # Returns
-///
-/// * `f64` - The NMI score as a float between 0 and 1
-///
-/// # Panics
-///
-/// - Panics if the two arrays have different lengths
-/// - Panics if input array is empty
+/// - `labels_true` - Ground-truth cluster assignments
+/// - `labels_pred` - Predicted cluster assignments
 ///
 /// # Examples
 /// ```rust
@@ -801,6 +742,15 @@ fn expected_mutual_information(row_sums: &Vec<usize>, col_sums: &Vec<usize>, n: 
 /// let nmi = normalized_mutual_info(&true_labels, &pred_labels);
 /// println!("Normalized Mutual Information: {:.4}", nmi);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Normalized mutual information score between 0.0 and 1.0
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
+/// - Panics if input arrays are empty
 pub fn normalized_mutual_info<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -837,36 +787,14 @@ where
     }
 }
 
-/// Calculates the Adjusted Mutual Information (AMI) between two cluster label assignments.(Unit: nat)
+/// Calculates the Adjusted Mutual Information (AMI) between two cluster label assignments.
 ///
-/// AMI adjusts the Mutual Information score to account for chance, correcting the effect of
-/// agreement solely due to chance between clustering assignments. AMI score equals 1.0 when
-/// two clusterings are identical and approximately 0.0 for random independent clusterings.
-/// Unlike NMI, AMI can yield negative values when the observed mutual information is less
-/// than expected.
-///
-/// The formula used is:
-/// AMI = (MI - E\[MI\]) / (avg(H(U), H(V)) - E\[MI\])
-///
-/// where:
-/// - MI is the mutual information between clusterings
-/// - E\[MI\] is the expected mutual information between random clusterings with same cluster counts
-/// - H(U) and H(V) are the entropies of the clusterings
-/// - avg represents the arithmetic mean
+/// AMI corrects mutual information for chance agreement, with scores near 1.0 for identical clusterings and around 0.0 for random agreement.
 ///
 /// # Parameters
 ///
-/// - `labels_true` - An array of cluster assignments representing the ground truth or reference clustering
-/// - `labels_pred` - An array of cluster assignments representing the predicted or comparison clustering
-///
-/// # Returns
-///
-/// * `f64` - The AMI score, typically between -1 and 1
-///
-/// # Panics
-///
-/// - Panics if the two arrays have different lengths
-/// - Panics if input array is empty
+/// - `labels_true` - Ground-truth cluster assignments
+/// - `labels_pred` - Predicted cluster assignments
 ///
 /// # Examples
 /// ```rust
@@ -879,6 +807,15 @@ where
 /// let ami = adjusted_mutual_info(&true_labels, &pred_labels);
 /// println!("Adjusted Mutual Information: {:.4}", ami);
 /// ```
+///
+/// # Returns
+///
+/// - `f64` - Adjusted mutual information score typically between -1.0 and 1.0
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
+/// - Panics if input arrays are empty
 pub fn adjusted_mutual_info<S>(
     labels_true: &ArrayBase<S, Ix1>,
     labels_pred: &ArrayBase<S, Ix1>,
@@ -919,27 +856,14 @@ where
 
 /// Calculates the Area Under the Receiver Operating Characteristic Curve (AUC-ROC).
 ///
-/// The AUC-ROC is a performance measurement for classification problems that tells how much
-/// the model is capable of distinguishing between classes. It uses the Mann-Whitney U statistic
-/// to calculate the probability that a randomly chosen positive example is ranked higher than
-/// a randomly chosen negative example.
+/// Uses the Mann-Whitney U statistic to measure how well predicted scores rank positive samples above negative samples.
 ///
 /// # Parameters
 ///
-/// - `scores` - An array of predicted scores or probabilities for each sample
-/// - `labels` - An array of boolean values indicating the true class of each sample (true for positive class, false for negative class)
+/// - `scores` - Predicted scores or probabilities for each sample
+/// - `labels` - True class labels for each sample (true for positive, false for negative)
 ///
-/// # Returns
-///
-/// * `f64` - The AUC-ROC value between 0.0 and 1.0
-///
-/// # Panics
-///
-/// - Panics if the two arrays have different lengths
-/// - Panics if input array is empty
-/// - Panics if there are no positive or negative samples
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::metric::calculate_auc;
 /// use ndarray::array;
@@ -950,11 +874,15 @@ where
 /// println!("AUC-ROC: {}", auc);
 /// ```
 ///
-/// # Notes
+/// # Returns
 ///
-/// The implementation handles tied scores by assigning average ranks to tied elements.
-/// It implements the AUC calculation based on the Mann-Whitney U statistic, which is
-/// mathematically equivalent to the area under the ROC curve.
+/// - `f64` - AUC-ROC score between 0.0 and 1.0
+///
+/// # Panics
+///
+/// - Panics if the two arrays have different lengths
+/// - Panics if input arrays are empty
+/// - Panics if there are no positive or negative samples
 pub fn calculate_auc<S1, S2>(scores: &ArrayBase<S1, Ix1>, labels: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
@@ -1017,7 +945,7 @@ where
         panic!("AUC cannot be calculated because there are no positive or negative samples");
     }
 
-    // Compute the Mann–Whitney U statistic
+    // Compute the Mann-Whitney U statistic
     let u = sum_positive_ranks - (pos_count as f64 * (pos_count as f64 + 1.0) / 2.0);
     // AUC is equal to the U statistic divided by (n_positive * n_negative)
     u / (pos_count as f64 * neg_count as f64)
