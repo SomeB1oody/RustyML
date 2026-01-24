@@ -1,50 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of a BatchNormalization layer's weights
-pub mod serializable_batch_normalization_weight;
-/// Serializable representation of a Conv1D layer's weights
-pub mod serializable_conv_1d_weight;
-/// Serializable representation of a Conv2D layer's weights
-pub mod serializable_conv_2d_weight;
-/// Serializable representation of a Conv3D layer's weights
-pub mod serializable_conv_3d_weight;
-/// Serializable representation of a Dense layer's weights
-pub mod serializable_dense_weight;
-/// Serializable representation of a DepthwiseConv2D layer's weights
-pub mod serializable_depthwise_conv_2d_weight;
-/// Serializable representation of a single gate's weights
-pub mod serializable_gate_weight;
-/// Serializable representation of a GroupNormalization layer's weights
-pub mod serializable_group_normalization;
-/// Serializable representation of a GRU layer's weights
-pub mod serializable_gru_weight;
-/// Serializable representation of an instance normalization layer's weights
-pub mod serializable_instance_normalization;
-/// Serializable representation of a LayerNormalization layer's weights
-pub mod serializable_layer_normalization_weight;
-/// Serializable representation of an LSTM layer's weights
-pub mod serializable_lstm_weight;
-/// Serializable representation of a SeparableConv2D layer's weights
-pub mod serializable_separable_conv_2d_weight;
-/// Serializable representation of a SimpleRNN layer's weights
-pub mod serializable_simple_rnn_weight;
-
-pub use serializable_batch_normalization_weight::*;
-pub use serializable_conv_1d_weight::*;
-pub use serializable_conv_2d_weight::*;
-pub use serializable_conv_3d_weight::*;
-pub use serializable_dense_weight::*;
-pub use serializable_depthwise_conv_2d_weight::*;
-pub use serializable_gate_weight::*;
-pub use serializable_group_normalization::*;
-pub use serializable_gru_weight::*;
-pub use serializable_instance_normalization::*;
-pub use serializable_layer_normalization_weight::*;
-pub use serializable_lstm_weight::*;
-pub use serializable_separable_conv_2d_weight::*;
-pub use serializable_simple_rnn_weight::*;
-
 /// Serializable weight container for all supported layer types.
 ///
 /// # Variants
@@ -363,127 +319,6 @@ pub struct SerializableSequential {
     pub layers: Vec<SerializableLayer>,
 }
 
-// Helper conversion functions used by multiple weight types
-fn vec2_to_array2(vec: &[Vec<f32>]) -> Result<Array2<f32>, IoError> {
-    let rows = vec.len();
-    let cols = if rows > 0 { vec[0].len() } else { 0 };
-    let flat: Vec<f32> = vec.iter().flat_map(|row| row.iter().cloned()).collect();
-    Array2::from_shape_vec((rows, cols), flat).map_err(|e| {
-        IoError::StdIoError(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            e.to_string(),
-        ))
-    })
-}
-
-fn vec3_to_array3(vec: &[Vec<Vec<f32>>]) -> Result<Array3<f32>, IoError> {
-    let d0 = vec.len();
-    let d1 = if d0 > 0 { vec[0].len() } else { 0 };
-    let d2 = if d1 > 0 && d0 > 0 { vec[0][0].len() } else { 0 };
-    let flat: Vec<f32> = vec
-        .iter()
-        .flat_map(|v1| v1.iter().flat_map(|v2| v2.iter().cloned()))
-        .collect();
-    Array3::from_shape_vec((d0, d1, d2), flat).map_err(|e| {
-        IoError::StdIoError(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            e.to_string(),
-        ))
-    })
-}
-
-fn vec4_to_array4(vec: &[Vec<Vec<Vec<f32>>>]) -> Result<Array4<f32>, IoError> {
-    let d0 = vec.len();
-    let d1 = if d0 > 0 { vec[0].len() } else { 0 };
-    let d2 = if d1 > 0 && d0 > 0 { vec[0][0].len() } else { 0 };
-    let d3 = if d2 > 0 && d1 > 0 && d0 > 0 {
-        vec[0][0][0].len()
-    } else {
-        0
-    };
-    let flat: Vec<f32> = vec
-        .iter()
-        .flat_map(|v1| {
-            v1.iter()
-                .flat_map(|v2| v2.iter().flat_map(|v3| v3.iter().cloned()))
-        })
-        .collect();
-    Array4::from_shape_vec((d0, d1, d2, d3), flat).map_err(|e| {
-        IoError::StdIoError(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            e.to_string(),
-        ))
-    })
-}
-
-fn vec5_to_array5(vec: &[Vec<Vec<Vec<Vec<f32>>>>]) -> Result<Array5<f32>, IoError> {
-    let d0 = vec.len();
-    let d1 = if d0 > 0 { vec[0].len() } else { 0 };
-    let d2 = if d1 > 0 && d0 > 0 { vec[0][0].len() } else { 0 };
-    let d3 = if d2 > 0 && d1 > 0 && d0 > 0 {
-        vec[0][0][0].len()
-    } else {
-        0
-    };
-    let d4 = if d3 > 0 && d2 > 0 && d1 > 0 && d0 > 0 {
-        vec[0][0][0][0].len()
-    } else {
-        0
-    };
-    let flat: Vec<f32> = vec
-        .iter()
-        .flat_map(|v1| {
-            v1.iter().flat_map(|v2| {
-                v2.iter()
-                    .flat_map(|v3| v3.iter().flat_map(|v4| v4.iter().cloned()))
-            })
-        })
-        .collect();
-    Array5::from_shape_vec((d0, d1, d2, d3, d4), flat).map_err(|e| {
-        IoError::StdIoError(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            e.to_string(),
-        ))
-    })
-}
-
-/// A macro that attempts to apply weights to different activation layer types.
-///
-/// This macro tries to downcast a generic layer to specific layer types with different
-/// activation functions (ReLU, Sigmoid, Softmax, Tanh) and applies the given weights
-/// if the downcast is successful.
-///
-/// # Parameters
-///
-/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
-/// - `$weight` - The weight structure to apply to the layer
-/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
-/// - `$layer_name` - String literal of the layer name (used for debugging)
-///
-/// # Returns
-///
-/// - `true` - If the layer was successfully downcast and weights were applied
-/// - `false` - If none of the activation types matched
-macro_rules! try_apply_with_activations {
-    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr) => {{
-        if let Some(layer) = $layer_any.downcast_mut::<$layer_type<ReLU>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Sigmoid>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Softmax>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Tanh>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else {
-            false
-        }
-    }};
-}
-
 /// A macro that applies weights to a layer with activation functions and handles type mismatch errors.
 ///
 /// This macro uses `try_apply_with_activations!` to attempt weight application and
@@ -529,6 +364,43 @@ macro_rules! apply_weights_simple {
                 std::io::ErrorKind::InvalidData,
                 format!("Expected {} layer but got {}", $layer_name, $expected_type),
             )));
+        }
+    }};
+}
+
+/// A macro that attempts to apply weights to different activation layer types.
+///
+/// This macro tries to downcast a generic layer to specific layer types with different
+/// activation functions (ReLU, Sigmoid, Softmax, Tanh) and applies the given weights
+/// if the downcast is successful.
+///
+/// # Parameters
+///
+/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
+/// - `$weight` - The weight structure to apply to the layer
+/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
+/// - `$layer_name` - String literal of the layer name (used for debugging)
+///
+/// # Returns
+///
+/// - `true` - If the layer was successfully downcast and weights were applied
+/// - `false` - If none of the activation types matched
+macro_rules! try_apply_with_activations {
+    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr) => {{
+        if let Some(layer) = $layer_any.downcast_mut::<$layer_type<ReLU>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Sigmoid>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Softmax>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Tanh>>() {
+            $weight.apply_to_layer(layer)?;
+            true
+        } else {
+            false
         }
     }};
 }
@@ -639,3 +511,50 @@ pub fn apply_weights_to_layer(
 
     Ok(())
 }
+
+/// Helper functions used by multiple weight types
+mod helper_function;
+/// Serializable representation of a BatchNormalization layer's weights
+pub mod serializable_batch_normalization_weight;
+/// Serializable representation of a Conv1D layer's weights
+pub mod serializable_conv_1d_weight;
+/// Serializable representation of a Conv2D layer's weights
+pub mod serializable_conv_2d_weight;
+/// Serializable representation of a Conv3D layer's weights
+pub mod serializable_conv_3d_weight;
+/// Serializable representation of a Dense layer's weights
+pub mod serializable_dense_weight;
+/// Serializable representation of a DepthwiseConv2D layer's weights
+pub mod serializable_depthwise_conv_2d_weight;
+/// Serializable representation of a single gate's weights
+pub mod serializable_gate_weight;
+/// Serializable representation of a GroupNormalization layer's weights
+pub mod serializable_group_normalization;
+/// Serializable representation of a GRU layer's weights
+pub mod serializable_gru_weight;
+/// Serializable representation of an instance normalization layer's weights
+pub mod serializable_instance_normalization;
+/// Serializable representation of a LayerNormalization layer's weights
+pub mod serializable_layer_normalization_weight;
+/// Serializable representation of an LSTM layer's weights
+pub mod serializable_lstm_weight;
+/// Serializable representation of a SeparableConv2D layer's weights
+pub mod serializable_separable_conv_2d_weight;
+/// Serializable representation of a SimpleRNN layer's weights
+pub mod serializable_simple_rnn_weight;
+
+use helper_function::*;
+pub use serializable_batch_normalization_weight::*;
+pub use serializable_conv_1d_weight::*;
+pub use serializable_conv_2d_weight::*;
+pub use serializable_conv_3d_weight::*;
+pub use serializable_dense_weight::*;
+pub use serializable_depthwise_conv_2d_weight::*;
+pub use serializable_gate_weight::*;
+pub use serializable_group_normalization::*;
+pub use serializable_gru_weight::*;
+pub use serializable_instance_normalization::*;
+pub use serializable_layer_normalization_weight::*;
+pub use serializable_lstm_weight::*;
+pub use serializable_separable_conv_2d_weight::*;
+pub use serializable_simple_rnn_weight::*;

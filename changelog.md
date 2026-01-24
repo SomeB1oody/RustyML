@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.11.0] - 2026-01-23 (UTC-7)
 ### Changed
 - Update documentation of `neural_network` module
+- Refactor `serialize_weight` module for better maintainability
 
 ## [v0.11.0] - 2026-01-22 (UTC-7)
 ### Changed
