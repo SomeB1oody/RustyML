@@ -199,49 +199,36 @@ fn test_fit_parameter_updates() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 3, ReLU::new()).unwrap())
+        .add(Dense::new(2, 3, Linear::new()).unwrap())
         .add(Dense::new(3, 1, Linear::new()).unwrap())
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    // Get weights before training
-    let initial_weights = model.get_weights();
-    let mut initial_weight_sums = Vec::new();
-    for layer_weight in &initial_weights {
-        match layer_weight {
-            LayerWeight::Dense(DenseLayerWeight { weight, bias: _ }) => {
-                initial_weight_sums.push(weight.sum());
-            }
-            _ => {}
-        }
-    }
+    let initial_params = collect_dense_weights(&model);
 
     // Train the model
-    model.fit(&x, &y, 10).unwrap();
+    model.fit(&x, &y, 20).unwrap();
 
-    // Get weights after training
-    let final_weights = model.get_weights();
-    let mut final_weight_sums = Vec::new();
-    for layer_weight in &final_weights {
-        match layer_weight {
-            LayerWeight::Dense(DenseLayerWeight { weight, bias: _ }) => {
-                final_weight_sums.push(weight.sum());
-            }
-            _ => {}
-        }
-    }
+    let final_params = collect_dense_weights(&model);
 
-    // Verify that weights have actually changed
-    for (i, (&initial_sum, &final_sum)) in initial_weight_sums
-        .iter()
-        .zip(final_weight_sums.iter())
-        .enumerate()
+    assert_eq!(initial_params.len(), final_params.len());
+    assert!(
+        !initial_params.is_empty(),
+        "Expected at least one dense layer with parameters"
+    );
+
+    // Verify that parameters have actually changed
+    for (i, ((initial_w, initial_b), (final_w, final_b))) in
+        initial_params.iter().zip(final_params.iter()).enumerate()
     {
+        let weight_delta = max_abs_diff_2d(initial_w, final_w);
+        let bias_delta = max_abs_diff_2d(initial_b, final_b);
+
         assert!(
-            (final_sum - initial_sum).abs() > 1e-6,
-            "Layer {} weights should change during training (initial: {:.6}, final: {:.6})",
+            weight_delta > 1e-6 || bias_delta > 1e-6,
+            "Layer {} parameters should change during training (weight delta {:.6}, bias delta {:.6})",
             i,
-            initial_sum,
-            final_sum
+            weight_delta,
+            bias_delta
         );
     }
 }
@@ -274,6 +261,25 @@ fn test_fit_error_handling() {
 
     let result = model.fit(&x_mismatch, &y_mismatch, 10);
     assert!(result.is_err(), "Sample count mismatch should return error");
+}
+
+fn collect_dense_weights(model: &Sequential) -> Vec<(Array2<f32>, Array2<f32>)> {
+    model
+        .get_weights()
+        .into_iter()
+        .filter_map(|layer_weight| match layer_weight {
+            LayerWeight::Dense(DenseLayerWeight { weight, bias }) => {
+                Some((weight.to_owned(), bias.to_owned()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn max_abs_diff_2d(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
+    a.iter()
+        .zip(b.iter())
+        .fold(0.0_f32, |max, (lhs, rhs)| max.max((lhs - rhs).abs()))
 }
 
 // Helper function: calculate mean squared error

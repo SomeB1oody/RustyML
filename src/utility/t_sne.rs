@@ -1,235 +1,240 @@
 use super::*;
-use crate::math::binary_search_sigma;
-use ndarray_rand::rand_distr::StandardNormal;
+use crate::math::{binary_search_sigma, squared_euclidean_distance_row};
 
-/// Threshold for determining whether to use parallel computation in t-SNE.
-/// Parallel processing is only beneficial when the number of samples exceeds this threshold,
-/// as the overhead of thread creation and management can outweigh benefits for smaller datasets.
-const TSNE_PARALLEL_THRESHOLD: usize = 1000;
+/// Early exaggeration factor applied to joint probabilities.
+const EARLY_EXAGGERATION: f64 = 12.0;
+/// Number of iterations to apply early exaggeration.
+const EARLY_EXAGGERATION_ITER: usize = 250;
+/// Initial momentum used at the start of optimization.
+const INITIAL_MOMENTUM: f64 = 0.5;
+/// Momentum used after early exaggeration phase.
+const FINAL_MOMENTUM: f64 = 0.8;
+/// Scale for random initialization of the embedding.
+const INIT_SCALE: f64 = 1e-4;
+/// Lower bound for q_ij to avoid log(0) in KL divergence.
+const MIN_Q: f64 = 1e-12;
 
-/// A t-Distributed Stochastic Neighbor Embedding (t-SNE) implementation for dimensionality reduction.
+/// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction.
 ///
-/// t-SNE is a technique for visualizing high-dimensional data by giving each datapoint
-/// a location in a two or three-dimensional map.
+/// This implementation performs t-SNE optimization with early exaggeration and
+/// momentum-based gradient descent.
 ///
 /// # Fields
 ///
-/// - `perplexity` - Controls the balance between preserving local and global structure. Higher values consider more points as neighbors. Default is 30.0.
-/// - `learning_rate` - Step size for gradient descent. Default is 200.0.
-/// - `n_iter` - Maximum number of iterations for optimization. Default is 1000.
-/// - `dim` - The dimension of the embedded space. Typically 2 or 3 for visualization.
-/// - `random_state` - Seed for random number generation to ensure reproducibility. Default is 42.
-/// - `early_exaggeration` - Factor to multiply early embeddings to encourage tight cluster formation. Default is 12.0.
-/// - `exaggeration_iter` - Number of iterations to use early exaggeration. Default is n_iter/12.
-/// - `initial_momentum` - Initial momentum coefficient for gradient updates. Default is 0.5.
-/// - `final_momentum` - Final momentum coefficient for gradient updates. Default is 0.8.
-/// - `momentum_switch_iter` - Iteration at which momentum changes from initial to final value. Default is n_iter/3.
+/// - `n_components` - Output embedding dimensions
+/// - `perplexity` - Effective neighborhood size
+/// - `learning_rate` - Gradient descent learning rate
+/// - `n_iter` - Number of optimization iterations
+/// - `random_state` - Optional random seed for reproducibility
 ///
-/// # Example
+/// # Examples
 /// ```rust
-/// use ndarray::Array2;
-/// use rustyml::utility::t_sne::TSNE;
+/// use rustyml::utility::TSNE;
+/// use ndarray::array;
 ///
-/// // Create a new TSNE instance with custom parameters
-/// let tsne = TSNE::new(None, None, Some(100), 3, None, None, None, None, None, None).unwrap();
-///
-/// // Generate some high-dimensional data
-/// let data = Array2::<f64>::ones((100, 50));
-///
-/// // Apply t-SNE dimensionality reduction
-/// let embedding = tsne.fit_transform(&data).unwrap();
-///
-/// // `embedding` now contains 100 samples in 3 dimensions
-/// assert_eq!(embedding.shape(), &[100, 3]);
+/// let tsne = TSNE::new(2, 2.0, 200.0, 250, Some(42)).unwrap();
+/// let x = array![[0.0, 1.0], [1.0, 0.0], [2.0, 2.0]];
+/// let embedding = tsne.fit_transform(&x).unwrap();
+/// assert_eq!(embedding.ncols(), 2);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TSNE {
+    n_components: usize,
     perplexity: f64,
     learning_rate: f64,
     n_iter: usize,
-    dim: usize,
-    random_state: u64,
-    early_exaggeration: f64,
-    exaggeration_iter: usize,
-    initial_momentum: f64,
-    final_momentum: f64,
-    momentum_switch_iter: usize,
+    random_state: Option<u64>,
 }
 
 impl Default for TSNE {
-    /// Default implementation for TSNE
+    /// Creates a TSNE instance with common default parameters.
     ///
     /// # Default Values
     ///
-    /// - `perplexity` - 30.0 (typical range 5-50, controls neighborhood size)
-    /// - `learning_rate` - 200.0 (typical range 10-1000, controls step size in optimization)
-    /// - `n_iter` - 1000 (maximum number of optimization iterations)
-    /// - `dim` - 2 (target dimensionality, commonly 2 for visualization)
-    /// - `random_state` - 42 (seed for random number generation for reproducibility)
-    /// - `early_exaggeration` - 12.0 (factor for early exaggeration phase)
-    /// - `exaggeration_iter` - 83 (approximately n_iter/12, iterations for early exaggeration)
-    /// - `initial_momentum` - 0.5 (momentum for first phase of optimization)
-    /// - `final_momentum` - 0.8 (momentum for second phase of optimization)
-    /// - `momentum_switch_iter` - 333 (approximately n_iter/3, when to switch momentum values)
+    /// - `n_components` - 2
+    /// - `perplexity` - 30.0
+    /// - `learning_rate` - 200.0
+    /// - `n_iter` - 1000
+    /// - `random_state` - None
     fn default() -> Self {
-        let default_max_iter = 1000;
-        TSNE {
-            perplexity: 30.0,
-            learning_rate: 200.0,
-            n_iter: default_max_iter,
-            dim: 2,
-            random_state: 42,
-            early_exaggeration: 12.0,
-            exaggeration_iter: default_max_iter / 12,
-            initial_momentum: 0.5,
-            final_momentum: 0.8,
-            momentum_switch_iter: default_max_iter / 3,
-        }
+        TSNE::new(2, 30.0, 200.0, 1000, None).expect("Default TSNE parameters should be valid")
     }
 }
 
 impl TSNE {
-    /// Creates a new TSNE instance with specified parameters.
+    /// Creates a new TSNE instance with validation.
     ///
     /// # Parameters
     ///
-    /// - `perplexity` - Controls the effective number of neighbors. Higher means more neighbors. Default is 30.0.
-    /// - `learning_rate` - Step size for gradient descent updates. Default is 200.0.
-    /// - `n_iter` - Maximum number of optimization iterations. Default is 1000.
-    /// - `dim` - Dimensionality of the embedding space. Must be greater than 0.
-    /// - `random_state` - Seed for random number generation. Default is 42.
-    /// - `early_exaggeration` - Factor to multiply probabilities in early iterations. Default is 12.0.
-    /// - `exaggeration_iter` - Number of iterations to apply early exaggeration. Default is n_iter/12.
-    /// - `initial_momentum` - Initial momentum coefficient. Must be in range \[0.0, 1.0\]. Default is 0.5.
-    /// - `final_momentum` - Final momentum coefficient. Must be in range \[0.0, 1.0\]. Default is 0.8.
-    /// - `momentum_switch_iter` - Iteration at which momentum switches from initial to final. Default is n_iter/3.
+    /// - `n_components` - Number of output dimensions (must be greater than 0)
+    /// - `perplexity` - Controls effective neighborhood size (must be positive and finite)
+    /// - `learning_rate` - Gradient descent learning rate (must be positive and finite)
+    /// - `n_iter` - Maximum number of optimization iterations (must be greater than 0)
+    /// - `random_state` - Optional random seed for reproducibility
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new TSNE instance if all parameters are valid, otherwise an error.
+    /// - `Result<Self, ModelError>` - A new TSNE instance or validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if any parameter is invalid (e.g., negative values where positive are expected, or momentum outside [0, 1]).
-
+    /// - `ModelError::InputValidationError` - If any parameter is invalid
     pub fn new(
-        perplexity: Option<f64>,
-        learning_rate: Option<f64>,
-        n_iter: Option<usize>,
-        dim: usize,
+        n_components: usize,
+        perplexity: f64,
+        learning_rate: f64,
+        n_iter: usize,
         random_state: Option<u64>,
-        early_exaggeration: Option<f64>,
-        exaggeration_iter: Option<usize>,
-        initial_momentum: Option<f64>,
-        final_momentum: Option<f64>,
-        momentum_switch_iter: Option<usize>,
     ) -> Result<Self, ModelError> {
-        let n_iter_val = n_iter.unwrap_or(1000);
-        let perplexity_val = perplexity.unwrap_or(30.0);
-        let learning_rate_val = learning_rate.unwrap_or(200.0);
-        let early_exaggeration_val = early_exaggeration.unwrap_or(12.0);
-        let exaggeration_iter_val = exaggeration_iter.unwrap_or(n_iter_val / 12);
-        let initial_momentum_val = initial_momentum.unwrap_or(0.5);
-        let final_momentum_val = final_momentum.unwrap_or(0.8);
-        let momentum_switch_iter_val = momentum_switch_iter.unwrap_or(n_iter_val / 3);
+        if n_components == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_components must be greater than 0".to_string(),
+            ));
+        }
 
-        // Validate parameters
-        Self::validate_positive_usize_static(n_iter_val, "n_iter")?;
-        Self::validate_positive_f64_static(perplexity_val, "perplexity")?;
-        Self::validate_positive_f64_static(learning_rate_val, "learning_rate")?;
-        Self::validate_min_f64_static(early_exaggeration_val, 1.0, "early_exaggeration")?;
-        Self::validate_positive_usize_static(exaggeration_iter_val, "exaggeration_iter")?;
-        Self::validate_range_f64_static(initial_momentum_val, "initial_momentum")?;
-        Self::validate_range_f64_static(final_momentum_val, "final_momentum")?;
-        Self::validate_positive_usize_static(momentum_switch_iter_val, "momentum_switch_iter")?;
-        Self::validate_positive_usize_static(dim, "dim")?;
+        if perplexity <= 0.0 || !perplexity.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "perplexity must be positive and finite, got {}",
+                perplexity
+            )));
+        }
 
-        Ok(TSNE {
-            perplexity: perplexity_val,
-            learning_rate: learning_rate_val,
-            n_iter: n_iter_val,
-            dim,
-            random_state: random_state.unwrap_or(42),
-            early_exaggeration: early_exaggeration_val,
-            exaggeration_iter: exaggeration_iter_val,
-            initial_momentum: initial_momentum_val,
-            final_momentum: final_momentum_val,
-            momentum_switch_iter: momentum_switch_iter_val,
+        if learning_rate <= 0.0 || !learning_rate.is_finite() {
+            return Err(ModelError::InputValidationError(format!(
+                "learning_rate must be positive and finite, got {}",
+                learning_rate
+            )));
+        }
+
+        if n_iter == 0 {
+            return Err(ModelError::InputValidationError(
+                "n_iter must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            n_components,
+            perplexity,
+            learning_rate,
+            n_iter,
+            random_state,
         })
     }
 
     // Getters
+    get_field!(get_n_components, n_components, usize);
     get_field!(get_perplexity, perplexity, f64);
     get_field!(get_learning_rate, learning_rate, f64);
-    get_field!(get_actual_iterations, n_iter, usize);
-    get_field!(get_dimensions, dim, usize);
-    get_field!(get_random_state, random_state, u64);
-    get_field!(get_early_exaggeration, early_exaggeration, f64);
-    get_field!(get_exaggeration_iterations, exaggeration_iter, usize);
-    get_field!(get_initial_momentum, initial_momentum, f64);
-    get_field!(get_final_momentum, final_momentum, f64);
-    get_field!(get_momentum_switch_iterations, momentum_switch_iter, usize);
+    get_field!(get_n_iter, n_iter, usize);
+    get_field!(get_random_state, random_state, Option<u64>);
 
     /// Performs t-SNE dimensionality reduction on input data.
     ///
     /// # Parameters
     ///
-    /// * `x` - Input data matrix where each row represents a sample in high-dimensional space.
+    /// - `x` - Input data matrix where rows are samples and columns are features
     ///
     /// # Returns
     ///
-    /// - `Ok(Array2<f64>)` - A matrix of reduced dimensionality representations where each row corresponds to the original sample
-    /// - `Err(ModelError::InputValidationError)` - If input does not match expectation
+    /// - `Result<Array2<f64>, ModelError>` - Reduced embedding of shape (n_samples, n_components)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the input matrix is empty, too small, or contains non-finite values
+    ///
+    /// # Performance
+    ///
+    /// For workloads with fewer than 2,000 samples, this sequential method typically outperforms
+    /// parallel overhead; for 2,000 samples or more, consider `fit_transform_parallel`.
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        self.validate_input(x)?;
+        let x_owned = x.to_owned();
+        self.fit_transform_internal(&x_owned, false)
+    }
+
+    /// Performs t-SNE dimensionality reduction on input data using parallel computation.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Input data matrix where rows are samples and columns are features
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, ModelError>` - Reduced embedding of shape (n_samples, n_components)
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the input matrix is empty, too small, or contains non-finite values
+    ///
+    /// # Performance
+    ///
+    /// Parallel execution uses Rayon to speed up distance, probability, and gradient computations.
+    /// For workloads with 2,000 samples or more, this method is usually faster; for fewer than 2,000
+    /// samples, prefer the sequential `fit_transform`.
+    pub fn fit_transform_parallel<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+    ) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Validate input data
-        if x.is_empty() {
+        self.validate_input(x)?;
+        let x_owned = x.to_owned();
+        self.fit_transform_internal(&x_owned, true)
+    }
+
+    fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        if x.nrows() == 0 || x.ncols() == 0 {
             return Err(ModelError::InputValidationError(
-                "Input data is empty".to_string(),
+                "Input data must have at least one row and one column".to_string(),
             ));
         }
 
-        if x.iter().any(|&val| !val.is_finite()) {
+        if x.nrows() < 2 {
             return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
+                "t-SNE requires at least 2 samples".to_string(),
             ));
         }
 
+        if self.perplexity >= x.nrows() as f64 {
+            return Err(ModelError::InputValidationError(format!(
+                "perplexity must be less than number of samples, got perplexity={} with samples={}",
+                self.perplexity,
+                x.nrows()
+            )));
+        }
+
+        if let Some(((i, j), _)) = x.indexed_iter().find(|&(_, &val)| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(format!(
+                "Input data contains NaN or infinite value at position [{}, {}]",
+                i, j
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn fit_transform_internal(
+        &self,
+        x: &Array2<f64>,
+        parallel: bool,
+    ) -> Result<Array2<f64>, ModelError> {
         let n_samples = x.nrows();
 
-        // Validate dimension parameter against actual sample size
-        if self.dim > n_samples {
-            return Err(ModelError::InputValidationError(format!(
-                "dim must be less than or equal to n_samples: {}, got {}",
-                n_samples, self.dim
-            )));
-        }
+        let distances = self.pairwise_squared_distances(x, parallel);
+        let p_conditional = self.conditional_probabilities(&distances, parallel);
+        let p = self.symmetrize_probabilities(&p_conditional);
+        let p_exaggerated = p.mapv(|v| v * EARLY_EXAGGERATION);
 
-        // Validate perplexity is appropriate for the dataset size
-        if self.perplexity >= n_samples as f64 {
-            return Err(ModelError::InputValidationError(format!(
-                "perplexity must be less than n_samples: {}, got {}",
-                n_samples, self.perplexity
-            )));
-        }
+        let mut y = self.init_embedding(n_samples);
+        let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
 
-        // 1. Optimized distance calculation using broadcasting
-        let distances = self.compute_pairwise_distances(&x)?;
-
-        // 2. Compute conditional probabilities in parallel
-        let p = self.compute_conditional_probabilities(&distances, self.perplexity)?;
-
-        // 3. Symmetrize and apply early exaggeration
-        let p_sym = (&p + &p.t()) / 2.0;
-        let mut p_exagg = p_sym.clone() * self.early_exaggeration;
-
-        // 4. Initialize embedding with better scaling
-        let mut y = self.initialize_embedding(n_samples, self.random_state)?;
-        let mut dy = Array2::<f64>::zeros((n_samples, self.dim));
-
-        // Create progress bar for optimization iterations
         let progress_bar = ProgressBar::new(self.n_iter as u64);
         progress_bar.set_style(
             ProgressStyle::default_bar()
@@ -241,315 +246,299 @@ impl TSNE {
         );
         progress_bar.set_message(format!("{:.6}", 0.0));
 
-        // 5. Optimized gradient descent loop
+        let exaggeration_iter = EARLY_EXAGGERATION_ITER.min(self.n_iter);
+        let mut last_kl = 0.0;
+
         for iter in 0..self.n_iter {
-            // Compute Q matrix more efficiently
-            let (q, num) = self.compute_q_matrix(&y)?;
-
-            // Compute gradient with improved numerical stability
-            let grad = self.compute_gradient(&y, &p_exagg, &q, &num)?;
-
-            // Compute KL divergence for monitoring
-            let kl_divergence = self.compute_kl_divergence(&p_exagg, &q);
-
-            // Update progress bar with current KL divergence
-            progress_bar.set_message(format!("{:.6}", kl_divergence));
-            progress_bar.inc(1);
-
-            // Update momentum and positions
-            let momentum = if iter < self.momentum_switch_iter {
-                self.initial_momentum
+            let p_use = if iter < exaggeration_iter {
+                &p_exaggerated
             } else {
-                self.final_momentum
+                &p
             };
 
-            dy *= momentum;
-            dy.scaled_add(-self.learning_rate, &grad);
-            y += &dy;
+            let (num, sum_num) = self.compute_num_matrix(&y, parallel);
+            let grad = self.compute_gradient(&y, p_use, &num, sum_num, parallel);
 
-            // Center the embedding
-            let mean_y = y.mean_axis(Axis(0)).unwrap();
-            y -= &mean_y;
+            let momentum = if iter < exaggeration_iter {
+                INITIAL_MOMENTUM
+            } else {
+                FINAL_MOMENTUM
+            };
 
-            // Switch to normal p after early exaggeration phase
-            if iter == self.exaggeration_iter {
-                p_exagg = p_sym.clone();
+            for i in 0..n_samples {
+                for d in 0..self.n_components {
+                    y_incs[[i, d]] = momentum * y_incs[[i, d]] - self.learning_rate * grad[[i, d]];
+                    y[[i, d]] += y_incs[[i, d]];
+                }
             }
+
+            self.center_embedding(&mut y)?;
+
+            last_kl = self.kl_divergence(p_use, &num, sum_num, parallel);
+            progress_bar.set_message(format!("{:.6}", last_kl));
+            progress_bar.inc(1);
         }
 
-        // Finish progress bar with final KL divergence
-        let (final_q, _) = self.compute_q_matrix(&y)?;
-        let final_kl = self.compute_kl_divergence(&p_sym, &final_q);
-        progress_bar.finish_with_message(format!("{:.6} | Completed", final_kl));
-
-        println!(
-            "\nt-SNE dimensionality reduction completed: {} samples, {} -> {} dimensions, {} iterations, final KL divergence: {:.6}",
-            n_samples,
-            x.ncols(),
-            self.dim,
-            self.n_iter,
-            final_kl
-        );
+        progress_bar.finish_with_message(format!("{:.6}", last_kl));
 
         Ok(y)
     }
 
-    // Helper methods for parameter validation
-    fn validate_positive_usize_static(val: usize, name: &str) -> Result<(), ModelError> {
-        if val > 0 {
-            Ok(())
-        } else {
-            Err(ModelError::InputValidationError(format!(
-                "{} must be greater than 0, got {}",
-                name, val
-            )))
-        }
-    }
-
-    fn validate_positive_f64_static(val: f64, name: &str) -> Result<(), ModelError> {
-        if val > 0.0 && val.is_finite() {
-            Ok(())
-        } else {
-            Err(ModelError::InputValidationError(format!(
-                "{} must be positive and finite, got {}",
-                name, val
-            )))
-        }
-    }
-
-    fn validate_min_f64_static(val: f64, min_val: f64, name: &str) -> Result<(), ModelError> {
-        if val > min_val && val.is_finite() {
-            Ok(())
-        } else {
-            Err(ModelError::InputValidationError(format!(
-                "{} must be greater than {} and finite, got {}",
-                name, min_val, val
-            )))
-        }
-    }
-
-    fn validate_range_f64_static(val: f64, name: &str) -> Result<(), ModelError> {
-        if (0.0..=1.0).contains(&val) && val.is_finite() {
-            Ok(())
-        } else {
-            Err(ModelError::InputValidationError(format!(
-                "{} must be between 0.0 and 1.0, got {}",
-                name, val
-            )))
-        }
-    }
-
-    // Optimized distance computation using more efficient approach
-    fn compute_pairwise_distances<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S: Data<Elem = f64> + Send + Sync,
-    {
-        let n_samples = x.nrows();
-        let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
-
-        // Use parallel computation only when sample size exceeds threshold
-        if n_samples >= TSNE_PARALLEL_THRESHOLD {
-            distances
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i, mut row)| {
-                    let xi = x.row(i);
-                    for (j, distance) in row.iter_mut().enumerate() {
-                        if i != j {
-                            let diff = &xi - &x.row(j);
-                            *distance = diff.dot(&diff);
-                        }
-                    }
-                });
-        } else {
-            // Sequential computation for small datasets
-            for (i, mut row) in distances.axis_iter_mut(Axis(0)).enumerate() {
-                let xi = x.row(i);
-                for (j, distance) in row.iter_mut().enumerate() {
-                    if i != j {
-                        let diff = &xi - &x.row(j);
-                        *distance = diff.dot(&diff);
-                    }
-                }
+    fn init_embedding(&self, n_samples: usize) -> Array2<f64> {
+        let mut rng = match self.random_state {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => {
+                let mut thread_rng = rand::rng();
+                StdRng::from_rng(&mut thread_rng)
             }
-        }
-
-        Ok(distances)
-    }
-
-    // Optimized conditional probability computation
-    fn compute_conditional_probabilities(
-        &self,
-        distances: &Array2<f64>,
-        perplexity: f64,
-    ) -> Result<Array2<f64>, ModelError> {
-        let n_samples = distances.nrows();
-        let mut p = Array2::<f64>::zeros((n_samples, n_samples));
-
-        // Process each row with conditional parallelization
-        if n_samples >= TSNE_PARALLEL_THRESHOLD {
-            p.axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i, mut row)| {
-                    let (p_i, _) = binary_search_sigma(&distances.slice(s![i, ..]), perplexity);
-                    for (j, &prob) in p_i.iter().enumerate() {
-                        if i != j {
-                            row[j] = prob;
-                        }
-                    }
-                });
-        } else {
-            // Sequential computation for small datasets
-            for (i, mut row) in p.axis_iter_mut(Axis(0)).enumerate() {
-                let (p_i, _) = binary_search_sigma(&distances.slice(s![i, ..]), perplexity);
-                for (j, &prob) in p_i.iter().enumerate() {
-                    if i != j {
-                        row[j] = prob;
-                    }
-                }
-            }
-        }
-
-        Ok(p)
-    }
-
-    // Improved embedding initialization
-    fn initialize_embedding(
-        &self,
-        n_samples: usize,
-        random_state: u64,
-    ) -> Result<Array2<f64>, ModelError> {
-        let mut rng = StdRng::seed_from_u64(random_state);
-        let mut y = Array2::<f64>::zeros((n_samples, self.dim));
-
-        // Use standard t-SNE initialization scale
-        let scale = 1e-4;
-
-        // Pre-generate all random numbers
-        let total_elements = n_samples * self.dim;
-        let random_values: Vec<f64> = (0..total_elements)
-            .map(|_| rng.sample::<f64, _>(StandardNormal) * scale)
-            .collect();
-
-        // Apply the pre-generated values
-        y.indexed_iter_mut()
-            .enumerate()
-            .for_each(|(idx, (_, elem))| {
-                *elem = random_values[idx];
-            });
-
-        Ok(y)
-    }
-
-    // Optimized Q matrix computation with improved numerical stability
-    fn compute_q_matrix(&self, y: &Array2<f64>) -> Result<(Array2<f64>, Array2<f64>), ModelError> {
-        let n_samples = y.nrows();
-        let mut num = Array2::<f64>::zeros((n_samples, n_samples));
-
-        // Compute numerator with conditional parallelization
-        if n_samples >= TSNE_PARALLEL_THRESHOLD {
-            num.axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i, mut row)| {
-                    let yi = y.row(i);
-                    for (j, numerator) in row.iter_mut().enumerate() {
-                        if i != j {
-                            let diff = &yi - &y.row(j);
-                            let dist_sq = diff.dot(&diff);
-                            *numerator = 1.0 / (1.0 + dist_sq);
-                        }
-                    }
-                });
-        } else {
-            // Sequential computation for small datasets
-            for (i, mut row) in num.axis_iter_mut(Axis(0)).enumerate() {
-                let yi = y.row(i);
-                for (j, numerator) in row.iter_mut().enumerate() {
-                    if i != j {
-                        let diff = &yi - &y.row(j);
-                        let dist_sq = diff.dot(&diff);
-                        *numerator = 1.0 / (1.0 + dist_sq);
-                    }
-                }
-            }
-        }
-
-        // Normalize to get Q matrix with numerical stability
-        let sum_num = num.sum();
-        let epsilon = 1e-12;
-        let q = if sum_num > epsilon {
-            &num / sum_num.max(epsilon)
-        } else {
-            return Err(ModelError::ProcessingError(
-                "Q matrix normalization failed".to_string(),
-            ));
         };
 
-        Ok((q, num))
+        let mut y = Array2::<f64>::zeros((n_samples, self.n_components));
+        for i in 0..n_samples {
+            for d in 0..self.n_components {
+                y[[i, d]] = rng.random_range(-0.5..0.5) * INIT_SCALE;
+            }
+        }
+
+        y
     }
 
-    // Compute KL divergence for monitoring optimization progress
-    fn compute_kl_divergence(&self, p: &Array2<f64>, q: &Array2<f64>) -> f64 {
-        let epsilon = 1e-12;
-        p.iter()
-            .zip(q.iter())
-            .map(|(&p_val, &q_val)| {
-                if p_val > epsilon {
-                    p_val * (p_val / q_val.max(epsilon)).ln()
-                } else {
-                    0.0
+    fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
+        let n_samples = x.nrows();
+
+        if parallel {
+            let rows: Vec<Vec<f64>> = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let row_i = x.row(i);
+                    let mut row = vec![0.0; n_samples];
+                    for j in 0..n_samples {
+                        if i == j {
+                            continue;
+                        }
+                        row[j] = squared_euclidean_distance_row(&row_i, &x.row(j));
+                    }
+                    row
+                })
+                .collect();
+
+            let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
+            for (i, row) in rows.into_iter().enumerate() {
+                for (j, val) in row.into_iter().enumerate() {
+                    distances[[i, j]] = val;
                 }
-            })
-            .sum()
+            }
+
+            distances
+        } else {
+            let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
+            for i in 0..n_samples {
+                let row_i = x.row(i);
+                for j in (i + 1)..n_samples {
+                    let dist = squared_euclidean_distance_row(&row_i, &x.row(j));
+                    distances[[i, j]] = dist;
+                    distances[[j, i]] = dist;
+                }
+            }
+            distances
+        }
     }
 
-    // Optimized gradient computation
+    fn conditional_probabilities(&self, distances: &Array2<f64>, parallel: bool) -> Array2<f64> {
+        let n_samples = distances.nrows();
+
+        let rows: Vec<Array1<f64>> = if parallel {
+            (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let (p_row, _) = binary_search_sigma(&distances.row(i), self.perplexity);
+                    p_row
+                })
+                .collect()
+        } else {
+            (0..n_samples)
+                .map(|i| {
+                    let (p_row, _) = binary_search_sigma(&distances.row(i), self.perplexity);
+                    p_row
+                })
+                .collect()
+        };
+
+        let mut p_conditional = Array2::<f64>::zeros((n_samples, n_samples));
+        for (i, row) in rows.into_iter().enumerate() {
+            p_conditional.row_mut(i).assign(&row);
+        }
+
+        p_conditional
+    }
+
+    fn symmetrize_probabilities(&self, p_conditional: &Array2<f64>) -> Array2<f64> {
+        let n_samples = p_conditional.nrows();
+        let mut p = Array2::<f64>::zeros((n_samples, n_samples));
+        let normalization = 2.0 * n_samples as f64;
+
+        for i in 0..n_samples {
+            for j in (i + 1)..n_samples {
+                let val = (p_conditional[[i, j]] + p_conditional[[j, i]]) / normalization;
+                p[[i, j]] = val;
+                p[[j, i]] = val;
+            }
+        }
+
+        p
+    }
+
+    fn compute_num_matrix(&self, y: &Array2<f64>, parallel: bool) -> (Array2<f64>, f64) {
+        let n_samples = y.nrows();
+
+        if parallel {
+            let rows: Vec<Vec<f64>> = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let row_i = y.row(i);
+                    let mut row = vec![0.0; n_samples];
+                    for j in 0..n_samples {
+                        if i == j {
+                            continue;
+                        }
+                        let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
+                        row[j] = 1.0 / (1.0 + dist);
+                    }
+                    row
+                })
+                .collect();
+
+            let sum_num: f64 = rows.iter().flat_map(|row| row.iter()).sum();
+            let mut num = Array2::<f64>::zeros((n_samples, n_samples));
+            for (i, row) in rows.into_iter().enumerate() {
+                for (j, val) in row.into_iter().enumerate() {
+                    num[[i, j]] = val;
+                }
+            }
+
+            (num, sum_num)
+        } else {
+            let mut num = Array2::<f64>::zeros((n_samples, n_samples));
+            for i in 0..n_samples {
+                let row_i = y.row(i);
+                for j in (i + 1)..n_samples {
+                    let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
+                    let val = 1.0 / (1.0 + dist);
+                    num[[i, j]] = val;
+                    num[[j, i]] = val;
+                }
+            }
+            let sum_num = num.sum();
+            (num, sum_num)
+        }
+    }
+
     fn compute_gradient(
         &self,
         y: &Array2<f64>,
         p: &Array2<f64>,
-        q: &Array2<f64>,
         num: &Array2<f64>,
-    ) -> Result<Array2<f64>, ModelError> {
+        sum_num: f64,
+        parallel: bool,
+    ) -> Array2<f64> {
         let n_samples = y.nrows();
-        let mut grad = Array2::<f64>::zeros((n_samples, self.dim));
+        let n_components = y.ncols();
 
-        // Define gradient computation logic as a closure to avoid code duplication
-        let compute_grad_row = |i: usize, mut grad_i: ArrayViewMut1<f64>| {
-            let yi = y.row(i);
-            for j in 0..n_samples {
-                if i != j {
-                    let pq_diff = p[[i, j]] - q[[i, j]];
-                    let factor = 4.0 * pq_diff * num[[i, j]];
-                    let diff = &yi - &y.row(j);
-
-                    for (d, &diff_val) in diff.iter().enumerate() {
-                        grad_i[d] += factor * diff_val;
+        if parallel {
+            let rows: Vec<Vec<f64>> = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let mut grad_row = vec![0.0; n_components];
+                    for j in 0..n_samples {
+                        if i == j {
+                            continue;
+                        }
+                        let q_ij = num[[i, j]] / sum_num;
+                        let mult = (p[[i, j]] - q_ij) * num[[i, j]];
+                        for d in 0..n_components {
+                            grad_row[d] += mult * (y[[i, d]] - y[[j, d]]);
+                        }
                     }
+                    for d in 0..n_components {
+                        grad_row[d] *= 4.0;
+                    }
+                    grad_row
+                })
+                .collect();
+
+            let mut grad = Array2::<f64>::zeros((n_samples, n_components));
+            for (i, row) in rows.into_iter().enumerate() {
+                for (d, val) in row.into_iter().enumerate() {
+                    grad[[i, d]] = val;
                 }
             }
-        };
-
-        // Gradient computation with conditional parallelization
-        if n_samples >= TSNE_PARALLEL_THRESHOLD {
-            grad.axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(i, grad_i)| compute_grad_row(i, grad_i));
+            grad
         } else {
-            // Sequential computation for small datasets
-            grad.axis_iter_mut(Axis(0))
-                .enumerate()
-                .for_each(|(i, grad_i)| compute_grad_row(i, grad_i));
+            let mut grad = Array2::<f64>::zeros((n_samples, n_components));
+            for i in 0..n_samples {
+                for j in 0..n_samples {
+                    if i == j {
+                        continue;
+                    }
+                    let q_ij = num[[i, j]] / sum_num;
+                    let mult = (p[[i, j]] - q_ij) * num[[i, j]];
+                    for d in 0..n_components {
+                        grad[[i, d]] += mult * (y[[i, d]] - y[[j, d]]);
+                    }
+                }
+                for d in 0..n_components {
+                    grad[[i, d]] *= 4.0;
+                }
+            }
+            grad
         }
+    }
 
-        Ok(grad)
+    fn kl_divergence(
+        &self,
+        p: &Array2<f64>,
+        num: &Array2<f64>,
+        sum_num: f64,
+        parallel: bool,
+    ) -> f64 {
+        let n_samples = p.nrows();
+
+        if parallel {
+            (0..n_samples)
+                .into_par_iter()
+                .map(|i| self.kl_divergence_row(p, num, sum_num, i))
+                .sum()
+        } else {
+            (0..n_samples)
+                .map(|i| self.kl_divergence_row(p, num, sum_num, i))
+                .sum()
+        }
+    }
+
+    fn kl_divergence_row(&self, p: &Array2<f64>, num: &Array2<f64>, sum_num: f64, i: usize) -> f64 {
+        let n_samples = p.nrows();
+        let mut kl = 0.0;
+        for j in 0..n_samples {
+            if i == j {
+                continue;
+            }
+            let p_ij = p[[i, j]];
+            if p_ij > 0.0 {
+                let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
+                kl += p_ij * (p_ij / q_ij).ln();
+            }
+        }
+        kl
+    }
+
+    fn center_embedding(&self, y: &mut Array2<f64>) -> Result<(), ModelError> {
+        let mean = y.mean_axis(Axis(0)).ok_or_else(|| {
+            ModelError::ProcessingError("Failed to compute embedding mean".to_string())
+        })?;
+        for mut row in y.outer_iter_mut() {
+            row -= &mean;
+        }
+        Ok(())
     }
 
     model_save_and_load_methods!(TSNE);
