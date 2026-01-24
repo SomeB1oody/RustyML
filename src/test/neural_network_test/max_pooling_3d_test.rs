@@ -49,7 +49,7 @@ fn test_max_pooling_3d_with_sequential() {
     model.fit(&x, &y, 3).unwrap();
 
     // Use predict for forward propagation
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!("MaxPooling3D prediction shape: {:?}", prediction.shape());
 
     // Check if output shape is correct

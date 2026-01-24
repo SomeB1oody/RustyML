@@ -50,7 +50,7 @@ fn test_simple_rnn_layer_basic() {
     model.fit(&x, &y, 1).unwrap();
 
     // Predict
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Check output shape
     assert_eq!(pred.shape(), &[2, 3]);
@@ -72,7 +72,7 @@ fn test_simple_rnn_different_activations() {
         );
 
     model_relu.fit(&x, &y, 3).unwrap();
-    let pred_relu = model_relu.predict(&x);
+    let pred_relu = model_relu.predict(&x).unwrap();
 
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
@@ -84,7 +84,7 @@ fn test_simple_rnn_different_activations() {
         );
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
-    let pred_sigmoid = model_sigmoid.predict(&x);
+    let pred_sigmoid = model_sigmoid.predict(&x).unwrap();
 
     // Check output shapes
     assert_eq!(pred_relu.shape(), &[3, 6]);
@@ -124,7 +124,7 @@ fn test_simple_rnn_sequential_composition() {
     model.fit(&x, &y, 5).unwrap();
 
     // Predict
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Check output shape
     assert_eq!(pred.shape(), &[2, 4]);
@@ -153,7 +153,7 @@ fn test_simple_rnn_overfitting() {
     model.fit(&x, &y, 200).unwrap();
 
     // Predictions should be very close to target values
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
     for (pred_val, target_val) in pred.iter().zip(y.iter()) {
         assert_abs_diff_eq!(*pred_val, *target_val, epsilon = 0.3);
     }
@@ -209,7 +209,7 @@ fn test_simple_rnn_sequence_memory() {
     // Train the memory task
     model.fit(&x, &y, 80).unwrap();
 
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Check memory performance
     let mut correct_predictions = 0;
@@ -286,7 +286,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
         );
 
     let initial_loss_short = {
-        let pred = model_short.predict(&x_short);
+        let pred = model_short.predict(&x_short).unwrap();
         let diff = &pred - &y_short;
         diff.mapv(|x| x.powi(2)).sum() / pred.len() as f32
     };
@@ -294,7 +294,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
     model_short.fit(&x_short, &y_short, 25).unwrap();
 
     let final_loss_short = {
-        let pred = model_short.predict(&x_short);
+        let pred = model_short.predict(&x_short).unwrap();
         let diff = &pred - &y_short;
         diff.mapv(|x| x.powi(2)).sum() / pred.len() as f32
     };
@@ -310,7 +310,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
         );
 
     let initial_loss_long = {
-        let pred = model_long.predict(&x_long);
+        let pred = model_long.predict(&x_long).unwrap();
         let diff = &pred - &y_long;
         diff.mapv(|x| x.powi(2)).sum() / pred.len() as f32
     };
@@ -318,7 +318,7 @@ fn test_simple_rnn_vanishing_gradient_susceptibility() {
     model_long.fit(&x_long, &y_long, 25).unwrap();
 
     let final_loss_long = {
-        let pred = model_long.predict(&x_long);
+        let pred = model_long.predict(&x_long).unwrap();
         let diff = &pred - &y_long;
         diff.mapv(|x| x.powi(2)).sum() / pred.len() as f32
     };

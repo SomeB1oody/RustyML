@@ -1,6 +1,11 @@
 use super::*;
 
-/// Serializable representation of a Conv2D layer's weights
+/// Serializable representation of Conv2D layer weights.
+///
+/// # Fields
+///
+/// - `weight` - 4D convolution weight tensor stored as nested vectors
+/// - `bias` - 2D bias matrix stored as nested vectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableConv2DWeight {
     pub weight: Vec<Vec<Vec<Vec<f32>>>>,

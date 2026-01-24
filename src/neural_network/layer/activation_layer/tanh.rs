@@ -14,28 +14,14 @@ const TANH_PARALLEL_THRESHOLD: usize = 2048;
 
 /// Tanh (Hyperbolic Tangent) activation layer.
 ///
-/// This layer applies the Tanh activation function element-wise to the input tensor:
-/// f(x) = tanh(x) = (e^x - e^-x) / (e^x + e^-x)
-///
-/// Tanh is a commonly used activation function that maps input values to the range (-1, 1).
-/// It is zero-centered, which can help with gradient flow during backpropagation,
-/// making it useful in various neural network architectures, especially in recurrent networks.
-///
-/// # Input Shape
-///
-/// Accepts tensors of any dimensionality. Common shapes include:
-/// - 2D: \[batch_size, features\] for dense layers
-/// - 4D: \[batch_size, channels, height, width\] for convolutional layers
-///
-/// # Output Shape
-///
-/// Same as input shape.
+/// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
+/// preserving the input shape.
 ///
 /// # Fields
 ///
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -66,7 +52,7 @@ impl Tanh {
     ///
     /// # Returns
     ///
-    /// * `Tanh` - A new `Tanh` layer instance
+    /// - `Self` - A new `Tanh` layer instance
     pub fn new() -> Self {
         Tanh { input_cache: None }
     }

@@ -15,7 +15,7 @@ fn test_global_average_pooling_3d_basic_functionality() {
     let input_data = Array::from_elem(IxDyn(&[2, 3, 4, 4, 4]), 2.0);
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape - should be [2, 3]
     assert_eq!(output.shape(), &[2, 3]);
@@ -56,7 +56,7 @@ fn test_global_average_pooling_3d_with_random_values() {
         }
     }
 
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape
     assert_eq!(output.shape(), &[1, 2]);
@@ -124,7 +124,7 @@ fn test_global_average_pooling_3d_multiple_batches_and_channels() {
         }
     }
 
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape
     assert_eq!(output.shape(), &[3, 4]);
@@ -147,7 +147,7 @@ fn test_global_average_pooling_3d_different_spatial_dimensions() {
     // Test with different spatial dimensions
     let input_data = Array::from_elem(IxDyn(&[1, 2, 5, 6, 7]), 4.0);
 
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape
     assert_eq!(output.shape(), &[1, 2]);
@@ -206,6 +206,6 @@ fn test_global_average_pooling_3d_with_sequential_training() {
     assert!(result.is_ok());
 
     // Test prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 2]);
 }

@@ -31,7 +31,7 @@ fn test_conv1d_sequential_with_sgd() {
     assert!(result.is_ok());
 
     // Make predictions
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 3, 8]);
 
     // Verify that the predictions are non-negative (ReLU activation function)
@@ -76,7 +76,7 @@ fn test_conv1d_sequential_with_rmsprop() {
     assert!(result.is_ok());
 
     // Make predictions
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[3, 2, 6]);
 
     // Verify that Tanh output is within [-1, 1]
@@ -105,7 +105,7 @@ fn test_conv1d_different_strides() {
         .add(stride_2_conv)
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[1, 1, 9]);
 }
 
@@ -136,7 +136,7 @@ fn test_conv1d_multiple_channels() {
     let result = model.fit(&x, &y, 2);
     assert!(result.is_ok());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 5, 13]);
 }
 
@@ -153,7 +153,7 @@ fn test_conv1d_activation_functions() {
         .add(Conv1D::new(1, 3, vec![1, 1, 5], 1, PaddingType::Valid, ReLU::new()).unwrap())
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let relu_output = relu_model.predict(&x);
+    let relu_output = relu_model.predict(&x).unwrap();
     // ReLU output should be non-negative
     for value in relu_output.iter() {
         assert!(*value >= 0.0);
@@ -165,7 +165,7 @@ fn test_conv1d_activation_functions() {
         .add(Conv1D::new(1, 3, vec![1, 1, 5], 1, PaddingType::Valid, Sigmoid::new()).unwrap())
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let sigmoid_output = sigmoid_model.predict(&x);
+    let sigmoid_output = sigmoid_model.predict(&x).unwrap();
     // Sigmoid output should be within [0, 1]
     for value in sigmoid_output.iter() {
         assert!(*value >= 0.0 && *value <= 1.0);

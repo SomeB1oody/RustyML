@@ -5,25 +5,23 @@ use super::*;
 /// Otherwise, sequential execution is used to avoid parallel overhead.
 const AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 
-/// 3D Average Pooling Layer
+/// 3D average pooling layer.
 ///
-/// Average pooling is a commonly used down-sampling technique in convolutional neural networks
-/// that reduces the spatial dimensions of feature maps by calculating the average value
-/// of all values in each pooling window. This reduces computational load and helps control overfitting.
-///
-/// # Data Structure
-///
-/// - Input tensor format: 5D tensor with shape `[batch_size, channels, depth, height, width]`
-/// - Output tensor format: 5D tensor with reduced spatial dimensions
+/// Computes the mean value over each pooling window across depth, height, and width.
+/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
+/// `[batch_size, channels, pooled_depth, pooled_height, pooled_width]` where
+/// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
+/// `pooled_height = (height - pool_size_h) / stride_h + 1`, and
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Fields
 ///
-/// - `pool_size` - Size of the pooling window, represented as (depth, height, width)
-/// - `strides` - Stride of the pooling operation, represented as (depth_stride, height_stride, width_stride)
+/// - `pool_size` - Size of the pooling window as (depth, height, width)
+/// - `strides` - Step size of the pooling operation as (depth_stride, height_stride, width_stride)
 /// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Cached input data used for backpropagation
+/// - `input_cache` - Cached input tensor from the forward pass
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array5, ArrayD};
@@ -61,10 +59,14 @@ const AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 /// model.fit(&input_data, &target_data, 5).unwrap();
 ///
 /// // Make predictions on new data
-/// let predictions = model.predict(&input_data);
+/// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after average pooling: {:?}", predictions.shape());
 /// // Expected output: [1, 16, 16, 16, 16] (spatial dimensions are halved)
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= AVERAGE_POOLING_3D_PARALLEL_THRESHOLD` (32).
 pub struct AveragePooling3D {
     pool_size: (usize, usize, usize),
     strides: (usize, usize, usize),
@@ -73,17 +75,24 @@ pub struct AveragePooling3D {
 }
 
 impl AveragePooling3D {
-    /// Create a new AveragePooling3D layer
+    /// Creates a new 3D average pooling layer.
+    ///
+    /// If `strides` is None, it defaults to `pool_size`.
     ///
     /// # Parameters
     ///
-    /// - `pool_size` - Size of the pooling window (depth, height, width)
-    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, depth, height, width\]
-    /// - `strides` - Optional strides, if None, the values will match `pool_size`
+    /// - `pool_size` - Size of the pooling window as (depth, height, width)
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, depth, height, width]`
+    /// - `strides` - Optional strides of the pooling operation
     ///
     /// # Returns
     ///
-    /// * `Result<AveragePooling3D, ModelError>` - A new `AveragePooling3D` instance or an error
+    /// - `Result<AveragePooling3D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 5D, `pool_size` has a zero
+    ///   dimension, or any stride is zero
     pub fn new(
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,

@@ -113,7 +113,7 @@ fn test_depthwise_conv2d_sequential_model() {
     model.summary();
 
     // Forward propagation
-    let output = model.predict(&input);
+    let output = model.predict(&input).unwrap();
 
     // Verify output shape
     // Input: [1, 3, 4, 4], kernel (2,2), stride (1,1), valid padding
@@ -151,7 +151,7 @@ fn test_depthwise_conv2d_same_padding() {
             .into_dyn();
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // With Same padding, output shape should match input shape (except for channel count)
     assert_eq!(output.shape(), &[1, 2, 5, 5]);
@@ -182,7 +182,7 @@ fn test_depthwise_conv2d_different_strides() {
             .into_dyn();
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Verify output shape
     // Input: [1, 2, 8, 8], kernel (3,3), stride (2,2), valid padding
@@ -223,7 +223,7 @@ fn test_depthwise_conv2d_training() {
     assert!(result.is_ok());
 
     // Verify predictions
-    let predictions = model.predict(&input_data);
+    let predictions = model.predict(&input_data).unwrap();
     assert_eq!(predictions.shape(), &[4, 2, 3, 3]);
 }
 
@@ -364,7 +364,7 @@ fn test_depthwise_conv2d_multiple_batches() {
     .into_dyn();
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[batch_size, 3, 3, 3]);

@@ -5,11 +5,9 @@ use super::*;
 /// to avoid parallelization overhead.
 const ADAM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Adam (Adaptive Moment Estimation) optimizer
+/// Adam (Adaptive Moment Estimation) optimizer.
 ///
-/// An optimization algorithm that computes individual adaptive learning
-/// rates for different parameters from estimates of first and second moments
-/// of the gradients.
+/// Computes adaptive learning rates using estimates of first and second moments of gradients.
 ///
 /// # Fields
 ///
@@ -18,6 +16,14 @@ const ADAM_PARALLEL_THRESHOLD: usize = 1024;
 /// - `beta2` - Exponential decay rate for the second moment estimates
 /// - `epsilon` - Small constant added for numerical stability
 /// - `t` - Current timestep, incremented with each update
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::Adam;
+///
+/// let optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
+/// ```
 pub struct Adam {
     learning_rate: f32,
     beta1: f32,
@@ -29,6 +35,8 @@ pub struct Adam {
 impl Adam {
     /// Creates a new Adam optimizer with the specified parameters.
     ///
+    /// Validates hyperparameters and initializes internal timestep tracking.
+    ///
     /// # Parameters
     ///
     /// - `learning_rate` - Step size for parameter updates
@@ -38,7 +46,11 @@ impl Adam {
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new Adam optimizer instance or an error
+    /// - `Result<Self, ModelError>` - A new Adam optimizer instance or an error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If any hyperparameter is out of range
     pub fn new(
         learning_rate: f32,
         beta1: f32,
@@ -74,12 +86,10 @@ impl Optimizer for Adam {
     }
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm.
+/// Adam optimizer state for dense or recurrent layers.
 ///
-/// Adam (Adaptive Moment Estimation) is an optimization algorithm that combines
-/// the advantages of two other extensions of stochastic gradient descent: AdaGrad and RMSprop.
-/// This struct maintains the first and second moment estimates (moving averages of gradients and
-/// squared gradients) for weights, recurrent weights (optional), and biases.
+/// Stores moving averages of gradients and squared gradients for weights, recurrent weights,
+/// and biases.
 ///
 /// # Fields
 ///
@@ -89,6 +99,14 @@ impl Optimizer for Adam {
 /// - `v_recurrent` - Second moment vector for recurrent parameters (if applicable)
 /// - `m_bias` - First moment vector for bias parameters
 /// - `v_bias` - Second moment vector for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdamStates;
+///
+/// let states = AdamStates::new((2, 2), None, (1, 2));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStates {
     pub m: Array2<f32>,
@@ -100,7 +118,7 @@ pub struct AdamStates {
 }
 
 impl AdamStates {
-    /// Creates a new Adam state object, initialized to zero
+    /// Creates a new Adam state object, initialized to zero.
     ///
     /// # Parameters
     ///
@@ -110,7 +128,15 @@ impl AdamStates {
     ///
     /// # Returns
     ///
-    /// - `Adam` - A new AdamStates instance with all moment vectors initialized to zero matrices of appropriate dimensions
+    /// - `Self` - A new AdamStates instance with all moment vectors initialized to zero matrices
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rustyml::neural_network::optimizer::AdamStates;
+    ///
+    /// let states = AdamStates::new((2, 2), None, (1, 2));
+    /// ```
     pub fn new(
         dims_param: (usize, usize),
         dims_recurrent: Option<(usize, usize)>,
@@ -129,7 +155,7 @@ impl AdamStates {
         }
     }
 
-    /// Updates Adam state for a single parameter and calculates update values
+    /// Updates Adam state and returns parameter updates.
     ///
     /// # Parameters
     ///
@@ -144,10 +170,26 @@ impl AdamStates {
     ///
     /// # Returns
     ///
-    /// * Tuple containing:
-    ///   - `Array2<f32>` - Update values for main parameter matrix
-    ///   - `Option<Array2<f32>>` - Optional update values for recurrent parameter matrix; None if not using recurrent parameters
-    ///   - `Array2<f32>` - Update values for bias parameter matrix
+    /// - `Array2<f32>` - Update values for main parameter matrix
+    /// - `Option<Array2<f32>>` - Optional update values for recurrent parameter matrix; None if not using recurrent parameters
+    /// - `Array2<f32>` - Update values for bias parameter matrix
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when the main parameter matrix length is at least `ADAM_PARALLEL_THRESHOLD`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ndarray::array;
+    /// use rustyml::neural_network::optimizer::AdamStates;
+    ///
+    /// let mut states = AdamStates::new((1, 2), None, (1, 2));
+    /// let grad_param = array![[0.1, 0.1]];
+    /// let grad_bias = array![[0.01, 0.01]];
+    /// let (_param_update, _recurrent_update, _bias_update) =
+    ///     states.update_parameter(&grad_param, None, &grad_bias, 0.9, 0.999, 1e-8, 1, 0.001);
+    /// ```
     pub fn update_parameter(
         &mut self,
         grad_param: &Array2<f32>,
@@ -262,7 +304,7 @@ impl AdamStates {
     }
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm for Conv1D layer.
+/// Adam optimizer state for Conv1D layers.
 ///
 /// This struct is specifically designed to handle the optimization state for 1D convolutional layers
 /// that process sequential data (e.g., time series, text sequences). It maintains the first and second
@@ -276,6 +318,14 @@ impl AdamStates {
 /// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 3D array
 /// - `m_bias` - First moment matrix for bias parameters
 /// - `v_bias` - Second moment matrix for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdamStatesConv1D;
+///
+/// let states = AdamStatesConv1D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv1D {
     pub m: Array3<f32>,
@@ -284,7 +334,7 @@ pub struct AdamStatesConv1D {
     pub v_bias: Array2<f32>,
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm for Conv2D layer.
+/// Adam optimizer state for Conv2D layers.
 ///
 /// This struct is specifically designed to handle the optimization state for layers involved in feature extraction,
 /// which typically deal with 4D tensors (e.g., convolutional layers). It maintains the first and second moment
@@ -298,6 +348,14 @@ pub struct AdamStatesConv1D {
 /// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 4D array
 /// - `m_bias` - First moment matrix for bias parameters
 /// - `v_bias` - Second moment matrix for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdamStatesConv2D;
+///
+/// let states = AdamStatesConv2D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv2D {
     pub m: Array4<f32>,
@@ -306,7 +364,7 @@ pub struct AdamStatesConv2D {
     pub v_bias: Array2<f32>,
 }
 
-/// Adam optimizer state variables for 3D convolutional layers
+/// Adam optimizer state for 3D convolutional layers.
 ///
 /// This structure stores the momentum and velocity estimates required by the Adam optimizer
 /// for updating weights and biases in 3D convolutional neural network layers. Adam maintains
@@ -320,6 +378,14 @@ pub struct AdamStatesConv2D {
 /// - `v` - Second moment estimate (velocity) for the 5D convolution weights with the same shape as `m`
 /// - `m_bias` - First moment estimate for the bias tensor with shape (1, output_channels)
 /// - `v_bias` - Second moment estimate for the bias tensor with the same shape as `m_bias`
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdamStatesConv3D;
+///
+/// let states = AdamStatesConv3D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv3D {
     pub m: Array5<f32>,
@@ -328,7 +394,7 @@ pub struct AdamStatesConv3D {
     pub v_bias: Array2<f32>,
 }
 
-/// Stores and manages optimization state for the Adam optimizer algorithm for Normalization layers.
+/// Adam optimizer state for normalization layers.
 ///
 /// This struct is specifically designed to handle the optimization state for normalization layers
 /// (e.g., BatchNormalization, LayerNormalization) that have gamma (scale) and beta (shift) parameters.
@@ -341,6 +407,14 @@ pub struct AdamStatesConv3D {
 /// - `v_gamma` - Second moment tensor (moving average of squared gradients) for gamma parameter
 /// - `m_beta` - First moment tensor for beta (shift) parameter
 /// - `v_beta` - Second moment tensor for beta parameter
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdamStatesNormalizationLayer;
+///
+/// let states = AdamStatesNormalizationLayer::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesNormalizationLayer {
     pub m_gamma: Tensor,

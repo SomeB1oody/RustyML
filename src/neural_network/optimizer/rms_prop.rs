@@ -5,16 +5,23 @@ use super::*;
 /// to avoid parallelization overhead.
 const RMS_PROP_PARALLEL_THRESHOLD: usize = 1024;
 
-/// RMSprop (Root Mean Square Propagation) optimizer
+/// RMSprop (Root Mean Square Propagation) optimizer.
 ///
-/// An optimization algorithm that adapts the learning rate for each parameter
-/// using a moving average of squared gradients.
+/// Adapts per-parameter learning rates using a moving average of squared gradients.
 ///
 /// # Fields
 ///
 /// - `learning_rate` - Learning rate controlling the size of parameter updates
 /// - `rho` - Decay rate for the moving average of squared gradients
 /// - `epsilon` - Small constant added for numerical stability
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSprop;
+///
+/// let optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+/// ```
 pub struct RMSprop {
     learning_rate: f32,
     rho: f32,
@@ -24,6 +31,8 @@ pub struct RMSprop {
 impl RMSprop {
     /// Creates a new RMSprop optimizer with the specified parameters.
     ///
+    /// Validates hyperparameters and initializes the optimizer.
+    ///
     /// # Parameters
     ///
     /// - `learning_rate` - Step size for parameter updates
@@ -32,7 +41,19 @@ impl RMSprop {
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new RMSprop optimizer instance or an error
+    /// - `Result<Self, ModelError>` - A new RMSprop optimizer instance or an error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If any hyperparameter is out of range
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rustyml::neural_network::optimizer::RMSprop;
+    ///
+    /// let optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+    /// ```
     pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, ModelError> {
         // input validation
         validate_learning_rate(learning_rate)?;
@@ -53,7 +74,7 @@ impl Optimizer for RMSprop {
     }
 }
 
-/// Cache structure for the RMSprop optimization algorithm.
+/// RMSprop cache for dense or recurrent layers.
 ///
 /// RMSprop (Root Mean Square Propagation) is an adaptive learning rate optimization
 /// algorithm that maintains a moving average of squared gradients for each parameter.
@@ -62,9 +83,17 @@ impl Optimizer for RMSprop {
 ///
 /// # Fields
 ///
-/// - `cache`: Moving average of squared gradients for main weight parameters.
-/// - `cache_recurrent`: Optional moving average of squared gradients for recurrent weight parameters. This is used in recurrent neural networks like RNN, LSTM, and GRU.
-/// - `bias`: Moving average of squared gradients for bias parameters.
+/// - `cache` - Moving average of squared gradients for main weight parameters
+/// - `cache_recurrent` - Optional moving average of squared gradients for recurrent weight parameters
+/// - `bias` - Moving average of squared gradients for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSpropCache;
+///
+/// let cache = RMSpropCache::new((2, 2), None, (1, 2));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCache {
     pub cache: Array2<f32>,
@@ -73,7 +102,7 @@ pub struct RMSpropCache {
 }
 
 impl RMSpropCache {
-    /// Creates a new RMSprop cache instance
+    /// Creates a new RMSprop cache instance.
     ///
     /// This constructor initializes the cache arrays required by the RMSprop optimizer
     /// for storing running averages of squared gradients. These caches are used during
@@ -87,10 +116,15 @@ impl RMSpropCache {
     ///
     /// # Returns
     ///
-    /// Returns a new `RMSpropCache` instance containing:
-    /// - `cache`: A zero-initialized 2D array with `dims` dimensions for storing running average of squared gradients for main parameters
-    /// - `cache_recurrent`: If `recurrent_dims` is `Some`, a zero-initialized 2D array with corresponding dimensions; otherwise `None`
-    /// - `bias`: A zero-initialized 2D array with `bias_dims` dimensions for storing running average of squared gradients for bias parameters
+    /// - `Self` - A new RMSpropCache instance with all caches initialized to zero matrices
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rustyml::neural_network::optimizer::RMSpropCache;
+    ///
+    /// let cache = RMSpropCache::new((2, 2), None, (1, 2));
+    /// ```
     pub fn new(
         dims: (usize, usize),
         recurrent_dims: Option<(usize, usize)>,
@@ -103,7 +137,7 @@ impl RMSpropCache {
         }
     }
 
-    /// Updates parameters and their corresponding cache
+    /// Updates a parameter and its RMSprop cache.
     ///
     /// # Parameters
     ///
@@ -113,6 +147,22 @@ impl RMSpropCache {
     /// - `rho` - Decay rate
     /// - `lr` - Learning rate
     /// - `epsilon` - Small constant for numerical stability
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when the parameter length is at least `RMS_PROP_PARALLEL_THRESHOLD`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ndarray::array;
+    /// use rustyml::neural_network::optimizer::RMSpropCache;
+    ///
+    /// let mut cache = RMSpropCache::new((1, 2), None, (1, 2));
+    /// let mut param = array![[1.0, 2.0]];
+    /// let grad = array![[0.1, 0.1]];
+    /// RMSpropCache::update_param(&mut param, &grad, &mut cache.cache, 0.9, 0.001, 1e-8);
+    /// ```
     pub fn update_param(
         param: &mut Array2<f32>,
         grad: &Array2<f32>,
@@ -142,7 +192,7 @@ impl RMSpropCache {
         }
     }
 
-    /// Updates all parameters using RMSprop optimization algorithm
+    /// Updates all parameters using RMSprop optimization algorithm.
     ///
     /// This method updates the weights, recurrent weights (if present), and bias parameters
     /// based on their respective gradients using the RMSprop optimization technique.
@@ -160,6 +210,34 @@ impl RMSpropCache {
     /// - `rho` - Decay rate for the moving average of squared gradients (typically 0.9)
     /// - `lr` - Learning rate controlling the size of parameter updates
     /// - `epsilon` - Small constant added for numerical stability (typically 1e-8)
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when any parameter length is at least `RMS_PROP_PARALLEL_THRESHOLD`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ndarray::array;
+    /// use rustyml::neural_network::optimizer::RMSpropCache;
+    ///
+    /// let mut cache = RMSpropCache::new((1, 2), None, (1, 2));
+    /// let mut param = array![[1.0, 2.0]];
+    /// let mut bias = array![[0.0, 0.0]];
+    /// let grad = array![[0.1, 0.1]];
+    /// let bias_grad = array![[0.01, 0.01]];
+    /// cache.update_parameters(
+    ///     &mut param,
+    ///     None,
+    ///     &mut bias,
+    ///     &grad,
+    ///     None,
+    ///     &bias_grad,
+    ///     0.9,
+    ///     0.001,
+    ///     1e-8,
+    /// );
+    /// ```
     pub fn update_parameters(
         &mut self,
         param: &mut Array2<f32>,
@@ -189,7 +267,7 @@ impl RMSpropCache {
     }
 }
 
-/// Cache structure for the RMSprop optimization algorithm for Conv1D layer.
+/// RMSprop cache for Conv1D layers.
 ///
 /// This specialized cache is designed for one-dimensional convolutional neural networks
 /// that process sequential data such as time series or text. It maintains moving averages
@@ -198,19 +276,27 @@ impl RMSpropCache {
 ///
 /// # Fields
 ///
-/// - `cache`: Optional moving average of squared gradients for 3D weight parameters.
+/// - `cache` - Optional moving average of squared gradients for 3D weight parameters
 ///   Stores values for 1D convolutional kernels used in sequential feature extraction.
 ///   None when the layer has no weight parameters.
 ///
-/// - `bias`: Optional moving average of squared gradients for bias parameters.
+/// - `bias` - Optional moving average of squared gradients for bias parameters
 ///   Remains 2D even in convolutional contexts but can be None when bias is disabled.
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSpropCacheConv1D;
+///
+/// let cache = RMSpropCacheConv1D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCacheConv1D {
     pub cache: Option<Array3<f32>>,
     pub bias: Option<Array2<f32>>,
 }
 
-/// Cache structure for the RMSprop optimization algorithm for Conv2D layer.
+/// RMSprop cache for Conv2D layers.
 ///
 /// This specialized cache is designed for convolutional neural networks and other architectures
 /// that use multi-dimensional tensors for feature extraction. Unlike the standard RMSprop cache,
@@ -219,18 +305,26 @@ pub struct RMSpropCacheConv1D {
 ///
 /// # Fields
 ///
-/// - `cache`: Moving average of squared gradients for 4D weight parameters. Typically stores values for
-///   convolutional kernels or other multi-dimensional feature extraction parameters.
+/// - `cache` - Moving average of squared gradients for 4D weight parameters
+///   Typically stores values for convolutional kernels or other multi-dimensional feature extraction parameters.
 ///
-/// - `bias`: Moving average of squared gradients for bias parameters, which remain 2D even in
+/// - `bias` - Moving average of squared gradients for bias parameters, which remain 2D even in
 ///   convolutional contexts.
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSpropCacheConv2D;
+///
+/// let cache = RMSpropCacheConv2D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCacheConv2D {
     pub cache: Array4<f32>,
     pub bias: Array2<f32>,
 }
 
-/// RMSprop optimizer cache for 3D convolutional layers
+/// RMSprop cache for 3D convolutional layers.
 ///
 /// This structure stores the exponentially decaying averages of squared gradients
 /// required by the RMSprop (Root Mean Square Propagation) optimizer for updating
@@ -246,13 +340,21 @@ pub struct RMSpropCacheConv2D {
 ///
 /// - `bias` - 3D array storing the exponentially decaying average of squared gradients
 ///   for bias parameters with shape (1, output_channels)
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSpropCacheConv3D;
+///
+/// let cache = RMSpropCacheConv3D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCacheConv3D {
     pub cache: Array5<f32>,
     pub bias: Array2<f32>,
 }
 
-/// Cache structure for the RMSprop optimization algorithm for Normalization layers.
+/// RMSprop cache for normalization layers.
 ///
 /// This specialized cache is designed for normalization layers (e.g., BatchNormalization,
 /// LayerNormalization) that have gamma (scale) and beta (shift) parameters. It maintains
@@ -262,6 +364,14 @@ pub struct RMSpropCacheConv3D {
 ///
 /// - `cache_gamma` - Moving average of squared gradients for gamma (scale) parameter
 /// - `cache_beta` - Moving average of squared gradients for beta (shift) parameter
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::RMSpropCacheNormalizationLayer;
+///
+/// let cache = RMSpropCacheNormalizationLayer::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct RMSpropCacheNormalizationLayer {
     pub cache_gamma: Tensor,

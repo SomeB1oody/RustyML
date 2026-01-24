@@ -377,7 +377,7 @@ fn activation_integration_test() {
     model.fit(&x, &y, 5).unwrap();
 
     // Make predictions
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
 
     // Check output shape is correct
     assert_eq!(prediction.shape(), &[4, 2]);

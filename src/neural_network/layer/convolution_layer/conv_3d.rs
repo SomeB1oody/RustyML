@@ -7,9 +7,10 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 
 /// A 3D convolutional layer for neural networks.
 ///
-/// This layer applies a 3D convolution operation to input data, which is fundamental
-/// for processing volumetric data such as medical images (CT scans, MRI), 3D models,
-/// or video sequences where temporal information is important.
+/// Applies a 3D convolution operation to volumetric data such as medical images, 3D models,
+/// or video sequences. Input shape is \[batch_size, channels, depth, height, width\] and
+/// output shape is \[batch_size, filters, output_depth, output_height, output_width\], where
+/// output dimensions depend on input size, kernel size, strides, and padding.
 ///
 /// # Fields
 ///
@@ -26,18 +27,7 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 /// - `bias_gradients` - Gradients for the biases, computed during backpropagation.
 /// - `optimizer_cache` - Cache for optimizer-specific state (e.g., momentum values for Adam).
 ///
-/// # Shape Information
-///
-/// Input shape: \[batch_size, channels, depth, height, width\]
-/// Output shape: \[batch_size, filters, output_depth, output_height, output_width\]
-///
-/// The output dimensions (output_depth, output_height, output_width) depend on:
-/// - Input dimensions
-/// - Kernel size
-/// - Stride values
-/// - Padding type
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array5;
@@ -69,7 +59,7 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 /// model.fit(&x, &y, 3).unwrap();
 ///
 /// // Use predict for forward propagation prediction
-/// let prediction = model.predict(&x);
+/// let prediction = model.predict(&x).unwrap();
 /// println!("3D Convolution layer prediction results: {:?}", prediction);
 ///
 /// // Check if output shape is correct - should be [2, 3, 6, 6, 6]
@@ -91,7 +81,7 @@ pub struct Conv3D<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> Conv3D<T> {
-    /// Creates a new Conv3D layer.
+    /// Creates a new Conv3D layer with the specified parameters.
     ///
     /// # Parameters
     ///
@@ -104,16 +94,13 @@ impl<T: ActivationLayer> Conv3D<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<Conv3D, ModelError>` - A new `Conv3D` layer instance or an error
+    /// - `Result<Self, ModelError>` - A new `Conv3D` layer instance or an error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `filters` is 0
-    /// - Any kernel dimension is 0
-    /// - Any stride is 0
-    /// - `input_shape` is not 5D
-    /// - Any input dimension is 0
+    /// - `ModelError::InputValidationError` - If `filters` is 0
+    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 5D or has 0 dimensions
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize, usize),

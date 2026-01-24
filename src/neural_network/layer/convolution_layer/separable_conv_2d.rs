@@ -7,10 +7,11 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 
 /// A 2D separable convolutional layer for neural networks.
 ///
-/// This layer implements depthwise separable convolution, which factors a standard convolution
-/// into two separate operations: a depthwise convolution followed by a pointwise convolution.
-/// This approach significantly reduces the number of parameters and computational cost compared
-/// to standard convolution while maintaining similar performance.
+/// Implements depthwise separable convolution with a depthwise step followed by a pointwise step.
+/// This reduces parameters and computation compared to standard convolution while maintaining
+/// similar performance. Input shape is \[batch_size, channels, height, width\], intermediate
+/// depthwise output shape is \[batch_size, channels * depth_multiplier, height', width'\], and
+/// final output shape is \[batch_size, filters, height', width'\].
 ///
 /// The separable convolution consists of:
 /// 1. **Depthwise Convolution**: Each input channel is convolved with its own set of filters
@@ -35,13 +36,7 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 /// - `bias_gradients` - Gradients for the biases.
 /// - `optimizer_cache` - Cache for optimizer-specific state.
 ///
-/// # Shape Information
-///
-/// Input shape: \[batch_size, channels, height, width\]
-/// Intermediate shape (after depthwise): \[batch_size, channels * depth_multiplier, height', width'\]
-/// Output shape: \[batch_size, filters, height', width'\]
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array4;
@@ -91,6 +86,9 @@ pub struct SeparableConv2D<T: ActivationLayer> {
 impl<T: ActivationLayer> SeparableConv2D<T> {
     /// Creates a new 2D separable convolutional layer with the specified parameters.
     ///
+    /// Weights are initialized using Xavier (Glorot) uniform initialization.
+    /// Biases are initialized to zeros.
+    ///
     /// # Parameters
     ///
     /// - `filters` - Number of output channels from the pointwise convolution.
@@ -103,25 +101,15 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<SeparableConv2D, ModelError>` - A new `SeparableConv2D` layer instance or an error.
+    /// - `Result<Self, ModelError>` - A new `SeparableConv2D` layer instance or an error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `filters` is 0
-    /// - Any kernel dimension is 0
-    /// - Any stride is 0
-    /// - `depth_multiplier` is 0
-    /// - `input_shape` is not 4D
-    /// - Input channels is 0
-    /// - Input dimensions are less than kernel size
-    ///
-    /// # Notes
-    ///
-    /// Weights are initialized using Xavier (Glorot) uniform initialization:
-    /// - Depthwise weights: Based on fan-in and fan-out for depthwise filters
-    /// - Pointwise weights: Based on fan-in and fan-out for 1x1 convolution
-    /// - Biases are initialized to zeros
+    /// - `ModelError::InputValidationError` - If `filters` is 0
+    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
+    /// - `ModelError::InputValidationError` - If `depth_multiplier` is 0
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D or has 0 channels
+    /// - `ModelError::InputValidationError` - If input dimensions are smaller than kernel size
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),

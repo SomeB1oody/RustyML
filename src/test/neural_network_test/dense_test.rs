@@ -94,7 +94,7 @@ fn test_dense_learning_capability() {
     model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Record initial prediction
-    let initial_prediction = model.predict(&x_train);
+    let initial_prediction = model.predict(&x_train).unwrap();
     let initial_loss = calculate_mse(&initial_prediction, &y_train);
     println!("Initial loss: {:.4}", initial_loss);
 
@@ -102,7 +102,7 @@ fn test_dense_learning_capability() {
     model.fit(&x_train, &y_train, 1000).unwrap();
 
     // Test final prediction
-    let final_prediction = model.predict(&x_train);
+    let final_prediction = model.predict(&x_train).unwrap();
     let final_loss = calculate_mse(&final_prediction, &y_train);
     println!("Final loss: {:.4}", final_loss);
     println!("Predictions: {:?}", final_prediction);

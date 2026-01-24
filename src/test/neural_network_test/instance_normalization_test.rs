@@ -726,7 +726,7 @@ fn test_instance_normalization_with_sequential_model() {
     model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Test forward pass
-    let output = model.predict(&input);
+    let output = model.predict(&input).unwrap();
     assert_eq!(output.shape(), &[2, 24]);
 
     // Test training

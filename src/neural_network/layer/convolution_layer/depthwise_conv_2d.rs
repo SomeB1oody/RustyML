@@ -6,13 +6,9 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 
 /// A 2D depthwise convolutional layer for neural networks.
 ///
-/// Depthwise convolution applies a single convolutional filter per input channel,
-/// unlike standard convolution which mixes channels. This operation significantly
-/// reduces the number of parameters and computational cost while maintaining
-/// spatial feature extraction capabilities.
-///
-/// The depthwise convolution operates on 4D tensors with shape \[batch_size, channels, height, width\].
-/// Each channel is convolved independently with its own set of filters.
+/// Applies one convolutional filter per input channel, reducing parameter count and
+/// computation while preserving spatial feature extraction. Input shape is
+/// \[batch_size, channels, height, width\], and each channel is convolved independently.
 ///
 /// # Fields
 ///
@@ -29,7 +25,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// - `bias_gradients` - Gradients with respect to bias
 /// - `optimizer_cache` - Cache for optimizer state
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::prelude::*;
@@ -75,7 +71,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// model.summary();
 ///
 /// // Forward propagation
-/// let output = model.predict(&input);
+/// let output = model.predict(&input).unwrap();
 ///
 /// // Verify output shape
 /// // Input: [1, 3, 4, 4], kernel (2,2), stride (1,1), valid padding
@@ -115,14 +111,12 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<DepthwiseConv2D, ModelError>` - A new `DepthwiseConv2D` instance with randomly initialized weights or an error
+    /// - `Result<Self, ModelError>` - A new `DepthwiseConv2D` instance with randomly initialized weights or an error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `filters` is 0
-    /// - Any kernel dimension is 0
-    /// - Any stride is 0
+    /// - `ModelError::InputValidationError` - If `filters` is 0
+    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -166,7 +160,11 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
     ///
     /// # Parameters
     ///
-    /// * `input_channels` - Number of input channels
+    /// - `input_channels` - Number of input channels
+    ///
+    /// # Panics
+    ///
+    /// Panics if `input_channels` does not match `filters`.
     pub fn initialize_weights(&mut self, input_channels: usize) {
         assert_eq!(
             self.filters, input_channels,

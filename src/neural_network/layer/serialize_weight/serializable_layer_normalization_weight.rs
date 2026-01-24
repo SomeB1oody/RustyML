@@ -1,6 +1,12 @@
 use super::*;
 
-/// Serializable representation of a LayerNormalization layer's weights
+/// Serializable representation of LayerNormalization layer weights.
+///
+/// # Fields
+///
+/// - `gamma` - Scale parameter values flattened into a vector
+/// - `beta` - Shift parameter values flattened into a vector
+/// - `shape` - Original parameter shape used to rebuild arrays
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLayerNormalizationWeight {
     pub gamma: Vec<f32>,

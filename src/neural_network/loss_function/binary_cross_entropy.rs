@@ -32,7 +32,7 @@ impl BinaryCrossEntropy {
     ///
     /// # Returns
     ///
-    /// * `BinaryCrossEntropy` - Returns a unit-like struct `BinaryCrossEntropy`
+    /// - `BinaryCrossEntropy` - Returns a unit-like struct `BinaryCrossEntropy`
     pub fn new() -> Self {
         Self {}
     }

@@ -4,30 +4,22 @@ use super::*;
 /// When batch_size * channels >= this threshold, use parallel execution.
 const MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 
-/// 1D Max Pooling layer for neural networks.
+/// 1D max pooling layer.
 ///
-/// This layer performs max pooling operation on a 3D tensor.
-/// Max pooling selects the maximum value from each patch as defined by the pool size.
-///
-/// # Input Shape
-///
-/// Input is a 3D tensor with shape \[batch_size, channels, length\]
-///
-/// # Output Shape
-///
-/// Output is a 3D tensor with shape \[batch_size, channels, pooled_length\]
-/// Where:
-/// - pooled_length = (length - pool_size) / stride + 1
+/// Selects the maximum value within each pooling window along the length dimension.
+/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
+/// `[batch_size, channels, pooled_length]` where
+/// `pooled_length = (length - pool_size) / stride + 1`.
 ///
 /// # Fields
 ///
 /// - `pool_size` - Size of the pooling window
-/// - `stride` - Stride of the pooling operation
+/// - `stride` - Step size of the pooling operation
 /// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Input tensor cached during forward pass, used for backward pass
-/// - `max_positions` - 3D array storing the input indices of maximum values for each output position, used for backpropagation
+/// - `input_cache` - Cached input tensor from the forward pass
+/// - `max_positions` - Cached indices of maximum values for backpropagation
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array3;
@@ -59,7 +51,7 @@ const MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
-/// let output = model.predict(&x);
+/// let output = model.predict(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 3, 4]);
 ///
 /// // Verify correctness of pooling results
@@ -77,6 +69,10 @@ const MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///     }
 /// }
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= MAX_POOLING_1D_PARALLEL_THRESHOLD` (32).
 pub struct MaxPooling1D {
     pool_size: usize,
     stride: usize,
@@ -86,17 +82,22 @@ pub struct MaxPooling1D {
 }
 
 impl MaxPooling1D {
-    /// Create a new 1D Max Pooling layer
+    /// Creates a new 1D max pooling layer.
     ///
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window
-    /// - `stride` - Stride of the pooling operation
-    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
+    /// - `stride` - Step size of the pooling operation
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, length]`
     ///
     /// # Returns
     ///
-    /// * `Result<MaxPooling1D, ModelError>` - a new instance of `MaxPooling1D` or an error
+    /// - `Result<MaxPooling1D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 3D, `pool_size` is zero or
+    ///   larger than the input length, or `stride` is zero
     pub fn new(
         pool_size: usize,
         stride: usize,

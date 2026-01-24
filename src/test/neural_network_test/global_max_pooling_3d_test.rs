@@ -107,7 +107,7 @@ fn test_global_max_pooling_3d_with_sequential() {
     let input_data = Array::from_elem(IxDyn(&[2, 3, 4, 5, 5]), 1.0);
 
     // Perform prediction
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape
     assert_eq!(output.shape(), &[2, 3]);
@@ -191,6 +191,6 @@ fn test_global_max_pooling_3d_sequential_training() {
     assert!(result.is_ok());
 
     // Verify prediction functionality
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[4, 2]);
 }

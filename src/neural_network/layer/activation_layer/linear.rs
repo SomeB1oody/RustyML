@@ -2,28 +2,13 @@ use super::*;
 
 /// Linear (Identity) activation layer.
 ///
-/// This layer applies the linear activation function element-wise to the input tensor:
-/// f(x) = x
-///
-/// The linear activation is essentially an identity function that passes the input through
-/// unchanged. It's useful in certain architectures, particularly in the output layer for
-/// regression tasks.
-///
-/// # Input Shape
-///
-/// Accepts tensors of any dimensionality. Common shapes include:
-/// - 2D: \[batch_size, features\] for dense layers
-/// - 4D: \[batch_size, channels, height, width\] for convolutional layers
-///
-/// # Output Shape
-///
-/// Same as input shape.
+/// Applies the identity function `f(x) = x` element-wise, preserving the input shape.
 ///
 /// # Fields
 ///
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -54,7 +39,7 @@ impl Linear {
     ///
     /// # Returns
     ///
-    /// * `Linear` - A new `Linear` layer instance
+    /// - `Self` - A new `Linear` layer instance
     pub fn new() -> Self {
         Linear { input_cache: None }
     }

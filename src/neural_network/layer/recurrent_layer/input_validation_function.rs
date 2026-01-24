@@ -9,8 +9,8 @@ use super::*;
 ///
 /// # Returns
 ///
-/// * `Ok(())` if validation passes
-/// * `Err(ModelError)` if validation fails
+/// - `Ok(())` if validation passes
+/// - `Err(ModelError)` if validation fails
 pub(super) fn validate_dimension_greater_than_zero(
     value: usize,
     name: &str,
@@ -33,8 +33,8 @@ pub(super) fn validate_dimension_greater_than_zero(
 ///
 /// # Returns
 ///
-/// * `Ok(())` if validation passes
-/// * `Err(ModelError)` if validation fails
+/// - `Ok(())` if validation passes
+/// - `Err(ModelError)` if validation fails
 pub(super) fn validate_recurrent_dimensions(
     input_dim: usize,
     units: usize,
@@ -52,8 +52,8 @@ pub(super) fn validate_recurrent_dimensions(
 ///
 /// # Returns
 ///
-/// * `Ok(())` if validation passes
-/// * `Err(ModelError)` if validation fails
+/// - `Ok(())` if validation passes
+/// - `Err(ModelError)` if validation fails
 pub(super) fn validate_input_3d(input: &Tensor) -> Result<(), ModelError> {
     if input.ndim() != 3 {
         return Err(ModelError::InputValidationError(

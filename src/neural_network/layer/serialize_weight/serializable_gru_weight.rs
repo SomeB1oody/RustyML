@@ -1,6 +1,12 @@
 use super::*;
 
-/// Serializable representation of a GRU layer's weights
+/// Serializable representation of GRU layer weights.
+///
+/// # Fields
+///
+/// - `reset` - Weights for the reset gate
+/// - `update` - Weights for the update gate
+/// - `candidate` - Weights for the candidate state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableGRUWeight {
     pub reset: SerializableGateWeight,

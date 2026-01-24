@@ -5,30 +5,22 @@ use super::*;
 /// Otherwise, sequential execution is used to avoid parallel overhead.
 const AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 
-/// A 2D average pooling layer for neural networks.
+/// 2D average pooling layer.
 ///
-/// This layer performs average pooling operations on 4D tensors.
-/// Average pooling computes the average value of each patch defined by the pool size.
-///
-/// # Input Shape
-///
-/// Input is a 4D tensor with shape \[batch_size, channels, height, width\]
-///
-/// # Output Shape
-///
-/// Output is a 4D tensor with shape \[batch_size, channels, pooled_height, pooled_width\]
-/// where:
-/// - pooled_height = (height - pool_size_h) / stride_h + 1
-/// - pooled_width = (width - pool_size_w) / stride_w + 1
+/// Computes the mean value over each pooling window along the height and width dimensions.
+/// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
+/// `[batch_size, channels, pooled_height, pooled_width]` where
+/// `pooled_height = (height - pool_size_h) / stride_h + 1` and
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Fields
 ///
 /// - `pool_size` - Size of the pooling window as (height, width)
-/// - `strides` - Stride of the pooling operation as (height, width)
+/// - `strides` - Step size of the pooling operation as (height, width)
 /// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Cached input tensor from forward pass, used in backpropagation
+/// - `input_cache` - Cached input tensor from the forward pass
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array4;
@@ -62,7 +54,7 @@ const AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///  .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 ///  // Output shape should be [2, 3, 2, 2]
-///  let output = model.predict(&x);
+///  let output = model.predict(&x).unwrap();
 ///  assert_eq!(output.shape(), &[2, 3, 2, 2]);
 ///
 ///  // Verify correctness of pooling results
@@ -80,6 +72,10 @@ const AVERAGE_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///     }
 ///  }
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= AVERAGE_POOLING_2D_PARALLEL_THRESHOLD` (32).
 pub struct AveragePooling2D {
     pool_size: (usize, usize),
     strides: (usize, usize),
@@ -88,17 +84,24 @@ pub struct AveragePooling2D {
 }
 
 impl AveragePooling2D {
-    /// Creates a new AveragePooling layer.
+    /// Creates a new 2D average pooling layer.
+    ///
+    /// If `strides` is None, it defaults to `pool_size`.
     ///
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (height, width)
-    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, height, width\]
-    /// - `strides` - Optional strides of the pooling operation as (height, width), if None, the values will match `pool_size`
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, height, width]`
+    /// - `strides` - Optional strides of the pooling operation as (height, width)
     ///
     /// # Returns
     ///
-    /// * `Result<AveragePooling2D, ModelError>` - A new `AveragePooling2D` layer instance or an error
+    /// - `Result<AveragePooling2D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D, `pool_size` has a zero
+    ///   dimension, or any stride is zero
     pub fn new(
         pool_size: (usize, usize),
         input_shape: Vec<usize>,

@@ -1,10 +1,8 @@
 use super::*;
 
-/// Internal gate structure for recurrent cell operations (GRU, LSTM)
+/// Gate parameters and optimizer state for recurrent cells.
 ///
-/// This structure represents a single gate within a recurrent cell.
-/// Each gate contains the weights, biases, gradients, and optimizer cache needed for
-/// forward and backward propagation through the gate.
+/// Stores weights, gradients, and optimizer cache for a single GRU/LSTM gate.
 ///
 /// # Fields
 ///
@@ -26,7 +24,10 @@ pub struct Gate {
 }
 
 impl Gate {
-    /// Creates a new gate with randomly initialized weights
+    /// Creates a gate with randomly initialized weights.
+    ///
+    /// Uses Xavier/Glorot initialization for the input kernel, a normalized orthogonal
+    /// initialization for the recurrent kernel, and a constant bias value.
     ///
     /// # Parameters
     ///
@@ -36,16 +37,15 @@ impl Gate {
     ///
     /// # Returns
     ///
-    /// * `Result<Gate, ModelError>` - A new `Gate` instance with:
-    ///     - Xavier/Glorot initialization for kernel weights
-    ///     - Orthogonal initialization for recurrent_kernel weights
-    ///     - Bias initialized to specified value
-    ///     - None gradients (will be allocated during first backward pass)
-    ///     - Default optimizer cache
+    /// - `Result<Self, ModelError>` - A new gate instance with initialized parameters
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
     pub fn new(input_dim: usize, units: usize, bias_init_value: f32) -> Result<Self, ModelError> {
         // Validate dimensions
-        input_validation_function::validate_dimension_greater_than_zero(input_dim, "input_dim")?;
-        input_validation_function::validate_dimension_greater_than_zero(units, "units")?;
+        validate_dimension_greater_than_zero(input_dim, "input_dim")?;
+        validate_dimension_greater_than_zero(units, "units")?;
 
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
@@ -85,6 +85,20 @@ const GRADIENT_CLIP_VALUE: f32 = 5.0;
 /// Computes gate value: x_t @ kernel + h_prev @ recurrent_kernel + bias
 ///
 /// This is the standard computation used by all gates in GRU and LSTM.
+///
+/// # Parameters
+///
+/// - `gate` - Gate parameters used for the computation
+/// - `x_t` - Input at the current timestep with shape (batch, input_dim)
+/// - `h_prev` - Previous hidden state with shape (batch, units)
+///
+/// # Returns
+///
+/// - `Array2<f32>` - Pre-activation gate values with shape (batch, units)
+///
+/// # Panics
+///
+/// - If matrix dimensions are incompatible for multiplication
 #[inline]
 pub fn compute_gate_value(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) -> Array2<f32> {
     x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
@@ -93,6 +107,19 @@ pub fn compute_gate_value(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) 
 /// Helper function to extract cache and return error if not available
 ///
 /// This is used during backward pass to ensure forward pass has been run.
+///
+/// # Parameters
+///
+/// - `cache` - Cache container to take ownership from
+/// - `error_msg` - Error message to use when cache is empty
+///
+/// # Returns
+///
+/// - `Result<T, ModelError>` - The cached value if present
+///
+/// # Errors
+///
+/// - `ModelError::ProcessingError` - If the cache is empty
 #[inline]
 pub fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
     cache
@@ -104,6 +131,13 @@ pub fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelE
 ///
 /// This is a helper function to reduce code duplication when storing gradients
 /// during backpropagation.
+///
+/// # Parameters
+///
+/// - `gate` - Gate to store gradients into
+/// - `grad_kernel` - Gradient for input kernel weights
+/// - `grad_recurrent` - Gradient for recurrent kernel weights
+/// - `grad_bias` - Gradient for bias values
 #[inline]
 pub fn store_gate_gradients(
     gate: &mut Gate,

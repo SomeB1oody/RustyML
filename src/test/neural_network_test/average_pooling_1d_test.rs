@@ -163,7 +163,7 @@ fn test_average_pooling_1d_with_sequential() {
         );
 
     // Perform prediction
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[2, 3, 4]);

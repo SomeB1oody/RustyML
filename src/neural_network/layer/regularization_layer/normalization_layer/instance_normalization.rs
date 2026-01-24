@@ -4,30 +4,28 @@ use super::*;
 /// Based on total elements in the tensor.
 const INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Instance Normalization layer for neural networks, which normalizes the inputs
-/// independently for each sample and each channel to improve training stability.
+/// Instance Normalization layer for neural networks.
 ///
-/// Instance Normalization computes statistics (mean and variance) for each channel
-/// in each sample independently, making it particularly useful for style transfer
-/// and generative models where batch statistics may not be meaningful.
+/// Normalizes each sample and channel independently, which is useful for
+/// style transfer and generative models.
 ///
 /// # Fields
 ///
-/// - `epsilon` - Small constant for numerical stability in normalization.
-/// - `channel_axis` - The axis representing channels (typically 1 for [batch, channels, spatial...]).
-/// - `input_shape` - Shape of the input tensor.
-/// - `gamma` - Scale parameter (trainable).
-/// - `beta` - Shift parameter (trainable).
-/// - `training` - Whether the layer is in training mode or inference mode.
-/// - `x_normalized` - Normalized input (used in backward pass).
-/// - `x_centered` - Centered input (used in backward pass).
-/// - `mean` - Mean computed during forward pass (used in backward pass).
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass).
-/// - `grad_gamma` - Gradient for gamma parameter.
-/// - `grad_beta` - Gradient for beta parameter.
-/// - `optimizer_cache` - Cache for optimizer states.
+/// - `epsilon` - Small constant for numerical stability in normalization
+/// - `channel_axis` - Axis representing channels (typically 1 for \[batch, channels, spatial...\])
+/// - `input_shape` - Shape of the input tensor
+/// - `gamma` - Scale parameter (trainable)
+/// - `beta` - Shift parameter (trainable)
+/// - `training` - Whether the layer is in training mode or inference mode
+/// - `x_normalized` - Normalized input (used in backward pass)
+/// - `x_centered` - Centered input (used in backward pass)
+/// - `mean` - Mean computed during forward pass (used in backward pass)
+/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
+/// - `grad_gamma` - Gradient for gamma parameter
+/// - `grad_beta` - Gradient for beta parameter
+/// - `optimizer_cache` - Cache for optimizer states
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array3;
@@ -66,22 +64,19 @@ impl InstanceNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor.
-    /// - `channel_axis` - The axis representing channels. For standard input format \[batch, channels, ...\],
-    ///   this should be 1. The normalization will be computed across all axes except axis 0 (batch) and
-    ///   `channel_axis`.
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).
+    /// - `input_shape` - Shape of the input tensor
+    /// - `channel_axis` - Axis representing channels for inputs like \[batch, channels, ...\]
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the InstanceNormalization layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New InstanceNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `input_shape` is empty
-    /// - `channel_axis` is out of bounds or is 0 (batch axis)
-    /// - `epsilon` is not positive or not finite
+    /// - `ModelError::InputValidationError` - If `input_shape` is empty
+    /// - `ModelError::InputValidationError` - If `channel_axis` is out of bounds or is 0 (batch axis)
+    /// - `ModelError::InputValidationError` - If `epsilon` is not positive or not finite
     pub fn new(
         input_shape: Vec<usize>,
         channel_axis: usize,
@@ -123,8 +118,8 @@ impl InstanceNormalization {
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable).
-    /// - `beta` - Shift parameter (trainable).
+    /// - `gamma` - Scale parameter (trainable)
+    /// - `beta` - Shift parameter (trainable)
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) {
         self.gamma = gamma;
         self.beta = beta;

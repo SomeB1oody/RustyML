@@ -8,33 +8,11 @@ use super::*;
 /// overhead is amortized by computational gains from parallelization.
 const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Long Short-Term Memory (LSTM) neural network layer
+/// Long Short-Term Memory (LSTM) neural network layer.
 ///
-/// LSTM is a type of recurrent neural network (RNN) architecture that is capable of learning
-/// long-term dependencies in sequential data. It addresses the vanishing gradient problem
-/// of traditional RNNs through the use of gating mechanisms that control information flow.
-///
-/// The LSTM cell uses three gates to control information flow:
-/// - Input Gate: Controls what new information should be stored in the cell state
-/// - Forget Gate: Controls what information should be discarded from the cell state
-/// - Output Gate: Controls what parts of the cell state should be output as the hidden state
-/// - Cell Gate: Proposes new candidate values to be added to the cell state
-///
-/// The LSTM maintains two internal states:
-/// - Cell State (C_t): The long-term memory that flows through the network
-/// - Hidden State (h_t): The short-term memory and current output
-///
-/// # Mathematical Operations
-///
-/// For each timestep t:
-/// 1. i_t = σ(W_i · \[h_{t-1}, x_t\] + b_i)  (Input gate)
-/// 2. f_t = σ(W_f · \[h_{t-1}, x_t] + b_f)  (Forget gate)
-/// 3. g_t = tanh(W_g · \[h_{t-1}, x_t\] + b_g)  (Cell gate)
-/// 4. o_t = σ(W_o · \[h_{t-1}, x_t\] + b_o)  (Output gate)
-/// 5. C_t = f_t ⊙ C_{t-1} + i_t ⊙ g_t  (Cell state update)
-/// 6. h_t = o_t ⊙ tanh(C_t)  (Hidden state update)
-///
-/// Where σ is the sigmoid function, ⊙ is element-wise multiplication, and W, b are learned parameters.
+/// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
+/// the last hidden state with shape (batch_size, units). Uses input, forget, cell, and
+/// output gates to control memory flow and mitigate vanishing gradients.
 ///
 /// # Fields
 ///
@@ -54,7 +32,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// - `o_cache` - Cached output gate activations for each timestep
 /// - `activation` - Activation layer from activation_layer module
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::neural_network::*;
 /// use ndarray::Array;
@@ -72,7 +50,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// model.fit(&input, &target, 10).unwrap();
 ///
 /// // Make predictions
-/// let predictions = model.predict(&input);
+/// let predictions = model.predict(&input).unwrap();
 /// println!("LSTM output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
@@ -102,7 +80,7 @@ pub struct LSTM<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> LSTM<T> {
-    /// Creates a new LSTM layer with specified parameters
+    /// Creates an LSTM layer with the specified dimensions and activation.
     ///
     /// # Parameters
     ///
@@ -112,10 +90,11 @@ impl<T: ActivationLayer> LSTM<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<LSTM, ModelError>` - A new `LSTM` instance with:
-    ///     - Four gates (input, forget, cell, output) initialized with random weights
-    ///     - All caches set to None (will be allocated during first forward pass)
-    ///     - Activation layer for output transformation
+    /// - `Result<Self, ModelError>` - A new LSTM layer instance
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
     pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
         // Validate input dimensions and units
         validate_recurrent_dimensions(input_dim, units)?;
@@ -143,13 +122,18 @@ impl<T: ActivationLayer> LSTM<T> {
     ///
     /// # Parameters
     ///
-    /// Each gate requires three arrays:
-    /// - `kernel` - Weight matrix connecting inputs with shape (input_dim, units)
-    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
-    /// - `bias` - Bias vector with shape (1, units)
-    ///
-    /// The parameters are provided for each of the four gates in order:
-    /// input gate, forget gate, cell gate, output gate
+    /// - `input_kernel` - Input kernel for the input gate with shape (input_dim, units)
+    /// - `input_recurrent_kernel` - Recurrent kernel for the input gate with shape (units, units)
+    /// - `input_bias` - Bias for the input gate with shape (1, units)
+    /// - `forget_kernel` - Input kernel for the forget gate with shape (input_dim, units)
+    /// - `forget_recurrent_kernel` - Recurrent kernel for the forget gate with shape (units, units)
+    /// - `forget_bias` - Bias for the forget gate with shape (1, units)
+    /// - `cell_kernel` - Input kernel for the cell gate with shape (input_dim, units)
+    /// - `cell_recurrent_kernel` - Recurrent kernel for the cell gate with shape (units, units)
+    /// - `cell_bias` - Bias for the cell gate with shape (1, units)
+    /// - `output_kernel` - Input kernel for the output gate with shape (input_dim, units)
+    /// - `output_recurrent_kernel` - Recurrent kernel for the output gate with shape (units, units)
+    /// - `output_bias` - Bias for the output gate with shape (1, units)
     pub fn set_weights(
         &mut self,
         input_kernel: Array2<f32>,

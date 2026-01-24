@@ -46,7 +46,7 @@ fn test_lstm_layer_basic() {
     model.fit(&x, &y, 1).unwrap();
 
     // Predict
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Check output shape
     assert_eq!(pred.shape(), &[2, 3]);
@@ -68,7 +68,7 @@ fn test_lstm_different_activations() {
         );
 
     model_relu.fit(&x, &y, 3).unwrap();
-    let pred_relu = model_relu.predict(&x);
+    let pred_relu = model_relu.predict(&x).unwrap();
 
     // Test Sigmoid activation function
     let mut model_sigmoid = Sequential::new();
@@ -80,7 +80,7 @@ fn test_lstm_different_activations() {
         );
 
     model_sigmoid.fit(&x, &y, 3).unwrap();
-    let pred_sigmoid = model_sigmoid.predict(&x);
+    let pred_sigmoid = model_sigmoid.predict(&x).unwrap();
 
     // Check output shapes
     assert_eq!(pred_relu.shape(), &[3, 6]);
@@ -120,7 +120,7 @@ fn test_lstm_sequential_composition() {
     model.fit(&x, &y, 5).unwrap();
 
     // Predict
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Check output shape
     assert_eq!(pred.shape(), &[2, 4]);
@@ -170,7 +170,7 @@ fn test_lstm_sequence_learning() {
     // Train for sequence learning
     model.fit(&x, &y, 80).unwrap();
 
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
 
     // Calculate average error
     let mut total_error = 0.0;
@@ -229,7 +229,7 @@ fn test_lstm_state_evolution() {
 
     for _ in 0..5 {
         model.fit(&x, &y, 1).unwrap();
-        let pred = model.predict(&x);
+        let pred = model.predict(&x).unwrap();
         predictions.push(pred);
     }
 
@@ -314,7 +314,7 @@ fn test_lstm_temporal_xor() {
         model.fit(&x_train, &y_train, 1).unwrap();
 
         if (epoch + 1) % 25 == 0 {
-            let pred = model.predict(&x_train);
+            let pred = model.predict(&x_train).unwrap();
             let mut total_error = 0.0;
             for b in 0..batch_size {
                 let error = (pred[[b, 0]] - y_train[[b, 0]]).abs();
@@ -326,7 +326,7 @@ fn test_lstm_temporal_xor() {
     }
 
     // Test
-    let pred = model.predict(&x_train);
+    let pred = model.predict(&x_train).unwrap();
     let mut total_error = 0.0;
 
     println!("\n=== Sample Predictions ===");
@@ -443,14 +443,14 @@ fn test_lstm_parity_check() {
         model.fit(&x_train, &y_train, 1).unwrap();
 
         if (epoch + 1) % 40 == 0 {
-            let pred = model.predict(&x_train);
+            let pred = model.predict(&x_train).unwrap();
             let accuracy = calculate_accuracy(&pred, &y_train, batch_size);
             println!("Epoch {}: Accuracy = {:.2}%", epoch + 1, accuracy * 100.0);
         }
     }
 
     // Test
-    let pred = model.predict(&x_train);
+    let pred = model.predict(&x_train).unwrap();
 
     println!("\n=== Sample Predictions ===");
     for b in 0..8 {

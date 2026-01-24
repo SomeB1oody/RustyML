@@ -45,7 +45,24 @@ pub use serializable_lstm_weight::*;
 pub use serializable_separable_conv_2d_weight::*;
 pub use serializable_simple_rnn_weight::*;
 
-/// Enum containing all possible serializable layer weight types
+/// Serializable weight container for all supported layer types.
+///
+/// # Variants
+///
+/// - `Dense` - Weights for a Dense layer
+/// - `SimpleRNN` - Weights for a SimpleRNN layer
+/// - `LSTM` - Weights for an LSTM layer
+/// - `GRU` - Weights for a GRU layer
+/// - `Conv1D` - Weights for a Conv1D layer
+/// - `Conv2D` - Weights for a Conv2D layer
+/// - `Conv3D` - Weights for a Conv3D layer
+/// - `SeparableConv2D` - Weights for a SeparableConv2D layer
+/// - `DepthwiseConv2D` - Weights for a DepthwiseConv2D layer
+/// - `BatchNormalization` - Weights for a BatchNormalization layer
+/// - `LayerNormalization` - Weights for a LayerNormalization layer
+/// - `InstanceNormalization` - Weights for an InstanceNormalization layer
+/// - `GroupNormalization` - Weights for a GroupNormalization layer
+/// - `Empty` - No weights for layers without parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SerializableLayerWeight {
@@ -66,7 +83,15 @@ pub enum SerializableLayerWeight {
 }
 
 impl SerializableLayerWeight {
-    /// Converts LayerWeight references to owned SerializableLayerWeight
+    /// Converts a `LayerWeight` reference into an owned serializable weight.
+    ///
+    /// # Parameters
+    ///
+    /// - `weight` - Layer weights to convert into a serializable form
+    ///
+    /// # Returns
+    ///
+    /// - `SerializableLayerWeight` - Serializable representation of the provided weights
     pub fn from_layer_weight(weight: &LayerWeight) -> Self {
         match weight {
             LayerWeight::Empty => SerializableLayerWeight::Empty,
@@ -304,21 +329,35 @@ impl SerializableLayerWeight {
     }
 }
 
-/// Information about a layer's type and configuration
+/// Serializable layer metadata.
+///
+/// # Fields
+///
+/// - `layer_type` - Layer type name
+/// - `output_shape` - Layer output shape description
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerInfo {
     pub layer_type: String,
     pub output_shape: String,
 }
 
-/// Complete serializable representation of a layer including its weights and metadata
+/// Serializable layer with metadata and weights.
+///
+/// # Fields
+///
+/// - `info` - Layer metadata describing type and output shape
+/// - `weights` - Layer weights in a serializable format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLayer {
     pub info: LayerInfo,
     pub weights: SerializableLayerWeight,
 }
 
-/// Serializable representation of a Sequential model
+/// Serializable representation of a Sequential model.
+///
+/// # Fields
+///
+/// - `layers` - Ordered list of layers with metadata and weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSequential {
     pub layers: Vec<SerializableLayer>,
@@ -494,22 +533,21 @@ macro_rules! apply_weights_simple {
     }};
 }
 
-/// Applies serializable weights to a neural network layer.
-///
-/// This function takes a mutable reference to a layer and applies the appropriate weights
-/// based on the layer type. It handles type checking and downcasting to ensure weights
-/// are applied to the correct layer type.
+/// Applies serializable weights to a layer instance.
 ///
 /// # Parameters
 ///
-/// - `layer` - Mutable reference to the layer that will receive the weights
-/// - `weights` - Reference to the serializable weights to apply
-/// - `expected_type` - String describing the expected layer type (used for error messages)
+/// - `layer` - Mutable reference to the target layer
+/// - `weights` - Serializable weights to apply
+/// - `expected_type` - Expected layer type label for error messages
 ///
 /// # Returns
 ///
-/// - `Ok(())` - Weights were successfully applied to the layer
-/// - `Err(IoError)` - Layer type mismatch or weight application failed
+/// - `Result<(), IoError>` - Ok when weights are applied successfully
+///
+/// # Errors
+///
+/// - `IoError::StdIoError` - Layer type mismatch or invalid weight shape during conversion
 pub fn apply_weights_to_layer(
     layer: &mut dyn Layer,
     weights: &SerializableLayerWeight,

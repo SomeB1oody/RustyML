@@ -1,6 +1,12 @@
 use super::*;
 
-/// Serializable representation of a SeparableConv2D layer's weights
+/// Serializable representation of SeparableConv2D layer weights.
+///
+/// # Fields
+///
+/// - `depthwise_weight` - 4D depthwise convolution weights stored as nested vectors
+/// - `pointwise_weight` - 4D pointwise convolution weights stored as nested vectors
+/// - `bias` - 2D bias matrix stored as nested vectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSeparableConv2DWeight {
     pub depthwise_weight: Vec<Vec<Vec<Vec<f32>>>>,

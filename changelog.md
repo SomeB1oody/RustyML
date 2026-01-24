@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-01-23 (UTC-7)
+### Changed
+- Update documentation of `neural_network` module
+
 ## [v0.11.0] - 2026-01-22 (UTC-7)
 ### Changed
 - Restrict visibility of validation helper functions

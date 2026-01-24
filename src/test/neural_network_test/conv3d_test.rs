@@ -31,7 +31,7 @@ fn test_conv3d_sequential_with_sgd() {
     assert!(result.is_ok());
 
     // Make predictions
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 3, 6, 6, 6]);
 
     // Verify that the predictions are non-negative (ReLU activation function)
@@ -76,7 +76,7 @@ fn test_conv3d_sequential_with_rmsprop() {
     assert!(result.is_ok());
 
     // Make predictions
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 2, 4, 4, 4]);
 
     // Verify that Tanh output is within [-1, 1]
@@ -105,7 +105,7 @@ fn test_conv3d_different_strides() {
         .add(stride_2_conv)
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[1, 1, 4, 4, 4]);
 }
 
@@ -139,7 +139,7 @@ fn test_conv3d_multiple_channels() {
     let result = model.fit(&x, &y, 2);
     assert!(result.is_ok());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 5, 4, 4, 4]);
 }
 
@@ -166,7 +166,7 @@ fn test_conv3d_activation_functions() {
         )
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let relu_output = relu_model.predict(&x);
+    let relu_output = relu_model.predict(&x).unwrap();
     // ReLU output should be non-negative
     for value in relu_output.iter() {
         assert!(*value >= 0.0);
@@ -188,7 +188,7 @@ fn test_conv3d_activation_functions() {
         )
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let sigmoid_output = sigmoid_model.predict(&x);
+    let sigmoid_output = sigmoid_model.predict(&x).unwrap();
     // Sigmoid output should be within [0, 1]
     for value in sigmoid_output.iter() {
         assert!(*value >= 0.0 && *value <= 1.0);
@@ -231,7 +231,7 @@ fn test_conv3d_same_padding() {
         )
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     // With Same padding and stride 1, output should have the same spatial dimensions
     assert_eq!(prediction.shape(), &[1, 2, 8, 8, 8]);
 }
@@ -269,7 +269,7 @@ fn test_conv3d_with_adam() {
     let result = model.fit(&x, &y, 3);
     assert!(result.is_ok());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     assert_eq!(prediction.shape(), &[2, 2, 4, 4, 4]);
 }
 
@@ -293,7 +293,7 @@ fn test_conv3d_asymmetric_stride() {
         )
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     // Output: depth = (12-3)/2+1 = 5, height = (8-3)/1+1 = 6, width = (10-3)/2+1 = 4
     assert_eq!(prediction.shape(), &[1, 1, 5, 6, 4]);
 }

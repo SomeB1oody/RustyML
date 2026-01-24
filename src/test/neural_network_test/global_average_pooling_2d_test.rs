@@ -17,7 +17,7 @@ fn test_global_average_pooling_2d() {
     model.summary();
 
     // Forward propagation
-    let output = model.predict(&input);
+    let output = model.predict(&input).unwrap();
 
     // Check output shape - should be [2, 3]
     assert_eq!(output.shape(), &[2, 3]);
@@ -48,7 +48,7 @@ fn test_global_average_pooling_2d() {
     let mut model = Sequential::new();
     model.add(GlobalAveragePooling2D::new());
 
-    let varied_output = model.predict(&varied_input);
+    let varied_output = model.predict(&varied_input).unwrap();
 
     // Check output shape - should be [1, 2]
     assert_eq!(varied_output.shape(), &[1, 2]);

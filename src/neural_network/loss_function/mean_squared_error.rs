@@ -37,7 +37,7 @@ impl MeanSquaredError {
     ///
     /// # Returns
     ///
-    /// * `MeanSquaredError` - Returns a unit-like struct `MeanSquaredError`
+    /// - `MeanSquaredError` - Returns a unit-like struct `MeanSquaredError`
     pub fn new() -> Self {
         Self {}
     }

@@ -1,6 +1,11 @@
 use super::*;
 
-/// Serializable representation of a Dense layer's weights
+/// Serializable representation of Dense layer weights.
+///
+/// # Fields
+///
+/// - `weight` - 2D weight matrix stored as nested vectors
+/// - `bias` - 2D bias matrix stored as nested vectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableDenseWeight {
     pub weight: Vec<Vec<f32>>,

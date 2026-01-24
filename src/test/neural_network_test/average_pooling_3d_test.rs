@@ -87,7 +87,7 @@ fn test_average_pooling_3d_sequential_model() {
     model.fit(&input_data, &target_data, 2).unwrap();
 
     // Perform predictions
-    let predictions = model.predict(&input_data);
+    let predictions = model.predict(&input_data).unwrap();
 
     // Check the shape of the prediction results
     assert_eq!(predictions.shape(), &[1, 2, 4, 4, 4]);

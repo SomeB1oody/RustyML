@@ -1,37 +1,27 @@
 use super::*;
 
-/// A Simple Recurrent Neural Network (SimpleRNN) layer implementation.
+/// Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 ///
-/// SimpleRNN applies a standard recurrent operation where the output from the previous
-/// timestep is used as additional input to the current timestep. This implementation
-/// supports optional activation functions from the activation_layer module.
-///
-/// # Dimensions
-///
-/// - Input shape: (batch_size, timesteps, input_dim)
-/// - Output shape: (batch_size, units)
+/// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
+/// the last hidden state with shape (batch_size, units). The activation is provided by
+/// the activation_layer module.
 ///
 /// # Fields
 ///
-/// ## Core fields
 /// - `input_dim` - Number of input features
 /// - `units` - Number of output units (neurons)
-/// - `kernel` - Weight matrix connecting inputs to the recurrent layer (shape: input_dim, units)
-/// - `recurrent_kernel` - Weight matrix connecting previous hidden states to the current state (shape: units, units)
-/// - `bias` - Bias vector for the layer (shape: 1, units)
-/// - `activation` - Activation layer from activation_layer module
-///
-/// ## Cache
-/// - `input_cache` - Cache of input tensors from forward pass (shape: batch, timesteps, input_dim)
-/// - `hidden_state_cache` - Cache of hidden states from forward pass (length = timesteps+1)
-/// - `optimizer_cache` - Cache for optimizer
-///
-/// ## Gradients
+/// - `kernel` - Weight matrix connecting inputs to the layer with shape (input_dim, units)
+/// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
+/// - `bias` - Bias vector for the layer with shape (1, units)
+/// - `input_cache` - Cached input tensor from the forward pass
+/// - `hidden_state_cache` - Cached hidden states from the forward pass
 /// - `grad_kernel` - Gradient of the kernel weights
 /// - `grad_recurrent_kernel` - Gradient of the recurrent kernel weights
 /// - `grad_bias` - Gradient of the bias
+/// - `optimizer_cache` - Cache for optimizer state
+/// - `activation` - Activation layer used in the recurrent computation
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use ndarray::Array;
 /// use rustyml::prelude::*;
@@ -73,17 +63,21 @@ pub struct SimpleRNN<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> SimpleRNN<T> {
-    /// Creates a new SimpleRNN layer with the specified dimensions and optional activation layer.
+    /// Creates a SimpleRNN layer with the specified dimensions and activation.
     ///
     /// # Parameters
     ///
-    /// - `input_dim` - The size of each input sample
-    /// - `units` - The dimensionality of the output space
+    /// - `input_dim` - Size of each input sample
+    /// - `units` - Number of output units
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
-    /// * `Result<SimpleRNN, ModelError>` - A new SimpleRNN instance with the specified activation
+    /// - `Result<Self, ModelError>` - A new SimpleRNN layer instance
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
     pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
         validate_recurrent_dimensions(input_dim, units)?;
 

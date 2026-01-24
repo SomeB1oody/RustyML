@@ -4,26 +4,24 @@ use super::*;
 /// When batch_size * channels >= this threshold, use parallel execution.
 const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 
-/// 3D data max pooling Layer.
+/// 3D max pooling layer.
 ///
-/// Max pooling is a common downsampling technique in convolutional neural networks that
-/// reduces the spatial dimensions of feature maps by selecting the maximum value from each
-/// pooling window, thereby reducing computational load and controlling overfitting.
-///
-/// # Data Structure
-///
-/// - Input tensor format: 5D tensor with shape `[batch_size, channels, depth, height, width]`
-/// - Output tensor format: 5D tensor with reduced spatial dimensions
+/// Selects the maximum value within each pooling window across depth, height, and width.
+/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
+/// `[batch_size, channels, pooled_depth, pooled_height, pooled_width]` where
+/// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
+/// `pooled_height = (height - pool_size_h) / stride_h + 1`, and
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Fields
 ///
-/// - `pool_size` - The size of the pooling window, represented as (depth, height, width).
-/// - `strides` - The stride of the pooling operation, represented as (depth stride, vertical stride, horizontal stride).
-/// - `input_shape` - The shape of the input tensor.
-/// - `input_cache` - Cached input data, used for backpropagation.
-/// - `max_positions` - Cache of maximum value positions, used for backpropagation.
+/// - `pool_size` - Size of the pooling window as (depth, height, width)
+/// - `strides` - Step size of the pooling operation as (depth stride, height stride, width stride)
+/// - `input_shape` - Shape of the input tensor
+/// - `input_cache` - Cached input tensor from the forward pass
+/// - `max_positions` - Cached positions of maximum values for backpropagation
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array5, ArrayD};
@@ -61,10 +59,14 @@ const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 /// model.fit(&input_data, &target_data, 5).unwrap();
 ///
 /// // Make predictions on new data
-/// let predictions = model.predict(&input_data);
+/// let predictions = model.predict(&input_data).unwrap();
 /// println!("Output shape after max pooling: {:?}", predictions.shape());
 /// // Expected output: [1, 16, 16, 16, 16] (spatial dimensions reduced by factor of 2)
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= MAX_POOLING_3D_PARALLEL_THRESHOLD` (32).
 pub struct MaxPooling3D {
     pool_size: (usize, usize, usize),
     strides: (usize, usize, usize),
@@ -76,16 +78,22 @@ pub struct MaxPooling3D {
 impl MaxPooling3D {
     /// Creates a new 3D max pooling layer.
     ///
+    /// If `strides` is None, it defaults to `pool_size`.
+    ///
     /// # Parameters
     ///
-    /// - `pool_size` - The size of the pooling window, represented as (depth, height, width).
-    /// - `input_shape` - The shape of the input tensor, formatted as \[batch_size, channels, depth, height, width\].
-    /// - `strides` - The stride of the pooling operation, represented as (depth stride, vertical stride, horizontal stride).
-    ///   If None, the same value as pool_size is used.
+    /// - `pool_size` - Size of the pooling window as (depth, height, width)
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, depth, height, width]`
+    /// - `strides` - Optional strides of the pooling operation
     ///
     /// # Returns
     ///
-    /// * `Result<MaxPooling3D, ModelError>` - A new instance of the MaxPooling3D layer or an error.
+    /// - `Result<MaxPooling3D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 5D, `pool_size` has a zero
+    ///   dimension, or any stride is zero
     pub fn new(
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,

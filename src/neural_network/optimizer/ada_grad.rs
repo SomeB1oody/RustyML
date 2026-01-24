@@ -5,16 +5,22 @@ use super::*;
 /// to avoid parallelization overhead.
 const ADA_GRAD_PARALLEL_THRESHOLD: usize = 1024;
 
-/// AdaGrad (Adaptive Gradient Algorithm) optimizer
+/// AdaGrad (Adaptive Gradient Algorithm) optimizer.
 ///
-/// An adaptive learning rate optimization algorithm that adjusts the learning rate
-/// for each parameter based on the historical sum of squared gradients. AdaGrad
-/// performs larger updates for infrequent parameters and smaller updates for frequent ones.
+/// Adapts learning rates per parameter using accumulated squared gradients.
 ///
 /// # Fields
 ///
 /// - `learning_rate` - Initial learning rate controlling the size of parameter updates
 /// - `epsilon` - Small constant added for numerical stability
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGrad;
+///
+/// let optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
+/// ```
 pub struct AdaGrad {
     learning_rate: f32,
     epsilon: f32,
@@ -23,6 +29,8 @@ pub struct AdaGrad {
 impl AdaGrad {
     /// Creates a new AdaGrad optimizer with the specified parameters.
     ///
+    /// Validates hyperparameters and initializes the optimizer.
+    ///
     /// # Parameters
     ///
     /// - `learning_rate` - Initial step size for parameter updates (typically 0.01)
@@ -30,7 +38,11 @@ impl AdaGrad {
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new AdaGrad optimizer instance or an error
+    /// - `Result<Self, ModelError>` - A new AdaGrad optimizer instance or an error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `learning_rate` or `epsilon` is not positive and finite
     pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, ModelError> {
         // input validation
         validate_positive_finite(learning_rate, "learning_rate")?;
@@ -49,7 +61,7 @@ impl Optimizer for AdaGrad {
     }
 }
 
-/// Stores and manages optimization state for the AdaGrad optimizer algorithm.
+/// AdaGrad optimizer state for dense or recurrent layers.
 ///
 /// AdaGrad maintains accumulated squared gradients for each parameter, which are
 /// used to adapt the learning rate per parameter. This struct stores the accumulation
@@ -60,6 +72,14 @@ impl Optimizer for AdaGrad {
 /// - `accumulator` - Accumulated squared gradients for main parameters
 /// - `accumulator_recurrent` - Accumulated squared gradients for recurrent parameters (if applicable)
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGradStates;
+///
+/// let states = AdaGradStates::new((2, 2), None, (1, 2));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStates {
     pub accumulator: Array2<f32>,
@@ -68,7 +88,7 @@ pub struct AdaGradStates {
 }
 
 impl AdaGradStates {
-    /// Creates a new AdaGrad state object, initialized to zero
+    /// Creates a new AdaGrad state object, initialized to zero.
     ///
     /// # Parameters
     ///
@@ -78,7 +98,7 @@ impl AdaGradStates {
     ///
     /// # Returns
     ///
-    /// - `AdaGradStates` - A new AdaGradStates instance with all accumulators initialized to zero matrices of appropriate dimensions
+    /// - `Self` - A new AdaGradStates instance with all accumulators initialized to zero matrices
     pub fn new(
         dims_param: (usize, usize),
         dims_recurrent: Option<(usize, usize)>,
@@ -93,7 +113,7 @@ impl AdaGradStates {
         }
     }
 
-    /// Updates AdaGrad state for parameters and calculates update values
+    /// Updates AdaGrad state and returns parameter updates.
     ///
     /// # Parameters
     ///
@@ -105,10 +125,26 @@ impl AdaGradStates {
     ///
     /// # Returns
     ///
-    /// * Tuple containing:
-    ///   - `Array2<f32>` - Update values for main parameter matrix
-    ///   - `Option<Array2<f32>>` - Optional update values for recurrent parameter matrix; None if not using recurrent parameters
-    ///   - `Array2<f32>` - Update values for bias parameter matrix
+    /// - `Array2<f32>` - Update values for the main parameter matrix
+    /// -` Option < Array2 <f32>>` - Optional update values for recurrent parameter matrix; None if not using recurrent parameters
+    /// - `Array2<f32>` - Update values for bias parameter matrix
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when the main parameter matrix length is at least `ADA_GRAD_PARALLEL_THRESHOLD`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ndarray::array;
+    /// use rustyml::neural_network::optimizer::AdaGradStates;
+    ///
+    /// let mut states = AdaGradStates::new((1, 2), None, (1, 2));
+    /// let grad_param = array![[0.1, 0.1]];
+    /// let grad_bias = array![[0.01, 0.01]];
+    /// let (_param_update, _recurrent_update, _bias_update) =
+    ///     states.update_parameter(&grad_param, None, &grad_bias, 1e-8, 0.01);
+    /// ```
     pub fn update_parameter(
         &mut self,
         grad_param: &Array2<f32>,
@@ -162,19 +198,13 @@ impl AdaGradStates {
         (param_update, recurrent_update, bias_update)
     }
 
-    /// Update AdaGrad accumulator:
-    /// - Updates `accumulator` in-place with accumulated squared gradients: accumulator += g^2
-    ///
-    /// # Parameters
-    ///
-    /// - `accumulator` - Accumulated squared gradients
-    /// - `g` - Current gradient
+    /// Update AdaGrad accumulator
     fn update_ada_grad_param(accumulator: &mut Array2<f32>, g: &Array2<f32>) {
         *accumulator = &*accumulator + &g.mapv(|x| x * x);
     }
 }
 
-/// Stores and manages optimization state for the AdaGrad optimizer algorithm for Conv1D layer.
+/// AdaGrad optimizer state for Conv1D layers.
 ///
 /// This struct is specifically designed to handle the optimization state for 1D convolutional layers
 /// that process sequential data (e.g., time series, text sequences). It maintains the accumulated
@@ -185,13 +215,21 @@ impl AdaGradStates {
 /// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 3D array
 ///   to accommodate 1D convolutional filter dimensions \[output_channels, input_channels, kernel_size\]
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGradStatesConv1D;
+///
+/// let states = AdaGradStatesConv1D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv1D {
     pub accumulator: Array3<f32>,
     pub accumulator_bias: Array2<f32>,
 }
 
-/// Stores and manages optimization state for the AdaGrad optimizer algorithm for Conv2D layer.
+/// AdaGrad optimizer state for Conv2D layers.
 ///
 /// This struct is specifically designed to handle the optimization state for 2D convolutional layers,
 /// which typically deal with 4D tensors (e.g., image processing layers). It maintains the accumulated
@@ -202,13 +240,21 @@ pub struct AdaGradStatesConv1D {
 /// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 4D array
 ///   to accommodate convolutional filter dimensions
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGradStatesConv2D;
+///
+/// let states = AdaGradStatesConv2D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv2D {
     pub accumulator: Array4<f32>,
     pub accumulator_bias: Array2<f32>,
 }
 
-/// AdaGrad optimizer state variables for 3D convolutional layers
+/// AdaGrad optimizer state for 3D convolutional layers.
 ///
 /// This structure stores the accumulated squared gradients required by the AdaGrad optimizer
 /// for updating weights and biases in 3D convolutional neural network layers. AdaGrad maintains
@@ -219,13 +265,21 @@ pub struct AdaGradStatesConv2D {
 /// - `accumulator` - Accumulated squared gradients for the 5D convolution weights with shape
 ///   (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
 /// - `accumulator_bias` - Accumulated squared gradients for the bias tensor with shape (1, output_channels)
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGradStatesConv3D;
+///
+/// let states = AdaGradStatesConv3D::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv3D {
     pub accumulator: Array5<f32>,
     pub accumulator_bias: Array2<f32>,
 }
 
-/// Stores and manages optimization state for the AdaGrad optimizer algorithm for Normalization layers.
+/// AdaGrad optimizer state for normalization layers.
 ///
 /// This struct is specifically designed to handle the optimization state for normalization layers
 /// (e.g., BatchNormalization, LayerNormalization) that have gamma (scale) and beta (shift) parameters.
@@ -236,6 +290,14 @@ pub struct AdaGradStatesConv3D {
 ///
 /// - `acc_grad_gamma` - Accumulated squared gradients for gamma (scale) parameter
 /// - `acc_grad_beta` - Accumulated squared gradients for beta (shift) parameter
+///
+/// # Examples
+///
+/// ```rust
+/// use rustyml::neural_network::optimizer::AdaGradStatesNormalizationLayer;
+///
+/// let states = AdaGradStatesNormalizationLayer::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesNormalizationLayer {
     pub acc_grad_gamma: Tensor,

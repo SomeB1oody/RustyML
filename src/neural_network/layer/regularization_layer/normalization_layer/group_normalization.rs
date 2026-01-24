@@ -13,32 +13,30 @@ macro_rules! channel_range {
     }};
 }
 
-/// Group Normalization layer for neural networks, which normalizes the inputs
-/// by dividing channels into groups and normalizing within each group.
+/// Group Normalization layer for neural networks.
 ///
-/// Group Normalization divides channels into groups and computes normalization
-/// statistics (mean and variance) within each group for each sample independently.
-/// This makes it less dependent on batch size compared to Batch Normalization and
-/// more flexible than Layer Normalization.
+/// Divides channels into groups and normalizes within each group per sample,
+/// reducing dependence on batch size. Channel divisibility is validated during
+/// the forward pass.
 ///
 /// # Fields
 ///
-/// - `num_groups` - Number of groups to divide channels into.
-/// - `epsilon` - Small constant for numerical stability in normalization.
-/// - `channel_axis` - The axis representing channels (typically 1 for \[batch, channels, spatial...\]).
-/// - `input_shape` - Shape of the input tensor.
-/// - `gamma` - Scale parameter (trainable).
-/// - `beta` - Shift parameter (trainable).
-/// - `training` - Whether the layer is in training mode or inference mode.
-/// - `x_normalized` - Normalized input (used in backward pass).
-/// - `x_centered` - Centered input (used in backward pass).
-/// - `mean` - Mean computed during forward pass (used in backward pass).
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass).
-/// - `grad_gamma` - Gradient for gamma parameter.
-/// - `grad_beta` - Gradient for beta parameter.
-/// - `optimizer_cache` - Cache for optimizer states.
+/// - `num_groups` - Number of groups to divide channels into
+/// - `epsilon` - Small constant for numerical stability in normalization
+/// - `channel_axis` - Axis representing channels (typically 1 for \[batch, channels, spatial...\])
+/// - `input_shape` - Shape of the input tensor
+/// - `gamma` - Scale parameter (trainable)
+/// - `beta` - Shift parameter (trainable)
+/// - `training` - Whether the layer is in training mode or inference mode
+/// - `x_normalized` - Normalized input (used in backward pass)
+/// - `x_centered` - Centered input (used in backward pass)
+/// - `mean` - Mean computed during forward pass (used in backward pass)
+/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
+/// - `grad_gamma` - Gradient for gamma parameter
+/// - `grad_beta` - Gradient for beta parameter
+/// - `optimizer_cache` - Cache for optimizer states
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array3;
@@ -78,29 +76,21 @@ impl GroupNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor.
-    /// - `num_groups` - Number of groups to divide channels into. The number of channels
-    ///   must be divisible by num_groups.
-    /// - `channel_axis` - The axis representing channels. For standard input format \[batch, channels, ...\],
-    ///   this should be 1. The normalization will be computed across spatial dimensions within each group.
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).
+    /// - `input_shape` - Shape of the input tensor
+    /// - `num_groups` - Number of groups to divide channels into
+    /// - `channel_axis` - Axis representing channels for inputs like \[batch, channels, ...\]
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the GroupNormalization layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New GroupNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `input_shape` is empty
-    /// - `num_groups` is 0
-    /// - `epsilon` is not positive
-    /// - `channel_axis` is out of bounds or is 0 (batch axis)
-    ///
-    /// # Note
-    ///
-    /// The number of channels must be divisible by num_groups. This will be validated
-    /// during the forward pass and will return an error if not satisfied.
+    /// - `ModelError::InputValidationError` - If `input_shape` is empty
+    /// - `ModelError::InputValidationError` - If `num_groups` is 0
+    /// - `ModelError::InputValidationError` - If `epsilon` is not positive
+    /// - `ModelError::InputValidationError` - If `channel_axis` is out of bounds or is 0 (batch axis)
     pub fn new(
         input_shape: Vec<usize>,
         num_groups: usize,
@@ -148,8 +138,8 @@ impl GroupNormalization {
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable).
-    /// - `beta` - Shift parameter (trainable).
+    /// - `gamma` - Scale parameter (trainable)
+    /// - `beta` - Shift parameter (trainable)
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) {
         self.gamma = gamma;
         self.beta = beta;

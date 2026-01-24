@@ -10,18 +10,18 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Parameters
     ///
-    /// * `input` - The input tensor to the layer
+    /// - `input` - The input tensor to the layer
     ///
     /// # Returns
     ///
-    /// * `Tensor` - The output tensor after forward computation
+    /// - `Tensor` - The output tensor after forward computation
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError>;
 
     /// Performs backward propagation through the layer.
     ///
     /// # Parameters
     ///
-    /// * `grad_output` - The gradient tensor from the next layer
+    /// - `grad_output` - The gradient tensor from the next layer
     ///
     /// # Returns
     ///
@@ -42,7 +42,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Returns
     ///
-    /// * `String` - A string describing the output dimensions
+    /// - `String` - A string describing the output dimensions
     fn output_shape(&self) -> String {
         "Unknown".to_string()
     }
@@ -51,14 +51,14 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Returns
     ///
-    /// * `TrainingParameters` - The count of parameters as an enum variant
+    /// - `TrainingParameters` - The count of parameters as an enum variant
     fn param_count(&self) -> TrainingParameters;
 
     /// Updates the layer parameters using Stochastic Gradient Descent.
     ///
     /// # Parameters
     ///
-    /// * `_lr` - Learning rate for parameter updates
+    /// - `_lr` - Learning rate for parameter updates
     fn update_parameters_sgd(&mut self, _lr: f32);
 
     /// Updates the layer parameters using Adam optimizer.
@@ -103,12 +103,12 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Returns
     ///
-    /// * `LayerWeight<'_>` - An enum containing references to layer weights:
-    ///   - `LayerWeight::Dense` for Dense layers with weight and bias
-    ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
-    ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
-    ///   - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for convolutional layers
-    ///   - `LayerWeight::Empty` for layers with no trainable parameters
+    /// - `LayerWeight<'_>` - An enum containing references to layer weights:
+    ///     - `LayerWeight::Dense` for Dense layers with weight and bias
+    ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
+    ///     - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
+    ///     - `LayerWeight::Conv1D`, `LayerWeight::Conv2D`, `LayerWeight::Conv3D` for convolutional layers
+    ///     - `LayerWeight::Empty` for layers with no trainable parameters
     fn get_weights(&self) -> LayerWeight<'_>;
 
     /// Sets the training mode if the layer is mode-dependent.
@@ -122,7 +122,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Parameters
     ///
-    /// * `_is_training` - `true` for training mode, `false` for inference mode
+    /// - `_is_training` - `true` for training mode, `false` for inference mode
     fn set_training_if_mode_dependent(&mut self, _is_training: bool) {
         // Default implementation: do nothing
         // Only mode-dependent layers need to override this
@@ -143,7 +143,7 @@ pub trait LossFunction {
     ///
     /// # Returns
     ///
-    /// * `f32` - The scalar loss value
+    /// - `f32` - The scalar loss value
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32;
 
     /// Computes the gradient of the loss with respect to the predictions.
@@ -155,7 +155,7 @@ pub trait LossFunction {
     ///
     /// # Returns
     ///
-    /// * `Tensor` - Tensor containing the gradient of the loss with respect to predictions
+    /// - `Tensor` - Tensor containing the gradient of the loss with respect to predictions
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor;
 }
 
@@ -168,7 +168,7 @@ pub trait Optimizer {
     ///
     /// # Parameters
     ///
-    /// * `layer` - The layer whose parameters should be updated
+    /// - `layer` - The layer whose parameters should be updated
     fn update(&mut self, layer: &mut dyn Layer);
 }
 
@@ -181,13 +181,13 @@ pub trait Optimizer {
 ///
 /// # Type Parameters
 ///
-/// * `L` - The layer type that these weights can be applied to
+/// - `L` - The layer type that these weights can be applied to
 pub trait ApplyWeights<L> {
     /// Applies the serialized weights to a layer instance.
     ///
     /// # Parameters
     ///
-    /// * `layer` - Mutable reference to the layer that will receive the weights
+    /// - `layer` - Mutable reference to the layer that will receive the weights
     ///
     /// # Returns
     ///

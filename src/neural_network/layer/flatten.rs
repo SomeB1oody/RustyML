@@ -1,29 +1,18 @@
 use super::*;
 
-/// A layer that flattens a multi-dimensional tensor (3D, 4D, or 5D) into a 2D tensor.
+/// Flattens a 3D, 4D, or 5D tensor into a 2D tensor.
 ///
-/// This layer is typically used in neural networks to transform the output of feature extraction layers
-/// (such as convolutional or pooling layers) into a format that can be processed by dense (fully connected) layers.
-///
-/// # Input Shape
-///
-/// - 3D tensor: \[batch_size, features, length\]
-/// - 4D tensor: \[batch_size, channels, height, width\]
-/// - 5D tensor: \[batch_size, channels, depth, height, width\]
-///
-/// # Output Shape
-///
-/// Output is always a 2D tensor with shape \[batch_size, flattened_features\] where:
-/// - For 3D: flattened_features = features * length
-/// - For 4D: flattened_features = channels * height * width
-/// - For 5D: flattened_features = channels * depth * height * width
+/// This layer reshapes inputs from feature extraction layers into a format suitable for dense layers.
+/// Input shapes are [batch_size, features, length], [batch_size, channels, height, width], or
+/// [batch_size, channels, depth, height, width]. Output shape is always [batch_size, flattened_features],
+/// where flattened_features is the product of all dimensions except batch_size.
 ///
 /// # Fields
 ///
-/// - `flattened_features` - the number of features after flattening (product of all dimensions except batch)
+/// - `flattened_features` - Number of features after flattening (product of all dimensions except batch)
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -43,7 +32,7 @@ use super::*;
 /// model.summary();
 ///
 /// // Forward propagation
-/// let flattened = model.predict(&x);
+/// let flattened = model.predict(&x).unwrap();
 ///
 /// // Check output shape - should be [2, 48]
 /// assert_eq!(flattened.shape(), &[2, 48]);
@@ -58,14 +47,16 @@ impl Flatten {
     ///
     /// # Parameters
     ///
-    /// * `input_shape` - The shape of the input tensor. Supported formats:
-    ///   - 3D: \[batch_size, features, length\]
-    ///   - 4D: \[batch_size, channels, height, width\]
-    ///   - 5D: \[batch_size, channels, depth, height, width\]
+    /// - `input_shape` - Input tensor shape, such as [batch_size, features, length],
+    ///   [batch_size, channels, height, width], or [batch_size, channels, depth, height, width]
     ///
     /// # Returns
     ///
-    /// * `Flatten` - A new `Flatten` layer instance
+    /// - `Result<Self, ModelError>` - New `Flatten` layer instance
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` has fewer than 2 dimensions or contains a zero
     pub fn new(input_shape: Vec<usize>) -> Result<Self, ModelError> {
         // Validate input shape dimensions
         if input_shape.len() < 2 {

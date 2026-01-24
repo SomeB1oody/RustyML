@@ -76,7 +76,7 @@ fn test_global_max_pooling_1d_sequential() {
     }
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Verify output shape - should be [batch_size, channels]
     assert_eq!(output.shape(), &[batch_size, channels]);

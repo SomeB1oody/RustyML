@@ -7,9 +7,10 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 
 /// A 1D convolutional layer for neural networks.
 ///
-/// This layer applies a convolution operation to input data, which is particularly
-/// effective for processing sequential data, such as time series, audio signals,
-/// or text data.
+/// Applies a convolution operation to sequential data such as time series, audio signals,
+/// or text. Input shape is \[batch_size, channels, length\] and output shape is
+/// \[batch_size, filters, output_length\], where output_length depends on input length,
+/// kernel size, stride, and padding.
 ///
 /// # Fields
 ///
@@ -26,18 +27,7 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 /// - `bias_gradients` - Gradients for the biases, computed during backpropagation.
 /// - `optimizer_cache` - Cache for optimizer-specific state (e.g., momentum values for Adam).
 ///
-/// # Shape Information
-///
-/// Input shape: \[batch_size, channels, length\]
-/// Output shape: \[batch_size, filters, output_length\]
-///
-/// The output dimension (output_length) depends on:
-/// - Input length
-/// - Kernel size
-/// - Stride value
-/// - Padding type
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array3;
@@ -69,7 +59,7 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 /// model.fit(&x, &y, 3).unwrap();
 ///
 /// // Use predict for forward propagation prediction
-/// let prediction = model.predict(&x);
+/// let prediction = model.predict(&x).unwrap();
 /// println!("Convolution layer prediction results: {:?}", prediction);
 ///
 /// // Check if output shape is correct - should be [2, 3, 8]
@@ -91,7 +81,7 @@ pub struct Conv1D<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> Conv1D<T> {
-    /// Creates a new Conv1D layer with optional activation layer.
+    /// Creates a new Conv1D layer with the specified parameters.
     ///
     /// # Parameters
     ///
@@ -104,17 +94,13 @@ impl<T: ActivationLayer> Conv1D<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<Conv1D, ModelError>` - A new `Conv1D` layer instance or an error
+    /// - `Result<Self, ModelError>` - A new `Conv1D` layer instance or an error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `filters` is 0
-    /// - `kernel_size` is 0
-    /// - `stride` is 0
-    /// - `input_shape` is not 3D
-    /// - Input channels is 0
-    /// - Input length is less than kernel size
+    /// - `ModelError::InputValidationError` - If `filters`, `kernel_size`, or `stride` is 0
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 3D or has 0 channels
+    /// - `ModelError::InputValidationError` - If input length is less than kernel size
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -169,11 +155,11 @@ impl<T: ActivationLayer> Conv1D<T> {
     ///
     /// # Parameters
     ///
-    /// * `input_length` - Length of the input sequence
+    /// - `input_length` - Length of the input sequence
     ///
     /// # Returns
     ///
-    /// * `usize` - Output length after convolution
+    /// - `usize` - Output length after convolution
     fn calculate_output_length(&self, input_length: usize) -> usize {
         match self.padding {
             PaddingType::Valid => (input_length - self.kernel_size) / self.stride + 1,
@@ -185,11 +171,11 @@ impl<T: ActivationLayer> Conv1D<T> {
     ///
     /// # Parameters
     ///
-    /// * `input` - Input tensor to pad
+    /// - `input` - Input tensor to pad
     ///
     /// # Returns
     ///
-    /// * `Tensor` - Padded tensor
+    /// - `Tensor` - Padded tensor
     fn apply_padding(&self, input: &Tensor) -> Tensor {
         match self.padding {
             PaddingType::Valid => input.clone(),
@@ -339,7 +325,7 @@ impl<T: ActivationLayer> Conv1D<T> {
     ///
     /// # Returns
     ///
-    /// Output tensor after convolution
+    /// - `Tensor` - Output tensor after convolution
     fn conv1d(&self, input: &Tensor) -> Tensor {
         let padded_input = self.apply_padding(input);
         let input_shape = padded_input.shape();

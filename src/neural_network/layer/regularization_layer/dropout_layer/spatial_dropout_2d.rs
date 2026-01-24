@@ -4,23 +4,20 @@ use super::*;
 /// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.
 const SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD: usize = 64;
 
-/// Spatial Dropout layer for 2D data, which randomly sets entire feature maps to 0
-/// at each update during training time.
+/// Spatial Dropout layer for 2D data.
 ///
-/// Unlike regular Dropout which drops individual elements, Spatial Dropout drops entire
-/// channels (feature maps) along the spatial dimensions. This is particularly effective
-/// for convolutional layers where adjacent pixels are highly correlated.
-///
-/// Input shape: (batch_size, channels, height, width)
+/// Drops entire channels instead of individual elements, which is effective for
+/// convolutional layers where adjacent pixels are correlated. Input shape is
+/// `(batch_size, channels, height, width)`.
 ///
 /// # Fields
 ///
-/// - `rate` - Dropout rate: fraction of the channels to drop (between 0 and 1).
-/// - `input_shape` - Shape of the input tensor.
-/// - `mask` - Binary mask used during training to determine which channels to drop.
-/// - `training` - Whether the layer is in training mode or inference mode.
+/// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
+/// - `input_shape` - Expected shape of the input tensor
+/// - `mask` - Binary mask used during training to determine which channels to drop
+/// - `training` - Whether the layer is in training mode or inference mode
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array4;
@@ -46,16 +43,16 @@ impl SpatialDropout2D {
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate: fraction of the channels to drop. Must be between 0 and 1.
-    /// - `input_shape` - Shape of the input tensor (batch_size, channels, height, width).
+    /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
+    /// - `input_shape` - Shape of the input tensor `(batch_size, channels, height, width)`
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the SpatialDropout2D layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New SpatialDropout2D layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if rate is not between 0 and 1.
+    /// - `ModelError::InputValidationError` - If `rate` is not between 0 and 1
     pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
         validate_rate(rate, "Dropout rate")?;
 

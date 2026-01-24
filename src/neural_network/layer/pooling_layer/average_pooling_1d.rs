@@ -5,29 +5,21 @@ use super::*;
 /// Otherwise, sequential execution is used to avoid parallel overhead.
 const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 
-/// 1D Average Pooling layer for neural networks.
+/// 1D average pooling layer.
 ///
-/// This layer performs average pooling operation on a 3D tensor.
-/// Average pooling computes the mean value of each patch as defined by the pool size.
-///
-/// # Input Shape
-///
-/// Input is a 3D tensor with shape \[batch_size, channels, length\]
-///
-/// # Output Shape
-///
-/// Output is a 3D tensor with shape \[batch_size, channels, pooled_length\]
-/// Where:
-/// - pooled_length = (length - pool_size) / stride + 1
+/// Computes the mean value over each pooling window along the length dimension.
+/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
+/// `[batch_size, channels, pooled_length]` where
+/// `pooled_length = (length - pool_size) / stride + 1`.
 ///
 /// # Fields
 ///
 /// - `pool_size` - Size of the pooling window
-/// - `stride` - Stride of the pooling operation
+/// - `stride` - Step size of the pooling operation
 /// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Input tensor cached during forward pass, used for backward pass
+/// - `input_cache` - Cached input tensor from the forward pass
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array3;
@@ -59,7 +51,7 @@ const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
-/// let output = model.predict(&x);
+/// let output = model.predict(&x).unwrap();
 /// assert_eq!(output.shape(), &[2, 3, 4]);
 ///
 /// // Verify correctness of pooling results
@@ -85,17 +77,24 @@ pub struct AveragePooling1D {
 }
 
 impl AveragePooling1D {
-    /// Create a new 1D Average Pooling layer
+    /// Creates a new 1D average pooling layer.
+    ///
+    /// If `stride` is None, it defaults to `pool_size`.
     ///
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window
-    /// - `input_shape` - Shape of the input tensor \[batch_size, channels, length\]
-    /// - `stride` - Optional stride of the pooling operation, if None, the value will match `pool_size`
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, length]`
+    /// - `stride` - Optional stride of the pooling operation
     ///
     /// # Returns
     ///
-    /// * `Result<AveragePooling1D, ModelError>` - A new `AveragePooling1D` layer instance or an error
+    /// - `Result<AveragePooling1D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 3D, contains non-positive
+    ///   dimensions, `pool_size` is zero or larger than the input length, or `stride` is zero
     pub fn new(
         pool_size: usize,
         input_shape: Vec<usize>,

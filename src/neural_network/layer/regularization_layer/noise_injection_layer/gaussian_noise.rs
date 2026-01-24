@@ -1,19 +1,17 @@
 use super::*;
 
-/// Gaussian Noise layer for neural networks, which adds random Gaussian (normal) noise
-/// to the input during training time, helping prevent overfitting and improving robustness.
+/// Gaussian Noise layer for neural networks.
 ///
-/// Gaussian noise injection is a regularization technique that adds random noise sampled
-/// from a normal distribution with mean 0 and a specified standard deviation. This forces
-/// the network to be more robust to small variations in the input.
+/// Adds random noise sampled from a normal distribution with mean 0 during training
+/// to improve robustness and reduce overfitting.
 ///
 /// # Fields
 ///
-/// - `stddev` - Standard deviation of the Gaussian noise to be added.
-/// - `input_shape` - Shape of the input tensor.
-/// - `training` - Whether the layer is in training mode or inference mode.
+/// - `stddev` - Standard deviation of the Gaussian noise to add
+/// - `input_shape` - Expected shape of the input tensor
+/// - `training` - Whether the layer is in training mode or inference mode
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array2;
@@ -38,16 +36,16 @@ impl GaussianNoise {
     ///
     /// # Parameters
     ///
-    /// - `stddev` - Standard deviation of the Gaussian noise. Must be non-negative.
-    /// - `input_shape` - Shape of the input tensor.
+    /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
+    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the GaussianNoise layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New GaussianNoise layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if stddev is negative.
+    /// - `ModelError::InputValidationError` - If `stddev` is negative
     pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
         validate_stddev(stddev)?;
 

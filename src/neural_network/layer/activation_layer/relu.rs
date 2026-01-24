@@ -12,28 +12,14 @@ const RELU_PARALLEL_THRESHOLD: usize = 10_000;
 
 /// ReLU (Rectified Linear Unit) activation layer.
 ///
-/// This layer applies the ReLU activation function element-wise to the input tensor:
-/// f(x) = max(0, x)
-///
-/// ReLU is one of the most commonly used activation functions in neural networks,
-/// particularly in hidden layers of deep networks, due to its computational efficiency
-/// and ability to mitigate the vanishing gradient problem.
-///
-/// # Input Shape
-///
-/// Accepts tensors of any dimensionality. Common shapes include:
-/// - 2D: \[batch_size, features\] for dense layers
-/// - 4D: \[batch_size, channels, height, width\] for convolutional layers
-///
-/// # Output Shape
-///
-/// Same as input shape.
+/// Applies `max(0, x)` element-wise to the input tensor, keeping the original shape.
+/// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers.
 ///
 /// # Fields
 ///
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -64,7 +50,7 @@ impl ReLU {
     ///
     /// # Returns
     ///
-    /// * `ReLU` - A new `ReLU` layer instance
+    /// - `Self` - A new `ReLU` layer instance
     pub fn new() -> Self {
         ReLU { input_cache: None }
     }

@@ -8,27 +8,11 @@ use super::*;
 /// overhead is amortized by computational gains from parallelization.
 const GRU_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Gated Recurrent Unit (GRU) neural network layer
+/// Gated Recurrent Unit (GRU) neural network layer.
 ///
-/// GRU is a type of recurrent neural network (RNN) architecture that is capable of learning
-/// long-term dependencies in sequential data. It addresses the vanishing gradient problem
-/// of traditional RNNs through the use of gating mechanisms, similar to LSTM but with a
-/// simpler structure using only two gates instead of three.
-///
-/// The GRU cell uses two gates to control information flow:
-/// - Reset Gate: Controls how much of the previous hidden state should be forgotten
-/// - Update Gate: Controls how much of the new hidden state is just a copy of the old one
-/// - Candidate Hidden State: Proposes new hidden state values
-///
-/// # Mathematical Operations
-///
-/// For each timestep t:
-/// 1. r_t = σ(W_r · \[h_{t-1}, x_t\] + b_r)  (Reset gate)
-/// 2. z_t = σ(W_z · \[h_{t-1}, x_t\] + b_z)  (Update gate)
-/// 3. h̃_t = tanh(W_h · \[r_t ⊙ h_{t-1}, x_t\] + b_h)  (Candidate hidden state)
-/// 4. h_t = (1 - z_t) ⊙ h_{t-1} + z_t ⊙ h̃_t  (Hidden state update)
-///
-/// Where σ is the sigmoid function, ⊙ is element-wise multiplication, and W, b are learned parameters.
+/// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
+/// the last hidden state with shape (batch_size, units). Uses reset, update, and candidate
+/// gates to control information flow and mitigate vanishing gradients.
 ///
 /// # Fields
 ///
@@ -43,9 +27,9 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 /// - `z_cache` - Cached update gate activations for each timestep
 /// - `h_candidate_cache` - Cached candidate hidden states for each timestep
 /// - `rh_cache` - Cached r_t ⊙ h_{t-1} values for each timestep
-/// - `activation` - Activation function applied to final output (usually Tanh)
+/// - `activation` - Activation function applied to final output
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::neural_network::*;
 /// use ndarray::Array;
@@ -63,7 +47,7 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 /// model.fit(&input, &target, 10).unwrap();
 ///
 /// // Make predictions
-/// let predictions = model.predict(&input);
+/// let predictions = model.predict(&input).unwrap();
 /// println!("GRU output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
@@ -90,7 +74,7 @@ pub struct GRU<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> GRU<T> {
-    /// Creates a new GRU layer with specified parameters
+    /// Creates a GRU layer with the specified dimensions and activation.
     ///
     /// # Parameters
     ///
@@ -100,10 +84,11 @@ impl<T: ActivationLayer> GRU<T> {
     ///
     /// # Returns
     ///
-    /// * `Result<GRU, ModelError>` - A new `GRU` instance with:
-    ///     - Three gates (reset, update, candidate) initialized with random weights
-    ///     - All caches set to None (will be allocated during first forward pass)
-    ///     - activation layer for output transformation
+    /// - `Result<Self, ModelError>` - A new GRU layer instance
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
     pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
         // Validate that dimensions are greater than 0
         validate_recurrent_dimensions(input_dim, units)?;
@@ -128,13 +113,15 @@ impl<T: ActivationLayer> GRU<T> {
     ///
     /// # Parameters
     ///
-    /// Each gate requires three arrays:
-    /// - `kernel` - Weight matrix connecting inputs with shape (input_dim, units)
-    /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
-    /// - `bias` - Bias vector with shape (1, units)
-    ///
-    /// The parameters are provided for each of the three gates in order:
-    /// reset gate, update gate, candidate gate
+    /// - `reset_kernel` - Input kernel for the reset gate with shape (input_dim, units)
+    /// - `reset_recurrent_kernel` - Recurrent kernel for the reset gate with shape (units, units)
+    /// - `reset_bias` - Bias for the reset gate with shape (1, units)
+    /// - `update_kernel` - Input kernel for the update gate with shape (input_dim, units)
+    /// - `update_recurrent_kernel` - Recurrent kernel for the update gate with shape (units, units)
+    /// - `update_bias` - Bias for the update gate with shape (1, units)
+    /// - `candidate_kernel` - Input kernel for the candidate gate with shape (input_dim, units)
+    /// - `candidate_recurrent_kernel` - Recurrent kernel for the candidate gate with shape (units, units)
+    /// - `candidate_bias` - Bias for the candidate gate with shape (1, units)
     pub fn set_weights(
         &mut self,
         reset_kernel: Array2<f32>,

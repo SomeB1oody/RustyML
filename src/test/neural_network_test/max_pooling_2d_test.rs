@@ -79,7 +79,7 @@ fn max_pooling_2d_test() {
     model.fit(&x, &y, 3).unwrap();
 
     // Use predict for forward propagation prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!("MaxPooling2D prediction results: {:?}", prediction);
 
     // Check if output shape is correct
@@ -108,7 +108,7 @@ fn max_pooling_2d_test() {
     let expected_shape = [2, 3, 4, 4]; // Using 3x3 window and 1x1 stride
 
     // Use predict to confirm output shape
-    let prediction2 = model2.predict(&x);
+    let prediction2 = model2.predict(&x).unwrap();
     println!(
         "MaxPooling2D prediction results (pool_size=(3,3), stride=(1,1)): {:?}",
         prediction2

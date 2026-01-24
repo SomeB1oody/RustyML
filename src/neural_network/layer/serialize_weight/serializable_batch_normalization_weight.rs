@@ -1,6 +1,14 @@
 use super::*;
 
-/// Serializable representation of a BatchNormalization layer's weights
+/// Serializable representation of BatchNormalization layer weights.
+///
+/// # Fields
+///
+/// - `gamma` - Scale parameter values flattened into a vector
+/// - `beta` - Shift parameter values flattened into a vector
+/// - `running_mean` - Running mean values flattened into a vector
+/// - `running_var` - Running variance values flattened into a vector
+/// - `shape` - Original parameter shape used to rebuild arrays
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableBatchNormalizationWeight {
     pub gamma: Vec<f32>,

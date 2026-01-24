@@ -1,6 +1,12 @@
 use super::*;
 
-/// Serializable representation of a SimpleRNN layer's weights
+/// Serializable representation of SimpleRNN layer weights.
+///
+/// # Fields
+///
+/// - `kernel` - 2D input kernel matrix stored as nested vectors
+/// - `recurrent_kernel` - 2D recurrent kernel matrix stored as nested vectors
+/// - `bias` - 2D bias matrix stored as nested vectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSimpleRNNWeight {
     pub kernel: Vec<Vec<f32>>,

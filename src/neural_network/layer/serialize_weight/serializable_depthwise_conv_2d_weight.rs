@@ -1,6 +1,11 @@
 use super::*;
 
-/// Serializable representation of a DepthwiseConv2D layer's weights
+/// Serializable representation of DepthwiseConv2D layer weights.
+///
+/// # Fields
+///
+/// - `weight` - 4D depthwise convolution weight tensor stored as nested vectors
+/// - `bias` - 1D bias vector stored as a flat list
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableDepthwiseConv2DWeight {
     pub weight: Vec<Vec<Vec<Vec<f32>>>>,

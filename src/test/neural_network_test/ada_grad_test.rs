@@ -20,7 +20,7 @@ fn test_ada_grad_dense_basic() {
     model.fit(&x, &y, 5).unwrap();
 
     // Use predict for forward propagation prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!("AdaGrad Dense prediction: {:?}", prediction);
 
     // Check output shape
@@ -47,7 +47,7 @@ fn test_ada_grad_simple_rnn() {
     model.fit(&x, &y, 3).unwrap();
 
     // Predict
-    let pred = model.predict(&x);
+    let pred = model.predict(&x).unwrap();
     println!("AdaGrad SimpleRNN prediction:\n{:#?}\n", pred);
 
     // Check output shape
@@ -70,7 +70,7 @@ fn test_ada_grad_lstm() {
     model.fit(&input, &target, 3).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&input);
+    let predictions = model.predict(&input).unwrap();
     println!("AdaGrad LSTM output shape: {:?}", predictions.shape());
 
     // Check output shape: [2, 3] (batch_size, units)
@@ -93,7 +93,7 @@ fn test_ada_grad_gru() {
     model.fit(&input, &target, 3).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&input);
+    let predictions = model.predict(&input).unwrap();
     println!("AdaGrad GRU output shape: {:?}", predictions.shape());
 
     // Check output shape: [3, 4] (batch_size, units)
@@ -126,7 +126,7 @@ fn test_ada_grad_conv1d() {
     model.fit(&input, &target, 3).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&input);
+    let predictions = model.predict(&input).unwrap();
     println!("AdaGrad Conv1D output shape: {:?}", predictions.shape());
 
     // Check output shape
@@ -159,7 +159,7 @@ fn test_ada_grad_conv2d() {
     model.fit(&input, &target, 3).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&input);
+    let predictions = model.predict(&input).unwrap();
     println!("AdaGrad Conv2D output shape: {:?}", predictions.shape());
 
     // Check output shape
@@ -192,7 +192,7 @@ fn test_ada_grad_conv3d() {
     model.fit(&input, &target, 3).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&input);
+    let predictions = model.predict(&input).unwrap();
     println!("AdaGrad Conv3D output shape: {:?}", predictions.shape());
 
     // Check output shape
@@ -218,7 +218,7 @@ fn test_ada_grad_mixed_layers() {
     model.fit(&x, &y, 10).unwrap();
 
     // Make predictions
-    let predictions = model.predict(&x);
+    let predictions = model.predict(&x).unwrap();
     println!("AdaGrad mixed layers prediction: {:?}", predictions);
 
     // Check output shape
@@ -240,7 +240,7 @@ fn test_ada_grad_learning_rate_effect() {
         .add(Dense::new(3, 1, ReLU::new()).unwrap());
     model_high_lr.compile(AdaGrad::new(0.1, 1e-8).unwrap(), MeanSquaredError::new());
     model_high_lr.fit(&x, &y, 5).unwrap();
-    let pred_high = model_high_lr.predict(&x);
+    let pred_high = model_high_lr.predict(&x).unwrap();
 
     // Model with lower learning rate
     let mut model_low_lr = Sequential::new();
@@ -249,7 +249,7 @@ fn test_ada_grad_learning_rate_effect() {
         .add(Dense::new(3, 1, ReLU::new()).unwrap());
     model_low_lr.compile(AdaGrad::new(0.001, 1e-8).unwrap(), MeanSquaredError::new());
     model_low_lr.fit(&x, &y, 5).unwrap();
-    let pred_low = model_low_lr.predict(&x);
+    let pred_low = model_low_lr.predict(&x).unwrap();
 
     println!("High LR prediction: {:?}", pred_high);
     println!("Low LR prediction: {:?}", pred_low);
@@ -272,7 +272,7 @@ fn test_ada_grad_with_different_activations() {
         .add(Dense::new(4, 2, ReLU::new()).unwrap())
         .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_relu.fit(&x, &y, 3).unwrap();
-    let pred_relu = model_relu.predict(&x);
+    let pred_relu = model_relu.predict(&x).unwrap();
 
     // Test with Sigmoid
     let mut model_sigmoid = Sequential::new();
@@ -280,7 +280,7 @@ fn test_ada_grad_with_different_activations() {
         .add(Dense::new(4, 2, Sigmoid::new()).unwrap())
         .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_sigmoid.fit(&x, &y, 3).unwrap();
-    let pred_sigmoid = model_sigmoid.predict(&x);
+    let pred_sigmoid = model_sigmoid.predict(&x).unwrap();
 
     // Test with Tanh
     let mut model_tanh = Sequential::new();
@@ -288,7 +288,7 @@ fn test_ada_grad_with_different_activations() {
         .add(Dense::new(4, 2, Tanh::new()).unwrap())
         .compile(AdaGrad::new(0.01, 1e-8).unwrap(), MeanSquaredError::new());
     model_tanh.fit(&x, &y, 3).unwrap();
-    let pred_tanh = model_tanh.predict(&x);
+    let pred_tanh = model_tanh.predict(&x).unwrap();
 
     println!("ReLU prediction: {:?}", pred_relu);
     println!("Sigmoid prediction: {:?}", pred_sigmoid);

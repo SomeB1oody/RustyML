@@ -35,7 +35,7 @@ fn conv2d_test() {
     model.fit(&x, &y, 3).unwrap();
 
     // Use predict for forward propagation prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!("Convolution layer prediction results: {:?}", prediction);
 
     // Check if output shape is correct - should be [2, 3, 3, 3]
@@ -70,7 +70,7 @@ fn conv2d_test() {
     model2.fit(&x, &y2, 3).unwrap();
 
     // Use predict for forward propagation prediction
-    let prediction2 = model2.predict(&x);
+    let prediction2 = model2.predict(&x).unwrap();
     println!(
         "Convolution layer prediction results (Same padding, stride 2): {:?}",
         prediction2

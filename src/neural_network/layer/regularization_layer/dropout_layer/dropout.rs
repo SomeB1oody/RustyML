@@ -4,21 +4,19 @@ use super::*;
 /// When the total number of elements >= this threshold, parallel computation is used.
 const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 
-/// Dropout layer for neural networks, which randomly sets a fraction of input units to 0
-/// at each update during training time, which helps prevent overfitting.
+/// Dropout layer for neural networks.
 ///
-/// Dropout is a regularization technique that randomly drops (sets to zero) a proportion
-/// of neurons during training. This prevents the network from becoming too dependent on
-/// any particular neuron and improves generalization.
+/// Randomly drops a fraction of input units during training to reduce overfitting and
+/// improve generalization.
 ///
 /// # Fields
 ///
-/// - `rate` - Dropout rate: fraction of the input units to drop (between 0 and 1).
-/// - `input_shape` - Shape of the input tensor.
-/// - `mask` - Binary mask used during training to determine which neurons to drop.
-/// - `training` - Whether the layer is in training mode or inference mode.
+/// - `rate` - Dropout rate, fraction of input units to drop (between 0 and 1)
+/// - `input_shape` - Expected shape of the input tensor
+/// - `mask` - Binary mask used during training to determine which units to drop
+/// - `training` - Whether the layer is in training mode or inference mode
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array2;
@@ -44,16 +42,16 @@ impl Dropout {
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate: fraction of the input units to drop. Must be between 0 and 1.
-    /// - `input_shape` - Shape of the input tensor.
+    /// - `rate` - Dropout rate, fraction of the input units to drop (between 0 and 1)
+    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the Dropout layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New Dropout layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if rate is not between 0 and 1.
+    /// - `ModelError::InputValidationError` - If `rate` is not between 0 and 1
     pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
         validate_rate(rate, "Dropout rate")?;
 

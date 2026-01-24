@@ -4,39 +4,30 @@ use super::*;
 /// Based on batch_size * feature_size (total elements in batch).
 const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Batch Normalization layer for neural networks, which normalizes the inputs
-/// of each mini-batch to improve training stability and speed.
+/// Batch Normalization layer for neural networks.
 ///
-/// Batch normalization normalizes the activations of the previous layer at each batch,
-/// i.e., applies a transformation that maintains the mean activation close to 0 and
-/// the activation standard deviation close to 1.
+/// Normalizes each mini-batch to keep activations centered and scaled, improving
+/// training stability and speed.
 ///
 /// # Fields
 ///
-/// - `epsilon` - Small constant for numerical stability in normalization.
-/// - `momentum` - Momentum for the moving average of mean and variance.
-/// - `input_shape` - Shape of the input tensor.
-/// - `gamma` - Scale parameter (trainable).
-/// - `beta` - Shift parameter (trainable).
-/// - `running_mean` - Running mean for inference.
-/// - `running_var` - Running variance for inference.
-/// - `training` - Whether the layer is in training mode or inference mode.
-/// - `batch_mean` - Mean computed during forward pass (used in backward pass).
-/// - `batch_var` - Variance computed during forward pass (used in backward pass).
-/// - `x_normalized` - Normalized input (used in backward pass).
-/// - `x_centered` - Centered input (used in backward pass).
-/// - `grad_gamma` - Gradient for gamma parameter.
-/// - `grad_beta` - Gradient for beta parameter.
-/// - `m_gamma` - First moment estimate for gamma (Adam optimizer).
-/// - `v_gamma` - Second moment estimate for gamma (Adam optimizer).
-/// - `m_beta` - First moment estimate for beta (Adam optimizer).
-/// - `v_beta` - Second moment estimate for beta (Adam optimizer).
-/// - `cache_gamma` - Cache for gamma (RMSprop optimizer).
-/// - `cache_beta` - Cache for beta (RMSprop optimizer).
-/// - `acc_grad_gamma` - Accumulated gradient for gamma (AdaGrad optimizer).
-/// - `acc_grad_beta` - Accumulated gradient for beta (AdaGrad optimizer).
+/// - `epsilon` - Small constant for numerical stability in normalization
+/// - `momentum` - Momentum for the moving average of mean and variance
+/// - `input_shape` - Shape of the input tensor
+/// - `gamma` - Scale parameter (trainable)
+/// - `beta` - Shift parameter (trainable)
+/// - `running_mean` - Running mean for inference
+/// - `running_var` - Running variance for inference
+/// - `training` - Whether the layer is in training mode or inference mode
+/// - `batch_mean` - Mean computed during forward pass (used in backward pass)
+/// - `batch_var` - Variance computed during forward pass (used in backward pass)
+/// - `x_normalized` - Normalized input (used in backward pass)
+/// - `x_centered` - Centered input (used in backward pass)
+/// - `grad_gamma` - Gradient for gamma parameter
+/// - `grad_beta` - Gradient for beta parameter
+/// - `optimizer_cache` - Optimizer state cache for adaptive updates
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array2;
@@ -76,20 +67,19 @@ impl BatchNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor.
-    /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99).
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).
+    /// - `input_shape` - Shape of the input tensor
+    /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the BatchNormalization layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New BatchNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
-    /// - `input_shape` is empty
-    /// - `momentum` is not between 0.0 and 1.0
-    /// - `epsilon` is not positive
+    /// - `ModelError::InputValidationError` - If `input_shape` is empty
+    /// - `ModelError::InputValidationError` - If `momentum` is not between 0.0 and 1.0
+    /// - `ModelError::InputValidationError` - If `epsilon` is not positive
     pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, ModelError> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_momentum(momentum)?;
@@ -130,10 +120,10 @@ impl BatchNormalization {
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable).
-    /// - `beta` - Shift parameter (trainable).
-    /// - `running_mean` - Running mean for inference.
-    /// - `running_var` - Running variance for inference.
+    /// - `gamma` - Scale parameter (trainable)
+    /// - `beta` - Shift parameter (trainable)
+    /// - `running_mean` - Running mean for inference
+    /// - `running_var` - Running variance for inference
     pub fn set_weights(
         &mut self,
         gamma: Tensor,

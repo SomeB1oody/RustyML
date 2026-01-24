@@ -37,7 +37,7 @@ impl MeanAbsoluteError {
     ///
     /// # Returns
     ///
-    /// * `MeanAbsoluteError` - Returns a unit-like struct `MeanAbsoluteError`
+    /// - `MeanAbsoluteError` - Returns a unit-like struct `MeanAbsoluteError`
     pub fn new() -> Self {
         Self {}
     }

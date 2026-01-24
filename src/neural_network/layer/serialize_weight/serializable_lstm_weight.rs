@@ -1,6 +1,13 @@
 use super::*;
 
-/// Serializable representation of an LSTM layer's weights
+/// Serializable representation of LSTM layer weights.
+///
+/// # Fields
+///
+/// - `input` - Weights for the input gate
+/// - `forget` - Weights for the forget gate
+/// - `cell` - Weights for the cell gate
+/// - `output` - Weights for the output gate
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLSTMWeight {
     pub input: SerializableGateWeight,

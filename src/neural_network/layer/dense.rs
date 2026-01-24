@@ -7,36 +7,27 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 
 /// Dense (Fully Connected) layer implementation for neural networks.
 ///
-/// This layer performs a linear transformation of the input data using a weight matrix and bias vector,
-/// optionally followed by an activation function. The transformation is defined as: output = activation(input * weights + bias).
+/// This layer performs a linear transformation using a weight matrix and bias vector, optionally
+/// followed by an activation function: output = activation(input * weights + bias). Input shape
+/// is (batch_size, input_dim) and output shape is (batch_size, output_dim).
 ///
-/// The Dense layer automatically initializes weights using Xavier/Glorot initialization to maintain proper variance
-/// across network layers, helping prevent vanishing/exploding gradients problems. Bias values are initialized to zeros.
-///
-/// During training, this layer stores necessary intermediate values for backpropagation and supports
-/// multiple optimization algorithms including SGD, Adam, and RMSprop.
-///
-/// # Dimensions
-///
-/// - Input shape: (batch_size, input_dim)
-/// - Output shape: (batch_size, output_dim)
+/// Weights are initialized with Xavier/Glorot initialization and biases start at zeros. During
+/// training, the layer stores intermediate values for backpropagation and supports multiple
+/// optimization algorithms including SGD, Adam, and RMSprop.
 ///
 /// # Fields
 ///
-/// ## Core fields
 /// - `input_dim` - Input dimension size
 /// - `output_dim` - Output dimension size
 /// - `weights` - Weight matrix with shape (input_dim, output_dim)
 /// - `bias` - Bias vector with shape (1, output_dim)
-/// - `activation` - Activation layer from activation_layer module
-///
-/// ## Cache
 /// - `input_cache` - Cache of the input from forward pass for use in backward pass
 /// - `grad_weights` - Stored weight gradients
 /// - `grad_bias` - Stored bias gradients
 /// - `optimizer_cache` - Cache for optimizer
+/// - `activation` - Activation layer from activation_layer module
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use ndarray::Array;
 /// use rustyml::prelude::*;
@@ -74,7 +65,7 @@ pub struct Dense<T: ActivationLayer> {
 }
 
 impl<T: ActivationLayer> Dense<T> {
-    /// Creates a new dense layer with optional activation layer.
+    /// Creates a new dense layer with an activation layer.
     ///
     /// # Parameters
     ///
@@ -84,7 +75,11 @@ impl<T: ActivationLayer> Dense<T> {
     ///
     /// # Returns
     ///
-    /// * `Dense` - A new `Dense` layer instance with specified dimensions
+    /// - `Result<Self, ModelError>` - New `Dense` layer instance with initialized parameters
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is zero
     pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
         // Validate that dimensions are greater than zero
         if input_dim == 0 {

@@ -440,7 +440,7 @@ fn test_batch_normalization_with_sequential_model() {
     let target = Array::ones((2, 1)).into_dyn();
 
     // Test forward pass
-    let output = model.predict(&input);
+    let output = model.predict(&input).unwrap();
     assert_eq!(output.shape(), &[2, 1]);
 
     // Test training

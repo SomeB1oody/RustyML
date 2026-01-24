@@ -4,21 +4,23 @@ use super::*;
 /// When batch_size * channels >= this threshold, use parallel execution.
 const MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 
-/// Defines a structure for max pooling operation, used to perform max pooling on 2D data.
+/// 2D max pooling layer.
 ///
-/// Max pooling is a common downsampling technique in CNNs that reduces
-/// the spatial dimensions of feature maps by selecting the maximum value in each pooling window,
-/// thereby reducing computation and controlling overfitting.
+/// Selects the maximum value within each pooling window across height and width.
+/// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
+/// `[batch_size, channels, pooled_height, pooled_width]` where
+/// `pooled_height = (height - pool_size_h) / stride_h + 1` and
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
 ///
 /// # Fields
 ///
-/// - `pool_size` - Size of the pooling window, expressed as (height, width).
-/// - `strides` - Stride of the pooling operation, expressed as (vertical stride, horizontal stride).
-/// - `input_shape` - Shape of the input tensor.
-/// - `input_cache` - Cached input data, used for backpropagation.
-/// - `max_positions` - Cache of maximum value positions, used for backpropagation.
+/// - `pool_size` - Size of the pooling window as (height, width)
+/// - `strides` - Step size of the pooling operation as (vertical stride, horizontal stride)
+/// - `input_shape` - Shape of the input tensor
+/// - `input_cache` - Cached input tensor from the forward pass
+/// - `max_positions` - Cached positions of maximum values for backpropagation
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array4;
@@ -61,12 +63,16 @@ const MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 /// model.fit(&x, &y, 3).unwrap();
 ///
 /// // Use predict for forward propagation prediction
-/// let prediction = model.predict(&x);
+/// let prediction = model.predict(&x).unwrap();
 /// println!("MaxPooling2D prediction results: {:?}", prediction);
 ///
 /// // Check if output shape is correct
 /// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= MAX_POOLING_2D_PARALLEL_THRESHOLD` (32).
 pub struct MaxPooling2D {
     pool_size: (usize, usize),
     strides: (usize, usize),
@@ -78,15 +84,22 @@ pub struct MaxPooling2D {
 impl MaxPooling2D {
     /// Creates a new 2D max pooling layer.
     ///
+    /// If `strides` is None, it defaults to `pool_size`.
+    ///
     /// # Parameters
     ///
-    /// - `pool_size` - Size of the pooling window, expressed as (height, width).
-    /// - `input_shape` - Shape of the input tensor, in format \[batch_size, channels, height, width\].
-    /// - `strides` - Stride of the pooling operation, expressed as (vertical stride, horizontal stride). If None, uses the same value as pool_size.
+    /// - `pool_size` - Size of the pooling window as (height, width)
+    /// - `input_shape` - Input tensor shape `[batch_size, channels, height, width]`
+    /// - `strides` - Optional strides of the pooling operation as (vertical stride, horizontal stride)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the MaxPooling2D layer or an error.
+    /// - `Result<MaxPooling2D, ModelError>` - New layer instance on success
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D, `pool_size` has a zero
+    ///   dimension, or any stride is zero
     pub fn new(
         pool_size: (usize, usize),
         input_shape: Vec<usize>,

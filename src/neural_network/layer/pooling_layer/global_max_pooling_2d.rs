@@ -4,20 +4,18 @@ use super::*;
 /// When batch_size * channels >= this threshold, use parallel execution.
 const GLOBAL_MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 
-/// Global Max Pooling Layer
+/// Global max pooling layer for 2D inputs.
 ///
-/// Performs global max pooling operation on the input tensor across spatial dimensions (height and width).
-/// The input tensor shape should be `[batch_size, channels, height, width]`,
-/// and the output tensor shape will be `[batch_size, channels]`.
-///
-/// This layer has no trainable parameters.
+/// Selects the maximum value across the height and width dimensions.
+/// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
+/// `[batch_size, channels]`.
 ///
 /// # Fields
 ///
-/// * `input_shape` - Stores the shape of the input tensor during the forward pass.
-/// * `max_positions` - Stores the positions of maximum values found during the forward pass, used for gradient propagation during backpropagation.
+/// - `input_shape` - Shape of the input tensor cached during the forward pass
+/// - `max_positions` - Cached positions of maximum values for backpropagation
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array, IxDyn};
@@ -33,7 +31,7 @@ const GLOBAL_MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 /// let input_data = Array::from_elem(IxDyn(&[3, 4, 5, 5]), 1.0);
 ///
 /// // Forward propagation
-/// let output = model.predict(&input_data);
+/// let output = model.predict(&input_data).unwrap();
 ///
 /// // Check output shape - should be [3, 4]
 /// assert_eq!(output.shape(), &[3, 4]);
@@ -45,17 +43,21 @@ const GLOBAL_MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///     }
 /// }
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= GLOBAL_MAX_POOLING_2D_PARALLEL_THRESHOLD` (32).
 pub struct GlobalMaxPooling2D {
     input_shape: Vec<usize>,
     max_positions: Option<Vec<(usize, usize)>>,
 }
 
 impl GlobalMaxPooling2D {
-    /// Creates a new instance of the global max pooling layer
+    /// Creates a new global max pooling 2D layer.
     ///
     /// # Returns
     ///
-    /// * `GlobalMaxPooling2D` - A new `GlobalMaxPooling2D` instance
+    /// - `GlobalMaxPooling2D` - New layer instance
     pub fn new() -> Self {
         GlobalMaxPooling2D {
             input_shape: Vec::new(),

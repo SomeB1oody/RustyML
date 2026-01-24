@@ -42,7 +42,7 @@ fn test_flatten_in_sequential() {
     model.fit(&x, &y, 3).unwrap();
 
     // Use predict for forward propagation prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!("CNN+Flatten prediction results: {:?}", prediction);
 
     // Check if output shape is correct
@@ -70,7 +70,7 @@ fn test_flatten_only_model() {
     model.summary();
 
     // Perform forward propagation
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Check output shape
     assert_eq!(output.shape(), &[2, flattened_size]);
@@ -133,7 +133,7 @@ fn test_multiple_layers_with_flatten() {
     model.fit(&x, &y, 3).unwrap();
 
     // Forward propagation prediction
-    let prediction = model.predict(&x);
+    let prediction = model.predict(&x).unwrap();
     println!(
         "Complex CNN with Flatten prediction results: {:?}",
         prediction

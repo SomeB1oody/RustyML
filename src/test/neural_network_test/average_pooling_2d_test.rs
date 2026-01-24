@@ -36,7 +36,7 @@ fn average_pooling_basic_test() {
         );
 
     // Output shape should be [2, 3, 2, 2]
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[2, 3, 2, 2]);
 
     // Verify correctness of pooling results
@@ -91,7 +91,7 @@ fn average_pooling_non_even_input_test() {
 
     // Output shape should be [2, 3, 2, 2]
     // (5-3)/2+1 = 2
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[2, 3, 2, 2]);
 
     // Verify the average pooling result for the first window
@@ -132,7 +132,7 @@ fn average_pooling_different_strides_test() {
 
     // Output shape should be [1, 1, 5, 5]
     // (6-2)/1+1 = 5
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[1, 1, 5, 5]);
 
     // Check the average of the first window
@@ -167,7 +167,7 @@ fn average_pooling_backprop_test() {
     assert!(result.is_ok(), "Model training failed");
 
     // Verify that predictions after training are close to target values
-    let prediction = model.predict(&input_data);
+    let prediction = model.predict(&input_data).unwrap();
     for b in 0..2 {
         for c in 0..2 {
             for i in 0..2 {

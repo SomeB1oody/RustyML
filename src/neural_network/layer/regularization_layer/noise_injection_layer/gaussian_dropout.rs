@@ -1,23 +1,19 @@
 use super::*;
 
-/// Gaussian Dropout layer for neural networks, which multiplies inputs with random samples
-/// drawn from a Gaussian (normal) distribution during training time.
+/// Gaussian Dropout layer for neural networks.
 ///
-/// Unlike standard dropout which randomly sets units to zero, Gaussian dropout multiplies
-/// each input by a random value sampled from a Gaussian distribution with mean 1 and
-/// configurable standard deviation. This provides a continuous form of dropout regularization
-/// that can lead to better generalization performance.
-///
-/// During training, each input value x is transformed as: x' = x * N(1, stddev�)
-/// During inference, inputs pass through unchanged.
+/// Multiplies inputs with random samples drawn from a Gaussian distribution during
+/// training. Each input value x is transformed as: x' = x * N(1, stddev^2).
+/// The standard deviation is computed as sqrt(rate / (1 - rate)). During inference,
+/// inputs pass through unchanged.
 ///
 /// # Fields
 ///
-/// - `rate` - Dropout rate used to compute standard deviation. Higher rate means more noise.
-/// - `input_shape` - Shape of the input tensor.
-/// - `training` - Whether the layer is in training mode or inference mode.
+/// - `rate` - Dropout rate used to compute standard deviation
+/// - `input_shape` - Expected shape of the input tensor
+/// - `training` - Whether the layer is in training mode or inference mode
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array2;
@@ -42,17 +38,16 @@ impl GaussianDropout {
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate, must be between 0 and 1 (exclusive). The standard deviation of the
-    ///   multiplicative Gaussian noise will be computed as sqrt(rate / (1 - rate)).
-    /// - `input_shape` - Shape of the input tensor.
+    /// - `rate` - Dropout rate, must be between 0 and 1 (exclusive)
+    /// - `input_shape` - Shape of the input tensor
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the GaussianDropout layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New GaussianDropout layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if rate is not in range [0, 1).
+    /// - `ModelError::InputValidationError` - If `rate` is not in range [0, 1)
     pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
         validate_rate_exclusive(rate, "Dropout rate")?;
 

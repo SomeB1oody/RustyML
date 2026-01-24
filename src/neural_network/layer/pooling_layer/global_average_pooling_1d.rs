@@ -5,20 +5,18 @@ use super::*;
 /// Otherwise, sequential execution is used to avoid parallel overhead.
 const GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 
-/// Global Average Pooling 1D Layer
+/// Global average pooling layer for 1D inputs.
 ///
-/// Performs global average pooling operation on the sequence dimension of the input tensor.
-/// Input tensor shape should be `[batch_size, channels, length]`,
-/// output tensor shape will be `[batch_size, channels]`.
-///
-/// This layer has no trainable parameters.
+/// Computes the mean value across the length dimension.
+/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
+/// `[batch_size, channels]`.
 ///
 /// # Fields
 ///
-/// - `input_shape` - Stores the shape of the input tensor during forward propagation.
-/// - `input_cache` - Caches the input tensor for backward propagation.
+/// - `input_shape` - Shape of the input tensor cached during the forward pass
+/// - `input_cache` - Cached input tensor from the forward pass
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array, IxDyn};
@@ -34,7 +32,7 @@ const GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 /// let input_data = Array::from_elem(IxDyn(&[2, 3, 4]), 1.0);
 ///
 /// // Forward propagation
-/// let output = model.predict(&input_data);
+/// let output = model.predict(&input_data).unwrap();
 ///
 /// // Check output shape - should be [2, 3]
 /// assert_eq!(output.shape(), &[2, 3]);
@@ -46,17 +44,21 @@ const GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///     }
 /// }
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= GLOBAL_AVERAGE_POOLING_1D_PARALLEL_THRESHOLD` (32).
 pub struct GlobalAveragePooling1D {
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
 }
 
 impl GlobalAveragePooling1D {
-    /// Creates a new `GlobalAveragePooling1D` layer.
+    /// Creates a new global average pooling 1D layer.
     ///
     /// # Returns
     ///
-    /// * `GlobalAveragePooling1D` - A new instance of `GlobalAveragePooling1D`
+    /// - `GlobalAveragePooling1D` - New layer instance
     pub fn new() -> Self {
         GlobalAveragePooling1D {
             input_shape: Vec::new(),

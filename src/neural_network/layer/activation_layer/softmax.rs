@@ -17,35 +17,15 @@ const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 
 /// Softmax activation layer.
 ///
-/// This layer applies the Softmax activation function to the input tensor along
-/// the last axis, converting raw scores (logits) into a probability distribution.
-///
-/// The Softmax function is defined as:
-/// softmax(x_i) = exp(x_i - max(x)) / sum_j(exp(x_j - max(x)))
-///
-/// where max(x) is subtracted for numerical stability to prevent overflow.
-///
-/// Softmax is commonly used in multi-class classification tasks as the final
-/// activation layer, transforming the network's output into class probabilities
-/// that sum to 1.
-///
-/// # Input Shape
-///
-/// Typically accepts 2D tensors of shape \[batch_size, num_classes\], though it can
-/// handle higher dimensional inputs by applying softmax along the last axis for each
-/// batch element.
-///
-/// # Output Shape
-///
-/// Same as input shape, with values normalized to form a probability distribution
-/// along the last axis.
+/// Applies softmax along the last axis, converting logits into a probability distribution
+/// that sums to 1 for each row while preserving the input shape.
 ///
 /// # Fields
 ///
 /// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 /// - `output_cache` - Cached output tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -77,7 +57,7 @@ impl Softmax {
     ///
     /// # Returns
     ///
-    /// * `Softmax` - A new `Softmax` layer instance
+    /// - `Self` - A new `Softmax` layer instance
     pub fn new() -> Self {
         Softmax {
             input_cache: None,

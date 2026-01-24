@@ -4,11 +4,11 @@ use super::*;
 /// Based on total elements in the tensor.
 const LAYER_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Enum to specify which axis to normalize along in Layer Normalization
+/// Axis selection for layer normalization.
 ///
 /// # Variants
 ///
-/// - `Default` - Normalize along the last dimension (feature dimension) - most common case
+/// - `Default` - Normalize along the last dimension (feature dimension)
 /// - `Custom(usize)` - Normalize along a custom specified axis
 #[derive(Debug, Clone, Copy)]
 pub enum LayerNormalizationAxis {
@@ -16,37 +16,28 @@ pub enum LayerNormalizationAxis {
     Custom(usize),
 }
 
-/// Layer Normalization layer for neural networks, which normalizes the inputs
-/// across the features for each data sample to improve training stability and speed.
+/// Layer Normalization layer for neural networks.
 ///
-/// Unlike Batch Normalization which normalizes across the batch dimension, Layer Normalization
-/// normalizes across the feature dimensions for each individual sample. This makes it particularly
-/// useful for recurrent neural networks and situations where batch sizes are small or variable.
+/// Normalizes across feature dimensions for each sample, which is effective
+/// when batch sizes are small or variable.
 ///
 /// # Fields
 ///
-/// - `epsilon` - Small constant for numerical stability in normalization.
-/// - `normalized_axis` - The axis along which to normalize (Default = last axis, Custom = specified axis).
-/// - `input_shape` - Shape of the input tensor.
-/// - `gamma` - Scale parameter (trainable).
-/// - `beta` - Shift parameter (trainable).
-/// - `training` - Whether the layer is in training mode or inference mode.
-/// - `x_normalized` - Normalized input (used in backward pass).
-/// - `x_centered` - Centered input (used in backward pass).
-/// - `mean` - Mean computed during forward pass (used in backward pass).
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass).
-/// - `grad_gamma` - Gradient for gamma parameter.
-/// - `grad_beta` - Gradient for beta parameter.
-/// - `m_gamma` - First moment estimate for gamma (Adam optimizer).
-/// - `v_gamma` - Second moment estimate for gamma (Adam optimizer).
-/// - `m_beta` - First moment estimate for beta (Adam optimizer).
-/// - `v_beta` - Second moment estimate for beta (Adam optimizer).
-/// - `cache_gamma` - Cache for gamma (RMSprop optimizer).
-/// - `cache_beta` - Cache for beta (RMSprop optimizer).
-/// - `acc_grad_gamma` - Accumulated gradient for gamma (AdaGrad optimizer).
-/// - `acc_grad_beta` - Accumulated gradient for beta (AdaGrad optimizer).
+/// - `epsilon` - Small constant for numerical stability in normalization
+/// - `normalized_axis` - Axis along which to normalize
+/// - `input_shape` - Shape of the input tensor
+/// - `gamma` - Scale parameter (trainable)
+/// - `beta` - Shift parameter (trainable)
+/// - `training` - Whether the layer is in training mode or inference mode
+/// - `x_normalized` - Normalized input (used in backward pass)
+/// - `x_centered` - Centered input (used in backward pass)
+/// - `mean` - Mean computed during forward pass (used in backward pass)
+/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
+/// - `grad_gamma` - Gradient for gamma parameter
+/// - `grad_beta` - Gradient for beta parameter
+/// - `optimizer_cache` - Cache for optimizer states
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array2;
@@ -84,17 +75,17 @@ impl LayerNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor.
-    /// - `normalized_axis` - The axis along which to normalize (Default for last axis, Custom(usize) for specific axis).
-    /// - `epsilon` - Small constant for numerical stability (typically 1e-5).
+    /// - `input_shape` - Shape of the input tensor
+    /// - `normalized_axis` - Axis along which to normalize
+    /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
     ///
-    /// * `Result<Self, ModelError>` - A new instance of the LayerNormalization layer, or an error if validation fails.
+    /// - `Result<Self, ModelError>` - New LayerNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if `epsilon` is not positive or not finite.
+    /// - `ModelError::InputValidationError` - If `epsilon` is not positive or not finite
     pub fn new(
         input_shape: Vec<usize>,
         normalized_axis: LayerNormalizationAxis,
@@ -146,8 +137,8 @@ impl LayerNormalization {
     ///
     /// # Parameters
     ///
-    /// - `gamma` - Scale parameter (trainable).
-    /// - `beta` - Shift parameter (trainable).
+    /// - `gamma` - Scale parameter (trainable)
+    /// - `beta` - Shift parameter (trainable)
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) {
         self.gamma = gamma;
         self.beta = beta;

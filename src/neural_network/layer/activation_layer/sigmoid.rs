@@ -14,27 +14,14 @@ const SIGMOID_PARALLEL_THRESHOLD: usize = 1000;
 
 /// Sigmoid activation layer.
 ///
-/// This layer applies the Sigmoid activation function element-wise to the input tensor:
-/// f(x) = 1 / (1 + e^(-x))
-///
-/// Sigmoid is commonly used in neural networks, particularly for binary classification
-/// tasks in the output layer, as it squashes the input values to the range (0, 1).
-///
-/// # Input Shape
-///
-/// Accepts tensors of any dimensionality. Common shapes include:
-/// - 2D: \[batch_size, features\] for dense layers
-/// - 4D: \[batch_size, channels, height, width\] for convolutional layers
-///
-/// # Output Shape
-///
-/// Same as input shape.
+/// Applies `1 / (1 + e^(-x))` element-wise to the input tensor, squashing values to (0, 1)
+/// while preserving the input shape.
 ///
 /// # Fields
 ///
 /// - `output_cache` - Cached output tensor from the forward pass, used during backpropagation
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::prelude::*;
@@ -65,7 +52,7 @@ impl Sigmoid {
     ///
     /// # Returns
     ///
-    /// * `Sigmoid` - A new `Sigmoid` layer instance
+    /// - `Self` - A new `Sigmoid` layer instance
     pub fn new() -> Self {
         Sigmoid { output_cache: None }
     }

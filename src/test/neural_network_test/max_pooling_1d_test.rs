@@ -34,7 +34,7 @@ fn test_max_pooling_1d() {
         );
 
     // Output shape should be [2, 3, 4]
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[2, 3, 4]);
 
     // Verify correctness of pooling results

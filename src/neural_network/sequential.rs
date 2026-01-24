@@ -15,16 +15,11 @@ use std::io::{BufWriter, Write};
 ///
 /// # Fields
 ///
-/// - `layers` - A vector containing all the layers in the model. Each layer implements
-///   the `Layer` trait and is stored as a boxed dynamic trait object.
+/// - `layers` - A vector containing all layers in the model
+/// - `optimizer` - Optimizer used for updating parameters during training
+/// - `loss` - Loss function used to compute training loss
 ///
-/// - `optimizer` - An optional optimizer used for updating model parameters during training.
-///   Common optimizers include SGD, Adam, and RMSprop.
-///
-/// - `loss` - An optional loss function used to compute the training loss. Examples include
-///   mean squared error for regression and categorical crossentropy for classification.
-///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::Array;
@@ -64,7 +59,7 @@ use std::io::{BufWriter, Write};
 /// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Make predictions with loaded model
-/// let predictions = new_model.predict(&x);
+/// let predictions = new_model.predict(&x).unwrap();
 /// println!("Predictions shape: {:?}", predictions.shape());
 ///
 /// // Clean up: remove the created file
@@ -77,11 +72,11 @@ pub struct Sequential {
 }
 
 impl Sequential {
-    /// Creates a new empty Sequential model
+    /// Creates a new empty Sequential model.
     ///
     /// # Returns
     ///
-    /// * `Sequential` - an empty Sequential model
+    /// - `Sequential` - An empty Sequential model
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
@@ -90,23 +85,23 @@ impl Sequential {
         }
     }
 
-    /// Adds a layer to the model
+    /// Adds a layer to the model.
     ///
-    /// Supports method chaining pattern
+    /// Supports method chaining pattern.
     ///
     /// # Parameters
     ///
-    /// * `layer` - The layer to add to the model
+    /// - `layer` - The layer to add to the model
     ///
     /// # Returns
     ///
-    /// * `&mut Sequential` - Mutable reference to self for method chaining
+    /// - `&mut Self` - Mutable reference to self for method chaining
     pub fn add<L: 'static + Layer>(&mut self, layer: L) -> &mut Self {
         self.layers.push(Box::new(layer));
         self
     }
 
-    /// Configures the optimizer and loss function for the model
+    /// Configures the optimizer and loss function for the model.
     ///
     /// # Parameters
     ///
@@ -115,7 +110,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// * `&mut Sequential` - Mutable reference to self for method chaining
+    /// - `&mut Self` - Mutable reference to self for method chaining
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,
@@ -220,15 +215,24 @@ impl Sequential {
         Ok(loss_value)
     }
 
-    /// Trains the model on the provided data
+    /// Trains the model on the provided data.
     ///
-    /// Executes the forward pass, loss calculation, backward pass, and parameter updates
+    /// Executes the forward pass, loss calculation, backward pass, and parameter updates.
     ///
     /// # Parameters
     ///
     /// - `x` - Input tensor containing training data
     /// - `y` - Target tensor containing expected outputs
     /// - `epochs` - Number of training epochs to perform
+    ///
+    /// # Returns
+    ///
+    /// - `Result<&mut Self, ModelError>` - Mutable reference to self after training or an error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the model is not compiled, has no layers, or inputs are invalid
+    /// - `ModelError::ProcessingError` - If a layer fails during forward or backward pass
     pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<&mut Self, ModelError> {
         // Validate inputs
         self.validate_training_inputs(x, y)?;
@@ -264,10 +268,10 @@ impl Sequential {
         Ok(self)
     }
 
-    /// Trains the model using batch processing
+    /// Trains the model using batch processing.
     ///
     /// Splits data into batches of specified size for training, automatically prints
-    /// detailed information for each batch by default
+    /// detailed information for each batch by default.
     ///
     /// # Parameters
     ///
@@ -278,7 +282,12 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// * `Result<&mut Self, ModelError>` - Mutable reference to trained model or error
+    /// - `Result<&mut Self, ModelError>` - Mutable reference to trained model or error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If the model is not compiled, has no layers, inputs are invalid, or batch size is invalid
+    /// - `ModelError::ProcessingError` - If a layer fails during forward or backward pass
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,
@@ -409,38 +418,47 @@ impl Sequential {
         Ok(self)
     }
 
-    /// Generates predictions for the input data
+    /// Generates predictions for the input data.
     ///
-    /// Only performs forward pass without any training
+    /// Only performs forward pass without any training.
     ///
     /// # Parameters
     ///
-    /// * `x` - Input tensor containing data to predict on
+    /// - `x` - Input tensor containing data to predict on
     ///
     /// # Returns
     ///
-    /// * `Tensor` - Tensor containing the model's predictions
-    pub fn predict(&mut self, x: &Tensor) -> Tensor {
+    /// - `Result<Tensor, ModelError>` - Tensor containing the model's predictions or an error
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `x` is empty or the model has no layers
+    /// - `ModelError::ProcessingError` - If any layer fails during forward pass
+    pub fn predict(&mut self, x: &Tensor) -> Result<Tensor, ModelError> {
         // Input validation
         if x.is_empty() {
-            panic!("Input tensor cannot be empty");
+            return Err(ModelError::InputValidationError(
+                "Input tensor cannot be empty".to_string(),
+            ));
         }
 
         let mut layers_iter = self.layers.iter_mut();
-        let first_layer = layers_iter.next().expect("Model has no layers");
+        let first_layer = layers_iter
+            .next()
+            .ok_or_else(|| ModelError::InputValidationError("Model has no layers".to_string()))?;
         first_layer.set_training_if_mode_dependent(false);
-        let mut output = first_layer.forward(x).expect("Failed to forward pass");
+        let mut output = first_layer.forward(x)?;
 
         for layer in layers_iter {
             layer.set_training_if_mode_dependent(false);
-            output = layer.forward(&output).expect("Failed to forward pass");
+            output = layer.forward(&output)?;
         }
-        output
+        Ok(output)
     }
 
-    /// Prints a summary of the model's structure
+    /// Prints a summary of the model's structure.
     ///
-    /// Displays each layer's information and parameter statistics in a tabular format
+    /// Displays each layer's information and parameter statistics in a tabular format to stdout.
     pub fn summary(&self) {
         let col1_width = 33;
         let col2_width = 24;
@@ -527,11 +545,7 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// * `Vec<LayerWeight>` - A vector containing weight references for each layer in the model.
-    ///   The type of each `LayerWeight` depends on the layer type:
-    ///   - `LayerWeight::Dense` for Dense layers with weight and bias
-    ///   - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
-    ///   - `LayerWeight::LSTM` for LSTM layers with weights for input, forget, cell, and output gates
+    /// - `Vec<LayerWeight<'_>>` - A vector containing weight references for each layer in the model
     pub fn get_weights(&self) -> Vec<LayerWeight<'_>> {
         let mut weights = Vec::with_capacity(self.layers.len());
         for layer in &self.layers {
@@ -548,13 +562,16 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// * `path` - File path where the model will be saved (e.g., "stored_model.json")
+    /// - `path` - File path where the model will be saved (e.g., "stored_model.json")
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - Model successfully saved to file
-    /// - `Err(IoError::StdIoError)` - File creation or write operation failed
-    /// - `Err(IoError::JsonError)` - Serialization to JSON failed
+    /// - `Result<(), IoError>` - Ok if the model is saved, or an IO/serialization error
+    ///
+    /// # Errors
+    ///
+    /// - `IoError::StdIoError` - File creation or write operation failed
+    /// - `IoError::JsonError` - Serialization to JSON failed
     pub fn save_to_path(&self, path: &str) -> Result<(), IoError> {
         // Convert layers to serializable format
         let serializable_layers = self
@@ -602,14 +619,17 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// * `path` - File path from which to load the weights (e.g., "stored_model.json")
+    /// - `path` - File path from which to load the weights (e.g., "stored_model.json")
     ///
     /// # Returns
     ///
-    /// - `Ok(())` - Successfully loaded weights into the model
-    /// - `Err(IoError::StdIoError)` - File not found or read operation failed
-    /// - `Err(IoError::JsonError)` - Deserialization from JSON failed
-    /// - `Err(IoError::ModelStructureMismatch)` - Model structure doesn't match saved weights
+    /// - `Result<(), IoError>` - Ok if weights are loaded, or an IO/deserialization error
+    ///
+    /// # Errors
+    ///
+    /// - `IoError::StdIoError` - File not found or read operation failed
+    /// - `IoError::JsonError` - Deserialization from JSON failed
+    /// - `IoError::ModelStructureMismatch` - Model structure doesn't match saved weights
     pub fn load_from_path(&mut self, path: &str) -> Result<(), IoError> {
         // Open and buffer the file for reading
         let reader = IoError::load_in_buf_reader(path)?;

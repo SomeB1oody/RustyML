@@ -5,20 +5,18 @@ use super::*;
 /// Otherwise, sequential execution is used to avoid parallel overhead.
 const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 
-/// Global Average Pooling 3D Layer
+/// Global average pooling layer for 3D inputs.
 ///
-/// Performs global average pooling operation on the spatial dimensions (depth, height, and width) of the input tensor.
-/// Input tensor shape should be `[batch_size, channels, depth, height, width]`,
-/// output tensor shape will be `[batch_size, channels]`.
-///
-/// This layer has no trainable parameters.
+/// Computes the mean value across the depth, height, and width dimensions.
+/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
+/// `[batch_size, channels]`.
 ///
 /// # Fields
 ///
-/// - `input_shape` - Stores the shape of the input tensor during forward propagation.
-/// - `input_cache` - Caches the input tensor for backward propagation.
+/// - `input_shape` - Shape of the input tensor cached during the forward pass
+/// - `input_cache` - Cached input tensor from the forward pass
 ///
-/// # Example
+/// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
 /// use ndarray::{Array, IxDyn};
@@ -34,7 +32,7 @@ const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 /// let input_data = Array::from_elem(IxDyn(&[2, 4, 8, 8, 8]), 1.0);
 ///
 /// // Forward propagation
-/// let output = model.predict(&input_data);
+/// let output = model.predict(&input_data).unwrap();
 ///
 /// // Check output shape - should be [2, 4]
 /// assert_eq!(output.shape(), &[2, 4]);
@@ -46,17 +44,21 @@ const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 ///     }
 /// }
 /// ```
+///
+/// # Performance
+///
+/// Parallel execution is used when `batch_size * channels >= GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD` (32).
 pub struct GlobalAveragePooling3D {
     input_shape: Vec<usize>,
     input_cache: Option<Tensor>,
 }
 
 impl GlobalAveragePooling3D {
-    /// Creates a new GlobalAveragePooling3D layer.
+    /// Creates a new global average pooling 3D layer.
     ///
     /// # Returns
     ///
-    /// * `GlobalAveragePooling3D` - A new `GlobalAveragePooling3D` layer instance
+    /// - `GlobalAveragePooling3D` - New layer instance
     pub fn new() -> Self {
         GlobalAveragePooling3D {
             input_shape: Vec::new(),

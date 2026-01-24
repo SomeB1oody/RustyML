@@ -46,14 +46,14 @@ fn test_fit_linear_regression_convergence() {
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     // Record initial predictions
-    let initial_predictions = model.predict(&x);
+    let initial_predictions = model.predict(&x).unwrap();
     let initial_loss = calculate_mse(&y, &initial_predictions);
 
     // Train the model
     model.fit(&x, &y, 100).unwrap();
 
     // Get predictions after training
-    let final_predictions = model.predict(&x);
+    let final_predictions = model.predict(&x).unwrap();
     let final_loss = calculate_mse(&y, &final_predictions);
 
     // Validation 1: Loss should decrease significantly
@@ -73,7 +73,7 @@ fn test_fit_linear_regression_convergence() {
 
     // Validation 3: Predictions for known inputs should be close to expected values
     let test_x = Array::from_shape_vec((1, 1), vec![1.0]).unwrap().into_dyn();
-    let prediction = model.predict(&test_x);
+    let prediction = model.predict(&test_x).unwrap();
     let expected = 3.0; // 2*1 + 1 = 3
 
     assert!(
@@ -120,7 +120,7 @@ fn test_fit_classification_convergence() {
         ); // Smaller learning rate
 
     // Record initial prediction accuracy
-    let initial_predictions = model.predict(&x);
+    let initial_predictions = model.predict(&x).unwrap();
     let initial_accuracy = calculate_accuracy(&y, &initial_predictions);
 
     println!("Initial accuracy: {:.3}", initial_accuracy);
@@ -129,7 +129,7 @@ fn test_fit_classification_convergence() {
     model.fit(&x, &y, 150).unwrap();
 
     // Get predictions after training
-    let final_predictions = model.predict(&x);
+    let final_predictions = model.predict(&x).unwrap();
     let final_accuracy = calculate_accuracy(&y, &final_predictions);
 
     println!("Final accuracy: {:.3}", final_accuracy);
@@ -163,7 +163,7 @@ fn test_fit_classification_convergence() {
     let test_x = Array::from_shape_vec((2, 2), vec![-1.5, -1.5, 1.5, 1.5])
         .unwrap()
         .into_dyn();
-    let predictions = model.predict(&test_x);
+    let predictions = model.predict(&test_x).unwrap();
 
     // First sample [-1.5, -1.5] should predict class 0 (first element larger)
     assert!(

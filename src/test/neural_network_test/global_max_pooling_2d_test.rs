@@ -28,7 +28,7 @@ fn test_global_max_pooling_forward() {
     model.add(GlobalMaxPooling2D::new());
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape - should be [2, 3]
     assert_eq!(output.shape(), &[2, 3]);
@@ -97,7 +97,7 @@ fn test_global_max_pooling_in_sequential() {
     let input_data = Array::from_elem(IxDyn(&[3, 4, 5, 5]), 1.0);
 
     // Forward propagation
-    let output = model.predict(&input_data);
+    let output = model.predict(&input_data).unwrap();
 
     // Check output shape - should be [3, 4]
     assert_eq!(output.shape(), &[3, 4]);

@@ -41,7 +41,7 @@ impl CategoricalCrossEntropy {
     ///
     /// # Returns
     ///
-    /// * `CategoricalCrossEntropy` - Returns a unit-like struct `CategoricalCrossEntropy`
+    /// - `CategoricalCrossEntropy` - Returns a unit-like struct `CategoricalCrossEntropy`
     pub fn new() -> Self {
         Self {}
     }

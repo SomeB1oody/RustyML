@@ -26,7 +26,7 @@ fn test_separable_conv2d_basic() {
     model.summary();
 
     // Forward pass
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Verify output shape: [1, 32, 16, 16]
     assert_eq!(output.shape(), &[1, 32, 16, 16]);
@@ -60,7 +60,7 @@ fn test_separable_conv2d_different_depth_multiplier() {
             MeanSquaredError::new(),
         );
 
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Verify output shape
     assert_eq!(output.shape(), &[2, 16, 8, 8]);
@@ -86,7 +86,7 @@ fn test_separable_conv2d_valid_padding() {
         )
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Valid padding: output size = (10-3)/1 + 1 = 8
     assert_eq!(output.shape(), &[1, 8, 8, 8]);
@@ -120,7 +120,7 @@ fn test_separable_conv2d_with_strides() {
             MeanSquaredError::new(),
         );
 
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
 
     // Same padding with stride 2: output size = ceil(32/2) = 16
     assert_eq!(output.shape(), &[1, 64, 16, 16]);
@@ -158,7 +158,7 @@ fn test_separable_conv2d_training() {
     assert!(result.is_ok());
 
     // Verify model can make predictions
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[2, 16, 8, 8]);
 }
 
@@ -291,7 +291,7 @@ fn test_separable_conv2d_batch_processing() {
             )
             .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-        let output = model.predict(&x);
+        let output = model.predict(&x).unwrap();
         assert_eq!(output.shape(), &[batch_size, 16, 8, 8]);
     }
 }
@@ -319,7 +319,7 @@ fn test_separable_conv2d_large_kernel() {
             MeanSquaredError::new(),
         );
 
-    let output = model.predict(&x);
+    let output = model.predict(&x).unwrap();
     assert_eq!(output.shape(), &[1, 64, 32, 32]);
 }
 
