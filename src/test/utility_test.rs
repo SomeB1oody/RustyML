@@ -1,6 +1,6 @@
 use crate::error::ModelError;
 use crate::utility::*;
-use approx::{assert_abs_diff_eq, assert_relative_eq};
+use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 
 mod kernel_pca_test;

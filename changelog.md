@@ -5,6 +5,9 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-01-25 (UTC-7)
+- Refactor and update `LDA` implementation in `utility` module
+
 ## [v0.11.0] - 2026-01-24 (UTC-7)
 - Refactor and update `t_sne` implementation in `utility` module
 
