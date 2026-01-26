@@ -1,5 +1,4 @@
 use super::*;
-use std::error::Error;
 
 fn make_three_class_dataset() -> (Array2<f64>, Array1<i32>) {
     let x = arr2(&[

@@ -16,14 +16,6 @@ const ADAM_PARALLEL_THRESHOLD: usize = 1024;
 /// - `beta2` - Exponential decay rate for the second moment estimates
 /// - `epsilon` - Small constant added for numerical stability
 /// - `t` - Current timestep, incremented with each update
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::Adam;
-///
-/// let optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
-/// ```
 pub struct Adam {
     learning_rate: f32,
     beta1: f32,
@@ -99,14 +91,6 @@ impl Optimizer for Adam {
 /// - `v_recurrent` - Second moment vector for recurrent parameters (if applicable)
 /// - `m_bias` - First moment vector for bias parameters
 /// - `v_bias` - Second moment vector for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdamStates;
-///
-/// let states = AdamStates::new((2, 2), None, (1, 2));
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStates {
     pub m: Array2<f32>,
@@ -129,14 +113,6 @@ impl AdamStates {
     /// # Returns
     ///
     /// - `Self` - A new AdamStates instance with all moment vectors initialized to zero matrices
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rustyml::neural_network::optimizer::AdamStates;
-    ///
-    /// let states = AdamStates::new((2, 2), None, (1, 2));
-    /// ```
     pub fn new(
         dims_param: (usize, usize),
         dims_recurrent: Option<(usize, usize)>,
@@ -318,14 +294,6 @@ impl AdamStates {
 /// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 3D array
 /// - `m_bias` - First moment matrix for bias parameters
 /// - `v_bias` - Second moment matrix for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdamStatesConv1D;
-///
-/// let states = AdamStatesConv1D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv1D {
     pub m: Array3<f32>,
@@ -348,14 +316,6 @@ pub struct AdamStatesConv1D {
 /// - `v` - Second moment tensor (moving average of squared gradients) for main parameters, stored as a 4D array
 /// - `m_bias` - First moment matrix for bias parameters
 /// - `v_bias` - Second moment matrix for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdamStatesConv2D;
-///
-/// let states = AdamStatesConv2D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv2D {
     pub m: Array4<f32>,
@@ -378,14 +338,6 @@ pub struct AdamStatesConv2D {
 /// - `v` - Second moment estimate (velocity) for the 5D convolution weights with the same shape as `m`
 /// - `m_bias` - First moment estimate for the bias tensor with shape (1, output_channels)
 /// - `v_bias` - Second moment estimate for the bias tensor with the same shape as `m_bias`
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdamStatesConv3D;
-///
-/// let states = AdamStatesConv3D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesConv3D {
     pub m: Array5<f32>,
@@ -407,14 +359,6 @@ pub struct AdamStatesConv3D {
 /// - `v_gamma` - Second moment tensor (moving average of squared gradients) for gamma parameter
 /// - `m_beta` - First moment tensor for beta (shift) parameter
 /// - `v_beta` - Second moment tensor for beta parameter
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdamStatesNormalizationLayer;
-///
-/// let states = AdamStatesNormalizationLayer::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdamStatesNormalizationLayer {
     pub m_gamma: Tensor,

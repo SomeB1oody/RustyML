@@ -371,7 +371,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Accuracy in the range [0.0, 1.0] (returns 0.0 when there are no predictions)
+    /// - `f64` - Accuracy in the range \[0.0, 1.0\] (returns 0.0 when there are no predictions)
     pub fn accuracy(&self) -> f64 {
         let total = self.tp + self.tn + self.fp + self.fn_;
         if total == 0 {
@@ -386,7 +386,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Error rate in the range [0.0, 1.0]
+    /// - `f64` - Error rate in the range \[0.0, 1.0\]
     pub fn error_rate(&self) -> f64 {
         1.0 - self.accuracy()
     }
@@ -397,7 +397,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Precision in the range [0.0, 1.0] (returns 0.0 when there are no positive predictions)
+    /// - `f64` - Precision in the range \[0.0, 1.0\] (returns 0.0 when there are no positive predictions)
     pub fn precision(&self) -> f64 {
         if self.tp + self.fp == 0 {
             return 0.0;
@@ -411,7 +411,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Recall in the range [0.0, 1.0] (returns 1.0 when there are no actual positives)
+    /// - `f64` - Recall in the range \[0.0, 1.0\] (returns 1.0 when there are no actual positives)
     pub fn recall(&self) -> f64 {
         if self.tp + self.fn_ == 0 {
             return 1.0;
@@ -425,7 +425,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Specificity in the range [0.0, 1.0] (returns 1.0 when there are no actual negatives)
+    /// - `f64` - Specificity in the range \[0.0, 1.0\] (returns 1.0 when there are no actual negatives)
     pub fn specificity(&self) -> f64 {
         if self.tn + self.fp == 0 {
             return 1.0;
@@ -439,7 +439,7 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - F1 score in the range [0.0, 1.0] (returns 0.0 when both precision and recall are 0.0)
+    /// - `f64` - F1 score in the range \[0.0, 1.0\] (returns 0.0 when both precision and recall are 0.0)
     pub fn f1_score(&self) -> f64 {
         let precision = self.precision();
         let recall = self.recall();
@@ -507,7 +507,7 @@ impl ConfusionMatrix {
 ///
 /// # Returns
 ///
-/// - `f64` - Accuracy in the range [0.0, 1.0]
+/// - `f64` - Accuracy in the range \[0.0, 1.0\]
 ///
 /// # Panics
 ///

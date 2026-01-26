@@ -1,130 +1,134 @@
 use super::*;
 
-/// Threshold for determining whether to use parallel processing in PCA computations
-/// When n_components >= this threshold, parallel processing is used for variance calculations
-const PCA_PARALLEL_THRESHOLD: usize = 64;
-
-/// PCA structure for implementing Principal Component Analysis
+/// SVD solver options for Principal Component Analysis.
 ///
-/// This structure provides functionality for dimensionality reduction using PCA.
-/// It allows fitting a model to data, transforming data into principal component space,
-/// and retrieving various statistics about the decomposition.
+/// Selects the decomposition strategy used to compute principal components.
+/// For small to mid-sized datasets (typically fewer than 10,000 samples or features),
+/// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
+/// `Randomized` is recommended for speed with good accuracy. `ARPACK` is recommended when
+/// you need only a few components from very large, sparse, or memory-constrained problems.
+///
+/// # Variants
+///
+/// - `Full` - Full SVD using deterministic decomposition
+/// - `Randomized` - Randomized SVD with a fixed RNG seed
+/// - `ARPACK` - Power-iteration based approximation
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub enum SVDSolver {
+    Full,
+    Randomized(u64),
+    ARPACK,
+}
+
+/// Threshold for using parallel computation in PCA.
+/// When the number of samples is below this threshold, sequential computation is used.
+const PCA_PARALLEL_THRESHOLD: usize = 200;
+
+/// Principal Component Analysis (PCA) model.
+///
+/// Reduces dimensionality by projecting data onto orthogonal components that capture the highest
+/// variance.
 ///
 /// # Fields
 ///
-/// - `n_components` - Number of principal components to keep in the model
-/// - `components` - Principal axes in feature space, representing the directions of maximum variance Shape is (n_components, n_features)
-/// - `mean` - Mean of each feature in the training data, used for centering
-/// - `explained_variance` - Amount of variance explained by each component
-/// - `explained_variance_ratio` - Percentage of variance explained by each component
+/// - `n_components` - Number of components to keep
+/// - `svd_solver` - SVD solver strategy
+/// - `mean` - Per-feature mean used for centering
+/// - `components` - Principal axes in feature space
+/// - `explained_variance` - Variance explained by each selected component
+/// - `explained_variance_ratio` - Ratio of variance explained by each selected component
 /// - `singular_values` - Singular values corresponding to each component
+/// - `n_samples` - Number of samples seen during fitting
+/// - `n_features` - Number of features seen during fitting
 ///
 /// # Examples
 /// ```rust
-/// use ndarray::{array, Array2};
-/// use rustyml::utility::principal_component_analysis::PCA;
+/// use rustyml::prelude::*;
+/// use ndarray::array;
 ///
-/// // Create some sample data (3 samples, 4 features)
-/// let data = Array2::from_shape_vec((3, 4), vec![
-///     1.0, 2.0, 3.0, 4.0,
-///     2.0, 3.0, 4.0, 5.0,
-///     3.0, 4.0, 5.0, 6.0
-/// ]).unwrap();
-///
-/// // Create a PCA model with 2 components
-/// let mut pca = PCA::new(2).expect("Failed to create PCA model");
-///
-/// // Fit the model to the data
-/// pca.fit(&data).expect("Failed to fit PCA model");
-///
-/// // Transform the data to the principal component space
-/// let transformed = pca.transform(&data).expect("Failed to transform data");
-/// println!("Transformed data:\n{:?}", transformed);
-///
-/// // Get the explained variance ratio
-/// let variance_ratio = pca.get_explained_variance_ratio().expect("Model not fitted");
-/// println!("Explained variance ratio: {:?}", variance_ratio);
-///
-/// // Transform back to original space
-/// let reconstructed = pca.inverse_transform(&transformed).expect("Failed to inverse transform");
-/// println!("Reconstructed data:\n{:?}", reconstructed);
+/// let mut pca = principal_component_analysis::PCA::new(
+///     2,
+///     principal_component_analysis::SVDSolver::Full,
+/// )
+/// .unwrap();
+/// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
+/// pca.fit(&x).unwrap();
+/// let projected = pca.transform(&x).unwrap();
+/// assert_eq!(projected.ncols(), 2);
 /// ```
-///
-/// # Common use cases
-///
-/// - Dimensionality reduction: Reduce high-dimensional data to a lower-dimensional space
-/// - Data visualization: Project data to 2 or 3 dimensions for visualization
-/// - Feature extraction: Extract the most important features from the dataset
-/// - Noise filtering: Remove noise by discarding components with low variance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PCA {
     n_components: usize,
-    components: Option<Array2<f64>>,
+    svd_solver: SVDSolver,
     mean: Option<Array1<f64>>,
+    components: Option<Array2<f64>>,
     explained_variance: Option<Array1<f64>>,
     explained_variance_ratio: Option<Array1<f64>>,
     singular_values: Option<Array1<f64>>,
+    n_samples: Option<usize>,
+    n_features: Option<usize>,
 }
 
 impl Default for PCA {
-    /// Default implementation for PCA
-    ///
-    /// Creates a new PCA instance with default values.
+    /// Creates a default PCA instance.
     ///
     /// # Default Values
     ///
-    /// - `n_components` - 2 (common for visualization purposes)
-    /// - `components` - None (computed during fitting)
-    /// - `mean` - None (computed during fitting)
-    /// - `explained_variance` - None (computed during fitting)
-    /// - `explained_variance_ratio` - None (computed during fitting)
-    /// - `singular_values` - None (computed during fitting)
+    /// - `n_components` - 2
+    /// - `svd_solver` - `SVDSolver::Full`
     fn default() -> Self {
-        // Default to 2 components which is common for visualization purposes
-        Self {
-            n_components: 2,
-            components: None,
-            mean: None,
-            explained_variance: None,
-            explained_variance_ratio: None,
-            singular_values: None,
-        }
+        PCA::new(2, SVDSolver::Full).expect("Default PCA parameters should be valid")
     }
 }
 
 impl PCA {
-    /// Creates a new PCA instance with validation
+    /// Creates a new PCA instance with validated hyperparameters.
+    ///
+    /// Solver guidance: choose `SVDSolver::Full` for small to mid-sized datasets (typically fewer
+    /// than 10,000 samples or features), `SVDSolver::Randomized` for large datasets (10,000+ samples
+    /// or features) when speed matters, and `SVDSolver::ARPACK` when extracting only a few
+    /// components from very large, sparse, or memory-constrained problems.
     ///
     /// # Parameters
     ///
-    /// - `n_components` - Number of principal components to keep (must be > 0)
+    /// - `n_components` - Number of components to keep (must be > 0)
+    /// - `svd_solver` - SVD solver strategy
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new PCA instance with the specified number of components, or an error if validation fails
+    /// - `Result<Self, ModelError>` - A new PCA instance or validation error
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if `n_components` is 0
-    pub fn new(n_components: usize) -> Result<Self, ModelError> {
+    /// - `ModelError::InputValidationError` - If `n_components` is 0
+    pub fn new(n_components: usize, svd_solver: SVDSolver) -> Result<Self, ModelError> {
         if n_components == 0 {
             return Err(ModelError::InputValidationError(
                 "n_components must be greater than 0".to_string(),
             ));
         }
 
-        Ok(PCA {
+        // Initialize model state with unset learned parameters
+        Ok(Self {
             n_components,
-            components: None,
+            svd_solver,
             mean: None,
+            components: None,
             explained_variance: None,
             explained_variance_ratio: None,
             singular_values: None,
+            n_samples: None,
+            n_features: None,
         })
     }
 
-    get_field_as_ref!(get_components, components, Option<&Array2<f64>>);
+    // Getters
+    get_field!(get_n_components, n_components, usize);
+    get_field!(get_svd_solver, svd_solver, SVDSolver);
+    get_field!(get_n_samples, n_samples, Option<usize>);
+    get_field!(get_n_features, n_features, Option<usize>);
     get_field_as_ref!(get_mean, mean, Option<&Array1<f64>>);
+    get_field_as_ref!(get_components, components, Option<&Array2<f64>>);
     get_field_as_ref!(
         get_explained_variance,
         explained_variance,
@@ -136,218 +140,117 @@ impl PCA {
         Option<&Array1<f64>>
     );
     get_field_as_ref!(get_singular_values, singular_values, Option<&Array1<f64>>);
-    get_field!(get_n_components, n_components, usize);
 
-    /// Validates input data for NaN and infinite values
-    fn validate_input_data<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
-    where
-        S: Data<Elem = f64>,
-    {
-        // Check if input data is empty
-        if x.nrows() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data is empty".to_string(),
-            ));
-        }
-
-        // Check for NaN or infinite values using iterator
-        // More efficient than collecting and parallelizing for most use cases
-        if let Some(((i, j), _)) = x
-            .indexed_iter()
-            .find(|&(_, &val)| val.is_nan() || val.is_infinite())
-        {
-            return Err(ModelError::InputValidationError(format!(
-                "Input data contains NaN or infinite value at position [{}, {}]",
-                i, j
-            )));
-        }
-
-        Ok(())
-    }
-
-    //// Fits the PCA model
+    /// Fits the PCA model.
+    ///
+    /// Computes the mean, principal components, and variance statistics for the input data.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data matrix, where rows are samples and columns are features
+    /// - `x` - Feature matrix with samples as rows and features as columns
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - The instance itself if successful
+    /// - `Result<&mut Self, ModelError>` - Mutable reference to self for chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - returns if input data is empty, contains NaN/infinite values, or feature count is 0
-    /// - `ModelError::ProcessingError` - returns if internal computation (SVD, mean) fails
+    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `ModelError::ProcessingError` - If the decomposition fails or numerical issues occur
     ///
     /// # Performance
     ///
-    /// Parallel processing is used for variance and singular value calculations when `n_components >= 64`.
+    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64>,
     {
-        // Validate input data
-        self.validate_input_data(x)?;
-
-        let n_samples = x.nrows();
-        let n_features = x.ncols();
-
-        // Check if number of features is valid
-        if n_features == 0 {
-            return Err(ModelError::InputValidationError(
-                "Number of features must be greater than 0".to_string(),
-            ));
-        }
-
-        // Calculate feature means in parallel using ndarray's built-in method
-        let mean = x
-            .mean_axis(Axis(0))
-            .ok_or_else(|| ModelError::ProcessingError("Failed to compute mean".to_string()))?;
-
-        // Center the data more efficiently using broadcasting
-        let x_centered = x - &mean;
-
-        // Use SVD for more stable computation
-        let x_slice = x_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert x_centered to slice".to_string())
-        })?;
-        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
-
-        // Compute SVD
-        let svd = nalgebra::SVD::new(x_mat, true, true);
-        let s_vals = svd.singular_values;
-        let m = s_vals.len();
-
-        // Limit components to available singular values
-        let n_components = self.n_components.min(m);
-
-        // Get principal components from V^T
-        let v_t = svd
-            .v_t
-            .ok_or_else(|| ModelError::ProcessingError("SVD did not compute V^T".to_string()))?;
-        let components = Array2::from_shape_fn((n_components, n_features), |(i, j)| v_t.row(i)[j]);
-
-        // Compute explained variance and singular values
-        // Use parallel processing only when n_components exceeds threshold
-        let variance_and_singular: Vec<(f64, f64)> = if n_components >= PCA_PARALLEL_THRESHOLD {
-            (0..n_components)
-                .into_par_iter()
-                .map(|i| {
-                    let s_val = s_vals[i];
-                    let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
-                    (exp_var, s_val)
-                })
-                .collect()
-        } else {
-            (0..n_components)
-                .map(|i| {
-                    let s_val = s_vals[i];
-                    let exp_var = (s_val * s_val) / ((n_samples - 1) as f64);
-                    (exp_var, s_val)
-                })
-                .collect()
-        };
-
-        let (explained_variance, singular_values): (Vec<f64>, Vec<f64>) =
-            variance_and_singular.into_iter().unzip();
-
-        let explained_variance = Array1::from(explained_variance);
-        let singular_values = Array1::from(singular_values);
-
-        // Compute total variance from already calculated values
-        let total_variance: f64 = explained_variance.sum();
-
-        // Calculate explained variance ratio
-        let explained_variance_ratio = explained_variance.mapv(|v| v / total_variance);
-
-        // Store results
-        self.components = Some(components);
-        self.mean = Some(mean);
-        self.explained_variance = Some(explained_variance);
-        self.explained_variance_ratio = Some(explained_variance_ratio);
-        self.singular_values = Some(singular_values);
-
-        Ok(self)
+        self.fit_internal(x, true)
     }
 
-    /// Transforms data into principal component space
+    /// Transforms data into principal component space.
+    ///
+    /// Projects centered data onto the fitted principal components.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data matrix to transform
+    /// - `x` - Feature matrix with samples as rows and features as columns
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - The transformed data in PC space
+    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - returns if the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - returns if input is invalid or feature dimension doesn't match
+    /// - `ModelError::NotFitted` - If the model has not been fitted
+    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `ModelError::ProcessingError` - If projection fails
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel projection when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
-        let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
-        let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
-
-        // Validate input data
-        self.validate_input_data(x)?;
-
-        // Check feature dimension match
-        if x.ncols() != mean.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data: expected {}, got {}",
-                mean.len(),
-                x.ncols()
-            )));
-        }
-
-        // Center data using broadcasting (more efficient than manual subtraction)
-        let x_centered = x - mean;
-
-        // Direct matrix multiplication for transformation
-        let transformed = x_centered.dot(&components.t());
-
-        Ok(transformed)
+        self.transform_internal(x, true)
     }
 
-    /// Fits the model and transforms the data
+    /// Fits the model and transforms the data.
+    ///
+    /// Computes components and returns the projected data in a single step.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data matrix
+    /// - `x` - Feature matrix with samples as rows and features as columns
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - The transformed data if successful
+    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError` - returns if fitting or transformation fails
+    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `ModelError::ProcessingError` - If the decomposition or projection fails
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
-        self.fit(x)?;
-        self.transform(x)
+        let progress_bar = Self::create_progress_bar(2, "Fitting model");
+        self.fit_internal(x, false)?;
+        progress_bar.inc(1);
+        progress_bar.set_message("Transforming data");
+        let transformed = self.transform_internal(x, false)?;
+        progress_bar.inc(1);
+        progress_bar.finish_with_message("Completed");
+        Ok(transformed)
     }
 
-    /// Transforms data from principal component space back to original feature space
+    /// Transforms data from principal component space back to original feature space.
+    ///
+    /// Reconstructs approximate original data using the fitted components and mean.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data matrix in principal component space
+    /// - `x` - PCA-transformed data matrix
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - The reconstructed data in original space
+    /// - `Result<Array2<f64>, ModelError>` - Reconstructed data in original feature space
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - returns if the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - returns if input is invalid or component count doesn't match
+    /// - `ModelError::NotFitted` - If the model has not been fitted
+    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `ModelError::ProcessingError` - If reconstruction fails
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel reconstruction when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -355,22 +258,538 @@ impl PCA {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
-        // Validate input data
-        self.validate_input_data(x)?;
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot inverse transform empty dataset".to_string(),
+            ));
+        }
 
-        // Check component dimension match
         if x.ncols() != components.nrows() {
             return Err(ModelError::InputValidationError(format!(
-                "Number of components does not match model: expected {}, got {}",
-                components.nrows(),
-                x.ncols()
+                "Number of components does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                components.nrows()
             )));
         }
 
-        // Transform back to original feature space using broadcasting
-        let x_restored = x.dot(components) + mean;
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
 
-        Ok(x_restored)
+        let progress_bar = Self::create_progress_bar(3, "Validating input");
+        progress_bar.inc(1);
+        progress_bar.set_message("Reconstructing data");
+
+        let reconstructed = if x.nrows() >= PCA_PARALLEL_THRESHOLD {
+            let x_owned = x.to_owned();
+            Self::reconstruct_parallel(&x_owned, components, mean)?
+        } else {
+            let mut reconstructed = x.dot(components);
+            reconstructed += mean;
+            reconstructed
+        };
+
+        progress_bar.inc(1);
+        progress_bar.set_message("Finalizing output");
+        progress_bar.inc(1);
+        progress_bar.finish_with_message("Completed");
+
+        Ok(reconstructed)
+    }
+
+    fn fit_internal<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        show_progress: bool,
+    ) -> Result<&mut Self, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input data cannot be empty".to_string(),
+            ));
+        }
+
+        if x.ncols() == 0 {
+            return Err(ModelError::InputValidationError(
+                "Number of features must be greater than 0".to_string(),
+            ));
+        }
+
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        let n_samples = x.nrows();
+        let n_features = x.ncols();
+
+        if n_samples < 2 {
+            return Err(ModelError::InputValidationError(
+                "PCA requires at least 2 samples".to_string(),
+            ));
+        }
+
+        // Enforce component count against data rank limits
+        let max_components = n_samples.min(n_features);
+        if self.n_components > max_components {
+            return Err(ModelError::InputValidationError(format!(
+                "n_components should be <= {}, got {}",
+                max_components, self.n_components
+            )));
+        }
+
+        let progress_bar = if show_progress {
+            Some(Self::create_progress_bar(5, "Validating input"))
+        } else {
+            None
+        };
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Centering data");
+        }
+
+        // Center data and keep the mean for later transforms
+        let mut x_centered = x.to_owned();
+        let mean = Self::compute_mean(&x_centered);
+        Self::center_data(&mut x_centered, &mean);
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Computing decomposition");
+        }
+
+        // Compute principal axes and singular values
+        let (components, singular_values) = self.compute_components(&x_centered)?;
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Computing explained variance");
+        }
+
+        // Convert singular values into variance statistics
+        let explained_variance = singular_values.mapv(|s| (s * s) / ((n_samples - 1) as f64));
+        let total_variance = Self::total_variance(&x_centered, n_samples)?;
+        let explained_variance_ratio = if total_variance > 0.0 && total_variance.is_finite() {
+            explained_variance.mapv(|v| v / total_variance)
+        } else {
+            Array1::zeros(self.n_components)
+        };
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Finalizing model state");
+        }
+
+        // Store learned parameters for future transforms
+        self.mean = Some(mean);
+        self.components = Some(components);
+        self.explained_variance = Some(explained_variance);
+        self.explained_variance_ratio = Some(explained_variance_ratio);
+        self.singular_values = Some(singular_values);
+        self.n_samples = Some(n_samples);
+        self.n_features = Some(n_features);
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.finish_with_message("Completed");
+        }
+
+        Ok(self)
+    }
+
+    fn transform_internal<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+        show_progress: bool,
+    ) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
+        let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
+
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot transform empty dataset".to_string(),
+            ));
+        }
+
+        if x.ncols() != components.ncols() {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                components.ncols()
+            )));
+        }
+
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        let progress_bar = if show_progress {
+            Some(Self::create_progress_bar(3, "Validating input"))
+        } else {
+            None
+        };
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Centering data");
+        }
+
+        // Reuse training mean to center new samples
+        let mut x_centered = x.to_owned();
+        Self::center_data(&mut x_centered, mean);
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.set_message("Projecting data");
+        }
+
+        // Project into component space with optional parallelism
+        let transformed = if x_centered.nrows() >= PCA_PARALLEL_THRESHOLD {
+            Self::project_parallel(&x_centered, components)?
+        } else {
+            x_centered.dot(&components.t())
+        };
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            pb.finish_with_message("Completed");
+        }
+
+        Ok(transformed)
+    }
+
+    fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
+        let n_samples = x.nrows();
+        let n_features = x.ncols();
+
+        // Compute column means with a parallel path for large matrices
+        if n_samples >= PCA_PARALLEL_THRESHOLD {
+            let means: Vec<f64> = (0..n_features)
+                .into_par_iter()
+                .map(|col| x.column(col).sum() / n_samples as f64)
+                .collect();
+            Array1::from_vec(means)
+        } else {
+            x.mean_axis(Axis(0)).expect("Input data must be non-empty")
+        }
+    }
+
+    fn center_data(x: &mut Array2<f64>, mean: &Array1<f64>) {
+        // Subtract mean from each row in place
+        if x.nrows() >= PCA_PARALLEL_THRESHOLD {
+            let mean = mean.to_owned();
+            x.axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .for_each(|mut row| {
+                    row -= &mean;
+                });
+        } else {
+            for mut row in x.axis_iter_mut(Axis(0)) {
+                row -= mean;
+            }
+        }
+    }
+
+    fn total_variance(x_centered: &Array2<f64>, n_samples: usize) -> Result<f64, ModelError> {
+        let denom = (n_samples - 1) as f64;
+        if denom <= 0.0 {
+            return Err(ModelError::ProcessingError(
+                "Variance computation requires at least 2 samples".to_string(),
+            ));
+        }
+
+        // Sum of squares over centered data
+        let sum_sq = if x_centered.nrows() >= PCA_PARALLEL_THRESHOLD {
+            if let Some(slice) = x_centered.as_slice() {
+                slice.par_iter().map(|v| v * v).sum::<f64>()
+            } else {
+                x_centered.iter().map(|v| v * v).sum::<f64>()
+            }
+        } else {
+            x_centered.iter().map(|v| v * v).sum::<f64>()
+        };
+
+        Ok(sum_sq / denom)
+    }
+
+    fn compute_components(
+        &self,
+        x_centered: &Array2<f64>,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        match self.svd_solver {
+            SVDSolver::Full => self.compute_full_svd(x_centered),
+            SVDSolver::Randomized(seed) => self.compute_randomized_svd(x_centered, seed),
+            SVDSolver::ARPACK => self.compute_arpack_svd(x_centered),
+        }
+    }
+
+    fn compute_full_svd(
+        &self,
+        x_centered: &Array2<f64>,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        // Convert ndarray to nalgebra for SVD
+        let x_slice = x_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
+        })?;
+        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
+        let svd = nalgebra::linalg::SVD::new(x_mat, false, true);
+        let v_t = svd.v_t.ok_or_else(|| {
+            ModelError::ProcessingError("SVD did not compute V^T matrix".to_string())
+        })?;
+
+        let singular_values: Vec<f64> = svd
+            .singular_values
+            .iter()
+            .take(self.n_components)
+            .cloned()
+            .collect();
+
+        // Copy the top components from V^T into ndarray layout
+        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
+        for i in 0..self.n_components {
+            for j in 0..n_features {
+                components[[i, j]] = v_t[(i, j)];
+            }
+        }
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
+
+    fn compute_randomized_svd(
+        &self,
+        x_centered: &Array2<f64>,
+        seed: u64,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        let max_rank = n_samples.min(n_features);
+        let oversampling = 5usize;
+        // Oversample to improve the randomized subspace
+        let k = (self.n_components + oversampling).min(max_rank);
+
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut omega = Vec::with_capacity(n_features * k);
+        for _ in 0..(n_features * k) {
+            omega.push(rng.random_range(-1.0..1.0));
+        }
+
+        // Build a random projection matrix and sketch X
+        let x_slice = x_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
+        })?;
+        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
+        let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
+        let mut y_mat = &x_mat * &omega_mat;
+
+        // Perform a few power iterations to improve spectral separation
+        let n_iter = 2usize;
+        for _ in 0..n_iter {
+            let y_t = x_mat.transpose() * &y_mat;
+            y_mat = &x_mat * y_t;
+        }
+
+        // Orthonormalize the sketch and compute SVD in the reduced space
+        let qr = nalgebra::linalg::QR::new(y_mat);
+        let q = qr.q();
+        let b = q.transpose() * x_mat;
+
+        let svd = nalgebra::linalg::SVD::new(b, false, true);
+        let v_t = svd.v_t.ok_or_else(|| {
+            ModelError::ProcessingError("Randomized SVD did not compute V^T matrix".to_string())
+        })?;
+
+        let singular_values: Vec<f64> = svd
+            .singular_values
+            .iter()
+            .take(self.n_components)
+            .cloned()
+            .collect();
+
+        // Expand V^T back to full feature space components
+        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
+        for i in 0..self.n_components {
+            for j in 0..n_features {
+                components[[i, j]] = v_t[(i, j)];
+            }
+        }
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
+
+    fn compute_arpack_svd(
+        &self,
+        x_centered: &Array2<f64>,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        let denom = (n_samples - 1) as f64;
+        // Form the covariance matrix for power iteration
+        let mut cov = x_centered.t().dot(x_centered) / denom;
+
+        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
+        let mut eigenvalues = Vec::with_capacity(self.n_components);
+        let mut rng = StdRng::seed_from_u64(0);
+        let max_iter = 1000usize;
+        let tol = 1e-6;
+
+        for idx in 0..self.n_components {
+            // Deflate the covariance as components are extracted
+            let (eigenvector, eigenvalue) = Self::power_iteration(&cov, &mut rng, max_iter, tol)?;
+            components.row_mut(idx).assign(&eigenvector);
+            eigenvalues.push(eigenvalue);
+
+            let v_col = eigenvector.view().insert_axis(Axis(1));
+            let v_row = eigenvector.view().insert_axis(Axis(0));
+            cov -= &(v_col.dot(&v_row) * eigenvalue);
+        }
+
+        // Convert eigenvalues into singular values
+        let singular_values: Vec<f64> = eigenvalues
+            .into_iter()
+            .map(|lambda| {
+                let clamped = if lambda.is_finite() && lambda > 0.0 {
+                    lambda
+                } else {
+                    0.0
+                };
+                (clamped * denom).sqrt()
+            })
+            .collect();
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
+
+    fn power_iteration(
+        cov: &Array2<f64>,
+        rng: &mut StdRng,
+        max_iter: usize,
+        tol: f64,
+    ) -> Result<(Array1<f64>, f64), ModelError> {
+        let n_features = cov.ncols();
+        // Start with a random unit vector
+        let mut v = Array1::<f64>::from_vec(
+            (0..n_features)
+                .map(|_| rng.random_range(-1.0..1.0))
+                .collect(),
+        );
+        let norm = v.dot(&v).sqrt();
+        if norm <= f64::EPSILON {
+            v.fill(1.0 / (n_features as f64).sqrt());
+        } else {
+            v /= norm;
+        }
+
+        let mut prev_lambda = 0.0;
+        for _ in 0..max_iter {
+            let w = cov.dot(&v);
+            let w_norm = w.dot(&w).sqrt();
+            if w_norm <= f64::EPSILON || !w_norm.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Power iteration failed to converge".to_string(),
+                ));
+            }
+            // Normalize the next vector estimate
+            let v_next = &w / w_norm;
+            let lambda = v_next.dot(&cov.dot(&v_next));
+            if !lambda.is_finite() {
+                return Err(ModelError::ProcessingError(
+                    "Power iteration produced non-finite eigenvalue".to_string(),
+                ));
+            }
+            if (lambda - prev_lambda).abs() < tol {
+                return Ok((v_next, lambda));
+            }
+            prev_lambda = lambda;
+            v = v_next;
+        }
+
+        let lambda = v.dot(&cov.dot(&v));
+        if !lambda.is_finite() {
+            return Err(ModelError::ProcessingError(
+                "Power iteration produced non-finite eigenvalue".to_string(),
+            ));
+        }
+        Ok((v, lambda))
+    }
+
+    fn project_parallel(
+        x_centered: &Array2<f64>,
+        components: &Array2<f64>,
+    ) -> Result<Array2<f64>, ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_components = components.nrows();
+
+        // Project each row in parallel to build the output matrix
+        let rows: Vec<Vec<f64>> = x_centered
+            .outer_iter()
+            .into_par_iter()
+            .map(|row| {
+                let mut projected = vec![0.0; n_components];
+                for (idx, comp) in components.outer_iter().enumerate() {
+                    projected[idx] = row.dot(&comp);
+                }
+                projected
+            })
+            .collect();
+
+        let flat: Vec<f64> = rows.into_iter().flatten().collect();
+        Array2::from_shape_vec((n_samples, n_components), flat).map_err(|e| {
+            ModelError::ProcessingError(format!("Failed to build projected matrix: {}", e))
+        })
+    }
+
+    fn reconstruct_parallel(
+        x: &Array2<f64>,
+        components: &Array2<f64>,
+        mean: &Array1<f64>,
+    ) -> Result<Array2<f64>, ModelError> {
+        let n_samples = x.nrows();
+        let n_features = components.ncols();
+        let components_t = components.t().to_owned();
+        let mean_vec = mean.to_owned();
+
+        // Reconstruct each row in parallel and add the mean
+        let rows: Vec<Vec<f64>> = x
+            .outer_iter()
+            .into_par_iter()
+            .map(|row| {
+                let mut reconstructed = vec![0.0; n_features];
+                for (j, comp_row) in components_t.outer_iter().enumerate() {
+                    reconstructed[j] = row.dot(&comp_row) + mean_vec[j];
+                }
+                reconstructed
+            })
+            .collect();
+
+        let flat: Vec<f64> = rows.into_iter().flatten().collect();
+        Array2::from_shape_vec((n_samples, n_features), flat).map_err(|e| {
+            ModelError::ProcessingError(format!("Failed to build reconstructed matrix: {}", e))
+        })
+    }
+
+    fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
+        let progress_bar = ProgressBar::new(len);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Stage: {msg}")
+                .expect("Failed to set progress bar template")
+                .progress_chars("=>-"),
+        );
+        progress_bar.set_message(message.to_string());
+        progress_bar
     }
 
     model_save_and_load_methods!(PCA);

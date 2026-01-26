@@ -13,14 +13,6 @@ const ADA_GRAD_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// - `learning_rate` - Initial learning rate controlling the size of parameter updates
 /// - `epsilon` - Small constant added for numerical stability
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGrad;
-///
-/// let optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
-/// ```
 pub struct AdaGrad {
     learning_rate: f32,
     epsilon: f32,
@@ -72,14 +64,6 @@ impl Optimizer for AdaGrad {
 /// - `accumulator` - Accumulated squared gradients for main parameters
 /// - `accumulator_recurrent` - Accumulated squared gradients for recurrent parameters (if applicable)
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGradStates;
-///
-/// let states = AdaGradStates::new((2, 2), None, (1, 2));
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStates {
     pub accumulator: Array2<f32>,
@@ -212,17 +196,8 @@ impl AdaGradStates {
 ///
 /// # Fields
 ///
-/// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 3D array
-///   to accommodate 1D convolutional filter dimensions \[output_channels, input_channels, kernel_size\]
+/// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 3D array to accommodate 1D convolutional filter dimensions \[output_channels, input_channels, kernel_size\]
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGradStatesConv1D;
-///
-/// let states = AdaGradStatesConv1D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv1D {
     pub accumulator: Array3<f32>,
@@ -237,17 +212,8 @@ pub struct AdaGradStatesConv1D {
 ///
 /// # Fields
 ///
-/// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 4D array
-///   to accommodate convolutional filter dimensions
+/// - `accumulator` - Accumulated squared gradients for main parameters, stored as a 4D array to accommodate convolutional filter dimensions
 /// - `accumulator_bias` - Accumulated squared gradients for bias parameters
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGradStatesConv2D;
-///
-/// let states = AdaGradStatesConv2D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv2D {
     pub accumulator: Array4<f32>,
@@ -262,17 +228,8 @@ pub struct AdaGradStatesConv2D {
 ///
 /// # Fields
 ///
-/// - `accumulator` - Accumulated squared gradients for the 5D convolution weights with shape
-///   (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
+/// - `accumulator` - Accumulated squared gradients for the 5D convolution weights with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
 /// - `accumulator_bias` - Accumulated squared gradients for the bias tensor with shape (1, output_channels)
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGradStatesConv3D;
-///
-/// let states = AdaGradStatesConv3D::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesConv3D {
     pub accumulator: Array5<f32>,
@@ -290,14 +247,6 @@ pub struct AdaGradStatesConv3D {
 ///
 /// - `acc_grad_gamma` - Accumulated squared gradients for gamma (scale) parameter
 /// - `acc_grad_beta` - Accumulated squared gradients for beta (shift) parameter
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::AdaGradStatesNormalizationLayer;
-///
-/// let states = AdaGradStatesNormalizationLayer::default();
-/// ```
 #[derive(Debug, Clone, Default)]
 pub struct AdaGradStatesNormalizationLayer {
     pub acc_grad_gamma: Tensor,

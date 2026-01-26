@@ -150,6 +150,7 @@ impl TSNE {
     where
         S: Data<Elem = f64>,
     {
+        // Validate inputs before any heavy computation
         self.validate_input(x)?;
         let x_owned = x.to_owned();
         self.fit_transform_internal(&x_owned, false)
@@ -181,6 +182,7 @@ impl TSNE {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
+        // Same validation as the sequential path
         self.validate_input(x)?;
         let x_owned = x.to_owned();
         self.fit_transform_internal(&x_owned, true)
@@ -190,6 +192,7 @@ impl TSNE {
     where
         S: Data<Elem = f64>,
     {
+        // Basic shape and size checks
         if x.nrows() == 0 || x.ncols() == 0 {
             return Err(ModelError::InputValidationError(
                 "Input data must have at least one row and one column".to_string(),
@@ -203,6 +206,7 @@ impl TSNE {
         }
 
         if self.perplexity >= x.nrows() as f64 {
+            // Perplexity must be less than the number of samples
             return Err(ModelError::InputValidationError(format!(
                 "perplexity must be less than number of samples, got perplexity={} with samples={}",
                 self.perplexity,
@@ -211,6 +215,7 @@ impl TSNE {
         }
 
         if let Some(((i, j), _)) = x.indexed_iter().find(|&(_, &val)| !val.is_finite()) {
+            // Reject NaN/Inf to avoid blowing up the optimizer
             return Err(ModelError::InputValidationError(format!(
                 "Input data contains NaN or infinite value at position [{}, {}]",
                 i, j
@@ -227,14 +232,17 @@ impl TSNE {
     ) -> Result<Array2<f64>, ModelError> {
         let n_samples = x.nrows();
 
+        // Precompute distances and convert them to joint probabilities
         let distances = self.pairwise_squared_distances(x, parallel);
         let p_conditional = self.conditional_probabilities(&distances, parallel);
         let p = self.symmetrize_probabilities(&p_conditional);
         let p_exaggerated = p.mapv(|v| v * EARLY_EXAGGERATION);
 
+        // Initialize embedding and momentum buffer
         let mut y = self.init_embedding(n_samples);
         let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
 
+        // Progress bar reports KL divergence each iteration
         let progress_bar = ProgressBar::new(self.n_iter as u64);
         progress_bar.set_style(
             ProgressStyle::default_bar()
@@ -250,21 +258,25 @@ impl TSNE {
         let mut last_kl = 0.0;
 
         for iter in 0..self.n_iter {
+            // Use early exaggeration for the first phase only
             let p_use = if iter < exaggeration_iter {
                 &p_exaggerated
             } else {
                 &p
             };
 
+            // Compute Student-t affinities and gradient
             let (num, sum_num) = self.compute_num_matrix(&y, parallel);
             let grad = self.compute_gradient(&y, p_use, &num, sum_num, parallel);
 
+            // Switch momentum after the exaggeration phase
             let momentum = if iter < exaggeration_iter {
                 INITIAL_MOMENTUM
             } else {
                 FINAL_MOMENTUM
             };
 
+            // Apply momentum SGD update to the embedding
             for i in 0..n_samples {
                 for d in 0..self.n_components {
                     y_incs[[i, d]] = momentum * y_incs[[i, d]] - self.learning_rate * grad[[i, d]];
@@ -272,8 +284,10 @@ impl TSNE {
                 }
             }
 
+            // Keep embedding centered to avoid drift
             self.center_embedding(&mut y)?;
 
+            // Track KL divergence for reporting only
             last_kl = self.kl_divergence(p_use, &num, sum_num, parallel);
             progress_bar.set_message(format!("{:.6}", last_kl));
             progress_bar.inc(1);
@@ -285,6 +299,7 @@ impl TSNE {
     }
 
     fn init_embedding(&self, n_samples: usize) -> Array2<f64> {
+        // Seeded RNG for reproducibility if provided
         let mut rng = match self.random_state {
             Some(seed) => StdRng::seed_from_u64(seed),
             None => {
@@ -296,6 +311,7 @@ impl TSNE {
         let mut y = Array2::<f64>::zeros((n_samples, self.n_components));
         for i in 0..n_samples {
             for d in 0..self.n_components {
+                // Small random init avoids large gradients at start
                 y[[i, d]] = rng.random_range(-0.5..0.5) * INIT_SCALE;
             }
         }
@@ -307,6 +323,7 @@ impl TSNE {
         let n_samples = x.nrows();
 
         if parallel {
+            // Compute all rows independently with Rayon
             let rows: Vec<Vec<f64>> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| {
@@ -335,6 +352,7 @@ impl TSNE {
             for i in 0..n_samples {
                 let row_i = x.row(i);
                 for j in (i + 1)..n_samples {
+                    // Fill symmetric matrix in the sequential path
                     let dist = squared_euclidean_distance_row(&row_i, &x.row(j));
                     distances[[i, j]] = dist;
                     distances[[j, i]] = dist;
@@ -347,6 +365,7 @@ impl TSNE {
     fn conditional_probabilities(&self, distances: &Array2<f64>, parallel: bool) -> Array2<f64> {
         let n_samples = distances.nrows();
 
+        // Match perplexity by binary search on sigma per row
         let rows: Vec<Array1<f64>> = if parallel {
             (0..n_samples)
                 .into_par_iter()
@@ -366,6 +385,7 @@ impl TSNE {
 
         let mut p_conditional = Array2::<f64>::zeros((n_samples, n_samples));
         for (i, row) in rows.into_iter().enumerate() {
+            // Assign per-row conditional probabilities
             p_conditional.row_mut(i).assign(&row);
         }
 
@@ -377,6 +397,7 @@ impl TSNE {
         let mut p = Array2::<f64>::zeros((n_samples, n_samples));
         let normalization = 2.0 * n_samples as f64;
 
+        // Average conditional probs to form joint probabilities
         for i in 0..n_samples {
             for j in (i + 1)..n_samples {
                 let val = (p_conditional[[i, j]] + p_conditional[[j, i]]) / normalization;
@@ -392,6 +413,7 @@ impl TSNE {
         let n_samples = y.nrows();
 
         if parallel {
+            // Compute 1 / (1 + dist) per pair in parallel
             let rows: Vec<Vec<f64>> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| {
@@ -422,6 +444,7 @@ impl TSNE {
             for i in 0..n_samples {
                 let row_i = y.row(i);
                 for j in (i + 1)..n_samples {
+                    // Fill symmetric Student-t numerator
                     let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
                     let val = 1.0 / (1.0 + dist);
                     num[[i, j]] = val;
@@ -445,6 +468,7 @@ impl TSNE {
         let n_components = y.ncols();
 
         if parallel {
+            // Compute gradient per row in parallel
             let rows: Vec<Vec<f64>> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| {
@@ -460,6 +484,7 @@ impl TSNE {
                         }
                     }
                     for d in 0..n_components {
+                        // t-SNE gradient scale factor
                         grad_row[d] *= 4.0;
                     }
                     grad_row
@@ -487,6 +512,7 @@ impl TSNE {
                     }
                 }
                 for d in 0..n_components {
+                    // t-SNE gradient scale factor
                     grad[[i, d]] *= 4.0;
                 }
             }
@@ -504,6 +530,7 @@ impl TSNE {
         let n_samples = p.nrows();
 
         if parallel {
+            // Sum KL terms per row in parallel
             (0..n_samples)
                 .into_par_iter()
                 .map(|i| self.kl_divergence_row(p, num, sum_num, i))
@@ -524,6 +551,7 @@ impl TSNE {
             }
             let p_ij = p[[i, j]];
             if p_ij > 0.0 {
+                // Clamp q_ij to avoid log(0)
                 let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
                 kl += p_ij * (p_ij / q_ij).ln();
             }
@@ -532,6 +560,7 @@ impl TSNE {
     }
 
     fn center_embedding(&self, y: &mut Array2<f64>) -> Result<(), ModelError> {
+        // Subtract mean to keep the embedding centered
         let mean = y.mean_axis(Axis(0)).ok_or_else(|| {
             ModelError::ProcessingError("Failed to compute embedding mean".to_string())
         })?;

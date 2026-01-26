@@ -277,6 +277,7 @@ impl LDA {
         let mut intercepts = Array1::<f64>::zeros(n_classes);
 
         for j in 0..n_classes {
+            // Build linear discriminant coefficients per class
             let mean = means.row(j).to_owned();
             let coef = cov_inv.dot(&mean);
             coefficients.row_mut(j).assign(&coef);
@@ -289,6 +290,7 @@ impl LDA {
         }
 
         let predict_sample = |row: ArrayView1<f64>| {
+            // Score each class and keep the best label
             let mut best_score = f64::NEG_INFINITY;
             let mut best_class = classes[0];
             for j in 0..n_classes {
@@ -302,6 +304,7 @@ impl LDA {
         };
 
         let predictions: Vec<i32> = if x.nrows() >= LDA_PARALLEL_THRESHOLD {
+            // Use parallel scoring for large batches
             let x_owned = x.to_owned();
             let pb = progress_bar.clone();
             x_owned
@@ -314,6 +317,7 @@ impl LDA {
                 })
                 .collect()
         } else {
+            // Use sequential scoring for smaller batches
             x.outer_iter()
                 .map(|row| {
                     let pred = predict_sample(row);
@@ -518,6 +522,7 @@ impl LDA {
             pb.set_message("Computing class statistics and scatter matrices");
         }
 
+        // Group row indices by class label
         let mut class_indices_map: AHashMap<i32, Vec<usize>> = AHashMap::with_capacity(n_classes);
         for &class in classes.iter() {
             class_indices_map.insert(class, Vec::new());
@@ -537,12 +542,14 @@ impl LDA {
             }
         }
 
+        // Compute the overall mean for between-class scatter
         let overall_mean = x.mean_axis(Axis(0)).ok_or_else(|| {
             ModelError::ProcessingError("Error computing overall mean".to_string())
         })?;
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
         let class_results: Vec<_> = if parallel {
+            // Compute per-class stats in parallel
             let x_owned = x.to_owned();
             class_pairs
                 .par_iter()
@@ -554,6 +561,7 @@ impl LDA {
                 })
                 .collect()
         } else {
+            // Compute per-class stats sequentially
             class_pairs
                 .iter()
                 .map(|&(class_idx, &class)| {
@@ -570,6 +578,7 @@ impl LDA {
         let mut sw = Array2::<f64>::zeros((n_features, n_features));
         let mut sb = Array2::<f64>::zeros((n_features, n_features));
 
+        // Aggregate priors, class means, and scatter matrices
         for (class_idx, prior, class_mean, class_sw, class_sb) in class_results {
             priors_vec.push(prior);
             means_mat.row_mut(class_idx).assign(&class_mean);
@@ -585,10 +594,12 @@ impl LDA {
             pb.set_message("Applying shrinkage and inverting covariance matrix");
         }
 
+        // Estimate and stabilize the shared covariance
         let mut cov = sw / ((n_samples - n_classes) as f64);
         cov = self.apply_shrinkage(&cov, n_samples, n_features);
         self.regularize_covariance(&mut cov);
 
+        // Compute inverse covariance for linear scoring
         let cov_inv = self.compute_cov_inv(&cov)?;
         self.cov_inv = Some(cov_inv);
 
@@ -597,6 +608,7 @@ impl LDA {
             pb.set_message("Computing projection matrix");
         }
 
+        // Build the discriminant projection
         let solver_matrix = self.compute_solver_matrix(&cov, sb, self.cov_inv.as_ref().unwrap())?;
         let projection = self.compute_projection(&solver_matrix, self.n_components)?;
         self.projection = Some(projection);
@@ -685,11 +697,13 @@ impl LDA {
 
         let mut class_sw = Array2::<f64>::zeros((n_features, n_features));
         for row in class_data.outer_iter() {
+            // Accumulate within-class scatter
             let diff = &row - &class_mean;
             let diff_col = diff.insert_axis(Axis(1));
             class_sw += &diff_col.dot(&diff_col.t());
         }
 
+        // Between-class scatter from mean shift
         let mean_diff = &class_mean - overall_mean;
         let mean_diff_col = mean_diff.insert_axis(Axis(1));
         let class_sb = mean_diff_col.dot(&mean_diff_col.t()) * (n_class as f64);
@@ -707,6 +721,7 @@ impl LDA {
             None => return cov.clone(),
             Some(Shrinkage::Manual(alpha)) => alpha,
             Some(Shrinkage::Auto) => {
+                // Simple Ledoit-Wolf style shrinkage heuristic
                 let denom = (n_samples + n_features) as f64;
                 if denom > 0.0 {
                     (n_features as f64 / denom).clamp(0.0, 1.0)
@@ -720,6 +735,7 @@ impl LDA {
             return cov.clone();
         }
 
+        // Shrink toward a scaled identity matrix
         let mut shrunk = cov.mapv(|v| v * (1.0 - alpha));
         let mu = cov.diag().sum() / n_features as f64;
         shrunk += &(Array2::<f64>::eye(n_features) * (alpha * mu));
@@ -747,6 +763,7 @@ impl LDA {
 
         let cov_inv_mat = match self.solver {
             Solver::Eigen => {
+                // Invert via eigen decomposition with tolerance
                 let eig = nalgebra::linalg::SymmetricEigen::new(cov_mat);
                 let mut inv_vals = eig.eigenvalues.clone();
                 let max_eval = inv_vals.iter().cloned().fold(0.0_f64, f64::max);
@@ -759,6 +776,7 @@ impl LDA {
                 &eig.eigenvectors * inv_diag * eig.eigenvectors.transpose()
             }
             Solver::LSQR => {
+                // Solve linear system for inverse using SVD
                 let svd = nalgebra::linalg::SVD::new(cov_mat.clone(), true, true);
                 let max_sv = svd.singular_values.max();
                 let tol = (1e-12 * max_sv).max(1e-12);
@@ -770,6 +788,7 @@ impl LDA {
                 })?
             }
             Solver::SVD => {
+                // Use pseudo-inverse for numerical stability
                 let svd = nalgebra::linalg::SVD::new(cov_mat, true, true);
                 let max_sv = svd.singular_values.max();
                 let tol = (1e-12 * max_sv).max(1e-12);
@@ -794,6 +813,7 @@ impl LDA {
     ) -> Result<Array2<f64>, ModelError> {
         match self.solver {
             Solver::LSQR => {
+                // Solve cov * M = sb for the discriminant matrix
                 let n_features = cov.ncols();
                 let cov_slice = cov.as_slice().ok_or_else(|| {
                     ModelError::ProcessingError(
@@ -837,6 +857,7 @@ impl LDA {
         let n_features = solver_matrix.nrows();
         let (eigenvalues, eigenvectors) = match self.solver {
             Solver::Eigen => {
+                // Use symmetric eigen decomposition for stability
                 let sym_matrix = (solver_matrix + &solver_matrix.t()) * 0.5;
                 let slice = sym_matrix.as_slice().ok_or_else(|| {
                     ModelError::ProcessingError(
@@ -860,6 +881,7 @@ impl LDA {
                 )
             }
             Solver::SVD | Solver::LSQR => {
+                // Use SVD to obtain principal directions
                 let slice = solver_matrix.as_slice().ok_or_else(|| {
                     ModelError::ProcessingError(
                         "Failed to convert solver matrix to slice".to_string(),
@@ -891,6 +913,7 @@ impl LDA {
         eig_pairs
             .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
+        // Select top components and normalize basis vectors
         let mut w = Array2::<f64>::zeros((n_features, n_components));
         for (component_idx, (i, _)) in eig_pairs.iter().take(n_components).enumerate() {
             let vec = eigenvectors.slice(s![.., *i]);

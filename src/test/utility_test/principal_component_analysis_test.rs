@@ -1,219 +1,158 @@
 use super::*;
-use std::error::Error;
 
-// Helper function for approximate equality checks
-fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {
-    (a - b).abs() < epsilon
+fn make_pca_dataset() -> Array2<f64> {
+    arr2(&[
+        [0.0, 1.0, 2.0],
+        [1.0, 2.0, 0.5],
+        [2.0, 0.5, 1.0],
+        [3.0, 1.5, 2.5],
+        [4.0, 3.0, 0.0],
+        [5.0, 2.5, 1.5],
+        [6.0, 4.0, 3.0],
+        [7.0, 5.0, 2.0],
+    ])
 }
 
 #[test]
-fn test_pca_new() {
-    // We can only test the public API behavior, not internal fields
-    let pca = PCA::new(2).unwrap();
-
-    // All getters should return errors when PCA is not fitted
-    assert!(pca.get_components().is_none());
-    assert!(pca.get_explained_variance().is_none());
-    assert!(pca.get_explained_variance_ratio().is_none());
-    assert!(pca.get_singular_values().is_none());
-}
-
-#[test]
-fn test_pca_default() {
+fn test_pca_default_and_new() {
     let pca = PCA::default();
-
-    // All getters should return errors when PCA is not fitted
+    assert_eq!(pca.get_n_components(), 2);
+    assert_eq!(pca.get_svd_solver(), SVDSolver::Full);
+    assert!(pca.get_mean().is_none());
     assert!(pca.get_components().is_none());
     assert!(pca.get_explained_variance().is_none());
     assert!(pca.get_explained_variance_ratio().is_none());
     assert!(pca.get_singular_values().is_none());
+
+    let custom = PCA::new(3, SVDSolver::Randomized(42)).unwrap();
+    assert_eq!(custom.get_n_components(), 3);
+    assert_eq!(custom.get_svd_solver(), SVDSolver::Randomized(42));
 }
 
 #[test]
-fn test_fit_and_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2).unwrap();
-    let data = arr2(&[
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [7.0, 8.0, 9.0],
-        [10.0, 11.0, 12.0],
-    ]);
+fn test_pca_new_validation() {
+    assert!(PCA::new(0, SVDSolver::Full).is_err());
+}
+
+#[test]
+fn test_pca_fit_and_transform() -> Result<(), Box<dyn Error>> {
+    let data = make_pca_dataset();
+    let mut pca = PCA::new(2, SVDSolver::Full)?;
 
     pca.fit(&data.view())?;
 
-    // After fitting, getters should return valid components
-    let components = pca.get_components().unwrap();
-    assert_eq!(components.shape(), &[2, 3]);
-
-    let explained_variance = pca.get_explained_variance().unwrap();
-    assert_eq!(explained_variance.len(), 2);
-
-    let variance_ratio = pca.get_explained_variance_ratio().unwrap();
-    assert_eq!(variance_ratio.len(), 2);
-    assert!(approx_eq(variance_ratio.sum(), 1.0, 1e-10));
-
-    let singular_values = pca.get_singular_values().unwrap();
-    assert_eq!(singular_values.len(), 2);
-
-    // Test transform functionality
-    let transformed = pca.transform(&data.view())?;
-    assert_eq!(transformed.shape(), &[4, 2]);
-
-    Ok(())
-}
-
-#[test]
-fn test_fit_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2).unwrap();
-    let data = arr2(&[
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [7.0, 8.0, 9.0],
-        [10.0, 11.0, 12.0],
-    ]);
-
-    let transformed = pca.fit_transform(&data.view())?;
-
-    // After fit_transform, getters should return valid components
+    assert!(pca.get_mean().is_some());
     assert!(pca.get_components().is_some());
-    assert_eq!(transformed.shape(), &[4, 2]);
+    assert_eq!(pca.get_components().unwrap().shape(), &[2, 3]);
+    assert_eq!(pca.get_explained_variance().unwrap().len(), 2);
+    assert_eq!(pca.get_explained_variance_ratio().unwrap().len(), 2);
+
+    let ratio_sum: f64 = pca.get_explained_variance_ratio().unwrap().iter().sum();
+    assert!(ratio_sum >= 0.0);
+    assert!(ratio_sum <= 1.00001);
+
+    let transformed = pca.transform(&data.view())?;
+    assert_eq!(transformed.shape(), &[data.nrows(), 2]);
+    assert!(transformed.iter().all(|v| v.is_finite()));
 
     Ok(())
 }
 
 #[test]
-fn test_inverse_transform() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2).unwrap();
-    let data = arr2(&[
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [7.0, 8.0, 9.0],
-        [10.0, 11.0, 12.0],
-    ]);
+fn test_pca_fit_transform_and_inverse() -> Result<(), Box<dyn Error>> {
+    let data = make_pca_dataset();
+    let mut pca = PCA::new(3, SVDSolver::Full)?;
 
     let transformed = pca.fit_transform(&data.view())?;
-    let reconstructed = pca.inverse_transform(&transformed.view())?;
+    assert_eq!(transformed.shape(), &[data.nrows(), 3]);
 
-    // Verify shape of reconstructed data matches original data
+    let reconstructed = pca.inverse_transform(&transformed.view())?;
     assert_eq!(reconstructed.shape(), data.shape());
 
-    // Since dimensionality reduction loses some information,
-    // reconstructed data should be close to but not identical to the original data
-    for i in 0..data.shape()[0] {
-        for j in 0..data.shape()[1] {
-            assert!((data[[i, j]] - reconstructed[[i, j]]).abs() < 1.0);
-        }
+    let max_diff = reconstructed
+        .iter()
+        .zip(data.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f64::max);
+    assert!(max_diff < 1e-6);
+
+    Ok(())
+}
+
+#[test]
+fn test_pca_solver_variants() -> Result<(), Box<dyn Error>> {
+    let data = make_pca_dataset();
+    let solvers = [SVDSolver::Full, SVDSolver::Randomized(7), SVDSolver::ARPACK];
+
+    for solver in solvers {
+        let mut pca = PCA::new(2, solver)?;
+        pca.fit(&data.view())?;
+        let transformed = pca.transform(&data.view())?;
+        assert_eq!(transformed.shape(), &[data.nrows(), 2]);
+        assert!(pca.get_components().is_some());
     }
 
     Ok(())
 }
 
 #[test]
-fn test_errors_when_not_fitted() {
-    let pca = PCA::new(2).unwrap();
+fn test_pca_validation_and_errors() {
+    let data = make_pca_dataset();
 
-    // Attempting to get components before fitting should return an error
-    assert!(pca.get_components().is_none());
-    assert!(pca.get_explained_variance().is_none());
-    assert!(pca.get_explained_variance_ratio().is_none());
-    assert!(pca.get_singular_values().is_none());
-
-    // Attempting to transform data before fitting should return an error
-    let data = arr2(&[[1.0, 2.0, 3.0]]);
+    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
     assert!(pca.transform(&data.view()).is_err());
     assert!(pca.inverse_transform(&data.view()).is_err());
+
+    let empty = Array2::<f64>::zeros((0, 3));
+    assert!(pca.fit(&empty.view()).is_err());
+
+    let single = Array2::from_shape_vec((1, 3), vec![1.0, 2.0, 3.0]).unwrap();
+    assert!(pca.fit(&single.view()).is_err());
+
+    let mut pca_bad = PCA::new(4, SVDSolver::Full).unwrap();
+    assert!(pca_bad.fit(&data.view()).is_err());
+
+    let data_with_nan =
+        Array2::from_shape_vec((2, 3), vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0]).unwrap();
+    assert!(pca.fit(&data_with_nan.view()).is_err());
+
+    let mut pca_fit = PCA::new(2, SVDSolver::Full).unwrap();
+    pca_fit.fit(&data.view()).unwrap();
+
+    let wrong_features = Array2::<f64>::zeros((2, 4));
+    assert!(pca_fit.transform(&wrong_features.view()).is_err());
+
+    let wrong_components = Array2::<f64>::zeros((2, 3));
+    assert!(pca_fit.inverse_transform(&wrong_components.view()).is_err());
 }
 
 #[test]
-fn test_with_different_n_components() -> Result<(), Box<dyn Error>> {
-    // Test different numbers of components
-    for n_components in 1..=3 {
-        let mut pca = PCA::new(n_components).unwrap();
-        let data = arr2(&[
-            [1.0, 2.0, 3.0, 4.0],
-            [5.0, 6.0, 7.0, 8.0],
-            [9.0, 10.0, 11.0, 12.0],
-            [13.0, 14.0, 15.0, 16.0],
-        ]);
-
-        pca.fit(&data.view())?;
-
-        // Verify component dimensions
-        let components = pca.get_components().unwrap();
-        assert_eq!(components.shape(), &[n_components, 4]);
-
-        // Verify dimensions of transformed data
-        let transformed = pca.transform(&data.view())?;
-        assert_eq!(transformed.shape(), &[4, n_components]);
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_variance_explained_properties() -> Result<(), Box<dyn Error>> {
-    let mut pca = PCA::new(2).unwrap();
+fn test_pca_effectiveness_on_linear_data() -> Result<(), Box<dyn Error>> {
     let data = arr2(&[
-        [1.0, 2.0, 3.0, 4.0],
-        [5.0, 6.0, 7.0, 8.0],
-        [9.0, 10.0, 11.0, 12.0],
-        [13.0, 14.0, 15.0, 16.0],
+        [0.0, 0.0],
+        [1.0, 2.0],
+        [2.0, 4.0],
+        [3.0, 6.0],
+        [4.0, 8.0],
+        [5.0, 10.0],
+        [6.0, 12.0],
+        [7.0, 14.0],
     ]);
 
-    pca.fit(&data.view())?;
+    let mut pca = PCA::new(1, SVDSolver::Full)?;
+    let transformed = pca.fit_transform(&data.view())?;
+    assert_eq!(transformed.shape(), &[data.nrows(), 1]);
 
-    // Check that variance explained is non-negative
-    let explained_variance = pca.get_explained_variance().unwrap();
-    for &variance in explained_variance.iter() {
-        assert!(variance >= 0.0);
-    }
+    let ratio = pca.get_explained_variance_ratio().unwrap()[0];
+    assert!(ratio > 0.999);
 
-    // Check that variance ratio sums to approximately 1
-    let variance_ratio = pca.get_explained_variance_ratio().unwrap();
-    assert!(approx_eq(variance_ratio.sum(), 1.0, 1e-10));
-
-    // Check that variance ratios are sorted in descending order
-    for i in 1..variance_ratio.len() {
-        assert!(variance_ratio[i - 1] >= variance_ratio[i]);
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_pca_with_random_data() -> Result<(), Box<dyn Error>> {
-    use rand::SeedableRng;
-    use rand::distr::{Distribution, Uniform};
-    use rand::rngs::StdRng;
-
-    // Create a deterministic random number generator
-    let mut rng = StdRng::seed_from_u64(42);
-
-    // Create uniform distribution and handle the Result
-    let dist = Uniform::new(0.0, 10.0).expect("Failed to create uniform distribution");
-
-    let mut data = Array2::<f64>::zeros((100, 10));
-    for i in 0..data.shape()[0] {
-        for j in 0..data.shape()[1] {
-            data[[i, j]] = dist.sample(&mut rng);
-        }
-    }
-
-    // Test PCA with different numbers of components
-    for n_components in [2, 5, 8] {
-        let mut pca = PCA::new(n_components).unwrap();
-        pca.fit(&data.view())?;
-
-        // Check dimensions
-        assert_eq!(pca.get_components().unwrap().shape(), &[n_components, 10]);
-
-        // Transform and reconstruct
-        let transformed = pca.transform(&data.view())?;
-        assert_eq!(transformed.shape(), &[100, n_components]);
-
-        let reconstructed = pca.inverse_transform(&transformed.view())?;
-        assert_eq!(reconstructed.shape(), data.shape());
-    }
+    let reconstructed = pca.inverse_transform(&transformed.view())?;
+    let max_diff = reconstructed
+        .iter()
+        .zip(data.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f64::max);
+    assert!(max_diff < 1e-6);
 
     Ok(())
 }

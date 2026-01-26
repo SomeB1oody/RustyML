@@ -502,13 +502,17 @@ pub mod prelude;
 /// # Examples
 /// ```rust
 /// use rustyml::utility::*;
-/// use ndarray::{Array2, arr2};
+/// use ndarray::array;
 ///
-/// // PCA dimensionality reduction
-/// let mut pca = PCA::new(2).unwrap();
-/// let data = arr2(&[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
-/// let transformed = pca.fit_transform(&data).unwrap();
-/// // and more
+/// let mut pca = principal_component_analysis::PCA::new(
+///     2,
+///     principal_component_analysis::SVDSolver::Full,
+/// )
+/// .unwrap();
+/// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
+/// pca.fit(&x).unwrap();
+/// let projected = pca.transform(&x).unwrap();
+/// assert_eq!(projected.ncols(), 2);
 /// ```
 #[cfg(feature = "utility")]
 pub mod utility;

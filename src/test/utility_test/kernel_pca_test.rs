@@ -1,6 +1,4 @@
 use super::*;
-use crate::utility::KernelType;
-use crate::utility::kernel_pca::{KernelPCA, compute_kernel};
 
 #[test]
 fn test_kernel_pca_default() {

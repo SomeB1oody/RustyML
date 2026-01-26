@@ -12,14 +12,6 @@ const SGD_PARALLEL_THRESHOLD: usize = 1024;
 /// # Fields
 ///
 /// - `learning_rate` - Learning rate controlling the size of parameter updates
-///
-/// # Examples
-///
-/// ```rust
-/// use rustyml::neural_network::optimizer::SGD;
-///
-/// let optimizer = SGD::new(0.01).unwrap();
-/// ```
 pub struct SGD {
     learning_rate: f32,
 }
@@ -40,14 +32,6 @@ impl SGD {
     /// # Errors
     ///
     /// - `ModelError::InputValidationError` - If `learning_rate` is not positive
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rustyml::neural_network::optimizer::SGD;
-    ///
-    /// let optimizer = SGD::new(0.01).unwrap();
-    /// ```
     pub fn new(learning_rate: f32) -> Result<Self, ModelError> {
         // input validation
         validate_learning_rate(learning_rate)?;
