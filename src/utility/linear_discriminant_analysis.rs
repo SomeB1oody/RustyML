@@ -436,6 +436,7 @@ impl LDA {
         Ok(transformed)
     }
 
+    /// Fits the model with optional parallelism and progress reporting
     fn fit_internal<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -626,6 +627,7 @@ impl LDA {
         Ok(self)
     }
 
+    /// Transforms input data using the fitted projection
     fn transform_internal<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -677,6 +679,7 @@ impl LDA {
         Ok(transformed)
     }
 
+    /// Computes per-class statistics and scatter matrices
     fn compute_class_stats<S>(
         x: &ArrayBase<S, Ix2>,
         indices: &[usize],
@@ -711,6 +714,7 @@ impl LDA {
         (prior, class_mean, class_sw, class_sb)
     }
 
+    /// Applies the configured shrinkage to the covariance matrix
     fn apply_shrinkage(
         &self,
         cov: &Array2<f64>,
@@ -742,6 +746,7 @@ impl LDA {
         shrunk
     }
 
+    /// Adds a small diagonal regularization term to covariance
     fn regularize_covariance(&self, cov: &mut Array2<f64>) {
         let n_features = cov.ncols().max(1);
         let trace = cov.diag().sum();
@@ -754,6 +759,7 @@ impl LDA {
         *cov += &(Array2::<f64>::eye(n_features) * regularization);
     }
 
+    /// Computes the inverse covariance matrix using the chosen solver
     fn compute_cov_inv(&self, cov: &Array2<f64>) -> Result<Array2<f64>, ModelError> {
         let n_features = cov.ncols();
         let cov_slice = cov.as_slice().ok_or_else(|| {
@@ -805,6 +811,7 @@ impl LDA {
         )
     }
 
+    /// Builds the solver matrix used to derive the projection
     fn compute_solver_matrix(
         &self,
         cov: &Array2<f64>,
@@ -849,6 +856,7 @@ impl LDA {
         }
     }
 
+    /// Computes the projection matrix from the solver output
     fn compute_projection(
         &self,
         solver_matrix: &Array2<f64>,
@@ -929,6 +937,7 @@ impl LDA {
         Ok(w)
     }
 
+    /// Creates a progress bar with a consistent style
     fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
         let progress_bar = ProgressBar::new(len);
         progress_bar.set_style(

@@ -299,6 +299,7 @@ impl PCA {
         Ok(reconstructed)
     }
 
+    /// Fits the model and updates internal state without exposing progress logic
     fn fit_internal<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -403,6 +404,7 @@ impl PCA {
         Ok(self)
     }
 
+    /// Transforms input data using the fitted model state
     fn transform_internal<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -469,6 +471,7 @@ impl PCA {
         Ok(transformed)
     }
 
+    /// Computes the per-feature mean for centering
     fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -485,6 +488,7 @@ impl PCA {
         }
     }
 
+    /// Centers data in place by subtracting the mean
     fn center_data(x: &mut Array2<f64>, mean: &Array1<f64>) {
         // Subtract mean from each row in place
         if x.nrows() >= PCA_PARALLEL_THRESHOLD {
@@ -501,6 +505,7 @@ impl PCA {
         }
     }
 
+    /// Computes total variance of centered data
     fn total_variance(x_centered: &Array2<f64>, n_samples: usize) -> Result<f64, ModelError> {
         let denom = (n_samples - 1) as f64;
         if denom <= 0.0 {
@@ -523,6 +528,7 @@ impl PCA {
         Ok(sum_sq / denom)
     }
 
+    /// Dispatches to the configured SVD solver
     fn compute_components(
         &self,
         x_centered: &Array2<f64>,
@@ -534,6 +540,7 @@ impl PCA {
         }
     }
 
+    /// Computes components using full SVD
     fn compute_full_svd(
         &self,
         x_centered: &Array2<f64>,
@@ -568,6 +575,7 @@ impl PCA {
         Ok((components, Array1::from_vec(singular_values)))
     }
 
+    /// Computes components using randomized SVD
     fn compute_randomized_svd(
         &self,
         x_centered: &Array2<f64>,
@@ -629,6 +637,7 @@ impl PCA {
         Ok((components, Array1::from_vec(singular_values)))
     }
 
+    /// Computes components using power-iteration SVD
     fn compute_arpack_svd(
         &self,
         x_centered: &Array2<f64>,
@@ -672,6 +681,7 @@ impl PCA {
         Ok((components, Array1::from_vec(singular_values)))
     }
 
+    /// Runs power iteration to extract a dominant eigenpair
     fn power_iteration(
         cov: &Array2<f64>,
         rng: &mut StdRng,
@@ -725,6 +735,7 @@ impl PCA {
         Ok((v, lambda))
     }
 
+    /// Projects data in parallel using principal components
     fn project_parallel(
         x_centered: &Array2<f64>,
         components: &Array2<f64>,
@@ -751,6 +762,7 @@ impl PCA {
         })
     }
 
+    /// Reconstructs data in parallel from component space
     fn reconstruct_parallel(
         x: &Array2<f64>,
         components: &Array2<f64>,
@@ -780,6 +792,7 @@ impl PCA {
         })
     }
 
+    /// Creates a progress bar with a consistent style
     fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
         let progress_bar = ProgressBar::new(len);
         progress_bar.set_style(
