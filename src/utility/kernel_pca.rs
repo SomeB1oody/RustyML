@@ -184,7 +184,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD`.
+    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD` (200)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -211,7 +211,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD`.
+    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD` (200)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,

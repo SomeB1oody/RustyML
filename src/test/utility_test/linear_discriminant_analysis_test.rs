@@ -68,18 +68,13 @@ fn test_fit_predict_transform() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_fit_transform_and_parallel() -> Result<(), Box<dyn Error>> {
+fn test_fit_transform() -> Result<(), Box<dyn Error>> {
     let (x, y) = make_three_class_dataset();
 
     let mut lda = LDA::new(2, Some(Solver::SVD), Some(Shrinkage::Auto))?;
     let transformed = lda.fit_transform(&x.view(), &y.view())?;
     assert_eq!(transformed.shape(), &[x.nrows(), 2]);
     assert!(lda.get_projection().is_some());
-
-    let mut lda_parallel = LDA::new(2, Some(Solver::SVD), Some(Shrinkage::Auto))?;
-    let transformed_parallel = lda_parallel.fit_transform_parallel(&x.view(), &y.view())?;
-    assert_eq!(transformed_parallel.shape(), &[x.nrows(), 2]);
-    assert!(lda_parallel.get_projection().is_some());
 
     Ok(())
 }

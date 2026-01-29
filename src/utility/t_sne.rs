@@ -13,6 +13,8 @@ const FINAL_MOMENTUM: f64 = 0.8;
 const INIT_SCALE: f64 = 1e-4;
 /// Lower bound for q_ij to avoid log(0) in KL divergence.
 const MIN_Q: f64 = 1e-12;
+/// Threshold for switching to parallel computation in t-SNE.
+const TSNE_PRARALLEL_THRESHOLD: usize = 2000;
 
 /// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction.
 ///
@@ -144,48 +146,83 @@ impl TSNE {
     ///
     /// # Performance
     ///
-    /// For workloads with fewer than 2,000 samples, this sequential method typically outperforms
-    /// parallel overhead; for 2,000 samples or more, consider `fit_transform_parallel`.
+    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PRARALLEL_THRESHOLD` (2000).
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
         // Validate inputs before any heavy computation
         self.validate_input(x)?;
-        let x_owned = x.to_owned();
-        self.fit_transform_internal(&x_owned, false)
-    }
 
-    /// Performs t-SNE dimensionality reduction on input data using parallel computation.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Input data matrix where rows are samples and columns are features
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Array2<f64>, ModelError>` - Reduced embedding of shape (n_samples, n_components)
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::InputValidationError` - If the input matrix is empty, too small, or contains non-finite values
-    ///
-    /// # Performance
-    ///
-    /// Parallel execution uses Rayon to speed up distance, probability, and gradient computations.
-    /// For workloads with 2,000 samples or more, this method is usually faster; for fewer than 2,000
-    /// samples, prefer the sequential `fit_transform`.
-    pub fn fit_transform_parallel<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S: Data<Elem = f64> + Send + Sync,
-    {
-        // Same validation as the sequential path
-        self.validate_input(x)?;
         let x_owned = x.to_owned();
-        self.fit_transform_internal(&x_owned, true)
+        let n_samples = x_owned.nrows();
+        // Decide execution mode from sample count
+        let use_parallel = n_samples > TSNE_PRARALLEL_THRESHOLD;
+
+        // Precompute distances and convert them to joint probabilities
+        let distances = self.pairwise_squared_distances(&x_owned, use_parallel);
+        let p_conditional = self.conditional_probabilities(&distances, use_parallel);
+        let p = self.symmetrize_probabilities(&p_conditional);
+        let p_exaggerated = p.mapv(|v| v * EARLY_EXAGGERATION);
+
+        // Initialize embedding and momentum buffer
+        let mut y = self.init_embedding(n_samples);
+        let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
+
+        // Progress bar reports KL divergence each iteration
+        let progress_bar = ProgressBar::new(self.n_iter as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | KL Divergence: {msg}",
+                )
+                .expect("Failed to set progress bar template")
+                .progress_chars("█▓░"),
+        );
+        progress_bar.set_message(format!("{:.6}", 0.0));
+
+        let exaggeration_iter = EARLY_EXAGGERATION_ITER.min(self.n_iter);
+        let mut last_kl = 0.0;
+
+        for iter in 0..self.n_iter {
+            // Use early exaggeration for the first phase only
+            let p_use = if iter < exaggeration_iter {
+                &p_exaggerated
+            } else {
+                &p
+            };
+
+            // Compute Student-t affinities and gradient
+            let (num, sum_num) = self.compute_num_matrix(&y, use_parallel);
+            let grad = self.compute_gradient(&y, p_use, &num, sum_num, use_parallel);
+
+            // Switch momentum after the exaggeration phase
+            let momentum = if iter < exaggeration_iter {
+                INITIAL_MOMENTUM
+            } else {
+                FINAL_MOMENTUM
+            };
+
+            // Apply momentum SGD update to the embedding
+            for i in 0..n_samples {
+                for d in 0..self.n_components {
+                    y_incs[[i, d]] = momentum * y_incs[[i, d]] - self.learning_rate * grad[[i, d]];
+                    y[[i, d]] += y_incs[[i, d]];
+                }
+            }
+
+            // Keep embedding centered to avoid drift
+            self.center_embedding(&mut y)?;
+
+            // Track KL divergence for reporting only
+            last_kl = self.kl_divergence(p_use, &num, sum_num, use_parallel);
+            progress_bar.set_message(format!("{:.6}", last_kl));
+            progress_bar.inc(1);
+        }
+
+        progress_bar.finish_with_message(format!("{:.6}", last_kl));
+
+        Ok(y)
     }
 
     fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
@@ -223,79 +260,6 @@ impl TSNE {
         }
 
         Ok(())
-    }
-
-    fn fit_transform_internal(
-        &self,
-        x: &Array2<f64>,
-        parallel: bool,
-    ) -> Result<Array2<f64>, ModelError> {
-        let n_samples = x.nrows();
-
-        // Precompute distances and convert them to joint probabilities
-        let distances = self.pairwise_squared_distances(x, parallel);
-        let p_conditional = self.conditional_probabilities(&distances, parallel);
-        let p = self.symmetrize_probabilities(&p_conditional);
-        let p_exaggerated = p.mapv(|v| v * EARLY_EXAGGERATION);
-
-        // Initialize embedding and momentum buffer
-        let mut y = self.init_embedding(n_samples);
-        let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
-
-        // Progress bar reports KL divergence each iteration
-        let progress_bar = ProgressBar::new(self.n_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | KL Divergence: {msg}",
-                )
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(format!("{:.6}", 0.0));
-
-        let exaggeration_iter = EARLY_EXAGGERATION_ITER.min(self.n_iter);
-        let mut last_kl = 0.0;
-
-        for iter in 0..self.n_iter {
-            // Use early exaggeration for the first phase only
-            let p_use = if iter < exaggeration_iter {
-                &p_exaggerated
-            } else {
-                &p
-            };
-
-            // Compute Student-t affinities and gradient
-            let (num, sum_num) = self.compute_num_matrix(&y, parallel);
-            let grad = self.compute_gradient(&y, p_use, &num, sum_num, parallel);
-
-            // Switch momentum after the exaggeration phase
-            let momentum = if iter < exaggeration_iter {
-                INITIAL_MOMENTUM
-            } else {
-                FINAL_MOMENTUM
-            };
-
-            // Apply momentum SGD update to the embedding
-            for i in 0..n_samples {
-                for d in 0..self.n_components {
-                    y_incs[[i, d]] = momentum * y_incs[[i, d]] - self.learning_rate * grad[[i, d]];
-                    y[[i, d]] += y_incs[[i, d]];
-                }
-            }
-
-            // Keep embedding centered to avoid drift
-            self.center_embedding(&mut y)?;
-
-            // Track KL divergence for reporting only
-            last_kl = self.kl_divergence(p_use, &num, sum_num, parallel);
-            progress_bar.set_message(format!("{:.6}", last_kl));
-            progress_bar.inc(1);
-        }
-
-        progress_bar.finish_with_message(format!("{:.6}", last_kl));
-
-        Ok(y)
     }
 
     fn init_embedding(&self, n_samples: usize) -> Array2<f64> {

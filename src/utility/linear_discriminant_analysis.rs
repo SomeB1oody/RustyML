@@ -31,9 +31,9 @@ pub enum Shrinkage {
     Manual(f64),
 }
 
-/// Threshold for using parallel computation in LDA.
-/// When the number of samples is below this threshold, sequential computation is used.
-const LDA_PARALLEL_THRESHOLD: usize = 500;
+/// Threshold for switching to parallel computation in LDA.
+/// Uses sequential computation at or below this sample count.
+const LDA_PRARALLEL_THRESHOLD: usize = 500;
 
 /// Linear Discriminant Analysis (LDA) model.
 ///
@@ -172,277 +172,12 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Use `fit_parallel` to enable parallel class-statistic computation.
-    /// As a rule of thumb, switch to `fit_parallel` when `x.nrows()` exceeds 500 samples.
+    /// Runs sequentially when `x.nrows()` is at or below `LDA_PRARALLEL_THRESHOLD`.
+    /// Uses Rayon parallelism when `x.nrows()` is above `LDA_PRARALLEL_THRESHOLD`.
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix1>,
-    ) -> Result<&mut Self, ModelError>
-    where
-        S1: Data<Elem = f64>,
-        S2: Data<Elem = i32>,
-    {
-        self.fit_internal(x, y, false, true)
-    }
-
-    /// Fits the LDA model using training data in parallel.
-    ///
-    /// Parallelizes class-statistic computation to speed up fitting on larger datasets.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix with samples as rows and features as columns
-    /// - `y` - Class labels aligned with the rows of `x`
-    ///
-    /// # Returns
-    ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to self for chaining
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
-    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
-    ///
-    /// # Performance
-    ///
-    /// For small datasets, `fit` can be faster due to lower overhead.
-    /// As a rule of thumb, use `fit` when `x.nrows()` is 500 samples or fewer.
-    pub fn fit_parallel<S1, S2>(
-        &mut self,
-        x: &ArrayBase<S1, Ix2>,
-        y: &ArrayBase<S2, Ix1>,
-    ) -> Result<&mut Self, ModelError>
-    where
-        S1: Data<Elem = f64> + Send + Sync,
-        S2: Data<Elem = i32>,
-    {
-        self.fit_internal(x, y, true, true)
-    }
-
-    /// Predicts class labels for new samples using the trained model.
-    ///
-    /// Applies the learned class means and shared covariance to compute linear scores.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix with samples as rows and features as columns
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Array1<i32>, ModelError>` - Predicted class labels
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
-    ///
-    /// # Performance
-    ///
-    /// Uses parallel prediction when `x.nrows()` is at least `LDA_PARALLEL_THRESHOLD` (500).
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
-    where
-        S: Data<Elem = f64>,
-    {
-        let classes = self.classes.as_ref().ok_or(ModelError::NotFitted)?;
-        let means = self.means.as_ref().ok_or(ModelError::NotFitted)?;
-        let cov_inv = self.cov_inv.as_ref().ok_or(ModelError::NotFitted)?;
-        let priors = self.priors.as_ref().ok_or(ModelError::NotFitted)?;
-
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        let n_features = means.ncols();
-        if x.ncols() != n_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                n_features
-            )));
-        }
-
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        let progress_bar = Self::create_progress_bar(x.nrows() as u64, "Scoring samples");
-
-        let n_classes = classes.len();
-        let mut coefficients = Array2::<f64>::zeros((n_classes, n_features));
-        let mut intercepts = Array1::<f64>::zeros(n_classes);
-
-        for j in 0..n_classes {
-            // Build linear discriminant coefficients per class
-            let mean = means.row(j).to_owned();
-            let coef = cov_inv.dot(&mean);
-            coefficients.row_mut(j).assign(&coef);
-            let prior_term = if priors[j] > 0.0 {
-                priors[j].ln()
-            } else {
-                f64::NEG_INFINITY
-            };
-            intercepts[j] = -0.5 * mean.dot(&coef) + prior_term;
-        }
-
-        let predict_sample = |row: ArrayView1<f64>| {
-            // Score each class and keep the best label
-            let mut best_score = f64::NEG_INFINITY;
-            let mut best_class = classes[0];
-            for j in 0..n_classes {
-                let score = row.dot(&coefficients.row(j)) + intercepts[j];
-                if score > best_score {
-                    best_score = score;
-                    best_class = classes[j];
-                }
-            }
-            best_class
-        };
-
-        let predictions: Vec<i32> = if x.nrows() >= LDA_PARALLEL_THRESHOLD {
-            // Use parallel scoring for large batches
-            let x_owned = x.to_owned();
-            let pb = progress_bar.clone();
-            x_owned
-                .outer_iter()
-                .into_par_iter()
-                .map(|row| {
-                    let pred = predict_sample(row);
-                    pb.inc(1);
-                    pred
-                })
-                .collect()
-        } else {
-            // Use sequential scoring for smaller batches
-            x.outer_iter()
-                .map(|row| {
-                    let pred = predict_sample(row);
-                    progress_bar.inc(1);
-                    pred
-                })
-                .collect()
-        };
-
-        progress_bar.finish_with_message("Completed");
-        Ok(Array1::from(predictions))
-    }
-
-    /// Transforms data using the trained projection matrix.
-    ///
-    /// Projects samples onto the learned discriminant components.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix with samples as rows and features as columns
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
-    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
-    where
-        S: Data<Elem = f64>,
-    {
-        self.transform_internal(x, true)
-    }
-
-    /// Fits the model and transforms the data in one step.
-    ///
-    /// Convenience method that trains the model and returns the projected data.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix with samples as rows and features as columns
-    /// - `y` - Class labels aligned with the rows of `x`
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
-    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
-    ///
-    /// # Performance
-    ///
-    /// Use `fit_transform_parallel` to enable parallel class-statistic computation.
-    /// As a rule of thumb, switch to `fit_transform_parallel` when `x.nrows()` exceeds 500 samples.
-    pub fn fit_transform<S1, S2>(
-        &mut self,
-        x: &ArrayBase<S1, Ix2>,
-        y: &ArrayBase<S2, Ix1>,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S1: Data<Elem = f64>,
-        S2: Data<Elem = i32>,
-    {
-        let progress_bar = Self::create_progress_bar(2, "Fitting model");
-        self.fit_internal(x, y, false, false)?;
-        progress_bar.inc(1);
-        progress_bar.set_message("Transforming data");
-        let transformed = self.transform_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.finish_with_message("Completed");
-        Ok(transformed)
-    }
-
-    /// Fits the model and transforms the data in one step using parallel computation.
-    ///
-    /// Parallelizes class-statistic computation to speed up fitting.
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Feature matrix with samples as rows and features as columns
-    /// - `y` - Class labels aligned with the rows of `x`
-    ///
-    /// # Returns
-    ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
-    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
-    ///
-    /// # Performance
-    ///
-    /// For small datasets, `fit_transform` can be faster due to lower overhead.
-    /// As a rule of thumb, use `fit_transform` when `x.nrows()` is 500 samples or fewer.
-    pub fn fit_transform_parallel<S1, S2>(
-        &mut self,
-        x: &ArrayBase<S1, Ix2>,
-        y: &ArrayBase<S2, Ix1>,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S1: Data<Elem = f64> + Send + Sync,
-        S2: Data<Elem = i32>,
-    {
-        let progress_bar = Self::create_progress_bar(2, "Fitting model (parallel)");
-        self.fit_internal(x, y, true, false)?;
-        progress_bar.inc(1);
-        progress_bar.set_message("Transforming data");
-        let transformed = self.transform_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.finish_with_message("Completed");
-        Ok(transformed)
-    }
-
-    /// Fits the model with optional parallelism and progress reporting
-    fn fit_internal<S1, S2>(
-        &mut self,
-        x: &ArrayBase<S1, Ix2>,
-        y: &ArrayBase<S2, Ix1>,
-        parallel: bool,
-        show_progress: bool,
     ) -> Result<&mut Self, ModelError>
     where
         S1: Data<Elem = f64>,
@@ -476,15 +211,13 @@ impl LDA {
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
+        // Decide execution mode from sample count
+        let use_parallel = n_samples > LDA_PRARALLEL_THRESHOLD;
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(
-                5,
-                "Validating input and extracting classes",
-            ))
-        } else {
-            None
-        };
+        let progress_bar = Some(Self::create_progress_bar(
+            5,
+            "Validating input and extracting classes",
+        ));
 
         let mut classes_set = AHashSet::new();
         for &label in y.iter() {
@@ -549,7 +282,7 @@ impl LDA {
         })?;
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
-        let class_results: Vec<_> = if parallel {
+        let class_results: Vec<_> = if use_parallel {
             // Compute per-class stats in parallel
             let x_owned = x.to_owned();
             class_pairs
@@ -625,6 +358,177 @@ impl LDA {
         }
 
         Ok(self)
+    }
+
+    /// Predicts class labels for new samples using the trained model.
+    ///
+    /// Applies the learned class means and shared covariance to compute linear scores.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix with samples as rows and features as columns
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<i32>, ModelError>` - Predicted class labels
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted
+    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
+    ///
+    /// # Performance
+    ///
+    /// Uses parallel prediction when `x.nrows()` is above `LDA_PRARALLEL_THRESHOLD` (500).
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        let classes = self.classes.as_ref().ok_or(ModelError::NotFitted)?;
+        let means = self.means.as_ref().ok_or(ModelError::NotFitted)?;
+        let cov_inv = self.cov_inv.as_ref().ok_or(ModelError::NotFitted)?;
+        let priors = self.priors.as_ref().ok_or(ModelError::NotFitted)?;
+
+        if x.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Cannot predict on empty dataset".to_string(),
+            ));
+        }
+
+        let n_features = means.ncols();
+        if x.ncols() != n_features {
+            return Err(ModelError::InputValidationError(format!(
+                "Number of features does not match training data, x columns: {}, expected: {}",
+                x.ncols(),
+                n_features
+            )));
+        }
+
+        if x.iter().any(|&val| !val.is_finite()) {
+            return Err(ModelError::InputValidationError(
+                "Input data contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        let progress_bar = Self::create_progress_bar(x.nrows() as u64, "Scoring samples");
+
+        let n_classes = classes.len();
+        let mut coefficients = Array2::<f64>::zeros((n_classes, n_features));
+        let mut intercepts = Array1::<f64>::zeros(n_classes);
+
+        for j in 0..n_classes {
+            // Build linear discriminant coefficients per class
+            let mean = means.row(j).to_owned();
+            let coef = cov_inv.dot(&mean);
+            coefficients.row_mut(j).assign(&coef);
+            let prior_term = if priors[j] > 0.0 {
+                priors[j].ln()
+            } else {
+                f64::NEG_INFINITY
+            };
+            intercepts[j] = -0.5 * mean.dot(&coef) + prior_term;
+        }
+
+        let predict_sample = |row: ArrayView1<f64>| {
+            // Score each class and keep the best label
+            let mut best_score = f64::NEG_INFINITY;
+            let mut best_class = classes[0];
+            for j in 0..n_classes {
+                let score = row.dot(&coefficients.row(j)) + intercepts[j];
+                if score > best_score {
+                    best_score = score;
+                    best_class = classes[j];
+                }
+            }
+            best_class
+        };
+
+        let predictions: Vec<i32> = if x.nrows() > LDA_PRARALLEL_THRESHOLD {
+            // Use parallel scoring for large batches
+            let x_owned = x.to_owned();
+            let pb = progress_bar.clone();
+            x_owned
+                .outer_iter()
+                .into_par_iter()
+                .map(|row| {
+                    let pred = predict_sample(row);
+                    pb.inc(1);
+                    pred
+                })
+                .collect()
+        } else {
+            // Use sequential scoring for smaller batches
+            x.outer_iter()
+                .map(|row| {
+                    let pred = predict_sample(row);
+                    progress_bar.inc(1);
+                    pred
+                })
+                .collect()
+        };
+
+        progress_bar.finish_with_message("Completed");
+        Ok(Array1::from(predictions))
+    }
+
+    /// Transforms data using the trained projection matrix.
+    ///
+    /// Projects samples onto the learned discriminant components.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix with samples as rows and features as columns
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted
+    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
+        self.transform_internal(x, true)
+    }
+
+    /// Fits the model and transforms the data in one step.
+    ///
+    /// Convenience method that trains the model and returns the projected data.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix with samples as rows and features as columns
+    /// - `y` - Class labels aligned with the rows of `x`
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
+    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
+    ///
+    /// # Performance
+    ///
+    /// Runs sequentially when `x.nrows()` is at or below `LDA_PRARALLEL_THRESHOLD`.
+    /// Uses Rayon parallelism when `x.nrows()` is above `LDA_PRARALLEL_THRESHOLD`.
+    pub fn fit_transform<S1, S2>(
+        &mut self,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
+    ) -> Result<Array2<f64>, ModelError>
+    where
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = i32>,
+    {
+        // Fit the model with adaptive parallelism
+        self.fit(x, y)?;
+        // Project the input using the fitted components
+        self.transform_internal(x, false)
     }
 
     /// Transforms input data using the fitted projection

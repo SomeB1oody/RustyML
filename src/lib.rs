@@ -506,7 +506,7 @@ pub mod prelude;
 ///
 /// let mut pca = principal_component_analysis::PCA::new(
 ///     2,
-///     principal_component_analysis::SVDSolver::Full,
+///     SVDSolver::Full,
 /// )
 /// .unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];

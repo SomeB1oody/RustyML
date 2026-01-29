@@ -63,7 +63,7 @@ fn test_tsne_fit_transform_shape() {
 }
 
 #[test]
-fn test_tsne_fit_transform_parallel_shape() {
+fn test_tsne_fit_transform_shape_alternate_seed() {
     let tsne = TSNE::new(2, 3.0, 100.0, 50, Some(7)).unwrap();
     let data = arr2(&[
         [1.5, 2.5, 3.5],
@@ -76,7 +76,7 @@ fn test_tsne_fit_transform_parallel_shape() {
         [8.5, 9.5, 10.5],
     ]);
 
-    let embedded = tsne.fit_transform_parallel(&data.view()).unwrap();
+    let embedded = tsne.fit_transform(&data.view()).unwrap();
 
     assert_eq!(embedded.shape(), &[8, 2]);
     assert!(embedded.iter().all(|v| v.is_finite()));
