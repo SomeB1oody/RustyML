@@ -48,41 +48,28 @@ pub enum RegularizationType {
     L2(f64),
 }
 
-/// Linear regression module implementing the ordinary least squares method
-pub mod linear_regression;
-
-/// Logistic regression module for binary classification problems
-pub mod logistic_regression;
-
-/// K-means clustering implementation for unsupervised learning
-pub mod kmeans;
-
-/// K-Nearest Neighbors (KNN) implementation for classification and regression
-pub mod knn;
-
-/// Mean Shift clustering algorithm implementation
-pub mod meanshift;
-
 /// Density-Based Spatial Clustering of Applications with Noise (DBSCAN) algorithm implementation
 pub mod dbscan;
-
 /// Decision Tree implementation for classification and regression task
 pub mod decision_tree;
-
-/// Isolation Forest algorithm implementation for anomaly detection
-pub mod isolation_forest;
-
-/// This module provides an implementation of Support Vector Classification
-pub mod svc;
-
-/// This module contains the implementation of Linear Support Vector Classification (Linear SVC)
-pub mod linear_svc;
-
-/// This module provides an implementation of Linear Discriminant Analysis
-pub mod linear_discriminant_analysis;
-
 /// This module provides helper functions for machine learning models
 mod helper_function;
+/// Isolation Forest algorithm implementation for anomaly detection
+pub mod isolation_forest;
+/// K-means clustering implementation for unsupervised learning
+pub mod kmeans;
+/// K-Nearest Neighbors (KNN) implementation for classification and regression
+pub mod knn;
+/// Linear regression module implementing the ordinary least squares method
+pub mod linear_regression;
+/// This module contains the implementation of Linear Support Vector Classification (Linear SVC)
+pub mod linear_svc;
+/// Logistic regression module for binary classification problems
+pub mod logistic_regression;
+/// Mean Shift clustering algorithm implementation
+pub mod meanshift;
+/// This module provides an implementation of Support Vector Classification
+pub mod svc;
 
 pub use crate::utility::KernelType;
 pub use dbscan::*;
@@ -91,7 +78,6 @@ use helper_function::*;
 pub use isolation_forest::*;
 pub use kmeans::*;
 pub use knn::*;
-pub use linear_discriminant_analysis::*;
 pub use linear_regression::*;
 pub use linear_svc::*;
 pub use logistic_regression::*;

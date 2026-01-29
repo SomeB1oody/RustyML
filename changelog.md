@@ -8,6 +8,9 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.11.0] - 2026-01-28 (UTC-7)
 - Refactor and simplify `LDA` and `t-SNE` implementations
 
+### Removed
+- ## [v0.11.0] - 2026-01-28 (UTC-7)
+
 ## [v0.11.0] - 2026-01-27 (UTC-7)
 - Refactor and update `KernelPCA` implementation in `utility` module
 
