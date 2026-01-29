@@ -173,6 +173,29 @@
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
 
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "utility",
+    feature = "neural_network"
+))]
+use serde::{Deserialize, Serialize};
+
+/// Kernel function types for Support Vector Machine
+///
+/// # Variants
+/// - `Linear` - Linear kernel: K(x, y) = x·y
+/// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
+/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
+/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
+#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+pub enum KernelType {
+    Linear,
+    Poly { degree: u32, gamma: f64, coef0: f64 },
+    RBF { gamma: f64 },
+    Sigmoid { gamma: f64, coef0: f64 },
+}
+
 /// A macro that generates a getter method for any field.
 ///
 /// This macro creates a public getter method that returns the value or reference

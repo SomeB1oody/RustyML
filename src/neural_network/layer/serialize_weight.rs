@@ -1,5 +1,5 @@
 use super::*;
-use serde::{Deserialize, Serialize};
+use crate::{Deserialize, Serialize};
 
 /// Serializable weight container for all supported layer types.
 ///

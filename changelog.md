@@ -5,11 +5,16 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-01-29 (UTC-7)
+### Changed
+- Relocate `KernelType` and update relevant modules
+
 ## [v0.11.0] - 2026-01-28 (UTC-7)
+### Changed
 - Refactor and simplify `LDA` and `t-SNE` implementations
 
-### Removed
-- ## [v0.11.0] - 2026-01-28 (UTC-7)
+# Removed
+- Remove `linear_discriminant_analysis` module from `machine_learning`
 
 ## [v0.11.0] - 2026-01-27 (UTC-7)
 - Refactor and update `KernelPCA` implementation in `utility` module

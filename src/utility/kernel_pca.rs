@@ -1,5 +1,5 @@
-pub use super::KernelType;
 use super::*;
+pub use crate::KernelType;
 use std::cmp::Ordering;
 
 /// Threshold for using parallel computation in Kernel PCA.

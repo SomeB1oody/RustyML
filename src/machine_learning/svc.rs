@@ -1,5 +1,5 @@
 use super::*;
-pub use crate::utility::KernelType;
+pub use crate::KernelType;
 
 /// Threshold for using parallel computation in SVC operations.
 /// When the number of samples is below this threshold, sequential computation is used.

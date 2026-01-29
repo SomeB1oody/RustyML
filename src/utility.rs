@@ -1,26 +1,11 @@
 use crate::error::ModelError;
+use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Data;
 use ndarray::prelude::*;
 use rand::prelude::*;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-
-/// Kernel function types for Support Vector Machine
-///
-/// # Variants
-/// - `Linear` - Linear kernel: K(x, y) = x·y
-/// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
-/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
-/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
-pub enum KernelType {
-    Linear,
-    Poly { degree: u32, gamma: f64, coef0: f64 },
-    RBF { gamma: f64 },
-    Sigmoid { gamma: f64, coef0: f64 },
-}
 
 /// This module implements Kernel Principal Component Analysis.
 pub mod kernel_pca;

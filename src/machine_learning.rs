@@ -1,5 +1,6 @@
 use crate::error::ModelError;
 use crate::math::*;
+use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::Data;
@@ -7,7 +8,6 @@ use ndarray::prelude::*;
 use rand::prelude::*;
 use rand::rng;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 
 /// Represents different distance calculation methods used in various machine learning algorithms.
 ///
@@ -42,9 +42,7 @@ pub enum DistanceCalculationMetric {
 ///   typically does not produce sparse solutions.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum RegularizationType {
-    /// L1 regularization (Lasso) with the specified regularization strength coefficient
     L1(f64),
-    /// L2 regularization (Ridge) with the specified regularization strength coefficient
     L2(f64),
 }
 
@@ -71,7 +69,6 @@ pub mod meanshift;
 /// This module provides an implementation of Support Vector Classification
 pub mod svc;
 
-pub use crate::utility::KernelType;
 pub use dbscan::*;
 pub use decision_tree::*;
 use helper_function::*;
