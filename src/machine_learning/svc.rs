@@ -188,6 +188,15 @@ impl SVC {
                 // K(x, y) = tanh(gamma·x·y + coef0)
                 (gamma * x1.dot(&x2) + coef0).tanh()
             }
+            KernelType::Cosine => {
+                // K(x, y) = (x dot y) / (||x|| * ||y||)
+                let norm_product = (x1.dot(&x1) * x2.dot(&x2)).sqrt();
+                if norm_product <= f64::EPSILON {
+                    0.0
+                } else {
+                    x1.dot(&x2) / norm_product
+                }
+            }
         }
     }
 

@@ -115,6 +115,12 @@ fn test_kernel_pca_default_and_new() {
         }
         _ => panic!("Expected Poly kernel"),
     }
+
+    let cosine = KernelPCA::new(KernelType::Cosine, 2, EigenSolver::Dense).unwrap();
+    match cosine.get_kernel() {
+        KernelType::Cosine => (),
+        _ => panic!("Expected Cosine kernel"),
+    }
 }
 
 #[test]
@@ -206,6 +212,18 @@ fn test_kernel_pca_fit_and_transform() -> Result<(), Box<dyn Error>> {
     let new_transformed = kpca.transform(&new_data.view())?;
     assert_eq!(new_transformed.shape(), &[2, 2]);
     assert!(new_transformed.iter().all(|v| v.is_finite()));
+
+    Ok(())
+}
+
+#[test]
+fn test_kernel_pca_cosine_kernel() -> Result<(), Box<dyn Error>> {
+    let data = make_kernel_pca_dataset();
+    let mut kpca = KernelPCA::new(KernelType::Cosine, 2, EigenSolver::Dense)?;
+
+    let transformed = kpca.fit_transform(&data.view())?;
+    assert_eq!(transformed.shape(), &[data.nrows(), 2]);
+    assert!(transformed.iter().all(|v| v.is_finite()));
 
     Ok(())
 }

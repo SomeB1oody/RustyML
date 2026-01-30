@@ -168,6 +168,8 @@ fn test_different_kernels() {
     )
     .unwrap();
 
+    let cosine_svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100).unwrap();
+
     // Ensure kernel types are correctly matched
     match poly_svc.get_kernel() {
         KernelType::Poly {
@@ -188,6 +190,21 @@ fn test_different_kernels() {
             assert!((coef0 - 0.0).abs() < 1e-10);
         }
         _ => panic!("Expected sigmoid kernel"),
+    }
+
+    match cosine_svc.get_kernel() {
+        KernelType::Cosine => (),
+        _ => panic!("Expected cosine kernel"),
+    }
+}
+
+#[test]
+fn test_cosine_kernel_constructor() {
+    let svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100).unwrap();
+
+    match svc.get_kernel() {
+        KernelType::Cosine => (),
+        _ => panic!("Expected cosine kernel"),
     }
 }
 

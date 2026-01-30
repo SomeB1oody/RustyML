@@ -33,7 +33,7 @@
 //! Data preprocessing and dimensionality reduction utilities:
 //! - **Dimensionality Reduction**: PCA, Kernel PCA, LDA, t-SNE
 //! - **Preprocessing**: Standardization, train-test splitting
-//! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid
+//! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid, Cosine
 //!
 //! ### [`metric`]
 //! Comprehensive evaluation metrics for model performance assessment:
@@ -187,6 +187,7 @@ use serde::{Deserialize, Serialize};
 /// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
 /// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
 /// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
+/// - `Cosine` - Cosine kernel: K(x, y) = (x dot y) / (||x|| * ||y||)
 #[cfg(any(feature = "machine_learning", feature = "utility"))]
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub enum KernelType {
@@ -194,6 +195,7 @@ pub enum KernelType {
     Poly { degree: u32, gamma: f64, coef0: f64 },
     RBF { gamma: f64 },
     Sigmoid { gamma: f64, coef0: f64 },
+    Cosine,
 }
 
 /// A macro that generates a getter method for any field.
@@ -514,7 +516,7 @@ pub mod prelude;
 /// # Data Preprocessing
 /// - **train_test_split**: Utility for splitting datasets into training and testing sets with configurable ratios
 /// - **standardize**: Data standardization (z-score normalization) for feature scaling
-/// - **KernelType**: Enumeration of supported kernel functions (RBF, Linear, Polynomial, Sigmoid)
+/// - **KernelType**: Enumeration of supported kernel functions (RBF, Linear, Polynomial, Sigmoid, Cosine)
 ///
 /// # Key Features
 /// - **Parallel Processing**: Rayon-based parallel computation for performance optimization

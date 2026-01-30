@@ -478,6 +478,7 @@ impl KernelPCA {
                 }
                 Ok(())
             }
+            KernelType::Cosine => Ok(()),
         }
     }
 
@@ -516,6 +517,14 @@ impl KernelPCA {
                 (-gamma * squared_norm).exp()
             }
             KernelType::Sigmoid { gamma, coef0 } => (gamma * x1.dot(&x2) + coef0).tanh(),
+            KernelType::Cosine => {
+                let norm_product = (x1.dot(&x1) * x2.dot(&x2)).sqrt();
+                if norm_product <= f64::EPSILON {
+                    0.0
+                } else {
+                    x1.dot(&x2) / norm_product
+                }
+            }
         }
     }
 
