@@ -1,4 +1,6 @@
-use super::*;
+use super::RegularizationType;
+use crate::error::ModelError;
+use ndarray::{ArrayBase, Data, Ix1, Ix2};
 
 /// Performs validation checks on the input data matrices.
 ///

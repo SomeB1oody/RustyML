@@ -1,4 +1,15 @@
-use super::*;
+use super::helper_function::{preliminary_check, validate_max_iterations, validate_tolerance};
+use crate::error::ModelError;
+use crate::math::squared_euclidean_distance_row;
+use crate::{Deserialize, Serialize};
+use ahash::AHashMap;
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Data, Ix2};
+use rand::rngs::StdRng;
+use rand::{SeedableRng, rng, seq::SliceRandom};
+use rayon::prelude::{
+    IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
+};
 
 /// Threshold for determining when to use parallel processing.
 /// Parallel processing is used only when the number of samples exceeds this threshold.

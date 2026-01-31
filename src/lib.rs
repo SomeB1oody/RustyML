@@ -67,7 +67,7 @@
 //!
 //! In your Rust code, write:
 //! ```rust, ignore
-//! use rustyml::machine_learning::linear_regression::*; // or `use rustyml::prelude::*`
+//! use rustyml::machine_learning::linear_regression::*;
 //! use ndarray::{Array1, Array2};
 //!
 //! // Create a linear regression model
@@ -441,7 +441,7 @@ pub mod math;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::*;
+/// use rustyml::machine_learning::linear_regression::LinearRegression;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Linear regression example
@@ -449,12 +449,6 @@ pub mod math;
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// let y = array![6.0, 9.0, 12.0];
 /// model.fit(&x, &y).unwrap();
-///
-/// // K-means clustering example
-/// let mut kmeans = KMeans::new(3, 100, 1e-4, Some(42)).unwrap();
-/// let data = array![[1.0, 2.0], [1.5, 1.8], [5.0, 8.0], [8.0, 8.0]];
-/// kmeans.fit(&data).unwrap();
-/// let labels = kmeans.predict(&data).unwrap();
 /// ```
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;

@@ -1,4 +1,6 @@
-use super::*;
+use crate::error::ModelError;
+use crate::machine_learning::isolation_forest::IsolationForest;
+use ndarray::{Array2, arr2};
 
 // Test basic constructor functionality
 #[test]

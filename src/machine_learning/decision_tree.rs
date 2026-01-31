@@ -1,4 +1,11 @@
-use super::*;
+use super::helper_function::preliminary_check;
+use crate::error::ModelError;
+use crate::math::{entropy, gini, variance};
+use crate::{Deserialize, Serialize};
+use ahash::AHashMap;
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Minimum number of samples required to enable parallel processing in decision tree operations.
 /// When the number of samples is below this threshold, sequential processing is used instead
@@ -200,7 +207,7 @@ impl Node {
 ///
 /// # Example
 /// ```rust
-/// use rustyml::machine_learning::{DecisionTree, Algorithm, DecisionTreeParams};
+/// use rustyml::machine_learning::decision_tree::{DecisionTree, Algorithm, DecisionTreeParams};
 /// use ndarray::{array, Array1, Array2};
 ///
 /// // Classification example with Iris dataset

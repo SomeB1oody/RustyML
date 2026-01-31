@@ -1,4 +1,7 @@
-use super::*;
+use crate::error::ModelError;
+use crate::machine_learning::DistanceCalculationMetric;
+use crate::machine_learning::knn::{KNN, WeightingStrategy};
+use ndarray::{Array1, Array2, array};
 
 // Test default initialization of KNN
 #[test]

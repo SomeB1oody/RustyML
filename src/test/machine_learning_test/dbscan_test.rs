@@ -1,4 +1,7 @@
-use super::*;
+use crate::error::ModelError;
+use crate::machine_learning::DistanceCalculationMetric;
+use crate::machine_learning::dbscan::DBSCAN;
+use ndarray::{Array2, arr2};
 
 #[test]
 fn test_new() {

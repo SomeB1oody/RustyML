@@ -1,4 +1,7 @@
-use super::*;
+use crate::machine_learning::decision_tree::{
+    Algorithm, DecisionTree, DecisionTreeParams, Node, NodeType,
+};
+use ndarray::{arr1, arr2};
 
 #[test]
 fn test_decision_tree_new() {

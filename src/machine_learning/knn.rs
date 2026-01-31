@@ -1,4 +1,11 @@
-pub use super::*;
+use super::DistanceCalculationMetric;
+use super::helper_function::preliminary_check;
+use crate::error::ModelError;
+use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
+use crate::{Deserialize, Serialize};
+use ahash::AHashMap;
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix1, Ix2};
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Threshold for using parallel distance calculation
 const PARALLEL_THRESHOLD: usize = 1000;
@@ -235,8 +242,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     where
         S: Data<Elem = f64>,
     {
-        use super::preliminary_check;
-
         // check if model is fitted
         if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
             return Err(ModelError::NotFitted);
@@ -307,8 +312,6 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        use super::preliminary_check;
-
         // check if model is fitted
         if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
             return Err(ModelError::NotFitted);

@@ -1,5 +1,13 @@
 pub use super::RegularizationType;
-use super::*;
+use super::helper_function::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_tolerance,
+};
+use crate::error::ModelError;
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
+use rand::{rng, seq::SliceRandom};
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 /// Threshold for batch size above which parallel processing is used
 const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;

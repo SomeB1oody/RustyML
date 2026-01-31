@@ -1,4 +1,17 @@
-use super::*;
+use super::RegularizationType;
+use super::helper_function::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_regulation_type,
+    validate_tolerance,
+};
+use crate::error::ModelError;
+use crate::math::sum_of_squared_errors;
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelBridge,
+    ParallelIterator,
+};
 
 /// Threshold for using parallel computation in Linear Regression.
 /// When the number of samples or features is below this threshold, sequential computation is used.
@@ -23,7 +36,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::*; // or just use `rustyml::prelude::*;`
+/// use rustyml::machine_learning::linear_regression::*;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Create a linear regression model

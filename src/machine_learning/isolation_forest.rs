@@ -1,4 +1,13 @@
-use super::*;
+use super::helper_function::preliminary_check;
+use crate::error::ModelError;
+use crate::machine_learning::decision_tree::{Node, NodeType};
+use crate::math::average_path_length_factor;
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng, rng};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction
 const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
@@ -25,7 +34,7 @@ const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
 ///
 /// # Example
 /// ```rust
-/// use rustyml::machine_learning::IsolationForest;
+/// use rustyml::machine_learning::isolation_forest::IsolationForest;
 /// use ndarray::array;
 ///
 /// let mut model = IsolationForest::new(100, 256, None, Some(42)).unwrap();

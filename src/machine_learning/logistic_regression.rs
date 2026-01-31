@@ -1,4 +1,14 @@
-use super::*;
+use super::RegularizationType;
+use super::helper_function::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_regulation_type,
+    validate_tolerance,
+};
+use crate::error::ModelError;
+use crate::math::{logistic_loss, sigmoid};
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Threshold for enabling parallel computation in logistic regression.
 /// When the number of samples exceeds this value, parallel processing is used

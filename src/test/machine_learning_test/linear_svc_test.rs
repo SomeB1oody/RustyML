@@ -1,4 +1,6 @@
-use super::*;
+use crate::machine_learning::RegularizationType;
+use crate::machine_learning::linear_svc::LinearSVC;
+use ndarray::{arr1, arr2};
 
 #[test]
 fn test_default() {

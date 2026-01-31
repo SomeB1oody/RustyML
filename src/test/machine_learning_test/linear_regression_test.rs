@@ -1,4 +1,5 @@
-use super::*;
+use crate::machine_learning::linear_regression::LinearRegression;
+use ndarray::{Array1, Array2};
 
 #[test]
 fn test_default_constructor() {

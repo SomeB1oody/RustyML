@@ -1,5 +1,13 @@
-use super::*;
+use super::helper_function::{preliminary_check, validate_max_iterations, validate_tolerance};
+use crate::error::ModelError;
+use crate::math::squared_euclidean_distance_row;
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix2};
 use ndarray_rand::rand::{RngCore, rng};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
 
 /// Threshold for parallelization in KMeans clustering.
@@ -192,8 +200,6 @@ impl KMeans {
     ///
     /// * `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
     fn closest_centroid(&self, x: &ArrayView2<f64>) -> Result<(usize, f64), ModelError> {
-        use crate::math::squared_euclidean_distance_row;
-
         let sample = x.row(0);
         let centroids = self.centroids.as_ref().unwrap();
 

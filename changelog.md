@@ -5,7 +5,11 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.11.0] - 2026-01-29 (UTC-7)
+## [v0.11.0] - 2026-01-31 (UTC-7)
+### Changed
+- Refactor imports in `machine_learning`
+
+## [v0.11.0] - 2026-01-30 (UTC-7)
 ### Added
 - Add `Cosine` kernel support to `KernelType`
 

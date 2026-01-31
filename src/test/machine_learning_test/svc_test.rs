@@ -1,4 +1,6 @@
-use super::*;
+use crate::KernelType;
+use crate::machine_learning::svc::SVC;
+use ndarray::{arr1, arr2};
 #[test]
 fn test_svc_constructor() {
     // Test basic constructor
