@@ -1,5 +1,11 @@
-use super::*;
+use crate::error::ModelError;
 use crate::math::{binary_search_sigma, squared_euclidean_distance_row};
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Early exaggeration factor applied to joint probabilities.
 const EARLY_EXAGGERATION: f64 = 12.0;
@@ -31,7 +37,7 @@ const TSNE_PRARALLEL_THRESHOLD: usize = 2000;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utility::TSNE;
+/// use rustyml::utility::t_sne::TSNE;
 /// use ndarray::array;
 ///
 /// let tsne = TSNE::new(2, 2.0, 200.0, 250, Some(42)).unwrap();

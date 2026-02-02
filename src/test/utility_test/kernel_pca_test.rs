@@ -1,4 +1,8 @@
-use super::*;
+use crate::error::ModelError;
+use crate::utility::kernel_pca::*;
+use approx::assert_abs_diff_eq;
+use ndarray::prelude::*;
+use std::error::Error;
 
 fn make_kernel_pca_dataset() -> Array2<f64> {
     arr2(&[

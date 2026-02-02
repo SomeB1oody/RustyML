@@ -5,8 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-02 (UTC-7)
+### Changed
+- Refactor imports in `utility`
+
 ## [v0.11.0] - 2026-02-01 (UTC-7)
-- Refactor imports in `dataset` modules
+### Changed
+- Refactor imports in `dataset`
 
 ## [v0.11.0] - 2026-01-31 (UTC-7)
 ### Changed

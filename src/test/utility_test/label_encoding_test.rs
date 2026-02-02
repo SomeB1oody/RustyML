@@ -1,4 +1,5 @@
-use super::*;
+use crate::utility::label_encoding::*;
+use ndarray::prelude::*;
 
 #[test]
 fn test_to_categorical_basic() {

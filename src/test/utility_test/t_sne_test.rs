@@ -1,4 +1,7 @@
-use super::*;
+use crate::error::ModelError;
+use crate::utility::t_sne::*;
+use approx::assert_abs_diff_eq;
+use ndarray::prelude::*;
 
 #[test]
 fn test_tsne_default() {

@@ -520,10 +520,10 @@ pub mod prelude;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utility::*;
+/// use rustyml::utility::principal_component_analysis::{PCA, SVDSolver};
 /// use ndarray::array;
 ///
-/// let mut pca = principal_component_analysis::PCA::new(
+/// let mut pca = PCA::new(
 ///     2,
 ///     SVDSolver::Full,
 /// )

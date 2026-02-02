@@ -1,4 +1,7 @@
-use super::*;
+use crate::error::ModelError;
+use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::IntoParallelRefMutIterator;
 
 /// Threshold for enabling parallel computation in standardization
 /// Arrays with fewer elements than this threshold will use sequential computation
@@ -38,7 +41,7 @@ pub enum StandardizationAxis {
 /// # Examples
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::utility::{standardize, StandardizationAxis};
+/// use rustyml::utility::standardize::{standardize, StandardizationAxis};
 ///
 /// let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
 /// let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();

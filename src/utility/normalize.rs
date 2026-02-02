@@ -1,4 +1,5 @@
-use super::*;
+use crate::error::ModelError;
+use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 
 /// Tolerance for considering a norm as effectively zero
 const NORM_ZERO_THRESHOLD: f64 = 1e-15;
@@ -65,7 +66,7 @@ pub enum NormalizationOrder {
 /// # Examples
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::utility::{normalize, NormalizationAxis, NormalizationOrder};
+/// use rustyml::utility::normalize::{normalize, NormalizationAxis, NormalizationOrder};
 ///
 /// let data = array![[3.0, 4.0], [1.0, 2.0]];
 /// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();

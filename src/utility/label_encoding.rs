@@ -1,4 +1,5 @@
-use super::*;
+use ahash::AHashMap;
+use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 
 /// Converts sparse categorical labels to categorical (one-hot encoded) format
 ///
@@ -20,7 +21,7 @@ use super::*;
 ///
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::utility::to_categorical;
+/// use rustyml::utility::label_encoding::to_categorical;
 ///
 /// let labels = array![0, 1, 2, 1, 0];
 /// let categorical = to_categorical(&labels, None);
@@ -97,7 +98,7 @@ where
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utility::to_categorical_with_mapping;
+/// use rustyml::utility::label_encoding::to_categorical_with_mapping;
 ///
 /// let labels = vec!["cat", "dog", "bird", "dog", "cat"];
 /// let (categorical, mapping) = to_categorical_with_mapping(&labels, None);
@@ -164,7 +165,7 @@ where
 ///
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::utility::to_sparse_categorical;
+/// use rustyml::utility::label_encoding::to_sparse_categorical;
 ///
 /// let categorical = array![[1.0, 0.0, 0.0],
 ///                         [0.0, 1.0, 0.0],

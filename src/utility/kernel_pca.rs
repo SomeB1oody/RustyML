@@ -1,6 +1,15 @@
-use super::*;
-pub use crate::KernelType;
+use crate::error::ModelError;
+use crate::{Deserialize, Serialize};
+use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 use std::cmp::Ordering;
+
+pub use crate::KernelType;
 
 /// Threshold for using parallel computation in Kernel PCA.
 /// When the number of samples is below this threshold, sequential computation is used.
@@ -43,7 +52,7 @@ pub enum EigenSolver {
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utility::{EigenSolver, KernelPCA, KernelType};
+/// use rustyml::utility::kernel_pca::{EigenSolver, KernelPCA, KernelType};
 /// use ndarray::array;
 ///
 /// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2, EigenSolver::Dense).unwrap();

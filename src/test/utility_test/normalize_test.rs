@@ -1,4 +1,6 @@
-use super::*;
+use crate::error::ModelError;
+use crate::utility::normalize::*;
+use ndarray::prelude::*;
 
 // Helper function for approximate equality checks
 fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {
