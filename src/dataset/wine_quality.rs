@@ -1,7 +1,7 @@
 use super::raw_data::wine_quality_raw::{
     load_red_wine_quality_raw_data, load_white_wine_quality_raw_data,
 };
-use ndarray::prelude::*;
+use ndarray::{Array1, Array2};
 use std::sync::OnceLock;
 
 // Use `OnceLock` for thread-safe delayed initialization of red wine dataset
@@ -49,8 +49,8 @@ fn parse_wine_data(
     }
 
     let features_array =
-        Array::from_shape_vec((features_array.len() / 12, 12), features_array).unwrap();
-    let headers_array = Array::from_vec(headers_array);
+        Array2::from_shape_vec((features_array.len() / 12, 12), features_array).unwrap();
+    let headers_array = Array1::from_vec(headers_array);
 
     (headers_array, features_array)
 }
@@ -166,8 +166,6 @@ pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array
 /// # Example
 /// ```rust
 /// use rustyml::dataset::wine_quality::load_white_wine_quality;
-/// use ndarray::prelude::*;
-///
 /// let (headers, features) = load_white_wine_quality();
 ///
 /// // Access feature names
@@ -250,8 +248,6 @@ pub fn load_red_wine_quality_owned() -> (Array1<&'static str>, Array2<f64>) {
 /// # Examples
 /// ```rust
 /// use rustyml::dataset::wine_quality::load_white_wine_quality_owned;
-/// use ndarray::prelude::*;
-///
 /// let (mut headers, mut features) = load_white_wine_quality_owned();
 ///
 /// // You can now modify the data since these are owned copies

@@ -1,5 +1,5 @@
-use super::raw_data::boston_housing_raw::*;
-use ndarray::prelude::*;
+use super::raw_data::boston_housing_raw::load_boston_housing_raw_data;
+use ndarray::{Array1, Array2};
 use std::sync::OnceLock;
 
 // Use `OnceLock` for thread-safe delayed initialization

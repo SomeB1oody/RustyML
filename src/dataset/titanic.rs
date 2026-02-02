@@ -1,5 +1,5 @@
 use super::raw_data::titanic_raw::load_titanic_raw_data;
-use ndarray::prelude::*;
+use ndarray::{Array1, Array2};
 use std::sync::OnceLock;
 
 // Use `OnceLock` for thread-safe delayed initialization
