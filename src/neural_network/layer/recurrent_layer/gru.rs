@@ -1,4 +1,17 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::{GRUGateWeight, GRULayerWeight, LayerWeight};
+use crate::neural_network::layer::recurrent_layer::apply_sigmoid;
+use crate::neural_network::layer::recurrent_layer::gate::{
+    Gate, compute_gate_value, store_gate_gradients, take_cache, update_gate_ada_grad,
+    update_gate_adam, update_gate_rmsprop, update_gate_sgd,
+};
+use crate::neural_network::layer::recurrent_layer::input_validation_function::{
+    validate_input_3d, validate_recurrent_dimensions,
+};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use ndarray::{Array2, Array3, Axis};
 
 /// Threshold for using parallel computation in GRU layer.
 /// When batch_size * units < this value, sequential execution is used.
@@ -31,7 +44,10 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::neural_network::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array;
 ///
 /// // Create input data: batch_size=2, timesteps=5, features=4

@@ -1,4 +1,4 @@
-use super::*;
+use crate::error::ModelError;
 
 /// Validates that the input shape has the expected number of dimensions.
 ///

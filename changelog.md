@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-03 (UTC-7)
+### Changed
+- Refactor imports in `neural_network`, `math`, and `metric`
+
 ## [v0.11.0] - 2026-02-02 (UTC-7)
 ### Changed
 - Refactor imports in `utility`
@@ -29,19 +33,23 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ### Changed
 - Refactor and simplify `LDA` and `t-SNE` implementations
 
-# Removed
+### Removed
 - Remove `linear_discriminant_analysis` module from `machine_learning`
 
 ## [v0.11.0] - 2026-01-27 (UTC-7)
+### Changed
 - Refactor and update `KernelPCA` implementation in `utility` module
 
 ## [v0.11.0] - 2026-01-26 (UTC-7)
+### Changed
 - Refactor and update `PCA` implementation in `utility` module
 
 ## [v0.11.0] - 2026-01-25 (UTC-7)
+### Changed
 - Refactor and update `LDA` implementation in `utility` module
 
 ## [v0.11.0] - 2026-01-24 (UTC-7)
+### Changed
 - Refactor and update `t_sne` implementation in `utility` module
 
 ## [v0.11.0] - 2026-01-23 (UTC-7)

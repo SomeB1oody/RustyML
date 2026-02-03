@@ -1,4 +1,8 @@
-use super::*;
+use crate::neural_network::layer::pooling_layer::global_max_pooling_2d::GlobalMaxPooling2D;
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::sequential::Sequential;
+use approx::assert_relative_eq;
+use ndarray::{Array, IxDyn};
 
 #[test]
 fn test_global_max_pooling_forward() {

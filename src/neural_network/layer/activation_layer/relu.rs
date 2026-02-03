@@ -1,4 +1,10 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use ndarray::Zip;
 
 /// Epsilon value for floating point precision handling
 const EPSILON: f32 = 1e-8;
@@ -22,7 +28,10 @@ const RELU_PARALLEL_THRESHOLD: usize = 10_000;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::activation_layer::relu::ReLU;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::MeanSquaredError;
 /// use ndarray::Array2;
 ///
 /// // Create a 2D input tensor

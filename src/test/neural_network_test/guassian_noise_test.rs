@@ -1,4 +1,6 @@
-use super::*;
+use crate::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_noise::GaussianNoise;
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::Array2;
 
 #[test]
 fn test_gaussian_noise_new() {

@@ -1,6 +1,5 @@
 use ahash::AHashMap;
-use ndarray::Data;
-use ndarray::prelude::*;
+use ndarray::{ArrayBase, Data, Ix1};
 
 /// Calculates the Mean Squared Error between predicted and actual values.
 ///

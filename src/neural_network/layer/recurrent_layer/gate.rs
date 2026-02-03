@@ -1,4 +1,12 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::layer::recurrent_layer::input_validation_function::validate_dimension_greater_than_zero;
+use crate::neural_network::optimizer::OptimizerCache;
+use crate::neural_network::optimizer::ada_grad::AdaGradStates;
+use crate::neural_network::optimizer::adam::AdamStates;
+use crate::neural_network::optimizer::rms_prop::RMSpropCache;
+use ndarray::{Array, Array2};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
 
 /// Gate parameters and optimizer state for recurrent cells.
 ///

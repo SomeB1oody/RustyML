@@ -1,4 +1,17 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::{LSTMGateWeight, LSTMLayerWeight, LayerWeight};
+use crate::neural_network::layer::recurrent_layer::apply_sigmoid;
+use crate::neural_network::layer::recurrent_layer::gate::{
+    Gate, compute_gate_value, store_gate_gradients, take_cache, update_gate_ada_grad,
+    update_gate_adam, update_gate_rmsprop, update_gate_sgd,
+};
+use crate::neural_network::layer::recurrent_layer::input_validation_function::{
+    validate_input_3d, validate_recurrent_dimensions,
+};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use ndarray::{Array2, Array3, Axis, Ix2, Ix3};
 
 /// Threshold for using parallel computation in LSTM layer.
 /// When batch_size * units < this value, sequential execution is used.
@@ -34,7 +47,10 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::neural_network::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array;
 ///
 /// // Create input data: batch_size=2, timesteps=5, features=4
@@ -172,7 +188,7 @@ impl<T: ActivationLayer> Layer for LSTM<T> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
-        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
+        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
 
         // Input shape: (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
@@ -298,7 +314,7 @@ impl<T: ActivationLayer> Layer for LSTM<T> {
         // Apply activation backward pass
         let grad_upstream = self.activation.backward(grad_output)?;
 
-        let grad_h_t = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
+        let grad_h_t = grad_upstream.into_dimensionality::<Ix2>().unwrap();
 
         let error_msg = "Forward pass has not been run";
         let x3 = take_cache(&mut self.input_cache, error_msg)?;

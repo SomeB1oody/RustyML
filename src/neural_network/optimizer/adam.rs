@@ -1,4 +1,10 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::{Layer, Optimizer};
+use crate::neural_network::optimizer::input_validation_function::{
+    validate_decay_rate, validate_epsilon, validate_learning_rate,
+};
+use ndarray::{Array2, Array3, Array4, Array5};
 
 /// Threshold for switching between sequential and parallel computation.
 /// For arrays smaller than this threshold, sequential computation is used
@@ -158,7 +164,8 @@ impl AdamStates {
     ///
     /// ```rust
     /// use ndarray::array;
-    /// use rustyml::neural_network::optimizer::AdamStates;
+    /// use rustyml::neural_network::optimizer::*;
+    /// use rustyml::neural_network::optimizer::adam::AdamStates;
     ///
     /// let mut states = AdamStates::new((1, 2), None, (1, 2));
     /// let grad_param = array![[0.1, 0.1]];

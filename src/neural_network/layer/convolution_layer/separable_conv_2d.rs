@@ -1,4 +1,28 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::convolution_layer::PaddingType;
+use crate::neural_network::layer::convolution_layer::input_validation_function::{
+    validate_depth_multiplier, validate_filters, validate_input_shape_2d, validate_kernel_size_2d,
+    validate_strides_2d,
+};
+use crate::neural_network::layer::helper_function::{
+    calculate_output_height_and_weight, compute_row_gradient_sum, merge_results, update_adam_conv,
+    update_rmsprop,
+};
+use crate::neural_network::layer::layer_weight::{LayerWeight, SeparableConv2DLayerWeight};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::OptimizerCacheConv2D;
+use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv2D;
+use crate::neural_network::optimizer::adam::AdamStatesConv2D;
+use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
+use ndarray::{Array2, Array3, Array4, ArrayD};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Threshold for deciding between parallel and sequential execution.
 /// When `batch_size * output_channels * output_height * output_width >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD`,
@@ -38,7 +62,10 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array4;
 ///
 /// // Create a simple 4D input tensor: [batch_size, channels, height, width]
@@ -814,8 +841,6 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
         ) {
             // Initialize AdaGrad cache (if not already initialized)
             if self.optimizer_cache.ada_grad_cache.is_none() {
-                use crate::neural_network::optimizer::AdaGradStatesConv2D;
-
                 let total_depthwise_params = self.depthwise_weights.len();
                 let total_pointwise_params = self.pointwise_weights.len();
                 let total_params = total_depthwise_params + total_pointwise_params;

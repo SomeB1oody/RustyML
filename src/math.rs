@@ -1,6 +1,5 @@
 use ahash::AHashMap;
-use ndarray::Data;
-use ndarray::prelude::*;
+use ndarray::{Array1, ArrayBase, Data, Ix1};
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 

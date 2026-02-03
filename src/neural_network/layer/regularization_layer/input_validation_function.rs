@@ -1,4 +1,4 @@
-use super::*;
+use crate::error::ModelError;
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (inclusive)
 pub(super) fn validate_rate(rate: f32, param_name: &str) -> Result<(), ModelError> {

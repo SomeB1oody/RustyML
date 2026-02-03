@@ -1,4 +1,5 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
 
 /// Validates that a dimension value is greater than 0
 ///

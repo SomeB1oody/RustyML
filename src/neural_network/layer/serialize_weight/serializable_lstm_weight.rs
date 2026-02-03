@@ -1,4 +1,9 @@
-use super::*;
+use crate::error::IoError;
+use crate::neural_network::layer::recurrent_layer::lstm::LSTM;
+use crate::neural_network::layer::serialize_weight::SerializableGateWeight;
+use crate::neural_network::layer::serialize_weight::helper_function::vec2_to_array2;
+use crate::neural_network::neural_network_trait::{ActivationLayer, ApplyWeights};
+use serde::{Deserialize, Serialize};
 
 /// Serializable representation of LSTM layer weights.
 ///

@@ -59,3 +59,14 @@ pub mod logistic_regression;
 pub mod meanshift;
 /// This module provides an implementation of Support Vector Classification
 pub mod svc;
+
+pub use dbscan::*;
+pub use decision_tree::*;
+pub use isolation_forest::*;
+pub use kmeans::*;
+pub use knn::*;
+pub use linear_regression::*;
+pub use linear_svc::*;
+pub use logistic_regression::*;
+pub use meanshift::*;
+pub use svc::*;

@@ -1,11 +1,14 @@
-use super::super::{LossFunction, Tensor};
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::LossFunction;
 
 /// Binary Cross Entropy loss function for binary classification
 ///
 /// # Example
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::loss_function::*;
+/// use rustyml::neural_network::Tensor;
+/// use rustyml::prelude::neural_network_trait::LossFunction;
 /// use ndarray::array;
 ///
 /// // Create a binary cross entropy loss function

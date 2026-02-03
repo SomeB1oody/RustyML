@@ -1,5 +1,3 @@
-use super::*;
-
 /// Defines the padding method used in convolutional layers.
 ///
 /// The padding type determines how the input is padded before applying convolution:
@@ -104,9 +102,8 @@ mod input_validation_function;
 /// 2D Separable Convolutional Layer
 pub mod separable_conv_2d;
 
-pub use conv_1d::*;
-pub use conv_2d::*;
-pub use conv_3d::*;
-pub use depthwise_conv_2d::*;
-use input_validation_function::*;
-pub use separable_conv_2d::*;
+pub use conv_1d::Conv1D;
+pub use conv_2d::Conv2D;
+pub use conv_3d::Conv3D;
+pub use depthwise_conv_2d::DepthwiseConv2D;
+pub use separable_conv_2d::SeparableConv2D;

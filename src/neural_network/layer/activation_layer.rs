@@ -1,4 +1,4 @@
-use super::*;
+use crate::neural_network::Tensor;
 
 /// Helper function to format the output shape for activation layers.
 ///
@@ -31,8 +31,8 @@ pub mod softmax;
 /// Tanh (Hyperbolic Tangent) activation layer
 pub mod tanh;
 
-pub use linear::*;
-pub use relu::*;
-pub use sigmoid::*;
-pub use softmax::*;
-pub use tanh::*;
+pub use linear::Linear;
+pub use relu::ReLU;
+pub use sigmoid::Sigmoid;
+pub use softmax::Softmax;
+pub use tanh::Tanh;

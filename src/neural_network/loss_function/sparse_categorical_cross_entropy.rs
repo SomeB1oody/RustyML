@@ -1,5 +1,6 @@
-use super::super::{LossFunction, Tensor};
-use rayon::prelude::*;
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::LossFunction;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Sparse Categorical Cross Entropy loss function for multi-class classification
 /// where true labels are integers instead of one-hot vectors
@@ -7,8 +8,9 @@ use rayon::prelude::*;
 /// # Example
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::ArrayD;
+/// use rustyml::prelude::neural_network_trait::LossFunction;
 ///
 /// // Create a Sparse Categorical Cross Entropy loss function instance
 /// let scce = SparseCategoricalCrossEntropy::new();

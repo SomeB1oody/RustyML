@@ -1,4 +1,4 @@
-use ndarray::prelude::*;
+use ndarray::{Array1, Array2, Array3, Array4, Array5, ArrayD};
 
 /// Container for different types of neural network layer weights
 ///

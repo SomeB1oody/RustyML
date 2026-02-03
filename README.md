@@ -162,7 +162,7 @@ rustyml = {version = "*", features = ["machine_learning"]}
 In your Rust code, write: 
 在你的Rust代码里写：
 ``` rust
-use rustyml::machine_learning::linear_regression::*; // or `use rustyml::prelude::*`
+use rustyml::machine_learning::linear_regression::*;
 use ndarray::{Array1, Array2};
     
 // Create a linear regression model
@@ -213,7 +213,12 @@ rustyml = {version = "*", features = ["neural_network"]}
 In your Rust code, write:
 在你的Rust代码里写：
 ``` rust
-use rustyml::prelude::*;  
+use rustyml::neural_network::{
+    sequential::Sequential,
+    layer::{Dense, ReLU, Softmax},
+    optimizer::Adam,
+    loss_function::CategoricalCrossEntropy,
+}; 
 use ndarray::Array;  
   
 // Create training data   

@@ -1,11 +1,14 @@
-use super::super::{LossFunction, Tensor};
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::LossFunction;
 
 /// Mean Absolute Error loss function
 ///
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::loss_function::*;
+/// use rustyml::neural_network::Tensor;
+/// use rustyml::prelude::neural_network_trait::LossFunction;
 /// use ndarray::ArrayD;
 ///
 /// // Create sample data

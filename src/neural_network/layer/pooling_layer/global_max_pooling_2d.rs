@@ -1,4 +1,10 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::IxDyn;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Threshold for deciding between parallel and sequential execution.
 /// When batch_size * channels >= this threshold, use parallel execution.
@@ -17,7 +23,10 @@ const GLOBAL_MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///

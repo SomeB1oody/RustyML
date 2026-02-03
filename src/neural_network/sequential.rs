@@ -1,6 +1,14 @@
-use super::*;
-use crate::error::IoError;
+use super::neural_network_trait::{Layer, LossFunction, Optimizer};
+use crate::error::{IoError, ModelError};
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::serialize_weight::{
+    LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
+    apply_weights_to_layer,
+};
 use indicatif::{ProgressBar, ProgressStyle};
+use ndarray::{Array, IxDyn, s};
 use rand::seq::SliceRandom;
 use serde_json::{from_reader, to_writer_pretty};
 use std::fs::File;
@@ -21,7 +29,12 @@ use std::io::{BufWriter, Write};
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::{
+///     sequential::Sequential,
+///     layer::{Dense, ReLU, Softmax},
+///     optimizer::Adam,
+///     loss_function::CategoricalCrossEntropy,
+/// };
 /// use ndarray::Array;
 ///
 /// // Create training data

@@ -1,4 +1,11 @@
-use super::*;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::pooling_layer::average_pooling_3d::AveragePooling3D;
+use crate::neural_network::loss_function::mean_squared_error::MeanSquaredError;
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::optimizer::rms_prop::RMSprop;
+use crate::neural_network::sequential::Sequential;
+use approx::assert_abs_diff_eq;
+use ndarray::{Array5, ArrayD};
 
 #[test]
 fn test_average_pooling_3d_basic() {

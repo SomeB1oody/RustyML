@@ -1,4 +1,8 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::{Layer, Optimizer};
+use crate::neural_network::optimizer::input_validation_function::validate_positive_finite;
+use ndarray::{Array2, Array3, Array4, Array5};
 
 /// Threshold for switching between sequential and parallel computation.
 /// For arrays smaller than this threshold, sequential computation is used
@@ -121,7 +125,7 @@ impl AdaGradStates {
     ///
     /// ```rust
     /// use ndarray::array;
-    /// use rustyml::neural_network::optimizer::AdaGradStates;
+    /// use rustyml::neural_network::optimizer::ada_grad::AdaGradStates;
     ///
     /// let mut states = AdaGradStates::new((1, 2), None, (1, 2));
     /// let grad_param = array![[0.1, 0.1]];

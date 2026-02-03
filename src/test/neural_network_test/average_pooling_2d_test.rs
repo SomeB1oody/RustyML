@@ -1,4 +1,9 @@
-use super::*;
+use crate::neural_network::layer::pooling_layer::average_pooling_2d::AveragePooling2D;
+use crate::neural_network::loss_function::mean_squared_error::MeanSquaredError;
+use crate::neural_network::optimizer::rms_prop::RMSprop;
+use crate::neural_network::sequential::Sequential;
+use approx::assert_relative_eq;
+use ndarray::Array4;
 
 #[test]
 fn average_pooling_basic_test() {

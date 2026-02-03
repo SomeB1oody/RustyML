@@ -1,4 +1,25 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::convolution_layer::PaddingType;
+use crate::neural_network::layer::convolution_layer::input_validation_function::{
+    validate_filters, validate_kernel_size_2d, validate_strides_2d,
+};
+use crate::neural_network::layer::helper_function::{
+    calculate_output_shape_2d, pad_tensor_2d, update_adam_conv, update_rmsprop,
+};
+use crate::neural_network::layer::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::OptimizerCacheConv2D;
+use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv2D;
+use crate::neural_network::optimizer::adam::AdamStatesConv2D;
+use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
+use crate::neural_network::optimizer::sgd::SGD;
+use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Threshold for using parallel computation in forward pass.
 /// If batch_size * channels * output_height * output_width < threshold, use sequential computation.
@@ -27,8 +48,11 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
-/// use ndarray::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
+/// use ndarray::Array4;
 ///
 /// // Create Sequential model
 /// let mut model = Sequential::new();
@@ -682,8 +706,6 @@ impl<T: ActivationLayer> Layer for DepthwiseConv2D<T> {
         {
             // Initialize AdaGrad cache (if not already initialized)
             if self.optimizer_cache.ada_grad_cache.is_none() {
-                use crate::neural_network::optimizer::AdaGradStatesConv2D;
-
                 self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv2D {
                     accumulator: Array4::zeros(self.weights.dim()),
                     accumulator_bias: Array2::zeros((1, self.bias.len())),

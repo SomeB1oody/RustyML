@@ -1,4 +1,7 @@
-use super::*;
+use crate::neural_network::layer::regularization_layer::dropout_layer::dropout::Dropout;
+use crate::neural_network::neural_network_trait::Layer;
+use approx::assert_abs_diff_eq;
+use ndarray::Array;
 
 #[test]
 fn test_dropout_forward_pass_dimensions() {

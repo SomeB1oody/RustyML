@@ -1,5 +1,3 @@
-use super::*;
-
 /// A macro that generates standard function implementations for global pooling layers.
 ///
 /// This macro expands to implementations of:
@@ -201,16 +199,15 @@ pub mod max_pooling_2d;
 /// Max Pooling layer 3D Layer
 pub mod max_pooling_3d;
 
-pub use average_pooling_1d::*;
-pub use average_pooling_2d::*;
-pub use average_pooling_3d::*;
-pub use global_average_pooling_1d::*;
-pub use global_average_pooling_2d::*;
-pub use global_average_pooling_3d::*;
-pub use global_max_pooling_1d::*;
-pub use global_max_pooling_2d::*;
-pub use global_max_pooling_3d::*;
-use input_validation_function::*;
-pub use max_pooling_1d::*;
-pub use max_pooling_2d::*;
-pub use max_pooling_3d::*;
+pub use average_pooling_1d::AveragePooling1D;
+pub use average_pooling_2d::AveragePooling2D;
+pub use average_pooling_3d::AveragePooling3D;
+pub use global_average_pooling_1d::GlobalAveragePooling1D;
+pub use global_average_pooling_2d::GlobalAveragePooling2D;
+pub use global_average_pooling_3d::GlobalAveragePooling3D;
+pub use global_max_pooling_1d::GlobalMaxPooling1D;
+pub use global_max_pooling_2d::GlobalMaxPooling2D;
+pub use global_max_pooling_3d::GlobalMaxPooling3D;
+pub use max_pooling_1d::MaxPooling1D;
+pub use max_pooling_2d::MaxPooling2D;
+pub use max_pooling_3d::MaxPooling3D;

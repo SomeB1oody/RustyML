@@ -9,8 +9,8 @@ pub mod mean_squared_error;
 /// Sparse Categorical Cross Entropy loss function for multi-class classification
 pub mod sparse_categorical_cross_entropy;
 
-pub use binary_cross_entropy::*;
-pub use categorical_cross_entropy::*;
-pub use mean_absolute_error::*;
-pub use mean_squared_error::*;
-pub use sparse_categorical_cross_entropy::*;
+pub use binary_cross_entropy::BinaryCrossEntropy;
+pub use categorical_cross_entropy::CategoricalCrossEntropy;
+pub use mean_absolute_error::MeanAbsoluteError;
+pub use mean_squared_error::MeanSquaredError;
+pub use sparse_categorical_cross_entropy::SparseCategoricalCrossEntropy;

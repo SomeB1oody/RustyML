@@ -1,4 +1,9 @@
-use super::*;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::convolution_layer::PaddingType;
+use ndarray::{Array2, Array3, ArrayD, s};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Calculate output shape for 1d pooling layer.
 ///

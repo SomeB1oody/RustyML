@@ -1,4 +1,11 @@
-use super::*;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::pooling_layer::max_pooling_2d::MaxPooling2D;
+use crate::neural_network::loss_function::mean_squared_error::MeanSquaredError;
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::optimizer::adam::Adam;
+use crate::neural_network::optimizer::rms_prop::RMSprop;
+use crate::neural_network::sequential::Sequential;
+use ndarray::{Array4, ArrayD};
 
 #[test]
 fn max_pooling_2d_test() {

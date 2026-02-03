@@ -1,4 +1,11 @@
-use super::*;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::pooling_layer::global_max_pooling_1d::GlobalMaxPooling1D;
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::sequential::Sequential;
+use crate::test::neural_network_test::generate_data;
+use approx::assert_relative_eq;
+use ndarray::IxDyn;
 
 #[test]
 fn test_global_max_pooling_1d_creation() {

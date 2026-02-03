@@ -1,4 +1,8 @@
-use super::*;
+use ndarray::{ArrayD, IxDyn};
+use serde::{Deserialize, Serialize};
+use crate::error::IoError;
+use crate::neural_network::layer::regularization_layer::normalization_layer::instance_normalization::InstanceNormalization;
+use crate::neural_network::neural_network_trait::ApplyWeights;
 
 /// Serializable representation of InstanceNormalization layer weights.
 ///

@@ -1,4 +1,17 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::regularization_layer::dropout_layer::{
+    apply_spatial_dropout_threshold, dropout_backward, dropout_output_shape,
+};
+use crate::neural_network::layer::regularization_layer::input_validation_function::{
+    validate_input_ndim, validate_input_shape, validate_rate,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::IxDyn;
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
 
 /// Threshold for using parallel computation in SpatialDropout2D layer.
 /// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.
@@ -19,7 +32,8 @@ const SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD: usize = 64;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::prelude::neural_network_trait::Layer;
 /// use ndarray::Array4;
 ///
 /// // Create a SpatialDropout2D layer with 20% dropout rate

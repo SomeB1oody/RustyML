@@ -1,4 +1,8 @@
 use super::*;
+use crate::neural_network::layer::serialize_weight::helper_function::{
+    vec2_to_array2, vec5_to_array5,
+};
+use crate::neural_network::neural_network_trait::{ActivationLayer, ApplyWeights};
 
 /// Serializable representation of Conv3D layer weights.
 ///

@@ -1,4 +1,16 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::regularization_layer::dropout_layer::{
+    dropout_backward, dropout_output_shape,
+};
+use crate::neural_network::layer::regularization_layer::input_validation_function::{
+    validate_input_shape, validate_rate,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
 
 /// Threshold for using parallel computation in Dropout layer.
 /// When the total number of elements >= this threshold, parallel computation is used.
@@ -18,7 +30,8 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::prelude::neural_network_trait::Layer;
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate

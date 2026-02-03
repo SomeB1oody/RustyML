@@ -1,4 +1,9 @@
-use super::*;
+use crate::neural_network::layer::pooling_layer::global_average_pooling_2d::GlobalAveragePooling2D;
+use crate::neural_network::loss_function::mean_squared_error::MeanSquaredError;
+use crate::neural_network::optimizer::sgd::SGD;
+use crate::neural_network::sequential::Sequential;
+use approx::assert_relative_eq;
+use ndarray::{Array, IxDyn};
 
 #[test]
 fn test_global_average_pooling_2d() {

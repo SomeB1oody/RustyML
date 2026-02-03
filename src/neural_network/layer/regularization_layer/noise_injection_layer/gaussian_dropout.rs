@@ -1,4 +1,13 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::regularization_layer::input_validation_function::{
+    validate_input_shape, validate_rate_exclusive,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray_rand::RandomExt;
+use ndarray_rand::rand_distr::Normal;
 
 /// Gaussian Dropout layer for neural networks.
 ///
@@ -15,7 +24,8 @@ use super::*;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::prelude::neural_network_trait::Layer;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianDropout layer with dropout rate of 0.3

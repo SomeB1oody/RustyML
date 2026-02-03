@@ -1,4 +1,22 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::{GroupNormalizationLayerWeight, LayerWeight};
+use crate::neural_network::layer::regularization_layer::input_validation_function::{
+    validate_channel_axis, validate_channel_axis_with_shape, validate_epsilon,
+    validate_input_shape, validate_input_shape_not_empty, validate_min_input_ndim,
+    validate_num_groups, validate_num_groups_positive,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::optimizer::OptimizerCacheNormalizationLayer;
+use crate::neural_network::optimizer::{
+    ada_grad::AdaGradStatesNormalizationLayer, adam::AdamStatesNormalizationLayer,
+    rms_prop::RMSpropCacheNormalizationLayer,
+};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Threshold for switching between sequential and parallel group normalization computation.
 /// Based on total elements in the tensor.
@@ -38,7 +56,8 @@ macro_rules! channel_range {
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::prelude::neural_network_trait::Layer;
 /// use ndarray::Array3;
 ///
 /// // Create a GroupNormalization layer for input shape [batch, channels, spatial]

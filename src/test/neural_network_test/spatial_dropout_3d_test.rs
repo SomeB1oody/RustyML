@@ -1,4 +1,7 @@
-use super::*;
+use crate::neural_network::layer::regularization_layer::dropout_layer::spatial_dropout_3d::SpatialDropout3D;
+use crate::neural_network::neural_network_trait::Layer;
+use approx::assert_abs_diff_eq;
+use ndarray::{Array, Array5, IxDyn};
 
 #[test]
 fn test_spatial_dropout_3d_forward_pass_dimensions() {

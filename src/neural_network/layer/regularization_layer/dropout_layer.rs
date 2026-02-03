@@ -1,4 +1,5 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
 
 /// Common backward pass implementation for all dropout layers.
 ///
@@ -101,7 +102,7 @@ pub mod spatial_dropout_2d;
 /// Spatial Dropout layer for 3D data
 pub mod spatial_dropout_3d;
 
-pub use dropout::*;
-pub use spatial_dropout_1d::*;
-pub use spatial_dropout_2d::*;
-pub use spatial_dropout_3d::*;
+pub use dropout::Dropout;
+pub use spatial_dropout_1d::SpatialDropout1D;
+pub use spatial_dropout_2d::SpatialDropout2D;
+pub use spatial_dropout_3d::SpatialDropout3D;

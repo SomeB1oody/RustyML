@@ -1,4 +1,11 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Epsilon value for floating point precision handling
 const EPSILON: f32 = 1e-8;
@@ -28,7 +35,10 @@ const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::activation_layer::softmax::Softmax;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array2;
 ///
 /// // Create a 2D input tensor with logits

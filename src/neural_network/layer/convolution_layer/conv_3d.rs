@@ -1,4 +1,24 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::convolution_layer::PaddingType;
+use crate::neural_network::layer::convolution_layer::input_validation_function::{
+    validate_filters, validate_input_shape_3d, validate_kernel_size_3d, validate_strides_3d,
+};
+use crate::neural_network::layer::layer_weight::{Conv3DLayerWeight, LayerWeight};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::OptimizerCacheConv3D;
+use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv3D;
+use crate::neural_network::optimizer::adam::AdamStatesConv3D;
+use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv3D;
+use crate::neural_network::optimizer::sgd::SGD;
+use ndarray::{Array2, Array5, ArrayD, ArrayView5, Axis, Zip};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Threshold for deciding when to use parallel computation in Conv3D operations.
 /// If batch_size * filters * output_volume < threshold, use sequential processing.
@@ -29,7 +49,10 @@ const CONV_3D_PARALLEL_THRESHOLD: usize = 100000;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array5;
 ///
 /// // Create a simple 5D input tensor: [batch_size, channels, depth, height, width]
@@ -777,8 +800,6 @@ impl<T: ActivationLayer> Layer for Conv3D<T> {
         {
             // Initialize AdaGrad cache (if not already initialized)
             if self.optimizer_cache.ada_grad_cache.is_none() {
-                use crate::neural_network::optimizer::AdaGradStatesConv3D;
-
                 self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv3D {
                     accumulator: Array5::zeros(self.weights.dim()),
                     accumulator_bias: Array2::zeros(self.bias.dim()),

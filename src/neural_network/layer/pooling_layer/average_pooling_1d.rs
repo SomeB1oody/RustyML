@@ -1,4 +1,15 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::helper_function::calculate_output_shape_1d_pooling;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::pooling_layer::input_validation_function::{
+    validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_1d,
+    validate_stride_1d,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::Array3;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Threshold for determining when to use parallel vs sequential execution.
 /// When batch_size * channels >= this threshold, parallel execution is used.
@@ -21,7 +32,10 @@ const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array3;
 /// use approx::assert_relative_eq;
 ///

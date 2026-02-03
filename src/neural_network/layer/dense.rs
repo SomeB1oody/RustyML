@@ -1,4 +1,15 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::{DenseLayerWeight, LayerWeight};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::{
+    OptimizerCache, ada_grad::AdaGradStates, adam::AdamStates, rms_prop::RMSpropCache, sgd::SGD,
+};
+use ndarray::{Array, Array2, Axis};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Threshold for determining when to use parallel computation in dense layer operations.
 /// When the total number of operations (input_dim * output_dim) is below this threshold,
@@ -30,7 +41,10 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 /// # Examples
 /// ```rust
 /// use ndarray::Array;
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::{Dense, ReLU};
+/// use rustyml::neural_network::optimizer::SGD;
+/// use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
 ///
 /// // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
 /// let x = Array::ones((2, 4)).into_dyn();

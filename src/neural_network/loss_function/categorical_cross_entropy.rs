@@ -1,11 +1,13 @@
-use super::super::{LossFunction, Tensor};
+use crate::neural_network::Tensor;
+use crate::neural_network::neural_network_trait::LossFunction;
 
 /// Categorical Cross Entropy loss function for multi-class classification
 ///
 /// # Example
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::loss_function::*;
+/// use rustyml::prelude::neural_network_trait::LossFunction;
 /// use ndarray::array;
 ///
 /// // Create the loss function

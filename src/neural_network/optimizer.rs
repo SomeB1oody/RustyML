@@ -1,5 +1,19 @@
-use super::*;
-use rayon::prelude::*;
+pub use ada_grad::AdaGrad;
+pub use adam::Adam;
+pub use rms_prop::RMSprop;
+pub use sgd::SGD;
+
+use ada_grad::{
+    AdaGradStates, AdaGradStatesConv1D, AdaGradStatesConv2D, AdaGradStatesConv3D,
+    AdaGradStatesNormalizationLayer,
+};
+use adam::{
+    AdamStates, AdamStatesConv1D, AdamStatesConv2D, AdamStatesConv3D, AdamStatesNormalizationLayer,
+};
+use rms_prop::{
+    RMSpropCache, RMSpropCacheConv1D, RMSpropCacheConv2D, RMSpropCacheConv3D,
+    RMSpropCacheNormalizationLayer,
+};
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
 pub mod ada_grad;
@@ -11,12 +25,6 @@ mod input_validation_function;
 pub mod rms_prop;
 /// SGD (Stochastic Gradient Descent) optimizer
 pub mod sgd;
-
-pub use ada_grad::*;
-pub use adam::*;
-use input_validation_function::*;
-pub use rms_prop::*;
-pub use sgd::*;
 
 /// Optimizer cache for dense layers.
 ///

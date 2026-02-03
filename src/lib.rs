@@ -116,7 +116,12 @@
 //!
 //! In your Rust code, write:
 //! ```rust, ignore
-//! use rustyml::prelude::*;
+//! use rustyml::neural_network::{
+//!     sequential::Sequential,
+//!     layer::{Dense, ReLU, Softmax},
+//!     optimizer::Adam,
+//!     loss_function::CategoricalCrossEntropy,
+//! };
 //! use ndarray::Array;
 //!
 //! // Create training data
@@ -668,7 +673,12 @@ pub mod dataset;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::neural_network::*;
+/// use rustyml::neural_network::{
+///     sequential::Sequential,
+///     layer::{Dense, ReLU, Linear},
+///     optimizer::Adam,
+///     loss_function::MeanSquaredError,
+/// };
 /// use ndarray::Array;
 ///
 /// // Create input and target tensors

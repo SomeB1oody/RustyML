@@ -1,4 +1,25 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::convolution_layer::PaddingType;
+use crate::neural_network::layer::convolution_layer::input_validation_function::{
+    validate_filters, validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
+};
+use crate::neural_network::layer::helper_function::update_adam_conv;
+use crate::neural_network::layer::layer_weight::{Conv1DLayerWeight, LayerWeight};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::OptimizerCacheConv1D;
+use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv1D;
+use crate::neural_network::optimizer::adam::AdamStatesConv1D;
+use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv1D;
+use crate::neural_network::optimizer::sgd::SGD;
+use ndarray::{Array2, Array3, Axis, s};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelBridge, ParallelIterator,
+};
 
 /// Threshold for determining whether to use parallel or sequential computation in Conv1D.
 /// When `batch_size * filters * output_length < CONV_1D_PARALLEL_THRESHOLD`,
@@ -29,7 +50,10 @@ const CONV_1D_PARALLEL_THRESHOLD: usize = 1000;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array3;
 ///
 /// // Create a simple 3D input tensor: [batch_size, channels, length]
@@ -519,8 +543,6 @@ impl<T: ActivationLayer> Layer for Conv1D<T> {
         {
             // Initialize Adam states (if not already initialized)
             if self.optimizer_cache.adam_states.is_none() {
-                use crate::neural_network::optimizer::AdamStatesConv1D;
-
                 self.optimizer_cache.adam_states = Some(AdamStatesConv1D {
                     m: Array3::zeros(self.weights.dim()),
                     v: Array3::zeros(self.weights.dim()),
@@ -571,8 +593,6 @@ impl<T: ActivationLayer> Layer for Conv1D<T> {
         {
             // Initialize RMSprop cache (if not already initialized)
             if self.optimizer_cache.rmsprop_cache.is_none() {
-                use crate::neural_network::optimizer::RMSpropCacheConv1D;
-
                 self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv1D {
                     cache: Some(Array3::zeros(self.weights.dim())),
                     bias: Some(Array2::zeros(self.bias.dim())),
@@ -627,8 +647,6 @@ impl<T: ActivationLayer> Layer for Conv1D<T> {
         {
             // Initialize AdaGrad cache (if not already initialized)
             if self.optimizer_cache.ada_grad_cache.is_none() {
-                use crate::neural_network::optimizer::AdaGradStatesConv1D;
-
                 self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv1D {
                     accumulator: Array3::zeros(self.weights.dim()),
                     accumulator_bias: Array2::zeros(self.bias.dim()),

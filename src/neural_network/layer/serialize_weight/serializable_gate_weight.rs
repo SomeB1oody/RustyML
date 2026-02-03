@@ -1,4 +1,4 @@
-use super::*;
+use serde::{Deserialize, Serialize};
 
 /// Serializable representation of a single gate's weights.
 ///

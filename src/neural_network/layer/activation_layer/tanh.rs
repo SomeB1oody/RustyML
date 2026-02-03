@@ -1,4 +1,10 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use ndarray::Zip;
 
 /// Gradient clipping value to prevent exploding gradients
 const GRAD_CLIP_VALUE: f32 = 1e6;
@@ -24,7 +30,10 @@ const TANH_PARALLEL_THRESHOLD: usize = 2048;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array2;
 ///
 /// // Create a 2D input tensor

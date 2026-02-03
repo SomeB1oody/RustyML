@@ -1,4 +1,18 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
+use crate::neural_network::layer::recurrent_layer::input_validation_function::{
+    validate_input_3d, validate_recurrent_dimensions,
+};
+use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::optimizer::OptimizerCache;
+use crate::neural_network::optimizer::ada_grad::AdaGradStates;
+use crate::neural_network::optimizer::adam::AdamStates;
+use crate::neural_network::optimizer::rms_prop::RMSpropCache;
+use ndarray::{Array, Array2, Array3, Axis};
+use ndarray_rand::RandomExt;
+use rand::distr::Uniform;
 
 /// Simple Recurrent Neural Network (SimpleRNN) layer implementation.
 ///
@@ -23,8 +37,11 @@ use super::*;
 ///
 /// # Examples
 /// ```rust
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array;
-/// use rustyml::prelude::*;
 ///
 /// // Create input with batch_size=2, timesteps=5, input_dim=4,
 /// // and target with batch_size=2, units=3 (same dimension as the last hidden state)

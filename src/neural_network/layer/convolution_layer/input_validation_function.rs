@@ -1,4 +1,4 @@
-use super::*;
+use crate::error::ModelError;
 
 /// Validates the filters parameter.
 ///

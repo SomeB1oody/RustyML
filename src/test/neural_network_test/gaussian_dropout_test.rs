@@ -1,4 +1,7 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_dropout::GaussianDropout;
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::Array;
 
 #[test]
 fn test_gaussian_dropout_new() {

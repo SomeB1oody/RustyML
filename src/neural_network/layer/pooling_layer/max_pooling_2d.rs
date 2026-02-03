@@ -1,4 +1,14 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::helper_function::calculate_output_shape_2d_pooling;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::pooling_layer::input_validation_function::{
+    validate_input_shape_dims, validate_pool_size_2d, validate_strides_2d,
+};
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::ArrayD;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Threshold for deciding between parallel and sequential execution.
 /// When batch_size * channels >= this threshold, use parallel execution.
@@ -22,7 +32,10 @@ const MAX_POOLING_2D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array4;
 ///
 /// // Create a simple 4D input tensor: [batch_size, channels, height, width]

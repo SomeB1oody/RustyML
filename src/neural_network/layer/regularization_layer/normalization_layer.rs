@@ -1,5 +1,3 @@
-use super::*;
-
 /// Common implementation for `output_shape` method in normalization layers
 macro_rules! normalization_layer_output_shape {
     ($self:expr) => {
@@ -245,7 +243,7 @@ pub mod instance_normalization;
 /// Layer Normalization layer for neural networks
 pub mod layer_normalization;
 
-pub use batch_normalization::*;
-pub use group_normalization::*;
-pub use instance_normalization::*;
-pub use layer_normalization::*;
+pub use batch_normalization::BatchNormalization;
+pub use group_normalization::GroupNormalization;
+pub use instance_normalization::InstanceNormalization;
+pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};

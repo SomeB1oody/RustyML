@@ -1,10 +1,15 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::Tensor;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::neural_network_trait::Layer;
+use ndarray::IxDyn;
 
 /// Flattens a 3D, 4D, or 5D tensor into a 2D tensor.
 ///
 /// This layer reshapes inputs from feature extraction layers into a format suitable for dense layers.
-/// Input shapes are [batch_size, features, length], [batch_size, channels, height, width], or
-/// [batch_size, channels, depth, height, width]. Output shape is always [batch_size, flattened_features],
+/// Input shapes are \[batch_size, features, length\], \[batch_size, channels, height, width\], or
+/// \[batch_size, channels, depth, height, width\]. Output shape is always \[batch_size, flattened_features\],
 /// where flattened_features is the product of all dimensions except batch_size.
 ///
 /// # Fields
@@ -15,7 +20,10 @@ use super::*;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::neural_network::sequential::Sequential;
+/// use rustyml::neural_network::layer::*;
+/// use rustyml::neural_network::optimizer::*;
+/// use rustyml::neural_network::loss_function::*;
 /// use ndarray::Array4;
 ///
 /// // Create a 4D input tensor: [batch_size, channels, height, width]

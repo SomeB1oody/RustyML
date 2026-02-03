@@ -1,4 +1,12 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::pooling_layer::global_average_pooling_3d::GlobalAveragePooling3D;
+use crate::neural_network::loss_function::mean_squared_error::MeanSquaredError;
+use crate::neural_network::neural_network_trait::Layer;
+use crate::neural_network::optimizer::sgd::SGD;
+use crate::neural_network::sequential::Sequential;
+use approx::assert_relative_eq;
+use ndarray::{Array, IxDyn};
 
 #[test]
 fn test_global_average_pooling_3d_basic_functionality() {

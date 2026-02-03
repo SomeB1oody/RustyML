@@ -1,5 +1,3 @@
-use super::*;
-
 /// A macro to define a layer-specific method for setting the training mode.
 ///
 /// This macro generates a `set_training` method within the implementing object
@@ -46,6 +44,5 @@ pub mod noise_injection_layer;
 pub mod normalization_layer;
 
 pub use dropout_layer::*;
-use input_validation_function::*;
 pub use noise_injection_layer::*;
 pub use normalization_layer::*;

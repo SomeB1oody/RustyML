@@ -1,4 +1,10 @@
-use super::*;
+use crate::error::ModelError;
+use crate::neural_network::neural_network_trait::{Layer, Optimizer};
+use crate::neural_network::optimizer::input_validation_function::validate_learning_rate;
+use ndarray::Array2;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 /// Threshold for switching between sequential and parallel computation.
 /// For arrays smaller than this threshold, sequential computation is used
@@ -58,7 +64,7 @@ impl SGD {
     /// # Examples
     ///
     /// ```rust
-    /// use rustyml::neural_network::optimizer::SGD;
+    /// use rustyml::neural_network::optimizer::*;
     ///
     /// let mut weights = vec![1.0, 2.0];
     /// let weight_grads = vec![0.1, 0.1];
@@ -123,7 +129,7 @@ impl SGD {
     ///
     /// ```rust
     /// use ndarray::array;
-    /// use rustyml::neural_network::optimizer::SGD;
+    /// use rustyml::neural_network::optimizer::*;
     ///
     /// let mut kernel = array![[1.0, 2.0]];
     /// let grad_kernel = array![[0.1, 0.1]];

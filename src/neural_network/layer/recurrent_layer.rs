@@ -1,4 +1,4 @@
-use super::*;
+use ndarray::Array2;
 
 /// Applies stable sigmoid activation to an array
 ///
@@ -23,8 +23,6 @@ pub mod lstm;
 /// A Simple Recurrent Neural Network (SimpleRNN) layer implementation
 pub mod simple_rnn;
 
-pub use gate::*;
-pub use gru::*;
-use input_validation_function::*;
-pub use lstm::*;
-pub use simple_rnn::*;
+pub use gru::GRU;
+pub use lstm::LSTM;
+pub use simple_rnn::SimpleRNN;
