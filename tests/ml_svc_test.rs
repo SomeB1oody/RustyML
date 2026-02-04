@@ -1,6 +1,6 @@
-use crate::KernelType;
-use crate::machine_learning::svc::SVC;
 use ndarray::{arr1, arr2};
+use rustyml::KernelType;
+use rustyml::machine_learning::svc::SVC;
 #[test]
 fn test_svc_constructor() {
     // Test basic constructor

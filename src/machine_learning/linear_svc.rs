@@ -32,7 +32,6 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_svc::*;
-/// use rustyml::utility::train_test_split::train_test_split;
 ///
 /// // Create model with custom parameters
 /// let mut model = LinearSVC::new(
@@ -56,12 +55,10 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// let y = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
 ///
-/// let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.25), Some(42)).unwrap();
-///
-/// model.fit(&x_train, &y_train).unwrap();
+/// model.fit(&x, &y).unwrap();
 ///
 /// // Make predictions
-/// let predictions = model.predict(&x_test).unwrap();
+/// let predictions = model.predict(&x).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearSVC {

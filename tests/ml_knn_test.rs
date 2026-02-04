@@ -1,7 +1,7 @@
-use crate::error::ModelError;
-use crate::machine_learning::DistanceCalculationMetric;
-use crate::machine_learning::knn::{KNN, WeightingStrategy};
 use ndarray::{Array1, Array2, array};
+use rustyml::error::ModelError;
+use rustyml::machine_learning::DistanceCalculationMetric;
+use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
 
 // Test default initialization of KNN
 #[test]

@@ -1,3 +1,5 @@
+pub use KernelType;
+
 /// This module implements Kernel Principal Component Analysis.
 pub mod kernel_pca;
 /// This module provides functions for converting between different label formats

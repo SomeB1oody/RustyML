@@ -1,5 +1,5 @@
-use crate::machine_learning::linear_regression::LinearRegression;
 use ndarray::{Array1, Array2};
+use rustyml::machine_learning::linear_regression::LinearRegression;
 
 #[test]
 fn test_default_constructor() {

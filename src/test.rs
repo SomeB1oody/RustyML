@@ -1,5 +1,3 @@
-#[cfg(feature = "machine_learning")]
-mod machine_learning_test;
 #[cfg(feature = "math")]
 mod math_module_test;
 #[cfg(feature = "metric")]

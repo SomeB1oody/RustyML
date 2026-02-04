@@ -1,6 +1,6 @@
-use crate::error::ModelError;
-use crate::machine_learning::isolation_forest::IsolationForest;
 use ndarray::{Array2, arr2};
+use rustyml::error::ModelError;
+use rustyml::machine_learning::isolation_forest::IsolationForest;
 
 // Test basic constructor functionality
 #[test]

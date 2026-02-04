@@ -1,7 +1,7 @@
-use crate::machine_learning::meanshift::{MeanShift, estimate_bandwidth};
 use ndarray::{Array2, arr2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rustyml::machine_learning::meanshift::{MeanShift, estimate_bandwidth};
 
 fn create_test_data() -> Array2<f64> {
     // Create a simple test dataset with three clusters

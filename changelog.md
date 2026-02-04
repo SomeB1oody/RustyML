@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-04 (UTC-7)
+### Changed
+- Move test modules for `machine_learning` from `./src/test/` to `./tests/`
+
 ## [v0.11.0] - 2026-02-03 (UTC-7)
 ### Changed
 - Refactor imports in `neural_network`, `math`, and `metric`

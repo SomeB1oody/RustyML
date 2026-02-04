@@ -1,7 +1,7 @@
-use crate::machine_learning::logistic_regression::{
+use ndarray::{arr1, arr2};
+use rustyml::machine_learning::logistic_regression::{
     LogisticRegression, generate_polynomial_features,
 };
-use ndarray::{arr1, arr2};
 
 #[test]
 fn test_default_constructor() {

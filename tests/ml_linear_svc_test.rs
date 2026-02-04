@@ -1,6 +1,6 @@
-use crate::machine_learning::RegularizationType;
-use crate::machine_learning::linear_svc::LinearSVC;
 use ndarray::{arr1, arr2};
+use rustyml::machine_learning::RegularizationType;
+use rustyml::machine_learning::linear_svc::LinearSVC;
 
 #[test]
 fn test_default() {

@@ -1,4 +1,5 @@
 use crate::{Deserialize, Serialize};
+pub use KernelType;
 
 /// Represents different distance calculation methods used in various machine learning algorithms.
 ///
