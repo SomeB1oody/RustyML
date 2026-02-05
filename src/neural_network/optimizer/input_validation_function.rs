@@ -1,6 +1,6 @@
 use crate::error::ModelError;
 
-/// Validates that the learning rate is positive.
+/// Validates that the learning rate is positive and finite.
 ///
 /// # Parameters
 ///
@@ -8,19 +8,19 @@ use crate::error::ModelError;
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the learning rate is positive
-/// - `Err(ModelError::InputValidationError)` if the learning rate is not positive
+/// - `Ok(())` if the learning rate is positive and finite
+/// - `Err(ModelError::InputValidationError)` if the learning rate is not positive or not finite
 pub(super) fn validate_learning_rate(learning_rate: f32) -> Result<(), ModelError> {
-    if learning_rate <= 0.0 {
+    if !(learning_rate > 0.0 && learning_rate.is_finite()) {
         return Err(ModelError::InputValidationError(format!(
-            "learning_rate must be positive, got {}",
+            "learning_rate must be positive and finite, got {}",
             learning_rate
         )));
     }
     Ok(())
 }
 
-/// Validates that a decay rate (beta or rho) is in the range [0, 1).
+/// Validates that a decay rate (beta or rho) is in the range [0, 1) and finite.
 ///
 /// # Parameters
 ///
@@ -29,19 +29,19 @@ pub(super) fn validate_learning_rate(learning_rate: f32) -> Result<(), ModelErro
 ///
 /// # Returns
 ///
-/// - `Ok(())` if the value is in the valid range
-/// - `Err(ModelError::InputValidationError)` if the value is out of range
+/// - `Ok(())` if the value is in the valid range and finite
+/// - `Err(ModelError::InputValidationError)` if the value is out of range or not finite
 pub(super) fn validate_decay_rate(value: f32, param_name: &str) -> Result<(), ModelError> {
-    if !(0.0..1.0).contains(&value) {
+    if !((0.0..1.0).contains(&value) && value.is_finite()) {
         return Err(ModelError::InputValidationError(format!(
-            "{} must be in range [0, 1), got {}",
+            "{} must be in range [0, 1) and finite, got {}",
             param_name, value
         )));
     }
     Ok(())
 }
 
-/// Validates that epsilon is positive.
+/// Validates that epsilon is positive and finite.
 ///
 /// # Parameters
 ///
@@ -49,12 +49,12 @@ pub(super) fn validate_decay_rate(value: f32, param_name: &str) -> Result<(), Mo
 ///
 /// # Returns
 ///
-/// - `Ok(())` if epsilon is positive
-/// - `Err(ModelError::InputValidationError)` if epsilon is not positive
+/// - `Ok(())` if epsilon is positive and finite
+/// - `Err(ModelError::InputValidationError)` if epsilon is not positive or not finite
 pub(super) fn validate_epsilon(epsilon: f32) -> Result<(), ModelError> {
-    if epsilon <= 0.0 {
+    if !(epsilon > 0.0 && epsilon.is_finite()) {
         return Err(ModelError::InputValidationError(format!(
-            "epsilon must be positive, got {}",
+            "epsilon must be positive and finite, got {}",
             epsilon
         )));
     }
