@@ -1,5 +1,5 @@
-use crate::utility::principal_component_analysis::*;
 use ndarray::prelude::*;
+use rustyml::utility::principal_component_analysis::*;
 use std::error::Error;
 
 fn make_pca_dataset() -> Array2<f64> {

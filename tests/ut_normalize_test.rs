@@ -1,6 +1,6 @@
-use crate::error::ModelError;
-use crate::utility::normalize::*;
 use ndarray::prelude::*;
+use rustyml::error::ModelError;
+use rustyml::utility::normalize::*;
 
 // Helper function for approximate equality checks
 fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {

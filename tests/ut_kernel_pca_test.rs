@@ -1,7 +1,7 @@
-use crate::error::ModelError;
-use crate::utility::kernel_pca::*;
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
+use rustyml::error::ModelError;
+use rustyml::utility::kernel_pca::*;
 use std::error::Error;
 
 fn make_kernel_pca_dataset() -> Array2<f64> {

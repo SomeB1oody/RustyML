@@ -169,7 +169,7 @@
 //!
 //! | Feature | Description |
 //! |---------|-------------|
-//! | `machine_learning` | Classical ML algorithms (depends on `math`, `utility`) |
+//! | `machine_learning` | Classical ML algorithms (depends on `math`) |
 //! | `neural_network` | Neural network framework |
 //! | `utility` | Data preprocessing and dimensionality reduction |
 //! | `metric` | Evaluation metrics |

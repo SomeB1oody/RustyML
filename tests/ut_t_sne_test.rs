@@ -1,7 +1,7 @@
-use crate::error::ModelError;
-use crate::utility::t_sne::*;
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
+use rustyml::error::ModelError;
+use rustyml::utility::t_sne::*;
 
 #[test]
 fn test_tsne_default() {

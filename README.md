@@ -4,7 +4,6 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 
 [![Rust Version](https://img.shields.io/badge/Rust-v.1.85-brown)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
-[![Crates](https://img.shields.io/badge/crates.io-v0.9.1-brown)](https://crates.io/crates/rustyml)
 
 ## Overview | 概述
 RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.  
@@ -267,16 +266,16 @@ For Chinese mainland users, a mandarin video tutorial is provided on Bilibili, f
 The crate uses feature flags for modular compilation:  
 该crate使用特性标志进行模块化编译：
 
-| Feature            | Description                                            | 说明                                       |  
-|--------------------|--------------------------------------------------------|------------------------------------------|  
-| `machine_learning` | Classical ML algorithms (depends on `math`, `utility`) | 经典机器学习算法（依赖于`math`、`utility`）            |  
-| `neural_network`   | Neural network framework                               | 神经网络框架                                   |  
-| `utility`          | Data preprocessing and dimensionality reduction        | 数据预处理和降维                                 |  
-| `metric`           | Evaluation metrics                                     | 评估指标                                     |  
-| `math`             | Mathematical utilities                                 | 数学工具                                     |  
-| `dataset`          | Standard datasets                                      | 标准数据集                                    | 
-| `default`          | Enables `machine_learning` and `neural_network`        | 开启`machine_learning`和`neural_network`功能  |
-| `full`             | Enables all features                                   | 启用所有功能                                   |
+| Feature            | Description                                     | 说明                                      |  
+|--------------------|-------------------------------------------------|-----------------------------------------|  
+| `machine_learning` | Classical ML algorithms (depends on `math`)     | 经典机器学习算法（依赖于`math`）                     |  
+| `neural_network`   | Neural network framework                        | 神经网络框架                                  |  
+| `utility`          | Data preprocessing and dimensionality reduction | 数据预处理和降维                                |  
+| `metric`           | Evaluation metrics                              | 评估指标                                    |  
+| `math`             | Mathematical utilities                          | 数学工具                                    |  
+| `dataset`          | Standard datasets                               | 标准数据集                                   | 
+| `default`          | Enables `machine_learning` and `neural_network` | 开启`machine_learning`和`neural_network`功能 |
+| `full`             | Enables all features                            | 启用所有功能                                  |
 
 ## Project Status | 项目状态
 RustyML is in active development. While the API is stabilizing, breaking changes may occur in minor version updates until version 1.0.0.

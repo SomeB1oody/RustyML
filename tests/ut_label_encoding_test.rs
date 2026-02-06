@@ -1,5 +1,5 @@
-use crate::utility::label_encoding::*;
 use ndarray::prelude::*;
+use rustyml::utility::label_encoding::*;
 
 #[test]
 fn test_to_categorical_basic() {

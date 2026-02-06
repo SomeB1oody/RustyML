@@ -1,6 +1,6 @@
-use crate::error::ModelError;
-use crate::utility::train_test_split::*;
 use ndarray::prelude::*;
+use rustyml::error::ModelError;
+use rustyml::utility::train_test_split::*;
 
 #[test]
 fn test_train_test_split_valid_input() {

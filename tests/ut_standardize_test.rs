@@ -1,7 +1,7 @@
-use crate::error::ModelError;
-use crate::utility::standardize::*;
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
+use rustyml::error::ModelError;
+use rustyml::utility::standardize::*;
 
 const EPSILON: f64 = 1e-8;
 
