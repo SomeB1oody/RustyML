@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::{Array4, ArrayD};
 use rustyml::neural_network::layer::TrainingParameters;
 use rustyml::neural_network::layer::pooling_layer::max_pooling_2d::MaxPooling2D;

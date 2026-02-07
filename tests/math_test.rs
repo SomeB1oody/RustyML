@@ -1,6 +1,8 @@
-use crate::math::*;
+#![cfg(feature = "math")]
+
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use ndarray::{Array, Array1, array};
+use rustyml::math::*;
 
 #[test]
 fn test_sum_of_square_total() {

@@ -1,3 +1,5 @@
+#![cfg(feature = "utility")]
+
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 use rustyml::error::ModelError;

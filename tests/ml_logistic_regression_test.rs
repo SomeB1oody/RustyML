@@ -1,3 +1,5 @@
+#![cfg(feature = "machine_learning")]
+
 use ndarray::{arr1, arr2};
 use rustyml::machine_learning::logistic_regression::{
     LogisticRegression, generate_polynomial_features,

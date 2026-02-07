@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-07 (UTC-7)
+### Changed
+- Move test modules for `math` and `metric` from `./src/test/` to `./tests/`
+
 ## [v0.11.0] - 2026-02-06 (UTC-7)
 ### Changed
 - Move test modules for `utility` from `./src/test/` to `./tests/`

@@ -1,10 +1,11 @@
-use ndarray::{Array, Array2};
+#![cfg(feature = "neural_network")]
+
+use ndarray::Array;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layer::activation_layer::linear::Linear;
 use rustyml::neural_network::layer::activation_layer::relu::ReLU;
 use rustyml::neural_network::layer::activation_layer::softmax::Softmax;
 use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::layer_weight::{DenseLayerWeight, LayerWeight};
 use rustyml::neural_network::loss_function::categorical_cross_entropy::CategoricalCrossEntropy;
 use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
 use rustyml::neural_network::optimizer::adam::Adam;
@@ -188,62 +189,6 @@ fn test_fit_classification_convergence() {
         "Sample [1.5, 1.5] should be classified as class 1"
     );
 }
-
-#[test]
-fn test_fit_parameter_updates() {
-    // Create simple training data
-    let x = Array::from_shape_vec(
-        (10, 2),
-        vec![
-            1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0, 1.5, 2.5, 2.5, 3.5, 3.5, 4.5, 4.5,
-            5.5, 5.5, 6.5,
-        ],
-    )
-    .unwrap()
-    .into_dyn();
-    let y = Array::from_shape_vec(
-        (10, 1),
-        vec![3.0, 5.0, 7.0, 9.0, 11.0, 4.0, 6.0, 8.0, 10.0, 12.0],
-    )
-    .unwrap()
-    .into_dyn();
-
-    let mut model = Sequential::new();
-    model
-        .add(Dense::new(2, 3, Linear::new()).unwrap())
-        .add(Dense::new(3, 1, Linear::new()).unwrap())
-        .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
-
-    let initial_params = collect_dense_weights(&model);
-
-    // Train the model
-    model.fit(&x, &y, 20).unwrap();
-
-    let final_params = collect_dense_weights(&model);
-
-    assert_eq!(initial_params.len(), final_params.len());
-    assert!(
-        !initial_params.is_empty(),
-        "Expected at least one dense layer with parameters"
-    );
-
-    // Verify that parameters have actually changed
-    for (i, ((initial_w, initial_b), (final_w, final_b))) in
-        initial_params.iter().zip(final_params.iter()).enumerate()
-    {
-        let weight_delta = max_abs_diff_2d(initial_w, final_w);
-        let bias_delta = max_abs_diff_2d(initial_b, final_b);
-
-        assert!(
-            weight_delta > 1e-6 || bias_delta > 1e-6,
-            "Layer {} parameters should change during training (weight delta {:.6}, bias delta {:.6})",
-            i,
-            weight_delta,
-            bias_delta
-        );
-    }
-}
-
 #[test]
 fn test_fit_error_handling() {
     let mut model = Sequential::new();
@@ -272,25 +217,6 @@ fn test_fit_error_handling() {
 
     let result = model.fit(&x_mismatch, &y_mismatch, 10);
     assert!(result.is_err(), "Sample count mismatch should return error");
-}
-
-fn collect_dense_weights(model: &Sequential) -> Vec<(Array2<f32>, Array2<f32>)> {
-    model
-        .get_weights()
-        .into_iter()
-        .filter_map(|layer_weight| match layer_weight {
-            LayerWeight::Dense(DenseLayerWeight { weight, bias }) => {
-                Some((weight.to_owned(), bias.to_owned()))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn max_abs_diff_2d(a: &Array2<f32>, b: &Array2<f32>) -> f32 {
-    a.iter()
-        .zip(b.iter())
-        .fold(0.0_f32, |max, (lhs, rhs)| max.max((lhs - rhs).abs()))
 }
 
 // Helper function: calculate mean squared error

@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::{s, Array, Array3};
 use rustyml::neural_network::layer::layer_weight::LayerWeight;
 use rustyml::neural_network::layer::regularization_layer::normalization_layer::group_normalization::GroupNormalization;

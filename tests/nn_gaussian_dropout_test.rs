@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::Array;
 use rustyml::error::ModelError;
 use rustyml::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_dropout::GaussianDropout;

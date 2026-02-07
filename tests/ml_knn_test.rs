@@ -1,3 +1,5 @@
+#![cfg(feature = "machine_learning")]
+
 use ndarray::{Array1, Array2, array};
 use rustyml::error::ModelError;
 use rustyml::machine_learning::DistanceCalculationMetric;

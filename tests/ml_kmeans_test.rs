@@ -1,3 +1,5 @@
+#![cfg(feature = "machine_learning")]
+
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};

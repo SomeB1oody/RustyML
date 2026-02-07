@@ -1,3 +1,5 @@
+#![cfg(feature = "utility")]
+
 use ndarray::prelude::*;
 use rustyml::error::ModelError;
 use rustyml::utility::normalize::*;

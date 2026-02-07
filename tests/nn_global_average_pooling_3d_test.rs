@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
 use rustyml::error::ModelError;

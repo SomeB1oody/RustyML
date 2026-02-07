@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array5, IxDyn};
 use rustyml::neural_network::layer::regularization_layer::dropout_layer::spatial_dropout_3d::SpatialDropout3D;

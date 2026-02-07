@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::{Array, ArrayD};
 use rustyml::neural_network::layer::activation_layer::relu::ReLU;
 use rustyml::neural_network::layer::dense::Dense;

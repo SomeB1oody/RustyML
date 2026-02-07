@@ -705,6 +705,3 @@ pub mod dataset;
 /// ```
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
-
-#[cfg(test)]
-mod test;

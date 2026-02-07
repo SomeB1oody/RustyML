@@ -1,3 +1,5 @@
+#![cfg(feature = "utility")]
+
 use ndarray::prelude::*;
 use rustyml::utility::label_encoding::*;
 

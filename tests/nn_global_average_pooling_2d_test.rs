@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
 use rustyml::neural_network::layer::pooling_layer::global_average_pooling_2d::GlobalAveragePooling2D;

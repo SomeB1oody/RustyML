@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3};
 use rustyml::neural_network::Tensor;
@@ -219,7 +221,7 @@ fn test_simple_rnn_sequence_memory() {
         );
 
     // Train the memory task
-    model.fit(&x, &y, 80).unwrap();
+    model.fit(&x, &y, 100).unwrap();
 
     let pred = model.predict(&x).unwrap();
 

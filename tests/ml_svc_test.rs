@@ -1,3 +1,5 @@
+#![cfg(feature = "machine_learning")]
+
 use ndarray::{arr1, arr2};
 use rustyml::KernelType;
 use rustyml::machine_learning::svc::SVC;

@@ -1,3 +1,5 @@
+#![cfg(feature = "machine_learning")]
+
 use ndarray::{Array1, Array2};
 use rustyml::machine_learning::linear_regression::LinearRegression;
 

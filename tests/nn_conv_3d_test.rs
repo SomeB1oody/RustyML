@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::Array5;
 use rustyml::neural_network::layer::ReLU;
 use rustyml::neural_network::layer::TrainingParameters;

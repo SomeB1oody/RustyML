@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use ndarray::array;
 use rustyml::neural_network::optimizer::ada_grad::AdaGradStates;
 use rustyml::neural_network::optimizer::adam::{Adam, AdamStates};

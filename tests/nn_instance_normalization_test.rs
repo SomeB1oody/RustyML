@@ -1,3 +1,5 @@
+#![cfg(feature = "neural_network")]
+
 use approx::assert_abs_diff_eq;
 use ndarray::{s, Array, Array2, Array3};
 use rustyml::neural_network::layer::activation_layer::linear::Linear;

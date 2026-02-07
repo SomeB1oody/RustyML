@@ -1,3 +1,5 @@
+#![cfg(feature = "utility")]
+
 use ndarray::prelude::*;
 use rustyml::utility::principal_component_analysis::*;
 use std::error::Error;

@@ -1,3 +1,5 @@
+#![cfg(feature = "utility")]
+
 use ndarray::*;
 use rustyml::utility::linear_discriminant_analysis::*;
 use std::error::Error;

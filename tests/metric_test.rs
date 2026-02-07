@@ -1,6 +1,8 @@
-use crate::metric::*;
+#![cfg(feature = "metric")]
+
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, array};
+use rustyml::metric::*;
 
 #[test]
 fn test_root_mean_squared_error() {
