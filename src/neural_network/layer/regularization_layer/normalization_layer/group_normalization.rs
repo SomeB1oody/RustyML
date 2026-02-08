@@ -57,7 +57,7 @@ macro_rules! channel_range {
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::layer::*;
-/// use rustyml::prelude::neural_network_trait::Layer;
+/// use rustyml::neural_network::neural_network_trait::Layer;
 /// use ndarray::Array3;
 ///
 /// // Create a GroupNormalization layer for input shape [batch, channels, spatial]

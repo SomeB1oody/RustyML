@@ -25,7 +25,7 @@ use ndarray_rand::rand_distr::Normal;
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::layer::*;
-/// use rustyml::prelude::neural_network_trait::Layer;
+/// use rustyml::neural_network::neural_network_trait::Layer;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianDropout layer with dropout rate of 0.3

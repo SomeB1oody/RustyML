@@ -50,7 +50,7 @@ const PCA_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::prelude::*;
+/// use rustyml::utility::*;
 /// use ndarray::array;
 ///
 /// let mut pca = principal_component_analysis::PCA::new(

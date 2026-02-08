@@ -31,7 +31,7 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::layer::*;
-/// use rustyml::prelude::neural_network_trait::Layer;
+/// use rustyml::neural_network::neural_network_trait::Layer;
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate

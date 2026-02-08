@@ -1,4 +1,4 @@
-use super::RegularizationType;
+pub use super::RegularizationType;
 use super::helper_function::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_regulation_type,
     validate_tolerance,

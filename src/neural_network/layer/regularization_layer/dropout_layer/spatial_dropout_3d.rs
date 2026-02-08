@@ -33,7 +33,7 @@ const SPATIAL_DROPOUT_3D_PARALLEL_THRESHOLD: usize = 64;
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::layer::*;
-/// use rustyml::prelude::neural_network_trait::Layer;
+/// use rustyml::neural_network::neural_network_trait::Layer;
 /// use ndarray::Array5;
 ///
 /// // Create a SpatialDropout3D layer with 20% dropout rate

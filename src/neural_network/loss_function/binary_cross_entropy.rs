@@ -8,7 +8,7 @@ use crate::neural_network::neural_network_trait::LossFunction;
 /// ```rust
 /// use rustyml::neural_network::loss_function::*;
 /// use rustyml::neural_network::Tensor;
-/// use rustyml::prelude::neural_network_trait::LossFunction;
+/// use rustyml::neural_network::neural_network_trait::LossFunction;
 /// use ndarray::array;
 ///
 /// // Create a binary cross entropy loss function

@@ -7,7 +7,7 @@ use crate::neural_network::neural_network_trait::LossFunction;
 ///
 /// ```rust
 /// use rustyml::neural_network::loss_function::*;
-/// use rustyml::prelude::neural_network_trait::LossFunction;
+/// use rustyml::neural_network::neural_network_trait::LossFunction;
 /// use ndarray::array;
 ///
 /// // Create the loss function

@@ -46,7 +46,7 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 /// # Examples
 /// ```rust
 /// use rustyml::neural_network::layer::*;
-/// use rustyml::prelude::neural_network_trait::Layer;
+/// use rustyml::neural_network::neural_network_trait::Layer;
 /// use ndarray::Array2;
 ///
 /// // Create a BatchNormalization layer
