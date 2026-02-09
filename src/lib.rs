@@ -491,8 +491,8 @@ pub mod machine_learning;
 /// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
-///
-/// // Quick access to all commonly used components
+/// // `use rustyml::prelude::machine_learning_prelude::*;` imports machine learning models
+/// // `use rustyml::prelude::utility_prelude::*;` imports utility functions
 /// ```
 pub mod prelude;
 
