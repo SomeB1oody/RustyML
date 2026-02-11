@@ -83,6 +83,63 @@ where
     sum
 }
 
+/// Calculates the mean squared error (variance) of a set of values.
+///
+/// The variance is the average of the squared differences between each value
+/// and the mean of all values.
+///
+/// # Parameters
+///
+/// - `y` - Values for which to calculate the variance
+///
+/// # Returns
+///
+/// - `f64` - Variance of the input values (0.0 when the array is empty)
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::variance;
+///
+/// let values = array![1.0, 2.0, 3.0];
+/// let mse = variance(&values);
+/// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ~= 0.66667
+/// assert!((mse - 0.6666667).abs() < 1e-6);
+/// ```
+#[inline]
+pub fn variance<S>(y: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
+    let n = y.len();
+
+    // Return 0.0 for empty arrays
+    if n == 0 {
+        return 0.0;
+    }
+
+    // Calculate mean using ndarray's mean method
+    // Handle potential NaN case when all values are NaN
+    let mean = match y.mean() {
+        Some(m) if m.is_finite() => m,
+        _ => return 0.0, // Return 0.0 if mean is NaN or can't be calculated
+    };
+
+    // Use fold for potentially better performance than map/sum
+    // This computes the sum of squared differences in one pass
+    let sum_squared_diff = y.fold(0.0, |acc, &val| {
+        if val.is_finite() {
+            let diff = val - mean;
+            acc + diff * diff
+        } else {
+            acc // Skip NaN or infinite values
+        }
+    });
+
+    // Compute variance (MSE)
+    sum_squared_diff / n as f64
+}
+
 /// Computes the logistic sigmoid for a scalar input.
 ///
 /// The sigmoid maps any real number into the open interval (0, 1) with clipping
@@ -298,7 +355,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Gini impurity in the range [0.0, 1.0]
+/// - `f64` - Gini impurity in the range \[0.0, 1.0\]
 ///
 /// # Examples
 /// ```rust
@@ -566,63 +623,6 @@ where
     } else {
         info_gain / split_info
     }
-}
-
-/// Calculates the mean squared error (variance) of a set of values.
-///
-/// The variance is the average of the squared differences between each value
-/// and the mean of all values.
-///
-/// # Parameters
-///
-/// - `y` - Values for which to calculate the variance
-///
-/// # Returns
-///
-/// - `f64` - Variance of the input values (0.0 when the array is empty)
-///
-/// # Examples
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::variance;
-///
-/// let values = array![1.0, 2.0, 3.0];
-/// let mse = variance(&values);
-/// // Mean is 2.0, so variance = ((1-2)^2 + (2-2)^2 + (3-2)^2) / 3 = (1 + 0 + 1) / 3 ~= 0.66667
-/// assert!((mse - 0.6666667).abs() < 1e-6);
-/// ```
-#[inline]
-pub fn variance<S>(y: &ArrayBase<S, Ix1>) -> f64
-where
-    S: Data<Elem = f64>,
-{
-    let n = y.len();
-
-    // Return 0.0 for empty arrays
-    if n == 0 {
-        return 0.0;
-    }
-
-    // Calculate mean using ndarray's mean method
-    // Handle potential NaN case when all values are NaN
-    let mean = match y.mean() {
-        Some(m) if m.is_finite() => m,
-        _ => return 0.0, // Return 0.0 if mean is NaN or can't be calculated
-    };
-
-    // Use fold for potentially better performance than map/sum
-    // This computes the sum of squared differences in one pass
-    let sum_squared_diff = y.fold(0.0, |acc, &val| {
-        if val.is_finite() {
-            let diff = val - mean;
-            acc + diff * diff
-        } else {
-            acc // Skip NaN or infinite values
-        }
-    });
-
-    // Compute variance (MSE)
-    sum_squared_diff / n as f64
 }
 
 /// Calculates the population standard deviation of a set of values.

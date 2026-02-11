@@ -5,13 +5,17 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-10 (UTC-7)
+### Changed
+- move preludes of `math` module to `math_prelude`
+
 ## [v0.11.0] - 2026-02-09 (UTC-7)
 ### Changed
-- move preludes of `utility` modules to `utility_prelude`
+- move preludes of `utility` module to `utility_prelude`
 
 ## [v0.11.0] - 2026-02-08 (UTC-7)
 ### Changed
-- move preludes of `machine_learning` modules to `machine_learning_prelude`
+- move preludes of `machine_learning` module to `machine_learning_prelude`
 
 ## [v0.11.0] - 2026-02-07 (UTC-7)
 ### Changed

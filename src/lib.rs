@@ -493,6 +493,7 @@ pub mod machine_learning;
 /// use rustyml::prelude::*;
 /// // `use rustyml::prelude::machine_learning_prelude::*;` imports machine learning models
 /// // `use rustyml::prelude::utility_prelude::*;` imports utility functions
+/// // `use rustyml::prelude::math_prelude::*;` imports math functions
 /// ```
 pub mod prelude;
 
