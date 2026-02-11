@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-11 (UTC-7)
+### Changed
+- move preludes of `metric` module to `metric_prelude`
+
 ## [v0.11.0] - 2026-02-10 (UTC-7)
 ### Changed
 - move preludes of `math` module to `math_prelude`
