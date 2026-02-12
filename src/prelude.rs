@@ -10,3 +10,6 @@ pub mod math_prelude;
 /// Prelude module for metric functions
 #[cfg(feature = "metric")]
 pub mod metric_prelude;
+/// Prelude module for datasets
+#[cfg(feature = "dataset")]
+pub mod dataset_prelude;

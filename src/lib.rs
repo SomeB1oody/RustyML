@@ -495,6 +495,7 @@ pub mod machine_learning;
 /// // `use rustyml::prelude::utility_prelude::*;` imports utility functions
 /// // `use rustyml::prelude::math_prelude::*;` imports math functions
 /// // `use rustyml::prelude::metric_prelude::*;` imports metric functions
+/// // `use rustyml::prelude::dataset_prelude::*;` imports datasets
 /// ```
 pub mod prelude;
 
