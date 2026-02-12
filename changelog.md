@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.11.0] - 2026-02-12 (UTC-7)
 ### Changed
 - move preludes of `dataset` module to `dataset_prelude`
+- move preludes of `neural_network` module to `neural_network_prelude`
 
 ## [v0.11.0] - 2026-02-11 (UTC-7)
 ### Changed
