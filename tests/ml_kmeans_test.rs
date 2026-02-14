@@ -1,8 +1,8 @@
 #![cfg(feature = "machine_learning")]
 
 use ndarray::{Array1, Array2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{Rng, SeedableRng};
 use rustyml::machine_learning::kmeans::KMeans;
 
 // Helper function: Create a simple test dataset

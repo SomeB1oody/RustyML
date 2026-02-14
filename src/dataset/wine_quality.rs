@@ -108,10 +108,18 @@ fn load_white_wine_quality_internal() -> (Array1<&'static str>, Array2<f64>) {
 /// # Returns
 ///
 /// - `&'static Array1<&'static str>` - Static reference to array of feature names including:
-///     - fixed acidity, volatile acidity, citric acid
-///     - residual sugar, chlorides
-///     - free sulfur dioxide, total sulfur dioxide
-///     - density, pH, sulphates, alcohol, quality
+///     - fixed acidity
+///     - volatile acidity
+///     - citric acid
+///     - residual sugar
+///     - chlorides
+///     - free sulfur dioxide
+///     - total sulfur dioxide
+///     - density
+///     - pH
+///     - sulphates
+///     - alcohol
+///     - quality
 /// - `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (1599, 12)
 ///   containing normalized wine quality measurements
 ///
@@ -156,10 +164,18 @@ pub fn load_red_wine_quality() -> (&'static Array1<&'static str>, &'static Array
 ///
 /// A tuple containing:
 /// - `&'static Array1<&'static str>` - Static reference to an array of feature names including
-///     - fixed acidity, volatile acidity, citric acid
-///     - residual sugar, chlorides
-///     - free sulfur dioxide, total sulfur dioxide
-///     - density, pH, sulphates, alcohol, quality
+///     - fixed acidity
+///     - volatile acidity
+///     - citric acid
+///     - residual sugar
+///     - chlorides
+///     - free sulfur dioxide
+///     - total sulfur dioxide
+///     - density
+///     - pH
+///     - sulphates
+///     - alcohol
+///     - quality
 /// - `&'static Array2<f64>` - Static reference to 2D feature matrix with shape (4898, 12)
 ///   containing normalized white wine quality measurements
 ///

@@ -1,6 +1,7 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::Array;
+use ndarray_rand::rand::random;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layer::activation_layer::linear::Linear;
 use rustyml::neural_network::layer::activation_layer::relu::ReLU;
@@ -104,16 +105,16 @@ fn test_fit_classification_convergence() {
 
     // Class 0: scattered points in one region with some overlap
     for i in 0..50 {
-        let x1 = -2.0 + (i as f32 / 25.0) + (rand::random::<f32>() - 0.5) * 0.5; // Add noise
-        let x2 = -2.0 + (i as f32 / 25.0) + (rand::random::<f32>() - 0.5) * 0.5; // Add noise
+        let x1 = -2.0 + (i as f32 / 25.0) + (random::<f32>() - 0.5) * 0.5; // Add noise
+        let x2 = -2.0 + (i as f32 / 25.0) + (random::<f32>() - 0.5) * 0.5; // Add noise
         x_data.extend_from_slice(&[x1, x2]);
         y_data.extend_from_slice(&[1.0, 0.0]); // one-hot encoding [1,0]
     }
 
     // Class 1: scattered points in another region with some overlap
     for i in 0..50 {
-        let x1 = 0.5 + (i as f32 / 25.0) + (rand::random::<f32>() - 0.5) * 0.5; // Add noise
-        let x2 = 0.5 + (i as f32 / 25.0) + (rand::random::<f32>() - 0.5) * 0.5; // Add noise
+        let x1 = 0.5 + (i as f32 / 25.0) + (random::<f32>() - 0.5) * 0.5; // Add noise
+        let x2 = 0.5 + (i as f32 / 25.0) + (random::<f32>() - 0.5) * 0.5; // Add noise
         x_data.extend_from_slice(&[x1, x2]);
         y_data.extend_from_slice(&[0.0, 1.0]); // one-hot encoding [0,1]
     }

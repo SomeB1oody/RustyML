@@ -3,8 +3,7 @@ use crate::math::{binary_search_sigma, squared_euclidean_distance_row};
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use ndarray_rand::rand::{Rng, SeedableRng, rng, rngs::StdRng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Early exaggeration factor applied to joint probabilities.
@@ -273,7 +272,7 @@ impl TSNE {
         let mut rng = match self.random_state {
             Some(seed) => StdRng::seed_from_u64(seed),
             None => {
-                let mut thread_rng = rand::rng();
+                let mut thread_rng = rng();
                 StdRng::from_rng(&mut thread_rng)
             }
         };

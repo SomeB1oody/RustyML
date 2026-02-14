@@ -5,8 +5,8 @@ use crate::math::average_path_length_factor;
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng, rng};
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{Rng, SeedableRng, rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction

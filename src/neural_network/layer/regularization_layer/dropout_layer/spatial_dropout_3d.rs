@@ -10,8 +10,7 @@ use crate::neural_network::layer::regularization_layer::input_validation_functio
 };
 use crate::neural_network::neural_network_trait::Layer;
 use ndarray::IxDyn;
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Threshold for using parallel computation in SpatialDropout3D layer.
 /// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.

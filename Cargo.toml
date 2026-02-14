@@ -1,30 +1,29 @@
 [package]
 name = "rustyml"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.85.0"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
-description = "A high-performance machine learning & deep learning library in pure Rust, offering ML algorithms and neural network support."
+description = "A high-performance machine learning & deep learning library in pure Rust, offering ML algorithms and neural network support"
 license = "MIT"
 readme = "README.md"
-keywords = ["machine_learning", "ML", "deep_learning", "neural_network", "AI"]
+keywords = ["machine_learning", "ML", "neural_network", "AI"]
 repository = "https://github.com/SomeB1oody/RustyML"
 documentation = "https://docs.rs/crate/rustyml"
-categories = ["mathematics", "science", "algorithms"]
+categories = ["mathematics", "science::machine_learning", "algorithms"]
 
 [features]
 default = ["machine_learning", "neural_network"]
 dataset = ["dep:ndarray"]
-machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:rand"]
-neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
-utility = ["math", "dep:ndarray", "dep:rand", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:ndarray-rand"]
+machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
+neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
+utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:ndarray-rand"]
 math = ["dep:ndarray", "dep:ahash"]
 metric = ["dep:ndarray", "dep:ahash"]
 full = ["dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
 
 [dependencies]
 ndarray = { version = "0.17.2", features = ["rayon", "serde"], optional = true }
-rand = { version = "0.9.2", optional = true }
 nalgebra = { version = "0.34.1", optional = true }
 rayon = { version = "1.11.0", optional = true }
 ndarray-rand = { version = "0.16.0", optional = true }

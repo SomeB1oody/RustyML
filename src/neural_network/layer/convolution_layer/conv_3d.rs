@@ -13,8 +13,7 @@ use crate::neural_network::optimizer::adam::AdamStatesConv3D;
 use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv3D;
 use crate::neural_network::optimizer::sgd::SGD;
 use ndarray::{Array2, Array5, ArrayD, ArrayView5, Axis, Zip};
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,

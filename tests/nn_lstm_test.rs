@@ -1,6 +1,7 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::{Array, Array2, Array3, ArrayD};
+use ndarray_rand::rand::{Rng, rng};
 use rustyml::neural_network::layer::activation_layer::relu::ReLU;
 use rustyml::neural_network::layer::activation_layer::sigmoid::Sigmoid;
 use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
@@ -279,8 +280,7 @@ fn test_lstm_temporal_xor() {
     let mut x_train = Array3::<f32>::zeros((batch_size, seq_len, input_dim));
     let mut y_train = Array2::<f32>::zeros((batch_size, 1));
 
-    use rand::Rng;
-    let mut rng = rand::rng();
+    let mut rng = rng();
 
     // Generate sequences of 0s and 1s
     for b in 0..batch_size {
@@ -396,8 +396,7 @@ fn test_lstm_parity_check() {
     let mut x_train = Array3::<f32>::zeros((batch_size, seq_len, input_dim));
     let mut y_train = Array2::<f32>::zeros((batch_size, 1));
 
-    use rand::Rng;
-    let mut rng = rand::rng();
+    let mut rng = rng();
 
     // Generate sequences
     for b in 0..batch_size {

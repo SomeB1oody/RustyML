@@ -17,8 +17,7 @@ use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv2D;
 use crate::neural_network::optimizer::adam::AdamStatesConv2D;
 use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
 use ndarray::{Array2, Array3, Array4, ArrayD};
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,

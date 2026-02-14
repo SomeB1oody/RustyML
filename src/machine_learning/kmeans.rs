@@ -4,9 +4,9 @@ use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix2};
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{Rng, SeedableRng};
 use ndarray_rand::rand::{RngCore, rng};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
 
@@ -36,7 +36,7 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// ```rust
 /// use rustyml::machine_learning::kmeans::KMeans;
 /// use ndarray::Array2;
-/// use rand::random;
+/// use ndarray_rand::rand::random; // or `use rand::random;`
 ///
 /// // Create a sample dataset with 100 points in 2D space
 /// // The dataset contains 3 distinct clusters

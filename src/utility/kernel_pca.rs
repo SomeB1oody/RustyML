@@ -2,8 +2,8 @@ use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{Rng, SeedableRng};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
