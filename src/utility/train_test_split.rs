@@ -1,8 +1,6 @@
 use crate::error::ModelError;
 use ndarray::{Array1, Array2, Axis};
-use rand::SeedableRng;
-use rand::rngs::StdRng;
-use rand::seq::SliceRandom;
+use ndarray_rand::rand::{SeedableRng, rng, rngs::StdRng, seq::SliceRandom};
 
 /// Splits a dataset into training and test sets
 ///
@@ -87,7 +85,7 @@ pub fn train_test_split(
             indices.shuffle(&mut rng);
         }
         None => {
-            let mut rng = rand::rng();
+            let mut rng = rng();
             indices.shuffle(&mut rng);
         }
     }

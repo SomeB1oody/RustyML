@@ -9,8 +9,7 @@ use crate::neural_network::layer::regularization_layer::input_validation_functio
     validate_input_shape, validate_rate,
 };
 use crate::neural_network::neural_network_trait::Layer;
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Threshold for using parallel computation in Dropout layer.
 /// When the total number of elements >= this threshold, parallel computation is used.

@@ -151,7 +151,7 @@ Access to standardized datasets for experimentation:
 
 Add the library to your `Cargo.toml`:  
 将库添加到您的`Cargo.toml`文件中：
-``` toml
+```toml
 [dependencies]
 rustyml = {version = "*", features = ["machine_learning"]} 
 # or use `features = ["full"]` to enable all features
@@ -202,7 +202,7 @@ println!("{:?}", model);
 
 Add the library to your `Cargo.toml`:  
 将库添加到您的`Cargo.toml`文件中：
-``` toml
+```toml
 [dependencies]
 rustyml = {version = "*", features = ["neural_network"]} 
 # or use `features = ["full"]` to enable all features
@@ -290,8 +290,8 @@ Contributions are welcome! If you're interested in helping build a robust machin
 4. Help with documentation and examples | 帮助完善文档和示例
 
 ## Authors | 作者
-- SomeB1oody (stanyin64@gmail.com)
+SomeB1oody – [stanyin64@gmail.com](mailto:stanyin64@gmail.com)
 
 ## License | 许可证
-Licensed under the [MIT License](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE). See LICENSE file for details.  
-根据[MIT许可证](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)授权。有关详细信息，请参阅LICENSE文件。
+Licensed under the [MIT License](LICENSE). See LICENSE file for details.  
+根据[MIT许可证](LICENSE)授权。有关详细信息，请参阅LICENSE文件。

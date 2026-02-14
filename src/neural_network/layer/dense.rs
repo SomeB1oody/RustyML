@@ -7,8 +7,7 @@ use crate::neural_network::optimizer::{
     OptimizerCache, ada_grad::AdaGradStates, adam::AdamStates, rms_prop::RMSpropCache, sgd::SGD,
 };
 use ndarray::{Array, Array2, Axis};
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Threshold for determining when to use parallel computation in dense layer operations.

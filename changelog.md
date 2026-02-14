@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.11.0] - 2026-02-14 (UTC-7)
+### Removed
+- remove rand dependency and use the built-in rand module in ndarray_rand
+
 ## [v0.11.0] - 2026-02-12 (UTC-7)
 ### Changed
 - move preludes of `dataset` module to `dataset_prelude`
@@ -607,7 +611,7 @@ Refactor traits in neural_network module definitions into traits module
 - Add `SimpleRNN` layer initial implementation
 
 ### Changed
-- Use rand v0.9.1
+- Update to rand v0.9.1
 
 ## [v0.5.1] - 2025-4-16 (UTC-7)
 ### Changed

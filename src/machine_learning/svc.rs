@@ -4,6 +4,7 @@ use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
+use ndarray_rand::rand::random_range;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
     ParallelIterator,
@@ -797,7 +798,7 @@ impl SVC {
 
             // Try non-bound alphas randomly
             let n_samples = alphas.len();
-            let mut start = rand::random_range(0..n_samples);
+            let mut start = random_range(0..n_samples);
 
             for _ in 0..n_samples {
                 i1 = start;
@@ -810,7 +811,7 @@ impl SVC {
             }
 
             // Try all alphas randomly
-            start = rand::random_range(0..n_samples);
+            start = random_range(0..n_samples);
             for _ in 0..n_samples {
                 i1 = start;
                 if i1 != i2 {

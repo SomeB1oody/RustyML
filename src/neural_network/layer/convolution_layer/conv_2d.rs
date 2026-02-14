@@ -16,8 +16,7 @@ use crate::neural_network::optimizer::adam::AdamStatesConv2D;
 use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
 use crate::neural_network::optimizer::sgd::SGD;
 use ndarray::{Array2, Array3, Array4, Axis, s};
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,

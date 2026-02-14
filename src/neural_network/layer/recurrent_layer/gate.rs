@@ -5,8 +5,7 @@ use crate::neural_network::optimizer::ada_grad::AdaGradStates;
 use crate::neural_network::optimizer::adam::AdamStates;
 use crate::neural_network::optimizer::rms_prop::RMSpropCache;
 use ndarray::{Array, Array2};
-use ndarray_rand::RandomExt;
-use rand::distr::Uniform;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Gate parameters and optimizer state for recurrent cells.
 ///

@@ -9,7 +9,7 @@ use crate::neural_network::layer::serialize_weight::{
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array, IxDyn, s};
-use rand::seq::SliceRandom;
+use ndarray_rand::rand::{rng, seq::SliceRandom};
 use serde_json::{from_reader, to_writer_pretty};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -392,7 +392,7 @@ impl Sequential {
         // Training loop
         for epoch in 0..epochs {
             // Shuffle data at the beginning of each epoch
-            indices.shuffle(&mut rand::rng());
+            indices.shuffle(&mut rng());
 
             let mut epoch_loss = 0.0;
             let mut batch_count = 0;

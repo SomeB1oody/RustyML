@@ -10,12 +10,12 @@ use crate::neural_network::layer::helper_function::{
 };
 use crate::neural_network::layer::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
 use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use crate::neural_network::optimizer::OptimizerCacheConv2D;
-use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv2D;
-use crate::neural_network::optimizer::adam::AdamStatesConv2D;
-use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
-use crate::neural_network::optimizer::sgd::SGD;
+use crate::neural_network::optimizer::{
+    OptimizerCacheConv2D, ada_grad::AdaGradStatesConv2D, adam::AdamStatesConv2D,
+    rms_prop::RMSpropCacheConv2D, sgd::SGD,
+};
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
+use ndarray_rand::rand::random;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
@@ -207,12 +207,12 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
             .for_each(|mut filter| {
                 filter
                     .slice_mut(s![0, .., ..])
-                    .par_mapv_inplace(|_| (rand::random::<f32>() - 0.5) * 2.0 * limit);
+                    .par_mapv_inplace(|_| (random::<f32>() - 0.5) * 2.0 * limit);
             });
 
         // bias initialization
         self.bias
-            .par_mapv_inplace(|_| (rand::random::<f32>() - 0.5) * 0.1);
+            .par_mapv_inplace(|_| (random::<f32>() - 0.5) * 0.1);
     }
 
     /// Calculates padding dimensions for Same padding mode.

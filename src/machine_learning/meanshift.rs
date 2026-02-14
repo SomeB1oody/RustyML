@@ -5,8 +5,8 @@ use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Data, Ix2};
-use rand::rngs::StdRng;
-use rand::{SeedableRng, rng, seq::SliceRandom};
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{SeedableRng, rng, seq::SliceRandom};
 use rayon::prelude::{
     IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
 };

@@ -6,7 +6,7 @@ use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
-use rand::{rng, seq::SliceRandom};
+use ndarray_rand::rand::{rng, seq::SliceRandom};
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 /// Threshold for batch size above which parallel processing is used
