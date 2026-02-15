@@ -1,6 +1,5 @@
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -172,7 +171,7 @@ impl PCA {
     where
         S: Data<Elem = f64>,
     {
-        self.fit_internal(x, true)
+        self.fit_internal(x)
     }
 
     /// Transforms data into principal component space.
@@ -200,7 +199,7 @@ impl PCA {
     where
         S: Data<Elem = f64>,
     {
-        self.transform_internal(x, true)
+        self.transform_internal(x)
     }
 
     /// Fits the model and transforms the data.
@@ -227,13 +226,27 @@ impl PCA {
     where
         S: Data<Elem = f64>,
     {
-        let progress_bar = Self::create_progress_bar(2, "Fitting model");
-        self.fit_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.set_message("Transforming data");
-        let transformed = self.transform_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                2,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Fitting model");
+            pb
+        };
+        self.fit_internal(x)?;
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Transforming data");
+        }
+        let transformed = self.transform_internal(x)?;
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
+        }
         Ok(transformed)
     }
 
@@ -285,9 +298,20 @@ impl PCA {
             ));
         }
 
-        let progress_bar = Self::create_progress_bar(3, "Validating input");
-        progress_bar.inc(1);
-        progress_bar.set_message("Reconstructing data");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                3,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
+        };
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Reconstructing data");
+        }
 
         let reconstructed = if x.nrows() >= PCA_PARALLEL_THRESHOLD {
             let x_owned = x.to_owned();
@@ -298,20 +322,19 @@ impl PCA {
             reconstructed
         };
 
-        progress_bar.inc(1);
-        progress_bar.set_message("Finalizing output");
-        progress_bar.inc(1);
-        progress_bar.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Finalizing output");
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
+        }
 
         Ok(reconstructed)
     }
 
     /// Fits the model and updates internal state without exposing progress logic
-    fn fit_internal<S>(
-        &mut self,
-        x: &ArrayBase<S, Ix2>,
-        show_progress: bool,
-    ) -> Result<&mut Self, ModelError>
+    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -351,15 +374,20 @@ impl PCA {
             )));
         }
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(5, "Validating input"))
-        } else {
-            None
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                5,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Centering data");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Centering data");
         }
 
         // Center data and keep the mean for later transforms
@@ -367,17 +395,19 @@ impl PCA {
         let mean = Self::compute_mean(&x_centered);
         Self::center_data(&mut x_centered, &mean);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Computing decomposition");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Computing decomposition");
         }
 
         // Compute principal axes and singular values
         let (components, singular_values) = self.compute_components(&x_centered)?;
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Computing explained variance");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Computing explained variance");
         }
 
         // Convert singular values into variance statistics
@@ -389,9 +419,10 @@ impl PCA {
             Array1::zeros(self.n_components)
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Finalizing model state");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Finalizing model state");
         }
 
         // Store learned parameters for future transforms
@@ -403,20 +434,17 @@ impl PCA {
         self.n_samples = Some(n_samples);
         self.n_features = Some(n_features);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
         }
 
         Ok(self)
     }
 
     /// Transforms input data using the fitted model state
-    fn transform_internal<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-        show_progress: bool,
-    ) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -443,24 +471,30 @@ impl PCA {
             ));
         }
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(3, "Validating input"))
-        } else {
-            None
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                3,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Centering data");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Centering data");
         }
 
         // Reuse training mean to center new samples
         let mut x_centered = x.to_owned();
         Self::center_data(&mut x_centered, mean);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Projecting data");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Projecting data");
         }
 
         // Project into component space with optional parallelism
@@ -470,9 +504,10 @@ impl PCA {
             x_centered.dot(&components.t())
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
         }
 
         Ok(transformed)
@@ -797,19 +832,6 @@ impl PCA {
         Array2::from_shape_vec((n_samples, n_features), flat).map_err(|e| {
             ModelError::ProcessingError(format!("Failed to build reconstructed matrix: {}", e))
         })
-    }
-
-    /// Creates a progress bar with a consistent style
-    fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
-        let progress_bar = ProgressBar::new(len);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Stage: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("=>-"),
-        );
-        progress_bar.set_message(message.to_string());
-        progress_bar
     }
 
     model_save_and_load_methods!(PCA);

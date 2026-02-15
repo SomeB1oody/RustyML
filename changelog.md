@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.12.0] - 2026-02-15 (UTC-7)
+### Added
+- add conditional progress bar support using the `show_progress` feature flag
+
 ## [v0.11.0] - 2026-02-14 (UTC-7)
 ### Removed
 - remove rand dependency and use the built-in rand module in ndarray_rand

@@ -177,9 +177,6 @@ pub(super) fn validate_regulation_type(
                         alpha
                     )));
                 }
-                if *alpha == 0.0 {
-                    eprintln!("Warning: regularization alpha is 0, consider using None instead");
-                }
             }
         }
     }

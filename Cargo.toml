@@ -13,14 +13,25 @@ documentation = "https://docs.rs/crate/rustyml"
 categories = ["mathematics", "science", "algorithms"]
 
 [features]
-default = ["machine_learning", "neural_network"]
-dataset = ["dep:ndarray"]
-machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
+# Classical machine learning algorithms for supervised and unsupervised learning
+machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json"]
+# Complete neural network framework with flexible architecture design
 neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
-utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:ndarray-rand"]
-math = ["dep:ndarray", "dep:ahash"]
+# Data preprocessing and dimensionality reduction utilities
+utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:serde_json", "dep:ndarray-rand"]
+# Comprehensive evaluation metrics for model performance assessment
 metric = ["dep:ndarray", "dep:ahash"]
+# Mathematical utilities and statistical functions
+math = ["dep:ndarray", "dep:ahash"]
+# Access to standardized datasets for experimentation
+dataset = ["dep:ndarray"]
+# Enables `machine_learning` and `neural_network`
+default = ["machine_learning", "neural_network"]
+# full access to all modules in the crate
 full = ["dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
+
+# Provides support for progress bars in the command line
+show_progress = ["dep:indicatif"]
 
 [dependencies]
 ndarray = { version = "0.17.2", features = ["rayon", "serde"], optional = true }
@@ -28,7 +39,7 @@ nalgebra = { version = "0.34.1", optional = true }
 rayon = { version = "1.11.0", optional = true }
 ndarray-rand = { version = "0.16.0", optional = true }
 ahash = { version = "0.8.12", features = ["serde"], optional = true }
-indicatif = { version = "0.18.3", optional = true }
+indicatif = { version = "0.18.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.149", optional = true}
 
@@ -42,5 +53,8 @@ opt-level = 0
 opt-level = 3
 
 [package.metadata.docs.rs]
-features = ["full"]
+all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.playground]
+features = ["default"]

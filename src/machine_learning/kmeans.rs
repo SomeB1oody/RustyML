@@ -2,7 +2,6 @@ use super::helper_function::{preliminary_check, validate_max_iterations, validat
 use crate::error::ModelError;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -339,14 +338,15 @@ impl KMeans {
         let mut counts = vec![0usize; self.n_clusters];
 
         // Create progress bar for clustering iterations
-        let progress_bar = ProgressBar::new(self.max_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Inertia: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(format!("{:.6}", f64::INFINITY));
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.max_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Inertia: {msg}",
+            );
+            pb.set_message(format!("{:.6}", f64::INFINITY));
+            pb
+        };
 
         // Main iteration loop
         for i in 0..self.max_iter {
@@ -401,8 +401,11 @@ impl KMeans {
             }
 
             // Update progress bar with current inertia
-            progress_bar.set_message(format!("{:.6}", inertia));
-            progress_bar.inc(1);
+            #[cfg(feature = "show_progress")]
+            {
+                progress_bar.set_message(format!("{:.6}", inertia));
+                progress_bar.inc(1);
+            }
 
             // Check convergence condition
             if let Some(prev) = prev_inertia {
@@ -468,16 +471,19 @@ impl KMeans {
         }
 
         // Finish progress bar with final statistics
-        let final_inertia = self.inertia.unwrap_or_else(|| prev_inertia.unwrap_or(0.0));
-        let convergence_status = if iter_count < self.max_iter {
-            "Converged"
-        } else {
-            "Max iterations"
-        };
-        progress_bar.finish_with_message(format!(
-            "{:.6} | {} | Iterations: {}",
-            final_inertia, convergence_status, iter_count
-        ));
+        #[cfg(feature = "show_progress")]
+        {
+            let final_inertia = self.inertia.unwrap_or_else(|| prev_inertia.unwrap_or(0.0));
+            let convergence_status = if iter_count < self.max_iter {
+                "Converged"
+            } else {
+                "Max iterations"
+            };
+            progress_bar.finish_with_message(format!(
+                "{:.6} | {} | Iterations: {}",
+                final_inertia, convergence_status, iter_count
+            ));
+        }
 
         self.labels = Some(labels);
         // Set inertia if not already set (i.e., if max_iter was reached without convergence)
@@ -485,11 +491,6 @@ impl KMeans {
             self.inertia = prev_inertia;
         }
         self.n_iter = Some(iter_count);
-
-        println!(
-            "\nKMeans clustering completed: {} samples, {} clusters, {} iterations, final inertia: {:.6}",
-            n_samples, self.n_clusters, iter_count, final_inertia
-        );
 
         Ok(self)
     }

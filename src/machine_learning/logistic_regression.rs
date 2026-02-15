@@ -6,7 +6,6 @@ use super::helper_function::{
 use crate::error::ModelError;
 use crate::math::{logistic_loss, sigmoid};
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -218,18 +217,20 @@ impl LogisticRegression {
         // Initialize weight vector
         let mut weights = Array1::zeros(n_features);
         let mut prev_cost = f64::INFINITY;
+        #[cfg(feature = "show_progress")]
         let mut final_cost = prev_cost;
         let mut n_iter = 0;
 
         // Create progress bar for training iterations
-        let progress_bar = ProgressBar::new(self.max_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Loss: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(format!("{:.6}", f64::INFINITY));
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.max_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Loss: {msg}",
+            );
+            pb.set_message(format!("{:.6}", f64::INFINITY));
+            pb
+        };
 
         // Gradient descent iterations
         while n_iter < self.max_iter {
@@ -259,6 +260,7 @@ impl LogisticRegression {
 
             // Check for numerical issues in gradients
             if gradients.iter().any(|&val| !val.is_finite()) {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
                 return Err(ModelError::ProcessingError(
                     "Gradient calculation resulted in NaN or infinite values".to_string(),
@@ -294,6 +296,7 @@ impl LogisticRegression {
 
             // Check for numerical issues in updated weights
             if weights.iter().any(|&val| !val.is_finite()) {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite weights");
                 return Err(ModelError::ProcessingError(
                     "Weight update resulted in NaN or infinite values".to_string(),
@@ -319,10 +322,14 @@ impl LogisticRegression {
                 }
             }
 
-            final_cost = cost;
+            #[cfg(feature = "show_progress")]
+            {
+                final_cost = cost;
+            }
 
             // Check for numerical issues in cost
             if !cost.is_finite() {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
                 return Err(ModelError::ProcessingError(
                     "Cost calculation resulted in NaN or infinite value".to_string(),
@@ -330,8 +337,11 @@ impl LogisticRegression {
             }
 
             // Update progress bar with current loss
-            progress_bar.set_message(format!("{:.6}", cost));
-            progress_bar.inc(1);
+            #[cfg(feature = "show_progress")]
+            {
+                progress_bar.set_message(format!("{:.6}", cost));
+                progress_bar.inc(1);
+            }
 
             // Check convergence condition
             if (prev_cost - cost).abs() < self.tol {
@@ -341,11 +351,13 @@ impl LogisticRegression {
         }
 
         // Finish progress bar with final statistics
+        #[cfg(feature = "show_progress")]
         let convergence_status = if n_iter < self.max_iter {
             "Converged"
         } else {
             "Max iterations"
         };
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!(
             "{:.6} | {} | Iterations: {}",
             final_cost, convergence_status, n_iter
@@ -353,11 +365,6 @@ impl LogisticRegression {
 
         self.weights = Some(weights);
         self.n_iter = Some(n_iter);
-
-        println!(
-            "\nLogistic Regression training completed: {} samples, {} features, {} iterations, final loss: {:.6}",
-            n_samples, n_features, n_iter, final_cost
-        );
 
         Ok(self)
     }

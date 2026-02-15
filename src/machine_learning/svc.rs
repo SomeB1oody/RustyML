@@ -2,7 +2,6 @@ use super::helper_function::{preliminary_check, validate_max_iterations, validat
 pub use crate::KernelType;
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
 use ndarray_rand::rand::random_range;
 use rayon::prelude::{
@@ -260,48 +259,6 @@ impl SVC {
         kernel_matrix
     }
 
-    /// Helper function to compute dual objective quadratic term
-    ///
-    /// # Parameters
-    ///
-    /// - `support_indices` - Indices of support vectors
-    /// - `support_vector_alphas` - Alpha values for support vectors
-    /// - `support_vector_labels` - Labels for support vectors
-    /// - `kernel_matrix` - Pre-computed kernel matrix
-    /// - `use_parallel` - Whether to use parallel computation
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The computed quadratic term value
-    fn compute_quadratic_term(
-        support_indices: &[usize],
-        support_vector_alphas: &Array1<f64>,
-        support_vector_labels: &Array1<f64>,
-        kernel_matrix: &Array2<f64>,
-        use_parallel: bool,
-    ) -> f64 {
-        let compute_fn = |(i, &idx_i): (usize, &usize)| {
-            support_indices
-                .iter()
-                .enumerate()
-                .map(|(j, &idx_j)| {
-                    let kernel_val = kernel_matrix[[idx_i, idx_j]];
-                    support_vector_alphas[i]
-                        * support_vector_alphas[j]
-                        * support_vector_labels[i]
-                        * support_vector_labels[j]
-                        * kernel_val
-                })
-                .sum::<f64>()
-        };
-
-        if use_parallel {
-            support_indices.par_iter().enumerate().map(compute_fn).sum()
-        } else {
-            support_indices.iter().enumerate().map(compute_fn).sum()
-        }
-    }
-
     /// Helper function to compute decision value for a single sample
     ///
     /// # Parameters
@@ -422,29 +379,28 @@ impl SVC {
         let mut iteration_count = 0;
 
         // Create progress bar for SMO iterations
-        let progress_bar = ProgressBar::new(self.max_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message("Alpha changes: 0 | Examine: All");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.max_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | {msg}",
+            );
+            pb.set_message("Alpha changes: 0 | Examine: All");
+            pb
+        };
 
         loop {
             if iteration_count >= self.max_iter {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message(
                     "Warning: Max iterations reached without full convergence",
-                );
-                eprintln!(
-                    "Warning: SVC reached maximum iterations ({}) without full convergence",
-                    self.max_iter
                 );
                 break;
             }
 
             num_changed_alphas = 0;
             iteration_count += 1;
+            #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
             let sample_range: Vec<usize> = if examine_all {
@@ -467,10 +423,11 @@ impl SVC {
             }
 
             // Update progress bar with current status
-            let examine_mode = if examine_all { "All" } else { "Non-bound" };
+            #[cfg(feature = "show_progress")]
             progress_bar.set_message(format!(
                 "Alpha changes: {} | Examine: {}",
-                num_changed_alphas, examine_mode
+                num_changed_alphas,
+                if examine_all { "All" } else { "Non-bound" }
             ));
 
             // Update examination strategy
@@ -487,6 +444,7 @@ impl SVC {
         }
 
         // Finish progress bar with convergence status
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!("Converged at iteration {}", iteration_count));
 
         // Extract support vectors
@@ -539,38 +497,6 @@ impl SVC {
                 "Support vector alphas contain invalid values".to_string(),
             ));
         }
-
-        // Calculate cost using margin-based objective function
-        let cost = {
-            // Calculate the primal objective function: 0.5 * ||w||^2 + C * sum(xi)
-            // For SVM, we compute it as: 0.5 * sum(alpha_i * alpha_j * y_i * y_j * K(x_i, x_j)) - sum(alpha_i)
-
-            // First term: 0.5 * sum(alpha_i * alpha_j * y_i * y_j * K(x_i, x_j))
-            let mut dual_objective = 0.0;
-
-            // Compute the quadratic term
-            let quadratic_term: f64 = Self::compute_quadratic_term(
-                &support_indices,
-                &support_vector_alphas,
-                &support_vector_labels,
-                &kernel_matrix,
-                support_indices.len() >= SVC_PARALLEL_THRESHOLD,
-            );
-
-            dual_objective += 0.5 * quadratic_term;
-
-            // Subtract the linear term: sum(alpha_i)
-            let linear_term: f64 = support_vector_alphas.sum();
-            dual_objective -= linear_term;
-
-            // Return negative dual objective as cost (higher dual objective means better, so negation gives cost)
-            -dual_objective
-        };
-
-        println!(
-            "\nSVC training completed: {} samples, {} features, {} iterations, {} support vectors, final cost: {:.6}",
-            n_samples, n_features, iteration_count, n_support_vectors, cost
-        );
 
         // Store results
         self.alphas = Some(support_vector_alphas);

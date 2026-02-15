@@ -1,7 +1,6 @@
 use crate::error::ModelError;
 use crate::math::{binary_search_sigma, squared_euclidean_distance_row};
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::{Rng, SeedableRng, rng, rngs::StdRng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -16,7 +15,7 @@ const INITIAL_MOMENTUM: f64 = 0.5;
 const FINAL_MOMENTUM: f64 = 0.8;
 /// Scale for random initialization of the embedding.
 const INIT_SCALE: f64 = 1e-4;
-/// Lower bound for q_ij to avoid log(0) in KL divergence.
+/// Lower bound for q_ij to avoid numerical instability.
 const MIN_Q: f64 = 1e-12;
 /// Threshold for switching to parallel computation in t-SNE.
 const TSNE_PRARALLEL_THRESHOLD: usize = 2000;
@@ -175,18 +174,18 @@ impl TSNE {
         let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
 
         // Progress bar reports KL divergence each iteration
-        let progress_bar = ProgressBar::new(self.n_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | KL Divergence: {msg}",
-                )
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(format!("{:.6}", 0.0));
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.n_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | KL Divergence: {msg}",
+            );
+            pb.set_message(format!("{:.6}", 0.0));
+            pb
+        };
 
         let exaggeration_iter = EARLY_EXAGGERATION_ITER.min(self.n_iter);
+        #[cfg(feature = "show_progress")]
         let mut last_kl = 0.0;
 
         for iter in 0..self.n_iter {
@@ -220,11 +219,15 @@ impl TSNE {
             self.center_embedding(&mut y)?;
 
             // Track KL divergence for reporting only
-            last_kl = self.kl_divergence(p_use, &num, sum_num, use_parallel);
-            progress_bar.set_message(format!("{:.6}", last_kl));
-            progress_bar.inc(1);
+            #[cfg(feature = "show_progress")]
+            {
+                last_kl = self.kl_divergence(p_use, &num, sum_num, use_parallel);
+                progress_bar.set_message(format!("{:.6}", last_kl));
+                progress_bar.inc(1);
+            }
         }
 
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!("{:.6}", last_kl));
 
         Ok(y)
@@ -446,7 +449,7 @@ impl TSNE {
                         if i == j {
                             continue;
                         }
-                        let q_ij = num[[i, j]] / sum_num;
+                        let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
                         let mult = (p[[i, j]] - q_ij) * num[[i, j]];
                         for d in 0..n_components {
                             grad_row[d] += mult * (y[[i, d]] - y[[j, d]]);
@@ -474,7 +477,7 @@ impl TSNE {
                     if i == j {
                         continue;
                     }
-                    let q_ij = num[[i, j]] / sum_num;
+                    let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
                     let mult = (p[[i, j]] - q_ij) * num[[i, j]];
                     for d in 0..n_components {
                         grad[[i, d]] += mult * (y[[i, d]] - y[[j, d]]);
@@ -489,6 +492,7 @@ impl TSNE {
         }
     }
 
+    #[cfg(feature = "show_progress")]
     fn kl_divergence(
         &self,
         p: &Array2<f64>,
@@ -511,6 +515,7 @@ impl TSNE {
         }
     }
 
+    #[cfg(feature = "show_progress")]
     fn kl_divergence_row(&self, p: &Array2<f64>, num: &Array2<f64>, sum_num: f64, i: usize) -> f64 {
         let n_samples = p.nrows();
         let mut kl = 0.0;

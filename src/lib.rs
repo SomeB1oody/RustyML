@@ -63,6 +63,7 @@
 //! rustyml = { version = "*", features = ["machine_learning"] }
 //! # Or use features = ["full"] to enable all modules
 //! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
+//! # Add `"show_progress"` in `features` to show progress bars when training
 //! ```
 //!
 //! In your Rust code, write:
@@ -112,6 +113,7 @@
 //! rustyml = { version = "*", features = ["neural_network"] }
 //! # Or use `features = ["full"]` to enable all modules
 //! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
+//! # Add `"show_progress"` in `features` to show progress bars when training
 //! ```
 //!
 //! In your Rust code, write:
@@ -177,6 +179,7 @@
 //! | `dataset` | Standard datasets |
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
+//! | `show_progress` | Show progress bars when training |
 
 #[cfg(any(
     feature = "machine_learning",
@@ -201,6 +204,52 @@ pub enum KernelType {
     RBF { gamma: f64 },
     Sigmoid { gamma: f64, coef0: f64 },
     Cosine,
+}
+
+#[cfg(feature = "show_progress")]
+use indicatif::{ProgressBar, ProgressStyle};
+
+/// Creates a progress bar with a consistent style across the entire crate.
+///
+/// This function provides a unified way to create progress bars for all algorithms
+/// and utilities in the crate. The progress bar will only be created when the
+/// `show_progress` feature is enabled.
+///
+/// # Parameters
+///
+/// - `total` - The total number of iterations or items to process
+/// - `template` - A custom template string for the progress bar format
+///   Use placeholders: {elapsed_precise}, {bar:40}, {pos}, {len}, {msg}
+///   Example: "\[{elapsed_precise}\] {bar:40} {pos}/{len} | Cost: {msg}"
+///
+/// # Returns
+///
+/// - `ProgressBar` - A configured progress bar instance (only when feature is enabled)
+///
+/// # Example Templates
+///
+/// - For iterations with cost: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}"`
+/// - For iterations with loss: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Loss: {msg}"`
+/// - For node counting: `"[{elapsed_precise}] {bar:40} {pos} nodes | Depth: {msg}"`
+/// - For general progress: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}"`
+///
+/// # Style
+///
+/// All progress bars use the unified style with:
+/// - Progress characters: `"#>-"` (completed, current, remaining)
+/// - Bar width: 40 characters
+/// - Time display: Precise elapsed time
+#[cfg(feature = "show_progress")]
+#[allow(dead_code)]
+fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
+    let progress_bar = ProgressBar::new(total);
+    progress_bar.set_style(
+        ProgressStyle::default_bar()
+            .template(template)
+            .expect("Failed to set progress bar template")
+            .progress_chars("#>-"),
+    );
+    progress_bar
 }
 
 /// A macro that generates a getter method for any field.

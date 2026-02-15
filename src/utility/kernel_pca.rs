@@ -1,6 +1,5 @@
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -169,7 +168,7 @@ impl KernelPCA {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        self.fit_internal(x, true)
+        self.fit_internal(x)
     }
 
     /// Transforms data using the fitted KernelPCA model.
@@ -198,7 +197,7 @@ impl KernelPCA {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        self.transform_internal(x, true)
+        self.transform_internal(x)
     }
 
     /// Fits the model to the data and then transforms it.
@@ -225,22 +224,28 @@ impl KernelPCA {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        let progress_bar = Self::create_progress_bar(2, "Fitting model");
-        self.fit_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.set_message("Transforming data");
-        let transformed = self.transform_internal(x, false)?;
-        progress_bar.inc(1);
-        progress_bar.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = crate::create_progress_bar(
+            2,
+            "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+        );
+        self.fit_internal(x)?;
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Transforming data");
+        }
+        let transformed = self.transform_internal(x)?;
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
+        }
         Ok(transformed)
     }
 
     /// Fits the model and updates internal state without exposing progress logic
-    fn fit_internal<S>(
-        &mut self,
-        x: &ArrayBase<S, Ix2>,
-        show_progress: bool,
-    ) -> Result<&mut Self, ModelError>
+    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -264,41 +269,49 @@ impl KernelPCA {
 
         let use_parallel = n_samples >= KERNEL_PCA_PARALLEL_THRESHOLD;
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(5, "Validating input"))
-        } else {
-            None
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                5,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Computing kernel matrix");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Computing kernel matrix");
         }
 
         // Build the training kernel matrix
         let mut kernel_matrix = self.compute_kernel_matrix(x, use_parallel)?;
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Centering kernel matrix");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Centering kernel matrix");
         }
 
         // Compute centering statistics from the training kernel matrix
         let (row_means, overall_mean) = Self::kernel_means(&kernel_matrix, use_parallel)?;
         Self::center_kernel_matrix(&mut kernel_matrix, &row_means, overall_mean, use_parallel);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Computing eigen decomposition");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Computing eigen decomposition");
         }
 
         // Extract eigenvalues and eigenvectors for projection
         let (eigenvalues, eigenvectors) = self.compute_eigendecomposition(&kernel_matrix)?;
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Finalizing model state");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Finalizing model state");
         }
 
         // Persist fitted state for later transforms
@@ -310,20 +323,17 @@ impl KernelPCA {
         self.n_samples = Some(n_samples);
         self.n_features = Some(n_features);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
         }
 
         Ok(self)
     }
 
     /// Transforms input data using the fitted model state
-    fn transform_internal<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-        show_progress: bool,
-    ) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -356,24 +366,30 @@ impl KernelPCA {
 
         let use_parallel = x.nrows().max(x_fit.nrows()) >= KERNEL_PCA_PARALLEL_THRESHOLD;
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(4, "Validating input"))
-        } else {
-            None
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                4,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Computing kernel matrix");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Computing kernel matrix");
         }
 
         // Build the cross-kernel matrix with training samples
         let mut kernel_matrix = self.compute_cross_kernel_matrix(x, x_fit, use_parallel)?;
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Centering kernel matrix");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Centering kernel matrix");
         }
 
         // Center the cross-kernel matrix using training means
@@ -384,9 +400,10 @@ impl KernelPCA {
             use_parallel,
         )?;
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Projecting data");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Projecting data");
         }
 
         // Scale by inverse sqrt of eigenvalues for projection
@@ -401,9 +418,10 @@ impl KernelPCA {
             projected
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
         }
 
         Ok(projected)
@@ -948,19 +966,6 @@ impl KernelPCA {
         Array2::from_shape_vec((n_samples, n_components), flat).map_err(|e| {
             ModelError::ProcessingError(format!("Failed to build projected matrix: {}", e))
         })
-    }
-
-    /// Creates a progress bar with a consistent style
-    fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
-        let progress_bar = ProgressBar::new(len);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Stage: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("=>-"),
-        );
-        progress_bar.set_message(message.to_string());
-        progress_bar
     }
 
     model_save_and_load_methods!(KernelPCA);

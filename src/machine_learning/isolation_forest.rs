@@ -3,7 +3,6 @@ use crate::error::ModelError;
 use crate::machine_learning::decision_tree::{Node, NodeType};
 use crate::math::average_path_length_factor;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng, rng};
@@ -180,14 +179,15 @@ impl IsolationForest {
         self.n_features = x.ncols();
 
         // Create progress bar for tree building
-        let progress_bar = ProgressBar::new(self.n_estimators as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message("Building isolation trees");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.n_estimators as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | {msg}",
+            );
+            pb.set_message("Building isolation trees");
+            pb
+        };
 
         // Build multiple isolation trees
         let build_tree = |i: usize| -> Result<Box<Node>, ModelError> {
@@ -207,7 +207,9 @@ impl IsolationForest {
                 .build_isolation_tree(x, &sample_indices, 0, &mut rng)
                 .map(Box::new);
 
+            #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
+
             result
         };
 
@@ -224,18 +226,10 @@ impl IsolationForest {
             };
 
         // Finish progress bar
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Trees built successfully");
 
         self.trees = Some(trees?);
-
-        println!(
-            "\nIsolation Forest training completed: {} samples, {} features, {} trees (max depth: {}, max samples per tree: {})",
-            x.nrows(),
-            x.ncols(),
-            self.n_estimators,
-            self.max_depth,
-            self.max_samples
-        );
 
         Ok(self)
     }

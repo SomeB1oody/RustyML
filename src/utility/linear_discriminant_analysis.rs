@@ -1,7 +1,6 @@
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
@@ -219,10 +218,15 @@ impl LDA {
         // Decide execution mode from sample count
         let use_parallel = n_samples > LDA_PRARALLEL_THRESHOLD;
 
-        let progress_bar = Some(Self::create_progress_bar(
-            5,
-            "Validating input and extracting classes",
-        ));
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                5,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input and extracting classes");
+            Some(pb)
+        };
 
         let mut classes_set = AHashSet::new();
         for &label in y.iter() {
@@ -256,6 +260,7 @@ impl LDA {
             )));
         }
 
+        #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
             pb.inc(1);
             pb.set_message("Computing class statistics and scatter matrices");
@@ -328,6 +333,7 @@ impl LDA {
         self.priors = Some(Array1::from_vec(priors_vec));
         self.means = Some(means_mat);
 
+        #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
             pb.inc(1);
             pb.set_message("Applying shrinkage and inverting covariance matrix");
@@ -342,6 +348,7 @@ impl LDA {
         let cov_inv = self.compute_cov_inv(&cov)?;
         self.cov_inv = Some(cov_inv);
 
+        #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
             pb.inc(1);
             pb.set_message("Computing projection matrix");
@@ -352,11 +359,13 @@ impl LDA {
         let projection = self.compute_projection(&solver_matrix, self.n_components)?;
         self.projection = Some(projection);
 
+        #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
             pb.inc(1);
             pb.set_message("Finalizing model state");
         }
 
+        #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
             pb.inc(1);
             pb.finish_with_message("Completed");
@@ -415,7 +424,15 @@ impl LDA {
             ));
         }
 
-        let progress_bar = Self::create_progress_bar(x.nrows() as u64, "Scoring samples");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                x.nrows() as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Scoring samples");
+            pb
+        };
 
         let n_classes = classes.len();
         let mut coefficients = Array2::<f64>::zeros((n_classes, n_features));
@@ -451,12 +468,14 @@ impl LDA {
         let predictions: Vec<i32> = if x.nrows() > LDA_PRARALLEL_THRESHOLD {
             // Use parallel scoring for large batches
             let x_owned = x.to_owned();
+            #[cfg(feature = "show_progress")]
             let pb = progress_bar.clone();
             x_owned
                 .outer_iter()
                 .into_par_iter()
                 .map(|row| {
                     let pred = predict_sample(row);
+                    #[cfg(feature = "show_progress")]
                     pb.inc(1);
                     pred
                 })
@@ -466,12 +485,14 @@ impl LDA {
             x.outer_iter()
                 .map(|row| {
                     let pred = predict_sample(row);
+                    #[cfg(feature = "show_progress")]
                     progress_bar.inc(1);
                     pred
                 })
                 .collect()
         };
 
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Completed");
         Ok(Array1::from(predictions))
     }
@@ -496,7 +517,7 @@ impl LDA {
     where
         S: Data<Elem = f64>,
     {
-        self.transform_internal(x, true)
+        self.transform_internal(x)
     }
 
     /// Fits the model and transforms the data in one step.
@@ -533,15 +554,11 @@ impl LDA {
         // Fit the model with adaptive parallelism
         self.fit(x, y)?;
         // Project the input using the fitted components
-        self.transform_internal(x, false)
+        self.transform_internal(x)
     }
 
     /// Transforms input data using the fitted projection
-    fn transform_internal<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-        show_progress: bool,
-    ) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
     {
@@ -567,22 +584,28 @@ impl LDA {
             ));
         }
 
-        let progress_bar = if show_progress {
-            Some(Self::create_progress_bar(2, "Validating input"))
-        } else {
-            None
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                2,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}",
+            );
+            pb.set_message("Validating input");
+            pb
         };
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.set_message("Applying projection");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.set_message("Applying projection");
         }
 
         let transformed = x.dot(projection);
 
-        if let Some(pb) = &progress_bar {
-            pb.inc(1);
-            pb.finish_with_message("Completed");
+        #[cfg(feature = "show_progress")]
+        {
+            progress_bar.inc(1);
+            progress_bar.finish_with_message("Completed");
         }
 
         Ok(transformed)
@@ -844,19 +867,6 @@ impl LDA {
         }
 
         Ok(w)
-    }
-
-    /// Creates a progress bar with a consistent style
-    fn create_progress_bar(len: u64, message: &str) -> ProgressBar {
-        let progress_bar = ProgressBar::new(len);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Stage: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(message.to_string());
-        progress_bar
     }
 
     model_save_and_load_methods!(LDA);

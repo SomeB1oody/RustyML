@@ -4,6 +4,7 @@ A comprehensive machine learning and deep learning library written in pure Rust.
 
 [![Rust Version](https://img.shields.io/badge/Rust-v.1.85-brown)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
+[![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
 
 ## Overview | 概述
 RustyML aims to be a feature-rich machine learning and deep learning framework that leverages Rust's performance, memory safety, and concurrency features. While currently in early development stages, the project's long-term vision is to provide a complete ecosystem for machine learning, deep learning, and transformer-based models.  
@@ -156,6 +157,7 @@ Add the library to your `Cargo.toml`:
 rustyml = {version = "*", features = ["machine_learning"]} 
 # or use `features = ["full"]` to enable all features
 # Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
+# Add `"show_progress"` in `features` to show progress bars when training
 ```
 
 In your Rust code, write: 
@@ -207,6 +209,7 @@ Add the library to your `Cargo.toml`:
 rustyml = {version = "*", features = ["neural_network"]} 
 # or use `features = ["full"]` to enable all features
 # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
+# Add `"show_progress"` in `features` to show progress bars when training
 ```
 
 In your Rust code, write:
@@ -276,6 +279,7 @@ The crate uses feature flags for modular compilation:
 | `dataset`          | Standard datasets                               | 标准数据集                                   | 
 | `default`          | Enables `machine_learning` and `neural_network` | 开启`machine_learning`和`neural_network`功能 |
 | `full`             | Enables all features                            | 启用所有功能                                  |
+| `show_progress`    | Show progress bars when training                | 训练时显示进度条                                |
 
 ## Project Status | 项目状态
 RustyML is in active development. While the API is stabilizing, breaking changes may occur in minor version updates until version 1.0.0.

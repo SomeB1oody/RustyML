@@ -7,7 +7,6 @@ use crate::neural_network::layer::serialize_weight::{
     LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
     apply_weights_to_layer,
 };
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array, IxDyn, s};
 use ndarray_rand::rand::{rng, seq::SliceRandom};
 use serde_json::{from_reader, to_writer_pretty};
@@ -250,33 +249,31 @@ impl Sequential {
         // Validate inputs
         self.validate_training_inputs(x, y)?;
 
-        let n_samples = x.shape()[0];
-
         // Create progress bar for training epochs
-        let progress_bar = ProgressBar::new(epochs as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Loss: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
+        #[cfg(feature = "show_progress")]
+        let progress_bar = crate::create_progress_bar(
+            epochs as u64,
+            "[{elapsed_precise}] {bar:40} {pos}/{len} | Loss: {msg}",
         );
 
         for _ in 0..epochs {
             // Train on the entire dataset as one batch
+            #[cfg(feature = "show_progress")]
             let loss_value = self.train_batch(x, y)?;
+            #[cfg(not(feature = "show_progress"))]
+            let _ = self.train_batch(x, y)?;
 
             // Update progress bar with current loss
-            progress_bar.set_message(format!("{:.6}", loss_value));
-            progress_bar.inc(1);
+            #[cfg(feature = "show_progress")]
+            {
+                progress_bar.set_message(format!("{:.6}", loss_value));
+                progress_bar.inc(1);
+            }
         }
 
         // Finish progress bar
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Training completed");
-
-        println!(
-            "\nNeural network training completed: {} samples, {} epochs",
-            n_samples, epochs
-        );
 
         Ok(self)
     }
@@ -377,19 +374,20 @@ impl Sequential {
         // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
+        #[cfg(feature = "show_progress")]
         let total_batches = (n_samples + batch_size - 1) / batch_size;
+        #[cfg(feature = "show_progress")]
         let total_iterations = epochs as u64 * total_batches as u64;
 
         // Create progress bar for batch training
-        let progress_bar = ProgressBar::new(total_iterations);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Epoch {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
+        #[cfg(feature = "show_progress")]
+        let progress_bar = crate::create_progress_bar(
+            total_iterations,
+            "[{elapsed_precise}] {bar:40} {pos}/{len} | Epoch {msg}",
         );
 
         // Training loop
+        #[cfg(feature = "show_progress")]
         for epoch in 0..epochs {
             // Shuffle data at the beginning of each epoch
             indices.shuffle(&mut rng());
@@ -420,13 +418,24 @@ impl Sequential {
             }
         }
 
-        // Finish progress bar
-        progress_bar.finish_with_message("Training completed");
+        #[cfg(not(feature = "show_progress"))]
+        for _ in 0..epochs {
+            // Shuffle data at the beginning of each epoch
+            indices.shuffle(&mut rng());
 
-        println!(
-            "\nNeural network batch training completed: {} samples, {} batch size, {} epochs",
-            n_samples, batch_size, epochs
-        );
+            // Process data in batches
+            for batch_indices in indices.chunks(batch_size) {
+                // Create batch tensors
+                let (batch_x, batch_y) = create_batch_tensors(x, y, batch_indices)?;
+
+                // Train on this batch
+                let _ = self.train_batch(&batch_x, &batch_y)?;
+            }
+        }
+
+        // Finish progress bar
+        #[cfg(feature = "show_progress")]
+        progress_bar.finish_with_message("Training completed");
 
         Ok(self)
     }
@@ -476,23 +485,27 @@ impl Sequential {
         let col1_width = 33;
         let col2_width = 24;
         let col3_width = 15;
-        println!("Model: \"sequential\"");
-        println!(
-            "┏{}┳{}┳{}┓",
+
+        let mut output = String::new();
+
+        output.push_str("Model: \"sequential\"\n");
+        output.push_str(&format!(
+            "┏{}┳{}┳{}┓\n",
             "━".repeat(col1_width),
             "━".repeat(col2_width),
             "━".repeat(col3_width)
-        );
-        println!(
-            "┃ {:<31} ┃ {:<22} ┃ {:>13} ┃",
+        ));
+        output.push_str(&format!(
+            "┃ {:<31} ┃ {:<22} ┃ {:>13} ┃\n",
             "Layer (type)", "Output Shape", "Param #"
-        );
-        println!(
-            "┡{}╇{}╇{}┩",
+        ));
+        output.push_str(&format!(
+            "┡{}╇{}╇{}┩\n",
             "━".repeat(col1_width),
             "━".repeat(col2_width),
             "━".repeat(col3_width)
-        );
+        ));
+
         let mut total_params: usize = 0;
         let mut trainable_param_count: usize = 0;
         let mut non_trainable_param_count: usize = 0;
@@ -524,30 +537,37 @@ impl Sequential {
                 }
             };
 
-            println!(
-                "│ {:<31} │ {:<22} │ {:>13} │",
+            output.push_str(&format!(
+                "│ {:<31} │ {:<22} │ {:>13} │\n",
                 format!("{} ({})", layer_name, layer.layer_type()),
                 out_shape,
                 param_count_num
-            );
+            ));
         }
-        println!(
-            "└{}┴{}┴{}┘",
+
+        output.push_str(&format!(
+            "└{}┴{}┴{}┘\n",
             "─".repeat(col1_width),
             "─".repeat(col2_width),
             "─".repeat(col3_width)
-        );
-        println!(" Total params: {} ({} B)", total_params, total_params * 4); // Using f32, each parameter is 4 bytes
-        println!(
-            " Trainable params: {} ({} B)",
+        ));
+        output.push_str(&format!(
+            " Total params: {} ({} B)\n",
+            total_params,
+            total_params * 4
+        )); // Using f32, each parameter is 4 bytes
+        output.push_str(&format!(
+            " Trainable params: {} ({} B)\n",
             trainable_param_count,
             trainable_param_count * 4
-        );
-        println!(
+        ));
+        output.push_str(&format!(
             " Non-trainable params: {} ({} B)",
             non_trainable_param_count,
             non_trainable_param_count * 4
-        );
+        ));
+
+        println!("{}", output);
     }
 
     /// Returns all the weights from each layer in the model.

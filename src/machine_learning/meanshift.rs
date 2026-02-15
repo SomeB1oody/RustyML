@@ -3,7 +3,6 @@ use crate::error::ModelError;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{SeedableRng, rng, seq::SliceRandom};
@@ -272,14 +271,15 @@ impl MeanShift {
         };
 
         // Create progress bar for seed processing
-        let progress_bar = ProgressBar::new(seeds.len() as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} seeds | {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message("Processing seeds...");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                seeds.len() as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} seeds | {msg}",
+            );
+            pb.set_message("Processing seeds...");
+            pb
+        };
 
         // Process mean shift for each seed point
         let results: Result<Vec<(Array1<f64>, usize)>, ModelError> = if use_parallel {
@@ -287,6 +287,7 @@ impl MeanShift {
                 .par_iter()
                 .map(|&seed_idx| {
                     let result = process_seed(seed_idx);
+                    #[cfg(feature = "show_progress")]
                     progress_bar.inc(1);
                     result
                 })
@@ -297,6 +298,7 @@ impl MeanShift {
                 .iter()
                 .map(|&seed_idx| {
                     let result = process_seed(seed_idx);
+                    #[cfg(feature = "show_progress")]
                     progress_bar.inc(1);
                     result
                 })
@@ -304,6 +306,7 @@ impl MeanShift {
         };
 
         let results = results?;
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("All seeds processed");
 
         // Extract centers and calculate actual max iterations
@@ -387,63 +390,6 @@ impl MeanShift {
         self.cluster_centers = Some(cluster_centers);
         self.labels = Some(Array1::from(labels));
         self.n_samples_per_center = Some(Array1::from(center_counts));
-
-        // Calculate cost using kernel density estimation
-        let calculate_cost = |x: &ArrayBase<S, Ix2>,
-                              centers: &[Array1<f64>],
-                              bandwidth: f64,
-                              use_parallel: bool|
-         -> Result<f64, ModelError> {
-            let n_samples = x.nrows();
-            let gamma = 1.0 / (2.0 * bandwidth * bandwidth);
-
-            // Helper function to compute log-likelihood for a single point
-            let compute_point_likelihood = |i: usize| -> Result<f64, ModelError> {
-                let point = x.row(i);
-                // Sum kernel values from all centers
-                let kernel_sum: Result<f64, ModelError> = centers
-                    .iter()
-                    .map(|center| -> Result<f64, ModelError> {
-                        let dist_squared = squared_euclidean_distance_row(&point, &center);
-                        Ok((-gamma * dist_squared).exp())
-                    })
-                    .sum();
-
-                let kernel_sum = kernel_sum?;
-
-                // Avoid log(0) by clamping to minimum density
-                let density = (kernel_sum / centers.len() as f64).max(1e-15);
-                Ok(density.ln())
-            };
-
-            // Calculate the negative log-likelihood
-            let total_log_likelihood: Result<f64, ModelError> = if use_parallel {
-                (0..n_samples)
-                    .into_par_iter()
-                    .map(compute_point_likelihood)
-                    .sum()
-            } else {
-                (0..n_samples).map(compute_point_likelihood).sum()
-            };
-
-            let total_log_likelihood = total_log_likelihood?;
-
-            // Return negative log-likelihood as cost (higher is worse)
-            Ok(-total_log_likelihood / n_samples as f64)
-        };
-
-        let cost = calculate_cost(x, &unique_centers, self.bandwidth, use_parallel)?;
-
-        // Print training info
-        println!(
-            "\nMean Shift training completed: {} samples, {} features, {} seeds processed, {} clusters found, max iterations: {}, cost: {:.6}",
-            n_samples,
-            n_features,
-            seeds.len(),
-            n_clusters,
-            max_actual_iter,
-            cost
-        );
 
         Ok(self)
     }

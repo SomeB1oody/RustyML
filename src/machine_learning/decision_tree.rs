@@ -3,9 +3,11 @@ use crate::error::ModelError;
 use crate::math::{entropy, gini, variance};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
+#[cfg(feature = "show_progress")]
+use indicatif::ProgressBar;
 
 /// Minimum number of samples required to enable parallel processing in decision tree operations.
 /// When the number of samples is below this threshold, sequential processing is used instead
@@ -395,60 +397,56 @@ impl DecisionTree {
 
         // Estimate maximum possible nodes for progress bar
         // For a balanced binary tree with depth d, max nodes = 2^(d+1) - 1
+        #[cfg(feature = "show_progress")]
         let estimated_max_depth = self.params.max_depth.unwrap_or(20).min(20);
+        #[cfg(feature = "show_progress")]
         let estimated_nodes = (1 << (estimated_max_depth + 1)) - 1;
 
         // Create progress bar for tree building
-        let progress_bar = ProgressBar::new(estimated_nodes as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos} nodes | Depth: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message("0");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                estimated_nodes as u64,
+                "[{elapsed_precise}] {bar:40} {pos} nodes | Depth: {msg}",
+            );
+            pb.set_message("0");
+            pb
+        };
 
         // Build the tree
         let indices: Vec<usize> = (0..x.nrows()).collect();
-        self.root = Some(Box::new(self.build_tree_with_progress(
+        self.root = Some(Box::new(self.build_tree(
             x,
             y,
             &indices,
             0,
+            #[cfg(feature = "show_progress")]
             &progress_bar,
         )?));
 
         // Finish progress bar
+        #[cfg(feature = "show_progress")]
         progress_bar
             .finish_with_message(format!("{}", self.count_nodes(self.root.as_ref().unwrap())));
-
-        let tree_depth = self.calculate_depth(self.root.as_ref().unwrap());
-        let total_nodes = self.count_nodes(self.root.as_ref().unwrap());
-
-        println!(
-            "\nDecision Tree training completed: {} samples, {} features, {} nodes, depth: {}",
-            x.nrows(),
-            self.n_features,
-            total_nodes,
-            tree_depth
-        );
 
         Ok(self)
     }
 
     /// Recursively builds a decision tree node by finding optimal splits with progress tracking.
-    fn build_tree_with_progress<S>(
+    fn build_tree<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
         indices: &[usize],
         depth: usize,
-        progress_bar: &ProgressBar,
+        #[cfg(feature = "show_progress")] progress_bar: &ProgressBar,
     ) -> Result<Node, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
+        #[cfg(feature = "show_progress")]
         progress_bar.inc(1);
+        #[cfg(feature = "show_progress")]
         progress_bar.set_message(format!("{}", depth));
 
         let n_samples = indices.len();
@@ -481,18 +479,20 @@ impl DecisionTree {
 
             // Create internal node and recursively build children
             let mut node = Node::new_internal(feature_idx, threshold);
-            node.left = Some(Box::new(self.build_tree_with_progress(
+            node.left = Some(Box::new(self.build_tree(
                 x,
                 y,
                 &left_indices,
                 depth + 1,
+                #[cfg(feature = "show_progress")]
                 progress_bar,
             )?));
-            node.right = Some(Box::new(self.build_tree_with_progress(
+            node.right = Some(Box::new(self.build_tree(
                 x,
                 y,
                 &right_indices,
                 depth + 1,
+                #[cfg(feature = "show_progress")]
                 progress_bar,
             )?));
 
@@ -1011,19 +1011,8 @@ impl DecisionTree {
         Ok(output)
     }
 
-    /// Calculates the depth (height) of the tree.
-    fn calculate_depth(&self, node: &Node) -> usize {
-        match &node.node_type {
-            NodeType::Leaf { .. } => 0,
-            NodeType::Internal { .. } => {
-                let left_depth = node.left.as_ref().map_or(0, |n| self.calculate_depth(n));
-                let right_depth = node.right.as_ref().map_or(0, |n| self.calculate_depth(n));
-                1 + left_depth.max(right_depth)
-            }
-        }
-    }
-
     /// Counts the total number of nodes in the tree.
+    #[cfg(feature = "show_progress")]
     fn count_nodes(&self, node: &Node) -> usize {
         let mut count = 1; // Count current node
         match &node.node_type {

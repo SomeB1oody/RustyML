@@ -4,7 +4,6 @@ use crate::error::ModelError;
 use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix2};
 use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use std::collections::VecDeque;
@@ -45,7 +44,7 @@ pub struct DBSCAN {
     eps: f64,
     min_samples: usize,
     metric: DistanceCalculationMetric,
-    labels_: Option<Array1<i32>>,
+    labels_: Option<Array1<isize>>,
     core_sample_indices: Option<Array1<usize>>,
 }
 
@@ -131,7 +130,7 @@ impl DBSCAN {
     get_field!(get_epsilon, eps, f64);
     get_field!(get_min_samples, min_samples, usize);
     get_field!(get_metric, metric, DistanceCalculationMetric);
-    get_field_as_ref!(get_labels, labels_, Option<&Array1<i32>>);
+    get_field_as_ref!(get_labels, labels_, Option<&Array1<isize>>);
     get_field_as_ref!(
         get_core_sample_indices,
         core_sample_indices,
@@ -205,8 +204,7 @@ impl DBSCAN {
     /// - `Err(ModelError::ProcessingError)` - If numerical issues occur or cluster ID overflows
     ///
     /// # Errors
-    /// - `ModelError::InputValidationError` - If the number of samples exceeds `i32::MAX`
-    /// - `ModelError::ProcessingError` - If the number of discovered clusters exceeds `i32::MAX`
+    /// - `ModelError::ProcessingError` - If the number of discovered clusters exceeds `isize::MAX`
     ///
     /// # Performance
     /// Uses parallel processing for region queries if the number of samples is greater than or equal to 1000.
@@ -219,29 +217,24 @@ impl DBSCAN {
         // Check if dataset is empty
         let n_samples = data.nrows();
 
-        // Check for cluster_id overflow early
-        if n_samples > i32::MAX as usize {
-            return Err(ModelError::InputValidationError(
-                "Dataset too large: exceeds maximum number of samples".to_string(),
-            ));
-        }
-
-        let mut labels = Array1::from(vec![-1; n_samples]); // -1 represents unclassified or noise
+        let mut labels = Array1::from(vec![-1isize; n_samples]); // -1 represents unclassified or noise
         let mut core_samples = AHashSet::with_capacity(n_samples / 4); // Estimate 25% core samples
-        let mut cluster_id = 0i32;
+        let mut cluster_id = 0isize;
 
         // Initialize progress bar for tracking clustering progress
-        let pb = ProgressBar::new(n_samples as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Clusters: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        pb.set_message("0 | Core points: 0");
+        #[cfg(feature = "show_progress")]
+        let pb = {
+            let progress = crate::create_progress_bar(
+                n_samples as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Clusters: {msg}",
+            );
+            progress.set_message("0 | Core points: 0");
+            progress
+        };
 
         // Main loop processes each point sequentially, the algorithm as a whole remains sequential
         for p in 0..n_samples {
+            #[cfg(feature = "show_progress")]
             pb.inc(1);
             if labels[p] != -1 {
                 continue;
@@ -291,6 +284,7 @@ impl DBSCAN {
             cluster_id += 1;
 
             // Update progress bar message with current statistics
+            #[cfg(feature = "show_progress")]
             pb.set_message(format!(
                 "{} | Core points: {}",
                 cluster_id,
@@ -298,7 +292,8 @@ impl DBSCAN {
             ));
 
             // Check for cluster_id overflow
-            if cluster_id >= i32::MAX {
+            if cluster_id >= isize::MAX {
+                #[cfg(feature = "show_progress")]
                 pb.finish_with_message("Error: cluster ID overflow");
                 return Err(ModelError::ProcessingError(
                     "Too many clusters: cluster ID overflow".to_string(),
@@ -307,6 +302,7 @@ impl DBSCAN {
         }
 
         // Finish progress bar with final statistics
+        #[cfg(feature = "show_progress")]
         pb.finish_with_message(format!(
             "{} | Core points: {} | Noise points: {}",
             cluster_id,
@@ -332,7 +328,7 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<i32>)` - Array of predicted cluster labels
+    /// - `Ok(Array1<isize>)` - Array of predicted cluster labels
     /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
     /// - `Err(ModelError::InputValidationError)` - If input validation fails or dimensions mismatch
     ///
@@ -353,7 +349,7 @@ impl DBSCAN {
         &self,
         trained_data: &ArrayBase<S, Ix2>,
         new_data: &ArrayBase<S, Ix2>,
-    ) -> Result<Array1<i32>, ModelError>
+    ) -> Result<Array1<isize>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -410,12 +406,12 @@ impl DBSCAN {
         // Create a set for faster core sample lookup
         let core_set: AHashSet<usize> = core_samples.iter().copied().collect();
 
-        // Process each row in parallel, collecting into Result<Vec<i32>, ModelError>
-        let predictions: Result<Vec<i32>, ModelError> = new_data
+        // Process each row in parallel, collecting into Result<Vec<isize>, ModelError>
+        let predictions: Result<Vec<isize>, ModelError> = new_data
             .rows()
             .into_iter()
             .par_bridge() // Convert sequential iterator to parallel iterator
-            .map(|row| -> Result<i32, ModelError> {
+            .map(|row| -> Result<isize, ModelError> {
                 let mut min_dist = f64::MAX;
                 let mut closest_label = -1;
 
@@ -463,13 +459,13 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<i32>)` - Array of cluster labels for each sample
+    /// - `Ok(Array1<isize>)` - Array of cluster labels for each sample
     /// - `Err(ModelError)` - If fitting fails due to validation or processing errors
     ///
     /// # Performance
     ///
     /// Inherits parallelization behavior from the `fit` method.
-    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

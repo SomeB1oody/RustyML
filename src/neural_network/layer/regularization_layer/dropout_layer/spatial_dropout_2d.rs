@@ -96,12 +96,10 @@ impl Layer for SpatialDropout2D {
         }
 
         if self.rate == 0.0 {
-            eprintln!("Dropout rate is 0.0, so this layer has no effect on the output.");
             return Ok(input.clone());
         }
 
         if self.rate == 1.0 {
-            eprintln!("SpatialDropout2D rate is 1.0, so this layer will return all zeros.");
             // If dropout rate is 1.0, return zeros
             return Ok(Tensor::zeros(input.raw_dim()));
         }

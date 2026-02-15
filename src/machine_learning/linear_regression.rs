@@ -6,7 +6,6 @@ use super::helper_function::{
 use crate::error::ModelError;
 use crate::math::sum_of_squared_errors;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelBridge,
@@ -37,7 +36,7 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// # Examples
 /// ```rust
 /// use rustyml::machine_learning::linear_regression::*;
-/// use ndarray::{Array1, Array2, array};
+/// use ndarray::{Array1, Array2};
 ///
 /// // Create a linear regression model
 /// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
@@ -231,18 +230,19 @@ impl LinearRegression {
         let mut error_vec = Array1::<f64>::zeros(n_samples);
 
         // Create progress bar for training iterations
-        let progress_bar = ProgressBar::new(self.max_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Cost: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message(format!(
-            "{:.6} | Convergence: 0/{}",
-            f64::INFINITY,
-            CONVERGENCE_THRESHOLD
-        ));
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.max_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}",
+            );
+            pb.set_message(format!(
+                "{:.6} | Convergence: 0/{}",
+                f64::INFINITY,
+                CONVERGENCE_THRESHOLD
+            ));
+            pb
+        };
 
         // Gradient descent iterations
         while n_iter < self.max_iter {
@@ -276,14 +276,17 @@ impl LinearRegression {
             let cost = sse / (2.0 * n_samples as f64) + regularization_term;
 
             // Update progress bar with current cost and convergence status
+            #[cfg(feature = "show_progress")]
             progress_bar.set_message(format!(
                 "{:.6} | Convergence: {}/{}",
                 cost, convergence_count, CONVERGENCE_THRESHOLD
             ));
+            #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
             // Check for numerical issues in cost
             if !cost.is_finite() {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
                 return Err(ModelError::ProcessingError(
                     "Cost calculation resulted in NaN or infinite value".to_string(),
@@ -302,6 +305,7 @@ impl LinearRegression {
             if weight_gradients.iter().any(|&val| !val.is_finite())
                 || !intercept_gradient.is_finite()
             {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
                 return Err(ModelError::ProcessingError(
                     "Gradient calculation resulted in NaN or infinite values".to_string(),
@@ -346,6 +350,7 @@ impl LinearRegression {
 
             // Check for numerical issues in updated parameters
             if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
+                #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite parameters");
                 return Err(ModelError::ProcessingError(
                     "Parameter update resulted in NaN or infinite values".to_string(),
@@ -367,11 +372,13 @@ impl LinearRegression {
         }
 
         // Finish progress bar with final statistics
+        #[cfg(feature = "show_progress")]
         let convergence_status = if n_iter < self.max_iter {
             "Converged"
         } else {
             "Max iterations"
         };
+        #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!(
             "{:.6} | {} | Iterations: {}",
             prev_cost, convergence_status, n_iter
@@ -381,11 +388,6 @@ impl LinearRegression {
         self.coefficients = Some(weights);
         self.intercept = Some(if self.fit_intercept { intercept } else { 0.0 });
         self.n_iter = Some(n_iter);
-
-        println!(
-            "\nLinear Regression training completed: {} samples, {} features, {} iterations, final cost: {:.6}",
-            n_samples, n_features, n_iter, prev_cost
-        );
 
         Ok(self)
     }

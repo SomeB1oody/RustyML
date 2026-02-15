@@ -4,7 +4,6 @@ use super::helper_function::{
 };
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::{rng, seq::SliceRandom};
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
@@ -279,6 +278,7 @@ impl LinearSVC {
         let batch_size = Self::calculate_batch_size(n_samples);
 
         // Define cost calculation closure
+        #[allow(unused_variables)]
         let calculate_cost = |x: &ArrayBase<S, Ix2>,
                               y: &Array1<f64>,
                               weights: &Array1<f64>,
@@ -312,17 +312,19 @@ impl LinearSVC {
         };
 
         // Create progress bar for training iterations
-        let progress_bar = ProgressBar::new(self.max_iter as u64);
-        progress_bar.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} | Cost: {msg}")
-                .expect("Failed to set progress bar template")
-                .progress_chars("█▓░"),
-        );
-        progress_bar.set_message("Initializing...");
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.max_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}",
+            );
+            pb.set_message("Initializing...");
+            pb
+        };
 
         while n_iter < self.max_iter {
             n_iter += 1;
+            #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
             // Randomly shuffle indices
@@ -418,6 +420,7 @@ impl LinearSVC {
             let total_diff = (weight_diff + bias_diff).sqrt();
 
             // Calculate and display current cost
+            #[cfg(feature = "show_progress")]
             if n_iter % 10 == 0 || total_diff < self.tol {
                 let current_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
                 progress_bar.set_message(format!("{:.6}", current_cost));
@@ -431,24 +434,20 @@ impl LinearSVC {
             prev_bias = bias;
         }
 
-        // Calculate final cost
-        let final_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
-
         // Finish progress bar with final statistics
-        let convergence_status = if n_iter < self.max_iter {
-            "Converged"
-        } else {
-            "Max iterations"
-        };
-        progress_bar.finish_with_message(format!(
-            "{:.6} | {} | Iterations: {}",
-            final_cost, convergence_status, n_iter
-        ));
-
-        println!(
-            "\nLinear SVC training completed: {} samples, {} features, {} iterations, final cost: {:.6}",
-            n_samples, n_features, n_iter, final_cost
-        );
+        #[cfg(feature = "show_progress")]
+        {
+            let final_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
+            let convergence_status = if n_iter < self.max_iter {
+                "Converged"
+            } else {
+                "Max iterations"
+            };
+            progress_bar.finish_with_message(format!(
+                "{:.6} | {} | Iterations: {}",
+                final_cost, convergence_status, n_iter
+            ));
+        }
 
         self.weights = Some(weights);
         self.bias = Some(bias);
