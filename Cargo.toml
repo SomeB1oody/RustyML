@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["machine_learning", "ML", "neural_network", "AI"]
 repository = "https://github.com/SomeB1oody/RustyML"
 documentation = "https://docs.rs/crate/rustyml"
-categories = ["mathematics", "science::machine_learning", "algorithms"]
+categories = ["mathematics", "science", "algorithms"]
 
 [features]
 default = ["machine_learning", "neural_network"]
