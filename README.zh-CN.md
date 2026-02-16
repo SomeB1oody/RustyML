@@ -1,3 +1,8 @@
+<div style="text-align: right;">
+
+[简体中文](https://github.com/SomeB1oody/RustyML/blob/master/README.zh-CN.md) | [English](https://github.com/SomeB1oody/RustyML/blob/master/README.md)
+</div>
+
 # RustyML 
 一个用纯Rust编写的全面机器学习和深度学习库。
 

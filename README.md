@@ -1,3 +1,8 @@
+<div style="text-align: right;">
+
+[简体中文](https://github.com/SomeB1oody/RustyML/blob/master/README.zh-CN.md) | [English](https://github.com/SomeB1oody/RustyML/blob/master/README.md)
+</div>
+
 # RustyML
 A comprehensive machine learning and deep learning library written in pure Rust.
 
@@ -10,7 +15,7 @@ RustyML aims to be a feature-rich machine learning and deep learning framework t
 
 ## Key Features
 - **Pure Rust Implementation**: No external C/C++ dependencies, ensuring memory safety and portability
-- **Parallel Processing**: Leverages Rayon for efficient multi-threaded computation
+- **Parallel Processing**: Leverages Rayon for efficient multithreaded computation
 - **Rich Algorithm Collection**: Supervised, unsupervised learning, and neural networks
 - **Comprehensive Metrics**: Evaluation tools for regression, classification, and clustering
 - **Model Persistence**: Save and load trained models with JSON serialization
@@ -278,4 +283,4 @@ Contributions are welcome! If you're interested in helping build a robust machin
 SomeB1oody – [stanyin64@gmail.com](mailto:stanyin64@gmail.com)
 
 ## License
-Licensed under the [MIT License](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE). See LICENSE file for details.
+Licensed under the [MIT License](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE). See the LICENSE file for details.

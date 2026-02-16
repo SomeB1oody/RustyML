@@ -8,6 +8,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.12.0] - 2026-02-16 (UTC-7)
 ### Added
 - Add Chinese README.zh-CN.md, separating it from English README.md.
+- Add bilingual language switch links to README.md and README.zh-CN.md
 
 ## [v0.12.0] - 2026-02-15 (UTC-7)
 ### Added
