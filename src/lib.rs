@@ -67,7 +67,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, ignore
+//! ```rust, no_run
 //! use rustyml::machine_learning::linear_regression::*;
 //! use ndarray::{Array1, Array2};
 //!
@@ -117,7 +117,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, ignore
+//! ```rust, no_run
 //! use rustyml::neural_network::{
 //!     sequential::Sequential,
 //!     layer::{Dense, ReLU, Softmax},
@@ -161,7 +161,7 @@
 //! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
 //!
 //! // Make predictions with loaded model
-//! let predictions = new_model.predict(&x);
+//! let predictions = new_model.predict(&x).unwrap();
 //! println!("Predictions shape: {:?}", predictions.shape());
 //! ```
 //!
