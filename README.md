@@ -250,7 +250,7 @@ new_model.load_from_path("model.json").unwrap();
 new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());  
   
 // Make predictions with loaded model  
-let predictions = new_model.predict(&x);  
+let predictions = new_model.predict(&x).unwrap();  
 println!("Predictions shape: {:?}", predictions.shape());  
 ```
 
