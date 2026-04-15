@@ -134,15 +134,6 @@
     - Sigmoid函数
     - Logistic loss: 逻辑损失
 
-### 数据集 (`features = ["dataset"]`)
-用于实验的标准化数据集：
-
-- Iris 鸢尾花数据集（150个样本，4个特征，3个类别）
-- Diabetes 糖尿病数据集（442个样本，10个特征）
-- Boston Housing 波士顿房价数据集
-- Wine Quality 葡萄酒质量数据集（红葡萄酒和白葡萄酒）
-- Titanic 泰坦尼克号数据集
-
 ## 开始使用
 
 ### 机器学习示例
@@ -265,7 +256,6 @@ println!("Predictions shape: {:?}", predictions.shape());
 | `utility`          | 数据预处理和降维                                |  
 | `metric`           | 评估指标                                    |  
 | `math`             | 数学工具                                    |  
-| `dataset`          | 标准数据集                                   | 
 | `default`          | 开启`machine_learning`和`neural_network`功能 |
 | `full`             | 启用所有功能                                  |
 | `show_progress`    | 训练时显示进度条                                |

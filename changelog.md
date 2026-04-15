@@ -6,6 +6,10 @@ This change log records updates after 2025-3-24.
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
 ## [v0.12.0] - 2026-02-16 (UTC-7)
+### Removed
+dataset module is moved to [dataset-core](http://crates.io/crates/dataset-core/0.1.0) crate
+
+## [v0.12.0] - 2026-02-16 (UTC-7)
 ### Added
 - Add Chinese README.zh-CN.md, separating it from English README.md.
 - Add bilingual language switch links to README.md and README.zh-CN.md

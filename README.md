@@ -134,15 +134,6 @@ Mathematical utilities and statistical functions:
   - Sigmoid
   - Logistic loss
 
-### Dataset (`features = ["dataset"]`)
-Access to standardized datasets for experimentation:
-
-- Iris (150 samples, 4 features, 3 classes)
-- Diabetes (442 samples, 10 features)
-- Boston Housing
-- Wine Quality (red and white wines)
-- Titanic
-
 ## Getting Started
 
 ### Machine Learning Example
@@ -264,7 +255,6 @@ The crate uses feature flags for modular compilation:
 | `utility`          | Data preprocessing and dimensionality reduction |  
 | `metric`           | Evaluation metrics                              |  
 | `math`             | Mathematical utilities                          |  
-| `dataset`          | Standard datasets                               | 
 | `default`          | Enables `machine_learning` and `neural_network` |
 | `full`             | Enables all features                            |
 | `show_progress`    | Show progress bars when training                |

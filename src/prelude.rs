@@ -1,6 +1,3 @@
-/// Prelude module for datasets
-#[cfg(feature = "dataset")]
-pub mod dataset_prelude;
 /// Prelude module for machine learning functionality
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning_prelude;

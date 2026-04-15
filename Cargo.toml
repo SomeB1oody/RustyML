@@ -23,12 +23,10 @@ utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep
 metric = ["dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
 math = ["dep:ndarray", "dep:ahash"]
-# Access to standardized datasets for experimentation
-dataset = ["dep:ndarray"]
 # Enables `machine_learning` and `neural_network`
 default = ["machine_learning", "neural_network"]
 # full access to all modules in the crate
-full = ["dataset", "machine_learning", "neural_network", "utility", "math", "metric"]
+full = ["machine_learning", "neural_network", "utility", "math", "metric"]
 
 # Provides support for progress bars in the command line
 show_progress = ["dep:indicatif"]

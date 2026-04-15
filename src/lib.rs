@@ -48,11 +48,6 @@
 //! - **Statistical Functions**: Variance, standard deviation, SST, SSE
 //! - **Activation Functions**: Sigmoid, logistic loss
 //!
-//! ### [`dataset`]
-//! Access to standardized datasets for experimentation:
-//! - Iris, Diabetes, Boston Housing, Wine Quality, Titanic
-//! - Pre-processed and ready for immediate use
-//!
 //! ## Quick Start
 //!
 //! ### Machine Learning Example
@@ -176,7 +171,6 @@
 //! | `utility` | Data preprocessing and dimensionality reduction |
 //! | `metric` | Evaluation metrics |
 //! | `math` | Mathematical utilities |
-//! | `dataset` | Standard datasets |
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
 //! | `show_progress` | Show progress bars when training |
@@ -544,7 +538,6 @@ pub mod machine_learning;
 /// // `use rustyml::prelude::utility_prelude::*;` imports utility functions
 /// // `use rustyml::prelude::math_prelude::*;` imports math functions
 /// // `use rustyml::prelude::metric_prelude::*;` imports metric functions
-/// // `use rustyml::prelude::dataset_prelude::*;` imports datasets
 /// ```
 pub mod prelude;
 
@@ -652,38 +645,6 @@ pub mod utility;
 /// ```
 #[cfg(feature = "metric")]
 pub mod metric;
-
-/// Module `dataset` provides access to standardized datasets for machine learning experimentation and algorithm benchmarking.
-///
-/// This module provides convenient access to well-known datasets commonly used in machine learning
-/// research, education, and algorithm validation. All datasets are pre-processed and ready for
-/// immediate use with the library's machine learning algorithms.
-///
-/// # Available Datasets
-/// - **iris**: Classic iris flower dataset for multi-class classification (150 samples, 4 features, 3 classes)
-/// - **diabetes**: Regression dataset for predicting diabetes progression (442 samples, 10 features)
-/// - **boston_housing**: Housing price prediction dataset for regression tasks
-/// - **wine_quality**: Wine quality datasets for both red and white wines (classification/regression)
-/// - **titanic**: Famous Titanic survival prediction dataset for binary classification
-///
-/// # Data Format
-/// All datasets return tuples in the format `(headers, data, target)` where:
-/// - `headers`: Vector of feature names as strings
-/// - `data`: 2D ndarray with samples as rows and features as columns
-/// - `target`: 1D ndarray with target values or class labels
-///
-/// # Examples
-/// ```rust
-/// use rustyml::dataset::iris;
-///
-/// // Load the iris dataset
-/// let (headers, data, class) = iris::load_iris();
-/// println!("Dataset shape: {:?}", data.shape());
-/// println!("Classes: {:?}", class);
-/// println!("Features: {:?}", headers);
-/// ```
-#[cfg(feature = "dataset")]
-pub mod dataset;
 
 /// Module `neural_network` provides components for building and training neural networks with flexible architecture design.
 ///
