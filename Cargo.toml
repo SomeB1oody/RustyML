@@ -2,7 +2,7 @@
 name = "rustyml"
 version = "0.12.0"
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.89.0"
 authors = ["SomeB1oody <stanyin64@gmail.com>"]
 description = "A high-performance machine learning & deep learning library in pure Rust, offering ML algorithms and neural network support"
 license = "MIT"
@@ -33,13 +33,13 @@ show_progress = ["dep:indicatif"]
 
 [dependencies]
 ndarray = { version = "0.17.2", features = ["rayon", "serde"], optional = true }
-nalgebra = { version = "0.34.1", optional = true }
-rayon = { version = "1.11.0", optional = true }
+nalgebra = { version = "0.35.0", optional = true }
+rayon = { version = "1.12.0", optional = true }
 ndarray-rand = { version = "0.16.0", optional = true }
 ahash = { version = "0.8.12", features = ["serde"], optional = true }
 indicatif = { version = "0.18.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
-serde_json = { version = "1.0.149", optional = true}
+serde_json = { version = "1.0.150", optional = true}
 
 [dev-dependencies]
 approx = "0.5.1"
