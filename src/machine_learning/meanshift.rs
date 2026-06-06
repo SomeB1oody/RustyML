@@ -1,3 +1,4 @@
+use super::KernelType;
 use super::parallel::map_collect;
 use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
@@ -201,8 +202,10 @@ impl MeanShift {
             indices[..max_seeds].to_vec()
         };
 
-        // Pre-compute gamma for efficiency
+        // Pre-compute the RBF kernel used to weight neighbours (gamma folds in the bandwidth).
+        // Shares the single kernel-dispatch implementation in `types` instead of a hand-rolled exp.
         let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
+        let kernel = KernelType::RBF { gamma };
         let tol_squared = self.tol * self.tol;
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
@@ -224,8 +227,7 @@ impl MeanShift {
 
                 for i in 0..n_samples {
                     let point = x.row(i);
-                    let dist = squared_euclidean_distance_row(&center, &point);
-                    let weight = (-gamma * dist).exp();
+                    let weight = kernel.compute(center.view(), point);
                     if weight > 0.0 {
                         for j in 0..n_features {
                             new_center[j] += point[j] * weight;

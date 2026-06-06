@@ -4,6 +4,7 @@ use super::validation::{
     validate_tolerance,
 };
 use crate::error::ModelError;
+use crate::math::hinge_loss;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::{rng, seq::SliceRandom};
@@ -249,18 +250,9 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            let n_samples = x.nrows() as f64;
-
-            // Calculate hinge loss
-            let hinge_loss: f64 = x
-                .outer_iter()
-                .zip(y.iter())
-                .map(|(xi, &yi)| {
-                    let margin = xi.dot(weights) + bias;
-                    (1.0 - yi * margin).max(0.0)
-                })
-                .sum::<f64>()
-                / n_samples;
+            // Hinge loss via the shared math primitive (margins = w·xᵢ + b)
+            let margins: Array1<f64> = x.outer_iter().map(|xi| xi.dot(weights) + bias).collect();
+            let hinge = hinge_loss(&margins, y);
 
             // Calculate regularization term
             let regularization_term = match penalty {
@@ -272,7 +264,7 @@ impl LinearSVC {
                 }
             };
 
-            hinge_loss + regularization_term
+            hinge + regularization_term
         };
 
         // Create progress bar for training iterations

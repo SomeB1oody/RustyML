@@ -5,14 +5,28 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
-## [v0.12.0] - 2026-02-16 (UTC-7)
+## [v0.12.0] - 2026-06-05 (UTC-7)
+### Added
+- Add `hinge_loss` to the `math` module (mean hinge loss for margin-based classifiers), alongside `logistic_loss`, and export it from the math prelude.
+
+### Changed
+- Encapsulate decision tree per-algorithm behaviour as methods on the `Algorithm` enum: the impurity criterion (Gini/entropy), the split-selection score (C4.5 gain ratio vs. raw impurity decrease), and the regression / multi-way-categorical capability checks. This replaces the `match self.algorithm` branches scattered across `DecisionTree`, and the now-exhaustive matches turn adding a new algorithm into a compile-time checklist instead of a silent fall-through.
+- Document the membership rule for the `math` module (pure, model-agnostic, reusable primitives that are shared by more than one caller) in its module-level docs.
+- `LinearSVC` now computes its training cost through `math::hinge_loss` instead of an inline hinge sum.
+- `MeanShift` now computes its RBF neighbour weights through `KernelType::RBF`, sharing the single kernel-dispatch implementation in `types` (mirroring how the distance metrics are already dispatched).
+- `metric::r2_score` now reuses `math::sum_of_squared_errors` and `math::sum_of_square_total` instead of recomputing SSE/SST inline. The `metric` feature now enables `math`.
+
 ### Removed
-dataset module is moved to [dataset-core](http://crates.io/crates/dataset-core/0.1.0) crate
+- Remove the unused `information_gain` and `gain_ratio` functions from the `math` module; the decision tree computes its split criteria directly.
+- Move `binary_search_sigma` out of the public `math` API into the t-SNE module as an internal helper. It is a t-SNE-specific perplexity solver, not a reusable primitive.
 
 ## [v0.12.0] - 2026-02-16 (UTC-7)
 ### Added
 - Add Chinese README.zh-CN.md, separating it from English README.md.
 - Add bilingual language switch links to README.md and README.zh-CN.md
+
+### Removed
+- dataset module is moved to [dataset-core](http://crates.io/crates/dataset-core/0.1.0) crate
 
 ## [v0.12.0] - 2026-02-15 (UTC-7)
 ### Added
@@ -191,8 +205,6 @@ dataset module is moved to [dataset-core](http://crates.io/crates/dataset-core/0
 - Change optimizer computation to adaptive parallel thresholds
 - Change the parameters that require arrays in reference to use a more general solution for `math` module
 - Change the parameters that require arrays in reference to use a more general solution for `machine_learning` module
-
-### Changed
 - Streamline tensor handling and improve training stability in recurrent and dense layers
 
 ## [v0.9.0] - 2025-10-17 (UTC-7)
@@ -337,9 +349,6 @@ dataset module is moved to [dataset-core](http://crates.io/crates/dataset-core/0
 ## [v0.6.3] - 2025-8-30 (UTC-7)
 ### Changed
 - Improve input validation and error handling in `Sequential` model
-
-## [v0.6.3] - 2025-8-30 (UTC-7)
-### Changed
 - Improve input validation and error handling across mathematical utilities
 - Enhance input validation, edge case handling, and error reporting across clustering and classification algorithms
 

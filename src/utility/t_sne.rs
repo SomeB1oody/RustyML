@@ -1,9 +1,71 @@
 use crate::error::ModelError;
-use crate::math::{binary_search_sigma, squared_euclidean_distance_row};
+use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 use ndarray_rand::rand::{Rng, SeedableRng, rng, rngs::StdRng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
+/// Finds the sigma matching a target perplexity for one point's distances, via binary search.
+///
+/// Returns the resulting probability distribution together with the sigma that achieves the
+/// target perplexity. This is t-SNE's per-point precision calibration — an algorithm-specific
+/// solver, so it lives with the model rather than in `crate::math`.
+fn binary_search_sigma<S>(
+    distances: &ArrayBase<S, Ix1>,
+    target_perplexity: f64,
+) -> (Array1<f64>, f64)
+where
+    S: Data<Elem = f64>,
+{
+    let tol = 1e-5;
+    let mut sigma_min: f64 = 1e-20;
+    let mut sigma_max: f64 = 1e20;
+    let mut sigma: f64 = 1.0;
+    let n = distances.len();
+    let mut p = Array1::<f64>::zeros(n);
+
+    for _ in 0..50 {
+        for (j, &d) in distances.iter().enumerate() {
+            p[j] = if d == 0.0 {
+                0.0
+            } else {
+                (-d / (2.0 * sigma * sigma)).exp()
+            };
+        }
+
+        let sum_p = p.sum();
+        let epsilon = 1e-12;
+
+        if sum_p < epsilon {
+            // If sum is too small, use uniform distribution
+            p.fill(1.0 / n as f64);
+        } else {
+            p.mapv_inplace(|v| v / sum_p);
+        }
+
+        let h: f64 = p
+            .iter()
+            .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
+            .sum();
+        let current_perplexity = h.exp();
+        let diff = current_perplexity - target_perplexity;
+        if diff.abs() < tol {
+            break;
+        }
+        if diff > 0.0 {
+            sigma_min = sigma;
+            if sigma_max.is_infinite() {
+                sigma *= 2.0;
+            } else {
+                sigma = (sigma + sigma_max) / 2.0;
+            }
+        } else {
+            sigma_max = sigma;
+            sigma = (sigma + sigma_min) / 2.0;
+        }
+    }
+    (p, sigma)
+}
 
 /// Early exaggeration factor applied to joint probabilities.
 const EARLY_EXAGGERATION: f64 = 12.0;

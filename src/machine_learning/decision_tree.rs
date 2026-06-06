@@ -68,6 +68,50 @@ pub enum Algorithm {
     CART,
 }
 
+impl Algorithm {
+    /// Whether this algorithm can be used for regression tasks.
+    ///
+    /// Only CART supports regression; ID3 and C4.5 are classification-only.
+    fn supports_regression(&self) -> bool {
+        matches!(self, Algorithm::CART)
+    }
+
+    /// Whether this algorithm splits categorical features multi-way (one branch per value).
+    ///
+    /// ID3 and C4.5 do; CART is always binary.
+    fn allows_multiway_categorical(&self) -> bool {
+        matches!(self, Algorithm::ID3 | Algorithm::C45)
+    }
+
+    /// Impurity measure for a classification subset under this algorithm.
+    ///
+    /// CART uses Gini impurity; ID3 and C4.5 use entropy. (Regression always uses MSE,
+    /// which is independent of the algorithm and handled by the caller.)
+    fn classification_impurity(&self, y: &ArrayView1<f64>) -> f64 {
+        match self {
+            Algorithm::CART => gini(y),
+            Algorithm::ID3 | Algorithm::C45 => entropy(y),
+        }
+    }
+
+    /// Selection score for a candidate split, given its impurity decrease and the sample
+    /// counts of its partitions.
+    ///
+    /// C4.5 normalizes the gain by split information (gain ratio) to curb the bias toward
+    /// features with many distinct values; ID3 and CART use the raw impurity decrease.
+    /// Returns `None` when C4.5's split information is degenerate (≈ 0), leaving the
+    /// caller to skip the split.
+    fn selection_score(&self, impurity_decrease: f64, counts: &[f64], total: f64) -> Option<f64> {
+        match self {
+            Algorithm::C45 => {
+                let split_info = split_information(counts, total);
+                (split_info > f64::EPSILON).then(|| impurity_decrease / split_info)
+            }
+            Algorithm::ID3 | Algorithm::CART => Some(impurity_decrease),
+        }
+    }
+}
+
 /// Hyperparameters for controlling decision tree growth and complexity.
 ///
 /// These parameters help prevent overfitting and control the tree structure during training.
@@ -325,7 +369,7 @@ impl DecisionTree {
         params: Option<DecisionTreeParams>,
     ) -> Result<Self, ModelError> {
         // Validate algorithm compatibility with task type
-        if !is_classifier && algorithm != Algorithm::CART {
+        if !is_classifier && !algorithm.supports_regression() {
             return Err(ModelError::InputValidationError(
                 "Only CART algorithm is supported for regression tasks".to_string(),
             ));
@@ -649,7 +693,7 @@ impl DecisionTree {
         let parent_impurity = self.calculate_impurity(y, indices);
 
         // ID3 and C4.5 support multi-way categorical splits; CART is always binary.
-        let allow_categorical = matches!(self.algorithm, Algorithm::ID3 | Algorithm::C45);
+        let allow_categorical = self.algorithm.allows_multiway_categorical();
 
         // For each feature, returns (selection_score, split, impurity_decrease).
         let process_feature = |feature_idx: usize| -> Option<(f64, Split, f64)> {
@@ -716,18 +760,13 @@ impl DecisionTree {
                 + (n_right / n) * self.calculate_impurity(y, &right);
             let impurity_decrease = parent_impurity - weighted;
 
-            // C4.5 normalizes the gain by split information to curb bias toward
-            // features with many distinct values; ID3 and CART use raw impurity decrease.
-            let score = match self.algorithm {
-                Algorithm::C45 => {
-                    let split_info = split_information(&[n_left, n_right], n);
-                    if split_info > f64::EPSILON {
-                        impurity_decrease / split_info
-                    } else {
-                        0.0
-                    }
-                }
-                _ => impurity_decrease,
+            // C4.5 normalizes the gain by split information (gain ratio); ID3 and CART use
+            // the raw impurity decrease. A degenerate split-info score skips this threshold.
+            let Some(score) =
+                self.algorithm
+                    .selection_score(impurity_decrease, &[n_left, n_right], n)
+            else {
+                continue;
             };
 
             if score > best_score {
@@ -792,17 +831,11 @@ impl DecisionTree {
             return None;
         }
 
-        let score = match self.algorithm {
-            Algorithm::C45 => {
-                let split_info = split_information(&counts, n);
-                if split_info > f64::EPSILON {
-                    impurity_decrease / split_info
-                } else {
-                    return None;
-                }
-            }
-            _ => impurity_decrease,
-        };
+        // C4.5 uses gain ratio (impurity decrease / split information); ID3 uses the raw
+        // decrease. A degenerate split-info score rejects this feature entirely.
+        let score = self
+            .algorithm
+            .selection_score(impurity_decrease, &counts, n)?;
 
         Some((
             score,
@@ -824,18 +857,8 @@ impl DecisionTree {
         }
 
         if self.is_classifier {
-            match self.algorithm {
-                Algorithm::CART => {
-                    let subset = y.select(Axis(0), indices);
-                    let subset_view: ArrayView1<f64> = subset.view();
-                    gini(&subset_view)
-                }
-                Algorithm::ID3 | Algorithm::C45 => {
-                    let subset = y.select(Axis(0), indices);
-                    let subset_view: ArrayView1<f64> = subset.view();
-                    entropy(&subset_view)
-                }
-            }
+            let subset = y.select(Axis(0), indices);
+            self.algorithm.classification_impurity(&subset.view())
         } else {
             self.calculate_mse(y, indices)
         }

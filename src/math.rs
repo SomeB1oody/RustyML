@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use ndarray::{Array1, ArrayBase, Data, Ix1};
+use ndarray::{ArrayBase, Data, Ix1};
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 
@@ -225,6 +225,51 @@ where
         .sum::<f64>();
 
     total_loss / n
+}
+
+/// Calculates the mean hinge loss for margin-based classifiers (e.g. linear SVM).
+///
+/// For each sample the loss is `max(0, 1 - yᵢ · marginᵢ)`, averaged over all samples,
+/// where the margin is the decision-function value `w·xᵢ + b`. Labels are expected in
+/// `{-1, +1}`.
+///
+/// # Parameters
+///
+/// - `margins` - Decision-function values for each sample
+/// - `labels` - True labels in `{-1, +1}`
+///
+/// # Returns
+///
+/// - `f64` - Mean hinge loss (0.0 when the input is empty)
+///
+/// # Examples
+/// ```rust
+/// use rustyml::math::hinge_loss;
+/// use ndarray::array;
+///
+/// let margins = array![0.8, -0.5, 2.0];
+/// let labels = array![1.0, -1.0, 1.0];
+/// // max(0,1-0.8)=0.2, max(0,1-0.5)=0.5, max(0,1-2)=0 -> mean = 0.7/3
+/// let loss = hinge_loss(&margins, &labels);
+/// assert!((loss - 0.2333333).abs() < 1e-5);
+/// ```
+#[inline]
+pub fn hinge_loss<S1, S2>(margins: &ArrayBase<S1, Ix1>, labels: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
+{
+    let n = margins.len();
+    if n == 0 {
+        return 0.0;
+    }
+
+    margins
+        .iter()
+        .zip(labels.iter())
+        .map(|(&m, &y)| (1.0 - y * m).max(0.0))
+        .sum::<f64>()
+        / n as f64
 }
 
 /// Calculates the squared Euclidean distance between two vectors.
@@ -475,156 +520,6 @@ where
     entropy
 }
 
-/// Calculates the information gain when splitting a dataset.
-///
-/// Information gain measures the reduction in entropy achieved by dividing a
-/// dataset into child nodes, guiding feature selection in decision trees.
-///
-/// # Parameters
-///
-/// - `y` - Class labels in the parent node
-/// - `left_y` - Class labels in the left child node
-/// - `right_y` - Class labels in the right child node
-///
-/// # Returns
-///
-/// - `f64` - Information gain for the proposed split
-///
-/// # Examples
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::information_gain;
-///
-/// let parent = array![0.0, 0.0, 1.0, 1.0];
-/// let left = array![0.0, 0.0];
-/// let right = array![1.0, 1.0];
-/// let ig = information_gain(&parent, &left, &right);
-/// // Entropy(parent)=1.0, Entropy(left)=Entropy(right)=0, so IG = 1.0
-/// assert!((ig - 1.0).abs() < 1e-6);
-/// ```
-#[inline]
-pub fn information_gain<S1, S2, S3>(
-    y: &ArrayBase<S1, Ix1>,
-    left_y: &ArrayBase<S2, Ix1>,
-    right_y: &ArrayBase<S3, Ix1>,
-) -> f64
-where
-    S1: Data<Elem = f64>,
-    S2: Data<Elem = f64>,
-    S3: Data<Elem = f64>,
-{
-    // Calculate sample counts once
-    let n = y.len() as f64;
-
-    // Early return for edge cases
-    if n == 0.0 {
-        return 0.0;
-    }
-
-    let n_left = left_y.len() as f64;
-    let n_right = right_y.len() as f64;
-
-    // Check for invalid split ratios - if child counts don't match parent, return 0
-    if (n_left + n_right - n).abs() > 1e-10 {
-        return 0.0;
-    }
-
-    // Calculate entropy values
-    let e = entropy(y);
-
-    // If parent node is already pure, no information gain is possible
-    if e.abs() < f64::EPSILON {
-        return 0.0;
-    }
-
-    let e_left = entropy(left_y);
-    let e_right = entropy(right_y);
-
-    // Calculate the weighted average entropy of children
-    let weighted_child_entropy = (n_left / n) * e_left + (n_right / n) * e_right;
-
-    // Information gain = parent entropy - weighted sum of child entropies
-    e - weighted_child_entropy
-}
-
-/// Calculates the gain ratio for a dataset split.
-///
-/// Gain ratio normalizes information gain by the entropy of the split to reduce
-/// bias toward features with many distinct values.
-///
-/// # Parameters
-///
-/// - `y` - Class labels in the parent node
-/// - `left_y` - Class labels in the left child node
-/// - `right_y` - Class labels in the right child node
-///
-/// # Returns
-///
-/// - `f64` - Gain ratio value for the proposed split
-///
-/// # Examples
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::gain_ratio;
-///
-/// let parent = array![0.0, 0.0, 1.0, 1.0];
-/// let left = array![0.0, 0.0];
-/// let right = array![1.0, 1.0];
-/// let gr = gain_ratio(&parent, &left, &right);
-/// // With equal splits, gain ratio should be 1.0
-/// assert!((gr - 1.0).abs() < 1e-6);
-/// ```
-#[inline]
-pub fn gain_ratio<S1, S2, S3>(
-    y: &ArrayBase<S1, Ix1>,
-    left_y: &ArrayBase<S2, Ix1>,
-    right_y: &ArrayBase<S3, Ix1>,
-) -> f64
-where
-    S1: Data<Elem = f64>,
-    S2: Data<Elem = f64>,
-    S3: Data<Elem = f64>,
-{
-    // Early return if parent is empty or either split is empty
-    if y.is_empty() || left_y.is_empty() || right_y.is_empty() {
-        return 0.0;
-    }
-
-    // Calculate sample counts once to avoid redundant computations
-    let n = y.len() as f64;
-    let n_left = left_y.len() as f64;
-    let n_right = right_y.len() as f64;
-
-    // Calculate information gain
-    let info_gain = information_gain(y, left_y, right_y);
-
-    // If information gain is negligible, return 0 to avoid unnecessary calculations
-    if info_gain < f64::EPSILON {
-        return 0.0;
-    }
-
-    // Calculate the proportions for split information
-    let p_left = n_left / n;
-    let p_right = n_right / n;
-
-    // Calculate split information, which measures the potential information of the split
-    // Handle edge cases where one of the proportions is 0
-    let mut split_info = 0.0;
-    if p_left > 0.0 {
-        split_info -= p_left * p_left.log2();
-    }
-    if p_right > 0.0 {
-        split_info -= p_right * p_right.log2();
-    }
-
-    // Avoid division by zero
-    if split_info < f64::EPSILON {
-        0.0
-    } else {
-        info_gain / split_info
-    }
-}
-
 /// Calculates the population standard deviation of a set of values.
 ///
 /// # Parameters
@@ -717,87 +612,4 @@ pub fn average_path_length_factor(n: usize) -> f64 {
     };
 
     2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
-}
-
-/// Finds the sigma value that matches a target perplexity for distance-derived probabilities.
-///
-/// Uses binary search to tune the precision parameter so the resulting probability
-/// distribution has the desired perplexity.
-///
-/// # Parameters
-///
-/// - `distances` - Squared Euclidean distances from a point to all others
-/// - `target_perplexity` - Desired perplexity controlling neighborhood size
-///
-/// # Returns
-///
-/// - `(Array1<f64>, f64)` - Probability distribution and the sigma value that achieves the target perplexity
-///
-/// # Examples
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::binary_search_sigma;
-///
-/// let distances = array![0.0, 1.0, 4.0, 9.0, 16.0];
-/// let target_perplexity = 2.0;
-/// let (probabilities, sigma) = binary_search_sigma(&distances, target_perplexity);
-/// // The function returns probabilities and sigma that achieve the target perplexity
-/// assert_eq!(probabilities.len(), 5);
-/// assert!(sigma > 0.0);
-/// ```
-pub fn binary_search_sigma<S>(
-    distances: &ArrayBase<S, Ix1>,
-    target_perplexity: f64,
-) -> (Array1<f64>, f64)
-where
-    S: Data<Elem = f64>,
-{
-    let tol = 1e-5;
-    let mut sigma_min: f64 = 1e-20;
-    let mut sigma_max: f64 = 1e20;
-    let mut sigma: f64 = 1.0;
-    let n = distances.len();
-    let mut p = Array1::<f64>::zeros(n);
-
-    for _ in 0..50 {
-        for (j, &d) in distances.iter().enumerate() {
-            p[j] = if d == 0.0 {
-                0.0
-            } else {
-                (-d / (2.0 * sigma * sigma)).exp()
-            };
-        }
-
-        let sum_p = p.sum();
-        let epsilon = 1e-12;
-
-        if sum_p < epsilon {
-            // If sum is too small, use uniform distribution
-            p.fill(1.0 / n as f64);
-        } else {
-            p.mapv_inplace(|v| v / sum_p);
-        }
-
-        let h: f64 = p
-            .iter()
-            .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
-            .sum();
-        let current_perplexity = h.exp();
-        let diff = current_perplexity - target_perplexity;
-        if diff.abs() < tol {
-            break;
-        }
-        if diff > 0.0 {
-            sigma_min = sigma;
-            if sigma_max.is_infinite() {
-                sigma *= 2.0;
-            } else {
-                sigma = (sigma + sigma_max) / 2.0;
-            }
-        } else {
-            sigma_max = sigma;
-            sigma = (sigma + sigma_min) / 2.0;
-        }
-    }
-    (p, sigma)
 }

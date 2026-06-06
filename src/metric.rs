@@ -1,6 +1,8 @@
 use ahash::AHashMap;
 use ndarray::{ArrayBase, Data, Ix1};
 
+use crate::math::{sum_of_square_total, sum_of_squared_errors};
+
 /// Calculates the Mean Squared Error between predicted and actual values.
 ///
 /// Mean Squared Error measures the average of the squared differences between predicted values and ground truth values.
@@ -239,21 +241,9 @@ where
         );
     }
 
-    // Calculate mean of actual values
-    let actual_mean = actual.mean().unwrap();
-
-    // Calculate SSE (Sum of Squared Errors) and SST (Sum of Squares Total) in one pass
-    let (sse, sst) = actual.iter().zip(predicted.iter()).fold(
-        (0.0, 0.0),
-        |(sse_acc, sst_acc), (&act, &pred)| {
-            let error = pred - act;
-            let deviation = act - actual_mean;
-            (
-                sse_acc + error * error,         // Sum of squared errors
-                sst_acc + deviation * deviation, // Sum of squared deviations from mean
-            )
-        },
-    );
+    // SSE = Σ(predicted - actual)², SST = Σ(actual - mean)²; reuse the shared primitives.
+    let sse = sum_of_squared_errors(predicted, actual);
+    let sst = sum_of_square_total(actual);
 
     // Prevent division by zero (when all actual values are identical)
     if sst < 1e-10 {

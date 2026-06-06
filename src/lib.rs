@@ -398,20 +398,25 @@ pub mod error;
 /// including impurity measures for decision trees, distance calculations for clustering algorithms,
 /// statistical measures for evaluation, and various mathematical utilities for data processing.
 ///
+/// # What belongs here
+///
+/// A function lives in `math` only if it is **(1)** pure and stateless, **(2)**
+/// model-agnostic (it encodes no single algorithm's policy), and **(3)** is — or
+/// plausibly could be — shared by more than one caller. Per-algorithm solvers live
+/// next to their model; post-hoc evaluation metrics live in [`crate::metric`] and
+/// call these primitives; trainable, gradient-aware losses live in
+/// `neural_network::loss_function`.
+///
 /// # Core Functions
 ///
 /// ## Decision Tree Mathematics
 /// - `entropy` - Calculates the entropy of a label set for information-based splitting
 /// - `gini` - Calculates the Gini impurity for CART-based splitting
-/// - `information_gain` - Measures information gained from dataset splitting
-/// - `gain_ratio` - Normalized information gain for C4.5 algorithm
-/// - `c` - Calculates the average path length adjustment factor for isolation trees
 ///
 /// ## Distance Calculations
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
-/// - Finds the appropriate sigma value for a single sample's distances to achieve target perplexity
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)
@@ -423,6 +428,7 @@ pub mod error;
 /// ## Activation and Loss Functions
 /// - `sigmoid` - Sigmoid activation function for neural networks and logistic regression
 /// - `logistic_loss` - Cross-entropy loss for binary classification
+/// - `hinge_loss` - Mean hinge loss for margin-based classifiers (e.g. SVM)
 ///
 /// # Example
 /// ```rust
