@@ -1,6 +1,7 @@
 pub use super::RegularizationType;
-use super::helper_function::{
-    preliminary_check, validate_learning_rate, validate_max_iterations, validate_tolerance,
+use super::validation::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
+    validate_tolerance,
 };
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
@@ -156,39 +157,6 @@ impl LinearSVC {
         })
     }
 
-    /// Validates input data dimensions and values
-    fn validate_input_data<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
-    where
-        S: Data<Elem = f64>,
-    {
-        // Check for empty input
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        // Check for NaN/Inf values in input
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input features contain NaN or infinite values".to_string(),
-            ));
-        }
-
-        // Check feature dimension mismatch if model is trained
-        if let Some(ref weights) = self.weights {
-            if x.ncols() != weights.len() {
-                return Err(ModelError::InputValidationError(format!(
-                    "Feature dimension mismatch: expected {}, got {}",
-                    weights.len(),
-                    x.ncols()
-                )));
-            }
-        }
-
-        Ok(())
-    }
-
     /// Checks if weights contain invalid values (NaN or infinite)
     fn check_weights_validity(weights: &Array1<f64>, bias: f64) -> Result<(), ModelError> {
         if weights.iter().any(|&w| !w.is_finite()) || !bias.is_finite() {
@@ -204,16 +172,12 @@ impl LinearSVC {
         const MIN_BATCH_SIZE: usize = 32;
         const MAX_BATCH_SIZE: usize = 512;
 
-        std::cmp::max(
-            MIN_BATCH_SIZE,
-            std::cmp::min(MAX_BATCH_SIZE, n_samples / 10),
-        )
+        (n_samples / 10).clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
     }
 
     // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
-    get_field!(get_max_iter, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
@@ -474,15 +438,7 @@ impl LinearSVC {
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted
-        if self.weights.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        // Validate input data
-        self.validate_input_data(x)?;
-
-        // Get decision values and convert to predictions
+        // Fitting checks and input validation are handled by `decision_function`
         let decision = self.decision_function(x)?;
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }
@@ -509,17 +465,11 @@ impl LinearSVC {
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted
-        let weights = match self.get_weights() {
-            Some(weights) => weights,
-            None => {
-                return Err(ModelError::NotFitted);
-            }
-        };
+        // Check if model has been fitted, then validate the prediction input
+        let weights = self.weights.as_ref().ok_or(ModelError::NotFitted)?;
         let bias = self.bias.unwrap_or(0.0);
 
-        // Validate input data
-        self.validate_input_data(x)?;
+        validate_predict_input(x, weights.len())?;
 
         let decision = x.dot(weights) + bias;
 
@@ -531,6 +481,35 @@ impl LinearSVC {
         }
 
         Ok(decision)
+    }
+
+    /// Fits the model to the training data and then predicts labels for the same data.
+    ///
+    /// A convenience method that sequentially executes `fit` and then `predict`.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Input features as a 2D array where each row is a sample and each column is a feature
+    /// - `y` - Target values as a 1D array (should contain only 0.0 and 1.0 values)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<f64>, ModelError>` - Predicted class labels (0.0 or 1.0) for the training data
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is invalid
+    /// - `ModelError::ProcessingError` - If numerical issues occur during training
+    pub fn fit_predict<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
+        self.fit(x, y)?;
+        self.predict(x)
     }
 
     model_save_and_load_methods!(LinearSVC);

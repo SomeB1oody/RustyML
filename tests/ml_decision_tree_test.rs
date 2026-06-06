@@ -291,3 +291,48 @@ fn test_node_creation() {
         _ => panic!("Expected an internal categorical node"),
     }
 }
+
+#[test]
+fn test_categorical_split() {
+    // Feature 0 is a categorical code with values {0, 1, 2}.
+    // Labels: value 0 -> class 0, value 1 -> class 1, value 2 -> class 0.
+    // A binary numeric split cannot separate {0, 2} from {1}, but a multi-way
+    // categorical split can — so marking the feature categorical is required here.
+    let x = arr2(&[[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]]);
+    let y = arr1(&[0.0, 0.0, 1.0, 1.0, 0.0, 0.0]);
+
+    let mut tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    tree.set_categorical_features(vec![0]);
+    assert_eq!(tree.get_categorical_features(), &[0]);
+    tree.fit(&x.view(), &y.view()).unwrap();
+
+    // The root must be a multi-way categorical node with one branch per value
+    let root = tree.get_root().expect("tree should be fitted");
+    match &root.node_type {
+        NodeType::Internal { categories, .. } => {
+            let cats = categories
+                .as_ref()
+                .expect("root should be a categorical split");
+            assert_eq!(cats.len(), 3);
+        }
+        _ => panic!("expected an internal categorical node at the root"),
+    }
+    assert_eq!(root.children.as_ref().unwrap().len(), 3);
+
+    // Predicts the training data perfectly (impossible with a single binary split)
+    let preds = tree.predict(&x.view()).unwrap();
+    for (p, t) in preds.iter().zip(y.iter()) {
+        assert_eq!(p, t);
+    }
+
+    // An unseen category (value 3) falls back to the default leaf without error
+    let unseen = arr2(&[[3.0]]);
+    let fallback = tree.predict(&unseen.view()).unwrap();
+    assert_eq!(fallback.len(), 1);
+
+    // Probabilities and the textual structure also work on categorical trees
+    let probs = tree.predict_proba(&x.view()).unwrap();
+    assert_eq!(probs.nrows(), x.nrows());
+    let structure = tree.generate_tree_structure().unwrap();
+    assert!(structure.contains("categorical"));
+}

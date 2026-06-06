@@ -1,4 +1,4 @@
-use super::helper_function::preliminary_check;
+use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::ModelError;
 use crate::math::{entropy, gini, variance};
 use crate::{Deserialize, Serialize};
@@ -13,6 +13,44 @@ use indicatif::ProgressBar;
 /// When the number of samples is below this threshold, sequential processing is used instead
 /// to avoid parallelization overhead.
 const DECISION_TREE_PARALLEL_THRESHOLD: usize = 1000;
+
+/// The best split found for a node while growing the tree.
+enum Split {
+    /// Binary numeric split: samples with `feature <= threshold` go left, the rest right.
+    Numeric {
+        feature: usize,
+        threshold: f64,
+        left: Vec<usize>,
+        right: Vec<usize>,
+    },
+    /// Multi-way categorical split: one partition (and child branch) per distinct value.
+    Categorical {
+        feature: usize,
+        partitions: Vec<(String, Vec<usize>)>,
+    },
+}
+
+/// Canonical string key for a categorical feature value.
+///
+/// Rounds to 6 decimal places so values that are equal in practice map to the same
+/// branch despite minor floating-point noise. The same key is used both to group
+/// samples during training and to route samples in [`Node`]'s `children` at predict time.
+fn category_key(value: f64) -> String {
+    format!("{}", (value * 1e6).round() / 1e6)
+}
+
+/// Split information (intrinsic value) of a partition, used for the C4.5 gain ratio:
+/// `-Σ (cᵢ/total) · log2(cᵢ/total)`.
+fn split_information(counts: &[f64], total: f64) -> f64 {
+    let mut info = 0.0;
+    for &c in counts {
+        if c > 0.0 {
+            let p = c / total;
+            info -= p * p.log2();
+        }
+    }
+    info
+}
 
 /// Decision tree algorithm types.
 ///
@@ -82,7 +120,7 @@ impl Default for DecisionTreeParams {
 /// - `Internal` - A decision node that splits data based on a feature.
 ///   - `feature_index`: Index of the feature used for splitting.
 ///   - `threshold`: Threshold value for binary splits (samples with feature value ≤ threshold go left).
-///   - `categories`: Optional list of categorical values for multi-way splits (not yet fully implemented).
+///   - `categories`: For categorical splits, the list of category-value keys (one per branch).
 /// - `Leaf` - A terminal node that produces a prediction.
 ///   - `value`: The predicted value (class label for classification, continuous value for regression).
 ///   - `class`: For classification, the majority class index.
@@ -108,9 +146,9 @@ pub enum NodeType {
 /// # Fields
 ///
 /// - `node_type` - The type of this node (Internal or Leaf), containing node-specific data.
-/// - `left` - For binary splits, the left child node (samples with feature value ≤ threshold).
+/// - `left` - For binary splits, the left child (feature value ≤ threshold); for categorical splits, the fallback child used for category values unseen during training.
 /// - `right` - For binary splits, the right child node (samples with feature value > threshold).
-/// - `children` - For categorical splits, a map from category values to child nodes (not yet fully implemented).
+/// - `children` - For categorical splits, a map from category-value keys to child nodes.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
     pub node_type: NodeType,
@@ -167,7 +205,7 @@ impl Node {
         }
     }
 
-    /// Creates a new internal node for categorical splitting (not yet fully implemented).
+    /// Creates a new internal node for a multi-way categorical split.
     ///
     /// # Parameters
     ///
@@ -206,6 +244,7 @@ impl Node {
 /// - `n_classes` - For classification, the number of distinct classes. `None` for regression.
 /// - `params` - Hyperparameters controlling tree growth and complexity.
 /// - `is_classifier` - Whether this tree performs classification (`true`) or regression (`false`).
+/// - `categorical_features` - Indices of feature columns treated as categorical (multi-way splits for ID3/C4.5).
 ///
 /// # Example
 /// ```rust
@@ -241,6 +280,17 @@ impl Node {
 ///
 /// // Get probability estimates for classification
 /// let probabilities = tree.predict_proba(&x_test).unwrap();
+///
+/// // Categorical features: mark which columns hold discrete category codes.
+/// // ID3 and C4.5 then split them multi-way (one branch per distinct value),
+/// // which can separate classes a single binary threshold cannot.
+/// let x_cat = array![[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]];
+/// let y_cat = array![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]; // value 1 -> class 1, values 0/2 -> class 0
+///
+/// let mut cat_tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+/// cat_tree.set_categorical_features(vec![0]); // treat column 0 as categorical
+/// cat_tree.fit(&x_cat, &y_cat).unwrap();
+/// let cat_predictions = cat_tree.predict(&x_cat).unwrap();
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionTree {
@@ -250,6 +300,7 @@ pub struct DecisionTree {
     n_classes: Option<usize>,
     params: DecisionTreeParams,
     is_classifier: bool,
+    categorical_features: Vec<usize>,
 }
 
 impl DecisionTree {
@@ -316,6 +367,7 @@ impl DecisionTree {
             n_classes: None,
             params,
             is_classifier,
+            categorical_features: Vec::new(),
         })
     }
 
@@ -324,8 +376,42 @@ impl DecisionTree {
     get_field!(get_n_features, n_features, usize);
     get_field!(get_n_classes, n_classes, Option<usize>);
     get_field!(get_parameters, params, DecisionTreeParams);
-    get_field_as_ref!(get_root, root, Option<&Box<Node>>);
+    /// Gets the root node of the trained tree.
+    ///
+    /// # Returns
+    ///
+    /// * `Option<&Node>` - The root node, or `None` if the model has not been fitted
+    pub fn get_root(&self) -> Option<&Node> {
+        self.root.as_deref()
+    }
     get_field!(get_is_classifier, is_classifier, bool);
+
+    /// Designates which feature columns are categorical.
+    ///
+    /// Categorical features are split multi-way (one branch per distinct value) by the
+    /// ID3 and C4.5 algorithms. CART always uses binary splits, so it ignores this
+    /// designation. This must be set before calling [`fit`](Self::fit).
+    ///
+    /// # Parameters
+    ///
+    /// - `features` - Indices of the feature columns to treat as categorical
+    ///
+    /// # Returns
+    ///
+    /// - `&mut Self` - A mutable reference to `self` for method chaining
+    pub fn set_categorical_features(&mut self, features: Vec<usize>) -> &mut Self {
+        self.categorical_features = features;
+        self
+    }
+
+    /// Returns the indices of the feature columns treated as categorical.
+    ///
+    /// # Returns
+    ///
+    /// - `&[usize]` - The configured categorical feature indices (empty if none)
+    pub fn get_categorical_features(&self) -> &[usize] {
+        &self.categorical_features
+    }
 
     /// Trains the decision tree on the provided training data.
     ///
@@ -460,133 +546,272 @@ impl DecisionTree {
         }
 
         // Find the best split
-        let split_result = self.find_best_split(&x, &y, indices)?;
+        let split_result = self.find_best_split(x, y, indices)?;
 
-        if let Some((feature_idx, threshold, left_indices, right_indices, impurity_decrease)) =
-            split_result
-        {
-            // Check if split meets minimum impurity decrease
-            if impurity_decrease < self.params.min_impurity_decrease {
-                return Ok(self.create_leaf(y, indices));
-            }
-
-            // Check if leaf size constraint is met
-            if left_indices.len() < self.params.min_samples_leaf
-                || right_indices.len() < self.params.min_samples_leaf
-            {
-                return Ok(self.create_leaf(y, indices));
-            }
-
-            // Create internal node and recursively build children
-            let mut node = Node::new_internal(feature_idx, threshold);
-            node.left = Some(Box::new(self.build_tree(
-                x,
-                y,
-                &left_indices,
-                depth + 1,
-                #[cfg(feature = "show_progress")]
-                progress_bar,
-            )?));
-            node.right = Some(Box::new(self.build_tree(
-                x,
-                y,
-                &right_indices,
-                depth + 1,
-                #[cfg(feature = "show_progress")]
-                progress_bar,
-            )?));
-
-            Ok(node)
-        } else {
+        let Some((split, impurity_decrease)) = split_result else {
             // No valid split found
-            Ok(self.create_leaf(y, indices))
+            return Ok(self.create_leaf(y, indices));
+        };
+
+        // Check if split meets minimum impurity decrease
+        if impurity_decrease < self.params.min_impurity_decrease {
+            return Ok(self.create_leaf(y, indices));
+        }
+
+        match split {
+            Split::Numeric {
+                feature,
+                threshold,
+                left,
+                right,
+            } => {
+                // Check if leaf size constraint is met
+                if left.len() < self.params.min_samples_leaf
+                    || right.len() < self.params.min_samples_leaf
+                {
+                    return Ok(self.create_leaf(y, indices));
+                }
+
+                // Create internal node and recursively build children
+                let mut node = Node::new_internal(feature, threshold);
+                node.left = Some(Box::new(self.build_tree(
+                    x,
+                    y,
+                    &left,
+                    depth + 1,
+                    #[cfg(feature = "show_progress")]
+                    progress_bar,
+                )?));
+                node.right = Some(Box::new(self.build_tree(
+                    x,
+                    y,
+                    &right,
+                    depth + 1,
+                    #[cfg(feature = "show_progress")]
+                    progress_bar,
+                )?));
+
+                Ok(node)
+            }
+            Split::Categorical {
+                feature,
+                partitions,
+            } => {
+                // Every branch must satisfy the leaf size constraint
+                if partitions
+                    .iter()
+                    .any(|(_, idx)| idx.len() < self.params.min_samples_leaf)
+                {
+                    return Ok(self.create_leaf(y, indices));
+                }
+
+                let keys: Vec<String> = partitions.iter().map(|(key, _)| key.clone()).collect();
+                let mut node = Node::new_categorical(feature, keys);
+
+                // Fallback leaf for categories not seen during training (used at predict time)
+                node.left = Some(Box::new(self.create_leaf(y, indices)));
+
+                let children = node.children.as_mut().unwrap();
+                for (key, idx) in partitions {
+                    let child = self.build_tree(
+                        x,
+                        y,
+                        &idx,
+                        depth + 1,
+                        #[cfg(feature = "show_progress")]
+                        progress_bar,
+                    )?;
+                    children.insert(key, Box::new(child));
+                }
+
+                Ok(node)
+            }
         }
     }
 
-    /// Finds the best feature and threshold to split the given samples.
+    /// Finds the best split for the given samples across all features.
+    ///
+    /// Numeric features are evaluated as binary threshold splits. Features marked as
+    /// categorical are evaluated as multi-way splits for ID3 and C4.5 (CART is always
+    /// binary). Selection uses information gain (ID3/CART) or gain ratio (C4.5); the
+    /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule.
     /// Uses parallel evaluation when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD.
     fn find_best_split<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
         indices: &[usize],
-    ) -> Result<Option<(usize, f64, Vec<usize>, Vec<usize>, f64)>, ModelError>
+    ) -> Result<Option<(Split, f64)>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // Calculate parent impurity once
         let parent_impurity = self.calculate_impurity(y, indices);
 
-        // Define the closure that processes each feature to find the best split
-        let process_feature =
-            |feature_idx: usize| -> Option<(f64, (usize, f64, Vec<usize>, Vec<usize>, f64))> {
-                // Get unique values for this feature
-                let mut feature_values: Vec<f64> =
-                    indices.iter().map(|&i| x[[i, feature_idx]]).collect();
-                feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                feature_values.dedup();
+        // ID3 and C4.5 support multi-way categorical splits; CART is always binary.
+        let allow_categorical = matches!(self.algorithm, Algorithm::ID3 | Algorithm::C45);
 
-                // Try each possible threshold and find the best for this feature
-                let mut best_feature_gain = 0.0;
-                let mut best_feature_split: Option<(usize, f64, Vec<usize>, Vec<usize>, f64)> =
-                    None;
-
-                for i in 0..feature_values.len().saturating_sub(1) {
-                    let threshold = (feature_values[i] + feature_values[i + 1]) / 2.0;
-
-                    // Split samples
-                    let (left_indices, right_indices): (Vec<usize>, Vec<usize>) = indices
-                        .iter()
-                        .partition(|&&idx| x[[idx, feature_idx]] <= threshold);
-
-                    if left_indices.is_empty() || right_indices.is_empty() {
-                        continue;
-                    }
-
-                    // Calculate impurity decrease
-                    let left_impurity = self.calculate_impurity(y, &left_indices);
-                    let right_impurity = self.calculate_impurity(y, &right_indices);
-
-                    let n_samples = indices.len() as f64;
-                    let n_left = left_indices.len() as f64;
-                    let n_right = right_indices.len() as f64;
-
-                    let weighted_impurity = (n_left / n_samples) * left_impurity
-                        + (n_right / n_samples) * right_impurity;
-                    let impurity_decrease = parent_impurity - weighted_impurity;
-
-                    // Use impurity decrease as the gain metric for all algorithms
-                    if impurity_decrease > best_feature_gain {
-                        best_feature_gain = impurity_decrease;
-                        best_feature_split = Some((
-                            feature_idx,
-                            threshold,
-                            left_indices,
-                            right_indices,
-                            impurity_decrease,
-                        ));
-                    }
-                }
-
-                best_feature_split.map(|split| (best_feature_gain, split))
-            };
+        // For each feature, returns (selection_score, split, impurity_decrease).
+        let process_feature = |feature_idx: usize| -> Option<(f64, Split, f64)> {
+            if allow_categorical && self.categorical_features.contains(&feature_idx) {
+                self.evaluate_categorical_split(x, y, indices, feature_idx, parent_impurity)
+            } else {
+                self.evaluate_numeric_split(x, y, indices, feature_idx, parent_impurity)
+            }
+        };
 
         // Use parallel evaluation only when sample size exceeds threshold
-        let best_split = if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
+        let best = if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
             (0..self.n_features)
                 .into_par_iter()
                 .filter_map(process_feature)
-                .max_by(|(gain_a, _), (gain_b, _)| gain_a.partial_cmp(gain_b).unwrap())
-                .map(|(_, split)| split)
+                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
         } else {
-            // Sequential evaluation for small datasets
             (0..self.n_features)
                 .filter_map(process_feature)
-                .max_by(|(gain_a, _), (gain_b, _)| gain_a.partial_cmp(gain_b).unwrap())
-                .map(|(_, split)| split)
+                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
         };
 
-        Ok(best_split)
+        Ok(best.map(|(_score, split, impurity_decrease)| (split, impurity_decrease)))
+    }
+
+    /// Evaluates the best binary numeric split for a single feature.
+    ///
+    /// Returns `(selection_score, split, impurity_decrease)`, or `None` if no
+    /// impurity-reducing threshold exists.
+    fn evaluate_numeric_split<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+        indices: &[usize],
+        feature_idx: usize,
+        parent_impurity: f64,
+    ) -> Option<(f64, Split, f64)>
+    where
+        S: Data<Elem = f64>,
+    {
+        // Unique sorted values give the candidate thresholds (midpoints)
+        let mut feature_values: Vec<f64> = indices.iter().map(|&i| x[[i, feature_idx]]).collect();
+        feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        feature_values.dedup();
+
+        let n = indices.len() as f64;
+        let mut best_score = 0.0;
+        let mut best: Option<(Split, f64)> = None;
+
+        for i in 0..feature_values.len().saturating_sub(1) {
+            let threshold = (feature_values[i] + feature_values[i + 1]) / 2.0;
+
+            let (left, right): (Vec<usize>, Vec<usize>) = indices
+                .iter()
+                .partition(|&&idx| x[[idx, feature_idx]] <= threshold);
+
+            if left.is_empty() || right.is_empty() {
+                continue;
+            }
+
+            let n_left = left.len() as f64;
+            let n_right = right.len() as f64;
+            let weighted = (n_left / n) * self.calculate_impurity(y, &left)
+                + (n_right / n) * self.calculate_impurity(y, &right);
+            let impurity_decrease = parent_impurity - weighted;
+
+            // C4.5 normalizes the gain by split information to curb bias toward
+            // features with many distinct values; ID3 and CART use raw impurity decrease.
+            let score = match self.algorithm {
+                Algorithm::C45 => {
+                    let split_info = split_information(&[n_left, n_right], n);
+                    if split_info > f64::EPSILON {
+                        impurity_decrease / split_info
+                    } else {
+                        0.0
+                    }
+                }
+                _ => impurity_decrease,
+            };
+
+            if score > best_score {
+                best_score = score;
+                best = Some((
+                    Split::Numeric {
+                        feature: feature_idx,
+                        threshold,
+                        left,
+                        right,
+                    },
+                    impurity_decrease,
+                ));
+            }
+        }
+
+        best.map(|(split, decrease)| (best_score, split, decrease))
+    }
+
+    /// Evaluates a multi-way categorical split for a single feature (one branch per value).
+    ///
+    /// Returns `(selection_score, split, impurity_decrease)`, or `None` if the feature
+    /// has fewer than two distinct values or the split does not reduce impurity.
+    fn evaluate_categorical_split<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+        indices: &[usize],
+        feature_idx: usize,
+        parent_impurity: f64,
+    ) -> Option<(f64, Split, f64)>
+    where
+        S: Data<Elem = f64>,
+    {
+        // Partition samples by distinct category value
+        let mut groups: AHashMap<String, Vec<usize>> = AHashMap::new();
+        for &idx in indices {
+            groups
+                .entry(category_key(x[[idx, feature_idx]]))
+                .or_default()
+                .push(idx);
+        }
+
+        // A useful split needs at least two distinct values
+        if groups.len() < 2 {
+            return None;
+        }
+
+        let n = indices.len() as f64;
+        let mut weighted = 0.0;
+        let mut counts: Vec<f64> = Vec::with_capacity(groups.len());
+        let mut partitions: Vec<(String, Vec<usize>)> = Vec::with_capacity(groups.len());
+        for (key, group) in groups {
+            let n_group = group.len() as f64;
+            counts.push(n_group);
+            weighted += (n_group / n) * self.calculate_impurity(y, &group);
+            partitions.push((key, group));
+        }
+
+        let impurity_decrease = parent_impurity - weighted;
+        if impurity_decrease <= 0.0 {
+            return None;
+        }
+
+        let score = match self.algorithm {
+            Algorithm::C45 => {
+                let split_info = split_information(&counts, n);
+                if split_info > f64::EPSILON {
+                    impurity_decrease / split_info
+                } else {
+                    return None;
+                }
+            }
+            _ => impurity_decrease,
+        };
+
+        Some((
+            score,
+            Split::Categorical {
+                feature: feature_idx,
+                partitions,
+            },
+            impurity_decrease,
+        ))
     }
 
     /// Calculates the impurity measure for the given samples based on the algorithm type.
@@ -714,10 +939,18 @@ impl DecisionTree {
                 categories,
             } => {
                 if categories.is_some() {
-                    // Categorical split (not implemented in this basic version)
-                    return Err(ModelError::TreeError(
-                        "Categorical splits not yet implemented",
-                    ));
+                    // Multi-way categorical split: route by the sample's category value,
+                    // falling back to the default leaf for categories unseen during training.
+                    let key = category_key(x[*feature_index]);
+                    if let Some(child) = node.children.as_ref().and_then(|c| c.get(&key)) {
+                        return self.traverse_tree(child, x);
+                    }
+                    return match &node.left {
+                        Some(fallback) => self.traverse_tree(fallback, x),
+                        None => Err(ModelError::TreeError(
+                            "Categorical node has no matching child and no fallback",
+                        )),
+                    };
                 }
 
                 // Binary split
@@ -760,32 +993,8 @@ impl DecisionTree {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        if self.root.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        // Check for empty input data
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check feature dimension match
-        if x.ncols() != self.n_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                self.n_features
-            )));
-        }
-
-        // Check for invalid values in input data
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        check_is_fitted(self.root.is_some())?;
+        validate_predict_input(x, self.n_features)?;
 
         // Use parallel processing only when sample size exceeds threshold
         let predictions: Result<Vec<f64>, ModelError> =
@@ -863,32 +1072,8 @@ impl DecisionTree {
             ));
         }
 
-        if self.root.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        // Check for empty input data
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check feature dimension match
-        if x.ncols() != self.n_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                self.n_features
-            )));
-        }
-
-        // Check for invalid values in input data
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        check_is_fitted(self.root.is_some())?;
+        validate_predict_input(x, self.n_features)?;
 
         let n_classes = self.n_classes.unwrap();
 
@@ -969,9 +1154,18 @@ impl DecisionTree {
                 categories,
             } => {
                 if categories.is_some() {
-                    return Err(ModelError::TreeError(
-                        "Categorical splits not yet implemented",
-                    ));
+                    // Multi-way categorical split: route by category value, falling back
+                    // to the default leaf for categories unseen during training.
+                    let key = category_key(x[*feature_index]);
+                    if let Some(child) = node.children.as_ref().and_then(|c| c.get(&key)) {
+                        return self.get_probabilities(child, x);
+                    }
+                    return match &node.left {
+                        Some(fallback) => self.get_probabilities(fallback, x),
+                        None => Err(ModelError::TreeError(
+                            "Categorical node has no matching child and no fallback",
+                        )),
+                    };
                 }
 
                 if x[*feature_index] <= *threshold {
@@ -1024,6 +1218,11 @@ impl DecisionTree {
                 if let Some(ref right) = node.right {
                     count += self.count_nodes(right);
                 }
+                if let Some(ref children) = node.children {
+                    for child in children.values() {
+                        count += self.count_nodes(child);
+                    }
+                }
                 count
             }
         }
@@ -1056,27 +1255,50 @@ impl DecisionTree {
                 threshold,
                 categories,
             } => {
+                let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+
                 if categories.is_some() {
                     output.push_str(&format!(
                         "Split: feature[{}] (categorical)\n",
                         feature_index
                     ));
+
+                    // One branch per category value (sorted by key for stable output),
+                    // plus a default branch for values unseen during training.
+                    let mut branches: Vec<(String, &Node)> = node
+                        .children
+                        .as_ref()
+                        .map(|c| c.iter().map(|(k, v)| (k.clone(), v.as_ref())).collect())
+                        .unwrap_or_default();
+                    branches.sort_by(|a, b| a.0.cmp(&b.0));
+
+                    let total = branches.len() + node.left.is_some() as usize;
+                    for (i, (key, child)) in branches.into_iter().enumerate() {
+                        let last = i + 1 == total;
+                        let connector = if last { "└── " } else { "├── " };
+                        output.push_str(&format!("{}{}= {}:\n", new_prefix, connector, key));
+                        let child_prefix =
+                            format!("{}{}", new_prefix, if last { "    " } else { "│   " });
+                        self.print_node(child, output, &child_prefix, true);
+                    }
+
+                    if let Some(ref fallback) = node.left {
+                        output.push_str(&format!("{}└── = (default):\n", new_prefix));
+                        let child_prefix = format!("{}    ", new_prefix);
+                        self.print_node(fallback, output, &child_prefix, true);
+                    }
                 } else {
                     output.push_str(&format!(
                         "Split: feature[{}] <= {:.4}\n",
                         feature_index, threshold
                     ));
-                }
 
-                // Print children
-                let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
-
-                if let Some(ref left) = node.left {
-                    self.print_node(left, output, &new_prefix, false);
-                }
-
-                if let Some(ref right) = node.right {
-                    self.print_node(right, output, &new_prefix, true);
+                    if let Some(ref left) = node.left {
+                        self.print_node(left, output, &new_prefix, false);
+                    }
+                    if let Some(ref right) = node.right {
+                        self.print_node(right, output, &new_prefix, true);
+                    }
                 }
             }
         }

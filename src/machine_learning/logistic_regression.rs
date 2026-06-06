@@ -1,7 +1,7 @@
 pub use super::RegularizationType;
-use super::helper_function::{
-    preliminary_check, validate_learning_rate, validate_max_iterations, validate_regulation_type,
-    validate_tolerance,
+use super::validation::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
+    validate_regularization_type, validate_tolerance,
 };
 use crate::error::ModelError;
 use crate::math::{logistic_loss, sigmoid};
@@ -130,7 +130,7 @@ impl LogisticRegression {
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
         validate_tolerance(tolerance)?;
-        validate_regulation_type(regularization_type)?;
+        validate_regularization_type(regularization_type)?;
 
         Ok(LogisticRegression {
             weights: None,
@@ -206,7 +206,7 @@ impl LogisticRegression {
         if self.fit_intercept {
             n_features += 1;
             let mut x_with_bias = Array2::ones((n_samples, n_features));
-            x_with_bias.slice_mut(s![.., 1..]).assign(&x);
+            x_with_bias.slice_mut(s![.., 1..]).assign(x);
             _x_train_owned = Some(x_with_bias);
             x_train_view = _x_train_owned.as_ref().unwrap().view();
         } else {
@@ -249,7 +249,7 @@ impl LogisticRegression {
                 Array1::from(sigmoid_vec)
             } else {
                 // Sequential computation for small datasets
-                predictions.mapv(|x| sigmoid(x))
+                predictions.mapv(sigmoid)
             };
 
             // Calculate prediction errors
@@ -304,7 +304,7 @@ impl LogisticRegression {
             }
 
             // Calculate loss using existing predictions
-            let mut cost = logistic_loss(&predictions, &y);
+            let mut cost = logistic_loss(&predictions, y);
 
             if let Some(reg_type) = &self.regularization_type {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
@@ -390,48 +390,53 @@ impl LogisticRegression {
     where
         S: Data<Elem = f64>,
     {
+        // Probabilities (with full input validation) then a 0.5 decision threshold
+        let probs = self.predict_proba(x)?;
+        Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
+    }
+
+    /// Predicts the positive-class probability for each sample.
+    ///
+    /// Applies the sigmoid function to the linear decision values to produce
+    /// probabilities in the range (0, 1).
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix where each row is a sample and each column is a feature (without the bias term)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<f64>, ModelError>` - Probability of the positive class for each sample
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::NotFitted` - If the model has not been fitted yet
+    /// - `ModelError::InputValidationError` - If input is empty, dimensions mismatch, or data contains non-finite values
+    /// - `ModelError::ProcessingError` - If numerical issues occur during probability calculation
+    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64>,
+    {
         // Check if model has been fitted
-        if self.weights.is_none() {
-            return Err(ModelError::NotFitted);
-        }
+        let weights = self.weights.as_ref().ok_or(ModelError::NotFitted)?;
 
-        let (n_samples, n_features) = x.dim();
-
-        // Check for empty input data
-        if n_samples == 0 {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check feature dimension match
+        // Validate input against the feature count the model was trained on
+        // (excluding the implicit bias column when an intercept was fitted)
         let expected_features = if self.fit_intercept {
-            self.weights.as_ref().unwrap().len() - 1
+            weights.len() - 1
         } else {
-            self.weights.as_ref().unwrap().len()
+            weights.len()
         };
+        validate_predict_input(x, expected_features)?;
 
-        if n_features != expected_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                n_features, expected_features
-            )));
-        }
-
-        // Check for invalid values in input data
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        // Prepare test data with optional bias term and compute probabilities
+        // Prepend the bias column when the model was trained with an intercept
         let probs = if self.fit_intercept {
+            let (n_samples, n_features) = x.dim();
             let mut x_with_bias = Array2::ones((n_samples, n_features + 1));
-            x_with_bias.slice_mut(s![.., 1..]).assign(&x);
-            self.predict_proba(&x_with_bias.view())?
+            x_with_bias.slice_mut(s![.., 1..]).assign(x);
+            self.sigmoid_decision(&x_with_bias)
         } else {
-            self.predict_proba(&x)?
+            self.sigmoid_decision(x)
         };
 
         // Check if probabilities contain invalid values
@@ -441,43 +446,28 @@ impl LogisticRegression {
             ));
         }
 
-        // Apply threshold for classification
-        Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
+        Ok(probs)
     }
 
-    /// Predicts probability scores for samples
+    /// Applies the sigmoid to the raw linear decision values `x · weights`.
     ///
-    /// Uses the sigmoid function to convert linear predictions to probabilities between 0-1.
-    ///
-    /// # Parameters
-    ///
-    /// * `x` - Feature matrix view where each row is a sample and each column is a feature (with bias if fit_intercept=true)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Array1<f64>)` - A 1D array containing the probability of each sample belonging to the positive class
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// `x` must already include the bias column when an intercept was fitted; this
+    /// is an internal helper used by [`Self::predict_proba`].
+    fn sigmoid_decision<S>(&self, x: &ArrayBase<S, Ix2>) -> Array1<f64>
     where
         S: Data<Elem = f64>,
     {
-        if let Some(weights) = &self.weights {
-            let mut predictions = x.dot(weights);
+        let weights = self.weights.as_ref().unwrap();
+        let mut predictions = x.dot(weights);
 
-            // Apply sigmoid with conditional parallelization (mutate in place)
-            let n_samples = predictions.len();
-            if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
-                // Parallel computation for large datasets
-                predictions.par_mapv_inplace(|x| sigmoid(x));
-            } else {
-                // Sequential computation for small datasets
-                predictions.mapv_inplace(|x| sigmoid(x));
-            }
-
-            Ok(predictions)
+        // Apply sigmoid with conditional parallelization (mutate in place)
+        if predictions.len() >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
+            predictions.par_mapv_inplace(sigmoid);
         } else {
-            Err(ModelError::NotFitted)
+            predictions.mapv_inplace(sigmoid);
         }
+
+        predictions
     }
 
     /// Fits the logistic regression model to the training data and then makes predictions.
@@ -506,7 +496,7 @@ impl LogisticRegression {
         S: Data<Elem = f64>,
     {
         self.fit(train_x, train_y)?;
-        Ok(self.predict(train_x)?)
+        self.predict(train_x)
     }
 
     model_save_and_load_methods!(LogisticRegression);
@@ -582,12 +572,14 @@ where
     if degree >= 2 {
         let mut col_idx = n_features; // Start from n_features, no +1 offset
 
-        // Define an inner recursive function to generate combinations
+        // Define an inner recursive function to generate combinations.
+        // The argument count is inherent to the recursion (shared mutable state plus
+        // the current position), so the lint is allowed here for clarity.
+        #[allow(clippy::too_many_arguments)]
         fn add_combinations<S>(
             x: &ArrayBase<S, Ix2>,
             result: &mut Array2<f64>,
             col_idx: &mut usize,
-            n_samples: usize,
             n_features: usize,
             degree: usize,
             current_degree: usize,
@@ -624,7 +616,6 @@ where
                     x,
                     result,
                     col_idx,
-                    n_samples,
                     n_features,
                     degree,
                     current_degree + 1,
@@ -641,7 +632,6 @@ where
                 x,
                 &mut result,
                 &mut col_idx,
-                n_samples,
                 n_features,
                 d,
                 0,

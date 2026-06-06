@@ -1,4 +1,6 @@
-pub use KernelType;
+// `KernelType` lives in the crate-level `types` module (shared with SVC); re-exported
+// here so it is reachable as `utility::KernelType` alongside the kernel-PCA API.
+pub use crate::types::KernelType;
 
 /// This module implements Kernel Principal Component Analysis.
 pub mod kernel_pca;

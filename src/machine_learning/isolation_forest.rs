@@ -1,6 +1,5 @@
-use super::helper_function::preliminary_check;
+use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::ModelError;
-use crate::machine_learning::decision_tree::{Node, NodeType};
 use crate::math::average_path_length_factor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
@@ -13,6 +12,31 @@ const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 
 /// Default minimum number of samples required to enable parallel prediction
 const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
+
+/// A node in an isolation tree.
+///
+/// Unlike a decision-tree node, an isolation tree only needs to record where it
+/// split and how many samples ended up unresolved at a leaf, so it has its own
+/// minimal structure rather than reusing the (classification-oriented) decision
+/// tree node.
+///
+/// # Variants
+///
+/// - `Leaf` - A terminal node; `size` is the number of samples that reached it
+///   (used by the average-path-length correction).
+/// - `Internal` - A split node on `feature` at `threshold`, with both children.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum IsolationTree {
+    Leaf {
+        size: usize,
+    },
+    Internal {
+        feature: usize,
+        threshold: f64,
+        left: Box<IsolationTree>,
+        right: Box<IsolationTree>,
+    },
+}
 
 /// An Isolation Forest implementation for anomaly detection.
 ///
@@ -43,7 +67,7 @@ const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IsolationForest {
-    trees: Option<Vec<Box<Node>>>,
+    trees: Option<Vec<IsolationTree>>,
     n_estimators: usize,
     max_samples: usize,
     max_depth: usize,
@@ -144,7 +168,7 @@ impl IsolationForest {
     get_field!(get_max_depth, max_depth, usize);
     get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_n_features, n_features, usize);
-    get_field_as_ref!(get_trees, trees, Option<&Vec<Box<Node>>>);
+    get_field_as_ref!(get_trees, trees, Option<&Vec<IsolationTree>>);
 
     /// Trains the Isolation Forest model on the provided dataset.
     ///
@@ -190,7 +214,7 @@ impl IsolationForest {
         };
 
         // Build multiple isolation trees
-        let build_tree = |i: usize| -> Result<Box<Node>, ModelError> {
+        let build_tree = |i: usize| -> Result<IsolationTree, ModelError> {
             // Create an independent RNG for each tree to maintain reproducibility
             let mut rng = if let Some(seed) = self.random_state {
                 StdRng::seed_from_u64(seed.wrapping_add(i as u64))
@@ -203,9 +227,7 @@ impl IsolationForest {
             let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
 
             // Build isolation tree
-            let result = self
-                .build_isolation_tree(x, &sample_indices, 0, &mut rng)
-                .map(Box::new);
+            let result = self.build_isolation_tree(x, &sample_indices, 0, &mut rng);
 
             #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
@@ -213,7 +235,7 @@ impl IsolationForest {
             result
         };
 
-        let trees: Result<Vec<Box<Node>>, ModelError> =
+        let trees: Result<Vec<IsolationTree>, ModelError> =
             if self.n_estimators >= DEFAULT_PARALLEL_THRESHOLD_TREES {
                 // Use parallelization for large number of trees
                 (0..self.n_estimators)
@@ -253,14 +275,15 @@ impl IsolationForest {
         indices: &[usize],
         current_depth: usize,
         rng: &mut StdRng,
-    ) -> Result<Node, ModelError>
+    ) -> Result<IsolationTree, ModelError>
     where
         S: Data<Elem = f64>,
     {
         // Stopping criteria: max depth reached or node has only one sample
         if current_depth >= self.max_depth || indices.len() <= 1 {
-            // Create a leaf node with the sample size as the value
-            return Ok(Node::new_leaf(indices.len() as f64, None, None));
+            return Ok(IsolationTree::Leaf {
+                size: indices.len(),
+            });
         }
 
         // Randomly select a feature
@@ -278,7 +301,9 @@ impl IsolationForest {
 
         // If all values are the same, create a leaf
         if (max_val - min_val).abs() < 1e-10 {
-            return Ok(Node::new_leaf(indices.len() as f64, None, None));
+            return Ok(IsolationTree::Leaf {
+                size: indices.len(),
+            });
         }
 
         // Randomly select a split point between min and max
@@ -291,53 +316,41 @@ impl IsolationForest {
 
         // If split results in empty partition, create a leaf
         if left_indices.is_empty() || right_indices.is_empty() {
-            return Ok(Node::new_leaf(indices.len() as f64, None, None));
+            return Ok(IsolationTree::Leaf {
+                size: indices.len(),
+            });
         }
 
         // Create internal node and recursively build children
-        let mut node = Node::new_internal(feature_index, threshold);
-        node.left = Some(Box::new(self.build_isolation_tree(
-            x,
-            &left_indices,
-            current_depth + 1,
-            rng,
-        )?));
-        node.right = Some(Box::new(self.build_isolation_tree(
-            x,
-            &right_indices,
-            current_depth + 1,
-            rng,
-        )?));
+        let left = self.build_isolation_tree(x, &left_indices, current_depth + 1, rng)?;
+        let right = self.build_isolation_tree(x, &right_indices, current_depth + 1, rng)?;
 
-        Ok(node)
+        Ok(IsolationTree::Internal {
+            feature: feature_index,
+            threshold,
+            left: Box::new(left),
+            right: Box::new(right),
+        })
     }
 
     /// Computes the path length of a sample through an isolation tree with average adjustment for unresolved samples.
-    fn path_length(&self, sample: &[f64], node: &Node, current_depth: usize) -> f64 {
-        match &node.node_type {
-            NodeType::Leaf { value, .. } => {
-                // value stores the number of samples in this leaf
-                // Add the average path length adjustment for unresolved samples
-                current_depth as f64 + average_path_length_factor(*value as usize)
+    fn path_length(&self, sample: &[f64], node: &IsolationTree, current_depth: usize) -> f64 {
+        match node {
+            IsolationTree::Leaf { size } => {
+                // Add the average path length adjustment for samples unresolved at this leaf
+                current_depth as f64 + average_path_length_factor(*size)
             }
-            NodeType::Internal {
-                feature_index,
+            IsolationTree::Internal {
+                feature,
                 threshold,
-                ..
+                left,
+                right,
             } => {
                 // Traverse to left or right child based on feature value
-                if sample[*feature_index] < *threshold {
-                    if let Some(ref left) = node.left {
-                        self.path_length(sample, left, current_depth + 1)
-                    } else {
-                        current_depth as f64
-                    }
+                if sample[*feature] < *threshold {
+                    self.path_length(sample, left, current_depth + 1)
                 } else {
-                    if let Some(ref right) = node.right {
-                        self.path_length(sample, right, current_depth + 1)
-                    } else {
-                        current_depth as f64
-                    }
+                    self.path_length(sample, right, current_depth + 1)
                 }
             }
         }
@@ -374,20 +387,27 @@ impl IsolationForest {
 
         let trees = self.trees.as_ref().unwrap();
 
-        // Compute average path length across all trees
+        // Normalize using c(max_samples)
+        let c_n = average_path_length_factor(self.max_samples);
+
+        Ok(self.normalized_score(sample, trees, c_n))
+    }
+
+    /// Computes the normalized anomaly score for one sample, given a precomputed
+    /// normalization constant `c_n = c(max_samples)`.
+    ///
+    /// Taking `c_n` as a parameter lets batch prediction compute it a single time
+    /// instead of recomputing it for every sample.
+    fn normalized_score(&self, sample: &[f64], trees: &[IsolationTree], c_n: f64) -> f64 {
+        // Average path length of the sample across all trees
         let avg_path_length: f64 = trees
             .iter()
             .map(|tree| self.path_length(sample, tree, 0))
             .sum::<f64>()
             / trees.len() as f64;
 
-        // Normalize using c(max_samples)
-        let c_n = average_path_length_factor(self.max_samples);
-
         // Anomaly score: s(x, n) = 2^(-E(h(x))/c(n))
-        let score = 2.0_f64.powf(-avg_path_length / c_n);
-
-        Ok(score)
+        2.0_f64.powf(-avg_path_length / c_n)
     }
 
     /// Predicts anomaly scores for multiple samples.
@@ -415,39 +435,30 @@ impl IsolationForest {
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted
-        if self.trees.is_none() {
-            return Err(ModelError::NotFitted);
-        }
+        check_is_fitted(self.trees.is_some())?;
+        validate_predict_input(x, self.n_features)?;
 
-        // Use preliminary_check for basic input validation
-        preliminary_check(x, None)?;
-
-        // Check feature dimension match
-        if x.ncols() != self.n_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: expected {} features, got {}",
-                self.n_features,
-                x.ncols()
-            )));
-        }
+        // Precompute the normalization constant once for the whole batch; feature
+        // dimensions and finiteness were already validated above, so each row can be
+        // scored directly without the per-sample validation done by `anomaly_score`.
+        let trees = self.trees.as_ref().unwrap();
+        let c_n = average_path_length_factor(self.max_samples);
 
         // Compute anomaly scores for all samples
-        let scores: Result<Vec<f64>, ModelError> =
-            if x.nrows() >= DEFAULT_PARALLEL_THRESHOLD_SAMPLES {
-                // Use parallelization for large number of samples
-                x.axis_iter(Axis(0))
-                    .into_par_iter()
-                    .map(|row| self.anomaly_score(row.as_slice().unwrap()))
-                    .collect()
-            } else {
-                // Sequential execution for small number of samples
-                x.axis_iter(Axis(0))
-                    .map(|row| self.anomaly_score(row.as_slice().unwrap()))
-                    .collect()
-            };
+        let scores: Vec<f64> = if x.nrows() >= DEFAULT_PARALLEL_THRESHOLD_SAMPLES {
+            // Use parallelization for large number of samples
+            x.axis_iter(Axis(0))
+                .into_par_iter()
+                .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))
+                .collect()
+        } else {
+            // Sequential execution for small number of samples
+            x.axis_iter(Axis(0))
+                .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))
+                .collect()
+        };
 
-        Ok(Array1::from_vec(scores?))
+        Ok(Array1::from_vec(scores))
     }
 
     /// Trains the model on the dataset and immediately predicts anomaly scores.

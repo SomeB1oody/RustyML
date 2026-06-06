@@ -1,14 +1,10 @@
 pub use super::DistanceCalculationMetric;
-use super::helper_function::preliminary_check;
+use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::ModelError;
-use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-
-/// Threshold for using parallel distance calculation
-const PARALLEL_THRESHOLD: usize = 1000;
 
 /// Represents the strategy used for weighting neighbors in KNN algorithm.
 ///
@@ -152,12 +148,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     );
     get_field!(get_metric, metric, DistanceCalculationMetric);
     get_field_as_ref!(get_x_train, x_train, Option<&Array2<f64>>);
-    get_field_as_ref!(get_y_train_encoded, y_train_encoded, Option<&Array1<usize>>);
-    get_field_as_ref!(
-        get_label_map,
-        label_map,
-        Option<&(AHashMap<T, usize>, Vec<T>)>
-    );
 
     /// Fits the KNN classifier to the training data.
     ///
@@ -242,30 +232,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     where
         S: Data<Elem = f64>,
     {
-        // check if model is fitted
-        if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        // validate input data
-        preliminary_check(x, None)?;
-
-        // check if feature dimension matches training data
+        // check if model is fitted, then validate the prediction input
+        check_is_fitted(
+            self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
+        )?;
         let x_train = self.x_train.as_ref().unwrap();
-        if x.ncols() != x_train.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: expected {}, got {}",
-                x_train.ncols(),
-                x.ncols()
-            )));
-        }
-
-        // check if input data is empty
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input array is empty".to_string(),
-            ));
-        }
+        validate_predict_input(x, x_train.ncols())?;
 
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
@@ -312,30 +284,12 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // check if model is fitted
-        if self.x_train.is_none() || self.y_train_encoded.is_none() || self.label_map.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        // validate input data
-        preliminary_check(x, None)?;
-
-        // check if feature dimension matches training data
+        // check if model is fitted, then validate the prediction input
+        check_is_fitted(
+            self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
+        )?;
         let x_train = self.x_train.as_ref().unwrap();
-        if x.ncols() != x_train.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: expected {}, got {}",
-                x_train.ncols(),
-                x.ncols()
-            )));
-        }
-
-        // check if input data is empty
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input array is empty".to_string(),
-            ));
-        }
+        validate_predict_input(x, x_train.ncols())?;
 
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
@@ -362,15 +316,6 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
-    /// Calculates the distance between two points based on the selected metric
-    fn calculate_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        match self.metric {
-            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b).sqrt(),
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b),
-            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&a, &b, p),
-        }
-    }
-
     /// Predicts the encoded class index for a single data point
     fn predict_one(
         &self,
@@ -381,24 +326,13 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        // Calculate distances to all training samples
-        // Use parallel computation only when n_samples is large enough to benefit from it
-        let mut distances: Vec<(f64, usize)> = if n_samples >= PARALLEL_THRESHOLD {
-            (0..n_samples)
-                .into_iter()
-                .map(|i| -> Result<(f64, usize), ModelError> {
-                    let distance = self.calculate_distance(x, x_train.row(i));
-                    Ok((distance, i))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            (0..n_samples)
-                .map(|i| -> Result<(f64, usize), ModelError> {
-                    let distance = self.calculate_distance(x, x_train.row(i));
-                    Ok((distance, i))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        // Calculate distances to all training samples.
+        // This per-query search stays sequential on purpose: callers parallelize
+        // across query samples (see `predict_parallel`), so parallelizing the inner
+        // loop as well would only nest Rayon pools without a real speedup.
+        let mut distances: Vec<(f64, usize)> = (0..n_samples)
+            .map(|i| (self.metric.distance(x, x_train.row(i)), i))
+            .collect();
 
         // Use partial sorting to get only k smallest elements instead of full sort
         distances.select_nth_unstable_by(k - 1, |a, b| {
@@ -417,22 +351,19 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     let class_counts = k_neighbors
                         .par_iter()
                         .fold(
-                            || AHashMap::new(),
+                            AHashMap::new,
                             |mut acc: AHashMap<usize, usize>, &(_, idx)| {
                                 let class_idx = y_train_encoded[idx];
                                 *acc.entry(class_idx).or_insert(0) += 1;
                                 acc
                             },
                         )
-                        .reduce(
-                            || AHashMap::new(),
-                            |mut a, b| {
-                                for (class_idx, count) in b {
-                                    *a.entry(class_idx).or_insert(0) += count;
-                                }
-                                a
-                            },
-                        );
+                        .reduce(AHashMap::new, |mut a, b| {
+                            for (class_idx, count) in b {
+                                *a.entry(class_idx).or_insert(0) += count;
+                            }
+                            a
+                        });
 
                     // Find the most common class
                     class_counts
@@ -476,7 +407,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     let class_weights = k_neighbors
                         .par_iter()
                         .fold(
-                            || AHashMap::new(),
+                            AHashMap::new,
                             |mut acc: AHashMap<usize, f64>, &(distance, idx)| {
                                 let weight = 1.0 / distance;
                                 let class_idx = y_train_encoded[idx];
@@ -484,15 +415,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                                 acc
                             },
                         )
-                        .reduce(
-                            || AHashMap::new(),
-                            |mut a, b| {
-                                for (class_idx, weight) in b {
-                                    *a.entry(class_idx).or_insert(0.0) += weight;
-                                }
-                                a
-                            },
-                        );
+                        .reduce(AHashMap::new, |mut a, b| {
+                            for (class_idx, weight) in b {
+                                *a.entry(class_idx).or_insert(0.0) += weight;
+                            }
+                            a
+                        });
 
                     // Find the class with highest weight
                     class_weights
@@ -560,7 +488,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         S2: Data<Elem = T>,
     {
         self.fit(x_train, y_train)?;
-        Ok(self.predict(x_train)?)
+        self.predict(x_train)
     }
 }
 

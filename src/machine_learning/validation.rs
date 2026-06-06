@@ -48,7 +48,7 @@ where
     }
 
     if let Some(y) = y {
-        if y.len() == 0 {
+        if y.is_empty() {
             return Err(ModelError::InputValidationError(
                 "Target vector is empty".to_string(),
             ));
@@ -56,7 +56,7 @@ where
 
         if y.len() != x.nrows() {
             return Err(ModelError::InputValidationError(format!(
-                "Input data and target vector have different lengths, x columns: {}, y length: {}",
+                "Input data and target vector have different lengths, x rows: {}, y length: {}",
                 x.nrows(),
                 y.len()
             )));
@@ -151,7 +151,6 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
 /// This function checks that regularization parameters are properly configured:
 /// - For L1 and L2 regularization, the alpha (regularization strength) parameter
 ///   must be non-negative and finite
-/// - If alpha is 0, a warning is printed suggesting to use None instead
 /// - None (no regularization) is always valid
 ///
 /// # Parameters
@@ -165,7 +164,7 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
 /// # Errors
 ///
 /// - `ModelError::InputValidationError` - If the regularization alpha is negative, NaN, or infinite
-pub(super) fn validate_regulation_type(
+pub(super) fn validate_regularization_type(
     reg_type: Option<RegularizationType>,
 ) -> Result<(), ModelError> {
     if let Some(reg) = &reg_type {
@@ -179,6 +178,82 @@ pub(super) fn validate_regulation_type(
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Returns [`ModelError::NotFitted`] when a model has not been fitted yet.
+///
+/// Centralizes the "is this model fitted?" guard so every estimator emits the
+/// same error instead of hand-rolling the check at each call site.
+///
+/// # Parameters
+///
+/// - `is_fitted` - Whether the model has already been trained (e.g. `self.weights.is_some()`)
+///
+/// # Returns
+///
+/// - `result` - `Ok(())` if the model is fitted, otherwise `ModelError::NotFitted`
+///
+/// # Errors
+///
+/// - `ModelError::NotFitted` - If `is_fitted` is `false`
+#[inline]
+pub(super) fn check_is_fitted(is_fitted: bool) -> Result<(), ModelError> {
+    if is_fitted {
+        Ok(())
+    } else {
+        Err(ModelError::NotFitted)
+    }
+}
+
+/// Validates a feature matrix passed to a `predict`-style method.
+///
+/// Performs the three checks every estimator needs before predicting, with a
+/// single consistent error message for each failure mode:
+/// - the matrix is not empty
+/// - the feature count matches the training data
+/// - no value is NaN or infinite
+///
+/// # Parameters
+///
+/// - `x` - Feature matrix where rows are samples and columns are features
+/// - `expected_features` - Number of features the fitted model was trained on
+///
+/// # Returns
+///
+/// - `result` - `Ok(())` if all checks pass, otherwise a `ModelError`
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If `x` is empty, has a mismatched feature
+///   count, or contains non-finite values
+pub(super) fn validate_predict_input<S>(
+    x: &ArrayBase<S, Ix2>,
+    expected_features: usize,
+) -> Result<(), ModelError>
+where
+    S: Data<Elem = f64>,
+{
+    if x.is_empty() {
+        return Err(ModelError::InputValidationError(
+            "Cannot predict on empty dataset".to_string(),
+        ));
+    }
+
+    if x.ncols() != expected_features {
+        return Err(ModelError::InputValidationError(format!(
+            "Number of features does not match training data, expected: {}, got: {}",
+            expected_features,
+            x.ncols()
+        )));
+    }
+
+    if x.iter().any(|&val| !val.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Input data contains NaN or infinite values".to_string(),
+        ));
     }
 
     Ok(())

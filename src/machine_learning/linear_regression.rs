@@ -1,10 +1,9 @@
 pub use super::RegularizationType;
-use super::helper_function::{
-    preliminary_check, validate_learning_rate, validate_max_iterations, validate_regulation_type,
-    validate_tolerance,
+use super::validation::{
+    preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
+    validate_regularization_type, validate_tolerance,
 };
 use crate::error::ModelError;
-use crate::math::sum_of_squared_errors;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
@@ -149,7 +148,7 @@ impl LinearRegression {
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
         validate_tolerance(tolerance)?;
-        validate_regulation_type(regularization_type)?;
+        validate_regularization_type(regularization_type)?;
 
         Ok(LinearRegression {
             coefficients: None,
@@ -166,7 +165,6 @@ impl LinearRegression {
     // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
-    get_field!(get_max_iter, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
@@ -254,11 +252,11 @@ impl LinearRegression {
                 predictions += intercept;
             }
 
-            // Calculate errors - use borrowing to avoid moving predictions
+            // Calculate errors once; the same vector feeds both the cost and the gradient.
             error_vec.assign(&(&predictions - y));
 
-            // Calculate cost using math module's sum_of_squared_errors
-            let sse = sum_of_squared_errors(&predictions, &y);
+            // Cost (sum of squared errors) reuses the error vector: SSE = e·e
+            let sse = error_vec.dot(&error_vec);
 
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
@@ -413,36 +411,11 @@ impl LinearRegression {
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted
-        if self.coefficients.is_none() {
-            return Err(ModelError::NotFitted);
-        }
-
-        let coeffs = self.coefficients.as_ref().unwrap();
+        // Check if model has been fitted, then validate the prediction input
+        let coeffs = self.coefficients.as_ref().ok_or(ModelError::NotFitted)?;
         let intercept = self.intercept.unwrap_or(0.0);
 
-        // Check for empty input data
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check feature dimension match
-        if x.ncols() != coeffs.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, coefficients: {}",
-                x.ncols(),
-                coeffs.len()
-            )));
-        }
-
-        // Check for invalid values in input data
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        validate_predict_input(x, coeffs.len())?;
 
         // Calculate predictions using matrix operations
         let mut predictions = x.dot(coeffs);
@@ -486,7 +459,7 @@ impl LinearRegression {
         S: Data<Elem = f64>,
     {
         self.fit(x, y)?;
-        Ok(self.predict(x)?)
+        self.predict(x)
     }
 
     model_save_and_load_methods!(LinearRegression);

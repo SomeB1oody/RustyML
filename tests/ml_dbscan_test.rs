@@ -119,9 +119,7 @@ fn test_predict() {
     let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     dbscan.fit(&train_data.view()).unwrap();
 
-    let predictions = dbscan
-        .predict(&train_data.view(), &new_data.view())
-        .unwrap();
+    let predictions = dbscan.predict(&new_data.view()).unwrap();
     assert_eq!(predictions.len(), new_data.nrows());
 }
 
@@ -150,12 +148,10 @@ fn test_fit_predict() {
 
 #[test]
 fn test_predict_before_fit() {
-    let data = arr2(&[[1.0, 2.0], [1.1, 2.2]]);
-
     let new_data = arr2(&[[1.0, 2.1]]);
 
     let dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    match dbscan.predict(&data.view(), &new_data.view()) {
+    match dbscan.predict(&new_data.view()) {
         Err(ModelError::NotFitted) => assert!(true),
         _ => panic!("Expected NotFitted error"),
     }

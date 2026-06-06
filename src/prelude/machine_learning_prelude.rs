@@ -1,3 +1,4 @@
+pub use crate::machine_learning::traits::{Fit, Predict};
 pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
 
 pub use crate::machine_learning::dbscan::DBSCAN;

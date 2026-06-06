@@ -6,7 +6,7 @@ use rustyml::machine_learning::svc::SVC;
 #[test]
 fn test_svc_constructor() {
     // Test basic constructor
-    let svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100).unwrap();
+    let svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100, None).unwrap();
 
     assert_eq!(svc.get_regularization_parameter(), 1.0);
     assert_eq!(svc.get_tolerance(), 0.001);
@@ -63,7 +63,7 @@ fn test_fit_and_predict_linear() {
 
     let y = arr1(&[1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0]);
 
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 0.001, 10000).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 0.001, 10000, Some(42)).unwrap();
 
     // Train the model
     let fit_result = svc.fit(&x.view(), &y.view());
@@ -105,7 +105,14 @@ fn test_fit_and_predict_rbf() {
     // XOR-like problem: (0,0)->-1, (0,1)->1, (1,0)->1, (1,1)->-1
     let y = arr1(&[-1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, -1.0]);
 
-    let mut svc = SVC::new(KernelType::RBF { gamma: 10.0 }, 10.0, 0.001, 10000).unwrap();
+    let mut svc = SVC::new(
+        KernelType::RBF { gamma: 10.0 },
+        10.0,
+        0.001,
+        10000,
+        Some(42),
+    )
+    .unwrap();
 
     // Train the model
     let fit_result = svc.fit(&x.view(), &y.view());
@@ -158,6 +165,7 @@ fn test_different_kernels() {
         1.0,
         0.001,
         100,
+        None,
     )
     .unwrap();
 
@@ -169,10 +177,11 @@ fn test_different_kernels() {
         1.0,
         0.001,
         100,
+        None,
     )
     .unwrap();
 
-    let cosine_svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100).unwrap();
+    let cosine_svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100, None).unwrap();
 
     // Ensure kernel types are correctly matched
     match poly_svc.get_kernel() {
@@ -204,7 +213,7 @@ fn test_different_kernels() {
 
 #[test]
 fn test_cosine_kernel_constructor() {
-    let svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100).unwrap();
+    let svc = SVC::new(KernelType::Cosine, 1.0, 0.001, 100, None).unwrap();
 
     match svc.get_kernel() {
         KernelType::Cosine => (),
@@ -219,7 +228,7 @@ fn test_decision_function() {
 
     let y = arr1(&[1.0, 1.0, -1.0, -1.0]);
 
-    let mut svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 1.0, 0.001, 100, None).unwrap();
     svc.fit(&x.view(), &y.view()).unwrap();
 
     // Get decision scores

@@ -1,8 +1,10 @@
-use super::helper_function::{preliminary_check, validate_max_iterations, validate_tolerance};
+use super::validation::{
+    preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
+};
 use crate::error::ModelError;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
 use ndarray_rand::rand::{RngCore, rng};
@@ -193,13 +195,12 @@ impl KMeans {
     ///
     /// # Parameters
     ///
-    /// * `x` - Data point as a 2D array view
+    /// * `sample` - Data point as a 1D array view
     ///
     /// # Returns
     ///
     /// * `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
-    fn closest_centroid(&self, x: &ArrayView2<f64>) -> Result<(usize, f64), ModelError> {
-        let sample = x.row(0);
+    fn closest_centroid(&self, sample: ArrayView1<f64>) -> (usize, f64) {
         let centroids = self.centroids.as_ref().unwrap();
 
         let mut min_dist = f64::MAX;
@@ -213,7 +214,7 @@ impl KMeans {
             }
         }
 
-        Ok((min_idx, min_dist))
+        (min_idx, min_dist)
     }
 
     /// Initializes cluster centroids using K-means++ algorithm.
@@ -465,9 +466,11 @@ impl KMeans {
                 }
             }
 
-            self.centroids = Some(new_centroids);
-            // Re-allocate for next iteration if needed
-            new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
+            // Install the freshly computed centroids and recycle the previous buffer
+            // for the next iteration (it gets zeroed at the top of the loop), avoiding
+            // a centroid-matrix allocation on every iteration.
+            let previous = self.centroids.replace(new_centroids);
+            new_centroids = previous.expect("centroids are initialized before the loop starts");
         }
 
         // Finish progress bar with final statistics
@@ -513,51 +516,16 @@ impl KMeans {
     where
         S: Data<Elem = f64>,
     {
-        if self.centroids.is_none() {
-            return Err(ModelError::NotFitted);
-        }
+        let centroids = self.centroids.as_ref().ok_or(ModelError::NotFitted)?;
+        validate_predict_input(data, centroids.ncols())?;
 
-        // Check for empty input data
-        if data.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check for invalid values in input data
-        if data.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        let n_features = data.shape()[1];
-
-        // Verify feature dimensions match
-        let expected_features = self.centroids.as_ref().unwrap().shape()[1];
-        if n_features != expected_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: expected {}, got {}",
-                expected_features, n_features
-            )));
-        }
-
-        let labels: Result<Vec<usize>, ModelError> = data
+        let labels: Vec<usize> = data
             .outer_iter()
             .into_par_iter()
-            .map(|sample| {
-                let sample_shaped = sample.to_shape((1, n_features)).map_err(|_| {
-                    ModelError::InputValidationError(
-                        "Failed to reshape sample during prediction".to_string(),
-                    )
-                })?;
-                let sample_view = sample_shaped.view();
-                let (closest_idx, _) = self.closest_centroid(&sample_view)?;
-                Ok(closest_idx)
-            })
+            .map(|sample| self.closest_centroid(sample).0)
             .collect();
 
-        Ok(Array1::from(labels?))
+        Ok(Array1::from(labels))
     }
 
     /// Fits the model and predicts cluster indices for the input data.

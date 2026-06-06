@@ -105,7 +105,7 @@ fn test_meanshift_predict() {
         [25.0, 25.0],   // Should belong to the third cluster
     ]);
 
-    let predictions = ms.predict(test_points.view()).unwrap();
+    let predictions = ms.predict(&test_points).unwrap();
     assert_eq!(predictions.len(), 3);
 
     // Check that the predicted labels match the expected labels

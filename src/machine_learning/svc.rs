@@ -1,9 +1,11 @@
-use super::helper_function::{preliminary_check, validate_max_iterations, validate_tolerance};
+use super::parallel::{map_collect, try_map_collect};
+use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 pub use crate::KernelType;
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
-use ndarray_rand::rand::random_range;
+use ndarray_rand::rand::rngs::StdRng;
+use ndarray_rand::rand::{Rng, SeedableRng, rng};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
     ParallelIterator,
@@ -29,6 +31,7 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 /// - `tol` - Tolerance for stopping criterion
 /// - `max_iter` - Maximum number of iterations for the optimization algorithm
 /// - `eps` - Small value for numerical stability in calculations
+/// - `random_state` - Optional seed for the SMO working-set selection, enabling reproducible training
 ///
 /// # Examples
 /// ```rust
@@ -42,9 +45,10 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 /// // Initialize SVM classifier with RBF kernel
 /// let mut svc = SVC::new(
 ///     KernelType::RBF { gamma: 0.5 },
-///     1.0,  // regularization parameter
-///     1e-3, // tolerance
-///     100   // max iterations
+///     1.0,      // regularization parameter
+///     1e-3,     // tolerance
+///     100,      // max iterations
+///     Some(42), // random seed for reproducibility
 /// ).expect("Failed to create SVC");
 ///
 /// // Train the model
@@ -67,6 +71,7 @@ pub struct SVC {
     max_iter: usize,
     eps: f64,
     n_iter: Option<usize>,
+    random_state: Option<u64>,
 }
 
 impl Default for SVC {
@@ -79,6 +84,7 @@ impl Default for SVC {
     /// - `tol` - 0.001
     /// - `max_iter` - 1000
     /// - `eps` - 1e-8
+    /// - `random_state` - None (non-deterministic working-set selection)
     fn default() -> Self {
         SVC {
             kernel: KernelType::RBF { gamma: 0.1 },
@@ -91,6 +97,7 @@ impl Default for SVC {
             max_iter: 1000,
             eps: 1e-8,
             n_iter: None,
+            random_state: None,
         }
     }
 }
@@ -104,6 +111,7 @@ impl SVC {
     /// - `regularization_param` - The regularization parameter (C) that trades off margin size and training error
     /// - `tol` - Tolerance for the stopping criterion
     /// - `max_iter` - Maximum number of iterations for the optimization algorithm
+    /// - `random_state` - Optional seed for the SMO working-set selection. Pass `Some(seed)` for reproducible training, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
@@ -117,6 +125,7 @@ impl SVC {
         regularization_param: f64,
         tol: f64,
         max_iter: usize,
+        random_state: Option<u64>,
     ) -> Result<Self, ModelError> {
         // Validate regularization parameter
         if regularization_param <= 0.0 || !regularization_param.is_finite() {
@@ -143,6 +152,7 @@ impl SVC {
             max_iter,
             eps: 1e-8,
             n_iter: None,
+            random_state,
         })
     }
 
@@ -153,6 +163,7 @@ impl SVC {
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_epsilon, eps, f64);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
+    get_field!(get_random_state, random_state, Option<u64>);
     get_field_as_ref!(get_alphas, alphas, Option<&Array1<f64>>);
     get_field_as_ref!(get_support_vectors, support_vectors, Option<&Array2<f64>>);
     get_field_as_ref!(
@@ -161,52 +172,6 @@ impl SVC {
         Option<&Array1<f64>>
     );
     get_field!(get_bias, bias, Option<f64>);
-
-    /// Calculates the kernel function value between two vectors
-    ///
-    /// # Parameters
-    ///
-    /// - `x1` - First input vector
-    /// - `x2` - Second input vector
-    ///
-    /// # Returns
-    ///
-    /// * `f64` - The kernel function value between the two input vectors
-    fn kernel_function(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
-        match self.kernel {
-            KernelType::Linear => {
-                // K(x, y) = x·y
-                x1.dot(&x2)
-            }
-            KernelType::Poly {
-                degree,
-                gamma,
-                coef0,
-            } => {
-                // K(x, y) = (gamma·x·y + coef0)^degree
-                (gamma * x1.dot(&x2) + coef0).powf(degree as f64)
-            }
-            KernelType::RBF { gamma } => {
-                // K(x, y) = exp(-gamma·|x-y|^2)
-                let diff = &x1 - &x2;
-                let squared_norm = diff.dot(&diff);
-                (-gamma * squared_norm).exp()
-            }
-            KernelType::Sigmoid { gamma, coef0 } => {
-                // K(x, y) = tanh(gamma·x·y + coef0)
-                (gamma * x1.dot(&x2) + coef0).tanh()
-            }
-            KernelType::Cosine => {
-                // K(x, y) = (x dot y) / (||x|| * ||y||)
-                let norm_product = (x1.dot(&x1) * x2.dot(&x2)).sqrt();
-                if norm_product <= f64::EPSILON {
-                    0.0
-                } else {
-                    x1.dot(&x2) / norm_product
-                }
-            }
-        }
-    }
 
     /// Computes the kernel matrix (Gram matrix) for the given data
     ///
@@ -234,7 +199,7 @@ impl SVC {
             pairs
                 .par_iter()
                 .map(|&(i, j)| {
-                    let k_val = self.kernel_function(x.row(i), x.row(j));
+                    let k_val = self.kernel.compute(x.row(i), x.row(j));
                     ((i, j), k_val)
                 })
                 .collect()
@@ -242,7 +207,7 @@ impl SVC {
             pairs
                 .iter()
                 .map(|&(i, j)| {
-                    let k_val = self.kernel_function(x.row(i), x.row(j));
+                    let k_val = self.kernel.compute(x.row(i), x.row(j));
                     ((i, j), k_val)
                 })
                 .collect()
@@ -327,14 +292,9 @@ impl SVC {
 
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
-        // Validate labels (SVC-specific requirement)
-        let y_vec: Vec<f64> = y.to_vec();
-        let label_check = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            y_vec.par_iter().all(|&yi| yi == 1.0 || yi == -1.0)
-        } else {
-            y_vec.iter().all(|&yi| yi == 1.0 || yi == -1.0)
-        };
-        if !label_check {
+        // Validate labels (SVC-specific requirement). This is a cheap O(n) scan,
+        // so it runs sequentially without cloning the label vector.
+        if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
             return Err(ModelError::InputValidationError(
                 "All labels must be either 1.0 or -1.0".to_string(),
             ));
@@ -348,35 +308,29 @@ impl SVC {
         let kernel_matrix = self.compute_kernel_matrix(x);
 
         // Validate kernel matrix
-        let kernel_vec: Vec<f64> = kernel_matrix.iter().cloned().collect();
-        let kernel_invalid = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            kernel_vec.par_iter().any(|&val| !val.is_finite())
-        } else {
-            kernel_vec.iter().any(|&val| !val.is_finite())
-        };
-        if kernel_invalid {
+        if kernel_matrix.iter().any(|&val| !val.is_finite()) {
             return Err(ModelError::ProcessingError(
                 "Kernel matrix contains invalid values - check kernel parameters".to_string(),
             ));
         }
 
         // Initialize error cache
-        let error_cache: Vec<f64> = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            (0..n_samples)
-                .into_par_iter()
-                .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
-                .collect()
-        } else {
-            (0..n_samples)
-                .map(|i| self.decision_function_internal(i, &alphas, &kernel_matrix, y, b))
-                .collect()
-        };
+        let error_cache = map_collect(n_samples, SVC_PARALLEL_THRESHOLD, |i| {
+            self.compute_error(i, &alphas, &kernel_matrix, y, b)
+        });
         let mut error_cache = Array1::from(error_cache);
 
         // SMO main loop with improved convergence tracking
         let mut num_changed_alphas;
         let mut examine_all = true;
         let mut iteration_count = 0;
+
+        // RNG for SMO working-set selection. Seeding it from `random_state` makes
+        // training fully reproducible; otherwise fall back to a non-deterministic seed.
+        let mut rng = match self.random_state {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_rng(&mut rng()),
+        };
 
         // Create progress bar for SMO iterations
         #[cfg(feature = "show_progress")]
@@ -419,6 +373,7 @@ impl SVC {
                     y,
                     &mut b,
                     &mut error_cache,
+                    &mut rng,
                 );
             }
 
@@ -451,12 +406,10 @@ impl SVC {
         let support_indices: Vec<usize> = if n_samples >= SVC_PARALLEL_THRESHOLD {
             (0..n_samples)
                 .into_par_iter()
-                .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
+                .filter(|&i| alphas[i] > self.eps)
                 .collect()
         } else {
-            (0..n_samples)
-                .filter_map(|i| if alphas[i] > self.eps { Some(i) } else { None })
-                .collect()
+            (0..n_samples).filter(|&i| alphas[i] > self.eps).collect()
         };
 
         if support_indices.is_empty() {
@@ -486,13 +439,7 @@ impl SVC {
         }
 
         // Final validation of extracted values
-        let alphas_vec: Vec<f64> = support_vector_alphas.to_vec();
-        let alphas_invalid = if support_indices.len() >= SVC_PARALLEL_THRESHOLD {
-            alphas_vec.par_iter().any(|&val| !val.is_finite())
-        } else {
-            alphas_vec.iter().any(|&val| !val.is_finite())
-        };
-        if alphas_invalid {
+        if support_vector_alphas.iter().any(|&val| !val.is_finite()) {
             return Err(ModelError::ProcessingError(
                 "Support vector alphas contain invalid values".to_string(),
             ));
@@ -566,7 +513,7 @@ impl SVC {
                 alphas,
                 support_vector_labels,
                 bias,
-                |x1, x2| self.kernel_function(x1, x2),
+                |x1, x2| self.kernel.compute(x1, x2),
             );
 
             // Handle numerical issues more robustly
@@ -579,24 +526,7 @@ impl SVC {
             }
         };
 
-        let prediction_results: Vec<Result<f64, ModelError>> =
-            if n_samples >= SVC_PARALLEL_THRESHOLD {
-                (0..n_samples)
-                    .into_par_iter()
-                    .map(compute_prediction)
-                    .collect()
-            } else {
-                (0..n_samples).map(compute_prediction).collect()
-            };
-
-        // Check if any errors occurred during parallel computation
-        let mut predictions = Vec::with_capacity(n_samples);
-        for result in prediction_results {
-            match result {
-                Ok(pred) => predictions.push(pred),
-                Err(e) => return Err(e),
-            }
-        }
+        let predictions = try_map_collect(n_samples, SVC_PARALLEL_THRESHOLD, compute_prediction)?;
 
         Ok(Array1::from(predictions))
     }
@@ -660,7 +590,7 @@ impl SVC {
                 alphas,
                 support_vector_labels,
                 bias,
-                |x1, x2| self.kernel_function(x1, x2),
+                |x1, x2| self.kernel.compute(x1, x2),
             );
             val.fill(decision_val);
         };
@@ -691,10 +621,14 @@ impl SVC {
     /// - `y` - Target labels
     /// - `b` - Current bias term
     /// - `error_cache` - Cached error values
+    /// - `rng` - Random number generator used for the randomized working-set fallback
     ///
     /// # Returns
     ///
     /// * `usize` - Number of alpha values changed (0 or 1)
+    // SMO threads the full optimization state (alphas, kernel matrix, bias, error
+    // cache, RNG) through this routine; bundling it would obscure the algorithm.
+    #[allow(clippy::too_many_arguments)]
     fn examine_example<S>(
         &self,
         i2: usize,
@@ -703,6 +637,7 @@ impl SVC {
         y: &ArrayBase<S, Ix1>,
         b: &mut f64,
         error_cache: &mut Array1<f64>,
+        rng: &mut StdRng,
     ) -> usize
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -724,26 +659,26 @@ impl SVC {
 
             // Try non-bound alphas randomly
             let n_samples = alphas.len();
-            let mut start = random_range(0..n_samples);
+            let mut start = rng.random_range(0..n_samples);
 
             for _ in 0..n_samples {
                 i1 = start;
-                if alphas[i1] > 0.0 && alphas[i1] < self.regularization_param && i1 != i2 {
-                    if self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
-                        return 1;
-                    }
+                if alphas[i1] > 0.0
+                    && alphas[i1] < self.regularization_param
+                    && i1 != i2
+                    && self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache)
+                {
+                    return 1;
                 }
                 start = (start + 1) % n_samples;
             }
 
             // Try all alphas randomly
-            start = random_range(0..n_samples);
+            start = rng.random_range(0..n_samples);
             for _ in 0..n_samples {
                 i1 = start;
-                if i1 != i2 {
-                    if self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
-                        return 1;
-                    }
+                if i1 != i2 && self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
+                    return 1;
                 }
                 start = (start + 1) % n_samples;
             }
@@ -817,6 +752,9 @@ impl SVC {
     /// # Returns
     ///
     /// * `bool` - `true` if the alpha values were changed, `false` otherwise
+    // SMO threads the full optimization state (alphas, kernel matrix, bias, error
+    // cache) through this routine; bundling it would obscure the algorithm.
+    #[allow(clippy::too_many_arguments)]
     fn take_step<S>(
         &self,
         i1: usize,
@@ -907,6 +845,7 @@ impl SVC {
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
         // Update bias
+        let b_old = *b;
         let b1 =
             *b + e1 + y1 * (alpha1_new - alpha1_old) * k11 + y2 * (alpha2_new - alpha2_old) * k12;
         let b2 =
@@ -924,47 +863,34 @@ impl SVC {
         alphas[i1] = alpha1_new;
         alphas[i2] = alpha2_new;
 
-        // Update error cache
-        self.update_error_cache(alphas, kernel_matrix, &y, *b, error_cache);
+        // Incrementally update the error cache in O(n). Only the two changed alphas
+        // and the bias shift affect each cached error E_i = f(x_i) - y_i, so there is
+        // no need to recompute the full decision function for every sample (which would
+        // make each SMO step O(n^2)). Uses kernel symmetry: K[i1, i] == K[i, i1].
+        let coeff1 = y1 * (alpha1_new - alpha1_old);
+        let coeff2 = y2 * (alpha2_new - alpha2_old);
+        let delta_b = *b - b_old;
+        let apply = |i: usize, e: &mut f64| {
+            *e += coeff1 * kernel_matrix[[i1, i]] + coeff2 * kernel_matrix[[i2, i]] + delta_b;
+        };
+        if error_cache.len() >= SVC_PARALLEL_THRESHOLD {
+            error_cache
+                .indexed_iter_mut()
+                .par_bridge()
+                .for_each(|(i, e)| apply(i, e));
+        } else {
+            error_cache
+                .indexed_iter_mut()
+                .for_each(|(i, e)| apply(i, e));
+        }
 
         true
     }
 
-    /// Updates the error cache after changes to alpha values
+    /// Computes the prediction error `E_i = f(x_i) - y_i` for a training example.
     ///
-    /// # Parameters
-    ///
-    /// - `alphas` - Current alpha values
-    /// - `kernel_matrix` - Pre-computed kernel matrix
-    /// - `y` - Target labels
-    /// - `b` - Current bias term
-    /// - `error_cache` - Error cache to update
-    fn update_error_cache<S>(
-        &self,
-        alphas: &Array1<f64>,
-        kernel_matrix: &Array2<f64>,
-        y: &ArrayBase<S, Ix1>,
-        b: f64,
-        error_cache: &mut Array1<f64>,
-    ) where
-        S: Data<Elem = f64> + Send + Sync,
-    {
-        let n_samples = alphas.len();
-        if n_samples >= SVC_PARALLEL_THRESHOLD {
-            error_cache
-                .indexed_iter_mut()
-                .par_bridge()
-                .for_each(|(i, error)| {
-                    *error = self.decision_function_internal(i, alphas, kernel_matrix, y, b);
-                });
-        } else {
-            error_cache.indexed_iter_mut().for_each(|(i, error)| {
-                *error = self.decision_function_internal(i, alphas, kernel_matrix, y, b);
-            });
-        }
-    }
-
-    /// Calculates the decision function value for a single training example
+    /// This is the quantity cached in the SMO error cache (not the raw decision
+    /// function `f(x_i)`, which omits the `- y_i` term).
     ///
     /// # Parameters
     ///
@@ -976,8 +902,8 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `f64` - The decision function value
-    fn decision_function_internal<S>(
+    /// * `f64` - The prediction error for example `i`
+    fn compute_error<S>(
         &self,
         i: usize,
         alphas: &Array1<f64>,
@@ -990,13 +916,12 @@ impl SVC {
     {
         let n_samples = alphas.len();
 
-        // Compute sum
+        // Compute the decision-function sum over non-zero alphas
         let sum: f64 = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            let indices: Vec<usize> = (0..n_samples).collect();
-            indices
-                .par_iter()
-                .filter(|&&j| alphas[j] > 0.0) // Only consider non-zero alphas
-                .map(|&j| alphas[j] * y[j] * kernel_matrix[[i, j]])
+            (0..n_samples)
+                .into_par_iter()
+                .filter(|&j| alphas[j] > 0.0) // Only consider non-zero alphas
+                .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
                 .sum()
         } else {
             (0..n_samples)
@@ -1006,6 +931,35 @@ impl SVC {
         };
 
         sum - y[i] + b
+    }
+
+    /// Fits the model to the training data and then predicts labels for the same data.
+    ///
+    /// A convenience method that sequentially executes `fit` and then `predict`.
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Training data matrix where each row is a sample
+    /// - `y` - Target labels (must be +1.0 or -1.0)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<f64>, ModelError>` - Predicted class labels for the training data
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If input data is invalid
+    /// - `ModelError::ProcessingError` - If an error occurs during fitting or prediction
+    pub fn fit_predict<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<Array1<f64>, ModelError>
+    where
+        S: Data<Elem = f64> + Send + Sync,
+    {
+        self.fit(x, y)?;
+        self.predict(x)
     }
 
     model_save_and_load_methods!(SVC);

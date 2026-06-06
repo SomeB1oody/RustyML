@@ -1,9 +1,12 @@
-use super::helper_function::{preliminary_check, validate_max_iterations, validate_tolerance};
+use super::parallel::map_collect;
+use super::validation::{
+    preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
+};
 use crate::error::ModelError;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{SeedableRng, rng, seq::SliceRandom};
 use rayon::prelude::{
@@ -20,8 +23,6 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// data points towards areas of higher density. Each data point moves in the direction of
 /// the mean of points within its current window until convergence. The algorithm does not
 /// require specifying the number of clusters in advance.
-///
-/// # Fields
 ///
 /// # Fields
 ///
@@ -155,7 +156,6 @@ impl MeanShift {
         n_samples_per_center,
         Option<&Array1<usize>>
     );
-    get_field!(get_n_iter, n_iter, Option<usize>);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
@@ -209,8 +209,12 @@ impl MeanShift {
         // Determine whether to use parallel processing
         let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
 
-        // Helper function for mean shift iteration on a single seed
-        let process_seed = |seed_idx: usize| -> Result<(Array1<f64>, usize), ModelError> {
+        // Helper function for mean shift iteration on a single seed.
+        // Seeds are independent and processed in parallel below, so this inner loop
+        // stays sequential to avoid nesting Rayon pools. The weight computation and the
+        // weighted-sum accumulation are fused into one pass to avoid allocating a
+        // per-iteration weight buffer.
+        let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
             let mut center = x.row(seed_idx).to_owned();
             let mut completed_iterations = 0;
 
@@ -218,32 +222,11 @@ impl MeanShift {
                 let mut new_center = Array1::zeros(n_features);
                 let mut weight_sum = 0.0;
 
-                // Calculate distances and weights
-                let weights: Result<Vec<f64>, ModelError> = if use_parallel {
-                    (0..n_samples)
-                        .into_par_iter()
-                        .map(|i| {
-                            let point = x.row(i);
-                            let dist = squared_euclidean_distance_row(&center, &point);
-                            Ok((-gamma * dist).exp())
-                        })
-                        .collect()
-                } else {
-                    (0..n_samples)
-                        .map(|i| {
-                            let point = x.row(i);
-                            let dist = squared_euclidean_distance_row(&center, &point);
-                            Ok((-gamma * dist).exp())
-                        })
-                        .collect()
-                };
-
-                let weights = weights?;
-
-                // Calculate weighted average (optimized accumulation)
-                for (i, &weight) in weights.iter().enumerate() {
+                for i in 0..n_samples {
+                    let point = x.row(i);
+                    let dist = squared_euclidean_distance_row(&center, &point);
+                    let weight = (-gamma * dist).exp();
                     if weight > 0.0 {
-                        let point = x.row(i);
                         for j in 0..n_features {
                             new_center[j] += point[j] * weight;
                         }
@@ -267,7 +250,7 @@ impl MeanShift {
                 }
             }
 
-            Ok((center, completed_iterations))
+            (center, completed_iterations)
         };
 
         // Create progress bar for seed processing
@@ -281,9 +264,10 @@ impl MeanShift {
             pb
         };
 
-        // Process mean shift for each seed point
-        let results: Result<Vec<(Array1<f64>, usize)>, ModelError> = if use_parallel {
-            let results: Result<Vec<_>, _> = seeds
+        // Process mean shift for each seed point. Seeds are independent, so this is the
+        // single level at which parallelism is applied.
+        let results: Vec<(Array1<f64>, usize)> = if use_parallel {
+            seeds
                 .par_iter()
                 .map(|&seed_idx| {
                     let result = process_seed(seed_idx);
@@ -291,8 +275,7 @@ impl MeanShift {
                     progress_bar.inc(1);
                     result
                 })
-                .collect();
-            results
+                .collect()
         } else {
             seeds
                 .iter()
@@ -304,8 +287,6 @@ impl MeanShift {
                 })
                 .collect()
         };
-
-        let results = results?;
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("All seeds processed");
 
@@ -323,7 +304,7 @@ impl MeanShift {
 
             // Find closest existing center within bandwidth
             for (i, unique_center) in unique_centers.iter_mut().enumerate() {
-                let distance_squared = squared_euclidean_distance_row(&center, &unique_center);
+                let distance_squared = squared_euclidean_distance_row(&center, unique_center);
 
                 if distance_squared < bandwidth_squared {
                     // Update existing center using weighted average
@@ -357,13 +338,13 @@ impl MeanShift {
         }
 
         // Helper function for finding nearest cluster label
-        let find_label = |i: usize| -> Result<usize, ModelError> {
+        let find_label = |i: usize| -> usize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
             let mut label = 0;
 
             for (j, center) in unique_centers.iter().enumerate() {
-                let dist_squared = squared_euclidean_distance_row(&point, &center);
+                let dist_squared = squared_euclidean_distance_row(&point, center);
                 if dist_squared < min_dist_squared {
                     min_dist_squared = dist_squared;
                     label = j;
@@ -372,20 +353,14 @@ impl MeanShift {
 
             // If not cluster_all and distance is too far, mark as outlier
             if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                Ok(n_clusters) // Use n_clusters as outlier label
+                n_clusters // Use n_clusters as outlier label
             } else {
-                Ok(label)
+                label
             }
         };
 
         // Assign cluster labels to each data point
-        let labels: Result<Vec<usize>, ModelError> = if use_parallel {
-            (0..n_samples).into_par_iter().map(find_label).collect()
-        } else {
-            (0..n_samples).map(find_label).collect()
-        };
-
-        let labels = labels?;
+        let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_label);
 
         self.cluster_centers = Some(cluster_centers);
         self.labels = Some(Array1::from(labels));
@@ -398,7 +373,7 @@ impl MeanShift {
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
+    /// - `x` - The input data as a 2D array where each row is a sample.
     ///
     /// # Returns
     ///
@@ -412,46 +387,24 @@ impl MeanShift {
     /// # Performance
     ///
     /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
-    pub fn predict(&self, x: ArrayView2<f64>) -> Result<Array1<usize>, ModelError> {
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    where
+        S: Data<Elem = f64> + Sync,
+    {
         // Check if model has been fitted
-        if self.cluster_centers.is_none() {
-            return Err(ModelError::NotFitted);
-        }
+        let centers = self.cluster_centers.as_ref().ok_or(ModelError::NotFitted)?;
 
-        let centers = self.cluster_centers.as_ref().unwrap();
+        // Validate input against the feature count seen during fitting
+        validate_predict_input(x, centers.ncols())?;
 
-        // Check for empty input data
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot predict on empty dataset".to_string(),
-            ));
-        }
-
-        // Check if input feature dimensions match training data
-        if x.shape()[1] != centers.shape()[1] {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, training features: {}",
-                x.shape()[1],
-                centers.shape()[1]
-            )));
-        }
-
-        // Check for invalid values in input data
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        let n_samples = x.shape()[0];
-        let n_clusters = centers.shape()[0];
+        let n_samples = x.nrows();
+        let n_clusters = centers.nrows();
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
-        // Determine whether to use parallel processing
-        let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
-
-        // Helper function for finding nearest cluster
-        let find_nearest = |i: usize| -> Result<usize, ModelError> {
+        // Finds the nearest cluster center for one sample, or the outlier label
+        // (`n_clusters`) when `cluster_all` is disabled and the point lies farther
+        // than the bandwidth from every center.
+        let find_nearest = |i: usize| -> usize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
             let mut label = 0;
@@ -465,22 +418,17 @@ impl MeanShift {
                 }
             }
 
-            // If not cluster_all and distance is too far, mark as outlier
             if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                Ok(n_clusters) // Use n_clusters as outlier label
+                n_clusters
             } else {
-                Ok(label)
+                label
             }
         };
 
         // Process all samples with optional parallelization
-        let labels: Result<Vec<usize>, ModelError> = if use_parallel {
-            (0..n_samples).into_par_iter().map(find_nearest).collect()
-        } else {
-            (0..n_samples).map(find_nearest).collect()
-        };
+        let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_nearest);
 
-        Ok(Array1::from(labels?))
+        Ok(Array1::from(labels))
     }
 
     /// Fits the model to the input data and predicts cluster labels.
@@ -502,27 +450,22 @@ impl MeanShift {
         S: Data<Elem = f64> + Sync + Send,
     {
         self.fit(x)?;
-        self.labels.clone().ok_or(ModelError::NotFitted)
+        Ok(self.labels.clone().unwrap())
     }
 
-    /// Estimates the bandwidth to use with the MeanShift algorithm.
+    /// Computes seed points by binning the feature space onto a grid.
     ///
-    /// The bandwidth is estimated based on the pairwise distances between a subset of points.
+    /// Each sample is mapped to a grid cell of side length `bandwidth`, and one
+    /// representative point per non-empty cell is returned. This reduces the number
+    /// of seeds the mean-shift iterations have to process on dense datasets.
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
-    /// - `quantile` - The quantile of the pairwise distances to use as the bandwidth.
-    /// - `n_samples` - The number of samples to use for the distance calculation.
-    /// - `random_state` - Seed for random number generation.
+    /// - `x` - The input data as a 2D array where each row is a sample.
     ///
     /// # Returns
     ///
-    /// - `Result<f64, ModelError>` - A Result containing the estimated bandwidth or a ModelError.
-    ///
-    /// # Errors
-    ///
-    /// - `ModelError::InputValidationError` - If `quantile` is not in range \[0, 1\].
+    /// - `Vec<usize>` - Indices of the selected seed points (one per occupied grid cell).
     fn get_bin_seeds<S>(&self, x: &ArrayBase<S, Ix2>) -> Vec<usize>
     where
         S: Data<Elem = f64> + Sync + Send,
@@ -557,7 +500,7 @@ impl MeanShift {
 
             // Lock the HashMap only when updating
             let mut bins = bins_mutex.lock().unwrap();
-            bins.entry(bin_index).or_insert_with(Vec::new).push(i);
+            bins.entry(bin_index).or_default().push(i);
         });
 
         // Get the final HashMap
@@ -604,7 +547,7 @@ where
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
         return Err(ModelError::InputValidationError(
-            "quantile should be in range [0, 1]".to_string(),
+            "quantile must be in the open range (0, 1)".to_string(),
         ));
     }
 
@@ -661,6 +604,8 @@ where
     let mut distances = distances;
     distances.par_sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    let k = (distances.len() as f64 * quantile) as usize;
+    // Clamp the quantile index to the last valid position so a quantile close to
+    // 1.0 (or a tiny sample) cannot index past the end and fall back to 0.0.
+    let k = ((distances.len() as f64 * quantile) as usize).min(distances.len().saturating_sub(1));
     Ok(distances.get(k).copied().unwrap_or(0.0))
 }

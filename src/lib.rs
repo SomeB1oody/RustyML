@@ -182,23 +182,14 @@
 ))]
 use serde::{Deserialize, Serialize};
 
-/// Kernel function types for Support Vector Machine
-///
-/// # Variants
-/// - `Linear` - Linear kernel: K(x, y) = x·y
-/// - `Poly` - Polynomial kernel: K(x, y) = (gamma·x·y + coef0)^degree
-/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma·|x-y|^2)
-/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma·x·y + coef0)
-/// - `Cosine` - Cosine kernel: K(x, y) = (x dot y) / (||x|| * ||y||)
+/// Shared configuration types (kernels, distance metrics, regularization).
 #[cfg(any(feature = "machine_learning", feature = "utility"))]
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
-pub enum KernelType {
-    Linear,
-    Poly { degree: u32, gamma: f64, coef0: f64 },
-    RBF { gamma: f64 },
-    Sigmoid { gamma: f64, coef0: f64 },
-    Cosine,
-}
+pub mod types;
+
+/// `KernelType` is re-exported at the crate root for backward compatibility; its
+/// canonical home is the [`types`] module.
+#[cfg(any(feature = "machine_learning", feature = "utility"))]
+pub use types::KernelType;
 
 #[cfg(feature = "show_progress")]
 use indicatif::{ProgressBar, ProgressStyle};

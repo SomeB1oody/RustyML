@@ -531,28 +531,7 @@ impl KernelPCA {
 
     /// Evaluates the configured kernel on two samples
     fn kernel_function(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
-        match self.kernel {
-            KernelType::Linear => x1.dot(&x2),
-            KernelType::Poly {
-                degree,
-                gamma,
-                coef0,
-            } => (gamma * x1.dot(&x2) + coef0).powf(degree as f64),
-            KernelType::RBF { gamma } => {
-                let diff = &x1 - &x2;
-                let squared_norm = diff.dot(&diff);
-                (-gamma * squared_norm).exp()
-            }
-            KernelType::Sigmoid { gamma, coef0 } => (gamma * x1.dot(&x2) + coef0).tanh(),
-            KernelType::Cosine => {
-                let norm_product = (x1.dot(&x1) * x2.dot(&x2)).sqrt();
-                if norm_product <= f64::EPSILON {
-                    0.0
-                } else {
-                    x1.dot(&x2) / norm_product
-                }
-            }
-        }
+        self.kernel.compute(x1, x2)
     }
 
     /// Computes the square kernel matrix for training data

@@ -1,11 +1,11 @@
 pub use super::DistanceCalculationMetric;
-use super::helper_function::preliminary_check;
+use super::parallel::map_collect;
+use super::validation::{preliminary_check, validate_predict_input};
 use crate::error::ModelError;
-use crate::math::{manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row};
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
-use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix2};
-use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
+use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::collections::VecDeque;
 
 /// Threshold for parallelization: only use parallel processing for larger datasets
@@ -44,8 +44,13 @@ pub struct DBSCAN {
     eps: f64,
     min_samples: usize,
     metric: DistanceCalculationMetric,
-    labels_: Option<Array1<isize>>,
+    labels: Option<Array1<isize>>,
     core_sample_indices: Option<Array1<usize>>,
+    /// Core-point coordinates, stored so `predict` needs only the new data rather
+    /// than the original training set.
+    core_points: Option<Array2<f64>>,
+    /// Cluster label of each stored core point (parallel to `core_points`).
+    core_point_labels: Option<Array1<isize>>,
 }
 
 impl Default for DBSCAN {
@@ -60,8 +65,10 @@ impl Default for DBSCAN {
             eps: 0.5,
             min_samples: 5,
             metric: DistanceCalculationMetric::Euclidean,
-            labels_: None,
+            labels: None,
             core_sample_indices: None,
+            core_points: None,
+            core_point_labels: None,
         }
     }
 }
@@ -106,13 +113,11 @@ impl DBSCAN {
 
         // Validate metric parameter
         match metric {
-            DistanceCalculationMetric::Minkowski(p) => {
-                if p <= 0.0 || !p.is_finite() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Minkowski p must be positive and finite, got {}",
-                        p
-                    )));
-                }
+            DistanceCalculationMetric::Minkowski(p) if (p <= 0.0 || !p.is_finite()) => {
+                return Err(ModelError::InputValidationError(format!(
+                    "Minkowski p must be positive and finite, got {}",
+                    p
+                )));
             }
             _ => {} // Euclidean and Manhattan don't need additional validation
         }
@@ -121,8 +126,10 @@ impl DBSCAN {
             eps,
             min_samples,
             metric,
-            labels_: None,
+            labels: None,
             core_sample_indices: None,
+            core_points: None,
+            core_point_labels: None,
         })
     }
 
@@ -130,23 +137,12 @@ impl DBSCAN {
     get_field!(get_epsilon, eps, f64);
     get_field!(get_min_samples, min_samples, usize);
     get_field!(get_metric, metric, DistanceCalculationMetric);
-    get_field_as_ref!(get_labels, labels_, Option<&Array1<isize>>);
+    get_field_as_ref!(get_labels, labels, Option<&Array1<isize>>);
     get_field_as_ref!(
         get_core_sample_indices,
         core_sample_indices,
         Option<&Array1<usize>>
     );
-
-    /// Computes distance between two data points using the specified metric
-    fn compute_distance(&self, p_row: ArrayView1<f64>, q_row: ArrayView1<f64>) -> f64 {
-        match self.metric {
-            DistanceCalculationMetric::Euclidean => {
-                squared_euclidean_distance_row(&p_row, &q_row).sqrt()
-            }
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&p_row, &q_row),
-            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&p_row, &q_row, p),
-        }
-    }
 
     /// Find all neighbors of point `p` (points within eps distance)
     ///
@@ -173,19 +169,19 @@ impl DBSCAN {
             // Parallel iteration through all rows, calculating distances and filtering points that satisfy the eps condition
             (0..n_samples)
                 .into_par_iter()
-                .filter_map(|q| {
+                .filter(|&q| {
                     let q_row = data.row(q);
-                    let dist = self.compute_distance(p_row, q_row);
-                    if dist <= eps { Some(q) } else { None }
+                    let dist = self.metric.distance(p_row, q_row);
+                    dist <= eps
                 })
                 .collect()
         } else {
             // Sequential iteration for smaller datasets
             (0..n_samples)
-                .filter_map(|q| {
+                .filter(|&q| {
                     let q_row = data.row(q);
-                    let dist = self.compute_distance(p_row, q_row);
-                    if dist <= eps { Some(q) } else { None }
+                    let dist = self.metric.distance(p_row, q_row);
+                    dist <= eps
                 })
                 .collect()
         };
@@ -212,7 +208,7 @@ impl DBSCAN {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        preliminary_check(&data, None)?;
+        preliminary_check(data, None)?;
 
         // Check if dataset is empty
         let n_samples = data.nrows();
@@ -240,7 +236,7 @@ impl DBSCAN {
                 continue;
             }
 
-            let neighbors = self.region_query(&data, p).map_err(|e| {
+            let neighbors = self.region_query(data, p).map_err(|e| {
                 ModelError::ProcessingError(format!("Region query failed: {:?}", e))
             })?;
 
@@ -264,7 +260,7 @@ impl DBSCAN {
                 // Assign to current cluster (could be noise or unvisited)
                 labels[q] = cluster_id;
 
-                let q_neighbors = self.region_query(&data, q).map_err(|e| {
+                let q_neighbors = self.region_query(data, q).map_err(|e| {
                     ModelError::ProcessingError(format!(
                         "Region query failed for point {}: {:?}",
                         q, e
@@ -291,8 +287,8 @@ impl DBSCAN {
                 core_samples.len()
             ));
 
-            // Check for cluster_id overflow
-            if cluster_id >= isize::MAX {
+            // Check for cluster_id overflow (the next increment would overflow)
+            if cluster_id == isize::MAX {
                 #[cfg(feature = "show_progress")]
                 pb.finish_with_message("Error: cluster ID overflow");
                 return Err(ModelError::ProcessingError(
@@ -310,145 +306,88 @@ impl DBSCAN {
             labels.iter().filter(|&&x| x == -1).count()
         ));
 
-        self.labels_ = Some(labels);
         // Convert HashSet to sorted Vec for consistent ordering
         let mut core_indices: Vec<usize> = core_samples.into_iter().collect();
         core_indices.sort_unstable();
+
+        // Store core-point coordinates and their labels so `predict` only needs the
+        // new data; the original training set is not retained.
+        let n_features = data.ncols();
+        let mut core_points = Array2::<f64>::zeros((core_indices.len(), n_features));
+        let mut core_point_labels = Array1::<isize>::zeros(core_indices.len());
+        for (i, &idx) in core_indices.iter().enumerate() {
+            core_points.row_mut(i).assign(&data.row(idx));
+            core_point_labels[i] = labels[idx];
+        }
+
+        self.labels = Some(labels);
         self.core_sample_indices = Some(Array1::from(core_indices));
+        self.core_points = Some(core_points);
+        self.core_point_labels = Some(core_point_labels);
 
         Ok(self)
     }
 
-    /// Predicts cluster labels for new data points based on trained model
+    /// Predicts cluster labels for new data points based on the trained model.
+    ///
+    /// Each new point is assigned to the cluster of its nearest core point when that
+    /// core point is within `eps`; otherwise it is labeled as noise (`-1`). Only the
+    /// core points found during `fit` are needed, so the original training set does
+    /// not have to be passed in.
     ///
     /// # Parameters
     ///
-    /// - `trained_data` - Original data array that was used for training
-    /// - `new_data` - New data points to classify
+    /// - `new_data` - New data points to classify, each row a sample
     ///
     /// # Returns
     ///
-    /// - `Ok(Array1<isize>)` - Array of predicted cluster labels
-    /// - `Err(ModelError::NotFitted)` - If the model has not been fitted yet
-    /// - `Err(ModelError::InputValidationError)` - If input validation fails or dimensions mismatch
+    /// - `Ok(Array1<isize>)` - Array of predicted cluster labels (`-1` for noise)
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If `labels_` or `core_sample_indices` are `None`
+    /// - `ModelError::NotFitted` - If the model has not been fitted yet
     /// - `ModelError::InputValidationError` - If feature dimensions don't match or data contains non-finite values
     ///
     /// # Performance
     ///
-    /// Processes new data points in parallel using a thread pool.
-    ///
-    /// # Notes
-    ///
-    /// New points are assigned to the nearest cluster if they are within `eps` distance
-    /// of a core point, otherwise they are labeled as noise (-1)
-    pub fn predict<S>(
-        &self,
-        trained_data: &ArrayBase<S, Ix2>,
-        new_data: &ArrayBase<S, Ix2>,
-    ) -> Result<Array1<isize>, ModelError>
+    /// New points are scored in parallel when the number of samples is large.
+    pub fn predict<S>(&self, new_data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // Ensure the model has been trained
-        let labels = self.labels_.as_ref().ok_or(ModelError::NotFitted)?;
-        let core_samples = self
-            .core_sample_indices
+        let core_points = self.core_points.as_ref().ok_or(ModelError::NotFitted)?;
+        let core_point_labels = self
+            .core_point_labels
             .as_ref()
             .ok_or(ModelError::NotFitted)?;
 
-        // Check if trained data is empty
-        if trained_data.nrows() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Trained data is empty".to_string(),
-            ));
-        }
-
-        // Check if new data is empty
+        // Empty input yields an empty result
         if new_data.nrows() == 0 {
             return Ok(Array1::from(vec![]));
         }
 
-        // Check dimension matching
-        if trained_data.ncols() != new_data.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Feature dimension mismatch: trained data has {} features, new data has {} features",
-                trained_data.ncols(),
-                new_data.ncols()
-            )));
-        }
+        // Validate feature dimensions and finiteness against the fitted model
+        validate_predict_input(new_data, core_points.ncols())?;
 
-        if trained_data.nrows() != labels.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "Trained data rows ({}) don't match labels length ({})",
-                trained_data.nrows(),
-                labels.len()
-            )));
-        }
+        // Assign each point to the cluster of its nearest core point within `eps`
+        let predictions = map_collect(new_data.nrows(), DBSCAN_PARALLEL_THRESHOLD, |i| {
+            let row = new_data.row(i);
+            let mut min_dist = f64::MAX;
+            let mut label = -1isize;
 
-        // Check for invalid values in trained data
-        if trained_data.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Trained data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        // Check for invalid values in new data
-        if new_data.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "New data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        // Create a set for faster core sample lookup
-        let core_set: AHashSet<usize> = core_samples.iter().copied().collect();
-
-        // Process each row in parallel, collecting into Result<Vec<isize>, ModelError>
-        let predictions: Result<Vec<isize>, ModelError> = new_data
-            .rows()
-            .into_iter()
-            .par_bridge() // Convert sequential iterator to parallel iterator
-            .map(|row| -> Result<isize, ModelError> {
-                let mut min_dist = f64::MAX;
-                let mut closest_label = -1;
-
-                // Find the closest classified data point
-                for (j, orig_row) in trained_data.rows().into_iter().enumerate() {
-                    if labels[j] == -1 {
-                        continue; // Skip noise points
-                    }
-
-                    let dist = self.compute_distance(row, orig_row);
-
-                    // Check if distance computation is valid
-                    if dist.is_nan() || dist.is_infinite() {
-                        continue;
-                    }
-
-                    // If a core point is found within eps range, assign its label directly
-                    if dist <= self.eps && core_set.contains(&j) {
-                        return Ok(labels[j]);
-                    }
-
-                    if dist < min_dist {
-                        min_dist = dist;
-                        closest_label = labels[j];
-                    }
+            for (j, core_row) in core_points.rows().into_iter().enumerate() {
+                let dist = self.metric.distance(row, core_row);
+                if dist < min_dist {
+                    min_dist = dist;
+                    label = core_point_labels[j];
                 }
+            }
 
-                // Only assign to closest cluster if within eps distance, otherwise mark as noise
-                if min_dist <= self.eps {
-                    Ok(closest_label)
-                } else {
-                    Ok(-1)
-                }
-            })
-            .collect();
+            if min_dist <= self.eps { label } else { -1 }
+        });
 
-        Ok(Array1::from(predictions?))
+        Ok(Array1::from(predictions))
     }
 
     /// Performs clustering and returns the labels in one step
@@ -470,7 +409,7 @@ impl DBSCAN {
         S: Data<Elem = f64> + Send + Sync,
     {
         self.fit(data)?;
-        Ok(self.labels_.as_ref().unwrap().clone())
+        Ok(self.labels.clone().unwrap())
     }
 
     model_save_and_load_methods!(DBSCAN);

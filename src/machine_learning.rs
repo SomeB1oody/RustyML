@@ -1,49 +1,13 @@
-use crate::{Deserialize, Serialize};
-pub use KernelType;
-
-/// Represents different distance calculation methods used in various machine learning algorithms.
-///
-/// This enum defines common distance metrics that can be used in clustering algorithms,
-/// nearest neighbor searches, and other applications where distance between points is relevant.
-///
-/// # Variants
-///
-/// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
-/// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
-/// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
-pub enum DistanceCalculationMetric {
-    Euclidean,
-    Manhattan,
-    Minkowski(f64),
-}
-
-/// Represents different types of regularization techniques used in machine learning models.
-///
-/// Regularization helps prevent overfitting by adding a penalty term to the model's loss function
-/// during training. This enum defines common regularization approaches that can be applied to
-/// various learning algorithms.
-///
-/// # Variants
-///
-/// - `L1` - L1 regularization (Lasso) that adds the sum of absolute values of parameters
-///   multiplied by the specified coefficient. Promotes sparse solutions by driving some
-///   parameters to exactly zero.
-/// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
-///   multiplied by the specified coefficient. Discourages large parameter values but
-///   typically does not produce sparse solutions.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
-pub enum RegularizationType {
-    L1(f64),
-    L2(f64),
-}
+// The shared estimator configuration enums live in the crate-level `types` module
+// (because `KernelType` is also used by the `utility` kernel-PCA code). They are
+// re-exported here so they remain reachable as `machine_learning::*` and via each
+// model submodule (e.g. `machine_learning::dbscan::DistanceCalculationMetric`).
+pub use crate::types::{DistanceCalculationMetric, KernelType, RegularizationType};
 
 /// Density-Based Spatial Clustering of Applications with Noise (DBSCAN) algorithm implementation
 pub mod dbscan;
 /// Decision Tree implementation for classification and regression task
 pub mod decision_tree;
-/// This module provides helper functions for machine learning models
-mod helper_function;
 /// Isolation Forest algorithm implementation for anomaly detection
 pub mod isolation_forest;
 /// K-means clustering implementation for unsupervised learning
@@ -58,16 +22,25 @@ pub mod linear_svc;
 pub mod logistic_regression;
 /// Mean Shift clustering algorithm implementation
 pub mod meanshift;
+/// Internal shared helpers for parallel/sequential dispatch across models
+mod parallel;
 /// This module provides an implementation of Support Vector Classification
 pub mod svc;
+/// Common `Fit` / `Predict` traits implemented by every estimator
+pub mod traits;
+/// Internal shared input-validation helpers used by every model
+mod validation;
 
-pub use dbscan::*;
-pub use decision_tree::*;
-pub use isolation_forest::*;
-pub use kmeans::*;
-pub use knn::*;
-pub use linear_regression::*;
-pub use linear_svc::*;
-pub use logistic_regression::*;
-pub use meanshift::*;
-pub use svc::*;
+// Explicit re-exports keep the flat `machine_learning::` API surface intentional and
+// stable: adding a `pub` item to a submodule no longer silently changes this namespace.
+pub use dbscan::DBSCAN;
+pub use decision_tree::{Algorithm, DecisionTree, DecisionTreeParams, Node, NodeType};
+pub use isolation_forest::{IsolationForest, IsolationTree};
+pub use kmeans::KMeans;
+pub use knn::{KNN, WeightingStrategy};
+pub use linear_regression::LinearRegression;
+pub use linear_svc::LinearSVC;
+pub use logistic_regression::{LogisticRegression, generate_polynomial_features};
+pub use meanshift::{MeanShift, estimate_bandwidth};
+pub use svc::SVC;
+pub use traits::{Fit, Predict};
