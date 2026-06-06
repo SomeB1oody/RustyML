@@ -139,12 +139,12 @@ impl IsolationForest {
         }
 
         // Validate max_depth if provided
-        if let Some(depth) = max_depth {
-            if depth == 0 {
-                return Err(ModelError::InputValidationError(
-                    "max_depth must be greater than 0".to_string(),
-                ));
-            }
+        if let Some(depth) = max_depth
+            && depth == 0
+        {
+            return Err(ModelError::InputValidationError(
+                "max_depth must be greater than 0".to_string(),
+            ));
         }
 
         let computed_max_depth = max_depth.unwrap_or_else(|| {

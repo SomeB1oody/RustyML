@@ -393,10 +393,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
             }
             WeightingStrategy::Distance => {
                 // Check for zero distance early (exact match)
-                if let Some(&(distance, idx)) = k_neighbors.first() {
-                    if distance == 0.0 {
-                        return Ok(y_train_encoded[idx]);
-                    }
+                if let Some(&(distance, idx)) = k_neighbors.first()
+                    && distance == 0.0
+                {
+                    return Ok(y_train_encoded[idx]);
                 }
 
                 // Threshold for using parallel weight aggregation

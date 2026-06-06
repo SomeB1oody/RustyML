@@ -409,12 +409,12 @@ impl KMeans {
             }
 
             // Check convergence condition
-            if let Some(prev) = prev_inertia {
-                if (prev - inertia).abs() < self.tol * prev.max(self.tol) {
-                    iter_count = i + 1;
-                    self.inertia = Some(inertia);
-                    break;
-                }
+            if let Some(prev) = prev_inertia
+                && (prev - inertia).abs() < self.tol * prev.max(self.tol)
+            {
+                iter_count = i + 1;
+                self.inertia = Some(inertia);
+                break;
             }
             prev_inertia = Some(inertia);
             iter_count = i + 1;
