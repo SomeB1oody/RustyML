@@ -1,9 +1,9 @@
 use crate::error::ModelError;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
 use ndarray_rand::rand::{Rng, SeedableRng, rng, rngs::StdRng};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Finds the sigma matching a target perplexity for one point's distances, via binary search.
 ///
@@ -80,7 +80,7 @@ const INIT_SCALE: f64 = 1e-4;
 /// Lower bound for q_ij to avoid numerical instability.
 const MIN_Q: f64 = 1e-12;
 /// Threshold for switching to parallel computation in t-SNE.
-const TSNE_PRARALLEL_THRESHOLD: usize = 2000;
+const TSNE_PARALLEL_THRESHOLD: usize = 2000;
 
 /// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction.
 ///
@@ -212,7 +212,7 @@ impl TSNE {
     ///
     /// # Performance
     ///
-    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PRARALLEL_THRESHOLD` (2000).
+    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PARALLEL_THRESHOLD` (2000).
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64>,
@@ -223,7 +223,7 @@ impl TSNE {
         let x_owned = x.to_owned();
         let n_samples = x_owned.nrows();
         // Decide execution mode from sample count
-        let use_parallel = n_samples > TSNE_PRARALLEL_THRESHOLD;
+        let use_parallel = n_samples > TSNE_PARALLEL_THRESHOLD;
 
         // Precompute distances and convert them to joint probabilities
         let distances = self.pairwise_squared_distances(&x_owned, use_parallel);
@@ -269,13 +269,12 @@ impl TSNE {
                 FINAL_MOMENTUM
             };
 
-            // Apply momentum SGD update to the embedding
-            for i in 0..n_samples {
-                for d in 0..self.n_components {
-                    y_incs[[i, d]] = momentum * y_incs[[i, d]] - self.learning_rate * grad[[i, d]];
-                    y[[i, d]] += y_incs[[i, d]];
-                }
-            }
+            // Apply momentum SGD update to the embedding:
+            // y_incs ← momentum · y_incs − learning_rate · grad, then y ← y + y_incs.
+            Zip::from(&mut y_incs).and(&grad).for_each(|inc, &g| {
+                *inc = momentum * *inc - self.learning_rate * g;
+            });
+            y += &y_incs;
 
             // Keep embedding centered to avoid drift
             self.center_embedding(&mut y)?;
@@ -299,33 +298,18 @@ impl TSNE {
     where
         S: Data<Elem = f64>,
     {
-        // Basic shape and size checks
-        if x.nrows() == 0 || x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data must have at least one row and one column".to_string(),
-            ));
-        }
+        // Shared shape/finiteness checks: non-empty, at least one feature, all finite,
+        // and the common minimum-sample guard.
+        super::validation::validate_fit_matrix(x)?;
+        super::validation::check_min_samples(x, 2, "t-SNE")?;
 
-        if x.nrows() < 2 {
-            return Err(ModelError::InputValidationError(
-                "t-SNE requires at least 2 samples".to_string(),
-            ));
-        }
-
+        // The perplexity bound is t-SNE-specific and stays here.
         if self.perplexity >= x.nrows() as f64 {
             // Perplexity must be less than the number of samples
             return Err(ModelError::InputValidationError(format!(
                 "perplexity must be less than number of samples, got perplexity={} with samples={}",
                 self.perplexity,
                 x.nrows()
-            )));
-        }
-
-        if let Some(((i, j), _)) = x.indexed_iter().find(|&(_, &val)| !val.is_finite()) {
-            // Reject NaN/Inf to avoid blowing up the optimizer
-            return Err(ModelError::InputValidationError(format!(
-                "Input data contains NaN or infinite value at position [{}, {}]",
-                i, j
             )));
         }
 
@@ -356,44 +340,29 @@ impl TSNE {
     fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
         let n_samples = x.nrows();
 
+        let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
         if parallel {
-            // Compute all rows independently with Rayon
-            let rows: Vec<Vec<f64>> = (0..n_samples)
-                .into_par_iter()
-                .map(|i| {
-                    let row_i = x.row(i);
-                    let mut row = vec![0.0; n_samples];
-                    for j in 0..n_samples {
-                        if i == j {
-                            continue;
-                        }
-                        row[j] = squared_euclidean_distance_row(&row_i, &x.row(j));
+            // Fill every row in parallel, writing directly into the matrix. The diagonal
+            // evaluates to exactly 0.0, matching the symmetric sequential path below.
+            Zip::from(distances.outer_iter_mut())
+                .and(x.outer_iter())
+                .par_for_each(|mut out_row, row_i| {
+                    for (j, row_j) in x.outer_iter().enumerate() {
+                        out_row[j] = squared_euclidean_distance_row(&row_i, &row_j);
                     }
-                    row
-                })
-                .collect();
-
-            let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
-            for (i, row) in rows.into_iter().enumerate() {
-                for (j, val) in row.into_iter().enumerate() {
-                    distances[[i, j]] = val;
-                }
-            }
-
-            distances
+                });
         } else {
-            let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
             for i in 0..n_samples {
                 let row_i = x.row(i);
                 for j in (i + 1)..n_samples {
-                    // Fill symmetric matrix in the sequential path
+                    // Exploit symmetry: compute each pair once.
                     let dist = squared_euclidean_distance_row(&row_i, &x.row(j));
                     distances[[i, j]] = dist;
                     distances[[j, i]] = dist;
                 }
             }
-            distances
         }
+        distances
     }
 
     fn conditional_probabilities(&self, distances: &Array2<f64>, parallel: bool) -> Array2<f64> {
@@ -445,49 +414,39 @@ impl TSNE {
 
     fn compute_num_matrix(&self, y: &Array2<f64>, parallel: bool) -> (Array2<f64>, f64) {
         let n_samples = y.nrows();
+        let mut num = Array2::<f64>::zeros((n_samples, n_samples));
 
         if parallel {
-            // Compute 1 / (1 + dist) per pair in parallel
-            let rows: Vec<Vec<f64>> = (0..n_samples)
+            // Fill each row in parallel. The diagonal stays 0 (self-affinity is excluded),
+            // so — unlike the distance matrix — the `i == j` term must be skipped explicitly.
+            num.outer_iter_mut()
                 .into_par_iter()
-                .map(|i| {
+                .enumerate()
+                .for_each(|(i, mut out_row)| {
                     let row_i = y.row(i);
-                    let mut row = vec![0.0; n_samples];
-                    for j in 0..n_samples {
-                        if i == j {
-                            continue;
+                    for (j, row_j) in y.outer_iter().enumerate() {
+                        if i != j {
+                            let dist = squared_euclidean_distance_row(&row_i, &row_j);
+                            out_row[j] = 1.0 / (1.0 + dist);
                         }
-                        let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
-                        row[j] = 1.0 / (1.0 + dist);
                     }
-                    row
-                })
-                .collect();
-
-            let sum_num: f64 = rows.iter().flat_map(|row| row.iter()).sum();
-            let mut num = Array2::<f64>::zeros((n_samples, n_samples));
-            for (i, row) in rows.into_iter().enumerate() {
-                for (j, val) in row.into_iter().enumerate() {
-                    num[[i, j]] = val;
-                }
-            }
-
-            (num, sum_num)
+                });
         } else {
-            let mut num = Array2::<f64>::zeros((n_samples, n_samples));
             for i in 0..n_samples {
                 let row_i = y.row(i);
                 for j in (i + 1)..n_samples {
-                    // Fill symmetric Student-t numerator
+                    // Symmetric Student-t numerator
                     let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
                     let val = 1.0 / (1.0 + dist);
                     num[[i, j]] = val;
                     num[[j, i]] = val;
                 }
             }
-            let sum_num = num.sum();
-            (num, sum_num)
         }
+
+        // The diagonal is zero in both paths, so this sums only off-diagonal affinities.
+        let sum_num = num.sum();
+        (num, sum_num)
     }
 
     fn compute_gradient(
@@ -500,58 +459,36 @@ impl TSNE {
     ) -> Array2<f64> {
         let n_samples = y.nrows();
         let n_components = y.ncols();
+        let mut grad = Array2::<f64>::zeros((n_samples, n_components));
+
+        // Fills gradient row `i` in place from the attractive/repulsive forces between
+        // point i and every other point. The t-SNE factor of 4 is folded into `mult`.
+        let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
+            let y_i = y.row(i);
+            for j in 0..n_samples {
+                if i == j {
+                    continue;
+                }
+                let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
+                let mult = 4.0 * (p[[i, j]] - q_ij) * num[[i, j]];
+                let y_j = y.row(j);
+                for d in 0..n_components {
+                    row[d] += mult * (y_i[d] - y_j[d]);
+                }
+            }
+        };
 
         if parallel {
-            // Compute gradient per row in parallel
-            let rows: Vec<Vec<f64>> = (0..n_samples)
+            grad.outer_iter_mut()
                 .into_par_iter()
-                .map(|i| {
-                    let mut grad_row = vec![0.0; n_components];
-                    for j in 0..n_samples {
-                        if i == j {
-                            continue;
-                        }
-                        let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
-                        let mult = (p[[i, j]] - q_ij) * num[[i, j]];
-                        for d in 0..n_components {
-                            grad_row[d] += mult * (y[[i, d]] - y[[j, d]]);
-                        }
-                    }
-                    for d in 0..n_components {
-                        // t-SNE gradient scale factor
-                        grad_row[d] *= 4.0;
-                    }
-                    grad_row
-                })
-                .collect();
-
-            let mut grad = Array2::<f64>::zeros((n_samples, n_components));
-            for (i, row) in rows.into_iter().enumerate() {
-                for (d, val) in row.into_iter().enumerate() {
-                    grad[[i, d]] = val;
-                }
-            }
-            grad
+                .enumerate()
+                .for_each(|(i, row)| fill_row(i, row));
         } else {
-            let mut grad = Array2::<f64>::zeros((n_samples, n_components));
-            for i in 0..n_samples {
-                for j in 0..n_samples {
-                    if i == j {
-                        continue;
-                    }
-                    let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
-                    let mult = (p[[i, j]] - q_ij) * num[[i, j]];
-                    for d in 0..n_components {
-                        grad[[i, d]] += mult * (y[[i, d]] - y[[j, d]]);
-                    }
-                }
-                for d in 0..n_components {
-                    // t-SNE gradient scale factor
-                    grad[[i, d]] *= 4.0;
-                }
+            for (i, row) in grad.outer_iter_mut().enumerate() {
+                fill_row(i, row);
             }
-            grad
         }
+        grad
     }
 
     #[cfg(feature = "show_progress")]
@@ -605,6 +542,4 @@ impl TSNE {
         }
         Ok(())
     }
-
-    model_save_and_load_methods!(TSNE);
 }

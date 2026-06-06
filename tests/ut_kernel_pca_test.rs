@@ -92,8 +92,6 @@ fn test_kernel_pca_default_and_new() {
     }
     assert!(kpca.get_eigenvalues().is_none());
     assert!(kpca.get_eigenvectors().is_none());
-    assert!(kpca.get_kernel_row_means().is_none());
-    assert!(kpca.get_kernel_all_mean().is_none());
     assert!(kpca.get_n_samples().is_none());
     assert!(kpca.get_n_features().is_none());
 
@@ -104,11 +102,11 @@ fn test_kernel_pca_default_and_new() {
             coef0: 1.0,
         },
         3,
-        EigenSolver::ARPACK,
+        EigenSolver::PowerIteration,
     )
     .unwrap();
     assert_eq!(custom.get_n_components(), 3);
-    assert_eq!(custom.get_eigen_solver(), EigenSolver::ARPACK);
+    assert_eq!(custom.get_eigen_solver(), EigenSolver::PowerIteration);
     match custom.get_kernel() {
         KernelType::Poly {
             degree,
@@ -200,9 +198,6 @@ fn test_kernel_pca_fit_and_transform() -> Result<(), Box<dyn Error>> {
     assert!(kpca.get_eigenvectors().is_some());
     assert_eq!(kpca.get_eigenvalues().unwrap().len(), 2);
     assert_eq!(kpca.get_eigenvectors().unwrap().shape(), &[data.nrows(), 2]);
-    assert!(kpca.get_kernel_row_means().is_some());
-    assert_eq!(kpca.get_kernel_row_means().unwrap().len(), data.nrows());
-    assert!(kpca.get_kernel_all_mean().is_some());
     assert!(
         kpca.get_eigenvalues()
             .unwrap()
@@ -253,7 +248,11 @@ fn test_kernel_pca_fit_transform_consistency() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test_kernel_pca_solver_variants() -> Result<(), Box<dyn Error>> {
     let data = make_kernel_pca_dataset();
-    let solvers = [EigenSolver::Dense, EigenSolver::ARPACK];
+    let solvers = [
+        EigenSolver::Dense,
+        EigenSolver::Lanczos,
+        EigenSolver::PowerIteration,
+    ];
 
     for solver in solvers {
         let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.6 }, 2, solver)?;

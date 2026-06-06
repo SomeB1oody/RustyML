@@ -1,14 +1,14 @@
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
-use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::rand::{Rng, SeedableRng};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2, Zip};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
 use std::cmp::Ordering;
 
-pub use crate::KernelType;
+// Re-exported from the canonical `crate::types` home (not the crate-root back-compat
+// alias) so the source of `KernelType` is unambiguous.
+pub use crate::types::KernelType;
 
 /// Threshold for using parallel computation in Kernel PCA.
 /// When the number of samples is below this threshold, sequential computation is used.
@@ -21,12 +21,106 @@ const KERNEL_PCA_PARALLEL_THRESHOLD: usize = 200;
 ///
 /// # Variants
 ///
-/// - `Dense` - Uses dense eigendecomposition via nalgebra
-/// - `ARPACK` - Uses power-iteration based approximation
+/// - `Dense` - Exact dense symmetric eigendecomposition via nalgebra; best for small
+///   to mid-sized kernel matrices
+/// - `Lanczos` - Krylov-subspace iterative solver (the pure-Rust counterpart of the
+///   symmetric solver behind ARPACK); fast and accurate for a few leading components
+///   of a large kernel matrix
+/// - `PowerIteration` - Power iteration with Hotelling deflation, extracting one
+///   component at a time; simplest iterative option
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum EigenSolver {
     Dense,
-    ARPACK,
+    Lanczos,
+    PowerIteration,
+}
+
+impl EigenSolver {
+    /// Computes the top `n_components` eigenpairs of the symmetric centered kernel
+    /// matrix, returning the eigenvalues alongside the eigenvectors stored as columns
+    /// (the layout the projection step expects).
+    ///
+    /// This is the single dispatch point over the solver strategies; the eigenvalue
+    /// positivity check that Kernel PCA additionally requires is applied by the caller.
+    fn decompose(
+        &self,
+        kernel_centered: &Array2<f64>,
+        n_components: usize,
+    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+        match self {
+            EigenSolver::Dense => Self::dense(kernel_centered, n_components),
+            EigenSolver::Lanczos => Self::columns_from_pairs(
+                super::linalg::top_eigenpairs_lanczos(kernel_centered, n_components, 0)?,
+                kernel_centered.nrows(),
+                n_components,
+            ),
+            EigenSolver::PowerIteration => Self::columns_from_pairs(
+                super::linalg::top_eigenpairs_power_iteration(
+                    kernel_centered.to_owned(),
+                    n_components,
+                    0,
+                    1000,
+                    1e-6,
+                )?,
+                kernel_centered.nrows(),
+                n_components,
+            ),
+        }
+    }
+
+    /// Exact path: dense symmetric eigendecomposition, then take the leading components.
+    fn dense(
+        kernel_centered: &Array2<f64>,
+        n_components: usize,
+    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+        let n_samples = kernel_centered.nrows();
+        let kernel_slice = kernel_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert kernel matrix to slice".to_string())
+        })?;
+        let matrix = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, kernel_slice);
+        let eigen = nalgebra::linalg::SymmetricEigen::new(matrix);
+
+        // Sort eigenpairs by descending eigenvalue.
+        let mut pairs: Vec<(f64, usize)> = eigen
+            .eigenvalues
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(idx, val)| (val, idx))
+            .collect();
+        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+
+        let mut eigenvalues = Vec::with_capacity(n_components);
+        let mut eigenvectors = Array2::<f64>::zeros((n_samples, n_components));
+        for (comp_idx, (_, idx)) in pairs.into_iter().take(n_components).enumerate() {
+            eigenvalues.push(eigen.eigenvalues[idx]);
+            for row in 0..n_samples {
+                eigenvectors[[row, comp_idx]] = eigen.eigenvectors[(row, idx)];
+            }
+        }
+
+        Ok((Array1::from_vec(eigenvalues), eigenvectors))
+    }
+
+    /// Iterative path shared by Lanczos and power iteration: arrange the returned
+    /// eigenvectors as the columns of an `(n_samples × n_components)` matrix.
+    fn columns_from_pairs(
+        pairs: (Vec<f64>, Vec<Array1<f64>>),
+        n_samples: usize,
+        n_components: usize,
+    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+        let (eigenvalues, eigenvectors) = pairs;
+        if eigenvectors.len() < n_components {
+            return Err(ModelError::ProcessingError(
+                "Solver could not extract the requested number of components".to_string(),
+            ));
+        }
+        let mut matrix = Array2::<f64>::zeros((n_samples, n_components));
+        for (idx, eigenvector) in eigenvectors.iter().enumerate() {
+            matrix.column_mut(idx).assign(eigenvector);
+        }
+        Ok((Array1::from_vec(eigenvalues), matrix))
+    }
 }
 
 /// Kernel Principal Component Analysis (Kernel PCA).
@@ -139,10 +233,11 @@ impl KernelPCA {
     get_field!(get_eigen_solver, eigen_solver, EigenSolver);
     get_field!(get_n_samples, n_samples, Option<usize>);
     get_field!(get_n_features, n_features, Option<usize>);
-    get_field!(get_kernel_all_mean, kernel_all_mean, Option<f64>);
     get_field_as_ref!(get_eigenvalues, eigenvalues, Option<&Array1<f64>>);
     get_field_as_ref!(get_eigenvectors, eigenvectors, Option<&Array2<f64>>);
-    get_field_as_ref!(get_kernel_row_means, kernel_row_means, Option<&Array1<f64>>);
+    // `kernel_row_means` / `kernel_all_mean` are internal centering statistics used only
+    // to center the cross-kernel matrix during `transform`; they are intentionally not
+    // exposed via getters.
 
     /// Fits the KernelPCA model to the input data.
     ///
@@ -163,7 +258,8 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD`.
+    /// Uses parallel computation when the number of samples is at least
+    /// `KERNEL_PCA_PARALLEL_THRESHOLD` (200).
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -192,7 +288,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD` (200)
+    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -219,7 +315,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_THRESHOLD` (200)
+    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -249,16 +345,11 @@ impl KernelPCA {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        self.validate_input(x)?;
+        super::validation::validate_fit_matrix(x)?;
+        super::validation::check_min_samples(x, 2, "KernelPCA")?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
-
-        if n_samples < 2 {
-            return Err(ModelError::InputValidationError(
-                "KernelPCA requires at least 2 samples".to_string(),
-            ));
-        }
 
         if self.n_components > n_samples {
             return Err(ModelError::InputValidationError(format!(
@@ -285,8 +376,8 @@ impl KernelPCA {
             progress_bar.set_message("Computing kernel matrix");
         }
 
-        // Build the training kernel matrix
-        let mut kernel_matrix = self.compute_kernel_matrix(x, use_parallel)?;
+        // Build the training kernel (Gram) matrix
+        let mut kernel_matrix = self.compute_kernel_matrix(x, x, use_parallel);
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
         #[cfg(feature = "show_progress")]
@@ -305,8 +396,11 @@ impl KernelPCA {
             progress_bar.set_message("Computing eigen decomposition");
         }
 
-        // Extract eigenvalues and eigenvectors for projection
-        let (eigenvalues, eigenvectors) = self.compute_eigendecomposition(&kernel_matrix)?;
+        // Extract eigenvalues and eigenvectors for projection, then apply Kernel PCA's
+        // positivity requirement on the resulting eigenvalues.
+        let (eigenvalues, eigenvectors) =
+            self.eigen_solver.decompose(&kernel_matrix, self.n_components)?;
+        Self::validate_eigenvalues(&eigenvalues)?;
 
         #[cfg(feature = "show_progress")]
         {
@@ -348,15 +442,7 @@ impl KernelPCA {
         let kernel_all_mean = self.kernel_all_mean.ok_or(ModelError::NotFitted)?;
         let n_features = self.n_features.ok_or(ModelError::NotFitted)?;
 
-        self.validate_input(x)?;
-
-        if x.ncols() != n_features {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                n_features
-            )));
-        }
+        super::validation::validate_transform_matrix(x, n_features)?;
 
         if eigenvectors.ncols() != eigenvalues.len() {
             return Err(ModelError::ProcessingError(
@@ -382,8 +468,8 @@ impl KernelPCA {
             progress_bar.set_message("Computing kernel matrix");
         }
 
-        // Build the cross-kernel matrix with training samples
-        let mut kernel_matrix = self.compute_cross_kernel_matrix(x, x_fit, use_parallel)?;
+        // Build the cross-kernel matrix between new data and the fitted samples
+        let mut kernel_matrix = self.compute_kernel_matrix(x, x_fit, use_parallel);
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
         #[cfg(feature = "show_progress")]
@@ -425,32 +511,6 @@ impl KernelPCA {
         }
 
         Ok(projected)
-    }
-
-    /// Validates input data shape and numerical values
-    fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
-    where
-        S: Data<Elem = f64>,
-    {
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        if x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Number of features must be greater than 0".to_string(),
-            ));
-        }
-
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
-
-        Ok(())
     }
 
     /// Validates kernel hyperparameters for correctness
@@ -529,88 +589,37 @@ impl KernelPCA {
         Ok(())
     }
 
-    /// Evaluates the configured kernel on two samples
-    fn kernel_function(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
-        self.kernel.compute(x1, x2)
-    }
-
-    /// Computes the square kernel matrix for training data
-    fn compute_kernel_matrix<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-        use_parallel: bool,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S: Data<Elem = f64> + Send + Sync,
-    {
-        let n_samples = x.nrows();
-        let rows = self.compute_kernel_rows(x, x, use_parallel);
-
-        let flat: Vec<f64> = rows.into_iter().flatten().collect();
-        Array2::from_shape_vec((n_samples, n_samples), flat).map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to build kernel matrix: {}", e))
-        })
-    }
-
-    /// Computes the cross-kernel matrix between new data and training data
-    fn compute_cross_kernel_matrix<S1, S2>(
-        &self,
-        x: &ArrayBase<S1, Ix2>,
-        x_fit: &ArrayBase<S2, Ix2>,
-        use_parallel: bool,
-    ) -> Result<Array2<f64>, ModelError>
-    where
-        S1: Data<Elem = f64> + Send + Sync,
-        S2: Data<Elem = f64> + Send + Sync,
-    {
-        let n_samples = x.nrows();
-        let n_train = x_fit.nrows();
-        let rows = self.compute_kernel_rows(x, x_fit, use_parallel);
-
-        let flat: Vec<f64> = rows.into_iter().flatten().collect();
-        Array2::from_shape_vec((n_samples, n_train), flat).map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to build kernel matrix: {}", e))
-        })
-    }
-
-    /// Computes kernel rows for a pair of datasets
-    fn compute_kernel_rows<S1, S2>(
+    /// Computes the kernel matrix `K[i, j] = kernel(x_i, y_j)` directly into an
+    /// `Array2`, in parallel over rows when requested.
+    ///
+    /// Used both for the training Gram matrix (called with `y == x`) and for the
+    /// cross-kernel matrix against the fitted data during `transform`.
+    fn compute_kernel_matrix<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix2>,
         use_parallel: bool,
-    ) -> Vec<Vec<f64>>
+    ) -> Array2<f64>
     where
-        S1: Data<Elem = f64> + Send + Sync,
-        S2: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Sync,
+        S2: Data<Elem = f64> + Sync,
     {
-        let n_rows = x.nrows();
-        let n_cols = y.nrows();
-
-        if use_parallel {
-            (0..n_rows)
-                .into_par_iter()
-                .map(|i| {
-                    let row_i = x.row(i);
-                    let mut row = Vec::with_capacity(n_cols);
-                    for j in 0..n_cols {
-                        row.push(self.kernel_function(row_i, y.row(j)));
-                    }
-                    row
-                })
-                .collect()
-        } else {
-            let mut rows = Vec::with_capacity(n_rows);
-            for i in 0..n_rows {
-                let row_i = x.row(i);
-                let mut row = Vec::with_capacity(n_cols);
-                for j in 0..n_cols {
-                    row.push(self.kernel_function(row_i, y.row(j)));
-                }
-                rows.push(row);
+        let mut matrix = Array2::<f64>::zeros((x.nrows(), y.nrows()));
+        let fill = |mut out_row: ArrayViewMut1<f64>, x_row: ArrayView1<f64>| {
+            for (j, y_row) in y.outer_iter().enumerate() {
+                out_row[j] = self.kernel.compute(x_row, y_row);
             }
-            rows
+        };
+        if use_parallel {
+            Zip::from(matrix.outer_iter_mut())
+                .and(x.outer_iter())
+                .par_for_each(fill);
+        } else {
+            Zip::from(matrix.outer_iter_mut())
+                .and(x.outer_iter())
+                .for_each(fill);
         }
+        matrix
     }
 
     /// Computes row means and overall mean for a kernel matrix
@@ -736,94 +745,9 @@ impl KernelPCA {
         Ok(())
     }
 
-    /// Dispatches to the configured eigensolver
-    fn compute_eigendecomposition(
-        &self,
-        kernel_centered: &Array2<f64>,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
-        match self.eigen_solver {
-            EigenSolver::Dense => self.compute_dense_eigen(kernel_centered),
-            EigenSolver::ARPACK => self.compute_arpack_eigen(kernel_centered),
-        }
-    }
-
-    /// Computes eigenvalues and eigenvectors via dense decomposition
-    fn compute_dense_eigen(
-        &self,
-        kernel_centered: &Array2<f64>,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
-        let n_samples = kernel_centered.nrows();
-        // Convert the kernel matrix to a dense nalgebra matrix
-        let kernel_slice = kernel_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert kernel matrix to slice".to_string())
-        })?;
-        let matrix = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, kernel_slice);
-        let eigen = nalgebra::linalg::SymmetricEigen::new(matrix);
-
-        let mut pairs: Vec<(f64, usize)> = eigen
-            .eigenvalues
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(idx, val)| (val, idx))
-            .collect();
-
-        // Sort eigenpairs by descending eigenvalue
-        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
-
-        let mut eigenvalues = Vec::with_capacity(self.n_components);
-        let mut eigenvectors = Array2::<f64>::zeros((n_samples, self.n_components));
-
-        // Copy the top components into output arrays
-        for (comp_idx, (_, idx)) in pairs.into_iter().take(self.n_components).enumerate() {
-            let value = eigen.eigenvalues[idx];
-            eigenvalues.push(value);
-            for row in 0..n_samples {
-                eigenvectors[[row, comp_idx]] = eigen.eigenvectors[(row, idx)];
-            }
-        }
-
-        Self::validate_eigenvalues(&eigenvalues)?;
-
-        Ok((Array1::from_vec(eigenvalues), eigenvectors))
-    }
-
-    /// Computes eigenvalues and eigenvectors using power iteration
-    fn compute_arpack_eigen(
-        &self,
-        kernel_centered: &Array2<f64>,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
-        let n_samples = kernel_centered.nrows();
-        // Deflate the matrix to extract multiple eigenpairs
-        let mut matrix = kernel_centered.to_owned();
-        let mut eigenvectors = Array2::<f64>::zeros((n_samples, self.n_components));
-        let mut eigenvalues = Vec::with_capacity(self.n_components);
-        let mut rng = StdRng::seed_from_u64(0);
-        let max_iter = 1000usize;
-        let tol = 1e-6;
-        let use_parallel = n_samples >= KERNEL_PCA_PARALLEL_THRESHOLD;
-
-        for idx in 0..self.n_components {
-            // Power iteration for the next dominant component
-            let (eigenvector, eigenvalue) =
-                Self::power_iteration(&matrix, &mut rng, max_iter, tol, use_parallel)?;
-            eigenvectors.column_mut(idx).assign(&eigenvector);
-            eigenvalues.push(eigenvalue);
-
-            // Remove the extracted component from the matrix
-            let v_col = eigenvector.view().insert_axis(Axis(1));
-            let v_row = eigenvector.view().insert_axis(Axis(0));
-            matrix -= &(v_col.dot(&v_row) * eigenvalue);
-        }
-
-        Self::validate_eigenvalues(&eigenvalues)?;
-
-        Ok((Array1::from_vec(eigenvalues), eigenvectors))
-    }
-
     /// Validates eigenvalues for positivity and finiteness
-    fn validate_eigenvalues(eigenvalues: &[f64]) -> Result<(), ModelError> {
-        for &value in eigenvalues {
+    fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), ModelError> {
+        for &value in eigenvalues.iter() {
             if !value.is_finite() || value <= 0.0 {
                 return Err(ModelError::ProcessingError(format!(
                     "Kernel PCA requires positive finite eigenvalues, got {}",
@@ -832,71 +756,6 @@ impl KernelPCA {
             }
         }
         Ok(())
-    }
-
-    /// Runs power iteration to extract a dominant eigenpair
-    fn power_iteration(
-        matrix: &Array2<f64>,
-        rng: &mut StdRng,
-        max_iter: usize,
-        tol: f64,
-        use_parallel: bool,
-    ) -> Result<(Array1<f64>, f64), ModelError> {
-        let n = matrix.ncols();
-        // Start from a random unit vector
-        let mut v = Array1::<f64>::from_vec((0..n).map(|_| rng.random_range(-1.0..1.0)).collect());
-        let norm = v.dot(&v).sqrt();
-        if norm <= f64::EPSILON {
-            v.fill(1.0 / (n as f64).sqrt());
-        } else {
-            v /= norm;
-        }
-
-        let mut prev_lambda = 0.0;
-        for _ in 0..max_iter {
-            // Iterate toward the dominant eigenvector
-            let w = Self::mat_vec_mul(matrix, &v, use_parallel);
-            let w_norm = w.dot(&w).sqrt();
-            if w_norm <= f64::EPSILON || !w_norm.is_finite() {
-                return Err(ModelError::ProcessingError(
-                    "Power iteration failed to converge".to_string(),
-                ));
-            }
-            let v_next = &w / w_norm;
-            let lambda = v_next.dot(&Self::mat_vec_mul(matrix, &v_next, use_parallel));
-            if !lambda.is_finite() {
-                return Err(ModelError::ProcessingError(
-                    "Power iteration produced non-finite eigenvalue".to_string(),
-                ));
-            }
-            if (lambda - prev_lambda).abs() < tol {
-                return Ok((v_next, lambda));
-            }
-            prev_lambda = lambda;
-            v = v_next;
-        }
-
-        let lambda = v.dot(&Self::mat_vec_mul(matrix, &v, use_parallel));
-        if !lambda.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Power iteration produced non-finite eigenvalue".to_string(),
-            ));
-        }
-        Ok((v, lambda))
-    }
-
-    /// Multiplies a matrix by a vector with optional parallelism
-    fn mat_vec_mul(matrix: &Array2<f64>, v: &Array1<f64>, use_parallel: bool) -> Array1<f64> {
-        let rows: Vec<f64> = if use_parallel {
-            matrix
-                .axis_iter(Axis(0))
-                .into_par_iter()
-                .map(|row| row.dot(v))
-                .collect()
-        } else {
-            matrix.axis_iter(Axis(0)).map(|row| row.dot(v)).collect()
-        };
-        Array1::from_vec(rows)
     }
 
     /// Computes scaling factors from eigenvalues for projection
@@ -914,37 +773,30 @@ impl KernelPCA {
         Ok(scales)
     }
 
-    /// Projects data in parallel using eigenvectors and scaling factors
+    /// Projects the centered kernel matrix onto the eigenvectors (scaled by the
+    /// inverse square root of the eigenvalues), one output row per thread.
     fn project_parallel(
         kernel_centered: &Array2<f64>,
         eigenvectors: &Array2<f64>,
         scales: &[f64],
     ) -> Result<Array2<f64>, ModelError> {
-        let n_samples = kernel_centered.nrows();
         let n_components = eigenvectors.ncols();
-
         if scales.len() != n_components {
             return Err(ModelError::ProcessingError(
                 "Scaling factors dimension mismatch".to_string(),
             ));
         }
 
-        let rows: Vec<Vec<f64>> = kernel_centered
-            .outer_iter()
-            .into_par_iter()
-            .map(|row| {
-                let mut projected = vec![0.0; n_components];
+        let mut projected = Array2::<f64>::zeros((kernel_centered.nrows(), n_components));
+        Zip::from(projected.outer_iter_mut())
+            .and(kernel_centered.outer_iter())
+            .par_for_each(|mut out_row, k_row| {
                 for (idx, eigenvector) in eigenvectors.axis_iter(Axis(1)).enumerate() {
-                    projected[idx] = row.dot(&eigenvector) * scales[idx];
+                    out_row[idx] = k_row.dot(&eigenvector) * scales[idx];
                 }
-                projected
-            })
-            .collect();
+            });
 
-        let flat: Vec<f64> = rows.into_iter().flatten().collect();
-        Array2::from_shape_vec((n_samples, n_components), flat).map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to build projected matrix: {}", e))
-        })
+        Ok(projected)
     }
 
     model_save_and_load_methods!(KernelPCA);

@@ -2,18 +2,27 @@ use crate::error::ModelError;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::{SeedableRng, rng, rngs::StdRng, seq::SliceRandom};
 
+/// The four arrays produced by [`train_test_split`], in order:
+/// `(x_train, x_test, y_train, y_test)`.
+pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
+
 /// Splits a dataset into training and test sets
 ///
 /// # Parameters
 ///
 /// - `x` - Feature matrix with shape (n_samples, n_features)
-/// - `y` - Target values with shape (n_samples)
+/// - `y` - Target values with shape (n_samples); the label type `A` is generic, so integer,
+///   float, or string labels all work (only `Clone` is required)
 /// - `test_size` - Size of the test set, default is 0.3 (30%)
 /// - `random_state` - Random seed, default is None
 ///
+/// # Type Parameters
+///
+/// - `A` - The label element type; must be `Clone` so rows can be gathered into the output arrays
+///
 /// # Returns
 ///
-/// - `Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError>` - Returns a tuple `(x_train, x_test, y_train, y_test)` if processing successfully
+/// - `Result<TrainTestSplit<A>, ModelError>` - Returns `(x_train, x_test, y_train, y_test)` if processing successfully
 ///
 /// # Errors
 ///
@@ -25,15 +34,19 @@ use ndarray_rand::rand::{SeedableRng, rng, rngs::StdRng, seq::SliceRandom};
 /// use rustyml::utility::train_test_split::train_test_split;
 ///
 /// let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
-/// let y = Array1::from(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
+/// // Integer class labels work just as well as floats.
+/// let y = Array1::from(vec![0, 1, 0, 1, 0]);
 /// let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.4), Some(42)).unwrap();
 /// ```
-pub fn train_test_split(
+pub fn train_test_split<A>(
     x: Array2<f64>,
-    y: Array1<f64>,
+    y: Array1<A>,
     test_size: Option<f64>,
     random_state: Option<u64>,
-) -> Result<(Array2<f64>, Array2<f64>, Array1<f64>, Array1<f64>), ModelError> {
+) -> Result<TrainTestSplit<A>, ModelError>
+where
+    A: Clone,
+{
     let n_samples = x.nrows();
 
     // Early return for edge cases

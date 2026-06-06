@@ -1,3 +1,4 @@
+use crate::error::ModelError;
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 
@@ -15,7 +16,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 ///
 /// # Returns
 ///
-/// - `Array2<f64>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
+/// - `Result<Array2<f64>, ModelError>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
 ///
 /// # Examples
 ///
@@ -24,29 +25,38 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 /// use rustyml::utility::label_encoding::to_categorical;
 ///
 /// let labels = array![0, 1, 2, 1, 0];
-/// let categorical = to_categorical(&labels, None);
-/// // Result: [[1.0, 0.0, 0.0],
-/// //          [0.0, 1.0, 0.0],
-/// //          [0.0, 0.0, 1.0],
-/// //          [0.0, 1.0, 0.0],
-/// //          [1.0, 0.0, 0.0]]
+/// let categorical = to_categorical(&labels, None).unwrap();
+/// assert_eq!(
+///     categorical,
+///     array![
+///         [1.0, 0.0, 0.0],
+///         [0.0, 1.0, 0.0],
+///         [0.0, 0.0, 1.0],
+///         [0.0, 1.0, 0.0],
+///         [1.0, 0.0, 0.0]
+///     ]
+/// );
 /// ```
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if any label is negative or if the specified num_classes is smaller
-/// than the maximum label + 1.
-pub fn to_categorical<S>(labels: &ArrayBase<S, Ix1>, num_classes: Option<usize>) -> Array2<f64>
+/// - `ModelError::InputValidationError` - If any label is negative, or if `num_classes`
+///   is smaller than the maximum label + 1
+pub fn to_categorical<S>(
+    labels: &ArrayBase<S, Ix1>,
+    num_classes: Option<usize>,
+) -> Result<Array2<f64>, ModelError>
 where
     S: Data<Elem = i32>,
 {
     let n_samples = labels.len();
 
-    // Check for negative labels
-    for &label in labels.iter() {
-        if label < 0 {
-            panic!("Labels must be non-negative, found: {}", label);
-        }
+    // Reject negative labels: they cannot index a one-hot column.
+    if let Some(&label) = labels.iter().find(|&&label| label < 0) {
+        return Err(ModelError::InputValidationError(format!(
+            "Labels must be non-negative, found: {}",
+            label
+        )));
     }
 
     // Determine number of classes
@@ -54,11 +64,11 @@ where
     let n_classes = match num_classes {
         Some(n) => {
             if n < max_label + 1 {
-                panic!(
+                return Err(ModelError::InputValidationError(format!(
                     "num_classes ({}) must be at least {} (max_label + 1)",
                     n,
                     max_label + 1
-                );
+                )));
             }
             n
         }
@@ -78,7 +88,7 @@ where
         categorical[[i, label as usize]] = 1.0;
     }
 
-    categorical
+    Ok(categorical)
 }
 
 /// Converts sparse categorical labels to categorical format with custom mapping
@@ -93,7 +103,11 @@ where
 ///
 /// # Returns
 ///
-/// - `(Array2<f64>, AHashMap<T, usize>)` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
+/// - `Result<(Array2<f64>, AHashMap<T, usize>), ModelError>` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If `num_classes` is smaller than the number of unique labels
 ///
 /// # Examples
 ///
@@ -101,14 +115,18 @@ where
 /// use rustyml::utility::label_encoding::to_categorical_with_mapping;
 ///
 /// let labels = vec!["cat", "dog", "bird", "dog", "cat"];
-/// let (categorical, mapping) = to_categorical_with_mapping(&labels, None);
-/// // categorical: one-hot encoded matrix
-/// // mapping: {"cat": 0, "dog": 1, "bird": 2} (order may vary)
+/// let (categorical, mapping) = to_categorical_with_mapping(&labels, None).unwrap();
+/// // Classes are indexed in first-seen order.
+/// assert_eq!(mapping["cat"], 0);
+/// assert_eq!(mapping["dog"], 1);
+/// assert_eq!(mapping["bird"], 2);
+/// // "cat" -> column 0, so the first row is one-hot at index 0.
+/// assert_eq!(categorical.row(0).to_vec(), vec![1.0, 0.0, 0.0]);
 /// ```
 pub fn to_categorical_with_mapping<T>(
     labels: &[T],
     num_classes: Option<usize>,
-) -> (Array2<f64>, AHashMap<T, usize>)
+) -> Result<(Array2<f64>, AHashMap<T, usize>), ModelError>
 where
     T: Clone + Eq + std::hash::Hash,
 {
@@ -127,10 +145,10 @@ where
     let n_classes = match num_classes {
         Some(n) => {
             if n < unique_classes {
-                panic!(
+                return Err(ModelError::InputValidationError(format!(
                     "num_classes ({}) must be at least the number of unique labels ({})",
                     n, unique_classes
-                );
+                )));
             }
             n
         }
@@ -145,7 +163,7 @@ where
         categorical[[i, class_index]] = 1.0;
     }
 
-    (categorical, label_to_index)
+    Ok((categorical, label_to_index))
 }
 
 /// Converts categorical (one-hot encoded) format to sparse categorical labels
@@ -159,7 +177,7 @@ where
 ///
 /// # Returns
 ///
-/// - `Array1<i32>` - A 1D array of integer labels in sparse categorical format
+/// - `Result<Array1<i32>, ModelError>` - A 1D array of integer labels in sparse categorical format
 ///
 /// # Examples
 ///
@@ -170,27 +188,36 @@ where
 /// let categorical = array![[1.0, 0.0, 0.0],
 ///                         [0.0, 1.0, 0.0],
 ///                         [0.0, 0.0, 1.0]];
-/// let sparse_labels = to_sparse_categorical(&categorical);
-/// // Result: [0, 1, 2]
+/// let sparse_labels = to_sparse_categorical(&categorical).unwrap();
+/// assert_eq!(sparse_labels, array![0, 1, 2]);
 /// ```
+///
+/// # Errors
+///
+/// - `ModelError::InputValidationError` - If the input contains NaN or infinite values
 ///
 /// # Note
 ///
 /// This function finds the class with the highest probability for each sample,
 /// making it suitable for converting model predictions back to class labels.
-pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Array1<i32>
+pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
 where
     S: Data<Elem = f64>,
 {
-    categorical
+    // Reject non-finite values up front so the per-row argmax comparison is total.
+    super::validation::check_finite(categorical)?;
+
+    let labels = categorical
         .rows()
         .into_iter()
         .map(|row| {
             row.iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(idx, _)| idx as i32)
                 .unwrap_or(0)
         })
-        .collect()
+        .collect();
+
+    Ok(labels)
 }

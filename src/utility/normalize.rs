@@ -1,12 +1,15 @@
 use crate::error::ModelError;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
+use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 /// Tolerance for considering a norm as effectively zero
 const NORM_ZERO_THRESHOLD: f64 = 1e-15;
 
-/// Threshold for determining whether to use parallel processing
-/// Parallel processing is only used when the number of elements exceeds this threshold
+/// Element-count threshold above which the global-axis path divides in parallel.
 const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
+
+/// Lane-count threshold above which row/column normalization runs across lanes in parallel.
+const NORMALIZE_PARALLEL_LANES: usize = 100;
 
 /// Defines the axis along which the normalization is applied
 ///
@@ -27,6 +30,7 @@ const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
 /// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two axes:
 /// - `Row`: normalizes along axis N-1 (last axis)
 /// - `Column`: normalizes along axis N-2 (second-to-last axis)
+///
 /// This convention follows common machine learning practices where the last axis represents features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationAxis {
@@ -84,7 +88,9 @@ pub enum NormalizationOrder {
 ///
 /// # Performance
 ///
-/// - This function uses parallel processing (via rayon) when the number of elements in the target slice exceeds `NORMALIZE_PARALLEL_THRESHOLD` (10,000).
+/// - Row/column normalization runs across lanes in parallel once there are at least
+///   `NORMALIZE_PARALLEL_LANES` (100) lanes; global normalization divides in parallel once the
+///   array has at least `NORMALIZE_PARALLEL_THRESHOLD` (10,000) elements.
 ///
 /// # Implementation Details
 ///
@@ -117,46 +123,28 @@ where
     }
 
     // Validate Lp norm parameter
-    if let NormalizationOrder::Lp(p) = order {
-        if p <= 0.0 || !p.is_finite() {
-            return Err(ModelError::InputValidationError(
-                "Lp norm parameter must be positive and finite".to_string(),
-            ));
-        }
+    if matches!(order, NormalizationOrder::Lp(p) if p <= 0.0 || !p.is_finite()) {
+        return Err(ModelError::InputValidationError(
+            "Lp norm parameter must be positive and finite".to_string(),
+        ));
     }
 
     let mut result = data.to_owned();
-
-    match axis {
-        NormalizationAxis::Global => {
-            normalize_global(&mut result, order)?;
-        }
-        NormalizationAxis::Row => {
-            normalize_by_rows(&mut result, order)?;
-        }
-        NormalizationAxis::Column => {
-            normalize_by_columns(&mut result, order)?;
-        }
-    }
-
+    axis.apply(&mut result, order)?;
     Ok(result)
 }
 
-/// Helper function to apply normalization to a 1D array view with adaptive parallelization
-fn normalize_array_view(mut array: ArrayViewMut1<f64>, norm: f64) {
+/// Divides a single lane by its norm in place, or zeros it when the norm is
+/// effectively zero (the lane is all near-zero, so it has no direction to keep).
+fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
     if norm > NORM_ZERO_THRESHOLD {
-        if array.len() >= NORMALIZE_PARALLEL_THRESHOLD {
-            array.par_mapv_inplace(|x| x / norm);
-        } else {
-            array.mapv_inplace(|x| x / norm);
-        }
+        lane.mapv_inplace(|x| x / norm);
     } else {
-        // If norm is effectively zero, set all elements to zero
-        array.fill(0.0);
+        lane.fill(0.0);
     }
 }
 
-/// Helper function to normalize the entire array globally
+/// Normalizes the entire array as a single flat vector.
 fn normalize_global<D>(
     data: &mut Array<f64, D>,
     order: NormalizationOrder,
@@ -164,7 +152,7 @@ fn normalize_global<D>(
 where
     D: Dimension,
 {
-    let norm = compute_norm(data.view().into_iter().copied(), order)?;
+    let norm = order.norm(data.iter().copied())?;
 
     if norm > NORM_ZERO_THRESHOLD {
         if data.len() >= NORMALIZE_PARALLEL_THRESHOLD {
@@ -177,110 +165,127 @@ where
     Ok(())
 }
 
-/// Helper function to normalize each row independently
-fn normalize_by_rows<D>(
+/// Normalizes each lane along the axis `axis_from_end` positions from the end
+/// (`1` = last axis → rows, `2` = second-to-last → columns).
+///
+/// Parallelizes across lanes once there are enough of them; each lane is then
+/// processed sequentially, so the two levels never nest.
+fn normalize_lanes<D>(
     data: &mut Array<f64, D>,
+    axis_from_end: usize,
     order: NormalizationOrder,
+    operation_name: &str,
 ) -> Result<(), ModelError>
 where
     D: Dimension,
 {
     let ndim = data.ndim();
     if ndim < 2 {
-        return Err(ModelError::InputValidationError(
-            "Row normalization requires at least 2 dimensions".to_string(),
-        ));
+        return Err(ModelError::InputValidationError(format!(
+            "{} requires at least 2 dimensions",
+            operation_name
+        )));
     }
+    // `ndim >= 2` is guaranteed above, so `ndim - axis_from_end` cannot underflow for
+    // `axis_from_end` in {1, 2}.
+    let axis = Axis(ndim - axis_from_end);
 
-    // Get the last axis (assuming it represents features/columns)
-    let last_axis = Axis(ndim - 1);
+    let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
+    let process = |lane: &mut ArrayViewMut1<f64>| -> Result<(), ModelError> {
+        let norm = order.norm(lane.iter().copied())?;
+        normalize_lane(lane, norm);
+        Ok(())
+    };
 
-    // Process each lane along the last axis
-    for row in data.lanes_mut(last_axis) {
-        let norm = compute_norm(row.iter().copied(), order)?;
-        normalize_array_view(row, norm);
+    if lanes.len() >= NORMALIZE_PARALLEL_LANES {
+        lanes.par_iter_mut().try_for_each(process)
+    } else {
+        lanes.iter_mut().try_for_each(process)
     }
-
-    Ok(())
 }
 
-/// Helper function to normalize each column independently
-fn normalize_by_columns<D>(
-    data: &mut Array<f64, D>,
-    order: NormalizationOrder,
-) -> Result<(), ModelError>
-where
-    D: Dimension,
-{
-    let ndim = data.ndim();
-    if ndim < 2 {
-        return Err(ModelError::InputValidationError(
-            "Column normalization requires at least 2 dimensions".to_string(),
-        ));
+impl NormalizationOrder {
+    /// Computes this norm over a sequence of values.
+    ///
+    /// This is the single source of truth for each variant's norm formula, shared by
+    /// the global and per-lane normalization paths.
+    ///
+    /// # Errors
+    ///
+    /// - [`ModelError::ProcessingError`] - If the accumulation overflows to a non-finite value
+    fn norm<I>(&self, values: I) -> Result<f64, ModelError>
+    where
+        I: Iterator<Item = f64>,
+    {
+        match *self {
+            NormalizationOrder::L1 => {
+                let norm: f64 = values.map(|x| x.abs()).sum();
+                if norm.is_finite() {
+                    Ok(norm)
+                } else {
+                    Err(ModelError::ProcessingError(
+                        "L1 norm computation resulted in non-finite value".to_string(),
+                    ))
+                }
+            }
+            NormalizationOrder::L2 => {
+                let norm_squared: f64 = values.map(|x| x * x).sum();
+                if norm_squared.is_finite() && norm_squared >= 0.0 {
+                    Ok(norm_squared.sqrt())
+                } else {
+                    Err(ModelError::ProcessingError(
+                        "L2 norm computation resulted in non-finite value".to_string(),
+                    ))
+                }
+            }
+            NormalizationOrder::Max => {
+                let norm = values.map(|x| x.abs()).fold(f64::NEG_INFINITY, f64::max);
+                // Handle the case where the iterator was empty or all values were zero
+                if norm.is_finite() && norm >= 0.0 {
+                    Ok(norm)
+                } else if norm == f64::NEG_INFINITY {
+                    // Empty iterator case
+                    Ok(0.0)
+                } else {
+                    Err(ModelError::ProcessingError(
+                        "Max norm computation resulted in non-finite value".to_string(),
+                    ))
+                }
+            }
+            NormalizationOrder::Lp(p) => {
+                let sum: f64 = values.map(|x| x.abs().powf(p)).sum();
+                if sum.is_finite() && sum >= 0.0 {
+                    Ok(sum.powf(1.0 / p))
+                } else {
+                    Err(ModelError::ProcessingError(format!(
+                        "Lp norm (p={}) computation resulted in non-finite value",
+                        p
+                    )))
+                }
+            }
+        }
     }
-
-    // Get the second-to-last axis (assuming it represents samples/rows)
-    let axis = Axis(ndim - 2);
-
-    // Process each lane along the specified axis
-    for col in data.lanes_mut(axis) {
-        let norm = compute_norm(col.iter().copied(), order)?;
-        normalize_array_view(col, norm);
-    }
-
-    Ok(())
 }
 
-/// Compute the norm of a sequence of values according to the specified order
-fn compute_norm<I>(values: I, order: NormalizationOrder) -> Result<f64, ModelError>
-where
-    I: Iterator<Item = f64>,
-{
-    match order {
-        NormalizationOrder::L1 => {
-            let norm: f64 = values.map(|x| x.abs()).sum();
-            if norm.is_finite() {
-                Ok(norm)
-            } else {
-                Err(ModelError::ProcessingError(
-                    "L1 norm computation resulted in non-finite value".to_string(),
-                ))
-            }
-        }
-        NormalizationOrder::L2 => {
-            let norm_squared: f64 = values.map(|x| x * x).sum();
-            if norm_squared.is_finite() && norm_squared >= 0.0 {
-                Ok(norm_squared.sqrt())
-            } else {
-                Err(ModelError::ProcessingError(
-                    "L2 norm computation resulted in non-finite value".to_string(),
-                ))
-            }
-        }
-        NormalizationOrder::Max => {
-            let norm = values.map(|x| x.abs()).fold(f64::NEG_INFINITY, f64::max);
-            // Handle the case where the iterator was empty or all values were zero
-            if norm.is_finite() && norm >= 0.0 {
-                Ok(norm)
-            } else if norm == f64::NEG_INFINITY {
-                // Empty iterator case
-                Ok(0.0)
-            } else {
-                Err(ModelError::ProcessingError(
-                    "Max norm computation resulted in non-finite value".to_string(),
-                ))
-            }
-        }
-        NormalizationOrder::Lp(p) => {
-            let sum: f64 = values.map(|x| x.abs().powf(p)).sum();
-            if sum.is_finite() && sum >= 0.0 {
-                Ok(sum.powf(1.0 / p))
-            } else {
-                Err(ModelError::ProcessingError(format!(
-                    "Lp norm (p={}) computation resulted in non-finite value",
-                    p
-                )))
-            }
+impl NormalizationAxis {
+    /// Normalizes `data` in place along this axis under the given norm order.
+    ///
+    /// Routes to whole-array normalization for [`NormalizationAxis::Global`] or to the
+    /// per-lane path for [`NormalizationAxis::Row`] / [`NormalizationAxis::Column`].
+    ///
+    /// # Errors
+    ///
+    /// - [`ModelError::InputValidationError`] - If row/column normalization is requested
+    ///   on an array with fewer than 2 dimensions
+    /// - [`ModelError::ProcessingError`] - If a norm computation overflows
+    fn apply<D>(&self, data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), ModelError>
+    where
+        D: Dimension,
+    {
+        match self {
+            NormalizationAxis::Global => normalize_global(data, order),
+            NormalizationAxis::Row => normalize_lanes(data, 1, order, "Row normalization"),
+            NormalizationAxis::Column => normalize_lanes(data, 2, order, "Column normalization"),
         }
     }
 }

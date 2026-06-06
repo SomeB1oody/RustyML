@@ -86,7 +86,11 @@ fn test_pca_fit_transform_and_inverse() -> Result<(), Box<dyn Error>> {
 #[test]
 fn test_pca_solver_variants() -> Result<(), Box<dyn Error>> {
     let data = make_pca_dataset();
-    let solvers = [SVDSolver::Full, SVDSolver::Randomized(7), SVDSolver::ARPACK];
+    let solvers = [
+        SVDSolver::Full,
+        SVDSolver::Randomized(7),
+        SVDSolver::PowerIteration,
+    ];
 
     for solver in solvers {
         let mut pca = PCA::new(2, solver)?;

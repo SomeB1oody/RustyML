@@ -1,6 +1,6 @@
 use crate::error::ModelError;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -11,19 +11,152 @@ use rayon::prelude::IntoParallelRefIterator;
 /// Selects the decomposition strategy used to compute principal components.
 /// For small to mid-sized datasets (typically fewer than 10,000 samples or features),
 /// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
-/// `Randomized` is recommended for speed with good accuracy. `ARPACK` is recommended when
-/// you need only a few components from very large, sparse, or memory-constrained problems.
+/// `Randomized` is recommended for speed with good accuracy. `PowerIteration` is recommended
+/// when you need only a few components from very large or memory-constrained problems.
 ///
 /// # Variants
 ///
 /// - `Full` - Full SVD using deterministic decomposition
 /// - `Randomized` - Randomized SVD with a fixed RNG seed
-/// - `ARPACK` - Power-iteration based approximation
+/// - `PowerIteration` - Power-iteration approximation with Hotelling deflation, extracting
+///   one component at a time (best when only a few components are needed)
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum SVDSolver {
     Full,
     Randomized(u64),
-    ARPACK,
+    PowerIteration,
+}
+
+impl SVDSolver {
+    /// Computes the top `n_components` principal axes and their singular values from
+    /// the centered data, dispatching over the configured solver strategy.
+    ///
+    /// Returns `(components, singular_values)`, where the principal axes are the rows
+    /// of `components`.
+    fn compute_components(
+        &self,
+        x_centered: &Array2<f64>,
+        n_components: usize,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        match *self {
+            SVDSolver::Full => Self::full_svd(x_centered, n_components),
+            SVDSolver::Randomized(seed) => Self::randomized_svd(x_centered, n_components, seed),
+            SVDSolver::PowerIteration => Self::power_iteration_svd(x_centered, n_components),
+        }
+    }
+
+    /// Exact, deterministic full SVD via nalgebra.
+    fn full_svd(
+        x_centered: &Array2<f64>,
+        n_components: usize,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        let x_slice = x_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
+        })?;
+        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
+        let svd = nalgebra::linalg::SVD::new(x_mat, false, true);
+        let v_t = svd.v_t.ok_or_else(|| {
+            ModelError::ProcessingError("SVD did not compute V^T matrix".to_string())
+        })?;
+
+        let singular_values: Vec<f64> =
+            svd.singular_values.iter().take(n_components).cloned().collect();
+        // Copy the top components from V^T into ndarray layout.
+        let components =
+            Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
+
+    /// Randomized SVD with oversampling and a couple of power iterations.
+    fn randomized_svd(
+        x_centered: &Array2<f64>,
+        n_components: usize,
+        seed: u64,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        let max_rank = n_samples.min(n_features);
+        let oversampling = 5usize;
+        // Oversample to improve the randomized subspace.
+        let k = (n_components + oversampling).min(max_rank);
+
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut omega = Vec::with_capacity(n_features * k);
+        for _ in 0..(n_features * k) {
+            omega.push(rng.random_range(-1.0..1.0));
+        }
+
+        // Build a random projection matrix and sketch X.
+        let x_slice = x_centered.as_slice().ok_or_else(|| {
+            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
+        })?;
+        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
+        let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
+        let mut y_mat = &x_mat * &omega_mat;
+
+        // A few power iterations sharpen the spectral separation.
+        let n_iter = 2usize;
+        for _ in 0..n_iter {
+            let y_t = x_mat.transpose() * &y_mat;
+            y_mat = &x_mat * y_t;
+        }
+
+        // Orthonormalize the sketch and compute SVD in the reduced space.
+        let qr = nalgebra::linalg::QR::new(y_mat);
+        let q = qr.q();
+        let b = q.transpose() * x_mat;
+
+        let svd = nalgebra::linalg::SVD::new(b, false, true);
+        let v_t = svd.v_t.ok_or_else(|| {
+            ModelError::ProcessingError("Randomized SVD did not compute V^T matrix".to_string())
+        })?;
+
+        let singular_values: Vec<f64> =
+            svd.singular_values.iter().take(n_components).cloned().collect();
+        // Expand V^T back to full feature-space components.
+        let components =
+            Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
+
+    /// Power iteration with Hotelling deflation on the covariance matrix.
+    fn power_iteration_svd(
+        x_centered: &Array2<f64>,
+        n_components: usize,
+    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+        let n_samples = x_centered.nrows();
+        let n_features = x_centered.ncols();
+        let denom = (n_samples - 1) as f64;
+        // Extract the leading eigenpairs of the covariance matrix.
+        let cov = x_centered.t().dot(x_centered) / denom;
+        let (eigenvalues, eigenvectors) =
+            super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
+
+        // Principal axes are the covariance eigenvectors, stored as rows.
+        let mut components = Array2::<f64>::zeros((n_components, n_features));
+        for (idx, eigenvector) in eigenvectors.iter().enumerate() {
+            components.row_mut(idx).assign(eigenvector);
+        }
+
+        // Convert covariance eigenvalues into the corresponding singular values.
+        let singular_values: Vec<f64> = eigenvalues
+            .into_iter()
+            .map(|lambda| {
+                let clamped = if lambda.is_finite() && lambda > 0.0 {
+                    lambda
+                } else {
+                    0.0
+                };
+                (clamped * denom).sqrt()
+            })
+            .collect();
+
+        Ok((components, Array1::from_vec(singular_values)))
+    }
 }
 
 /// Threshold for using parallel computation in PCA.
@@ -92,8 +225,8 @@ impl PCA {
     ///
     /// Solver guidance: choose `SVDSolver::Full` for small to mid-sized datasets (typically fewer
     /// than 10,000 samples or features), `SVDSolver::Randomized` for large datasets (10,000+ samples
-    /// or features) when speed matters, and `SVDSolver::ARPACK` when extracting only a few
-    /// components from very large, sparse, or memory-constrained problems.
+    /// or features) when speed matters, and `SVDSolver::PowerIteration` when extracting only a few
+    /// components from very large or memory-constrained problems.
     ///
     /// # Parameters
     ///
@@ -278,12 +411,7 @@ impl PCA {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot inverse transform empty dataset".to_string(),
-            ));
-        }
-
+        super::validation::check_non_empty(x)?;
         if x.ncols() != components.nrows() {
             return Err(ModelError::InputValidationError(format!(
                 "Number of components does not match training data, x columns: {}, expected: {}",
@@ -291,12 +419,7 @@ impl PCA {
                 components.nrows()
             )));
         }
-
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        super::validation::check_finite(x)?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -315,7 +438,7 @@ impl PCA {
 
         let reconstructed = if x.nrows() >= PCA_PARALLEL_THRESHOLD {
             let x_owned = x.to_owned();
-            Self::reconstruct_parallel(&x_owned, components, mean)?
+            Self::reconstruct_parallel(&x_owned, components, mean)
         } else {
             let mut reconstructed = x.dot(components);
             reconstructed += mean;
@@ -338,32 +461,11 @@ impl PCA {
     where
         S: Data<Elem = f64>,
     {
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input data cannot be empty".to_string(),
-            ));
-        }
-
-        if x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Number of features must be greater than 0".to_string(),
-            ));
-        }
-
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        super::validation::validate_fit_matrix(x)?;
+        super::validation::check_min_samples(x, 2, "PCA")?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
-
-        if n_samples < 2 {
-            return Err(ModelError::InputValidationError(
-                "PCA requires at least 2 samples".to_string(),
-            ));
-        }
 
         // Enforce component count against data rank limits
         let max_components = n_samples.min(n_features);
@@ -402,7 +504,9 @@ impl PCA {
         }
 
         // Compute principal axes and singular values
-        let (components, singular_values) = self.compute_components(&x_centered)?;
+        let (components, singular_values) = self
+            .svd_solver
+            .compute_components(&x_centered, self.n_components)?;
 
         #[cfg(feature = "show_progress")]
         {
@@ -451,25 +555,7 @@ impl PCA {
         let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
         let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
 
-        if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Cannot transform empty dataset".to_string(),
-            ));
-        }
-
-        if x.ncols() != components.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of features does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                components.ncols()
-            )));
-        }
-
-        if x.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::InputValidationError(
-                "Input data contains NaN or infinite values".to_string(),
-            ));
-        }
+        super::validation::validate_transform_matrix(x, components.ncols())?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -499,7 +585,7 @@ impl PCA {
 
         // Project into component space with optional parallelism
         let transformed = if x_centered.nrows() >= PCA_PARALLEL_THRESHOLD {
-            Self::project_parallel(&x_centered, components)?
+            Self::project_parallel(&x_centered, components)
         } else {
             x_centered.dot(&components.t())
         };
@@ -515,19 +601,9 @@ impl PCA {
 
     /// Computes the per-feature mean for centering
     fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
-        let n_samples = x.nrows();
-        let n_features = x.ncols();
-
-        // Compute column means with a parallel path for large matrices
-        if n_samples >= PCA_PARALLEL_THRESHOLD {
-            let means: Vec<f64> = (0..n_features)
-                .into_par_iter()
-                .map(|col| x.column(col).sum() / n_samples as f64)
-                .collect();
-            Array1::from_vec(means)
-        } else {
-            x.mean_axis(Axis(0)).expect("Input data must be non-empty")
-        }
+        // `mean_axis` sums each column in row-major (cache-friendly) order; that beats a
+        // hand-rolled parallel column-sum, whose strided column access dominates its runtime.
+        x.mean_axis(Axis(0)).expect("Input data must be non-empty")
     }
 
     /// Centers data in place by subtracting the mean
@@ -570,268 +646,38 @@ impl PCA {
         Ok(sum_sq / denom)
     }
 
-    /// Dispatches to the configured SVD solver
-    fn compute_components(
-        &self,
-        x_centered: &Array2<f64>,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
-        match self.svd_solver {
-            SVDSolver::Full => self.compute_full_svd(x_centered),
-            SVDSolver::Randomized(seed) => self.compute_randomized_svd(x_centered, seed),
-            SVDSolver::ARPACK => self.compute_arpack_svd(x_centered),
-        }
-    }
-
-    /// Computes components using full SVD
-    fn compute_full_svd(
-        &self,
-        x_centered: &Array2<f64>,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
-        let n_samples = x_centered.nrows();
-        let n_features = x_centered.ncols();
-        // Convert ndarray to nalgebra for SVD
-        let x_slice = x_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
-        })?;
-        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
-        let svd = nalgebra::linalg::SVD::new(x_mat, false, true);
-        let v_t = svd.v_t.ok_or_else(|| {
-            ModelError::ProcessingError("SVD did not compute V^T matrix".to_string())
-        })?;
-
-        let singular_values: Vec<f64> = svd
-            .singular_values
-            .iter()
-            .take(self.n_components)
-            .cloned()
-            .collect();
-
-        // Copy the top components from V^T into ndarray layout
-        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
-        for i in 0..self.n_components {
-            for j in 0..n_features {
-                components[[i, j]] = v_t[(i, j)];
-            }
-        }
-
-        Ok((components, Array1::from_vec(singular_values)))
-    }
-
-    /// Computes components using randomized SVD
-    fn compute_randomized_svd(
-        &self,
-        x_centered: &Array2<f64>,
-        seed: u64,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
-        let n_samples = x_centered.nrows();
-        let n_features = x_centered.ncols();
-        let max_rank = n_samples.min(n_features);
-        let oversampling = 5usize;
-        // Oversample to improve the randomized subspace
-        let k = (self.n_components + oversampling).min(max_rank);
-
-        let mut rng = StdRng::seed_from_u64(seed);
-        let mut omega = Vec::with_capacity(n_features * k);
-        for _ in 0..(n_features * k) {
-            omega.push(rng.random_range(-1.0..1.0));
-        }
-
-        // Build a random projection matrix and sketch X
-        let x_slice = x_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
-        })?;
-        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
-        let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
-        let mut y_mat = &x_mat * &omega_mat;
-
-        // Perform a few power iterations to improve spectral separation
-        let n_iter = 2usize;
-        for _ in 0..n_iter {
-            let y_t = x_mat.transpose() * &y_mat;
-            y_mat = &x_mat * y_t;
-        }
-
-        // Orthonormalize the sketch and compute SVD in the reduced space
-        let qr = nalgebra::linalg::QR::new(y_mat);
-        let q = qr.q();
-        let b = q.transpose() * x_mat;
-
-        let svd = nalgebra::linalg::SVD::new(b, false, true);
-        let v_t = svd.v_t.ok_or_else(|| {
-            ModelError::ProcessingError("Randomized SVD did not compute V^T matrix".to_string())
-        })?;
-
-        let singular_values: Vec<f64> = svd
-            .singular_values
-            .iter()
-            .take(self.n_components)
-            .cloned()
-            .collect();
-
-        // Expand V^T back to full feature space components
-        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
-        for i in 0..self.n_components {
-            for j in 0..n_features {
-                components[[i, j]] = v_t[(i, j)];
-            }
-        }
-
-        Ok((components, Array1::from_vec(singular_values)))
-    }
-
-    /// Computes components using power-iteration SVD
-    fn compute_arpack_svd(
-        &self,
-        x_centered: &Array2<f64>,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
-        let n_samples = x_centered.nrows();
-        let n_features = x_centered.ncols();
-        let denom = (n_samples - 1) as f64;
-        // Form the covariance matrix for power iteration
-        let mut cov = x_centered.t().dot(x_centered) / denom;
-
-        let mut components = Array2::<f64>::zeros((self.n_components, n_features));
-        let mut eigenvalues = Vec::with_capacity(self.n_components);
-        let mut rng = StdRng::seed_from_u64(0);
-        let max_iter = 1000usize;
-        let tol = 1e-6;
-
-        for idx in 0..self.n_components {
-            // Deflate the covariance as components are extracted
-            let (eigenvector, eigenvalue) = Self::power_iteration(&cov, &mut rng, max_iter, tol)?;
-            components.row_mut(idx).assign(&eigenvector);
-            eigenvalues.push(eigenvalue);
-
-            let v_col = eigenvector.view().insert_axis(Axis(1));
-            let v_row = eigenvector.view().insert_axis(Axis(0));
-            cov -= &(v_col.dot(&v_row) * eigenvalue);
-        }
-
-        // Convert eigenvalues into singular values
-        let singular_values: Vec<f64> = eigenvalues
-            .into_iter()
-            .map(|lambda| {
-                let clamped = if lambda.is_finite() && lambda > 0.0 {
-                    lambda
-                } else {
-                    0.0
-                };
-                (clamped * denom).sqrt()
-            })
-            .collect();
-
-        Ok((components, Array1::from_vec(singular_values)))
-    }
-
-    /// Runs power iteration to extract a dominant eigenpair
-    fn power_iteration(
-        cov: &Array2<f64>,
-        rng: &mut StdRng,
-        max_iter: usize,
-        tol: f64,
-    ) -> Result<(Array1<f64>, f64), ModelError> {
-        let n_features = cov.ncols();
-        // Start with a random unit vector
-        let mut v = Array1::<f64>::from_vec(
-            (0..n_features)
-                .map(|_| rng.random_range(-1.0..1.0))
-                .collect(),
-        );
-        let norm = v.dot(&v).sqrt();
-        if norm <= f64::EPSILON {
-            v.fill(1.0 / (n_features as f64).sqrt());
-        } else {
-            v /= norm;
-        }
-
-        let mut prev_lambda = 0.0;
-        for _ in 0..max_iter {
-            let w = cov.dot(&v);
-            let w_norm = w.dot(&w).sqrt();
-            if w_norm <= f64::EPSILON || !w_norm.is_finite() {
-                return Err(ModelError::ProcessingError(
-                    "Power iteration failed to converge".to_string(),
-                ));
-            }
-            // Normalize the next vector estimate
-            let v_next = &w / w_norm;
-            let lambda = v_next.dot(&cov.dot(&v_next));
-            if !lambda.is_finite() {
-                return Err(ModelError::ProcessingError(
-                    "Power iteration produced non-finite eigenvalue".to_string(),
-                ));
-            }
-            if (lambda - prev_lambda).abs() < tol {
-                return Ok((v_next, lambda));
-            }
-            prev_lambda = lambda;
-            v = v_next;
-        }
-
-        let lambda = v.dot(&cov.dot(&v));
-        if !lambda.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Power iteration produced non-finite eigenvalue".to_string(),
-            ));
-        }
-        Ok((v, lambda))
-    }
-
-    /// Projects data in parallel using principal components
-    fn project_parallel(
-        x_centered: &Array2<f64>,
-        components: &Array2<f64>,
-    ) -> Result<Array2<f64>, ModelError> {
-        let n_samples = x_centered.nrows();
+    /// Projects centered data onto the principal components, one output row per
+    /// thread, writing directly into the result matrix (no per-row allocation).
+    fn project_parallel(x_centered: &Array2<f64>, components: &Array2<f64>) -> Array2<f64> {
         let n_components = components.nrows();
-
-        // Project each row in parallel to build the output matrix
-        let rows: Vec<Vec<f64>> = x_centered
-            .outer_iter()
-            .into_par_iter()
-            .map(|row| {
-                let mut projected = vec![0.0; n_components];
-                for (idx, comp) in components.outer_iter().enumerate() {
-                    projected[idx] = row.dot(&comp);
+        let mut projected = Array2::<f64>::zeros((x_centered.nrows(), n_components));
+        Zip::from(projected.outer_iter_mut())
+            .and(x_centered.outer_iter())
+            .par_for_each(|mut out_row, in_row| {
+                for (idx, component) in components.outer_iter().enumerate() {
+                    out_row[idx] = in_row.dot(&component);
                 }
-                projected
-            })
-            .collect();
-
-        let flat: Vec<f64> = rows.into_iter().flatten().collect();
-        Array2::from_shape_vec((n_samples, n_components), flat).map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to build projected matrix: {}", e))
-        })
+            });
+        projected
     }
 
-    /// Reconstructs data in parallel from component space
+    /// Reconstructs data from component space in parallel, computing
+    /// `x · components + mean` one output row per thread.
     fn reconstruct_parallel(
         x: &Array2<f64>,
         components: &Array2<f64>,
         mean: &Array1<f64>,
-    ) -> Result<Array2<f64>, ModelError> {
-        let n_samples = x.nrows();
+    ) -> Array2<f64> {
         let n_features = components.ncols();
-        let components_t = components.t().to_owned();
-        let mean_vec = mean.to_owned();
-
-        // Reconstruct each row in parallel and add the mean
-        let rows: Vec<Vec<f64>> = x
-            .outer_iter()
-            .into_par_iter()
-            .map(|row| {
-                let mut reconstructed = vec![0.0; n_features];
-                for (j, comp_row) in components_t.outer_iter().enumerate() {
-                    reconstructed[j] = row.dot(&comp_row) + mean_vec[j];
+        let mut reconstructed = Array2::<f64>::zeros((x.nrows(), n_features));
+        Zip::from(reconstructed.outer_iter_mut())
+            .and(x.outer_iter())
+            .par_for_each(|mut out_row, in_row| {
+                for (j, component_col) in components.axis_iter(Axis(1)).enumerate() {
+                    out_row[j] = in_row.dot(&component_col) + mean[j];
                 }
-                reconstructed
-            })
-            .collect();
-
-        let flat: Vec<f64> = rows.into_iter().flatten().collect();
-        Array2::from_shape_vec((n_samples, n_features), flat).map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to build reconstructed matrix: {}", e))
-        })
+            });
+        reconstructed
     }
 
     model_save_and_load_methods!(PCA);

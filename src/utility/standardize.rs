@@ -3,10 +3,11 @@ use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::prelude::IntoParallelRefMutIterator;
 
-/// Threshold for enabling parallel computation in standardization
-/// Arrays with fewer elements than this threshold will use sequential computation
-/// to avoid the overhead of thread spawning and synchronization
+/// Element-count threshold above which the global-axis path computes in parallel.
 const STANDARDIZE_PARALLEL_THRESHOLD: usize = 10000;
+
+/// Lane-count threshold above which row/column standardization runs across lanes in parallel.
+const STANDARDIZE_PARALLEL_LANES: usize = 100;
 
 /// Defines the axis along which the standardization is applied
 ///
@@ -22,6 +23,30 @@ pub enum StandardizationAxis {
     Global,
 }
 
+impl StandardizationAxis {
+    /// Standardizes `data` in place along this axis.
+    ///
+    /// Routes to whole-array standardization for [`StandardizationAxis::Global`] or to
+    /// the per-lane path for [`StandardizationAxis::Row`] / [`StandardizationAxis::Column`].
+    ///
+    /// # Errors
+    ///
+    /// - [`ModelError::InputValidationError`] - If row/column standardization is requested
+    ///   on an array with fewer than 2 dimensions
+    fn apply<D>(&self, data: &mut Array<f64, D>, epsilon: f64) -> Result<(), ModelError>
+    where
+        D: Dimension,
+    {
+        match self {
+            StandardizationAxis::Global => standardize_global(data, epsilon),
+            StandardizationAxis::Row => standardize_lanes(data, 1, epsilon, "Row standardization"),
+            StandardizationAxis::Column => {
+                standardize_lanes(data, 2, epsilon, "Column standardization")
+            }
+        }
+    }
+}
+
 /// Standardizes data to have zero mean and unit variance
 ///
 /// This function transforms input data by subtracting the mean and dividing
@@ -32,7 +57,8 @@ pub enum StandardizationAxis {
 ///
 /// - `data` - Input array data as `ArrayBase` with arbitrary dimensions and f64 elements
 /// - `axis` - The axis along which to perform standardization (Row/Column/Global)
-/// - `epsilon` - Small value added to standard deviation to prevent division by zero
+/// - `epsilon` - Small value that floors the standard deviation, added in quadrature as
+///   `sqrt(variance + epsilon²)`, to prevent division by zero
 ///
 /// # Returns
 ///
@@ -61,7 +87,7 @@ pub enum StandardizationAxis {
 /// - For Row axis: Each row is standardized independently
 /// - For Column axis: Each column is standardized independently
 /// - For Global axis: The entire array is standardized as a single dataset
-/// - Epsilon is added to standard deviation to prevent division by zero
+/// - The standard deviation is floored via `sqrt(variance + epsilon²)` to prevent division by zero
 /// - Uses parallel computation for improved performance on large datasets
 /// - NaN and infinite values in input will result in an error
 pub fn standardize<S, D>(
@@ -95,19 +121,7 @@ where
     }
 
     let mut result = data.to_owned();
-
-    match axis {
-        StandardizationAxis::Global => {
-            standardize_global(&mut result, epsilon)?;
-        }
-        StandardizationAxis::Row => {
-            standardize_by_rows(&mut result, epsilon)?;
-        }
-        StandardizationAxis::Column => {
-            standardize_by_columns(&mut result, epsilon)?;
-        }
-    }
-
+    axis.apply(&mut result, epsilon)?;
     Ok(result)
 }
 
@@ -148,40 +162,26 @@ where
     Ok(())
 }
 
-/// Helper function to compute mean and standard deviation for a collection of values
-fn compute_mean_and_std(values: &[f64], epsilon: f64) -> (f64, f64) {
-    let n = values.len() as f64;
-
-    if n == 0.0 {
-        return (0.0, epsilon);
-    }
-
-    // Use parallel computation for large datasets
-    if values.len() >= STANDARDIZE_PARALLEL_THRESHOLD {
-        // Calculate mean
-        let mean = values.par_iter().sum::<f64>() / n;
-
-        // Calculate variance
-        let variance = values.par_iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-
-        // Add epsilon to variance for numerical stability, then take sqrt
-        let std_dev = (variance + epsilon * epsilon).sqrt();
-
-        (mean, std_dev)
-    } else {
-        // Same process as above, but sequential
-        let mean = values.iter().sum::<f64>() / n;
-        let variance = values.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-        let std_dev = (variance + epsilon * epsilon).sqrt();
-
-        (mean, std_dev)
-    }
+/// Computes the population mean and the epsilon-floored standard deviation of a lane.
+///
+/// The returned standard deviation is `sqrt(variance + epsilon²)`, which stays
+/// strictly positive so the subsequent division is always well defined.
+fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
+    let n = lane.len() as f64;
+    let mean = lane.sum() / n;
+    let variance = lane.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
+    let std_dev = (variance + epsilon * epsilon).sqrt();
+    (mean, std_dev)
 }
 
-/// Generic helper function to standardize lanes along a specified axis
+/// Standardizes each lane along the axis `axis_from_end` positions from the end
+/// (`1` = last axis → rows, `2` = second-to-last → columns).
+///
+/// Parallelizes across lanes once there are enough of them; each lane is then
+/// processed sequentially, so the two levels never nest.
 fn standardize_lanes<D>(
     data: &mut Array<f64, D>,
-    axis: Axis,
+    axis_from_end: usize,
     epsilon: f64,
     operation_name: &str,
 ) -> Result<(), ModelError>
@@ -195,58 +195,20 @@ where
             operation_name
         )));
     }
+    // `ndim >= 2` is guaranteed above, so `ndim - axis_from_end` cannot underflow for
+    // `axis_from_end` in {1, 2}.
+    let axis = Axis(ndim - axis_from_end);
 
-    // Process each lane along the specified axis using parallel iteration
-    let mut lanes: Vec<_> = data.lanes_mut(axis).into_iter().collect();
-
-    // Define a closure that processes a single lane
-    let process_lane = |lane: &mut ArrayViewMut1<f64>| -> Result<(), ModelError> {
-        let values: Vec<f64> = lane.iter().copied().collect();
-        let (mean, std_dev) = compute_mean_and_std(&values, epsilon);
+    let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
+    let process = |lane: &mut ArrayViewMut1<f64>| {
+        let (mean, std_dev) = lane_mean_and_std(lane, epsilon);
         lane.mapv_inplace(|x| (x - mean) / std_dev);
-        Ok(())
     };
 
-    // Choose between parallel and sequential processing based on the number of lanes
-    if lanes.len() >= STANDARDIZE_PARALLEL_THRESHOLD / 100 {
-        // Use parallel iteration for large number of lanes
-        lanes.par_iter_mut().try_for_each(process_lane)?;
+    if lanes.len() >= STANDARDIZE_PARALLEL_LANES {
+        lanes.par_iter_mut().for_each(process);
     } else {
-        // Use sequential iteration for small number of lanes
-        lanes.iter_mut().try_for_each(process_lane)?;
+        lanes.iter_mut().for_each(process);
     }
-
     Ok(())
-}
-
-/// Helper function to standardize each row independently
-fn standardize_by_rows<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), ModelError>
-where
-    D: Dimension,
-{
-    let ndim = data.ndim();
-    // Get the last axis (assuming it represents features/columns)
-    let last_axis = Axis(ndim - 1);
-
-    standardize_lanes(data, last_axis, epsilon, "Row standardization")
-}
-
-/// Helper function to standardize each column independently
-fn standardize_by_columns<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), ModelError>
-where
-    D: Dimension,
-{
-    let ndim = data.ndim();
-
-    // Column standardization requires at least 2 dimensions
-    if ndim < 2 {
-        return Err(ModelError::InputValidationError(
-            "Column standardization requires at least 2 dimensions".to_string(),
-        ));
-    }
-
-    // Get the second-to-last axis (assuming it represents samples/rows)
-    let axis = Axis(ndim - 2);
-
-    standardize_lanes(data, axis, epsilon, "Column standardization")
 }
