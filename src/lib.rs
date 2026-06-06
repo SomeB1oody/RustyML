@@ -31,7 +31,7 @@
 //!
 //! ### [`utility`]
 //! Data preprocessing and dimensionality reduction utilities:
-//! - **Dimensionality Reduction**: PCA, Kernel PCA, LDA, t-SNE
+//! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
 //! - **Preprocessing**: Standardization, train-test splitting
 //! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid, Cosine
 //!
@@ -512,7 +512,7 @@ pub mod machine_learning;
 /// - Anomaly detection (IsolationForest)
 ///
 /// ## Data Processing and Utilities
-/// - Dimensionality reduction (PCA, kernel PCA, t-SNE, LDA)
+/// - Dimensionality reduction (PCA, kernel PCA, t-SNE)
 /// - Data preprocessing (standardize, train_test_split)
 /// - Feature engineering utilities
 /// - and more (See details at documentation in utility module)
@@ -548,7 +548,6 @@ pub mod prelude;
 ///
 /// ## Linear Methods
 /// - **PCA (Principal Component Analysis)**: Linear dimensionality reduction for feature extraction and data visualization
-/// - **LDA (Linear Discriminant Analysis)**: Supervised dimensionality reduction with class separability optimization
 ///
 /// ## Non-linear Methods
 /// - **Kernel PCA**: Non-linear dimensionality reduction using kernel methods for complex data patterns

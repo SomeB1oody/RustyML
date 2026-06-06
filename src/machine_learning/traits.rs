@@ -36,6 +36,7 @@ use super::decision_tree::DecisionTree;
 use super::isolation_forest::IsolationForest;
 use super::kmeans::KMeans;
 use super::knn::KNN;
+use super::linear_discriminant_analysis::LDA;
 use super::linear_regression::LinearRegression;
 use super::linear_svc::LinearSVC;
 use super::logistic_regression::LogisticRegression;
@@ -64,9 +65,8 @@ pub trait Fit<D> {
 
 /// Runs inference with a fitted estimator.
 ///
-/// `X` is the input type (typically `&features`; DBSCAN uses a
-/// `(&trained, &new)` tuple), and [`Predict::Output`] is the prediction type
-/// produced by the model.
+/// `X` is the input type — the feature matrix `&ArrayBase<S, Ix2>` for every model —
+/// and [`Predict::Output`] is the prediction type produced by the model.
 ///
 /// # Type Parameters
 ///
@@ -157,6 +157,20 @@ where
     T: Clone + Hash + Eq,
     S1: Data<Elem = f64>,
     S2: Data<Elem = T>,
+{
+    fn fit(
+        &mut self,
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
+    ) -> Result<&mut Self, ModelError> {
+        let (x, y) = data;
+        self.fit(x, y)
+    }
+}
+
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for LDA
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = i32>,
 {
     fn fit(
         &mut self,
@@ -297,6 +311,16 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<T>;
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+        self.predict(input)
+    }
+}
+
+impl<'a, S> Predict<&'a ArrayBase<S, Ix2>> for LDA
+where
+    S: Data<Elem = f64>,
+{
+    type Output = Array1<i32>;
     fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
         self.predict(input)
     }

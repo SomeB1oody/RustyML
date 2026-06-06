@@ -14,6 +14,8 @@ pub mod isolation_forest;
 pub mod kmeans;
 /// K-Nearest Neighbors (KNN) implementation for classification and regression
 pub mod knn;
+/// Linear Discriminant Analysis for classification and supervised dimensionality reduction
+pub mod linear_discriminant_analysis;
 /// Linear regression module implementing the ordinary least squares method
 pub mod linear_regression;
 /// This module contains the implementation of Linear Support Vector Classification (Linear SVC)
@@ -38,6 +40,7 @@ pub use decision_tree::{Algorithm, DecisionTree, DecisionTreeParams, Node, NodeT
 pub use isolation_forest::{IsolationForest, IsolationTree};
 pub use kmeans::KMeans;
 pub use knn::{KNN, WeightingStrategy};
+pub use linear_discriminant_analysis::{LDA, Shrinkage, Solver};
 pub use linear_regression::LinearRegression;
 pub use linear_svc::LinearSVC;
 pub use logistic_regression::{LogisticRegression, generate_polynomial_features};

@@ -14,7 +14,7 @@ categories = ["mathematics", "science", "algorithms"]
 
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
-machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json"]
+machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json"]
 # Complete neural network framework with flexible architecture design
 neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
 # Data preprocessing and dimensionality reduction utilities
