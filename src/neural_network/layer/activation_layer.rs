@@ -73,7 +73,7 @@ fn clip_grad(g: &mut f32) {
 /// The element-wise activation functions that trainable layers can embed.
 ///
 /// Dense, the convolutional layers and the recurrent layers each carry an
-/// `Activation` value instead of a `T: ActivationLayer` type parameter. Keeping
+/// `Activation` value instead of a generic activation type parameter. Keeping
 /// the activation as a runtime enum makes the host layers non-generic, which
 /// removes monomorphization bloat and lets weight deserialization downcast every
 /// layer to a single concrete type rather than probing each `Layer<Act>` pairing.
@@ -96,7 +96,7 @@ fn clip_grad(g: &mut f32) {
 /// (Dense, the convolutional layers, the recurrent layers) store an `Activation` *value* and call
 /// these **pure, stateless** methods inside their own forward/backward. A stateful `Layer` impl
 /// (which caches `output` and takes `&mut self`) cannot serve that embedded, value-typed use
-/// without reintroducing the `T: ActivationLayer` generic or `Box<dyn Layer>` — both removed in the
+/// without reintroducing a generic activation type parameter or `Box<dyn Layer>` — both removed in the
 /// Step-1 refactor — and would duplicate the algorithm. The standalone structs are therefore thin
 /// wrappers, never the source of truth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

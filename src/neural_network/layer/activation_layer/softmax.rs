@@ -4,7 +4,7 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::{Activation, format_output_shape};
 use crate::neural_network::layer::layer_weight::LayerWeight;
-use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
+use crate::neural_network::neural_network_trait::Layer;
 
 /// Softmax activation layer.
 ///
@@ -130,5 +130,3 @@ impl Layer for Softmax {
 
     no_trainable_parameters_layer_functions!();
 }
-
-impl ActivationLayer for Softmax {}

@@ -232,19 +232,3 @@ pub trait ApplyWeights<L> {
     /// - `Err(Error)` - Weight shape mismatch or conversion error
     fn apply_to_layer(&self, layer: &mut L) -> Result<(), Error>;
 }
-
-/// A marker trait for activation layers in neural networks.
-///
-/// This trait extends the base `Layer` trait to specifically mark layers that provide
-/// activation functions. Activation layers are special types of neural network layers
-/// that apply non-linear transformations to their inputs, enabling neural networks
-/// to learn complex patterns and relationships.
-///
-/// # Purpose
-///
-/// The `ActivationLayer` trait serves as a type constraint and marker for layers that:
-/// - Apply element-wise non-linear transformations to input data
-/// - Don't have trainable parameters (weights or biases)
-/// - Preserve the input tensor shape in their output
-/// - Can be used as activation functions in other layers (e.g., Dense, Convolutional layers)
-pub trait ActivationLayer: Layer {}
