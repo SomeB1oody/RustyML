@@ -42,7 +42,7 @@ use super::linear_svc::LinearSVC;
 use super::logistic_regression::LogisticRegression;
 use super::meanshift::MeanShift;
 use super::svc::SVC;
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use std::hash::Hash;
 
@@ -59,8 +59,8 @@ pub trait Fit<D> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ModelError`] if the input is invalid or training fails.
-    fn fit(&mut self, data: D) -> Result<&mut Self, ModelError>;
+    /// Returns an [`Error`] if the input is invalid or training fails.
+    fn fit(&mut self, data: D) -> Result<&mut Self, Error>;
 }
 
 /// Runs inference with a fitted estimator.
@@ -79,8 +79,8 @@ pub trait Predict<X> {
     ///
     /// # Errors
     ///
-    /// Returns a [`ModelError`] if the model is not fitted or the input is invalid.
-    fn predict(&self, input: X) -> Result<Self::Output, ModelError>;
+    /// Returns an [`Error`] if the model is not fitted or the input is invalid.
+    fn predict(&self, input: X) -> Result<Self::Output, Error>;
 }
 
 // ----------------------------------------------------------------------------
@@ -94,7 +94,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -107,7 +107,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -120,7 +120,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -133,7 +133,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -146,7 +146,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -161,7 +161,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -175,7 +175,7 @@ where
     fn fit(
         &mut self,
         data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
@@ -189,7 +189,7 @@ impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for KMeans
 where
     S: Data<Elem = f64>,
 {
-    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError> {
+    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
         self.fit(data)
     }
 }
@@ -198,7 +198,7 @@ impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for DBSCAN
 where
     S: Data<Elem = f64> + Send + Sync,
 {
-    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError> {
+    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
         self.fit(data)
     }
 }
@@ -207,7 +207,7 @@ impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for MeanShift
 where
     S: Data<Elem = f64> + Send + Sync,
 {
-    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError> {
+    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
         self.fit(data)
     }
 }
@@ -216,7 +216,7 @@ impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for IsolationForest
 where
     S: Data<Elem = f64> + Send + Sync,
 {
-    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError> {
+    fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
         self.fit(data)
     }
 }
@@ -230,7 +230,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<f64>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -240,7 +240,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<i32>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -250,7 +250,7 @@ where
     S: Data<Elem = f64> + Send + Sync,
 {
     type Output = Array1<f64>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -260,7 +260,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<f64>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -270,7 +270,7 @@ where
     S: Data<Elem = f64> + Send + Sync,
 {
     type Output = Array1<f64>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -280,7 +280,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<usize>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -290,7 +290,7 @@ where
     S: Data<Elem = f64> + Sync,
 {
     type Output = Array1<usize>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -300,7 +300,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<f64>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -311,7 +311,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<T>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -321,7 +321,7 @@ where
     S: Data<Elem = f64>,
 {
     type Output = Array1<i32>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }
@@ -331,7 +331,7 @@ where
     S: Data<Elem = f64> + Send + Sync,
 {
     type Output = Array1<isize>;
-    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, ModelError> {
+    fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
 }

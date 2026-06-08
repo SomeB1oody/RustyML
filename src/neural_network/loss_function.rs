@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 
 /// Epsilon used to clip predicted probabilities into the open interval `(0, 1)`,
@@ -8,13 +8,9 @@ pub(crate) const PROB_CLIP_EPS: f32 = 1e-7;
 /// Validates that `y_true` and `y_pred` have identical shapes, returning a descriptive error
 /// instead of letting a downstream ndarray broadcast mismatch panic. Shared by the losses that
 /// require element-wise correspondence between targets and predictions.
-pub(crate) fn validate_same_shape(y_true: &Tensor, y_pred: &Tensor) -> Result<(), ModelError> {
+pub(crate) fn validate_same_shape(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.shape() != y_pred.shape() {
-        return Err(ModelError::InputValidationError(format!(
-            "Loss inputs must have the same shape, got y_true {:?} and y_pred {:?}",
-            y_true.shape(),
-            y_pred.shape()
-        )));
+        return Err(Error::shape_mismatch(y_true.shape(), y_pred.shape()));
     }
     Ok(())
 }

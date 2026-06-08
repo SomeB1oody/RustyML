@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::{SeedableRng, rng, rngs::StdRng, seq::SliceRandom};
 
@@ -22,11 +22,14 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 ///
 /// # Returns
 ///
-/// - `Result<TrainTestSplit<A>, ModelError>` - Returns `(x_train, x_test, y_train, y_test)` if processing successfully
+/// - `Result<TrainTestSplit<A>, Error>` - Returns `(x_train, x_test, y_train, y_test)` if processing successfully
 ///
 /// # Errors
 ///
-/// - Returns `ModelError::InputValidationError` if the dataset is empty, if `x` and `y` have different lengths, if `test_size` is not between 0 and 1, or if the dataset is too small to split.
+/// - [`Error::EmptyInput`] if the dataset is empty
+/// - [`Error::DimensionMismatch`] if `x` and `y` have different lengths
+/// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
+/// - [`Error::InvalidInput`] if the dataset is too small to split
 ///
 /// # Example
 /// ```rust
@@ -43,7 +46,7 @@ pub fn train_test_split<A>(
     y: Array1<A>,
     test_size: Option<f64>,
     random_state: Option<u64>,
-) -> Result<TrainTestSplit<A>, ModelError>
+) -> Result<TrainTestSplit<A>, Error>
 where
     A: Clone,
 {
@@ -51,34 +54,28 @@ where
 
     // Early return for edge cases
     if n_samples == 0 {
-        return Err(ModelError::InputValidationError(
-            "Cannot split empty dataset".to_string(),
-        ));
+        return Err(Error::empty_input("dataset"));
     }
 
     // Ensure x and y have the same number of samples
     if n_samples != y.len() {
-        return Err(ModelError::InputValidationError(format!(
-            "x and y must have the same number of samples, x rows: {}, y length: {}",
-            n_samples,
-            y.len()
-        )));
+        return Err(Error::dimension_mismatch(n_samples, y.len()));
     }
 
     // Set test size, default is 0.3
     let test_size = test_size.unwrap_or(0.3);
     if test_size <= 0.0 || test_size >= 1.0 {
-        return Err(ModelError::InputValidationError(format!(
-            "test_size must be between 0 and 1 (exclusive), got {}",
-            test_size
-        )));
+        return Err(Error::invalid_parameter(
+            "test_size",
+            format!("test_size must be between 0 and 1 (exclusive), got {}", test_size),
+        ));
     }
 
     // Calculate the number of test samples
     // For small datasets, ensure at least one sample in both train and test sets
     let n_test = if n_samples == 1 {
-        return Err(ModelError::InputValidationError(
-            "Cannot split a dataset with only 1 sample into train and test sets".to_string(),
+        return Err(Error::invalid_input(
+            "Cannot split a dataset with only 1 sample into train and test sets",
         ));
     } else if n_samples == 2 {
         1 // Special case: with 2 samples, always put 1 in test set regardless of test_size

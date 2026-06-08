@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -101,16 +101,16 @@ impl GRU {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new GRU layer instance
+    /// - `Result<Self, Error>` - A new GRU layer instance
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate that dimensions are greater than 0
         validate_recurrent_dimensions(input_dim, units)?;
 
@@ -155,7 +155,7 @@ impl GRU {
         candidate_kernel: Array2<f32>,
         candidate_recurrent_kernel: Array2<f32>,
         candidate_bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape(
             "reset_kernel",
             self.reset_gate.kernel.shape(),
@@ -219,7 +219,7 @@ impl GRU {
 }
 
 impl Layer for GRU {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -309,7 +309,7 @@ impl Layer for GRU {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -374,7 +374,7 @@ impl Layer for GRU {
         Ok(h_prev.into_dyn())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // The upstream gradient is dL/dh_T directly (no extra output activation).
         let grad_h_t = grad_output
             .clone()
@@ -384,13 +384,12 @@ impl Layer for GRU {
         // The configurable activation (Copy), used for the candidate derivative.
         let act = self.activation;
 
-        let error_msg = "Forward pass has not been run";
-        let x3 = take_cache(&mut self.input_cache, error_msg)?;
-        let hs = take_cache(&mut self.hidden_cache, error_msg)?;
-        let r_vals = take_cache(&mut self.r_cache, error_msg)?;
-        let z_vals = take_cache(&mut self.z_cache, error_msg)?;
-        let h_candidate_vals = take_cache(&mut self.h_candidate_cache, error_msg)?;
-        let rh_vals = take_cache(&mut self.rh_cache, error_msg)?;
+        let x3 = take_cache(&mut self.input_cache, "GRU")?;
+        let hs = take_cache(&mut self.hidden_cache, "GRU")?;
+        let r_vals = take_cache(&mut self.r_cache, "GRU")?;
+        let z_vals = take_cache(&mut self.z_cache, "GRU")?;
+        let h_candidate_vals = take_cache(&mut self.h_candidate_cache, "GRU")?;
+        let rh_vals = take_cache(&mut self.rh_cache, "GRU")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];

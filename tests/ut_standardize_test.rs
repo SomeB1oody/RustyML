@@ -2,7 +2,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::utility::standardize::*;
 
 const EPSILON: f64 = 1e-8;
@@ -142,8 +142,8 @@ fn test_standardize_empty_array() {
     let data: Array2<f64> = Array2::zeros((0, 0));
     let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
+    assert!(matches!(result, Err(Error::EmptyInput(_))));
+    if let Err(Error::EmptyInput(msg)) = result {
         assert!(msg.contains("Cannot standardize empty array"));
     }
 }
@@ -153,9 +153,9 @@ fn test_standardize_nan_values() {
     let data = array![[1.0, f64::NAN], [3.0, 4.0]];
     let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Input contains NaN or infinite values"));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
+    if let Err(Error::NonFinite(msg)) = result {
+        assert!(msg.contains("input data"));
     }
 }
 
@@ -164,9 +164,9 @@ fn test_standardize_infinite_values() {
     let data = array![[1.0, 2.0], [f64::INFINITY, 4.0]];
     let result = standardize(&data, StandardizationAxis::Global, EPSILON);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Input contains NaN or infinite values"));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
+    if let Err(Error::NonFinite(msg)) = result {
+        assert!(msg.contains("input data"));
     }
 }
 
@@ -175,9 +175,9 @@ fn test_standardize_negative_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
     let result = standardize(&data, StandardizationAxis::Global, -1e-8);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Epsilon must be positive and finite"));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
+    if let Err(Error::InvalidParameter { reason, .. }) = result {
+        assert!(reason.contains("Epsilon must be positive and finite"));
     }
 }
 
@@ -186,9 +186,9 @@ fn test_standardize_zero_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
     let result = standardize(&data, StandardizationAxis::Global, 0.0);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Epsilon must be positive and finite"));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
+    if let Err(Error::InvalidParameter { reason, .. }) = result {
+        assert!(reason.contains("Epsilon must be positive and finite"));
     }
 }
 
@@ -197,9 +197,9 @@ fn test_standardize_infinite_epsilon() {
     let data = array![[1.0, 2.0], [3.0, 4.0]];
     let result = standardize(&data, StandardizationAxis::Global, f64::INFINITY);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Epsilon must be positive and finite"));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
+    if let Err(Error::InvalidParameter { reason, .. }) = result {
+        assert!(reason.contains("Epsilon must be positive and finite"));
     }
 }
 
@@ -209,7 +209,7 @@ fn test_standardize_row_1d_array() {
     let result = standardize(&data, StandardizationAxis::Row, EPSILON);
 
     // 1D array cannot be standardized by rows
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidInput(_))));
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn test_standardize_column_1d_array() {
     let result = standardize(&data, StandardizationAxis::Column, EPSILON);
 
     // 1D array cannot be standardized by columns
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidInput(_))));
 }
 
 #[test]

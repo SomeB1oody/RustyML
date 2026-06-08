@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::{Error, Context};
 use crate::neural_network::Tensor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
@@ -122,13 +122,13 @@ impl Activation {
     ///
     /// # Returns
     ///
-    /// - `Result<Tensor, ModelError>` - Activated tensor with the same shape as `z`
+    /// - `Result<Tensor, Error>` - Activated tensor with the same shape as `z`
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - Softmax received an input with fewer than 2 dimensions
-    /// - `ModelError::ProcessingError` - Softmax failed to reshape the input
-    pub fn forward(&self, z: &Tensor) -> Result<Tensor, ModelError> {
+    /// - `Error::InvalidInput` - Softmax received an input with fewer than 2 dimensions
+    /// - `Error::Computation` - Softmax failed to reshape the input
+    pub fn forward(&self, z: &Tensor) -> Result<Tensor, Error> {
         match self {
             Activation::Linear => Ok(z.clone()),
             Activation::ReLU => {
@@ -181,12 +181,12 @@ impl Activation {
     ///
     /// # Returns
     ///
-    /// - `Result<Tensor, ModelError>` - The gradient `dL/dz`, same shape as `activated`
+    /// - `Result<Tensor, Error>` - The gradient `dL/dz`, same shape as `activated`
     ///
     /// # Errors
     ///
-    /// - `ModelError::ProcessingError` - Softmax failed to reshape the tensors
-    pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    /// - `Error::Computation` - Softmax failed to reshape the tensors
+    pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
         match self {
             // Derivative is 1, so the gradient passes through unchanged.
             Activation::Linear => Ok(grad_output.clone()),
@@ -269,12 +269,12 @@ impl From<Softmax> for Activation {
 }
 
 /// Softmax forward over the last axis, with the row-max shift for numerical stability.
-fn softmax_forward(input: &Tensor) -> Result<Tensor, ModelError> {
+fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
     let shape = input.shape();
     let ndim = shape.len();
 
     if ndim < 2 {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "Softmax requires input with at least 2 dimensions, got shape: {:?}",
             shape
         )));
@@ -287,9 +287,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, ModelError> {
     let mut output_2d = input
         .to_owned()
         .into_shape_with_order((batch_size, num_features))
-        .map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to reshape for softmax computation: {}", e))
-        })?;
+        .context("Failed to reshape for softmax computation")?;
 
     let apply_softmax = |mut row: ArrayViewMut1<f32>| {
         // Subtract the row max so every exp argument is <= 0 (no overflow).
@@ -308,19 +306,14 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, ModelError> {
         output_2d.axis_iter_mut(Axis(0)).for_each(apply_softmax);
     }
 
-    output_2d
+    Ok(output_2d
         .into_shape_with_order(shape)
-        .map_err(|e| {
-            ModelError::ProcessingError(format!(
-                "Failed to reshape back after softmax computation: {}",
-                e
-            ))
-        })
-        .map(|out| out.into_dyn())
+        .context("Failed to reshape back after softmax computation")?
+        .into_dyn())
 }
 
 /// Softmax backward using the Jacobian-vector product expressed via the cached output.
-fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
     let shape = output.shape();
     let ndim = shape.len();
     let batch_size: usize = shape[..ndim - 1].iter().product();
@@ -329,19 +322,12 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Mod
     let output_2d = output
         .to_owned()
         .into_shape_with_order((batch_size, num_features))
-        .map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to reshape output for backward: {}", e))
-        })?;
+        .context("Failed to reshape output for backward")?;
 
     let grad_output_2d = grad_output
         .to_owned()
         .into_shape_with_order((batch_size, num_features))
-        .map_err(|e| {
-            ModelError::ProcessingError(format!(
-                "Failed to reshape grad_output for backward: {}",
-                e
-            ))
-        })?;
+        .context("Failed to reshape grad_output for backward")?;
 
     let mut grad_input_2d = Array2::<f32>::zeros((batch_size, num_features));
 
@@ -373,10 +359,8 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Mod
             .for_each(compute_gradient);
     }
 
-    grad_input_2d
+    Ok(grad_input_2d
         .into_shape_with_order(shape)
-        .map_err(|e| {
-            ModelError::ProcessingError(format!("Failed to reshape grad_input back: {}", e))
-        })
-        .map(|grad| grad.into_dyn())
+        .context("Failed to reshape grad_input back")?
+        .into_dyn())
 }

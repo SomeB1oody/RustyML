@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::loss_function::validate_same_shape;
 use crate::neural_network::neural_network_trait::LossFunction;
@@ -54,7 +54,7 @@ impl Default for MeanSquaredError {
 }
 
 impl LossFunction for MeanSquaredError {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_same_shape(y_true, y_pred)?;
 
         // Calculate the squared difference
@@ -65,7 +65,7 @@ impl LossFunction for MeanSquaredError {
         Ok(squared_diff.sum() / n)
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
 
         // Calculate the difference between predictions and ground truth

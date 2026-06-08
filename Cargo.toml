@@ -14,11 +14,11 @@ categories = ["mathematics", "science", "algorithms"]
 
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
-machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json"]
+machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json", "dep:thiserror"]
 # Complete neural network framework with flexible architecture design
-neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json"]
+neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:thiserror"]
 # Data preprocessing and dimensionality reduction utilities
-utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:serde_json", "dep:ndarray-rand"]
+utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:serde_json", "dep:ndarray-rand", "dep:thiserror"]
 # Comprehensive evaluation metrics for model performance assessment
 metric = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
@@ -40,6 +40,7 @@ ahash = { version = "0.8.12", features = ["serde"], optional = true }
 indicatif = { version = "0.18.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.150", optional = true}
+thiserror = { version = "2.0.17", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"

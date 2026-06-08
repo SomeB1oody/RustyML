@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::recurrent_layer::lstm::LSTM;
 use crate::neural_network::layer::serialize_weight::SerializableGateWeight;
 use crate::neural_network::neural_network_trait::ApplyWeights;
@@ -21,7 +21,7 @@ pub struct SerializableLSTMWeight {
 }
 
 impl ApplyWeights<LSTM> for SerializableLSTMWeight {
-    fn apply_to_layer(&self, layer: &mut LSTM) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut LSTM) -> Result<(), Error> {
         layer.set_weights(
             self.input.kernel.clone(),
             self.input.recurrent_kernel.clone(),

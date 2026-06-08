@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::convolution_layer::separable_conv_2d::SeparableConv2D;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::{Array2, Array4};
@@ -19,7 +19,7 @@ pub struct SerializableSeparableConv2DWeight {
 }
 
 impl ApplyWeights<SeparableConv2D> for SerializableSeparableConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut SeparableConv2D) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut SeparableConv2D) -> Result<(), Error> {
         layer.set_weights(
             self.depthwise_weight.clone(),
             self.pointwise_weight.clone(),

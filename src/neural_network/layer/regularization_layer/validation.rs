@@ -1,23 +1,23 @@
-use crate::error::ModelError;
+use crate::error::Error;
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (inclusive)
-pub(super) fn validate_rate(rate: f32, param_name: &str) -> Result<(), ModelError> {
+pub(super) fn validate_rate(rate: f32, param_name: &str) -> Result<(), Error> {
     if !(0.0..=1.0).contains(&rate) {
-        return Err(ModelError::InputValidationError(format!(
-            "{} must be between 0 and 1, got {}",
-            param_name, rate
-        )));
+        return Err(Error::invalid_parameter(
+            param_name.to_string(),
+            format!("must be between 0 and 1, got {}", rate),
+        ));
     }
     Ok(())
 }
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (exclusive of 1.0)
-pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(), ModelError> {
+pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(), Error> {
     if !(0.0..1.0).contains(&rate) {
-        return Err(ModelError::InputValidationError(format!(
-            "{} must be in range [0, 1), got {}",
-            param_name, rate
-        )));
+        return Err(Error::invalid_parameter(
+            param_name.to_string(),
+            format!("must be in range [0, 1), got {}", rate),
+        ));
     }
     Ok(())
 }
@@ -26,12 +26,9 @@ pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(),
 pub(super) fn validate_input_shape(
     input_shape: &[usize],
     expected_shape: &[usize],
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if !expected_shape.is_empty() && input_shape != expected_shape {
-        return Err(ModelError::InputValidationError(format!(
-            "Input shape mismatch: expected {:?}, got {:?}",
-            expected_shape, input_shape
-        )));
+        return Err(Error::shape_mismatch(expected_shape, input_shape));
     }
     Ok(())
 }
@@ -41,9 +38,9 @@ pub(super) fn validate_input_ndim(
     input_ndim: usize,
     expected_ndim: usize,
     layer_name: &str,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if input_ndim != expected_ndim {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "{} expects {}D input, got {}D",
             layer_name, expected_ndim, input_ndim
         )));
@@ -56,9 +53,9 @@ pub(super) fn validate_min_input_ndim(
     input_ndim: usize,
     min_ndim: usize,
     layer_name: &str,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if input_ndim < min_ndim {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "{} expects at least {}D input, got {}D",
             layer_name, min_ndim, input_ndim
         )));
@@ -67,39 +64,40 @@ pub(super) fn validate_min_input_ndim(
 }
 
 /// Validates that a standard deviation parameter is non-negative
-pub(super) fn validate_stddev(stddev: f32) -> Result<(), ModelError> {
+pub(super) fn validate_stddev(stddev: f32) -> Result<(), Error> {
     if stddev < 0.0 {
-        return Err(ModelError::InputValidationError(
-            "Standard deviation cannot be negative".to_string(),
+        return Err(Error::invalid_parameter(
+            "stddev",
+            "Standard deviation cannot be negative",
         ));
     }
     Ok(())
 }
 
 /// Validates that epsilon is positive and finite
-pub(super) fn validate_epsilon(epsilon: f32) -> Result<(), ModelError> {
+pub(super) fn validate_epsilon(epsilon: f32) -> Result<(), Error> {
     if epsilon <= 0.0 {
-        return Err(ModelError::InputValidationError(format!(
-            "Epsilon must be positive, got {}",
-            epsilon
-        )));
+        return Err(Error::invalid_parameter(
+            "epsilon",
+            format!("Epsilon must be positive, got {}", epsilon),
+        ));
     }
     if !epsilon.is_finite() {
-        return Err(ModelError::InputValidationError(format!(
-            "Epsilon must be finite, got {}",
-            epsilon
-        )));
+        return Err(Error::invalid_parameter(
+            "epsilon",
+            format!("Epsilon must be finite, got {}", epsilon),
+        ));
     }
     Ok(())
 }
 
 /// Validates that momentum is between 0.0 and 1.0 (inclusive)
-pub(super) fn validate_momentum(momentum: f32) -> Result<(), ModelError> {
+pub(super) fn validate_momentum(momentum: f32) -> Result<(), Error> {
     if !(0.0..=1.0).contains(&momentum) {
-        return Err(ModelError::InputValidationError(format!(
-            "Momentum must be between 0.0 and 1.0, got {}",
-            momentum
-        )));
+        return Err(Error::invalid_parameter(
+            "momentum",
+            format!("Momentum must be between 0.0 and 1.0, got {}", momentum),
+        ));
     }
     Ok(())
 }
@@ -108,50 +106,53 @@ pub(super) fn validate_momentum(momentum: f32) -> Result<(), ModelError> {
 pub(super) fn validate_channel_axis(
     channel_axis: usize,
     input_ndim: usize,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if channel_axis == 0 {
-        return Err(ModelError::InputValidationError(
-            "Channel axis cannot be 0 (batch axis)".to_string(),
+        return Err(Error::invalid_parameter(
+            "channel_axis",
+            "Channel axis cannot be 0 (batch axis)",
         ));
     }
     if channel_axis >= input_ndim {
-        return Err(ModelError::InputValidationError(format!(
-            "Channel axis {} is out of bounds for input with {} dimensions",
-            channel_axis, input_ndim
-        )));
+        return Err(Error::invalid_parameter(
+            "channel_axis",
+            format!(
+                "Channel axis {} is out of bounds for input with {} dimensions",
+                channel_axis, input_ndim
+            ),
+        ));
     }
     Ok(())
 }
 
 /// Validates that num_groups divides num_channels evenly
-pub(super) fn validate_num_groups(
-    num_channels: usize,
-    num_groups: usize,
-) -> Result<(), ModelError> {
+pub(super) fn validate_num_groups(num_channels: usize, num_groups: usize) -> Result<(), Error> {
     if !num_channels.is_multiple_of(num_groups) {
-        return Err(ModelError::InputValidationError(format!(
-            "Number of channels ({}) must be divisible by num_groups ({})",
-            num_channels, num_groups
-        )));
-    }
-    Ok(())
-}
-
-/// Validates that input_shape is not empty
-pub(super) fn validate_input_shape_not_empty(input_shape: &[usize]) -> Result<(), ModelError> {
-    if input_shape.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Input shape cannot be empty".to_string(),
+        return Err(Error::invalid_parameter(
+            "num_groups",
+            format!(
+                "Number of channels ({}) must be divisible by num_groups ({})",
+                num_channels, num_groups
+            ),
         ));
     }
     Ok(())
 }
 
+/// Validates that input_shape is not empty
+pub(super) fn validate_input_shape_not_empty(input_shape: &[usize]) -> Result<(), Error> {
+    if input_shape.is_empty() {
+        return Err(Error::empty_input("input shape"));
+    }
+    Ok(())
+}
+
 /// Validates that num_groups is greater than 0
-pub(super) fn validate_num_groups_positive(num_groups: usize) -> Result<(), ModelError> {
+pub(super) fn validate_num_groups_positive(num_groups: usize) -> Result<(), Error> {
     if num_groups == 0 {
-        return Err(ModelError::InputValidationError(
-            "Number of groups must be greater than 0".to_string(),
+        return Err(Error::invalid_parameter(
+            "num_groups",
+            "Number of groups must be greater than 0",
         ));
     }
     Ok(())

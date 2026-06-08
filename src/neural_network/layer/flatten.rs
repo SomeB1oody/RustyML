@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::{Error, Context};
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
@@ -61,15 +61,15 @@ impl Flatten {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New `Flatten` layer instance
+    /// - `Result<Self, Error>` - New `Flatten` layer instance
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_shape` has fewer than 2 dimensions or contains a zero
-    pub fn new(input_shape: Vec<usize>) -> Result<Self, ModelError> {
+    /// - `Error::InvalidInput` - If `input_shape` has fewer than 2 dimensions or contains a zero
+    pub fn new(input_shape: Vec<usize>) -> Result<Self, Error> {
         // Validate input shape dimensions
         if input_shape.len() < 2 {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "Input shape must have at least 2 dimensions [batch_size, features...], got {}D",
                 input_shape.len()
             )));
@@ -78,7 +78,7 @@ impl Flatten {
         // Ensure all dimensions are greater than 0
         for (i, &dim) in input_shape.iter().enumerate() {
             if dim == 0 {
-                return Err(ModelError::InputValidationError(format!(
+                return Err(Error::invalid_input(format!(
                     "Dimension {} must be greater than 0, got {}",
                     i, dim
                 )));
@@ -95,11 +95,11 @@ impl Flatten {
 }
 
 impl Layer for Flatten {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input dimensions
         let input_shape = input.shape();
         if input_shape.len() < 3 || input_shape.len() > 5 {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
                 input_shape.len()
             )));
@@ -119,11 +119,11 @@ impl Layer for Flatten {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input dimensions
         let input_shape = input.shape();
         if input_shape.len() < 3 || input_shape.len() > 5 {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
                 input_shape.len()
             )));
@@ -139,33 +139,28 @@ impl Layer for Flatten {
             .to_owned())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(input) = &self.input_cache {
             let input_shape = input.shape().to_vec();
 
             // Validate gradient output shape
             let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
             if grad_output.shape() != expected_grad_shape {
-                return Err(ModelError::ProcessingError(format!(
-                    "Gradient output shape {:?} doesn't match expected shape {:?}",
+                return Err(Error::shape_mismatch(
+                    expected_grad_shape,
                     grad_output.shape(),
-                    expected_grad_shape
-                )));
+                ));
             }
 
             // Reshape gradient back to input shape
             let reshaped_grad = grad_output
                 .to_shape(IxDyn(&input_shape))
-                .map_err(|e| {
-                    ModelError::ProcessingError(format!("Failed to reshape gradient: {}", e))
-                })?
+                .context("reshape gradient")?
                 .to_owned();
 
             Ok(reshaped_grad)
         } else {
-            Err(ModelError::ProcessingError(
-                "Forward pass has not been run yet".to_string(),
-            ))
+            Err(Error::forward_pass_not_run("Flatten"))
         }
     }
 

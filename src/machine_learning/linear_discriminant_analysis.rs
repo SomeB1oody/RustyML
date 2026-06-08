@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::{Error, Context};
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2, s};
@@ -23,10 +23,10 @@ pub enum Solver {
 
 impl Solver {
     /// Inverts the (regularized) shared covariance matrix under this solver strategy.
-    fn invert_covariance(&self, cov: &Array2<f64>) -> Result<Array2<f64>, ModelError> {
+    fn invert_covariance(&self, cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_features = cov.ncols();
         let cov_slice = cov.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert covariance matrix to slice".to_string())
+            Error::computation("Failed to convert covariance matrix to slice")
         })?;
         let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
 
@@ -51,9 +51,7 @@ impl Solver {
                 let tol = (1e-12 * max_sv).max(1e-12);
                 let identity = nalgebra::DMatrix::<f64>::identity(n_features, n_features);
                 svd.solve(&identity, tol).map_err(|_| {
-                    ModelError::ProcessingError(
-                        "LSQR solver failed to compute covariance inverse".to_string(),
-                    )
+                    Error::computation("LSQR solver failed to compute covariance inverse")
                 })?
             }
             Solver::SVD => {
@@ -62,16 +60,13 @@ impl Solver {
                 let max_sv = svd.singular_values.max();
                 let tol = (1e-12 * max_sv).max(1e-12);
                 svd.pseudo_inverse(tol).map_err(|_| {
-                    ModelError::ProcessingError(
-                        "Covariance matrix is singular and cannot be inverted".to_string(),
-                    )
+                    Error::computation("Covariance matrix is singular and cannot be inverted")
                 })?
             }
         };
 
-        Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec()).map_err(
-            |e| ModelError::ProcessingError(format!("Failed to build inverse covariance: {}", e)),
-        )
+        Array2::from_shape_vec((n_features, n_features), cov_inv_mat.as_slice().to_vec())
+            .context("Failed to build inverse covariance")
     }
 
     /// Builds the discriminant matrix `cov⁻¹·S_b` (or solves `cov·M = S_b` for `LSQR`).
@@ -80,20 +75,16 @@ impl Solver {
         cov: &Array2<f64>,
         sb: Array2<f64>,
         cov_inv: &Array2<f64>,
-    ) -> Result<Array2<f64>, ModelError> {
+    ) -> Result<Array2<f64>, Error> {
         match *self {
             Solver::LSQR => {
                 // Solve cov * M = sb for the discriminant matrix
                 let n_features = cov.ncols();
                 let cov_slice = cov.as_slice().ok_or_else(|| {
-                    ModelError::ProcessingError(
-                        "Failed to convert covariance matrix to slice".to_string(),
-                    )
+                    Error::computation("Failed to convert covariance matrix to slice")
                 })?;
                 let sb_slice = sb.as_slice().ok_or_else(|| {
-                    ModelError::ProcessingError(
-                        "Failed to convert between-class matrix to slice".to_string(),
-                    )
+                    Error::computation("Failed to convert between-class matrix to slice")
                 })?;
 
                 let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
@@ -102,18 +93,11 @@ impl Solver {
                 let max_sv = svd.singular_values.max();
                 let tol = (1e-12 * max_sv).max(1e-12);
                 let solved = svd.solve(&sb_mat, tol).map_err(|_| {
-                    ModelError::ProcessingError(
-                        "LSQR solver failed to compute discriminant matrix".to_string(),
-                    )
+                    Error::computation("LSQR solver failed to compute discriminant matrix")
                 })?;
 
                 Array2::from_shape_vec((n_features, n_features), solved.as_slice().to_vec())
-                    .map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to build discriminant matrix: {}",
-                            e
-                        ))
-                    })
+                    .context("Failed to build discriminant matrix")
             }
             _ => Ok(cov_inv.dot(&sb)),
         }
@@ -125,16 +109,14 @@ impl Solver {
         &self,
         solver_matrix: &Array2<f64>,
         n_components: usize,
-    ) -> Result<Array2<f64>, ModelError> {
+    ) -> Result<Array2<f64>, Error> {
         let n_features = solver_matrix.nrows();
         let (eigenvalues, eigenvectors) = match *self {
             Solver::Eigen => {
                 // Use symmetric eigen decomposition for stability
                 let sym_matrix = (solver_matrix + &solver_matrix.t()) * 0.5;
                 let slice = sym_matrix.as_slice().ok_or_else(|| {
-                    ModelError::ProcessingError(
-                        "Failed to convert symmetric matrix to slice".to_string(),
-                    )
+                    Error::computation("Failed to convert symmetric matrix to slice")
                 })?;
                 let mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, slice);
                 let eig = nalgebra::linalg::SymmetricEigen::new(mat);
@@ -144,35 +126,23 @@ impl Solver {
                         (n_features, n_features),
                         eig.eigenvectors.as_slice().to_vec(),
                     )
-                    .map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to build eigenvector matrix: {}",
-                            e
-                        ))
-                    })?,
+                    .context("Failed to build eigenvector matrix")?,
                 )
             }
             Solver::SVD | Solver::LSQR => {
                 // Use SVD to obtain principal directions
                 let slice = solver_matrix.as_slice().ok_or_else(|| {
-                    ModelError::ProcessingError(
-                        "Failed to convert solver matrix to slice".to_string(),
-                    )
+                    Error::computation("Failed to convert solver matrix to slice")
                 })?;
                 let mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, slice);
                 let svd = nalgebra::linalg::SVD::new(mat, true, true);
-                let u = svd.u.ok_or_else(|| {
-                    ModelError::ProcessingError("SVD did not compute U matrix".to_string())
-                })?;
+                let u = svd
+                    .u
+                    .ok_or_else(|| Error::computation("SVD did not compute U matrix"))?;
                 (
                     Array1::from_vec(svd.singular_values.as_slice().to_vec()),
                     Array2::from_shape_vec((n_features, n_features), u.as_slice().to_vec())
-                        .map_err(|e| {
-                            ModelError::ProcessingError(format!(
-                                "Failed to build eigenvector matrix: {}",
-                                e
-                            ))
-                        })?,
+                        .context("Failed to build eigenvector matrix")?,
                 )
             }
         };
@@ -191,8 +161,8 @@ impl Solver {
             let vec = eigenvectors.slice(s![.., *i]);
             let norm = vec.dot(&vec).sqrt();
             if norm <= 1e-12 {
-                return Err(ModelError::ProcessingError(
-                    "Eigenvector norm too small for stable projection".to_string(),
+                return Err(Error::computation(
+                    "Eigenvector norm too small for stable projection",
                 ));
             }
             w.column_mut(component_idx).assign(&(&vec / norm));
@@ -290,29 +260,30 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new LDA instance or validation error
+    /// - `Result<Self, Error>` - A new LDA instance or validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `n_components` is zero or shrinkage is out of range
+    /// - `Error::InvalidParameter` - If `n_components` is zero or shrinkage is out of range
     pub fn new(
         n_components: usize,
         solver: Option<Solver>,
         shrinkage: Option<Shrinkage>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         if n_components == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_components must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_components",
+                "must be greater than 0",
             ));
         }
 
         if let Some(Shrinkage::Manual(alpha)) = shrinkage
             && (!alpha.is_finite() || !(0.0..=1.0).contains(&alpha))
         {
-            return Err(ModelError::InputValidationError(format!(
-                "shrinkage Manual(alpha) must be in [0, 1], got {}",
-                alpha
-            )));
+            return Err(Error::invalid_parameter(
+                "shrinkage",
+                format!("Manual(alpha) must be in [0, 1], got {}", alpha),
+            ));
         }
 
         Ok(Self {
@@ -349,12 +320,12 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to self for chaining
+    /// - `Result<&mut Self, Error>` - Mutable reference to self for chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
-    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, shapes mismatch, or contain invalid values
+    /// - `Error::Computation` - If numerical computation fails during fitting
     ///
     /// # Performance
     ///
@@ -364,7 +335,7 @@ impl LDA {
         &mut self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S1: Data<Elem = f64>,
         S2: Data<Elem = i32>,
@@ -375,17 +346,11 @@ impl LDA {
         super::validation::preliminary_check(x, None)?;
 
         if x.nrows() != y.len() {
-            return Err(ModelError::InputValidationError(format!(
-                "x.nrows() {} != y.len() {}",
-                x.nrows(),
-                y.len()
-            )));
+            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
         }
 
         if x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Number of features must be greater than 0".to_string(),
-            ));
+            return Err(Error::empty_input("features"));
         }
 
         let n_samples = x.nrows();
@@ -409,8 +374,8 @@ impl LDA {
         }
 
         if classes_set.len() < 2 {
-            return Err(ModelError::InputValidationError(
-                "At least two distinct classes are required".to_string(),
+            return Err(Error::invalid_input(
+                "At least two distinct classes are required",
             ));
         }
 
@@ -421,7 +386,7 @@ impl LDA {
         let n_classes = classes.len();
 
         if n_samples <= n_classes {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "Number of samples ({}) must be greater than number of classes ({})",
                 n_samples, n_classes
             )));
@@ -429,7 +394,7 @@ impl LDA {
 
         let max_components = (n_classes - 1).min(n_features);
         if self.n_components > max_components {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "n_components should be <= {}, got {}",
                 max_components, self.n_components
             )));
@@ -453,7 +418,7 @@ impl LDA {
         }
         for (&class, indices) in &class_indices_map {
             if indices.len() < 2 {
-                return Err(ModelError::InputValidationError(format!(
+                return Err(Error::invalid_input(format!(
                     "Class {} has only {} sample(s). Each class must have at least 2 samples",
                     class,
                     indices.len()
@@ -462,9 +427,9 @@ impl LDA {
         }
 
         // Compute the overall mean for between-class scatter
-        let overall_mean = x.mean_axis(Axis(0)).ok_or_else(|| {
-            ModelError::ProcessingError("Error computing overall mean".to_string())
-        })?;
+        let overall_mean = x
+            .mean_axis(Axis(0))
+            .ok_or_else(|| Error::computation("Error computing overall mean"))?;
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
         let class_results: Vec<_> = if use_parallel {
@@ -561,24 +526,33 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, ModelError>` - Predicted class labels
+    /// - `Result<Array1<i32>, Error>` - Predicted class labels
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
     ///
     /// # Performance
     ///
     /// Uses parallel prediction when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD` (500).
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
     {
-        let classes = self.classes.as_ref().ok_or(ModelError::NotFitted)?;
-        let means = self.means.as_ref().ok_or(ModelError::NotFitted)?;
-        let cov_inv = self.cov_inv.as_ref().ok_or(ModelError::NotFitted)?;
-        let priors = self.priors.as_ref().ok_or(ModelError::NotFitted)?;
+        let classes = self
+            .classes
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
+        let means = self.means.as_ref().ok_or_else(|| Error::not_fitted("LDA"))?;
+        let cov_inv = self
+            .cov_inv
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
+        let priors = self
+            .priors
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
 
         let n_features = means.ncols();
         super::validation::validate_predict_input(x, n_features)?;
@@ -666,13 +640,13 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If inputs are empty, mismatched, or contain invalid values
-    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -690,12 +664,12 @@ impl LDA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If inputs are empty, shapes mismatch, or contain invalid values
-    /// - `ModelError::ProcessingError` - If numerical computation fails during fitting
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, shapes mismatch, or contain invalid values
+    /// - `Error::Computation` - If numerical computation fails during fitting
     ///
     /// # Performance
     ///
@@ -705,7 +679,7 @@ impl LDA {
         &mut self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix1>,
-    ) -> Result<Array2<f64>, ModelError>
+    ) -> Result<Array2<f64>, Error>
     where
         S1: Data<Elem = f64>,
         S2: Data<Elem = i32>,
@@ -717,11 +691,14 @@ impl LDA {
     }
 
     /// Transforms input data using the fitted projection
-    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        let projection = self.projection.as_ref().ok_or(ModelError::NotFitted)?;
+        let projection = self
+            .projection
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
 
         super::validation::validate_predict_input(x, projection.nrows())?;
 

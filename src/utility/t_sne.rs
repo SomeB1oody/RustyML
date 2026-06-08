@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
@@ -142,42 +142,41 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new TSNE instance or validation error
+    /// - `Result<Self, Error>` - A new TSNE instance or validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If any parameter is invalid
+    /// - `Error::InvalidParameter` - If any parameter is invalid
     pub fn new(
         n_components: usize,
         perplexity: f64,
         learning_rate: f64,
         n_iter: usize,
         random_state: Option<u64>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         if n_components == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_components must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_components",
+                "must be greater than 0",
             ));
         }
 
         if perplexity <= 0.0 || !perplexity.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "perplexity must be positive and finite, got {}",
-                perplexity
-            )));
+            return Err(Error::invalid_parameter(
+                "perplexity",
+                format!("must be positive and finite, got {}", perplexity),
+            ));
         }
 
         if learning_rate <= 0.0 || !learning_rate.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "learning_rate must be positive and finite, got {}",
-                learning_rate
-            )));
+            return Err(Error::invalid_parameter(
+                "learning_rate",
+                format!("must be positive and finite, got {}", learning_rate),
+            ));
         }
 
         if n_iter == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_iter must be greater than 0".to_string(),
-            ));
+            return Err(Error::invalid_parameter("n_iter", "must be greater than 0"));
         }
 
         Ok(Self {
@@ -204,16 +203,16 @@ impl TSNE {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Reduced embedding of shape (n_samples, n_components)
+    /// - `Result<Array2<f64>, Error>` - Reduced embedding of shape (n_samples, n_components)
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input matrix is empty, too small, or contains non-finite values
+    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input matrix is empty, too small, or contains non-finite values
     ///
     /// # Performance
     ///
     /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PARALLEL_THRESHOLD` (2000).
-    pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -294,7 +293,7 @@ impl TSNE {
         Ok(y)
     }
 
-    fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), Error>
     where
         S: Data<Elem = f64>,
     {
@@ -306,11 +305,14 @@ impl TSNE {
         // The perplexity bound is t-SNE-specific and stays here.
         if self.perplexity >= x.nrows() as f64 {
             // Perplexity must be less than the number of samples
-            return Err(ModelError::InputValidationError(format!(
-                "perplexity must be less than number of samples, got perplexity={} with samples={}",
-                self.perplexity,
-                x.nrows()
-            )));
+            return Err(Error::invalid_parameter(
+                "perplexity",
+                format!(
+                    "must be less than number of samples, got perplexity={} with samples={}",
+                    self.perplexity,
+                    x.nrows()
+                ),
+            ));
         }
 
         Ok(())
@@ -532,11 +534,11 @@ impl TSNE {
         kl
     }
 
-    fn center_embedding(&self, y: &mut Array2<f64>) -> Result<(), ModelError> {
+    fn center_embedding(&self, y: &mut Array2<f64>) -> Result<(), Error> {
         // Subtract mean to keep the embedding centered
-        let mean = y.mean_axis(Axis(0)).ok_or_else(|| {
-            ModelError::ProcessingError("Failed to compute embedding mean".to_string())
-        })?;
+        let mean = y
+            .mean_axis(Axis(0))
+            .ok_or_else(|| Error::computation("Failed to compute embedding mean"))?;
         for mut row in y.outer_iter_mut() {
             row -= &mean;
         }

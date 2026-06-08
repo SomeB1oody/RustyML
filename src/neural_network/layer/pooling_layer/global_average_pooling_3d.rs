@@ -1,5 +1,5 @@
 use crate::neural_network::layer::pooling_layer::layer_functions_global_pooling;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
@@ -78,12 +78,10 @@ impl Default for GlobalAveragePooling3D {
 }
 
 impl Layer for GlobalAveragePooling3D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 5D
         if input.ndim() != 5 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 5D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
         // Store input shape for backpropagation (only the shape is needed)
@@ -94,24 +92,20 @@ impl Layer for GlobalAveragePooling3D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 5D
         if input.ndim() != 5 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 5D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Check that the forward pass has populated the input shape
         if self.input_shape.is_empty() {
-            return Err(ModelError::ProcessingError(
-                "Forward pass has not been run yet".to_string(),
-            ));
+            return Err(Error::forward_pass_not_run("GlobalAveragePooling3D"));
         }
 
         Ok(global_pool_backward(

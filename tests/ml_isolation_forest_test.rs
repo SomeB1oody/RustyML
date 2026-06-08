@@ -1,7 +1,7 @@
 #![cfg(feature = "machine_learning")]
 
 use ndarray::{Array2, arr2};
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::machine_learning::isolation_forest::IsolationForest;
 
 // Test basic constructor functionality
@@ -63,7 +63,7 @@ fn test_fit_empty_data() {
     let x = Array2::<f64>::zeros((0, 2));
 
     let result = forest.fit(&x.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::EmptyInput(_))));
 }
 
 // Test fitting with NaN values
@@ -73,7 +73,7 @@ fn test_fit_nan_data() {
     let x = arr2(&[[1.0, 2.0], [f64::NAN, 3.0], [4.0, 5.0]]);
 
     let result = forest.fit(&x.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
 }
 
 // Test fitting with infinite values
@@ -83,7 +83,7 @@ fn test_fit_infinite_data() {
     let x = arr2(&[[1.0, 2.0], [f64::INFINITY, 3.0], [4.0, 5.0]]);
 
     let result = forest.fit(&x.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
 }
 
 // Test anomaly score calculation for single samples
@@ -115,7 +115,7 @@ fn test_anomaly_score_not_fitted() {
     let sample = [1.0, 2.0];
 
     let result = forest.anomaly_score(&sample);
-    assert!(matches!(result, Err(ModelError::NotFitted)));
+    assert!(matches!(result, Err(Error::NotFitted(_))));
 }
 
 // Test anomaly score with wrong feature dimension
@@ -129,7 +129,7 @@ fn test_anomaly_score_dimension_mismatch() {
     // Try with wrong number of features
     let wrong_sample = [1.0, 2.0, 3.0]; // 3 features instead of 2
     let result = forest.anomaly_score(&wrong_sample);
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::DimensionMismatch { .. })));
 }
 
 // Test predict function with multiple samples
@@ -169,7 +169,7 @@ fn test_predict_not_fitted() {
     let x_test = arr2(&[[1.0, 2.0], [3.0, 4.0]]);
 
     let result = forest.predict(&x_test.view());
-    assert!(matches!(result, Err(ModelError::NotFitted)));
+    assert!(matches!(result, Err(Error::NotFitted(_))));
 }
 
 // Test predict with empty data
@@ -181,7 +181,7 @@ fn test_predict_empty_data() {
 
     let x_test = Array2::<f64>::zeros((0, 2));
     let result = forest.predict(&x_test.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::EmptyInput(_))));
 }
 
 // Test predict with dimension mismatch
@@ -193,7 +193,7 @@ fn test_predict_dimension_mismatch() {
 
     let x_test = arr2(&[[1.0, 2.0, 3.0]]); // 3 features instead of 2
     let result = forest.predict(&x_test.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::DimensionMismatch { .. })));
 }
 
 // Test predict with NaN values
@@ -205,7 +205,7 @@ fn test_predict_nan_data() {
 
     let x_test = arr2(&[[1.0, f64::NAN]]);
     let result = forest.predict(&x_test.view());
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
 }
 
 // Test fit_predict function

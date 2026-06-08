@@ -1,7 +1,7 @@
 #![cfg(feature = "utility")]
 
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::utility::normalize::*;
 
 // Helper function for approximate equality checks
@@ -219,7 +219,7 @@ fn test_normalize_empty_array() {
         NormalizationOrder::L2,
     );
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::EmptyInput(_))));
 }
 
 /// Test NaN input
@@ -228,7 +228,7 @@ fn test_normalize_nan_input() {
     let data = array![[1.0, f64::NAN], [2.0, 3.0]];
     let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
 }
 
 /// Test infinite input
@@ -237,7 +237,7 @@ fn test_normalize_infinite_input() {
     let data = array![[1.0, f64::INFINITY], [2.0, 3.0]];
     let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
 
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::NonFinite(_))));
 }
 
 /// Test invalid Lp parameters
@@ -251,14 +251,14 @@ fn test_normalize_invalid_lp_parameter() {
         NormalizationAxis::Row,
         NormalizationOrder::Lp(0.0),
     );
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
 
     let result = normalize(
         &data.view(),
         NormalizationAxis::Row,
         NormalizationOrder::Lp(-1.0),
     );
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
 
     // Test p as infinity
     let result = normalize(
@@ -266,7 +266,7 @@ fn test_normalize_invalid_lp_parameter() {
         NormalizationAxis::Row,
         NormalizationOrder::Lp(f64::INFINITY),
     );
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
 
     // Test p as NaN
     let result = normalize(
@@ -274,7 +274,7 @@ fn test_normalize_invalid_lp_parameter() {
         NormalizationAxis::Row,
         NormalizationOrder::Lp(f64::NAN),
     );
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidParameter { .. })));
 }
 
 /// Test 1D array row/column normalization errors
@@ -283,14 +283,14 @@ fn test_normalize_1d_row_column_error() {
     let data = array![1.0, 2.0, 3.0];
 
     let result = normalize(&data.view(), NormalizationAxis::Row, NormalizationOrder::L2);
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidInput(_))));
 
     let result = normalize(
         &data.view(),
         NormalizationAxis::Column,
         NormalizationOrder::L2,
     );
-    assert!(matches!(result, Err(ModelError::InputValidationError(_))));
+    assert!(matches!(result, Err(Error::InvalidInput(_))));
 }
 
 /// Test negative values handling

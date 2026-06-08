@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -86,16 +86,16 @@ impl SimpleRNN {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new SimpleRNN layer instance
+    /// - `Result<Self, Error>` - A new SimpleRNN layer instance
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
 
         // Xavier/Glorot initialization for input kernel
@@ -133,7 +133,7 @@ impl SimpleRNN {
         kernel: Array2<f32>,
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("kernel", self.kernel.shape(), kernel.shape())?;
         validate_weight_shape(
             "recurrent_kernel",
@@ -149,7 +149,7 @@ impl SimpleRNN {
 }
 
 impl Layer for SimpleRNN {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -185,7 +185,7 @@ impl Layer for SimpleRNN {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -215,21 +215,20 @@ impl Layer for SimpleRNN {
         Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         let grad_h_t = grad_output
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
+        fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> Result<T, Error> {
             cache
                 .take()
-                .ok_or_else(|| ModelError::ProcessingError(error_msg.to_string()))
+                .ok_or_else(|| Error::forward_pass_not_run(layer))
         }
 
-        let error_msg = "Forward pass has not been run";
-        let x3 = take_cache(&mut self.input_cache, error_msg)?;
-        let hs = take_cache(&mut self.hidden_state_cache, error_msg)?;
+        let x3 = take_cache(&mut self.input_cache, "SimpleRNN")?;
+        let hs = take_cache(&mut self.hidden_state_cache, "SimpleRNN")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];

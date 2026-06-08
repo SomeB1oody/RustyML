@@ -5,7 +5,7 @@
 //! deflation. That routine lives here so the two solvers share one
 //! implementation instead of carrying near-identical copies.
 
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -30,14 +30,15 @@ fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
 ///
 /// # Errors
 ///
-/// - [`ModelError::ProcessingError`] - If the iteration fails to converge to a
+/// - [`Error::NotConverged`] - If the iteration fails to converge to a
 ///   finite, non-degenerate eigenpair
+/// - [`Error::NonFinite`] - If the iteration produces a non-finite eigenvalue
 fn dominant_eigenpair(
     matrix: &Array2<f64>,
     rng: &mut StdRng,
     max_iter: usize,
     tol: f64,
-) -> Result<(Array1<f64>, f64), ModelError> {
+) -> Result<(Array1<f64>, f64), Error> {
     let n = matrix.ncols();
     let mut v = random_unit_vector(n, rng);
 
@@ -47,16 +48,14 @@ fn dominant_eigenpair(
         let w = matrix.dot(&v);
         let w_norm = w.dot(&w).sqrt();
         if w_norm <= f64::EPSILON || !w_norm.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Power iteration failed to converge".to_string(),
+            return Err(Error::not_converged(
+                "Power iteration failed to converge",
             ));
         }
         let v_next = &w / w_norm;
         let lambda = v_next.dot(&matrix.dot(&v_next));
         if !lambda.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Power iteration produced non-finite eigenvalue".to_string(),
-            ));
+            return Err(Error::non_finite("power iteration eigenvalue"));
         }
         if (lambda - prev_lambda).abs() < tol {
             return Ok((v_next, lambda));
@@ -67,9 +66,7 @@ fn dominant_eigenpair(
 
     let lambda = v.dot(&matrix.dot(&v));
     if !lambda.is_finite() {
-        return Err(ModelError::ProcessingError(
-            "Power iteration produced non-finite eigenvalue".to_string(),
-        ));
+        return Err(Error::non_finite("power iteration eigenvalue"));
     }
     Ok((v, lambda))
 }
@@ -93,14 +90,15 @@ fn dominant_eigenpair(
 ///
 /// # Errors
 ///
-/// - [`ModelError::ProcessingError`] - If any component fails to converge
+/// - [`Error::NotConverged`] - If any component fails to converge
+/// - [`Error::NonFinite`] - If a component produces a non-finite eigenvalue
 pub(super) fn top_eigenpairs_power_iteration(
     mut matrix: Array2<f64>,
     k: usize,
     seed: u64,
     max_iter: usize,
     tol: f64,
-) -> Result<(Vec<f64>, Vec<Array1<f64>>), ModelError> {
+) -> Result<(Vec<f64>, Vec<Array1<f64>>), Error> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut eigenvalues = Vec::with_capacity(k);
     let mut eigenvectors = Vec::with_capacity(k);
@@ -142,12 +140,12 @@ pub(super) fn top_eigenpairs_power_iteration(
 ///
 /// # Errors
 ///
-/// - [`ModelError::ProcessingError`] - If the Krylov subspace collapses immediately
+/// - [`Error::NotConverged`] - If the Krylov subspace collapses immediately
 pub(super) fn top_eigenpairs_lanczos(
     matrix: &Array2<f64>,
     k: usize,
     seed: u64,
-) -> Result<(Vec<f64>, Vec<Array1<f64>>), ModelError> {
+) -> Result<(Vec<f64>, Vec<Array1<f64>>), Error> {
     let n = matrix.ncols();
     // Krylov dimension: comfortably larger than k for accurate leading Ritz pairs,
     // capped at the matrix size.
@@ -198,8 +196,8 @@ pub(super) fn top_eigenpairs_lanczos(
 
     let dim = alphas.len();
     if dim == 0 {
-        return Err(ModelError::ProcessingError(
-            "Lanczos iteration produced an empty subspace".to_string(),
+        return Err(Error::not_converged(
+            "Lanczos iteration produced an empty subspace",
         ));
     }
 

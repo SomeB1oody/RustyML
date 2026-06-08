@@ -1,26 +1,17 @@
-use crate::error::ModelError;
+use crate::error::Error;
 
 /// Validates that the input shape has the expected number of dimensions.
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if the shape length doesn't match expected_dims.
+/// Returns [`Error::DimensionMismatch`] if the shape length doesn't match expected_dims.
 pub(super) fn validate_input_shape_dims(
     input_shape: &[usize],
     expected_dims: usize,
-    layer_name: &str,
-) -> Result<(), ModelError> {
+    _layer_name: &str,
+) -> Result<(), Error> {
     if input_shape.len() != expected_dims {
-        let dim_names = match expected_dims {
-            3 => "[batch_size, channels, length]",
-            4 => "[batch_size, channels, height, width]",
-            5 => "[batch_size, channels, depth, height, width]",
-            _ => "proper dimensions",
-        };
-        return Err(ModelError::InputValidationError(format!(
-            "Input shape must be {}-dimensional: {} for {}",
-            expected_dims, dim_names, layer_name
-        )));
+        return Err(Error::dimension_mismatch(expected_dims, input_shape.len()));
     }
     Ok(())
 }
@@ -29,10 +20,10 @@ pub(super) fn validate_input_shape_dims(
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any dimension is 0.
-pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), ModelError> {
+/// Returns [`Error::InvalidInput`] if any dimension is 0.
+pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Error> {
     if !input_shape.iter().all(|&dim| dim > 0) {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "All dimensions in input_shape must be greater than zero. Got: {:?}",
             input_shape
         )));
@@ -44,23 +35,24 @@ pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Mo
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if:
+/// Returns [`Error::InvalidParameter`] if:
 /// - pool_size is 0
 /// - pool_size is greater than input length
 pub(super) fn validate_pool_size_1d(
     pool_size: usize,
     input_length: usize,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if pool_size == 0 {
-        return Err(ModelError::InputValidationError(
-            "pool_size must be greater than zero".to_string(),
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "must be greater than zero",
         ));
     }
     if pool_size > input_length {
-        return Err(ModelError::InputValidationError(format!(
-            "pool_size ({}) cannot be greater than input length ({})",
-            pool_size, input_length
-        )));
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "cannot exceed the corresponding input dimension",
+        ));
     }
     Ok(())
 }
@@ -69,24 +61,25 @@ pub(super) fn validate_pool_size_1d(
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any dimension is 0, or if a pool dimension is
+/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
 /// greater than the corresponding input dimension (which would underflow the output-shape
 /// calculation).
 pub(super) fn validate_pool_size_2d(
     pool_size: (usize, usize),
     input_height: usize,
     input_width: usize,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if pool_size.0 == 0 || pool_size.1 == 0 {
-        return Err(ModelError::InputValidationError(
-            "Pool size must be greater than zero in all dimensions".to_string(),
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "must be greater than zero in all dimensions",
         ));
     }
     if pool_size.0 > input_height || pool_size.1 > input_width {
-        return Err(ModelError::InputValidationError(format!(
-            "pool_size {:?} cannot be greater than the input spatial size ({}, {})",
-            pool_size, input_height, input_width
-        )));
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "cannot exceed the corresponding input dimension",
+        ));
     }
     Ok(())
 }
@@ -95,7 +88,7 @@ pub(super) fn validate_pool_size_2d(
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any dimension is 0, or if a pool dimension is
+/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
 /// greater than the corresponding input dimension (which would underflow the output-shape
 /// calculation).
 pub(super) fn validate_pool_size_3d(
@@ -103,17 +96,18 @@ pub(super) fn validate_pool_size_3d(
     input_depth: usize,
     input_height: usize,
     input_width: usize,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if pool_size.0 == 0 || pool_size.1 == 0 || pool_size.2 == 0 {
-        return Err(ModelError::InputValidationError(
-            "Pool size dimensions must be greater than zero".to_string(),
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "must be greater than zero in all dimensions",
         ));
     }
     if pool_size.0 > input_depth || pool_size.1 > input_height || pool_size.2 > input_width {
-        return Err(ModelError::InputValidationError(format!(
-            "pool_size {:?} cannot be greater than the input spatial size ({}, {}, {})",
-            pool_size, input_depth, input_height, input_width
-        )));
+        return Err(Error::invalid_parameter(
+            "pool_size",
+            "cannot exceed the corresponding input dimension",
+        ));
     }
     Ok(())
 }
@@ -122,11 +116,12 @@ pub(super) fn validate_pool_size_3d(
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if stride is 0.
-pub(super) fn validate_stride_1d(stride: usize) -> Result<(), ModelError> {
+/// Returns [`Error::InvalidParameter`] if stride is 0.
+pub(super) fn validate_stride_1d(stride: usize) -> Result<(), Error> {
     if stride == 0 {
-        return Err(ModelError::InputValidationError(
-            "stride must be greater than zero".to_string(),
+        return Err(Error::invalid_parameter(
+            "stride",
+            "must be greater than zero",
         ));
     }
     Ok(())
@@ -136,11 +131,12 @@ pub(super) fn validate_stride_1d(stride: usize) -> Result<(), ModelError> {
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any stride is 0.
-pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), ModelError> {
+/// Returns [`Error::InvalidParameter`] if any stride is 0.
+pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 {
-        return Err(ModelError::InputValidationError(
-            "Strides must be greater than zero".to_string(),
+        return Err(Error::invalid_parameter(
+            "strides",
+            "must be greater than zero in all dimensions",
         ));
     }
     Ok(())
@@ -150,11 +146,12 @@ pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), ModelEr
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any stride is 0.
-pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), ModelError> {
+/// Returns [`Error::InvalidParameter`] if any stride is 0.
+pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 || strides.2 == 0 {
-        return Err(ModelError::InputValidationError(
-            "Stride dimensions must be greater than zero".to_string(),
+        return Err(Error::invalid_parameter(
+            "strides",
+            "must be greater than zero in all dimensions",
         ));
     }
     Ok(())

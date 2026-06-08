@@ -1,5 +1,5 @@
 use crate::neural_network::layer::pooling_layer::layer_functions_1d_pooling;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::shape_helpers::calculate_output_shape_1d_pooling;
@@ -100,17 +100,19 @@ impl AveragePooling1D {
     ///
     /// # Returns
     ///
-    /// - `Result<AveragePooling1D, ModelError>` - New layer instance on success
+    /// - `Result<AveragePooling1D, Error>` - New layer instance on success
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_shape` is not 3D, contains non-positive
-    ///   dimensions, `pool_size` is zero or larger than the input length, or `stride` is zero
+    /// - [`Error::DimensionMismatch`] if `input_shape` is not 3D
+    /// - [`Error::InvalidInput`] if `input_shape` contains non-positive dimensions
+    /// - [`Error::InvalidParameter`] if `pool_size` is zero or larger than the input length, or
+    ///   `stride` is zero
     pub fn new(
         pool_size: usize,
         input_shape: Vec<usize>,
         stride: Option<usize>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         let stride = stride.unwrap_or(pool_size);
 
         // input validation
@@ -129,12 +131,10 @@ impl AveragePooling1D {
 }
 
 impl Layer for AveragePooling1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
         // Cache the actual input shape for backward (only the shape is needed for averaging)
@@ -150,12 +150,10 @@ impl Layer for AveragePooling1D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
         let (output, _) = windowed_pool_forward(
@@ -167,10 +165,11 @@ impl Layer for AveragePooling1D {
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        let input_shape = self.forward_input_shape.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run yet".to_string())
-        })?;
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+        let input_shape = self
+            .forward_input_shape
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("AveragePooling1D"))?;
 
         Ok(windowed_pool_backward(
             grad_output,

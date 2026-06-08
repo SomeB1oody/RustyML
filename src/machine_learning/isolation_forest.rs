@@ -1,5 +1,5 @@
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::average_path_length_factor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
@@ -110,11 +110,11 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new unfitted `IsolationForest` instance
+    /// - `Result<Self, Error>` - A new unfitted `IsolationForest` instance
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
+    /// Returns `Error::InvalidParameter` if:
     /// - `n_estimators` is 0
     /// - `max_samples` is 0
     /// - `max_depth` (if provided) is 0
@@ -123,18 +123,20 @@ impl IsolationForest {
         max_samples: usize,
         max_depth: Option<usize>,
         random_state: Option<u64>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate n_estimators
         if n_estimators == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_estimators must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_estimators",
+                "must be greater than 0",
             ));
         }
 
         // Validate max_samples
         if max_samples == 0 {
-            return Err(ModelError::InputValidationError(
-                "max_samples must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "max_samples",
+                "must be greater than 0",
             ));
         }
 
@@ -142,8 +144,9 @@ impl IsolationForest {
         if let Some(depth) = max_depth
             && depth == 0
         {
-            return Err(ModelError::InputValidationError(
-                "max_depth must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "max_depth",
+                "must be greater than 0",
             ));
         }
 
@@ -181,11 +184,11 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to self if successful
+    /// - `Result<&mut Self, Error>` - A mutable reference to self if successful
     ///
     /// # Errors
     ///
-    /// Returns `ModelError` if:
+    /// Returns `Error` if:
     /// - Input data is empty
     /// - Input contains NaN or infinite values
     /// - Tree building fails
@@ -193,7 +196,7 @@ impl IsolationForest {
     /// # Performance
     ///
     /// Uses parallelization when the number of trees exceeds `DEFAULT_PARALLEL_THRESHOLD_TREES`.
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -214,7 +217,7 @@ impl IsolationForest {
         };
 
         // Build multiple isolation trees
-        let build_tree = |i: usize| -> Result<IsolationTree, ModelError> {
+        let build_tree = |i: usize| -> Result<IsolationTree, Error> {
             // Create an independent RNG for each tree to maintain reproducibility
             let mut rng = if let Some(seed) = self.random_state {
                 StdRng::seed_from_u64(seed.wrapping_add(i as u64))
@@ -235,7 +238,7 @@ impl IsolationForest {
             result
         };
 
-        let trees: Result<Vec<IsolationTree>, ModelError> =
+        let trees: Result<Vec<IsolationTree>, Error> =
             if self.n_estimators >= DEFAULT_PARALLEL_THRESHOLD_TREES {
                 // Use parallelization for large number of trees
                 (0..self.n_estimators)
@@ -275,7 +278,7 @@ impl IsolationForest {
         indices: &[usize],
         current_depth: usize,
         rng: &mut StdRng,
-    ) -> Result<IsolationTree, ModelError>
+    ) -> Result<IsolationTree, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -367,22 +370,20 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<f64, ModelError>` - The anomaly score between 0 and 1
+    /// - `Result<f64, Error>` - The anomaly score between 0 and 1
     ///
     /// # Errors
     ///
-    /// Returns `ModelError` if:
+    /// Returns `Error` if:
     /// - Model has not been fitted
     /// - Sample feature dimension does not match training data
-    pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, ModelError> {
+    pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, Error> {
         if self.trees.is_none() {
-            return Err(ModelError::NotFitted);
+            return Err(Error::not_fitted("IsolationForest"));
         }
 
         if sample.len() != self.n_features {
-            return Err(ModelError::InputValidationError(
-                "Sample feature dimension mismatch".to_string(),
-            ));
+            return Err(Error::dimension_mismatch(self.n_features, sample.len()));
         }
 
         let trees = self.trees.as_ref().unwrap();
@@ -418,11 +419,11 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores
+    /// - `Result<Array1<f64>, Error>` - A 1D array of anomaly scores
     ///
     /// # Errors
     ///
-    /// Returns `ModelError` if:
+    /// Returns `Error` if:
     /// - Model has not been fitted
     /// - Input data is empty
     /// - Feature dimension does not match training data
@@ -431,11 +432,11 @@ impl IsolationForest {
     /// # Performance
     ///
     /// Uses parallelization when the number of samples exceeds `DEFAULT_PARALLEL_THRESHOLD_SAMPLES`.
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        check_is_fitted(self.trees.is_some())?;
+        check_is_fitted(self.trees.is_some(), "IsolationForest")?;
         validate_predict_input(x, self.n_features)?;
 
         // Precompute the normalization constant once for the whole batch; feature
@@ -471,12 +472,12 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array of anomaly scores for the training data
+    /// - `Result<Array1<f64>, Error>` - A 1D array of anomaly scores for the training data
     ///
     /// # Errors
     ///
-    /// Returns `ModelError` if fitting or prediction fails.
-    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// Returns `Error` if fitting or prediction fails.
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

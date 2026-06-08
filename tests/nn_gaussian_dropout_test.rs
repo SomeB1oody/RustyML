@@ -1,7 +1,7 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::Array;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_dropout::GaussianDropout;
 use rustyml::neural_network::neural_network_trait::Layer;
 
@@ -16,40 +16,43 @@ fn test_gaussian_dropout_new() {
 
 #[test]
 fn test_gaussian_dropout_negative_rate() {
-    // Test that negative rate returns an InputValidationError
+    // Test that negative rate returns an InvalidParameter error
     let result = GaussianDropout::new(-0.1, vec![32, 128]);
     assert!(result.is_err());
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
-        assert!(msg.contains("-0.1"));
+    if let Err(Error::InvalidParameter { name, reason }) = result {
+        assert_eq!(name, "Dropout rate");
+        assert!(reason.contains("must be in range [0, 1)"));
+        assert!(reason.contains("-0.1"));
     } else {
-        panic!("Expected InputValidationError");
+        panic!("Expected InvalidParameter");
     }
 }
 
 #[test]
 fn test_gaussian_dropout_rate_equals_one() {
-    // Test that rate=1.0 returns an InputValidationError
+    // Test that rate=1.0 returns an InvalidParameter error
     let result = GaussianDropout::new(1.0, vec![32, 128]);
     assert!(result.is_err());
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
-        assert!(msg.contains("1"));
+    if let Err(Error::InvalidParameter { name, reason }) = result {
+        assert_eq!(name, "Dropout rate");
+        assert!(reason.contains("must be in range [0, 1)"));
+        assert!(reason.contains("1"));
     } else {
-        panic!("Expected InputValidationError");
+        panic!("Expected InvalidParameter");
     }
 }
 
 #[test]
 fn test_gaussian_dropout_rate_over_one() {
-    // Test that rate>1.0 returns an InputValidationError
+    // Test that rate>1.0 returns an InvalidParameter error
     let result = GaussianDropout::new(1.5, vec![32, 128]);
     assert!(result.is_err());
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("Dropout rate must be in range [0, 1)"));
-        assert!(msg.contains("1.5"));
+    if let Err(Error::InvalidParameter { name, reason }) = result {
+        assert_eq!(name, "Dropout rate");
+        assert!(reason.contains("must be in range [0, 1)"));
+        assert!(reason.contains("1.5"));
     } else {
-        panic!("Expected InputValidationError");
+        panic!("Expected InvalidParameter");
     }
 }
 

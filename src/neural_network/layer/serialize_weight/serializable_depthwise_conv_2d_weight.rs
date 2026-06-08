@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::convolution_layer::depthwise_conv_2d::DepthwiseConv2D;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::{Array1, Array4};
@@ -17,7 +17,7 @@ pub struct SerializableDepthwiseConv2DWeight {
 }
 
 impl ApplyWeights<DepthwiseConv2D> for SerializableDepthwiseConv2DWeight {
-    fn apply_to_layer(&self, layer: &mut DepthwiseConv2D) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut DepthwiseConv2D) -> Result<(), Error> {
         layer.set_weights(self.weight.clone(), self.bias.clone())?;
         Ok(())
     }

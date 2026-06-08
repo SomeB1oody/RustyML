@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 
@@ -16,7 +16,7 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 ///
 /// # Returns
 ///
-/// - `Result<Array2<f64>, ModelError>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
+/// - `Result<Array2<f64>, Error>` - A 2D one-hot encoded matrix of shape (n_samples, n_classes)
 ///
 /// # Examples
 ///
@@ -40,12 +40,12 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If any label is negative, or if `num_classes`
-///   is smaller than the maximum label + 1
+/// - [`Error::InvalidInput`] - If any label is negative
+/// - [`Error::InvalidParameter`] - If `num_classes` is smaller than the maximum label + 1
 pub fn to_categorical<S>(
     labels: &ArrayBase<S, Ix1>,
     num_classes: Option<usize>,
-) -> Result<Array2<f64>, ModelError>
+) -> Result<Array2<f64>, Error>
 where
     S: Data<Elem = i32>,
 {
@@ -53,7 +53,7 @@ where
 
     // Reject negative labels: they cannot index a one-hot column.
     if let Some(&label) = labels.iter().find(|&&label| label < 0) {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "Labels must be non-negative, found: {}",
             label
         )));
@@ -64,11 +64,14 @@ where
     let n_classes = match num_classes {
         Some(n) => {
             if n < max_label + 1 {
-                return Err(ModelError::InputValidationError(format!(
-                    "num_classes ({}) must be at least {} (max_label + 1)",
-                    n,
-                    max_label + 1
-                )));
+                return Err(Error::invalid_parameter(
+                    "num_classes",
+                    format!(
+                        "num_classes ({}) must be at least {} (max_label + 1)",
+                        n,
+                        max_label + 1
+                    ),
+                ));
             }
             n
         }
@@ -103,11 +106,11 @@ where
 ///
 /// # Returns
 ///
-/// - `Result<(Array2<f64>, AHashMap<T, usize>), ModelError>` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
+/// - `Result<(Array2<f64>, AHashMap<T, usize>), Error>` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If `num_classes` is smaller than the number of unique labels
+/// - [`Error::InvalidParameter`] - If `num_classes` is smaller than the number of unique labels
 ///
 /// # Examples
 ///
@@ -126,7 +129,7 @@ where
 pub fn to_categorical_with_mapping<T>(
     labels: &[T],
     num_classes: Option<usize>,
-) -> Result<(Array2<f64>, AHashMap<T, usize>), ModelError>
+) -> Result<(Array2<f64>, AHashMap<T, usize>), Error>
 where
     T: Clone + Eq + std::hash::Hash,
 {
@@ -145,10 +148,13 @@ where
     let n_classes = match num_classes {
         Some(n) => {
             if n < unique_classes {
-                return Err(ModelError::InputValidationError(format!(
-                    "num_classes ({}) must be at least the number of unique labels ({})",
-                    n, unique_classes
-                )));
+                return Err(Error::invalid_parameter(
+                    "num_classes",
+                    format!(
+                        "num_classes ({}) must be at least the number of unique labels ({})",
+                        n, unique_classes
+                    ),
+                ));
             }
             n
         }
@@ -177,7 +183,7 @@ where
 ///
 /// # Returns
 ///
-/// - `Result<Array1<i32>, ModelError>` - A 1D array of integer labels in sparse categorical format
+/// - `Result<Array1<i32>, Error>` - A 1D array of integer labels in sparse categorical format
 ///
 /// # Examples
 ///
@@ -194,13 +200,13 @@ where
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the input contains NaN or infinite values
+/// - [`Error::NonFinite`] - If the input contains NaN or infinite values
 ///
 /// # Note
 ///
 /// This function finds the class with the highest probability for each sample,
 /// making it suitable for converting model predictions back to class labels.
-pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
 where
     S: Data<Elem = f64>,
 {

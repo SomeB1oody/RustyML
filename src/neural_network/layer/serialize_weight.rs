@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::{Error, IoError};
 use crate::neural_network::layer::convolution_layer::{
     conv_1d::Conv1D, conv_2d::Conv2D, conv_3d::Conv3D, depthwise_conv_2d::DepthwiseConv2D,
     separable_conv_2d::SeparableConv2D,
@@ -223,12 +223,17 @@ pub struct SerializableSequential {
 macro_rules! apply_weights_simple {
     ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
         if let Some(layer) = $layer_any.downcast_mut::<$layer_type>() {
-            $weight.apply_to_layer(layer)?;
+            // At the load boundary a weight-shape error from the layer is a structural
+            // incompatibility between the saved file and the target model, so surface it
+            // uniformly as `ModelStructureMismatch` (its message keeps the shape detail).
+            $weight
+                .apply_to_layer(layer)
+                .map_err(|e| Error::Io(IoError::ModelStructureMismatch(e.to_string())))?;
         } else {
-            return Err(IoError::ModelStructureMismatch(format!(
+            return Err(Error::Io(IoError::ModelStructureMismatch(format!(
                 "expected a {} layer but the target layer has type `{}`",
                 $layer_name, $expected_type
-            )));
+            ))));
         }
     }};
 }
@@ -243,16 +248,16 @@ macro_rules! apply_weights_simple {
 ///
 /// # Returns
 ///
-/// - `Result<(), IoError>` - Ok when weights are applied successfully
+/// - `Result<(), Error>` - Ok when weights are applied successfully
 ///
 /// # Errors
 ///
-/// - `IoError::StdIoError` - Layer type mismatch or invalid weight shape during conversion
+/// - `Error::Io(IoError::ModelStructureMismatch)` - Layer type mismatch or invalid weight shape during conversion
 pub fn apply_weights_to_layer(
     layer: &mut dyn Layer,
     weights: &SerializableLayerWeight,
     expected_type: &str,
-) -> Result<(), IoError> {
+) -> Result<(), Error> {
     use std::any::Any;
     let layer_any: &mut dyn Any = layer;
 

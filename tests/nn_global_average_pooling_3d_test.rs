@@ -2,7 +2,7 @@
 
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
-use rustyml::error::ModelError;
+use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layer::TrainingParameters;
 use rustyml::neural_network::layer::pooling_layer::global_average_pooling_3d::GlobalAveragePooling3D;
 use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
@@ -179,10 +179,10 @@ fn test_global_average_pooling_3d_backward_without_forward() {
 
     // Should return an error
     assert!(result.is_err());
-    if let Err(ModelError::ProcessingError(msg)) = result {
-        assert_eq!(msg, "Forward pass has not been run yet");
+    if let Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(layer))) = result {
+        assert_eq!(layer, "GlobalAveragePooling3D");
     } else {
-        panic!("Expected ProcessingError");
+        panic!("Expected NeuralNetwork(ForwardPassNotRun)");
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::loss_function::clip_probabilities;
 use crate::neural_network::neural_network_trait::LossFunction;
@@ -68,25 +68,24 @@ impl Default for SparseCategoricalCrossEntropy {
 fn validate_and_extract_labels(
     y_true: &Tensor,
     y_pred: &Tensor,
-) -> Result<Vec<usize>, ModelError> {
+) -> Result<Vec<usize>, Error> {
     if y_pred.ndim() != 2 {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "SparseCategoricalCrossEntropy expects 2D predictions [batch, num_classes], got shape {:?}",
             y_pred.shape()
         )));
     }
     if y_true.ndim() != 2 || y_true.shape()[1] != 1 {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "SparseCategoricalCrossEntropy expects integer labels of shape [batch, 1], got shape {:?}",
             y_true.shape()
         )));
     }
     if y_true.shape()[0] != y_pred.shape()[0] {
-        return Err(ModelError::InputValidationError(format!(
-            "SparseCategoricalCrossEntropy batch size mismatch: labels have {} samples, predictions have {}",
+        return Err(Error::dimension_mismatch(
             y_true.shape()[0],
-            y_pred.shape()[0]
-        )));
+            y_pred.shape()[0],
+        ));
     }
 
     let batch_size = y_true.shape()[0];
@@ -96,13 +95,13 @@ fn validate_and_extract_labels(
         .map(|i| {
             let label = y_true[[i, 0]];
             if !label.is_finite() || label < 0.0 {
-                return Err(ModelError::InputValidationError(format!(
+                return Err(Error::invalid_input(format!(
                     "SparseCategoricalCrossEntropy label at sample {i} must be a non-negative integer, got {label}"
                 )));
             }
             let class_idx = label.round() as usize;
             if class_idx >= num_classes {
-                return Err(ModelError::InputValidationError(format!(
+                return Err(Error::invalid_input(format!(
                     "SparseCategoricalCrossEntropy label {class_idx} at sample {i} is out of range for {num_classes} classes"
                 )));
             }
@@ -112,7 +111,7 @@ fn validate_and_extract_labels(
 }
 
 impl LossFunction for SparseCategoricalCrossEntropy {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
         let y_pred_clipped = clip_probabilities(y_pred);
 
@@ -130,7 +129,7 @@ impl LossFunction for SparseCategoricalCrossEntropy {
         Ok(total_loss / batch_size as f32)
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         // Ensure predictions are in a numerically stable range
         let y_pred_clipped = clip_probabilities(y_pred);
 

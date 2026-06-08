@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::Array2;
@@ -19,7 +19,7 @@ pub struct SerializableSimpleRNNWeight {
 }
 
 impl ApplyWeights<SimpleRNN> for SerializableSimpleRNNWeight {
-    fn apply_to_layer(&self, layer: &mut SimpleRNN) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut SimpleRNN) -> Result<(), Error> {
         layer.set_weights(
             self.kernel.clone(),
             self.recurrent_kernel.clone(),

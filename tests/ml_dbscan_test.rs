@@ -1,7 +1,7 @@
 #![cfg(feature = "machine_learning")]
 
 use ndarray::{Array2, arr2};
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric;
 use rustyml::machine_learning::dbscan::DBSCAN;
 
@@ -152,7 +152,7 @@ fn test_predict_before_fit() {
 
     let dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
     match dbscan.predict(&new_data.view()) {
-        Err(ModelError::NotFitted) => assert!(true),
+        Err(Error::NotFitted(_)) => assert!(true),
         _ => panic!("Expected NotFitted error"),
     }
 }
@@ -164,8 +164,8 @@ fn test_empty_data() {
 
     // Test with empty dataset
     match dbscan.fit(&data.view()) {
-        Err(ModelError::InputValidationError(_)) => assert!(true),
-        _ => panic!("Expected InputValidationError"),
+        Err(Error::EmptyInput(_)) => assert!(true),
+        _ => panic!("Expected EmptyInput error"),
     }
 }
 

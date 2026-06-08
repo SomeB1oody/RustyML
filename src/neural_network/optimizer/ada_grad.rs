@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::neural_network_trait::{Layer, Optimizer};
 use crate::neural_network::optimizer::validation::validate_positive_finite;
 use crate::neural_network::optimizer::kernels;
@@ -32,12 +32,12 @@ impl AdaGrad {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new AdaGrad optimizer instance or an error
+    /// - `Result<Self, Error>` - A new AdaGrad optimizer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `learning_rate` or `epsilon` is not positive and finite
-    pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite
+    pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, Error> {
         // input validation
         validate_positive_finite(learning_rate, "learning_rate")?;
         validate_positive_finite(epsilon, "epsilon")?;

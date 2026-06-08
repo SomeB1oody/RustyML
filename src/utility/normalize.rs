@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -79,12 +79,14 @@ pub enum NormalizationOrder {
 ///
 /// # Returns
 ///
-/// - `Result<Array<f64, D>, ModelError>` - Normalized array with same dimensions as input
+/// - `Result<Array<f64, D>, Error>` - Normalized array with same dimensions as input
 ///
 /// # Errors
 ///
-/// - Returns `ModelError::InputValidationError` if the input array is empty, contains non-finite values (NaN/Inf), or if the Lp norm parameter `p` is not positive/finite.
-/// - Returns `ModelError::ProcessingError` if the normalization computation results in non-finite values.
+/// - Returns [`Error::EmptyInput`] if the input array is empty.
+/// - Returns [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf).
+/// - Returns [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive/finite.
+/// - Returns [`Error::NonFinite`] if the normalization computation results in non-finite values.
 ///
 /// # Performance
 ///
@@ -103,29 +105,26 @@ pub fn normalize<S, D>(
     data: &ArrayBase<S, D>,
     axis: NormalizationAxis,
     order: NormalizationOrder,
-) -> Result<Array<f64, D>, ModelError>
+) -> Result<Array<f64, D>, Error>
 where
     S: Data<Elem = f64>,
     D: Dimension,
 {
     // Input validation
     if data.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot normalize empty array".to_string(),
-        ));
+        return Err(Error::empty_input("Cannot normalize empty array"));
     }
 
     // Check for NaN or infinite values
     if data.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Input contains NaN or infinite values".to_string(),
-        ));
+        return Err(Error::non_finite("input data"));
     }
 
     // Validate Lp norm parameter
     if matches!(order, NormalizationOrder::Lp(p) if p <= 0.0 || !p.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Lp norm parameter must be positive and finite".to_string(),
+        return Err(Error::invalid_parameter(
+            "p",
+            "Lp norm parameter must be positive and finite",
         ));
     }
 
@@ -148,7 +147,7 @@ fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
 fn normalize_global<D>(
     data: &mut Array<f64, D>,
     order: NormalizationOrder,
-) -> Result<(), ModelError>
+) -> Result<(), Error>
 where
     D: Dimension,
 {
@@ -175,13 +174,13 @@ fn normalize_lanes<D>(
     axis_from_end: usize,
     order: NormalizationOrder,
     operation_name: &str,
-) -> Result<(), ModelError>
+) -> Result<(), Error>
 where
     D: Dimension,
 {
     let ndim = data.ndim();
     if ndim < 2 {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "{} requires at least 2 dimensions",
             operation_name
         )));
@@ -191,7 +190,7 @@ where
     let axis = Axis(ndim - axis_from_end);
 
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
-    let process = |lane: &mut ArrayViewMut1<f64>| -> Result<(), ModelError> {
+    let process = |lane: &mut ArrayViewMut1<f64>| -> Result<(), Error> {
         let norm = order.norm(lane.iter().copied())?;
         normalize_lane(lane, norm);
         Ok(())
@@ -212,8 +211,8 @@ impl NormalizationOrder {
     ///
     /// # Errors
     ///
-    /// - [`ModelError::ProcessingError`] - If the accumulation overflows to a non-finite value
-    fn norm<I>(&self, values: I) -> Result<f64, ModelError>
+    /// - [`Error::NonFinite`] - If the accumulation overflows to a non-finite value
+    fn norm<I>(&self, values: I) -> Result<f64, Error>
     where
         I: Iterator<Item = f64>,
     {
@@ -223,8 +222,8 @@ impl NormalizationOrder {
                 if norm.is_finite() {
                     Ok(norm)
                 } else {
-                    Err(ModelError::ProcessingError(
-                        "L1 norm computation resulted in non-finite value".to_string(),
+                    Err(Error::non_finite(
+                        "L1 norm computation resulted in non-finite value",
                     ))
                 }
             }
@@ -233,8 +232,8 @@ impl NormalizationOrder {
                 if norm_squared.is_finite() && norm_squared >= 0.0 {
                     Ok(norm_squared.sqrt())
                 } else {
-                    Err(ModelError::ProcessingError(
-                        "L2 norm computation resulted in non-finite value".to_string(),
+                    Err(Error::non_finite(
+                        "L2 norm computation resulted in non-finite value",
                     ))
                 }
             }
@@ -247,8 +246,8 @@ impl NormalizationOrder {
                     // Empty iterator case
                     Ok(0.0)
                 } else {
-                    Err(ModelError::ProcessingError(
-                        "Max norm computation resulted in non-finite value".to_string(),
+                    Err(Error::non_finite(
+                        "Max norm computation resulted in non-finite value",
                     ))
                 }
             }
@@ -257,7 +256,7 @@ impl NormalizationOrder {
                 if sum.is_finite() && sum >= 0.0 {
                     Ok(sum.powf(1.0 / p))
                 } else {
-                    Err(ModelError::ProcessingError(format!(
+                    Err(Error::non_finite(format!(
                         "Lp norm (p={}) computation resulted in non-finite value",
                         p
                     )))
@@ -275,14 +274,14 @@ impl NormalizationAxis {
     ///
     /// # Errors
     ///
-    /// - [`ModelError::InputValidationError`] - If row/column normalization is requested
+    /// - [`Error::InvalidInput`] - If row/column normalization is requested
     ///   on an array with fewer than 2 dimensions
-    /// - [`ModelError::ProcessingError`] - If a norm computation overflows
+    /// - [`Error::NonFinite`] - If a norm computation overflows
     fn apply<D>(
         &self,
         data: &mut Array<f64, D>,
         order: NormalizationOrder,
-    ) -> Result<(), ModelError>
+    ) -> Result<(), Error>
     where
         D: Dimension,
     {

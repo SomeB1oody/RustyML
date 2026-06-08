@@ -1,5 +1,5 @@
 use crate::neural_network::layer::no_trainable_parameters_layer_functions;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::format_shape;
@@ -62,19 +62,15 @@ impl Default for Linear {
 }
 
 impl Layer for Linear {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Check if tensor is empty
         if input.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensor is empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensor"));
         }
 
         // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input tensor contains NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("input tensor"));
         }
 
         // Save the input shape for backpropagation (validation only)
@@ -85,49 +81,40 @@ impl Layer for Linear {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Check if tensor is empty
         if input.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensor is empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensor"));
         }
 
         // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input tensor contains NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("input tensor"));
         }
 
         // Linear activation: f(x) = x (identity function)
         Ok(input.clone())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(input_shape) = &self.input_shape {
             // Validate gradient output shape
             if grad_output.shape() != input_shape.as_slice() {
-                return Err(ModelError::ProcessingError(format!(
-                    "Gradient output shape {:?} doesn't match input shape {:?}",
+                return Err(Error::shape_mismatch(
+                    input_shape.clone(),
                     grad_output.shape(),
-                    input_shape
-                )));
+                ));
             }
 
             // Check for NaN or infinite values in gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-                return Err(ModelError::InputValidationError(
-                    "Gradient output contains NaN or infinite values".to_string(),
-                ));
+                return Err(Error::non_finite("gradient output"));
             }
 
             // Linear derivative is 1, so gradient passes through unchanged
             Ok(grad_output.clone())
         } else {
-            Err(ModelError::ProcessingError(
-                "Forward pass has not been run yet".to_string(),
-            ))
+            Err(Error::forward_pass_not_run("Linear"))
         }
     }
 

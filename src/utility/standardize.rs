@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::prelude::IntoParallelRefMutIterator;
@@ -31,9 +31,9 @@ impl StandardizationAxis {
     ///
     /// # Errors
     ///
-    /// - [`ModelError::InputValidationError`] - If row/column standardization is requested
+    /// - [`Error::InvalidInput`] - If row/column standardization is requested
     ///   on an array with fewer than 2 dimensions
-    fn apply<D>(&self, data: &mut Array<f64, D>, epsilon: f64) -> Result<(), ModelError>
+    fn apply<D>(&self, data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
     where
         D: Dimension,
     {
@@ -62,7 +62,7 @@ impl StandardizationAxis {
 ///
 /// # Returns
 ///
-/// - `Result<Array<f64, D>, ModelError>` - Standardized array with same dimensions as input
+/// - `Result<Array<f64, D>, Error>` - Standardized array with same dimensions as input
 ///
 /// # Examples
 /// ```rust
@@ -75,8 +75,10 @@ impl StandardizationAxis {
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If input array is empty, contains NaN/Infinite values, or if epsilon is non-positive
-/// - `ModelError::ProcessingError` - If standardization computation fails (e.g., zero values in global axis)
+/// - [`Error::EmptyInput`] - If input array is empty
+/// - [`Error::NonFinite`] - If input contains NaN/Infinite values
+/// - [`Error::InvalidParameter`] - If epsilon is non-positive or non-finite
+/// - [`Error::Computation`] - If standardization computation fails (e.g., zero values in global axis)
 ///
 /// # Performance
 ///
@@ -94,29 +96,26 @@ pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
     epsilon: f64,
-) -> Result<Array<f64, D>, ModelError>
+) -> Result<Array<f64, D>, Error>
 where
     S: Data<Elem = f64>,
     D: Dimension,
 {
     // Input validation
     if data.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot standardize empty array".to_string(),
-        ));
+        return Err(Error::empty_input("Cannot standardize empty array"));
     }
 
     // Check for NaN or infinite values
     if data.iter().any(|&x| !x.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Input contains NaN or infinite values".to_string(),
-        ));
+        return Err(Error::non_finite("input data"));
     }
 
     // Validate epsilon parameter
     if epsilon <= 0.0 || !epsilon.is_finite() {
-        return Err(ModelError::InputValidationError(
-            "Epsilon must be positive and finite".to_string(),
+        return Err(Error::invalid_parameter(
+            "epsilon",
+            "Epsilon must be positive and finite",
         ));
     }
 
@@ -126,16 +125,14 @@ where
 }
 
 /// Helper function to standardize the entire array globally
-fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), ModelError>
+fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
 where
     D: Dimension,
 {
     let n = data.len() as f64;
 
     if n == 0.0 {
-        return Err(ModelError::ProcessingError(
-            "No values to standardize".to_string(),
-        ));
+        return Err(Error::computation("No values to standardize"));
     }
 
     // Use parallel computation for large datasets
@@ -184,13 +181,13 @@ fn standardize_lanes<D>(
     axis_from_end: usize,
     epsilon: f64,
     operation_name: &str,
-) -> Result<(), ModelError>
+) -> Result<(), Error>
 where
     D: Dimension,
 {
     let ndim = data.ndim();
     if ndim < 2 {
-        return Err(ModelError::InputValidationError(format!(
+        return Err(Error::invalid_input(format!(
             "{} requires at least 2 dimensions",
             operation_name
         )));

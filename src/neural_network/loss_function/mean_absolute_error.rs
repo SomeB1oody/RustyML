@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::loss_function::validate_same_shape;
 use crate::neural_network::neural_network_trait::LossFunction;
@@ -55,14 +55,14 @@ impl Default for MeanAbsoluteError {
 }
 
 impl LossFunction for MeanAbsoluteError {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_same_shape(y_true, y_pred)?;
         let mut diff = y_pred - y_true;
         diff.par_mapv_inplace(|x| x.abs());
         Ok(diff.sum() / (y_true.len() as f32))
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
         let n = y_true.len() as f32;
         let mut result = y_pred - y_true;

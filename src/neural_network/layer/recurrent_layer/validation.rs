@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 
 /// Validates that a dimension value is greater than 0
@@ -11,16 +11,13 @@ use crate::neural_network::Tensor;
 /// # Returns
 ///
 /// - `Ok(())` if validation passes
-/// - `Err(ModelError)` if validation fails
+/// - `Err(Error::InvalidParameter)` if validation fails
 pub(super) fn validate_dimension_greater_than_zero(
     value: usize,
     name: &str,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if value == 0 {
-        return Err(ModelError::InputValidationError(format!(
-            "{} must be greater than 0",
-            name
-        )));
+        return Err(Error::invalid_parameter(name, "must be greater than 0"));
     }
     Ok(())
 }
@@ -35,11 +32,11 @@ pub(super) fn validate_dimension_greater_than_zero(
 /// # Returns
 ///
 /// - `Ok(())` if validation passes
-/// - `Err(ModelError)` if validation fails
+/// - `Err(Error::InvalidParameter)` if validation fails
 pub(super) fn validate_recurrent_dimensions(
     input_dim: usize,
     units: usize,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     validate_dimension_greater_than_zero(input_dim, "input_dim")?;
     validate_dimension_greater_than_zero(units, "units")?;
     Ok(())
@@ -54,12 +51,10 @@ pub(super) fn validate_recurrent_dimensions(
 /// # Returns
 ///
 /// - `Ok(())` if validation passes
-/// - `Err(ModelError)` if validation fails
-pub(super) fn validate_input_3d(input: &Tensor) -> Result<(), ModelError> {
+/// - `Err(Error::InvalidInput)` if validation fails
+pub(super) fn validate_input_3d(input: &Tensor) -> Result<(), Error> {
     if input.ndim() != 3 {
-        return Err(ModelError::InputValidationError(
-            "input tensor is not 3D".to_string(),
-        ));
+        return Err(Error::invalid_input("input tensor is not 3D"));
     }
     Ok(())
 }

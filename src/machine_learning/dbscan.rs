@@ -1,7 +1,7 @@
 pub use super::DistanceCalculationMetric;
 use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_predict_input};
-use crate::error::ModelError;
+use crate::error::{Error, Context};
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
@@ -85,39 +85,40 @@ impl DBSCAN {
     /// # Returns
     ///
     /// - `Ok(DBSCAN)` - A new DBSCAN instance with the specified parameters
-    /// - `Err(ModelError::InputValidationError)` - If parameters are invalid (e.g., eps <= 0)
+    /// - `Err(Error::InvalidParameter)` - If parameters are invalid (e.g., eps <= 0)
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if `eps` is non-positive or not finite,
+    /// Returns `Error::InvalidParameter` if `eps` is non-positive or not finite,
     /// if `min_samples` is 0, or if Minkowski `p` is non-positive or not finite.
     pub fn new(
         eps: f64,
         min_samples: usize,
         metric: DistanceCalculationMetric,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate eps parameter
         if eps <= 0.0 || !eps.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "eps must be positive and finite, got {}",
-                eps
-            )));
+            return Err(Error::invalid_parameter(
+                "eps",
+                format!("eps must be positive and finite, got {}", eps),
+            ));
         }
 
         // Validate min_samples parameter
         if min_samples == 0 {
-            return Err(ModelError::InputValidationError(
-                "min_samples must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "min_samples",
+                "min_samples must be greater than 0",
             ));
         }
 
         // Validate metric parameter
         match metric {
             DistanceCalculationMetric::Minkowski(p) if (p <= 0.0 || !p.is_finite()) => {
-                return Err(ModelError::InputValidationError(format!(
-                    "Minkowski p must be positive and finite, got {}",
-                    p
-                )));
+                return Err(Error::invalid_parameter(
+                    "p",
+                    format!("Minkowski p must be positive and finite, got {}", p),
+                ));
             }
             _ => {} // Euclidean and Manhattan don't need additional validation
         }
@@ -147,13 +148,13 @@ impl DBSCAN {
     /// Find all neighbors of point `p` (points within eps distance)
     ///
     /// Uses parallelization for datasets larger than a threshold to improve performance
-    fn region_query<S>(&self, data: &ArrayBase<S, Ix2>, p: usize) -> Result<Vec<usize>, ModelError>
+    fn region_query<S>(&self, data: &ArrayBase<S, Ix2>, p: usize) -> Result<Vec<usize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // Bounds check
         if p >= data.nrows() {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::computation(format!(
                 "Point index {} is out of bounds (max: {})",
                 p,
                 data.nrows() - 1
@@ -196,15 +197,16 @@ impl DBSCAN {
     ///
     /// # Returns
     /// - `Ok(&mut Self)` - The trained instance containing cluster labels and core sample indices
-    /// - `Err(ModelError::InputValidationError)` - If dataset size exceeds limit or is empty
-    /// - `Err(ModelError::ProcessingError)` - If numerical issues occur or cluster ID overflows
+    /// - `Err(Error::EmptyInput)` - If the dataset is empty
+    /// - `Err(Error::InvalidInput)` - If the dataset fails validation
+    /// - `Err(Error::Computation)` - If numerical issues occur or cluster ID overflows
     ///
     /// # Errors
-    /// - `ModelError::ProcessingError` - If the number of discovered clusters exceeds `isize::MAX`
+    /// - `Error::Computation` - If the number of discovered clusters exceeds `isize::MAX`
     ///
     /// # Performance
     /// Uses parallel processing for region queries if the number of samples is greater than or equal to 1000.
-    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -236,9 +238,9 @@ impl DBSCAN {
                 continue;
             }
 
-            let neighbors = self.region_query(data, p).map_err(|e| {
-                ModelError::ProcessingError(format!("Region query failed: {:?}", e))
-            })?;
+            let neighbors = self
+                .region_query(data, p)
+                .context("region query failed")?;
 
             if neighbors.len() < self.min_samples {
                 labels[p] = -1; // Mark as noise
@@ -260,12 +262,9 @@ impl DBSCAN {
                 // Assign to current cluster (could be noise or unvisited)
                 labels[q] = cluster_id;
 
-                let q_neighbors = self.region_query(data, q).map_err(|e| {
-                    ModelError::ProcessingError(format!(
-                        "Region query failed for point {}: {:?}",
-                        q, e
-                    ))
-                })?;
+                let q_neighbors = self
+                    .region_query(data, q)
+                    .with_context(|| format!("region query failed for point {q}"))?;
 
                 if q_neighbors.len() >= self.min_samples {
                     core_samples.insert(q);
@@ -291,8 +290,8 @@ impl DBSCAN {
             if cluster_id == isize::MAX {
                 #[cfg(feature = "show_progress")]
                 pb.finish_with_message("Error: cluster ID overflow");
-                return Err(ModelError::ProcessingError(
-                    "Too many clusters: cluster ID overflow".to_string(),
+                return Err(Error::computation(
+                    "Too many clusters: cluster ID overflow",
                 ));
             }
         }
@@ -345,22 +344,26 @@ impl DBSCAN {
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - If feature dimensions don't match or data contains non-finite values
+    /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::DimensionMismatch` - If feature dimensions don't match
+    /// - `Error::NonFinite` - If data contains non-finite values
     ///
     /// # Performance
     ///
     /// New points are scored in parallel when the number of samples is large.
-    pub fn predict<S>(&self, new_data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, ModelError>
+    pub fn predict<S>(&self, new_data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // Ensure the model has been trained
-        let core_points = self.core_points.as_ref().ok_or(ModelError::NotFitted)?;
+        let core_points = self
+            .core_points
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("DBSCAN"))?;
         let core_point_labels = self
             .core_point_labels
             .as_ref()
-            .ok_or(ModelError::NotFitted)?;
+            .ok_or_else(|| Error::not_fitted("DBSCAN"))?;
 
         // Empty input yields an empty result
         if new_data.nrows() == 0 {
@@ -399,12 +402,12 @@ impl DBSCAN {
     /// # Returns
     ///
     /// - `Ok(Array1<isize>)` - Array of cluster labels for each sample
-    /// - `Err(ModelError)` - If fitting fails due to validation or processing errors
+    /// - `Err(Error)` - If fitting fails due to validation or processing errors
     ///
     /// # Performance
     ///
     /// Inherits parallelization behavior from the `fit` method.
-    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, ModelError>
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

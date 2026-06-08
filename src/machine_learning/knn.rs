@@ -1,6 +1,6 @@
 pub use super::DistanceCalculationMetric;
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix1, Ix2};
@@ -116,17 +116,15 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If k is 0
+    /// - `Error::InvalidParameter` - If k is 0
     pub fn new(
         k: usize,
         weighting_strategy: WeightingStrategy,
         metric: DistanceCalculationMetric,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate k parameter
         if k == 0 {
-            return Err(ModelError::InputValidationError(
-                "k must be greater than 0".to_string(),
-            ));
+            return Err(Error::invalid_parameter("k", "must be greater than 0"));
         }
 
         Ok(KNN {
@@ -165,12 +163,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the number of samples is less than k or input validation fails
+    /// - `Error::InvalidInput` - If the number of samples is less than k or input validation fails
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
         y: &ArrayBase<S2, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S1: Data<Elem = f64>,
         S2: Data<Elem = T>,
@@ -178,8 +176,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         preliminary_check(x, None)?;
 
         if x.nrows() < self.k {
-            return Err(ModelError::InputValidationError(
-                "The number of samples is less than k".to_string(),
+            return Err(Error::invalid_input(
+                "The number of samples is less than k",
             ));
         }
 
@@ -226,15 +224,16 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been trained using `fit`
-    /// - `ModelError::InputValidationError` - If input dimension mismatch or input is empty
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been trained using `fit`
+    /// - `Error::InvalidInput` - If input dimension mismatch or input is empty
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64>,
     {
         // check if model is fitted, then validate the prediction input
         check_is_fitted(
             self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
+            "KNN",
         )?;
         let x_train = self.x_train.as_ref().unwrap();
         validate_predict_input(x, x_train.ncols())?;
@@ -243,7 +242,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
         // Sequential prediction on encoded indices
-        let encoded_results: Result<Vec<usize>, ModelError> = (0..x.nrows())
+        let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
             .map(|i| {
                 let sample = x.row(i);
                 self.predict_one(sample, x_train.view(), y_train_encoded)
@@ -278,15 +277,16 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been trained
-    /// - `ModelError::InputValidationError` - If input dimension mismatch or input is empty
-    pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been trained
+    /// - `Error::InvalidInput` - If input dimension mismatch or input is empty
+    pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // check if model is fitted, then validate the prediction input
         check_is_fitted(
             self.x_train.is_some() && self.y_train_encoded.is_some() && self.label_map.is_some(),
+            "KNN",
         )?;
         let x_train = self.x_train.as_ref().unwrap();
         validate_predict_input(x, x_train.ncols())?;
@@ -295,7 +295,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
         // Parallel prediction on encoded indices
-        let encoded_results: Result<Vec<usize>, ModelError> = (0..x.nrows())
+        let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
             .into_par_iter()
             .map(|i| {
                 let sample = x.row(i);
@@ -322,7 +322,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         x: ArrayView1<f64>,
         x_train: ArrayView2<f64>,
         y_train_encoded: &Array1<usize>,
-    ) -> Result<usize, ModelError> {
+    ) -> Result<usize, Error> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
@@ -370,9 +370,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         .into_iter()
                         .max_by_key(|(_, count)| *count)
                         .map(|(class_idx, _)| class_idx)
-                        .ok_or(ModelError::ProcessingError(
-                            "No valid neighbors found for classification".to_string(),
-                        ))?
+                        .ok_or_else(|| {
+                            Error::computation("No valid neighbors found for classification")
+                        })?
                 } else {
                     // Sequential counting for small k values
                     let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
@@ -386,9 +386,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         .into_iter()
                         .max_by_key(|(_, count)| *count)
                         .map(|(class_idx, _)| class_idx)
-                        .ok_or(ModelError::ProcessingError(
-                            "No valid neighbors found for classification".to_string(),
-                        ))?
+                        .ok_or_else(|| {
+                            Error::computation("No valid neighbors found for classification")
+                        })?
                 }
             }
             WeightingStrategy::Distance => {
@@ -431,9 +431,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                                 .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
                         })
                         .map(|(class_idx, _)| class_idx)
-                        .ok_or(ModelError::ProcessingError(
-                            "No valid neighbors found for classification".to_string(),
-                        ))?
+                        .ok_or_else(|| {
+                            Error::computation("No valid neighbors found for classification")
+                        })?
                 } else {
                     // Sequential weight calculation for small k values
                     let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
@@ -452,9 +452,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                                 .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
                         })
                         .map(|(class_idx, _)| class_idx)
-                        .ok_or(ModelError::ProcessingError(
-                            "No valid neighbors found for classification".to_string(),
-                        ))?
+                        .ok_or_else(|| {
+                            Error::computation("No valid neighbors found for classification")
+                        })?
                 }
             }
         };
@@ -477,12 +477,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If training data is invalid or samples < k
+    /// - `Error::InvalidInput` - If training data is invalid or samples < k
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,
         y_train: &ArrayBase<S2, Ix1>,
-    ) -> Result<Array1<T>, ModelError>
+    ) -> Result<Array1<T>, Error>
     where
         S1: Data<Elem = f64>,
         S2: Data<Elem = T>,

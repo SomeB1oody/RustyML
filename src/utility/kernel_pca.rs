@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2, Zip};
 use rayon::prelude::{
@@ -46,7 +46,7 @@ impl EigenSolver {
         &self,
         kernel_centered: &Array2<f64>,
         n_components: usize,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+    ) -> Result<(Array1<f64>, Array2<f64>), Error> {
         match self {
             EigenSolver::Dense => Self::dense(kernel_centered, n_components),
             EigenSolver::Lanczos => Self::columns_from_pairs(
@@ -72,11 +72,11 @@ impl EigenSolver {
     fn dense(
         kernel_centered: &Array2<f64>,
         n_components: usize,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+    ) -> Result<(Array1<f64>, Array2<f64>), Error> {
         let n_samples = kernel_centered.nrows();
-        let kernel_slice = kernel_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert kernel matrix to slice".to_string())
-        })?;
+        let kernel_slice = kernel_centered
+            .as_slice()
+            .ok_or_else(|| Error::computation("Failed to convert kernel matrix to slice"))?;
         let matrix = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, kernel_slice);
         let eigen = nalgebra::linalg::SymmetricEigen::new(matrix);
 
@@ -108,11 +108,11 @@ impl EigenSolver {
         pairs: (Vec<f64>, Vec<Array1<f64>>),
         n_samples: usize,
         n_components: usize,
-    ) -> Result<(Array1<f64>, Array2<f64>), ModelError> {
+    ) -> Result<(Array1<f64>, Array2<f64>), Error> {
         let (eigenvalues, eigenvectors) = pairs;
         if eigenvectors.len() < n_components {
-            return Err(ModelError::ProcessingError(
-                "Solver could not extract the requested number of components".to_string(),
+            return Err(Error::computation(
+                "Solver could not extract the requested number of components",
             ));
         }
         let mut matrix = Array2::<f64>::zeros((n_samples, n_components));
@@ -195,19 +195,20 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new KernelPCA instance or validation error
+    /// - `Result<Self, Error>` - A new KernelPCA instance or validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `n_components` is 0 or kernel parameters are invalid
+    /// - `Error::InvalidParameter` - If `n_components` is 0 or kernel parameters are invalid
     pub fn new(
         kernel: KernelType,
         n_components: usize,
         eigen_solver: EigenSolver,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         if n_components == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_components must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_components",
+                "must be greater than 0",
             ));
         }
 
@@ -249,18 +250,19 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to self for chaining
+    /// - `Result<&mut Self, Error>` - Mutable reference to self for chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input is empty or invalid
-    /// - `ModelError::ProcessingError` - If kernel computation or eigendecomposition fails
+    /// - `Error::EmptyInput` / `Error::InvalidInput` - If the input is empty or invalid
+    /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
+    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition fails
     ///
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least
     /// `KERNEL_PCA_PARALLEL_THRESHOLD` (200).
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -278,18 +280,18 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed data matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed data matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If the input is invalid
-    /// - `ModelError::ProcessingError` - If kernel centering or projection fails
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::InvalidInput` / `Error::DimensionMismatch` - If the input is invalid
+    /// - `Error::NonFinite` / `Error::Computation` - If kernel centering or projection fails
     ///
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
-    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -306,17 +308,18 @@ impl KernelPCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed data matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed data matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input is invalid
-    /// - `ModelError::ProcessingError` - If kernel computation or eigendecomposition fails
+    /// - `Error::EmptyInput` / `Error::InvalidInput` - If the input is invalid
+    /// - `Error::InvalidParameter` - If `n_components` exceeds the number of samples
+    /// - `Error::NonFinite` / `Error::Computation` - If kernel computation or eigendecomposition fails
     ///
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
-    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -341,7 +344,7 @@ impl KernelPCA {
     }
 
     /// Fits the model and updates internal state without exposing progress logic
-    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -352,10 +355,10 @@ impl KernelPCA {
         let n_features = x.ncols();
 
         if self.n_components > n_samples {
-            return Err(ModelError::InputValidationError(format!(
-                "n_components should be <= {}, got {}",
-                n_samples, self.n_components
-            )));
+            return Err(Error::invalid_parameter(
+                "n_components",
+                format!("should be <= {}, got {}", n_samples, self.n_components),
+            ));
         }
 
         let use_parallel = n_samples >= KERNEL_PCA_PARALLEL_THRESHOLD;
@@ -428,26 +431,39 @@ impl KernelPCA {
     }
 
     /// Transforms input data using the fitted model state
-    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         // Load fitted state needed for transformation
-        let x_fit = self.x_fit.as_ref().ok_or(ModelError::NotFitted)?;
-        let eigenvectors = self.eigenvectors.as_ref().ok_or(ModelError::NotFitted)?;
-        let eigenvalues = self.eigenvalues.as_ref().ok_or(ModelError::NotFitted)?;
+        let x_fit = self
+            .x_fit
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
+        let eigenvectors = self
+            .eigenvectors
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
+        let eigenvalues = self
+            .eigenvalues
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
         let kernel_row_means = self
             .kernel_row_means
             .as_ref()
-            .ok_or(ModelError::NotFitted)?;
-        let kernel_all_mean = self.kernel_all_mean.ok_or(ModelError::NotFitted)?;
-        let n_features = self.n_features.ok_or(ModelError::NotFitted)?;
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
+        let kernel_all_mean = self
+            .kernel_all_mean
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
+        let n_features = self
+            .n_features
+            .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
 
         super::validation::validate_transform_matrix(x, n_features)?;
 
         if eigenvectors.ncols() != eigenvalues.len() {
-            return Err(ModelError::ProcessingError(
-                "Eigenvectors and eigenvalues dimension mismatch".to_string(),
+            return Err(Error::computation(
+                "Eigenvectors and eigenvalues dimension mismatch",
             ));
         }
 
@@ -515,7 +531,7 @@ impl KernelPCA {
     }
 
     /// Validates kernel hyperparameters for correctness
-    fn validate_kernel(kernel: &KernelType) -> Result<(), ModelError> {
+    fn validate_kernel(kernel: &KernelType) -> Result<(), Error> {
         match *kernel {
             KernelType::Linear => Ok(()),
             KernelType::Poly {
@@ -524,45 +540,52 @@ impl KernelPCA {
                 coef0,
             } => {
                 if degree == 0 {
-                    return Err(ModelError::InputValidationError(
-                        "Poly kernel degree must be greater than 0".to_string(),
+                    return Err(Error::invalid_parameter(
+                        "degree",
+                        "Poly kernel degree must be greater than 0",
                     ));
                 }
                 if !gamma.is_finite() || gamma <= 0.0 {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Poly kernel gamma must be positive and finite, got {}",
-                        gamma
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "gamma",
+                        format!(
+                            "Poly kernel gamma must be positive and finite, got {}",
+                            gamma
+                        ),
+                    ));
                 }
                 if !coef0.is_finite() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Poly kernel coef0 must be finite, got {}",
-                        coef0
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "coef0",
+                        format!("Poly kernel coef0 must be finite, got {}", coef0),
+                    ));
                 }
                 Ok(())
             }
             KernelType::RBF { gamma } => {
                 if !gamma.is_finite() || gamma <= 0.0 {
-                    return Err(ModelError::InputValidationError(format!(
-                        "RBF kernel gamma must be positive and finite, got {}",
-                        gamma
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "gamma",
+                        format!(
+                            "RBF kernel gamma must be positive and finite, got {}",
+                            gamma
+                        ),
+                    ));
                 }
                 Ok(())
             }
             KernelType::Sigmoid { gamma, coef0 } => {
                 if !gamma.is_finite() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Sigmoid kernel gamma must be finite, got {}",
-                        gamma
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "gamma",
+                        format!("Sigmoid kernel gamma must be finite, got {}", gamma),
+                    ));
                 }
                 if !coef0.is_finite() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Sigmoid kernel coef0 must be finite, got {}",
-                        coef0
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "coef0",
+                        format!("Sigmoid kernel coef0 must be finite, got {}", coef0),
+                    ));
                 }
                 Ok(())
             }
@@ -574,7 +597,7 @@ impl KernelPCA {
     fn validate_kernel_matrix(
         kernel_matrix: &Array2<f64>,
         use_parallel: bool,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         let invalid = if use_parallel {
             kernel_matrix.par_iter().any(|&val| !val.is_finite())
         } else {
@@ -582,9 +605,7 @@ impl KernelPCA {
         };
 
         if invalid {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix contains NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("kernel matrix"));
         }
 
         Ok(())
@@ -627,18 +648,14 @@ impl KernelPCA {
     fn kernel_means(
         kernel_matrix: &Array2<f64>,
         use_parallel: bool,
-    ) -> Result<(Array1<f64>, f64), ModelError> {
+    ) -> Result<(Array1<f64>, f64), Error> {
         let n_samples = kernel_matrix.nrows();
         if n_samples == 0 {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix has zero rows".to_string(),
-            ));
+            return Err(Error::computation("Kernel matrix has zero rows"));
         }
         let n_cols = kernel_matrix.ncols();
         if n_cols == 0 {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix has zero columns".to_string(),
-            ));
+            return Err(Error::computation("Kernel matrix has zero columns"));
         }
 
         let row_means: Vec<f64> = if use_parallel {
@@ -663,9 +680,7 @@ impl KernelPCA {
         let overall_mean = total / n_samples as f64;
 
         if !overall_mean.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix mean is not finite".to_string(),
-            ));
+            return Err(Error::non_finite("kernel matrix mean"));
         }
 
         Ok((row_means, overall_mean))
@@ -708,17 +723,15 @@ impl KernelPCA {
         train_row_means: &Array1<f64>,
         train_overall_mean: f64,
         use_parallel: bool,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         let n_train = train_row_means.len();
         if n_train == 0 {
-            return Err(ModelError::ProcessingError(
-                "Training kernel means are empty".to_string(),
-            ));
+            return Err(Error::computation("Training kernel means are empty"));
         }
 
         if kernel_matrix.ncols() != n_train {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix columns do not match training samples".to_string(),
+            return Err(Error::computation(
+                "Kernel matrix columns do not match training samples",
             ));
         }
 
@@ -747,10 +760,10 @@ impl KernelPCA {
     }
 
     /// Validates eigenvalues for positivity and finiteness
-    fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), ModelError> {
+    fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), Error> {
         for &value in eigenvalues.iter() {
             if !value.is_finite() || value <= 0.0 {
-                return Err(ModelError::ProcessingError(format!(
+                return Err(Error::computation(format!(
                     "Kernel PCA requires positive finite eigenvalues, got {}",
                     value
                 )));
@@ -760,11 +773,11 @@ impl KernelPCA {
     }
 
     /// Computes scaling factors from eigenvalues for projection
-    fn compute_scaling_factors(eigenvalues: &Array1<f64>) -> Result<Vec<f64>, ModelError> {
+    fn compute_scaling_factors(eigenvalues: &Array1<f64>) -> Result<Vec<f64>, Error> {
         let mut scales = Vec::with_capacity(eigenvalues.len());
         for &value in eigenvalues.iter() {
             if !value.is_finite() || value <= 0.0 {
-                return Err(ModelError::ProcessingError(format!(
+                return Err(Error::computation(format!(
                     "Eigenvalue must be positive and finite, got {}",
                     value
                 )));
@@ -780,12 +793,10 @@ impl KernelPCA {
         kernel_centered: &Array2<f64>,
         eigenvectors: &Array2<f64>,
         scales: &[f64],
-    ) -> Result<Array2<f64>, ModelError> {
+    ) -> Result<Array2<f64>, Error> {
         let n_components = eigenvectors.ncols();
         if scales.len() != n_components {
-            return Err(ModelError::ProcessingError(
-                "Scaling factors dimension mismatch".to_string(),
-            ));
+            return Err(Error::computation("Scaling factors dimension mismatch"));
         }
 
         let mut projected = Array2::<f64>::zeros((kernel_centered.nrows(), n_components));

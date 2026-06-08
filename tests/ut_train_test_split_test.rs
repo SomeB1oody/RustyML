@@ -1,7 +1,7 @@
 #![cfg(feature = "utility")]
 
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::utility::train_test_split::*;
 
 #[test]
@@ -92,10 +92,12 @@ fn test_error_different_sample_sizes() {
     let result = train_test_split(x, y, Some(0.4), Some(42));
     assert!(result.is_err());
 
-    if let Err(ModelError::InputValidationError(msg)) = result {
-        assert!(msg.contains("x and y must have the same number of samples"));
+    // x has 5 samples while y has 3: the source returns a DimensionMismatch.
+    if let Err(Error::DimensionMismatch { expected, found }) = result {
+        assert_eq!(expected, 5);
+        assert_eq!(found, 3);
     } else {
-        panic!("Expected InputValidationError");
+        panic!("Expected DimensionMismatch");
     }
 }
 

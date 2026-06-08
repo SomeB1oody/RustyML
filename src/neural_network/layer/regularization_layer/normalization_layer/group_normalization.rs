@@ -2,7 +2,7 @@ use crate::neural_network::layer::regularization_layer::normalization_layer::com
 use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::validation::validate_weight_shape;
@@ -102,20 +102,20 @@ impl GroupNormalization {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New GroupNormalization layer instance or a validation error
+    /// - `Result<Self, Error>` - New GroupNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_shape` is empty
-    /// - `ModelError::InputValidationError` - If `num_groups` is 0
-    /// - `ModelError::InputValidationError` - If `epsilon` is not positive
-    /// - `ModelError::InputValidationError` - If `channel_axis` is out of bounds or is 0 (batch axis)
+    /// - `Error::EmptyInput` - If `input_shape` is empty
+    /// - `Error::InvalidParameter` - If `num_groups` is 0
+    /// - `Error::InvalidParameter` - If `epsilon` is not positive
+    /// - `Error::InvalidParameter` - If `channel_axis` is out of bounds or is 0 (batch axis)
     pub fn new(
         input_shape: Vec<usize>,
         num_groups: usize,
         channel_axis: usize,
         epsilon: f32,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_num_groups_positive(num_groups)?;
         validate_epsilon(epsilon)?;
@@ -162,7 +162,7 @@ impl GroupNormalization {
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
-    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), ModelError> {
+    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
         self.gamma = gamma;
@@ -172,7 +172,7 @@ impl GroupNormalization {
 }
 
 impl Layer for GroupNormalization {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
@@ -423,7 +423,7 @@ impl Layer for GroupNormalization {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
@@ -666,7 +666,7 @@ impl Layer for GroupNormalization {
         Ok(from_channels_first(output, self.channel_axis))
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if !self.training {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
@@ -691,17 +691,20 @@ impl Layer for GroupNormalization {
         let group_size = channels_per_group * spatial_size;
         let group_size_f32 = group_size as f32;
 
-        let x_normalized = self.x_normalized.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_normalized = self
+            .x_normalized
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
 
-        let x_centered = self.x_centered.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_centered = self
+            .x_centered
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
 
-        let std_dev = self.std_dev.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let std_dev = self
+            .std_dev
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
 
         let total_elements = grad_output.len();
         let num_instances = batch_size * self.num_groups;

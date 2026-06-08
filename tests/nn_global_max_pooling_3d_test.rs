@@ -176,7 +176,7 @@ fn test_global_max_pooling_3d_backward_without_forward() {
         result
             .unwrap_err()
             .to_string()
-            .contains("Forward pass has not been run yet")
+            .contains("forward pass has not been run")
     );
 }
 

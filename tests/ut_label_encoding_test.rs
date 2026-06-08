@@ -1,7 +1,7 @@
 #![cfg(feature = "utility")]
 
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::utility::label_encoding::*;
 
 #[test]
@@ -76,7 +76,7 @@ fn test_to_sparse_categorical_rejects_non_finite() {
     let categorical = array![[1.0, f64::NAN, 0.0]];
     assert!(matches!(
         to_sparse_categorical(&categorical),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::NonFinite(_))
     ));
 }
 
@@ -105,7 +105,7 @@ fn test_negative_labels() {
     // Negative labels can no longer index a one-hot column: expect a validation error.
     let labels = array![0, -1, 2];
     let err = to_categorical(&labels, None).unwrap_err();
-    assert!(matches!(err, ModelError::InputValidationError(msg) if msg.contains("non-negative")));
+    assert!(matches!(err, Error::InvalidInput(msg) if msg.contains("non-negative")));
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn test_insufficient_num_classes() {
     // num_classes smaller than (max_label + 1) is invalid.
     let labels = array![0, 1, 2];
     let err = to_categorical(&labels, Some(2)).unwrap_err();
-    assert!(matches!(err, ModelError::InputValidationError(msg) if msg.contains("num_classes")));
+    assert!(matches!(err, Error::InvalidParameter { name, .. } if name == "num_classes"));
 }
 
 #[test]

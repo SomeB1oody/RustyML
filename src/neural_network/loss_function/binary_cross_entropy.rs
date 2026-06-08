@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::loss_function::{clip_probabilities, validate_same_shape};
 use crate::neural_network::neural_network_trait::LossFunction;
@@ -50,7 +50,7 @@ impl Default for BinaryCrossEntropy {
 }
 
 impl LossFunction for BinaryCrossEntropy {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_same_shape(y_true, y_pred)?;
 
         // Ensure predictions are in range (0,1) to avoid numerical issues
@@ -66,7 +66,7 @@ impl LossFunction for BinaryCrossEntropy {
         Ok(-losses.sum() / n)
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
 
         // Ensure predictions are in range (0,1) to avoid numerical issues

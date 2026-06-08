@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::dense::Dense;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::Array2;
@@ -17,7 +17,7 @@ pub struct SerializableDenseWeight {
 }
 
 impl ApplyWeights<Dense> for SerializableDenseWeight {
-    fn apply_to_layer(&self, layer: &mut Dense) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut Dense) -> Result<(), Error> {
         layer.set_weights(self.weight.clone(), self.bias.clone())?;
         Ok(())
     }

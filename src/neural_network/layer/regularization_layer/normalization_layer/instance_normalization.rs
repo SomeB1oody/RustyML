@@ -2,7 +2,7 @@ use crate::neural_network::layer::regularization_layer::normalization_layer::com
 use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::validation::validate_weight_shape;
@@ -87,18 +87,18 @@ impl InstanceNormalization {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New InstanceNormalization layer instance or a validation error
+    /// - `Result<Self, Error>` - New InstanceNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_shape` is empty
-    /// - `ModelError::InputValidationError` - If `channel_axis` is out of bounds or is 0 (batch axis)
-    /// - `ModelError::InputValidationError` - If `epsilon` is not positive or not finite
+    /// - `Error::EmptyInput` - If `input_shape` is empty
+    /// - `Error::InvalidParameter` - If `channel_axis` is out of bounds or is 0 (batch axis)
+    /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
     pub fn new(
         input_shape: Vec<usize>,
         channel_axis: usize,
         epsilon: f32,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_channel_axis(channel_axis, input_shape.len())?;
         validate_epsilon(epsilon)?;
@@ -138,7 +138,7 @@ impl InstanceNormalization {
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
-    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), ModelError> {
+    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
         self.gamma = gamma;
@@ -148,7 +148,7 @@ impl InstanceNormalization {
 }
 
 impl Layer for InstanceNormalization {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
@@ -347,7 +347,7 @@ impl Layer for InstanceNormalization {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
@@ -539,7 +539,7 @@ impl Layer for InstanceNormalization {
         Ok(from_channels_first(output, self.channel_axis))
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if !self.training {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
@@ -562,17 +562,20 @@ impl Layer for InstanceNormalization {
             .product();
         let spatial_size_f32 = spatial_size as f32;
 
-        let x_normalized = self.x_normalized.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_normalized = self
+            .x_normalized
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
 
-        let x_centered = self.x_centered.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_centered = self
+            .x_centered
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
 
-        let std_dev = self.std_dev.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let std_dev = self
+            .std_dev
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("InstanceNormalization"))?;
 
         let total_elements = grad_output.len();
 

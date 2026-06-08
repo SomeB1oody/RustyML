@@ -3,7 +3,7 @@ use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_tolerance,
 };
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::hinge_loss;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
@@ -114,11 +114,11 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A Result containing the new LinearSVC instance if validation passes
+    /// - `Result<Self, Error>` - A Result containing the new LinearSVC instance if validation passes
     ///
     /// # Errors
     ///
-    /// Returns `ModelError::InputValidationError` if:
+    /// Returns `Error::InvalidParameter` if:
     /// - `max_iter` is 0
     /// - `learning_rate` is not positive or not finite
     /// - `penalty` regularization parameter is negative or not finite
@@ -129,7 +129,7 @@ impl LinearSVC {
         penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate parameters
         validate_max_iterations(max_iter)?;
         validate_learning_rate(learning_rate)?;
@@ -140,10 +140,10 @@ impl LinearSVC {
             RegularizationType::L1(lambda) | RegularizationType::L2(lambda) => lambda,
         };
         if reg_param < 0.0 || !reg_param.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "Regularization parameter must be non-negative and finite, got {}",
-                reg_param
-            )));
+            return Err(Error::invalid_parameter(
+                "penalty",
+                format!("regularization parameter must be non-negative and finite, got {reg_param}"),
+            ));
         }
 
         Ok(LinearSVC {
@@ -159,10 +159,10 @@ impl LinearSVC {
     }
 
     /// Checks if weights contain invalid values (NaN or infinite)
-    fn check_weights_validity(weights: &Array1<f64>, bias: f64) -> Result<(), ModelError> {
+    fn check_weights_validity(weights: &Array1<f64>, bias: f64) -> Result<(), Error> {
         if weights.iter().any(|&w| !w.is_finite()) || !bias.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Weights became NaN or infinite during training. Try reducing learning_rate or regularization_param".to_string()
+            return Err(Error::non_finite(
+                "weights during training (try reducing learning_rate or regularization_param)",
             ));
         }
         Ok(())
@@ -199,12 +199,12 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to the trained model
+    /// - `Result<&mut Self, Error>` - A mutable reference to the trained model
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
-    /// - `ModelError::ProcessingError` - If numerical issues occur during training (e.g., weights become NaN)
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    /// - `Error::NonFinite` - If numerical issues occur during training (e.g., weights become NaN)
     ///
     /// # Performance
     ///
@@ -213,7 +213,7 @@ impl LinearSVC {
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -420,13 +420,13 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - Array of predicted class labels (0.0 or 1.0) for each sample
+    /// - `Result<Array1<f64>, Error>` - Array of predicted class labels (0.0 or 1.0) for each sample
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet
-    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// - `Error::NotFitted` - If the model hasn't been trained yet
+    /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -446,19 +446,22 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - Raw decision scores for each sample
+    /// - `Result<Array1<f64>, Error>` - Raw decision scores for each sample
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet
-    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimension mismatches
-    /// - `ModelError::ProcessingError` - If the computation produced NaN or infinite values
-    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// - `Error::NotFitted` - If the model hasn't been trained yet
+    /// - `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    /// - `Error::NonFinite` - If the computation produced NaN or infinite values
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
         // Check if model has been fitted, then validate the prediction input
-        let weights = self.weights.as_ref().ok_or(ModelError::NotFitted)?;
+        let weights = self
+            .weights
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LinearSVC"))?;
         let bias = self.bias.unwrap_or(0.0);
 
         validate_predict_input(x, weights.len())?;
@@ -467,9 +470,7 @@ impl LinearSVC {
 
         // Check for NaN/Inf in decision values
         if decision.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Decision function produced NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("decision function"));
         }
 
         Ok(decision)
@@ -486,17 +487,17 @@ impl LinearSVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - Predicted class labels (0.0 or 1.0) for the training data
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels (0.0 or 1.0) for the training data
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is invalid
-    /// - `ModelError::ProcessingError` - If numerical issues occur during training
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid
+    /// - `Error::NonFinite` - If numerical issues occur during training
     pub fn fit_predict<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<f64>, ModelError>
+    ) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::neural_network_trait::{Layer, Optimizer};
 use crate::neural_network::optimizer::validation::{
     validate_decay_rate, validate_epsilon, validate_learning_rate,
@@ -37,12 +37,12 @@ impl RMSprop {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new RMSprop optimizer instance or an error
+    /// - `Result<Self, Error>` - A new RMSprop optimizer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If any hyperparameter is out of range
-    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If any hyperparameter is out of range
+    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, Error> {
         // input validation
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(rho, "rho")?;

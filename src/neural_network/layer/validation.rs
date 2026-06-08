@@ -1,6 +1,6 @@
 //! Shared input/weight validation for the layer module.
 
-use crate::error::ModelError;
+use crate::error::{Error, NnError};
 
 /// Validates that a weight array being assigned to a layer has the shape the layer expects.
 ///
@@ -17,17 +17,18 @@ use crate::error::ModelError;
 /// # Returns
 ///
 /// - `Ok(())` - The shapes match
-/// - `Err(ModelError::InputValidationError)` - The shapes differ
+/// - `Err(Error::NeuralNetwork(NnError::WeightShape))` - The shapes differ
 pub(super) fn validate_weight_shape(
     name: &str,
     expected: &[usize],
     found: &[usize],
-) -> Result<(), ModelError> {
+) -> crate::error::RustymlResult<()> {
     if expected != found {
-        return Err(ModelError::InputValidationError(format!(
-            "weight shape mismatch for `{}`: layer expects {:?}, got {:?}",
-            name, expected, found
-        )));
+        return Err(Error::NeuralNetwork(NnError::WeightShape {
+            name: name.to_string(),
+            expected: expected.to_vec(),
+            found: found.to_vec(),
+        }));
     }
     Ok(())
 }

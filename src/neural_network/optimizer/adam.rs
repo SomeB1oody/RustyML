@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::neural_network_trait::{Layer, Optimizer};
 use crate::neural_network::optimizer::validation::{
     validate_decay_rate, validate_epsilon, validate_learning_rate,
@@ -49,17 +49,17 @@ impl Adam {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new Adam optimizer instance or an error
+    /// - `Result<Self, Error>` - A new Adam optimizer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If any hyperparameter is out of range
+    /// - `Error::InvalidParameter` - If any hyperparameter is out of range
     pub fn new(
         learning_rate: f32,
         beta1: f32,
         beta2: f32,
         epsilon: f32,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // input validation
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(beta1, "beta1")?;

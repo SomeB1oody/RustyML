@@ -3,7 +3,7 @@ use super::parallel::map_collect;
 use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
@@ -107,23 +107,23 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A Result containing a new MeanShift instance or a ModelError.
+    /// - `Result<Self, Error>` - A Result containing a new MeanShift instance or an Error.
     ///
     /// # Errors
-    /// - `ModelError::InputValidationError` - If any parameter is invalid (e.g., non-positive bandwidth).
+    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g., non-positive bandwidth).
     pub fn new(
         bandwidth: f64,
         max_iter: Option<usize>,
         tol: Option<f64>,
         bin_seeding: Option<bool>,
         cluster_all: Option<bool>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate bandwidth
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "bandwidth must be positive and finite, got {}",
-                bandwidth
-            )));
+            return Err(Error::invalid_parameter(
+                "bandwidth",
+                format!("must be positive and finite, got {}", bandwidth),
+            ));
         }
 
         let max_iter_val = max_iter.unwrap_or(300);
@@ -171,16 +171,16 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A Result containing a mutable reference to the fitted model or a ModelError.
+    /// - `Result<&mut Self, Error>` - A Result containing a mutable reference to the fitted model or an Error.
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data fails preliminary checks.
+    /// - `Error::InvalidInput` - If input data fails preliminary checks.
     ///
     /// # Performance
     ///
     /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -379,22 +379,25 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, ModelError>` - A Result containing the predicted cluster labels or a ModelError.
+    /// - `Result<Array1<usize>, Error>` - A Result containing the predicted cluster labels or an Error.
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted yet.
-    /// - `ModelError::InputValidationError` - If input data is invalid or dimensions don't match training data.
+    /// - `Error::NotFitted` - If the model has not been fitted yet.
+    /// - `Error::InvalidInput` - If input data is invalid or dimensions don't match training data.
     ///
     /// # Performance
     ///
     /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64> + Sync,
     {
         // Check if model has been fitted
-        let centers = self.cluster_centers.as_ref().ok_or(ModelError::NotFitted)?;
+        let centers = self
+            .cluster_centers
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("MeanShift"))?;
 
         // Validate input against the feature count seen during fitting
         validate_predict_input(x, centers.ncols())?;
@@ -441,13 +444,13 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, ModelError>` - A Result containing the predicted cluster labels or a ModelError.
+    /// - `Result<Array1<usize>, Error>` - A Result containing the predicted cluster labels or an Error.
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data fails preliminary checks.
-    /// - `ModelError::NotFitted` - If fitting succeeded but labels were not set correctly.
-    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    /// - `Error::InvalidInput` - If input data fails preliminary checks.
+    /// - `Error::NotFitted` - If fitting succeeded but labels were not set correctly.
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64> + Sync + Send,
     {
@@ -536,20 +539,21 @@ impl MeanShift {
 /// # Returns
 ///
 /// - `Ok(f64)` - The estimated bandwidth
-/// - `Err(ModelError::InputValidationError)` - quantile is not in range \[0, 1\]
+/// - `Err(Error::InvalidParameter)` - quantile is not in range \[0, 1\]
 pub fn estimate_bandwidth<S>(
     x: &ArrayBase<S, Ix2>,
     quantile: Option<f64>,
     n_samples: Option<usize>,
     random_state: Option<u64>,
-) -> Result<f64, ModelError>
+) -> Result<f64, Error>
 where
     S: Data<Elem = f64>,
 {
     let quantile = quantile.unwrap_or(0.3);
     if quantile <= 0.0 || quantile >= 1.0 {
-        return Err(ModelError::InputValidationError(
-            "quantile must be in the open range (0, 1)".to_string(),
+        return Err(Error::invalid_parameter(
+            "quantile",
+            "must be in the open range (0, 1)",
         ));
     }
 

@@ -1,5 +1,5 @@
 use super::neural_network_trait::{Layer, LossFunction, Optimizer};
-use crate::error::{IoError, ModelError};
+use crate::error::{Error, IoError, NnError, Context};
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
@@ -150,40 +150,28 @@ impl Sequential {
     /// # Returns
     ///
     /// - `Ok(())` - If validation passes
-    /// - `Err(ModelError)` - If validation fails
-    fn validate_training_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), ModelError> {
+    /// - `Err(Error)` - If validation fails
+    fn validate_training_inputs(&self, x: &Tensor, y: &Tensor) -> Result<(), Error> {
         if self.optimizer.is_none() {
-            return Err(ModelError::InputValidationError(
-                "Optimizer not specified".to_string(),
-            ));
+            return Err(Error::NeuralNetwork(NnError::NotCompiled("optimizer")));
         }
 
         if self.loss.is_none() {
-            return Err(ModelError::InputValidationError(
-                "Loss function not specified".to_string(),
-            ));
+            return Err(Error::NeuralNetwork(NnError::NotCompiled("loss function")));
         }
 
         if self.layers.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Layers not specified".to_string(),
-            ));
+            return Err(Error::NeuralNetwork(NnError::EmptyModel));
         }
 
         // Input shape validation
         if x.is_empty() || y.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensors cannot be empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensors"));
         }
 
         // Verify batch size match
         if x.shape()[0] != y.shape()[0] {
-            return Err(ModelError::InputValidationError(format!(
-                "Batch size mismatch: input has {} samples, target has {} samples",
-                x.shape()[0],
-                y.shape()[0]
-            )));
+            return Err(Error::dimension_mismatch(x.shape()[0], y.shape()[0]));
         }
 
         Ok(())
@@ -199,13 +187,13 @@ impl Sequential {
     /// # Returns
     ///
     /// - `Ok(f32)` - The loss value for this batch
-    /// - `Err(ModelError)` - If training fails
-    fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, ModelError> {
+    /// - `Err(Error)` - If training fails
+    fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
         // Forward pass - first layer takes input reference, subsequent layers take owned tensors
         let mut layers_iter = self.layers.iter_mut();
         let first_layer = layers_iter
             .next()
-            .ok_or_else(|| ModelError::InputValidationError("No layers in model".to_string()))?;
+            .ok_or_else(|| Error::computation("no layers in model"))?;
         first_layer.set_training_if_mode_dependent(true);
         let mut output = first_layer.forward(x)?;
 
@@ -249,13 +237,15 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to self after training or an error
+    /// - `Result<&mut Self, Error>` - Mutable reference to self after training or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the model is not compiled, has no layers, or inputs are invalid
-    /// - `ModelError::ProcessingError` - If a layer fails during forward or backward pass
-    pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<&mut Self, ModelError> {
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is not specified
+    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If inputs are empty or batch sizes disagree
+    /// - `Error::Computation` - If a layer fails during forward or backward pass
+    pub fn fit(&mut self, x: &Tensor, y: &Tensor, epochs: u32) -> Result<&mut Self, Error> {
         // Validate inputs
         self.validate_training_inputs(x, y)?;
 
@@ -302,19 +292,22 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to trained model or error
+    /// - `Result<&mut Self, Error>` - Mutable reference to trained model or error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the model is not compiled, has no layers, inputs are invalid, or batch size is invalid
-    /// - `ModelError::ProcessingError` - If a layer fails during forward or backward pass
+    /// - `Error::NeuralNetwork(NnError::NotCompiled)` - If the optimizer or loss function is not specified
+    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If inputs are empty or batch sizes disagree
+    /// - `Error::InvalidParameter` - If `batch_size` is zero or larger than the dataset
+    /// - `Error::Computation` - If a layer fails during forward or backward pass, or a batch tensor cannot be built
     pub fn fit_with_batches(
         &mut self,
         x: &Tensor,
         y: &Tensor,
         epochs: u32,
         batch_size: usize,
-    ) -> Result<&mut Self, ModelError> {
+    ) -> Result<&mut Self, Error> {
         // Validate inputs
         self.validate_training_inputs(x, y)?;
 
@@ -322,21 +315,22 @@ impl Sequential {
 
         // Validate batch size
         if batch_size == 0 {
-            return Err(ModelError::InputValidationError(
-                "Batch size must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "batch_size",
+                "must be greater than 0",
             ));
         }
 
         if batch_size > n_samples {
-            return Err(ModelError::InputValidationError(format!(
-                "Batch size ({}) cannot be larger than dataset size ({})",
-                batch_size, n_samples
-            )));
+            return Err(Error::invalid_parameter(
+                "batch_size",
+                format!("({}) cannot be larger than dataset size ({})", batch_size, n_samples),
+            ));
         }
 
         // Creates batch tensors from the full dataset
         let create_batch_tensors =
-            |x: &Tensor, y: &Tensor, indices: &[usize]| -> Result<(Tensor, Tensor), ModelError> {
+            |x: &Tensor, y: &Tensor, indices: &[usize]| -> Result<(Tensor, Tensor), Error> {
                 let batch_size = indices.len();
 
                 // Get shapes for batch tensors
@@ -363,21 +357,11 @@ impl Sequential {
                 }
 
                 // Create batch tensors
-                let x_batch =
-                    Array::from_shape_vec(IxDyn(&x_batch_shape), x_batch_data).map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to create batch tensor for x: {}",
-                            e
-                        ))
-                    })?;
+                let x_batch = Array::from_shape_vec(IxDyn(&x_batch_shape), x_batch_data)
+                    .context("create batch tensor for x")?;
 
-                let y_batch =
-                    Array::from_shape_vec(IxDyn(&y_batch_shape), y_batch_data).map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to create batch tensor for y: {}",
-                            e
-                        ))
-                    })?;
+                let y_batch = Array::from_shape_vec(IxDyn(&y_batch_shape), y_batch_data)
+                    .context("create batch tensor for y")?;
 
                 Ok((x_batch, y_batch))
             };
@@ -461,18 +445,17 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<Tensor, ModelError>` - Tensor containing the model's predictions or an error
+    /// - `Result<Tensor, Error>` - Tensor containing the model's predictions or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `x` is empty or the model has no layers
-    /// - `ModelError::ProcessingError` - If any layer fails during forward pass
-    pub fn predict(&self, x: &Tensor) -> Result<Tensor, ModelError> {
+    /// - `Error::EmptyInput` - If `x` is empty
+    /// - `Error::NeuralNetwork(NnError::EmptyModel)` - If the model has no layers
+    /// - `Error::Computation` - If any layer fails during forward pass
+    pub fn predict(&self, x: &Tensor) -> Result<Tensor, Error> {
         // Input validation
         if x.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensor cannot be empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensor"));
         }
 
         // Inference path: each layer's `predict` runs in eval mode and writes no caches, so this
@@ -480,7 +463,7 @@ impl Sequential {
         let mut layers_iter = self.layers.iter();
         let first_layer = layers_iter
             .next()
-            .ok_or_else(|| ModelError::InputValidationError("Model has no layers".to_string()))?;
+            .ok_or_else(|| Error::NeuralNetwork(NnError::EmptyModel))?;
         let mut output = first_layer.predict(x)?;
 
         for layer in layers_iter {
@@ -617,13 +600,13 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<(), IoError>` - Ok if the model is saved, or an IO/serialization error
+    /// - `crate::error::RustymlResult<()>` - Ok if the model is saved, or an IO/serialization error
     ///
     /// # Errors
     ///
-    /// - `IoError::StdIoError` - File creation or write operation failed
-    /// - `IoError::JsonError` - Serialization to JSON failed
-    pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> Result<(), IoError> {
+    /// - `Error::Io(IoError::Std)` - File creation or write operation failed
+    /// - `Error::Io(IoError::Json)` - Serialization to JSON failed
+    pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> crate::error::RustymlResult<()> {
         // Convert layers to serializable format
         let serializable_layers = self
             .layers
@@ -647,14 +630,14 @@ impl Sequential {
         };
 
         // Create or overwrite the file
-        let file = File::create(path).map_err(IoError::StdIoError)?;
+        let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
         // Serialize the model to JSON and write to file
-        to_writer_pretty(&mut writer, &serializable_model).map_err(IoError::JsonError)?;
+        to_writer_pretty(&mut writer, &serializable_model)?;
 
         // Ensure all data is written to disk
-        writer.flush().map_err(IoError::StdIoError)?;
+        writer.flush()?;
 
         Ok(())
     }
@@ -675,29 +658,28 @@ impl Sequential {
     ///
     /// # Returns
     ///
-    /// - `Result<(), IoError>` - Ok if weights are loaded, or an IO/deserialization error
+    /// - `crate::error::RustymlResult<()>` - Ok if weights are loaded, or an IO/deserialization error
     ///
     /// # Errors
     ///
-    /// - `IoError::StdIoError` - File not found or read operation failed
-    /// - `IoError::JsonError` - Deserialization from JSON failed
-    /// - `IoError::ModelStructureMismatch` - The current model's structure (layer count, a layer
+    /// - `Error::Io(IoError::Std)` - File not found or read operation failed
+    /// - `Error::Io(IoError::Json)` - Deserialization from JSON failed
+    /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer count, a layer
     ///   type at some position, or a weight shape) does not match the saved model
-    pub fn load_from_path(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), IoError> {
+    pub fn load_from_path(&mut self, path: impl AsRef<std::path::Path>) -> crate::error::RustymlResult<()> {
         // Open and buffer the file for reading
         let reader = IoError::load_in_buf_reader(path)?;
 
         // Deserialize the model from JSON
-        let serializable_model: SerializableSequential =
-            from_reader(reader).map_err(IoError::JsonError)?;
+        let serializable_model: SerializableSequential = from_reader(reader)?;
 
         // Verify layer count matches
         if serializable_model.layers.len() != self.layers.len() {
-            return Err(IoError::ModelStructureMismatch(format!(
+            return Err(Error::Io(IoError::ModelStructureMismatch(format!(
                 "layer count mismatch: model has {} layers, file has {} layers",
                 self.layers.len(),
                 serializable_model.layers.len()
-            )));
+            ))));
         }
 
         // Apply weights to each layer, verifying the layer type at each position first.
@@ -707,10 +689,10 @@ impl Sequential {
             let expected_type = self.layers[i].layer_type();
             let saved_type = serializable_layer.info.layer_type.as_str();
             if expected_type != saved_type {
-                return Err(IoError::ModelStructureMismatch(format!(
+                return Err(Error::Io(IoError::ModelStructureMismatch(format!(
                     "layer {} type mismatch: model has `{}`, file has `{}`",
                     i, expected_type, saved_type
-                )));
+                ))));
             }
 
             apply_weights_to_layer(

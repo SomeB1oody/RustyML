@@ -2,7 +2,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error as RustymlError;
 use rustyml::utility::kernel_pca::*;
 use std::error::Error;
 
@@ -131,11 +131,11 @@ fn test_kernel_pca_default_and_new() {
 fn test_kernel_pca_new_validation() {
     assert!(matches!(
         KernelPCA::new(KernelType::Linear, 0, EigenSolver::Dense),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
     assert!(matches!(
         KernelPCA::new(KernelType::RBF { gamma: 0.0 }, 2, EigenSolver::Dense),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
     assert!(matches!(
         KernelPCA::new(
@@ -147,7 +147,7 @@ fn test_kernel_pca_new_validation() {
             2,
             EigenSolver::Dense
         ),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
     assert!(matches!(
         KernelPCA::new(
@@ -159,7 +159,7 @@ fn test_kernel_pca_new_validation() {
             2,
             EigenSolver::Dense
         ),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
     assert!(matches!(
         KernelPCA::new(
@@ -170,7 +170,7 @@ fn test_kernel_pca_new_validation() {
             2,
             EigenSolver::Dense
         ),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
     assert!(matches!(
         KernelPCA::new(
@@ -181,7 +181,7 @@ fn test_kernel_pca_new_validation() {
             2,
             EigenSolver::Dense
         ),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
 }
 
@@ -272,19 +272,19 @@ fn test_kernel_pca_validation_and_errors() {
 
     assert!(matches!(
         kpca.transform(&data.view()),
-        Err(ModelError::NotFitted)
+        Err(RustymlError::NotFitted(_))
     ));
 
     let empty = Array2::<f64>::zeros((0, 3));
     assert!(matches!(
         kpca.fit(&empty.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::EmptyInput(_))
     ));
 
     let single = Array2::from_shape_vec((1, 3), vec![1.0, 2.0, 3.0]).unwrap();
     assert!(matches!(
         kpca.fit(&single.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidInput(_))
     ));
 
     let mut kpca_bad = KernelPCA::new(
@@ -295,14 +295,14 @@ fn test_kernel_pca_validation_and_errors() {
     .unwrap();
     assert!(matches!(
         kpca_bad.fit(&data.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::InvalidParameter { .. })
     ));
 
     let mut data_with_nan = data.clone();
     data_with_nan[[0, 1]] = f64::NAN;
     assert!(matches!(
         kpca.fit(&data_with_nan.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::NonFinite(_))
     ));
 
     let mut kpca_fit =
@@ -312,7 +312,7 @@ fn test_kernel_pca_validation_and_errors() {
     let wrong_features = Array2::<f64>::zeros((2, 4));
     assert!(matches!(
         kpca_fit.transform(&wrong_features.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(RustymlError::DimensionMismatch { .. })
     ));
 }
 

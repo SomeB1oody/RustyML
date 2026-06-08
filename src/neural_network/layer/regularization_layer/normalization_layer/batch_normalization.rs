@@ -1,7 +1,7 @@
 use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::validation::validate_weight_shape;
@@ -86,14 +86,14 @@ impl BatchNormalization {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New BatchNormalization layer instance or a validation error
+    /// - `Result<Self, Error>` - New BatchNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_shape` is empty
-    /// - `ModelError::InputValidationError` - If `momentum` is not between 0.0 and 1.0
-    /// - `ModelError::InputValidationError` - If `epsilon` is not positive
-    pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, ModelError> {
+    /// - `Error::EmptyInput` - If `input_shape` is empty
+    /// - `Error::InvalidParameter` - If `momentum` is not between 0.0 and 1.0
+    /// - `Error::InvalidParameter` - If `epsilon` is not positive
+    pub fn new(input_shape: Vec<usize>, momentum: f32, epsilon: f32) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
@@ -142,7 +142,7 @@ impl BatchNormalization {
         beta: Tensor,
         running_mean: Tensor,
         running_var: Tensor,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
         validate_weight_shape(
@@ -160,7 +160,7 @@ impl BatchNormalization {
 }
 
 impl Layer for BatchNormalization {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         if self.training {
@@ -273,7 +273,7 @@ impl Layer for BatchNormalization {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Inference mode: use running statistics
@@ -284,7 +284,7 @@ impl Layer for BatchNormalization {
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if !self.training {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
@@ -293,17 +293,20 @@ impl Layer for BatchNormalization {
         let batch_size = grad_output.shape()[0] as f32;
         let total_elements = grad_output.len();
 
-        let x_normalized = self.x_normalized.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_normalized = self
+            .x_normalized
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
 
-        let x_centered = self.x_centered.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_centered = self
+            .x_centered
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
 
-        let batch_var = self.batch_var.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let batch_var = self
+            .batch_var
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
 
         // Compute gradients for gamma and beta
         let grad_gamma = (grad_output * x_normalized).sum_axis(Axis(0));

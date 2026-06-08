@@ -1,7 +1,7 @@
 #![cfg(feature = "machine_learning")]
 
 use ndarray::{Array1, Array2, array};
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric;
 use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
 
@@ -237,7 +237,7 @@ fn test_knn_empty_train() {
     let x_test = Array2::<f64>::from_shape_vec((1, 2), vec![1.0, 1.0]).unwrap();
     assert!(matches!(
         knn.predict(&x_test.view()),
-        Err(ModelError::NotFitted)
+        Err(Error::NotFitted(_))
     ));
 }
 

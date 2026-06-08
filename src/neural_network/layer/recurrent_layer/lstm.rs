@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -107,16 +107,16 @@ impl LSTM {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new LSTM layer instance
+    /// - `Result<Self, Error>` - A new LSTM layer instance
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
+    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate input dimensions and units
         validate_recurrent_dimensions(input_dim, units)?;
 
@@ -170,7 +170,7 @@ impl LSTM {
         output_kernel: Array2<f32>,
         output_recurrent_kernel: Array2<f32>,
         output_bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape(
             "input_kernel",
             self.input_gate.kernel.shape(),
@@ -249,7 +249,7 @@ impl LSTM {
 }
 
 impl Layer for LSTM {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -361,7 +361,7 @@ impl Layer for LSTM {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         validate_input_3d(input)?;
 
@@ -441,22 +441,21 @@ impl Layer for LSTM {
         Ok(h_prev.into_dyn())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // The upstream gradient is dL/dh_T directly (no extra output activation).
         let grad_h_t = grad_output.clone().into_dimensionality::<Ix2>().unwrap();
 
         // The configurable activation (Copy), used for the candidate and cell-state derivatives.
         let act = self.activation;
 
-        let error_msg = "Forward pass has not been run";
-        let x3 = take_cache(&mut self.input_cache, error_msg)?;
-        let hs = take_cache(&mut self.hidden_cache, error_msg)?;
-        let cs = take_cache(&mut self.cell_cache, error_msg)?;
-        let cs_activated = take_cache(&mut self.cell_activated_cache, error_msg)?;
-        let i_vals = take_cache(&mut self.i_cache, error_msg)?;
-        let f_vals = take_cache(&mut self.f_cache, error_msg)?;
-        let g_vals = take_cache(&mut self.g_cache, error_msg)?;
-        let o_vals = take_cache(&mut self.o_cache, error_msg)?;
+        let x3 = take_cache(&mut self.input_cache, "LSTM")?;
+        let hs = take_cache(&mut self.hidden_cache, "LSTM")?;
+        let cs = take_cache(&mut self.cell_cache, "LSTM")?;
+        let cs_activated = take_cache(&mut self.cell_activated_cache, "LSTM")?;
+        let i_vals = take_cache(&mut self.i_cache, "LSTM")?;
+        let f_vals = take_cache(&mut self.f_cache, "LSTM")?;
+        let g_vals = take_cache(&mut self.g_cache, "LSTM")?;
+        let o_vals = take_cache(&mut self.o_cache, "LSTM")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];

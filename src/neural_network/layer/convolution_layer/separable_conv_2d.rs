@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -119,15 +119,15 @@ impl SeparableConv2D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new `SeparableConv2D` layer instance or an error
+    /// - `Result<Self, Error>` - A new `SeparableConv2D` layer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `filters` is 0
-    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
-    /// - `ModelError::InputValidationError` - If `depth_multiplier` is 0
-    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D or has 0 channels
-    /// - `ModelError::InputValidationError` - If input dimensions are smaller than kernel size
+    /// - `Error::InvalidParameter` - If `filters` is 0
+    /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
+    /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
+    /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -136,7 +136,7 @@ impl SeparableConv2D {
         padding: PaddingType,
         depth_multiplier: usize,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate input parameters
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
@@ -377,7 +377,7 @@ impl SeparableConv2D {
         depthwise_weights: Array4<f32>,
         pointwise_weights: Array4<f32>,
         bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape(
             "depthwise_weight",
             self.depthwise_weights.shape(),
@@ -397,12 +397,10 @@ impl SeparableConv2D {
 }
 
 impl Layer for SeparableConv2D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D tensor
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         // Save input for backpropagation
@@ -425,12 +423,10 @@ impl Layer for SeparableConv2D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D tensor
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         // Step 1: Depthwise convolution - each input channel convolved independently
@@ -444,11 +440,12 @@ impl Layer for SeparableConv2D {
         Ok(activated)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Apply activation backward pass
-        let activated = self.output_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let activated = self
+            .output_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("SeparableConv2D"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         if let (Some(input), Some(depthwise_output)) =
@@ -610,9 +607,7 @@ impl Layer for SeparableConv2D {
 
             Ok(input_gradients)
         } else {
-            Err(ModelError::ProcessingError(
-                "Forward pass has not been run".to_string(),
-            ))
+            Err(Error::forward_pass_not_run("SeparableConv2D"))
         }
     }
 

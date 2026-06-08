@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::loss_function::{clip_probabilities, validate_same_shape};
 use crate::neural_network::neural_network_trait::LossFunction;
@@ -61,17 +61,17 @@ impl Default for CategoricalCrossEntropy {
 ///
 /// Categorical cross entropy is an element-wise product reduced over the batch, so the two
 /// tensors must share the same shape, and the batch axis must be non-empty (it is the divisor).
-fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), ModelError> {
+fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "CategoricalCrossEntropy expects non-empty y_true".to_string(),
+        return Err(Error::empty_input(
+            "CategoricalCrossEntropy expects non-empty y_true",
         ));
     }
     validate_same_shape(y_true, y_pred)
 }
 
 impl LossFunction for CategoricalCrossEntropy {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_shapes(y_true, y_pred)?;
 
         // Ensure predictions are in a numerically stable range to avoid log(0) issues
@@ -86,7 +86,7 @@ impl LossFunction for CategoricalCrossEntropy {
         Ok(-losses.sum() / n)
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_shapes(y_true, y_pred)?;
 
         // Ensure predictions are in a numerically stable range

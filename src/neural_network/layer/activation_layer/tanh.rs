@@ -1,5 +1,5 @@
 use crate::neural_network::layer::no_trainable_parameters_layer_functions;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::{Activation, format_output_shape};
@@ -65,19 +65,15 @@ impl Default for Tanh {
 }
 
 impl Layer for Tanh {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Check if tensor is empty
         if input.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensor is empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensor"));
         }
 
         // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input tensor contains NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("input tensor"));
         }
 
         // Apply Tanh: tanh(x) with input clipping for numerical stability
@@ -90,49 +86,37 @@ impl Layer for Tanh {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Check if tensor is empty
         if input.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Input tensor is empty".to_string(),
-            ));
+            return Err(Error::empty_input("input tensor"));
         }
 
         // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(ModelError::InputValidationError(
-                "Input tensor contains NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("input tensor"));
         }
 
         // Apply Tanh: tanh(x) with input clipping for numerical stability
         Activation::Tanh.forward(input)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(output) = &self.output_cache {
             // Validate gradient output shape (tanh preserves shape)
             if grad_output.shape() != output.shape() {
-                return Err(ModelError::ProcessingError(format!(
-                    "Gradient output shape {:?} doesn't match output shape {:?}",
-                    grad_output.shape(),
-                    output.shape()
-                )));
+                return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
             }
 
             // Check for NaN or infinite values in gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-                return Err(ModelError::InputValidationError(
-                    "Gradient output contains NaN or infinite values".to_string(),
-                ));
+                return Err(Error::non_finite("gradient output"));
             }
 
             // Tanh derivative is: d/dx tanh(x) = 1 - tanh^2(x)
             Activation::Tanh.backward(output, grad_output)
         } else {
-            Err(ModelError::ProcessingError(
-                "Forward pass has not been run yet".to_string(),
-            ))
+            Err(Error::forward_pass_not_run("Tanh"))
         }
     }
 

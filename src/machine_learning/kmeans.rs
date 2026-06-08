@@ -1,7 +1,7 @@
 use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Data, Ix2};
@@ -148,21 +148,22 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new KMeans instance if parameters are valid
+    /// - `Result<Self, Error>` - A new KMeans instance if parameters are valid
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `n_clusters` or `max_iterations` is 0, or `tolerance` is non-positive/non-finite
+    /// - `Error::InvalidParameter` - If `n_clusters` or `max_iterations` is 0, or `tolerance` is non-positive/non-finite
     pub fn new(
         n_clusters: usize,
         max_iterations: usize,
         tolerance: f64,
         random_seed: Option<u64>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Input validation
         if n_clusters == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_clusters must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_clusters",
+                "must be greater than 0",
             ));
         }
 
@@ -225,7 +226,7 @@ impl KMeans {
     /// # Parameters
     ///
     /// * `data` - Training data as a 2D array
-    fn init_centroids<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<(), ModelError>
+    fn init_centroids<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<(), Error>
     where
         S: Data<Elem = f64>,
     {
@@ -303,16 +304,16 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to self for method chaining
+    /// - `Result<&mut Self, Error>` - A mutable reference to self for method chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the number of samples is less than `n_clusters` or data contains invalid values
+    /// - `Error::InvalidInput` - If the number of samples is less than `n_clusters` or data contains invalid values
     ///
     /// # Performance
     ///
     /// Parallel processing is used when the number of samples is greater than or equal to 1000.
-    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -322,8 +323,8 @@ impl KMeans {
         let n_features = data.shape()[1];
 
         if n_samples < self.n_clusters {
-            return Err(ModelError::InputValidationError(
-                "Number of samples is less than number of clusters".to_string(),
+            return Err(Error::invalid_input(
+                "Number of samples is less than number of clusters",
             ));
         }
 
@@ -357,7 +358,7 @@ impl KMeans {
 
             // Find the closest cluster center and distance for each sample
             let compute_assignments =
-                |sample: ArrayView1<f64>| -> Result<(usize, f64), ModelError> {
+                |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
                     let mut min_dist = f64::MAX;
                     let mut min_cluster = 0;
 
@@ -375,7 +376,7 @@ impl KMeans {
                     Ok((min_cluster, min_dist))
                 };
 
-            let results: Result<Vec<(usize, f64)>, ModelError> =
+            let results: Result<Vec<(usize, f64)>, Error> =
                 if n_samples >= KMEANS_PARALLEL_THRESHOLD {
                     // Parallel computation for large datasets
                     data.outer_iter()
@@ -435,7 +436,7 @@ impl KMeans {
             for (cluster_idx, &count) in counts.iter().enumerate() {
                 if count == 0 {
                     // Find the sample with maximum distance to its assigned centroid
-                    let result: Result<Option<usize>, ModelError> = results
+                    let result: Result<Option<usize>, Error> = results
                         .iter()
                         .enumerate()
                         .try_fold(
@@ -506,17 +507,20 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, ModelError>` - An array of cluster indices for each input data point
+    /// - `Result<Array1<usize>, Error>` - An array of cluster indices for each input data point
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - If input data is empty, contains invalid values, or has incorrect feature dimensions
-    pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::InvalidInput` - If input data is empty, contains invalid values, or has incorrect feature dimensions
+    pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64>,
     {
-        let centroids = self.centroids.as_ref().ok_or(ModelError::NotFitted)?;
+        let centroids = self
+            .centroids
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("KMeans"))?;
         validate_predict_input(data, centroids.ncols())?;
 
         let labels: Vec<usize> = data
@@ -538,12 +542,12 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, ModelError>` - An array of cluster indices for each input data point
+    /// - `Result<Array1<usize>, Error>` - An array of cluster indices for each input data point
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is invalid or smaller than the number of clusters
-    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, ModelError>
+    /// - `Error::InvalidInput` - If input data is invalid or smaller than the number of clusters
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64>,
     {

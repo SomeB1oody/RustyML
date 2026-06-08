@@ -3,7 +3,7 @@ use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::math::{logistic_loss, sigmoid};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
@@ -114,18 +114,18 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - An untrained logistic regression model instance or validation error
+    /// - `Result<Self, Error>` - An untrained logistic regression model instance or validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If any parameter is invalid (e.g., non-positive learning rate)
+    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g., non-positive learning rate)
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
         regularization_type: Option<RegularizationType>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Input validation
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
@@ -167,12 +167,12 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to the trained model or error
+    /// - `Result<&mut Self, Error>` - A mutable reference to the trained model or error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If target vector contains values other than 0 or 1
-    /// - `ModelError::ProcessingError` - If numerical issues (NaN/Infinity) occur during training
+    /// - `Error::InvalidInput` - If target vector contains values other than 0 or 1
+    /// - `Error::NonFinite` - If numerical issues (NaN/Infinity) occur during training
     ///
     /// # Performance
     ///
@@ -181,7 +181,7 @@ impl LogisticRegression {
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -191,8 +191,8 @@ impl LogisticRegression {
         // Check target values are binary
         for &val in y.iter() {
             if val != 0.0 && val != 1.0 {
-                return Err(ModelError::InputValidationError(
-                    "Target vector must contain only 0 or 1".to_string(),
+                return Err(Error::invalid_input(
+                    "Target vector must contain only 0 or 1",
                 ));
             }
         }
@@ -262,8 +262,8 @@ impl LogisticRegression {
             if gradients.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
-                return Err(ModelError::ProcessingError(
-                    "Gradient calculation resulted in NaN or infinite values".to_string(),
+                return Err(Error::non_finite(
+                    "gradient calculation",
                 ));
             }
 
@@ -298,8 +298,8 @@ impl LogisticRegression {
             if weights.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite weights");
-                return Err(ModelError::ProcessingError(
-                    "Weight update resulted in NaN or infinite values".to_string(),
+                return Err(Error::non_finite(
+                    "weight update",
                 ));
             }
 
@@ -331,8 +331,8 @@ impl LogisticRegression {
             if !cost.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
-                return Err(ModelError::ProcessingError(
-                    "Cost calculation resulted in NaN or infinite value".to_string(),
+                return Err(Error::non_finite(
+                    "cost calculation",
                 ));
             }
 
@@ -379,14 +379,14 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, ModelError>` - A 1D array containing predicted class labels (0 or 1)
+    /// - `Result<Array1<i32>, Error>` - A 1D array containing predicted class labels (0 or 1)
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - If input is empty, dimensions mismatch, or contains invalid values
-    /// - `ModelError::ProcessingError` - If numerical issues occur during probability calculation
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - If input is empty, dimensions mismatch, or contains invalid values
+    /// - `Error::NonFinite` - If numerical issues occur during probability calculation
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -406,19 +406,22 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - Probability of the positive class for each sample
+    /// - `Result<Array1<f64>, Error>` - Probability of the positive class for each sample
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted yet
-    /// - `ModelError::InputValidationError` - If input is empty, dimensions mismatch, or data contains non-finite values
-    /// - `ModelError::ProcessingError` - If numerical issues occur during probability calculation
-    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - If input is empty, dimensions mismatch, or data contains non-finite values
+    /// - `Error::NonFinite` - If numerical issues occur during probability calculation
+    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
         // Check if model has been fitted
-        let weights = self.weights.as_ref().ok_or(ModelError::NotFitted)?;
+        let weights = self
+            .weights
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LogisticRegression"))?;
 
         // Validate input against the feature count the model was trained on
         // (excluding the implicit bias column when an intercept was fitted)
@@ -441,8 +444,8 @@ impl LogisticRegression {
 
         // Check if probabilities contain invalid values
         if probs.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Probability calculation resulted in NaN or infinite values".to_string(),
+            return Err(Error::non_finite(
+                "probability calculation",
             ));
         }
 
@@ -481,17 +484,17 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, ModelError>` - Predicted class labels for the training samples
+    /// - `Result<Array1<i32>, Error>` - Predicted class labels for the training samples
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data does not match expectations
-    /// - `ModelError::ProcessingError` - If errors occur during fitting or prediction
+    /// - `Error::InvalidInput` - If input data does not match expectations
+    /// - `Error::NonFinite` - If numerical issues occur during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         train_x: &ArrayBase<S, Ix2>,
         train_y: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<i32>, ModelError>
+    ) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
     {

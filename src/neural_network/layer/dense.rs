@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -82,26 +82,25 @@ impl Dense {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New `Dense` layer instance with initialized parameters
+    /// - `Result<Self, Error>` - New `Dense` layer instance with initialized parameters
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is zero
+    /// - `Error::InvalidParameter` - If `input_dim` or `units` is zero
     pub fn new(
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate that dimensions are greater than zero
         if input_dim == 0 {
-            return Err(ModelError::InputValidationError(
-                "input_dim must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "input_dim",
+                "must be greater than 0",
             ));
         }
         if units == 0 {
-            return Err(ModelError::InputValidationError(
-                "units must be greater than 0".to_string(),
-            ));
+            return Err(Error::invalid_parameter("units", "must be greater than 0"));
         }
 
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
@@ -129,13 +128,13 @@ impl Dense {
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `weights` or `bias` do not match the layer's
-    ///   configured shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
+    ///   layer's configured shape
     pub fn set_weights(
         &mut self,
         weights: Array2<f32>,
         bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         // Force a contiguous standard layout: `parameters()` exposes the weights as a flat
@@ -148,12 +147,10 @@ impl Dense {
 }
 
 impl Layer for Dense {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 2D
         if input.ndim() != 2 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 2D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 2D"));
         }
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
@@ -172,12 +169,10 @@ impl Layer for Dense {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 2D
         if input.ndim() != 2 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 2D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 2D"));
         }
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
@@ -189,20 +184,22 @@ impl Layer for Dense {
         self.activation.forward(&z.into_dyn())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Backprop through the activation using the cached activated output
-        let activated = self.output_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError(String::from("Forward pass has not been run"))
-        })?;
+        let activated = self
+            .output_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         // Convert gradient to 2D array with shape [batch_size, output_dim]
         let grad_upstream_2d = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
 
         // Get input cache
-        let input = self.input_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError(String::from("Forward pass has not been run"))
-        })?;
+        let input = self
+            .input_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
         // Weight gradients: grad_w = input^T · grad_upstream (matmul via `dot`).
         let grad_w = input.t().dot(&grad_upstream_2d);

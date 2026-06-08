@@ -1,5 +1,5 @@
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
-use crate::error::ModelError;
+use crate::error::{Error, TreeError};
 use crate::math::{entropy, gini, variance};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
@@ -358,20 +358,21 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new untrained `DecisionTree` instance, or a `ModelError` if validation fails.
+    /// - `Result<Self, Error>` - A new untrained `DecisionTree` instance, or an `Error` if validation fails.
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the algorithm is incompatible with the task type, or if hyperparameters are invalid.
+    /// - `Error::InvalidInput` - If the algorithm is incompatible with the task type.
+    /// - `Error::InvalidParameter` - If hyperparameters are invalid.
     pub fn new(
         algorithm: Algorithm,
         is_classifier: bool,
         params: Option<DecisionTreeParams>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate algorithm compatibility with task type
         if !is_classifier && !algorithm.supports_regression() {
-            return Err(ModelError::InputValidationError(
-                "Only CART algorithm is supported for regression tasks".to_string(),
+            return Err(Error::invalid_input(
+                "Only CART algorithm is supported for regression tasks",
             ));
         }
 
@@ -379,29 +380,37 @@ impl DecisionTree {
 
         // Validate hyperparameters
         if params.min_samples_split < 2 {
-            return Err(ModelError::InputValidationError(
-                "min_samples_split must be at least 2".to_string(),
+            return Err(Error::invalid_parameter(
+                "min_samples_split",
+                "must be at least 2",
             ));
         }
 
         if params.min_samples_leaf < 1 {
-            return Err(ModelError::InputValidationError(
-                "min_samples_leaf must be at least 1".to_string(),
+            return Err(Error::invalid_parameter(
+                "min_samples_leaf",
+                "must be at least 1",
             ));
         }
 
         if params.min_samples_leaf > params.min_samples_split {
-            return Err(ModelError::InputValidationError(format!(
-                "min_samples_leaf ({}) cannot be greater than min_samples_split ({})",
-                params.min_samples_leaf, params.min_samples_split
-            )));
+            return Err(Error::invalid_parameter(
+                "min_samples_leaf",
+                format!(
+                    "min_samples_leaf ({}) cannot be greater than min_samples_split ({})",
+                    params.min_samples_leaf, params.min_samples_split
+                ),
+            ));
         }
 
         if params.min_impurity_decrease < 0.0 || !params.min_impurity_decrease.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "min_impurity_decrease must be non-negative and finite, got {}",
-                params.min_impurity_decrease
-            )));
+            return Err(Error::invalid_parameter(
+                "min_impurity_decrease",
+                format!(
+                    "must be non-negative and finite, got {}",
+                    params.min_impurity_decrease
+                ),
+            ));
         }
 
         Ok(Self {
@@ -468,12 +477,12 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to `self` for method chaining.
+    /// - `Result<&mut Self, Error>` - A mutable reference to `self` for method chaining.
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input data is invalid or doesn't meet minimum requirements.
-    /// - `ModelError::ProcessingError` - If class information cannot be determined.
+    /// - `Error::InvalidInput` - If the input data is invalid or doesn't meet minimum requirements.
+    /// - `Error::Computation` - If class information cannot be determined.
     ///
     /// # Performance
     ///
@@ -482,7 +491,7 @@ impl DecisionTree {
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -491,7 +500,7 @@ impl DecisionTree {
 
         // Check minimum samples requirement for tree construction
         if x.nrows() < self.params.min_samples_split {
-            return Err(ModelError::InputValidationError(format!(
+            return Err(Error::invalid_input(format!(
                 "Number of samples ({}) is less than min_samples_split ({})",
                 x.nrows(),
                 self.params.min_samples_split
@@ -500,8 +509,8 @@ impl DecisionTree {
 
         // Check that there are enough features
         if x.ncols() == 0 {
-            return Err(ModelError::InputValidationError(
-                "Input data must have at least one feature".to_string(),
+            return Err(Error::invalid_input(
+                "Input data must have at least one feature",
             ));
         }
 
@@ -509,15 +518,16 @@ impl DecisionTree {
 
         // For classification, determine number of classes and validate labels
         if self.is_classifier {
-            let max_class = y.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).ok_or(
-                ModelError::ProcessingError("Cannot determine max class".to_string()),
-            )?;
+            let max_class = y
+                .iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .ok_or_else(|| Error::computation("Cannot determine max class"))?;
 
             // Validate that all labels are non-negative integers
             for &label in y.iter() {
                 if label < 0.0 || label.fract() != 0.0 {
-                    return Err(ModelError::InputValidationError(
-                        "Class labels must be non-negative integers starting from 0".to_string(),
+                    return Err(Error::invalid_input(
+                        "Class labels must be non-negative integers starting from 0",
                     ));
                 }
             }
@@ -570,7 +580,7 @@ impl DecisionTree {
         indices: &[usize],
         depth: usize,
         #[cfg(feature = "show_progress")] progress_bar: &ProgressBar,
-    ) -> Result<Node, ModelError>
+    ) -> Result<Node, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -685,7 +695,7 @@ impl DecisionTree {
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
         indices: &[usize],
-    ) -> Result<Option<(Split, f64)>, ModelError>
+    ) -> Result<Option<(Split, f64)>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -934,26 +944,27 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<f64, ModelError>` - The predicted value, or a `ModelError` if prediction fails.
+    /// - `Result<f64, Error>` - The predicted value, or an `Error` if prediction fails.
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
-    /// - `ModelError::TreeError` - If the feature dimension mismatches or tree structure is broken.
-    pub fn predict_one(&self, x: &[f64]) -> Result<f64, ModelError> {
+    /// - `Error::NotFitted` - If the model hasn't been trained yet.
+    /// - `Error::DimensionMismatch` - If the feature dimension mismatches.
+    /// - `Error::Tree` - If the tree structure is broken.
+    pub fn predict_one(&self, x: &[f64]) -> Result<f64, Error> {
         if self.root.is_none() {
-            return Err(ModelError::NotFitted);
+            return Err(Error::not_fitted("DecisionTree"));
         }
 
         if x.len() != self.n_features {
-            return Err(ModelError::TreeError("Feature dimension mismatch"));
+            return Err(Error::dimension_mismatch(self.n_features, x.len()));
         }
 
         self.traverse_tree(self.root.as_ref().unwrap(), x)
     }
 
     /// Traverses the tree from a given node to make a prediction for a single sample.
-    fn traverse_tree(&self, node: &Node, x: &[f64]) -> Result<f64, ModelError> {
+    fn traverse_tree(&self, node: &Node, x: &[f64]) -> Result<f64, Error> {
         match &node.node_type {
             NodeType::Leaf { value, .. } => Ok(*value),
             NodeType::Internal {
@@ -970,9 +981,9 @@ impl DecisionTree {
                     }
                     return match &node.left {
                         Some(fallback) => self.traverse_tree(fallback, x),
-                        None => Err(ModelError::TreeError(
+                        None => Err(Error::Tree(TreeError::CorruptStructure(
                             "Categorical node has no matching child and no fallback",
-                        )),
+                        ))),
                     };
                 }
 
@@ -981,13 +992,15 @@ impl DecisionTree {
                     if let Some(ref left) = node.left {
                         self.traverse_tree(left, x)
                     } else {
-                        Err(ModelError::TreeError("Missing left child"))
+                        Err(Error::Tree(TreeError::CorruptStructure("Missing left child")))
                     }
                 } else {
                     if let Some(ref right) = node.right {
                         self.traverse_tree(right, x)
                     } else {
-                        Err(ModelError::TreeError("Missing right child"))
+                        Err(Error::Tree(TreeError::CorruptStructure(
+                            "Missing right child",
+                        )))
                     }
                 }
             }
@@ -1002,25 +1015,26 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array of predicted values.
+    /// - `Result<Array1<f64>, Error>` - A 1D array of predicted values.
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
-    /// - `ModelError::InputValidationError` - If input data is empty or dimensions mismatch.
+    /// - `Error::NotFitted` - If the model hasn't been trained yet.
+    /// - `Error::EmptyInput` - If input data is empty.
+    /// - `Error::DimensionMismatch` - If feature dimensions mismatch.
     ///
     /// # Performance
     ///
     /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`.
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        check_is_fitted(self.root.is_some())?;
+        check_is_fitted(self.root.is_some(), "DecisionTree")?;
         validate_predict_input(x, self.n_features)?;
 
         // Use parallel processing only when sample size exceeds threshold
-        let predictions: Result<Vec<f64>, ModelError> =
+        let predictions: Result<Vec<f64>, Error> =
             if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
@@ -1050,16 +1064,16 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array of predictions for the training data.
+    /// - `Result<Array1<f64>, Error>` - A 1D array of predictions for the training data.
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If training or prediction inputs are invalid.
+    /// - `Error::InvalidInput` - If training or prediction inputs are invalid.
     pub fn fit_predict<S>(
         &mut self,
         x_train: &ArrayBase<S, Ix2>,
         y_train: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<f64>, ModelError>
+    ) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -1075,33 +1089,31 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - A 2D array of class probabilities where each row sums to 1.0.
+    /// - `Result<Array2<f64>, Error>` - A 2D array of class probabilities where each row sums to 1.0.
     ///
     /// # Errors
     ///
-    /// - `ModelError::TreeError` - If called on a regression tree.
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
+    /// - `Error::Tree` - If called on a regression tree.
+    /// - `Error::NotFitted` - If the model hasn't been trained yet.
     ///
     /// # Performance
     ///
     /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`.
-    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
         if !self.is_classifier {
-            return Err(ModelError::TreeError(
-                "predict_proba is only available for classification",
-            ));
+            return Err(Error::Tree(TreeError::NotClassificationTree));
         }
 
-        check_is_fitted(self.root.is_some())?;
+        check_is_fitted(self.root.is_some(), "DecisionTree")?;
         validate_predict_input(x, self.n_features)?;
 
         let n_classes = self.n_classes.unwrap();
 
         // Use parallel processing only when sample size exceeds threshold
-        let probabilities: Result<Vec<Vec<f64>>, ModelError> =
+        let probabilities: Result<Vec<Vec<f64>>, Error> =
             if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
@@ -1140,37 +1152,35 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<Vec<f64>, ModelError>` - A vector of class probabilities.
+    /// - `Result<Vec<f64>, Error>` - A vector of class probabilities.
     ///
     /// # Errors
     ///
-    /// - `ModelError::TreeError` - If called on a regression tree or dimension mismatches.
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
-    pub fn predict_proba_one(&self, x: &[f64]) -> Result<Vec<f64>, ModelError> {
+    /// - `Error::Tree` - If called on a regression tree.
+    /// - `Error::DimensionMismatch` - If the feature dimension mismatches.
+    /// - `Error::NotFitted` - If the model hasn't been trained yet.
+    pub fn predict_proba_one(&self, x: &[f64]) -> Result<Vec<f64>, Error> {
         if !self.is_classifier {
-            return Err(ModelError::TreeError(
-                "predict_proba is only available for classification",
-            ));
+            return Err(Error::Tree(TreeError::NotClassificationTree));
         }
 
         if self.root.is_none() {
-            return Err(ModelError::NotFitted);
+            return Err(Error::not_fitted("DecisionTree"));
         }
 
         if x.len() != self.n_features {
-            return Err(ModelError::TreeError("Feature dimension mismatch"));
+            return Err(Error::dimension_mismatch(self.n_features, x.len()));
         }
 
         self.get_probabilities(self.root.as_ref().unwrap(), x)
     }
 
     /// Traverses the tree to retrieve class probabilities from the appropriate leaf node.
-    fn get_probabilities(&self, node: &Node, x: &[f64]) -> Result<Vec<f64>, ModelError> {
+    fn get_probabilities(&self, node: &Node, x: &[f64]) -> Result<Vec<f64>, Error> {
         match &node.node_type {
-            NodeType::Leaf { probabilities, .. } => probabilities
-                .as_ref()
-                .cloned()
-                .ok_or(ModelError::TreeError("No probabilities in leaf node")),
+            NodeType::Leaf { probabilities, .. } => probabilities.as_ref().cloned().ok_or_else(
+                || Error::Tree(TreeError::CorruptStructure("No probabilities in leaf node")),
+            ),
             NodeType::Internal {
                 feature_index,
                 threshold,
@@ -1185,9 +1195,9 @@ impl DecisionTree {
                     }
                     return match &node.left {
                         Some(fallback) => self.get_probabilities(fallback, x),
-                        None => Err(ModelError::TreeError(
+                        None => Err(Error::Tree(TreeError::CorruptStructure(
                             "Categorical node has no matching child and no fallback",
-                        )),
+                        ))),
                     };
                 }
 
@@ -1195,13 +1205,15 @@ impl DecisionTree {
                     if let Some(ref left) = node.left {
                         self.get_probabilities(left, x)
                     } else {
-                        Err(ModelError::TreeError("Missing left child"))
+                        Err(Error::Tree(TreeError::CorruptStructure("Missing left child")))
                     }
                 } else {
                     if let Some(ref right) = node.right {
                         self.get_probabilities(right, x)
                     } else {
-                        Err(ModelError::TreeError("Missing right child"))
+                        Err(Error::Tree(TreeError::CorruptStructure(
+                            "Missing right child",
+                        )))
                     }
                 }
             }
@@ -1212,14 +1224,14 @@ impl DecisionTree {
     ///
     /// # Returns
     ///
-    /// - `Result<String, ModelError>` - A formatted string containing the tree structure.
+    /// - `Result<String, Error>` - A formatted string containing the tree structure.
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been trained yet.
-    pub fn generate_tree_structure(&self) -> Result<String, ModelError> {
+    /// - `Error::NotFitted` - If the model hasn't been trained yet.
+    pub fn generate_tree_structure(&self) -> Result<String, Error> {
         if self.root.is_none() {
-            return Err(ModelError::NotFitted);
+            return Err(Error::not_fitted("DecisionTree"));
         }
 
         let mut output = String::new();

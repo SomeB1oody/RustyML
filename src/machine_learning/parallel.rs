@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Maps `f` over `0..n`, choosing parallel or sequential execution by `threshold`.
@@ -38,16 +38,16 @@ where
 ///
 /// # Returns
 ///
-/// - `Result<Vec<R>, ModelError>` - The collected results, or the first error encountered
+/// - `Result<Vec<R>, Error>` - The collected results, or the first error encountered
 ///
 /// # Errors
 ///
-/// - Propagates any `ModelError` returned by `f`
+/// - Propagates any `Error` returned by `f`
 #[inline]
-pub(super) fn try_map_collect<R, F>(n: usize, threshold: usize, f: F) -> Result<Vec<R>, ModelError>
+pub(super) fn try_map_collect<R, F>(n: usize, threshold: usize, f: F) -> Result<Vec<R>, Error>
 where
     R: Send,
-    F: Fn(usize) -> Result<R, ModelError> + Sync + Send,
+    F: Fn(usize) -> Result<R, Error> + Sync + Send,
 {
     if n >= threshold {
         (0..n).into_par_iter().map(f).collect()

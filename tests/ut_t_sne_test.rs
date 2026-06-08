@@ -2,7 +2,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
-use rustyml::error::ModelError;
+use rustyml::error::Error;
 use rustyml::utility::t_sne::*;
 
 #[test]
@@ -31,19 +31,19 @@ fn test_tsne_new_getters() {
 fn test_tsne_new_validation() {
     assert!(matches!(
         TSNE::new(0, 30.0, 200.0, 100, None),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidParameter { .. })
     ));
     assert!(matches!(
         TSNE::new(2, 0.0, 200.0, 100, None),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidParameter { .. })
     ));
     assert!(matches!(
         TSNE::new(2, 30.0, 0.0, 100, None),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidParameter { .. })
     ));
     assert!(matches!(
         TSNE::new(2, 30.0, 200.0, 0, None),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidParameter { .. })
     ));
 }
 
@@ -93,14 +93,14 @@ fn test_tsne_fit_transform_invalid_input() {
     let single_sample = Array2::<f64>::zeros((1, 2));
     assert!(matches!(
         tsne.fit_transform(&single_sample.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidInput(_))
     ));
 
     let mut data = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
     data[[0, 1]] = f64::NAN;
     assert!(matches!(
         tsne.fit_transform(&data.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::NonFinite(_))
     ));
 }
 
@@ -110,7 +110,7 @@ fn test_tsne_perplexity_validation() {
     let data = Array2::<f64>::zeros((5, 2));
     assert!(matches!(
         tsne.fit_transform(&data.view()),
-        Err(ModelError::InputValidationError(_))
+        Err(Error::InvalidParameter { .. })
     ));
 }
 

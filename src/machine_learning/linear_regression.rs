@@ -3,7 +3,7 @@ use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
@@ -132,18 +132,18 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new instance of LinearRegression, or an error if parameters are invalid
+    /// - `Result<Self, Error>` - A new instance of LinearRegression, or an error if parameters are invalid
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If learning_rate, max_iterations or tolerance is invalid
+    /// - `Error::InvalidParameter` - If learning_rate, max_iterations or tolerance is invalid
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
         regularization_type: Option<RegularizationType>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Input validation
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
@@ -188,12 +188,12 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Returns mutable reference to self for method chaining
+    /// - `Result<&mut Self, Error>` - Returns mutable reference to self for method chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::ProcessingError` - If numerical issues like NaN or infinity occur during training
-    /// - `ModelError::InputValidationError` - If input dimensions are inconsistent
+    /// - `Error::NonFinite` - If numerical issues like NaN or infinity occur during training
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input dimensions are inconsistent
     ///
     /// # Performance
     ///
@@ -203,7 +203,7 @@ impl LinearRegression {
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -286,9 +286,7 @@ impl LinearRegression {
             if !cost.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
-                return Err(ModelError::ProcessingError(
-                    "Cost calculation resulted in NaN or infinite value".to_string(),
-                ));
+                return Err(Error::non_finite("cost calculation"));
             }
 
             // Calculate gradients using matrix operations
@@ -305,9 +303,7 @@ impl LinearRegression {
             {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
-                return Err(ModelError::ProcessingError(
-                    "Gradient calculation resulted in NaN or infinite values".to_string(),
-                ));
+                return Err(Error::non_finite("gradient calculation"));
             }
 
             // Add regularization terms to gradients
@@ -350,9 +346,7 @@ impl LinearRegression {
             if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite parameters");
-                return Err(ModelError::ProcessingError(
-                    "Parameter update resulted in NaN or infinite values".to_string(),
-                ));
+                return Err(Error::non_finite("parameter update"));
             }
 
             // Enhanced convergence check with stability requirement
@@ -400,19 +394,22 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A vector of predictions
+    /// - `Result<Array1<f64>, Error>` - A vector of predictions
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been trained yet
-    /// - `ModelError::InputValidationError` - If features count doesn't match or data contains invalid values
-    /// - `ModelError::ProcessingError` - If prediction results in non-finite values
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    /// - `Error::NotFitted` - If the model has not been trained yet
+    /// - `Error::DimensionMismatch` - If features count doesn't match or data contains invalid values
+    /// - `Error::NonFinite` - If prediction results in non-finite values
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
         // Check if model has been fitted, then validate the prediction input
-        let coeffs = self.coefficients.as_ref().ok_or(ModelError::NotFitted)?;
+        let coeffs = self
+            .coefficients
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LinearRegression"))?;
         let intercept = self.intercept.unwrap_or(0.0);
 
         validate_predict_input(x, coeffs.len())?;
@@ -425,9 +422,7 @@ impl LinearRegression {
 
         // Check if predictions contain invalid values
         if predictions.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Prediction calculation resulted in NaN or infinite values".to_string(),
-            ));
+            return Err(Error::non_finite("prediction calculation"));
         }
 
         Ok(predictions)
@@ -444,17 +439,17 @@ impl LinearRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - The predicted values for the input data
+    /// - `Result<Array1<f64>, Error>` - The predicted values for the input data
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is invalid
-    /// - `ModelError::ProcessingError` - If an error occurs during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid
+    /// - `Error::NonFinite` - If an error occurs during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<f64>, ModelError>
+    ) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {

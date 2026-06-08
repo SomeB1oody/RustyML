@@ -1,7 +1,7 @@
 use super::parallel::{map_collect, try_map_collect};
 use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 pub use crate::KernelType;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
@@ -115,24 +115,27 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new SVC instance if parameters are valid
+    /// - `Result<Self, Error>` - A new SVC instance if parameters are valid
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `regularization_param` is non-positive or non-finite, or if `tol` or `max_iter` fail validation
+    /// - `Error::InvalidParameter` - If `regularization_param` is non-positive or non-finite, or if `tol` or `max_iter` fail validation
     pub fn new(
         kernel: KernelType,
         regularization_param: f64,
         tol: f64,
         max_iter: usize,
         random_state: Option<u64>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate regularization parameter
         if regularization_param <= 0.0 || !regularization_param.is_finite() {
-            return Err(ModelError::InputValidationError(format!(
-                "Regularization parameter must be positive and finite, got {}",
-                regularization_param
-            )));
+            return Err(Error::invalid_parameter(
+                "regularization_param",
+                format!(
+                    "must be positive and finite, got {}",
+                    regularization_param
+                ),
+            ));
         }
 
         // Validate tolerance
@@ -269,12 +272,14 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - A mutable reference to the fitted model
+    /// - `Result<&mut Self, Error>` - A mutable reference to the fitted model
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is empty or labels are not +1/-1
-    /// - `ModelError::ProcessingError` - If the model fails to converge, no support vectors are found, or numerical instability occurs
+    /// - `Error::EmptyInput` - If input data is empty
+    /// - `Error::InvalidInput` - If labels are not +1/-1
+    /// - `Error::NotConverged` - If the model fails to converge and no support vectors are found
+    /// - `Error::NonFinite` - If numerical instability produces non-finite values
     ///
     /// # Performance
     ///
@@ -283,7 +288,7 @@ impl SVC {
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<&mut Self, ModelError>
+    ) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -295,8 +300,8 @@ impl SVC {
         // Validate labels (SVC-specific requirement). This is a cheap O(n) scan,
         // so it runs sequentially without cloning the label vector.
         if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
-            return Err(ModelError::InputValidationError(
-                "All labels must be either 1.0 or -1.0".to_string(),
+            return Err(Error::invalid_input(
+                "All labels must be either 1.0 or -1.0",
             ));
         }
 
@@ -309,9 +314,7 @@ impl SVC {
 
         // Validate kernel matrix
         if kernel_matrix.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Kernel matrix contains invalid values - check kernel parameters".to_string(),
-            ));
+            return Err(Error::non_finite("kernel matrix"));
         }
 
         // Initialize error cache
@@ -413,17 +416,14 @@ impl SVC {
         };
 
         if support_indices.is_empty() {
-            return Err(ModelError::ProcessingError(
-                "No support vectors found - model failed to converge. Try adjusting parameters."
-                    .to_string(),
+            return Err(Error::not_converged(
+                "no support vectors found; try adjusting parameters",
             ));
         }
 
         // Validate bias term
         if !b.is_finite() {
-            return Err(ModelError::ProcessingError(
-                "Bias term is invalid - numerical instability detected".to_string(),
-            ));
+            return Err(Error::non_finite("bias term"));
         }
 
         let n_support_vectors = support_indices.len();
@@ -440,9 +440,7 @@ impl SVC {
 
         // Final validation of extracted values
         if support_vector_alphas.iter().any(|&val| !val.is_finite()) {
-            return Err(ModelError::ProcessingError(
-                "Support vector alphas contain invalid values".to_string(),
-            ));
+            return Err(Error::non_finite("support vector alphas"));
         }
 
         // Store results
@@ -463,18 +461,19 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array containing predicted class labels (+1.0 or -1.0)
+    /// - `Result<Array1<f64>, Error>` - A 1D array containing predicted class labels (+1.0 or -1.0)
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been fitted yet
-    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimensions mismatch
-    /// - `ModelError::ProcessingError` - If numerical issues occur during decision function calculation
+    /// - `Error::NotFitted` - If the model hasn't been fitted yet
+    /// - `Error::EmptyInput` - If input data is empty
+    /// - `Error::DimensionMismatch` - If feature dimensions mismatch
+    /// - `Error::NonFinite` - If numerical issues produce a non-finite decision value during prediction
     ///
     /// # Performance
     ///
     /// Parallel computation is used for batch prediction when the number of samples exceeds 100.
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -486,7 +485,7 @@ impl SVC {
             self.bias,
         ) {
             (Some(sv), Some(svl), Some(a), Some(b)) => (sv, svl, a, b),
-            _ => return Err(ModelError::NotFitted),
+            _ => return Err(Error::not_fitted("SVC")),
         };
 
         // Basic input validation
@@ -496,11 +495,10 @@ impl SVC {
 
         // Check feature dimension match
         if n_features != support_vectors.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input has {} features but model was trained on {} features",
+            return Err(Error::dimension_mismatch(
+                support_vectors.ncols(),
                 n_features,
-                support_vectors.ncols()
-            )));
+            ));
         }
 
         let n_samples = x.nrows();
@@ -518,9 +516,7 @@ impl SVC {
 
             // Handle numerical issues more robustly
             if !decision_value.is_finite() {
-                Err(ModelError::ProcessingError(
-                    "Decision function produced invalid value during prediction".to_string(),
-                ))
+                Err(Error::non_finite("decision function during prediction"))
             } else {
                 Ok(if decision_value >= 0.0 { 1.0 } else { -1.0 })
             }
@@ -539,17 +535,18 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - A 1D array containing the raw decision function values (distance to hyperplane)
+    /// - `Result<Array1<f64>, Error>` - A 1D array containing the raw decision function values (distance to hyperplane)
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model hasn't been fitted yet
-    /// - `ModelError::InputValidationError` - If input data is invalid or feature dimensions mismatch
+    /// - `Error::NotFitted` - If the model hasn't been fitted yet
+    /// - `Error::EmptyInput` - If input data is empty
+    /// - `Error::DimensionMismatch` - If feature dimensions mismatch
     ///
     /// # Performance
     ///
     /// Parallel computation is used when the number of samples exceeds 100.
-    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, ModelError>
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -561,7 +558,7 @@ impl SVC {
             self.bias,
         ) {
             (Some(sv), Some(svl), Some(a), Some(b)) => (sv, svl, a, b),
-            _ => return Err(ModelError::NotFitted),
+            _ => return Err(Error::not_fitted("SVC")),
         };
 
         // Basic input validation
@@ -571,11 +568,10 @@ impl SVC {
 
         // Check feature dimension match
         if n_features != support_vectors.ncols() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input has {} features but model was trained on {} features",
+            return Err(Error::dimension_mismatch(
+                support_vectors.ncols(),
                 n_features,
-                support_vectors.ncols()
-            )));
+            ));
         }
 
         let n_samples = x.nrows();
@@ -944,17 +940,17 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, ModelError>` - Predicted class labels for the training data
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels for the training data
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If input data is invalid
-    /// - `ModelError::ProcessingError` - If an error occurs during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::InvalidParameter` - If input data is invalid
+    /// - `Error::NotConverged` / `Error::NonFinite` / `Error::NotFitted` / `Error::DimensionMismatch` - If an error occurs during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<f64>, ModelError>
+    ) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

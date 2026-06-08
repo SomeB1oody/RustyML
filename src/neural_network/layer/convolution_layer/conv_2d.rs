@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -114,14 +114,14 @@ impl Conv2D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new `Conv2D` layer instance with randomly initialized weights or an error
+    /// - `Result<Self, Error>` - A new `Conv2D` layer instance with randomly initialized weights or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `filters` is 0
-    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
-    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D or has 0 channels
-    /// - `ModelError::InputValidationError` - If input dimensions are smaller than kernel size
+    /// - `Error::InvalidParameter` - If `filters` is 0
+    /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
+    /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -129,7 +129,7 @@ impl Conv2D {
         strides: (usize, usize),
         padding: PaddingType,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
@@ -200,7 +200,7 @@ impl Conv2D {
         &mut self,
         weights: Array4<f32>,
         bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -210,12 +210,10 @@ impl Conv2D {
 }
 
 impl Layer for Conv2D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         // Save input for backpropagation
@@ -236,12 +234,10 @@ impl Layer for Conv2D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         // Convolution (dimension-generic engine), then activation
@@ -257,16 +253,18 @@ impl Layer for Conv2D {
         Ok(activated)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Apply activation backward pass
-        let activated = self.output_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let activated = self
+            .output_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("Conv2D"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
-        let input = self.input_cache.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let input = self
+            .input_cache
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("Conv2D"))?;
 
         let grads = conv_backward(
             &grad_upstream,

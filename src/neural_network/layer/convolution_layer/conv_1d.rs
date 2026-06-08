@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -111,13 +111,13 @@ impl Conv1D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new `Conv1D` layer instance or an error
+    /// - `Result<Self, Error>` - A new `Conv1D` layer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `filters`, `kernel_size`, or `stride` is 0
-    /// - `ModelError::InputValidationError` - If `input_shape` is not 3D or has 0 channels
-    /// - `ModelError::InputValidationError` - If input length is less than kernel size
+    /// - `Error::InvalidParameter` - If `filters`, `kernel_size`, or `stride` is 0
+    /// - `Error::InvalidInput` - If `input_shape` is not 3D or has 0 channels
+    /// - `Error::InvalidInput` - If input length is less than kernel size
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -125,7 +125,7 @@ impl Conv1D {
         stride: usize,
         padding: PaddingType,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Validate input parameters
         validate_filters(filters)?;
         validate_kernel_size_1d(kernel_size)?;
@@ -190,7 +190,7 @@ impl Conv1D {
         &mut self,
         weights: Array3<f32>,
         bias: Array2<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -200,12 +200,10 @@ impl Conv1D {
 }
 
 impl Layer for Conv1D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
         // Cache input for backpropagation
@@ -226,12 +224,10 @@ impl Layer for Conv1D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 3D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
         // Convolution (dimension-generic engine), then activation
@@ -247,16 +243,18 @@ impl Layer for Conv1D {
         Ok(activated)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Apply activation backward pass
-        let activated = self.output_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let activated = self
+            .output_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("Conv1D"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
-        let input = self.input_cache.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("No cached input for backward pass".to_string())
-        })?;
+        let input = self
+            .input_cache
+            .as_ref()
+            .ok_or_else(|| Error::computation("No cached input for backward pass"))?;
 
         let grads = conv_backward(
             &grad_upstream,

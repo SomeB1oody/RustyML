@@ -1,7 +1,7 @@
 use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
-use crate::error::ModelError;
+use crate::error::{Error, Context};
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::validation::validate_weight_shape;
@@ -44,23 +44,26 @@ pub enum LayerNormalizationAxis {
 fn merge_normalized_axes(
     input: &Tensor,
     axes: &[usize],
-) -> Result<(Tensor, Vec<usize>, Vec<usize>), ModelError> {
+) -> Result<(Tensor, Vec<usize>, Vec<usize>), Error> {
     let ndim = input.ndim();
     if axes.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "LayerNormalization Multiple axis list must be non-empty".to_string(),
+        return Err(Error::invalid_parameter(
+            "normalized_axis",
+            "LayerNormalization Multiple axis list must be non-empty",
         ));
     }
     for (i, &a) in axes.iter().enumerate() {
         if a >= ndim {
-            return Err(ModelError::InputValidationError(format!(
-                "Normalization axis {a} is out of bounds for input with {ndim} dimensions"
-            )));
+            return Err(Error::invalid_parameter(
+                "normalized_axis",
+                format!("Normalization axis {a} is out of bounds for input with {ndim} dimensions"),
+            ));
         }
         if axes[..i].contains(&a) {
-            return Err(ModelError::InputValidationError(format!(
-                "Duplicate normalization axis {a}"
-            )));
+            return Err(Error::invalid_parameter(
+                "normalized_axis",
+                format!("Duplicate normalization axis {a}"),
+            ));
         }
     }
 
@@ -80,7 +83,7 @@ fn merge_normalized_axes(
     merged_shape.push(inner);
     let merged = permuted
         .into_shape_with_order(merged_shape)
-        .map_err(|e| ModelError::ProcessingError(format!("LayerNorm merge reshape failed: {e}")))?;
+        .context("layer-norm merge reshape")?;
     Ok((merged, perm, permuted_shape))
 }
 
@@ -169,16 +172,16 @@ impl LayerNormalization {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New LayerNormalization layer instance or a validation error
+    /// - `Result<Self, Error>` - New LayerNormalization layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `epsilon` is not positive or not finite
+    /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite
     pub fn new(
         input_shape: Vec<usize>,
         normalized_axis: LayerNormalizationAxis,
         epsilon: f32,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         validate_epsilon(epsilon)?;
 
         // gamma/beta are 1-D over the normalized dimension(s). For a single axis that is the size of
@@ -201,21 +204,26 @@ impl LayerNormalization {
             }
             LayerNormalizationAxis::Multiple(axes) => {
                 if axes.is_empty() {
-                    return Err(ModelError::InputValidationError(
-                        "LayerNormalization Multiple axis list must be non-empty".to_string(),
+                    return Err(Error::invalid_parameter(
+                        "normalized_axis",
+                        "LayerNormalization Multiple axis list must be non-empty",
                     ));
                 }
                 for (i, &a) in axes.iter().enumerate() {
                     if a >= input_shape.len() {
-                        return Err(ModelError::InputValidationError(format!(
-                            "Normalization axis {a} is out of bounds for input shape with {} dimensions",
-                            input_shape.len()
-                        )));
+                        return Err(Error::invalid_parameter(
+                            "normalized_axis",
+                            format!(
+                                "Normalization axis {a} is out of bounds for input shape with {} dimensions",
+                                input_shape.len()
+                            ),
+                        ));
                     }
                     if axes[..i].contains(&a) {
-                        return Err(ModelError::InputValidationError(format!(
-                            "Duplicate normalization axis {a}"
-                        )));
+                        return Err(Error::invalid_parameter(
+                            "normalized_axis",
+                            format!("Duplicate normalization axis {a}"),
+                        ));
                     }
                 }
                 vec![axes.iter().map(|&a| input_shape[a]).product()]
@@ -248,7 +256,7 @@ impl LayerNormalization {
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
-    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), ModelError> {
+    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
         self.gamma = gamma;
@@ -258,7 +266,7 @@ impl LayerNormalization {
 }
 
 impl Layer for LayerNormalization {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Resolve the working layout and axis. Default/Custom normalize an existing axis in place;
@@ -271,19 +279,20 @@ impl Layer for LayerNormalization {
         let (input, axis_idx): (&Tensor, usize) = match (&self.normalized_axis, &merged) {
             (LayerNormalizationAxis::Default, _) => {
                 if input.ndim() == 0 {
-                    return Err(ModelError::InputValidationError(
-                        "Cannot normalize a scalar tensor".to_string(),
-                    ));
+                    return Err(Error::invalid_input("Cannot normalize a scalar tensor"));
                 }
                 (input, input.ndim() - 1)
             }
             (LayerNormalizationAxis::Custom(axis), _) => {
                 if *axis >= input.ndim() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Normalization axis {} is out of bounds for input with {} dimensions",
-                        axis,
-                        input.ndim()
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "normalized_axis",
+                        format!(
+                            "Normalization axis {} is out of bounds for input with {} dimensions",
+                            axis,
+                            input.ndim()
+                        ),
+                    ));
                 }
                 (input, *axis)
             }
@@ -437,7 +446,7 @@ impl Layer for LayerNormalization {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Resolve the working layout and axis. Default/Custom normalize an existing axis in place;
@@ -450,19 +459,20 @@ impl Layer for LayerNormalization {
         let (input, axis_idx): (&Tensor, usize) = match (&self.normalized_axis, &merged) {
             (LayerNormalizationAxis::Default, _) => {
                 if input.ndim() == 0 {
-                    return Err(ModelError::InputValidationError(
-                        "Cannot normalize a scalar tensor".to_string(),
-                    ));
+                    return Err(Error::invalid_input("Cannot normalize a scalar tensor"));
                 }
                 (input, input.ndim() - 1)
             }
             (LayerNormalizationAxis::Custom(axis), _) => {
                 if *axis >= input.ndim() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Normalization axis {} is out of bounds for input with {} dimensions",
-                        axis,
-                        input.ndim()
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "normalized_axis",
+                        format!(
+                            "Normalization axis {} is out of bounds for input with {} dimensions",
+                            axis,
+                            input.ndim()
+                        ),
+                    ));
                 }
                 (input, *axis)
             }
@@ -609,7 +619,7 @@ impl Layer for LayerNormalization {
         Ok(output)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if !self.training {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
@@ -628,17 +638,20 @@ impl Layer for LayerNormalization {
             (LayerNormalizationAxis::Multiple(_), None) => unreachable!(),
         };
 
-        let x_normalized = self.x_normalized.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_normalized = self
+            .x_normalized
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
 
-        let x_centered = self.x_centered.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let x_centered = self
+            .x_centered
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
 
-        let std_dev = self.std_dev.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let std_dev = self
+            .std_dev
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
 
         // Compute gradients for gamma and beta. Since gamma/beta are 1-D over the normalized axis,
         // reduce every other axis, leaving a gradient of shape `[axis_size]`.

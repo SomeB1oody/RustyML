@@ -1,7 +1,7 @@
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
 use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
 use crate::neural_network::layer::no_trainable_parameters_layer_functions;
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
@@ -54,12 +54,12 @@ impl GaussianNoise {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - New GaussianNoise layer instance or a validation error
+    /// - `Result<Self, Error>` - New GaussianNoise layer instance or a validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `stddev` is negative
-    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If `stddev` is negative
+    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_stddev(stddev)?;
 
         Ok(GaussianNoise {
@@ -73,7 +73,7 @@ impl GaussianNoise {
 }
 
 impl Layer for GaussianNoise {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // `stddev` is immutable and already validated in `new()`; only validate the runtime input.
         validate_input_shape(input.shape(), &self.input_shape)?;
 
@@ -92,7 +92,7 @@ impl Layer for GaussianNoise {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // `stddev` is immutable and already validated in `new()`; only validate the runtime input.
         validate_input_shape(input.shape(), &self.input_shape)?;
 
@@ -100,7 +100,7 @@ impl Layer for GaussianNoise {
         Ok(input.clone())
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Gradient passes through unchanged since d/dx(x + noise) = 1
         // The noise is not a function of the input during backpropagation
         Ok(grad_output.clone())

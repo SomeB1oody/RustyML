@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::regularization_layer::normalization_layer::layer_normalization::LayerNormalization;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::ArrayD;
@@ -17,7 +17,7 @@ pub struct SerializableLayerNormalizationWeight {
 }
 
 impl ApplyWeights<LayerNormalization> for SerializableLayerNormalizationWeight {
-    fn apply_to_layer(&self, layer: &mut LayerNormalization) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut LayerNormalization) -> Result<(), Error> {
         layer.set_weights(self.gamma.clone(), self.beta.clone())?;
         Ok(())
     }

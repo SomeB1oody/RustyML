@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 
 /// Common backward pass implementation for all dropout layers.
@@ -15,13 +15,13 @@ use crate::neural_network::Tensor;
 ///
 /// # Returns
 ///
-/// * `Result<Tensor, ModelError>` - Gradient to pass to previous layer
+/// * `Result<Tensor, Error>` - Gradient to pass to previous layer
 fn dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
     training: bool,
     rate: f32,
-) -> Result<Tensor, ModelError> {
+) -> Result<Tensor, Error> {
     if !training || rate == 0.0 {
         // During inference or if rate is 0, pass gradient through unchanged
         return Ok(grad_output.clone());
@@ -38,9 +38,7 @@ fn dropout_backward(
         let grad_input = grad_output * mask * scale;
         Ok(grad_input)
     } else {
-        Err(ModelError::ProcessingError(
-            "Forward pass has not been run".to_string(),
-        ))
+        Err(Error::forward_pass_not_run("Dropout"))
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::neural_network_trait::{Layer, Optimizer};
 use crate::neural_network::optimizer::validation::validate_learning_rate;
 use crate::neural_network::optimizer::kernels;
@@ -25,12 +25,12 @@ impl SGD {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new SGD optimizer instance or an error
+    /// - `Result<Self, Error>` - A new SGD optimizer instance or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `learning_rate` is not positive
-    pub fn new(learning_rate: f32) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If `learning_rate` is not positive
+    pub fn new(learning_rate: f32) -> Result<Self, Error> {
         // input validation
         validate_learning_rate(learning_rate)?;
 

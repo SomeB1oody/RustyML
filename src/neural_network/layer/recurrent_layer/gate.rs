@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::layer::recurrent_layer::validation::validate_dimension_greater_than_zero;
 use crate::neural_network::layer::recurrent_layer::{GRADIENT_CLIP_VALUE, orthogonal_init};
 use crate::neural_network::neural_network_trait::ParamGrad;
@@ -41,12 +41,12 @@ impl Gate {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new gate instance with initialized parameters
+    /// - `Result<Self, Error>` - A new gate instance with initialized parameters
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
-    pub fn new(input_dim: usize, units: usize, bias_init_value: f32) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If `input_dim` or `units` is 0
+    pub fn new(input_dim: usize, units: usize, bias_init_value: f32) -> Result<Self, Error> {
         // Validate dimensions
         validate_dimension_greater_than_zero(input_dim, "input_dim")?;
         validate_dimension_greater_than_zero(units, "units")?;
@@ -147,20 +147,20 @@ pub fn compute_gate_value(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) 
 /// # Parameters
 ///
 /// - `cache` - Cache container to take ownership from
-/// - `error_msg` - Error message to use when cache is empty
+/// - `layer` - Name of the layer, used to build the error when the cache is empty
 ///
 /// # Returns
 ///
-/// - `Result<T, ModelError>` - The cached value if present
+/// - `crate::error::RustymlResult<T>` - The cached value if present
 ///
 /// # Errors
 ///
-/// - `ModelError::ProcessingError` - If the cache is empty
+/// - `Error::NeuralNetwork(NnError::ForwardPassNotRun)` - If the cache is empty
 #[inline]
-pub fn take_cache<T>(cache: &mut Option<T>, error_msg: &str) -> Result<T, ModelError> {
+pub fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> crate::error::RustymlResult<T> {
     cache
         .take()
-        .ok_or_else(|| ModelError::ProcessingError(error_msg.to_string()))
+        .ok_or_else(|| Error::forward_pass_not_run(layer))
 }
 
 /// Stores gradients for a gate

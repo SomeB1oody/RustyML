@@ -8,7 +8,7 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array4};
-use rustyml::error::IoError;
+use rustyml::error::{Error, IoError};
 use rustyml::neural_network::layer::activation_layer::linear::Linear;
 use rustyml::neural_network::layer::activation_layer::relu::ReLU;
 use rustyml::neural_network::layer::convolution_layer::PaddingType;
@@ -144,7 +144,7 @@ fn load_layer_count_mismatch_is_reported() {
         .add(Dense::new(3, 2, Linear::new()).unwrap());
     let err = loaded.load_from_path(&path).unwrap_err();
     assert!(
-        matches!(err, IoError::ModelStructureMismatch(_)),
+        matches!(err, Error::Io(IoError::ModelStructureMismatch(_))),
         "expected ModelStructureMismatch, got {:?}",
         err
     );
@@ -164,7 +164,7 @@ fn load_layer_type_mismatch_is_reported() {
     loaded.add(ReLU::new());
     let err = loaded.load_from_path(&path).unwrap_err();
     assert!(
-        matches!(err, IoError::ModelStructureMismatch(_)),
+        matches!(err, Error::Io(IoError::ModelStructureMismatch(_))),
         "expected ModelStructureMismatch, got {:?}",
         err
     );
@@ -185,7 +185,7 @@ fn load_weight_shape_mismatch_is_reported() {
     loaded.add(Dense::new(4, 5, Linear::new()).unwrap());
     let err = loaded.load_from_path(&path).unwrap_err();
     assert!(
-        matches!(err, IoError::ModelStructureMismatch(_)),
+        matches!(err, Error::Io(IoError::ModelStructureMismatch(_))),
         "expected ModelStructureMismatch, got {:?}",
         err
     );

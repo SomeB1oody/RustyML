@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
 use ndarray_rand::rand::rngs::StdRng;
@@ -37,7 +37,7 @@ impl SVDSolver {
         &self,
         x_centered: &Array2<f64>,
         n_components: usize,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+    ) -> Result<(Array2<f64>, Array1<f64>), Error> {
         match *self {
             SVDSolver::Full => Self::full_svd(x_centered, n_components),
             SVDSolver::Randomized(seed) => Self::randomized_svd(x_centered, n_components, seed),
@@ -49,17 +49,17 @@ impl SVDSolver {
     fn full_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+    ) -> Result<(Array2<f64>, Array1<f64>), Error> {
         let n_samples = x_centered.nrows();
         let n_features = x_centered.ncols();
-        let x_slice = x_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
-        })?;
+        let x_slice = x_centered
+            .as_slice()
+            .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
         let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
         let svd = nalgebra::linalg::SVD::new(x_mat, false, true);
-        let v_t = svd.v_t.ok_or_else(|| {
-            ModelError::ProcessingError("SVD did not compute V^T matrix".to_string())
-        })?;
+        let v_t = svd
+            .v_t
+            .ok_or_else(|| Error::computation("SVD did not compute V^T matrix"))?;
 
         let singular_values: Vec<f64> = svd
             .singular_values
@@ -79,7 +79,7 @@ impl SVDSolver {
         x_centered: &Array2<f64>,
         n_components: usize,
         seed: u64,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+    ) -> Result<(Array2<f64>, Array1<f64>), Error> {
         let n_samples = x_centered.nrows();
         let n_features = x_centered.ncols();
         let max_rank = n_samples.min(n_features);
@@ -94,9 +94,9 @@ impl SVDSolver {
         }
 
         // Build a random projection matrix and sketch X.
-        let x_slice = x_centered.as_slice().ok_or_else(|| {
-            ModelError::ProcessingError("Failed to convert centered data to slice".to_string())
-        })?;
+        let x_slice = x_centered
+            .as_slice()
+            .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
         let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
         let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
         let mut y_mat = &x_mat * &omega_mat;
@@ -114,9 +114,9 @@ impl SVDSolver {
         let b = q.transpose() * x_mat;
 
         let svd = nalgebra::linalg::SVD::new(b, false, true);
-        let v_t = svd.v_t.ok_or_else(|| {
-            ModelError::ProcessingError("Randomized SVD did not compute V^T matrix".to_string())
-        })?;
+        let v_t = svd
+            .v_t
+            .ok_or_else(|| Error::computation("Randomized SVD did not compute V^T matrix"))?;
 
         let singular_values: Vec<f64> = svd
             .singular_values
@@ -135,7 +135,7 @@ impl SVDSolver {
     fn power_iteration_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
-    ) -> Result<(Array2<f64>, Array1<f64>), ModelError> {
+    ) -> Result<(Array2<f64>, Array1<f64>), Error> {
         let n_samples = x_centered.nrows();
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
@@ -243,15 +243,16 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new PCA instance or validation error
+    /// - `Result<Self, Error>` - A new PCA instance or validation error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `n_components` is 0
-    pub fn new(n_components: usize, svd_solver: SVDSolver) -> Result<Self, ModelError> {
+    /// - `Error::InvalidParameter` - If `n_components` is 0
+    pub fn new(n_components: usize, svd_solver: SVDSolver) -> Result<Self, Error> {
         if n_components == 0 {
-            return Err(ModelError::InputValidationError(
-                "n_components must be greater than 0".to_string(),
+            return Err(Error::invalid_parameter(
+                "n_components",
+                "must be greater than 0",
             ));
         }
 
@@ -298,17 +299,17 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, ModelError>` - Mutable reference to self for chaining
+    /// - `Result<&mut Self, Error>` - Mutable reference to self for chaining
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `ModelError::ProcessingError` - If the decomposition fails or numerical issues occur
+    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `Error::Computation` - If the decomposition fails or numerical issues occur
     ///
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
-    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -325,18 +326,18 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `ModelError::ProcessingError` - If projection fails
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::DimensionMismatch` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `Error::Computation` - If projection fails
     ///
     /// # Performance
     ///
     /// Uses parallel projection when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
-    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -353,17 +354,17 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Transformed feature matrix
+    /// - `Result<Array2<f64>, Error>` - Transformed feature matrix
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `ModelError::ProcessingError` - If the decomposition or projection fails
+    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `Error::Computation` - If the decomposition or projection fails
     ///
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
-    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -401,31 +402,30 @@ impl PCA {
     ///
     /// # Returns
     ///
-    /// - `Result<Array2<f64>, ModelError>` - Reconstructed data in original feature space
+    /// - `Result<Array2<f64>, Error>` - Reconstructed data in original feature space
     ///
     /// # Errors
     ///
-    /// - `ModelError::NotFitted` - If the model has not been fitted
-    /// - `ModelError::InputValidationError` - If the input is empty, has non-finite values, or has incompatible dimensions
-    /// - `ModelError::ProcessingError` - If reconstruction fails
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::DimensionMismatch` - If the input is empty, has non-finite values, or has incompatible dimensions
+    /// - `Error::Computation` - If reconstruction fails
     ///
     /// # Performance
     ///
     /// Uses parallel reconstruction when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
-    pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
-        let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
+        let components = self
+            .components
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("PCA"))?;
+        let mean = self.mean.as_ref().ok_or_else(|| Error::not_fitted("PCA"))?;
 
         super::validation::check_non_empty(x)?;
         if x.ncols() != components.nrows() {
-            return Err(ModelError::InputValidationError(format!(
-                "Number of components does not match training data, x columns: {}, expected: {}",
-                x.ncols(),
-                components.nrows()
-            )));
+            return Err(Error::dimension_mismatch(components.nrows(), x.ncols()));
         }
         super::validation::check_finite(x)?;
 
@@ -465,7 +465,7 @@ impl PCA {
     }
 
     /// Fits the model and updates internal state without exposing progress logic
-    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, ModelError>
+    fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -478,10 +478,13 @@ impl PCA {
         // Enforce component count against data rank limits
         let max_components = n_samples.min(n_features);
         if self.n_components > max_components {
-            return Err(ModelError::InputValidationError(format!(
-                "n_components should be <= {}, got {}",
-                max_components, self.n_components
-            )));
+            return Err(Error::invalid_parameter(
+                "n_components",
+                format!(
+                    "should be <= {}, got {}",
+                    max_components, self.n_components
+                ),
+            ));
         }
 
         #[cfg(feature = "show_progress")]
@@ -556,12 +559,15 @@ impl PCA {
     }
 
     /// Transforms input data using the fitted model state
-    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, ModelError>
+    fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        let components = self.components.as_ref().ok_or(ModelError::NotFitted)?;
-        let mean = self.mean.as_ref().ok_or(ModelError::NotFitted)?;
+        let components = self
+            .components
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("PCA"))?;
+        let mean = self.mean.as_ref().ok_or_else(|| Error::not_fitted("PCA"))?;
 
         super::validation::validate_transform_matrix(x, components.ncols())?;
 
@@ -632,11 +638,11 @@ impl PCA {
     }
 
     /// Computes total variance of centered data
-    fn total_variance(x_centered: &Array2<f64>, n_samples: usize) -> Result<f64, ModelError> {
+    fn total_variance(x_centered: &Array2<f64>, n_samples: usize) -> Result<f64, Error> {
         let denom = (n_samples - 1) as f64;
         if denom <= 0.0 {
-            return Err(ModelError::ProcessingError(
-                "Variance computation requires at least 2 samples".to_string(),
+            return Err(Error::computation(
+                "Variance computation requires at least 2 samples",
             ));
         }
 

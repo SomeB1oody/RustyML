@@ -316,23 +316,21 @@ macro_rules! model_save_and_load_methods {
         /// # Returns
         ///
         /// - `Ok(())` - Model successfully saved to file
-        /// - `Err(IoError::StdIoError)` - File creation or write operation failed
-        /// - `Err(IoError::JsonError)` - Serialization to JSON failed
-        pub fn save_to_path(&self, path: &str) -> Result<(), crate::error::IoError> {
-            use crate::error::IoError;
+        /// - `Err(Error::Io)` - File creation/write failed, or serialization to JSON failed
+        pub fn save_to_path(&self, path: &str) -> Result<(), crate::error::Error> {
             use serde_json::to_writer_pretty;
             use std::fs::File;
             use std::io::{BufWriter, Write};
 
             // Create or overwrite the file
-            let file = File::create(path).map_err(IoError::StdIoError)?;
+            let file = File::create(path)?;
             let mut writer = BufWriter::new(file);
 
             // Serialize the model to JSON and write to file
-            to_writer_pretty(&mut writer, self).map_err(IoError::JsonError)?;
+            to_writer_pretty(&mut writer, self)?;
 
             // Ensure all data is written to disk
-            writer.flush().map_err(IoError::StdIoError)?;
+            writer.flush()?;
 
             Ok(())
         }
@@ -349,42 +347,30 @@ macro_rules! model_save_and_load_methods {
         /// # Returns
         ///
         /// - `Ok(Self)` - Successfully loaded model instance
-        /// - `Err(IoError::StdIoError)` - File not found or read operation failed
-        /// - `Err(IoError::JsonError)` - Deserialization from JSON failed (invalid format or corrupted data)
-        pub fn load_from_path(path: &str) -> Result<Self, crate::error::IoError> {
-            use crate::error::IoError;
+        /// - `Err(Error::Io)` - File not found/read failed, or deserialization from JSON failed
+        ///   (invalid format or corrupted data)
+        pub fn load_from_path(path: &str) -> Result<Self, crate::error::Error> {
             use serde_json::from_reader;
 
             // Open and buffer the file for reading
-            let reader = IoError::load_in_buf_reader(path)?;
+            let reader = crate::error::IoError::load_in_buf_reader(path)?;
 
             // Deserialize the model from JSON
-            let model: $model_type = from_reader(reader).map_err(IoError::JsonError)?;
+            let model: $model_type = from_reader(reader)?;
 
             Ok(model)
         }
     };
 }
 
-/// Error handling module containing custom error types for machine learning operations.
+/// Error handling module containing the crate's unified error type and its result alias.
 ///
-/// This module defines comprehensive error types that can occur throughout the machine learning
-/// library, providing structured error handling for various failure modes including model state
-/// validation, input data validation, processing errors, and I/O operations.
-///
-/// # Error Types
-///
-/// ## ModelError
-/// Primary error type for machine learning model operations:
-/// - **NotFitted**: Model hasn't been trained/fitted before prediction or transformation
-/// - **InputValidationError**: Invalid input data format, dimensions, or values (NaN/infinite)
-/// - **TreeError**: Decision tree structure or operation errors
-/// - **ProcessingError**: General computation or algorithm execution errors
-///
-/// ## IoError
-/// Error type for file operations and serialization:
-/// - **StdIoError**: Standard I/O errors during file system operations
-/// - **JsonError**: JSON serialization/deserialization failures
+/// Every fallible operation returns [`error::RustymlResult<T>`](crate::error::RustymlResult) (an alias for `Result<T, error::Error>`).
+/// [`error::Error`] is structured into category variants and groups domain-specific failures into
+/// the nested [`error::NnError`], [`error::TreeError`], and [`error::IoError`] sub-enums. Prefer the
+/// smart constructors (`Error::dimension_mismatch`, `Error::invalid_parameter`, …) and
+/// [`error::Context::context`] for wrapping foreign errors. See the module docs for the full
+/// category breakdown and conventions.
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",

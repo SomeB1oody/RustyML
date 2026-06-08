@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::convolution_layer::conv_3d::Conv3D;
 use crate::neural_network::neural_network_trait::ApplyWeights;
 use ndarray::{Array2, Array5};
@@ -17,7 +17,7 @@ pub struct SerializableConv3DWeight {
 }
 
 impl ApplyWeights<Conv3D> for SerializableConv3DWeight {
-    fn apply_to_layer(&self, layer: &mut Conv3D) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut Conv3D) -> Result<(), Error> {
         layer.set_weights(self.weight.clone(), self.bias.clone())?;
         Ok(())
     }

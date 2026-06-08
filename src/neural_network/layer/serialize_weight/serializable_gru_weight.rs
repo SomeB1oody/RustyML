@@ -1,4 +1,4 @@
-use crate::error::IoError;
+use crate::error::Error;
 use crate::neural_network::layer::recurrent_layer::gru::GRU;
 use crate::neural_network::layer::serialize_weight::SerializableGateWeight;
 use crate::neural_network::neural_network_trait::ApplyWeights;
@@ -19,7 +19,7 @@ pub struct SerializableGRUWeight {
 }
 
 impl ApplyWeights<GRU> for SerializableGRUWeight {
-    fn apply_to_layer(&self, layer: &mut GRU) -> Result<(), IoError> {
+    fn apply_to_layer(&self, layer: &mut GRU) -> Result<(), Error> {
         layer.set_weights(
             self.reset.kernel.clone(),
             self.reset.recurrent_kernel.clone(),

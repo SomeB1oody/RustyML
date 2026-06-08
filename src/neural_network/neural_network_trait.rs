@@ -1,4 +1,4 @@
-use crate::error::{IoError, ModelError};
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
@@ -34,7 +34,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// # Returns
     ///
     /// - `Tensor` - The output tensor after forward computation
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError>;
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error>;
 
     /// Runs the forward pass in inference (eval) mode, taking `&self`.
     ///
@@ -51,7 +51,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// # Returns
     ///
     /// - `Tensor` - The output tensor, identical to what `forward` produces in inference mode
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError>;
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error>;
 
     /// Performs backward propagation through the layer.
     ///
@@ -62,8 +62,8 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// # Returns
     ///
     /// - `Ok(Tensor)` - The gradient tensor to be passed to the previous layer
-    /// - `Err(ModelError)` - If the layer encountered an error during processing
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError>;
+    /// - `Err(Error)` - If the layer encountered an error during processing
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error>;
 
     /// Returns the type name of the layer (e.g. "Dense").
     ///
@@ -170,9 +170,9 @@ pub trait LossFunction {
     /// # Returns
     ///
     /// - `Ok(f32)` - The scalar loss value
-    /// - `Err(ModelError)` - If the inputs are inconsistent (e.g. mismatched shapes or, for the
+    /// - `Err(Error)` - If the inputs are inconsistent (e.g. mismatched shapes or, for the
     ///   sparse loss, out-of-range labels)
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError>;
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error>;
 
     /// Computes the gradient of the loss with respect to the predictions.
     ///
@@ -184,8 +184,8 @@ pub trait LossFunction {
     /// # Returns
     ///
     /// - `Ok(Tensor)` - Tensor containing the gradient of the loss with respect to predictions
-    /// - `Err(ModelError)` - If the inputs are inconsistent (see [`compute_loss`](LossFunction::compute_loss))
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError>;
+    /// - `Err(Error)` - If the inputs are inconsistent (see [`compute_loss`](LossFunction::compute_loss))
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error>;
 }
 
 /// Defines the interface for optimization algorithms.
@@ -229,8 +229,8 @@ pub trait ApplyWeights<L> {
     /// # Returns
     ///
     /// - `Ok(())` - Weights were successfully applied
-    /// - `Err(IoError)` - Weight shape mismatch or conversion error
-    fn apply_to_layer(&self, layer: &mut L) -> Result<(), IoError>;
+    /// - `Err(Error)` - Weight shape mismatch or conversion error
+    fn apply_to_layer(&self, layer: &mut L) -> Result<(), Error>;
 }
 
 /// A marker trait for activation layers in neural networks.

@@ -1,4 +1,4 @@
-use crate::error::ModelError;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::activation_layer::Activation;
@@ -129,14 +129,14 @@ impl DepthwiseConv2D {
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new `DepthwiseConv2D` instance with Xavier-initialized weights or an error
+    /// - `Result<Self, Error>` - A new `DepthwiseConv2D` instance with Xavier-initialized weights or an error
     ///
     /// # Errors
     ///
-    /// - `ModelError::InputValidationError` - If `filters` is 0
-    /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
-    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D or smaller than the kernel
-    /// - `ModelError::InputValidationError` - If `filters` does not equal the input channels
+    /// - `Error::InvalidParameter` - If `filters` is 0
+    /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D or smaller than the kernel
+    /// - `Error::InvalidParameter` - If `filters` does not equal the input channels
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
@@ -144,7 +144,7 @@ impl DepthwiseConv2D {
         strides: (usize, usize),
         padding: PaddingType,
         activation: impl Into<Activation>,
-    ) -> Result<Self, ModelError> {
+    ) -> Result<Self, Error> {
         // Input validation
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
@@ -156,9 +156,10 @@ impl DepthwiseConv2D {
         // shape mismatch at the first `forward` into an explicit construction-time error.
         let channels = input_shape[1];
         if channels != filters {
-            return Err(ModelError::InputValidationError(format!(
-                "For depthwise convolution the number of filters ({filters}) must equal the input channels ({channels})"
-            )));
+            return Err(Error::invalid_parameter(
+                "filters",
+                "must equal the number of input channels",
+            ));
         }
 
         let (kernel_height, kernel_width) = kernel_size;
@@ -220,7 +221,7 @@ impl DepthwiseConv2D {
         &mut self,
         weights: Array4<f32>,
         bias: Array1<f32>,
-    ) -> Result<(), ModelError> {
+    ) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -360,12 +361,10 @@ impl DepthwiseConv2D {
 }
 
 impl Layer for DepthwiseConv2D {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         self.input = Some(input.clone());
@@ -466,12 +465,10 @@ impl Layer for DepthwiseConv2D {
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
-    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {
-            return Err(ModelError::InputValidationError(
-                "input tensor is not 4D".to_string(),
-            ));
+            return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
         let input_shape = input.shape().to_vec();
@@ -569,16 +566,18 @@ impl Layer for DepthwiseConv2D {
         Ok(activated)
     }
 
-    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // Apply activation backward pass
-        let activated = self.output_cache.take().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let activated = self
+            .output_cache
+            .take()
+            .ok_or_else(|| Error::forward_pass_not_run("DepthwiseConv2D"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
-        let input = self.input.as_ref().ok_or_else(|| {
-            ModelError::ProcessingError("Forward pass has not been run".to_string())
-        })?;
+        let input = self
+            .input
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("DepthwiseConv2D"))?;
 
         let input_array = input.view();
 

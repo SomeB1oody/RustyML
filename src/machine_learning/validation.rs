@@ -1,5 +1,5 @@
 use super::RegularizationType;
-use crate::error::ModelError;
+use crate::error::Error;
 use ndarray::{ArrayBase, Data, Ix1, Ix2};
 
 /// Performs validation checks on the input data matrices.
@@ -18,29 +18,29 @@ use ndarray::{ArrayBase, Data, Ix1, Ix2};
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if all validation checks pass, otherwise a `ModelError`
+/// - `result` - `Ok(())` if all validation checks pass, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the input data is empty, contains non-finite values, or if dimensions of `x` and `y` mismatch
+/// - [`Error::EmptyInput`] - If the input data or target vector is empty
+/// - [`Error::NonFinite`] - If the input data contains NaN or infinite values
+/// - [`Error::DimensionMismatch`] - If the dimensions of `x` and `y` mismatch
 pub(super) fn preliminary_check<S>(
     x: &ArrayBase<S, Ix2>,
     y: Option<&ArrayBase<S, Ix1>>,
-) -> Result<(), ModelError>
+) -> Result<(), Error>
 where
     S: Data<Elem = f64>,
 {
     if x.nrows() == 0 {
-        return Err(ModelError::InputValidationError(
-            "Input data is empty".to_string(),
-        ));
+        return Err(Error::empty_input("input data"));
     }
 
     for (i, row) in x.outer_iter().enumerate() {
         for (j, &val) in row.iter().enumerate() {
             if val.is_nan() || val.is_infinite() {
-                return Err(ModelError::InputValidationError(format!(
-                    "Input data contains NaN or infinite value at position [{}][{}]",
+                return Err(Error::non_finite(format!(
+                    "input data at position [{}][{}]",
                     i, j
                 )));
             }
@@ -49,17 +49,11 @@ where
 
     if let Some(y) = y {
         if y.is_empty() {
-            return Err(ModelError::InputValidationError(
-                "Target vector is empty".to_string(),
-            ));
+            return Err(Error::empty_input("target vector"));
         }
 
         if y.len() != x.nrows() {
-            return Err(ModelError::InputValidationError(format!(
-                "Input data and target vector have different lengths, x rows: {}, y length: {}",
-                x.nrows(),
-                y.len()
-            )));
+            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
         }
     }
     Ok(())
@@ -76,17 +70,17 @@ where
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the learning rate is valid, otherwise a `ModelError`
+/// - `result` - `Ok(())` if the learning rate is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the learning rate is non-positive, NaN, or infinite
-pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelError> {
+/// - [`Error::InvalidParameter`] - If the learning rate is non-positive, NaN, or infinite
+pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), Error> {
     if learning_rate <= 0.0 || !learning_rate.is_finite() {
-        return Err(ModelError::InputValidationError(format!(
-            "learning_rate must be positive and finite, got {}",
-            learning_rate
-        )));
+        return Err(Error::invalid_parameter(
+            "learning_rate",
+            format!("must be positive and finite, got {}", learning_rate),
+        ));
     }
 
     Ok(())
@@ -103,15 +97,16 @@ pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), ModelErro
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the maximum iterations value is valid, otherwise a `ModelError`
+/// - `result` - `Ok(())` if the maximum iterations value is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the maximum iterations value is 0
-pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), ModelError> {
+/// - [`Error::InvalidParameter`] - If the maximum iterations value is 0
+pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error> {
     if max_iterations == 0 {
-        return Err(ModelError::InputValidationError(
-            "max_iterations must be greater than 0".to_string(),
+        return Err(Error::invalid_parameter(
+            "max_iterations",
+            "must be greater than 0",
         ));
     }
 
@@ -130,17 +125,17 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Model
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the tolerance is valid, otherwise a `ModelError`
+/// - `result` - `Ok(())` if the tolerance is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the tolerance is non-positive, NaN, or infinite
-pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
+/// - [`Error::InvalidParameter`] - If the tolerance is non-positive, NaN, or infinite
+pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), Error> {
     if tolerance <= 0.0 || !tolerance.is_finite() {
-        return Err(ModelError::InputValidationError(format!(
-            "tolerance must be positive and finite, got {}",
-            tolerance
-        )));
+        return Err(Error::invalid_parameter(
+            "tolerance",
+            format!("must be positive and finite, got {}", tolerance),
+        ));
     }
 
     Ok(())
@@ -159,22 +154,22 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), ModelError> {
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the regularization configuration is valid, otherwise a `ModelError`
+/// - `result` - `Ok(())` if the regularization configuration is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If the regularization alpha is negative, NaN, or infinite
+/// - [`Error::InvalidParameter`] - If the regularization alpha is negative, NaN, or infinite
 pub(super) fn validate_regularization_type(
     reg_type: Option<RegularizationType>,
-) -> Result<(), ModelError> {
+) -> Result<(), Error> {
     if let Some(reg) = &reg_type {
         match reg {
             RegularizationType::L1(alpha) | RegularizationType::L2(alpha) => {
                 if *alpha < 0.0 || !alpha.is_finite() {
-                    return Err(ModelError::InputValidationError(format!(
-                        "Regularization alpha must be non-negative and finite, got {}",
-                        alpha
-                    )));
+                    return Err(Error::invalid_parameter(
+                        "alpha",
+                        format!("must be non-negative and finite, got {}", alpha),
+                    ));
                 }
             }
         }
@@ -183,7 +178,7 @@ pub(super) fn validate_regularization_type(
     Ok(())
 }
 
-/// Returns [`ModelError::NotFitted`] when a model has not been fitted yet.
+/// Returns [`Error::NotFitted`] when a model has not been fitted yet.
 ///
 /// Centralizes the "is this model fitted?" guard so every estimator emits the
 /// same error instead of hand-rolling the check at each call site.
@@ -191,20 +186,21 @@ pub(super) fn validate_regularization_type(
 /// # Parameters
 ///
 /// - `is_fitted` - Whether the model has already been trained (e.g. `self.weights.is_some()`)
+/// - `model` - The model's name, used to build the [`Error::NotFitted`] payload
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the model is fitted, otherwise `ModelError::NotFitted`
+/// - `result` - `Ok(())` if the model is fitted, otherwise [`Error::NotFitted`]
 ///
 /// # Errors
 ///
-/// - `ModelError::NotFitted` - If `is_fitted` is `false`
+/// - [`Error::NotFitted`] - If `is_fitted` is `false`
 #[inline]
-pub(super) fn check_is_fitted(is_fitted: bool) -> Result<(), ModelError> {
+pub(super) fn check_is_fitted(is_fitted: bool, model: &'static str) -> crate::error::RustymlResult<()> {
     if is_fitted {
         Ok(())
     } else {
-        Err(ModelError::NotFitted)
+        Err(Error::not_fitted(model))
     }
 }
 
@@ -223,37 +219,30 @@ pub(super) fn check_is_fitted(is_fitted: bool) -> Result<(), ModelError> {
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if all checks pass, otherwise a `ModelError`
+/// - `result` - `Ok(())` if all checks pass, otherwise an `Error`
 ///
 /// # Errors
 ///
-/// - `ModelError::InputValidationError` - If `x` is empty, has a mismatched feature
-///   count, or contains non-finite values
+/// - [`Error::EmptyInput`] - If `x` is empty
+/// - [`Error::DimensionMismatch`] - If `x` has a mismatched feature count
+/// - [`Error::NonFinite`] - If `x` contains non-finite values
 pub(super) fn validate_predict_input<S>(
     x: &ArrayBase<S, Ix2>,
     expected_features: usize,
-) -> Result<(), ModelError>
+) -> Result<(), Error>
 where
     S: Data<Elem = f64>,
 {
     if x.is_empty() {
-        return Err(ModelError::InputValidationError(
-            "Cannot predict on empty dataset".to_string(),
-        ));
+        return Err(Error::empty_input("dataset to predict on"));
     }
 
     if x.ncols() != expected_features {
-        return Err(ModelError::InputValidationError(format!(
-            "Number of features does not match training data, expected: {}, got: {}",
-            expected_features,
-            x.ncols()
-        )));
+        return Err(Error::dimension_mismatch(expected_features, x.ncols()));
     }
 
     if x.iter().any(|&val| !val.is_finite()) {
-        return Err(ModelError::InputValidationError(
-            "Input data contains NaN or infinite values".to_string(),
-        ));
+        return Err(Error::non_finite("input data"));
     }
 
     Ok(())
