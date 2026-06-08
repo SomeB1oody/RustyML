@@ -74,7 +74,7 @@ Complete neural network framework with flexible architecture design:
 - **Activation layers**:
   - ReLU, Tanh, Sigmoid, Softmax
 
-### Utility (`features = ["utility"]`)
+### Utility (`features = ["utils"]`)
 Data preprocessing and dimensionality reduction utilities:
 
 - **Dimensionality Reduction**:
@@ -90,7 +90,7 @@ Data preprocessing and dimensionality reduction utilities:
 - **Kernel Functions**:
   - RBF, Linear, Polynomial, Sigmoid
 
-### Metric (`features = ["metric"]`)
+### Metric (`features = ["metrics"]`)
 Comprehensive evaluation metrics for model performance assessment:
 
 - **Regression Metrics**:
@@ -201,9 +201,9 @@ In your Rust code, write:
 ``` rust
 use rustyml::neural_network::{
     sequential::Sequential,
-    layer::{Activation, Dense},
-    optimizer::Adam,
-    loss_function::CategoricalCrossEntropy,
+    layers::{Activation, Dense},
+    optimizers::Adam,
+    losses::CategoricalCrossEntropy,
 }; 
 use ndarray::Array;  
   
@@ -252,8 +252,8 @@ The crate uses feature flags for modular compilation:
 |--------------------|-------------------------------------------------|
 | `machine_learning` | Classical ML algorithms (depends on `math`)     |  
 | `neural_network`   | Neural network framework                        |  
-| `utility`          | Data preprocessing and dimensionality reduction |  
-| `metric`           | Evaluation metrics                              |  
+| `utils`            | Data preprocessing and dimensionality reduction |  
+| `metrics`          | Evaluation metrics                              |  
 | `math`             | Mathematical utilities                          |  
 | `default`          | Enables `machine_learning` and `neural_network` |
 | `full`             | Enables all features                            |

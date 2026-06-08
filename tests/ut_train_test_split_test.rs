@@ -1,8 +1,8 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use ndarray::prelude::*;
 use rustyml::error::Error;
-use rustyml::utility::train_test_split::*;
+use rustyml::utils::train_test_split::*;
 
 #[test]
 fn test_train_test_split_valid_input() {

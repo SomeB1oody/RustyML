@@ -2,8 +2,8 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array4, IxDyn};
-use rustyml::neural_network::layer::regularization_layer::dropout_layer::spatial_dropout_2d::SpatialDropout2D;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_2d::SpatialDropout2D;
+use rustyml::neural_network::traits::Layer;
 
 #[test]
 fn test_spatial_dropout_2d_forward_pass_dimensions() {

@@ -1,8 +1,8 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::Array2;
-use rustyml::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_noise::GaussianNoise;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
+use rustyml::neural_network::traits::Layer;
 
 #[test]
 fn test_gaussian_noise_new() {

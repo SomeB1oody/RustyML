@@ -1,13 +1,13 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::{s, Array, Array3};
-use rustyml::neural_network::layer::layer_weight::LayerWeight;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::group_normalization::GroupNormalization;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::instance_normalization::InstanceNormalization;
-use rustyml::neural_network::layer::serialize_weight::SerializableLayerWeight;
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
-use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
+use rustyml::neural_network::layers::layer_weight::LayerWeight;
+use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
+use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
+use rustyml::neural_network::layers::serialize_weight::SerializableLayerWeight;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::traits::{Layer, Optimizer};
+use rustyml::neural_network::optimizers::{AdaGrad, Adam, RMSprop, SGD};
 
 #[test]
 fn test_group_normalization_forward_pass_dimensions() {

@@ -2,16 +2,16 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::neural_network::layer::activation_layer::linear::Linear;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::layer_weight::LayerWeight;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::batch_normalization::BatchNormalization;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::layer_normalization::{LayerNormalization, LayerNormalizationAxis};
-use rustyml::neural_network::layer::serialize_weight::SerializableLayerWeight;
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
-use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
+use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::layer_weight::LayerWeight;
+use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
+use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{LayerNormalization, LayerNormalizationAxis};
+use rustyml::neural_network::layers::serialize_weight::SerializableLayerWeight;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::{Layer, Optimizer};
+use rustyml::neural_network::optimizers::{AdaGrad, Adam, RMSprop, SGD};
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

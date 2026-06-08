@@ -2,9 +2,9 @@
 
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
-use rustyml::neural_network::layer::pooling_layer::global_average_pooling_2d::GlobalAveragePooling2D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::pooling::global_average_pooling_2d::GlobalAveragePooling2D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

@@ -1,19 +1,19 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::{Array2, Array3, Array4, Array5};
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::activation_layer::sigmoid::Sigmoid;
-use rustyml::neural_network::layer::activation_layer::softmax::Softmax;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_2d::Conv2D;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::flatten::Flatten;
-use rustyml::neural_network::layer::pooling_layer::max_pooling_2d::MaxPooling2D;
-use rustyml::neural_network::loss_function::categorical_cross_entropy::CategoricalCrossEntropy;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::adam::Adam;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+use rustyml::neural_network::layers::activation::softmax::Softmax;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::flatten::Flatten;
+use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
+use rustyml::neural_network::losses::categorical_cross_entropy::CategoricalCrossEntropy;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::adam::Adam;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

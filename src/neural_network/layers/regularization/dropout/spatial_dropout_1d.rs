@@ -1,0 +1,183 @@
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
+use crate::error::Error;
+use crate::neural_network::Tensor;
+use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::regularization::dropout::{
+    apply_spatial_dropout_threshold, dropout_backward, dropout_output_shape,
+};
+use crate::neural_network::layers::regularization::validation::{
+    validate_input_ndim, validate_input_shape, validate_rate,
+};
+use crate::neural_network::traits::Layer;
+use ndarray::IxDyn;
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
+
+/// Threshold for using parallel computation in SpatialDropout1D layer.
+/// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.
+const SPATIAL_DROPOUT_1D_PARALLEL_THRESHOLD: usize = 64;
+
+/// Spatial Dropout layer for 1D data.
+///
+/// Drops entire channels instead of individual elements, which is effective for
+/// convolutional layers where adjacent positions are correlated. Input shape is
+/// `(batch_size, channels, length)`.
+///
+/// # Fields
+///
+/// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
+/// - `input_shape` - Expected shape of the input tensor
+/// - `mask` - Binary mask used during training to determine which channels to drop
+/// - `training` - Whether the layer is in training mode or inference mode
+///
+/// # Examples
+/// ```rust
+/// use rustyml::neural_network::layers::*;
+/// use rustyml::neural_network::traits::Layer;
+/// use ndarray::Array3;
+///
+/// // Create a SpatialDropout1D layer with 20% dropout rate
+/// let mut spatial_dropout = SpatialDropout1D::new(0.2, vec![32, 64, 128]).unwrap();
+///
+/// // Create input tensor (batch_size=32, channels=64, length=128)
+/// let input = Array3::ones((32, 64, 128)).into_dyn();
+///
+/// // During training, approximately 20% of channels will be set to 0
+/// let output = spatial_dropout.forward(&input).unwrap();
+/// ```
+pub struct SpatialDropout1D {
+    rate: f32,
+    input_shape: Vec<usize>,
+    mask: Option<Tensor>,
+    training: bool,
+}
+
+impl SpatialDropout1D {
+    /// Creates a new SpatialDropout1D layer.
+    ///
+    /// # Parameters
+    ///
+    /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
+    /// - `input_shape` - Shape of the input tensor `(batch_size, channels, length)`
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - New SpatialDropout1D layer instance or a validation error
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+        validate_rate(rate, "Dropout rate")?;
+
+        Ok(SpatialDropout1D {
+            rate,
+            input_shape,
+            mask: None,
+            training: true,
+        })
+    }
+
+    mode_dependent_layer_set_training!();
+}
+
+impl Layer for SpatialDropout1D {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_input_ndim(
+            input.ndim(),
+            3,
+            "SpatialDropout1D (batch_size, channels, length)",
+        )?;
+
+        if !self.training {
+            // During inference, pass input through unchanged
+            return Ok(input.clone());
+        }
+
+        if self.rate == 0.0 {
+            return Ok(input.clone());
+        }
+
+        if self.rate == 1.0 {
+            // If dropout rate is 1.0, return zeros
+            return Ok(Tensor::zeros(input.raw_dim()));
+        }
+
+        let shape = input.shape();
+        let batch_size = shape[0];
+        let channels = shape[1];
+        let length = shape[2];
+
+        // Generate mask for channels: shape (batch_size, channels)
+        // Each channel is either fully kept or fully dropped
+        let mut mask_2d = Tensor::random(
+            IxDyn(&[batch_size, channels]),
+            Uniform::new(0.0, 1.0).unwrap(),
+        );
+
+        // Apply threshold to create binary mask with parallel or sequential computation
+        apply_spatial_dropout_threshold(
+            &mut mask_2d,
+            self.rate,
+            SPATIAL_DROPOUT_1D_PARALLEL_THRESHOLD,
+        );
+
+        // Expand mask to match input shape (batch_size, channels, length)
+        // by broadcasting the mask across the spatial dimension
+        let mut mask = Tensor::zeros(IxDyn(&[batch_size, channels, length]));
+
+        // Broadcast the 2D mask to 3D mask efficiently
+        for b in 0..batch_size {
+            for c in 0..channels {
+                let mask_value = mask_2d[[b, c]];
+                for l in 0..length {
+                    mask[[b, c, l]] = mask_value;
+                }
+            }
+        }
+
+        // Apply mask and scale by (1 - rate) to maintain expected value
+        // This is "inverted dropout" technique
+        let scale = 1.0 / (1.0 - self.rate);
+        let output = input * &mask * scale;
+
+        // Store mask for backpropagation
+        self.mask = Some(mask);
+
+        Ok(output)
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_input_ndim(
+            input.ndim(),
+            3,
+            "SpatialDropout1D (batch_size, channels, length)",
+        )?;
+
+        // During inference, pass input through unchanged
+        Ok(input.clone())
+    }
+
+    fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+        dropout_backward(grad_output, &self.mask, self.training, self.rate)
+    }
+
+    fn layer_type(&self) -> &str {
+        "SpatialDropout1D"
+    }
+
+    fn output_shape(&self) -> String {
+        dropout_output_shape(&self.input_shape)
+    }
+
+    no_trainable_parameters_layer_functions!();
+
+    mode_dependent_layer_trait!();
+}

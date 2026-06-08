@@ -1,9 +1,9 @@
-use super::neural_network_trait::{Layer, LossFunction, Optimizer};
+use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Error, IoError, NnError, Context};
 use crate::neural_network::Tensor;
-use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::layer_weight::LayerWeight;
-use crate::neural_network::layer::serialize_weight::{
+use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::serialize_weight::{
     LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
     apply_weights_to_layer,
 };
@@ -31,9 +31,9 @@ use std::io::{BufWriter, Write};
 /// ```rust
 /// use rustyml::neural_network::{
 ///     sequential::Sequential,
-///     layer::{Activation, Dense},
-///     optimizer::Adam,
-///     loss_function::CategoricalCrossEntropy,
+///     layers::{Activation, Dense},
+///     optimizers::Adam,
+///     losses::CategoricalCrossEntropy,
 /// };
 /// use ndarray::Array;
 ///
@@ -81,7 +81,7 @@ use std::io::{BufWriter, Write};
 pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
-    loss: Option<Box<dyn LossFunction>>,
+    loss: Option<Box<dyn Loss>>,
 }
 
 impl Default for Sequential {
@@ -133,7 +133,7 @@ impl Sequential {
     pub fn compile<O, LFunc>(&mut self, optimizer: O, loss: LFunc) -> &mut Self
     where
         O: 'static + Optimizer,
-        LFunc: 'static + LossFunction,
+        LFunc: 'static + Loss,
     {
         self.optimizer = Some(Box::new(optimizer));
         self.loss = Some(Box::new(loss));

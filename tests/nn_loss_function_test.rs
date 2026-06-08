@@ -8,12 +8,12 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{ArrayD, IxDyn};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::loss_function::binary_cross_entropy::BinaryCrossEntropy;
-use rustyml::neural_network::loss_function::categorical_cross_entropy::CategoricalCrossEntropy;
-use rustyml::neural_network::loss_function::mean_absolute_error::MeanAbsoluteError;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::loss_function::sparse_categorical_cross_entropy::SparseCategoricalCrossEntropy;
-use rustyml::neural_network::neural_network_trait::LossFunction;
+use rustyml::neural_network::losses::binary_cross_entropy::BinaryCrossEntropy;
+use rustyml::neural_network::losses::categorical_cross_entropy::CategoricalCrossEntropy;
+use rustyml::neural_network::losses::mean_absolute_error::MeanAbsoluteError;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::losses::sparse_categorical_cross_entropy::SparseCategoricalCrossEntropy;
+use rustyml::neural_network::traits::Loss;
 
 const EPS: f32 = 1e-5;
 

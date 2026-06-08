@@ -1,7 +1,7 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use ndarray::prelude::*;
-use rustyml::utility::principal_component_analysis::*;
+use rustyml::utils::pca::*;
 use std::error::Error;
 
 fn make_pca_dataset() -> Array2<f64> {

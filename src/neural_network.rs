@@ -4,12 +4,12 @@ use ndarray::ArrayD;
 pub type Tensor = ArrayD<f32>;
 
 /// Module that contains neural network layer implementations
-pub mod layer;
+pub mod layers;
 /// Module that contains loss function implementations
-pub mod loss_function;
+pub mod losses;
 /// Module containing trait definitions for machine neural network model interfaces
-pub mod neural_network_trait;
+pub mod traits;
 /// Module that contains optimization algorithms for neural network training
-pub mod optimizer;
+pub mod optimizers;
 /// Module that contains implementations for sequential model architecture
 pub mod sequential;

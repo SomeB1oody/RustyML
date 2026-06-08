@@ -18,15 +18,15 @@ machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:nda
 # Complete neural network framework with flexible architecture design
 neural_network = ["dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:serde_json", "dep:thiserror"]
 # Data preprocessing and dimensionality reduction utilities
-utility = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:serde_json", "dep:ndarray-rand", "dep:thiserror"]
+utils = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:serde_json", "dep:ndarray-rand", "dep:thiserror"]
 # Comprehensive evaluation metrics for model performance assessment
-metric = ["math", "dep:ndarray", "dep:ahash"]
+metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
 math = ["dep:ndarray", "dep:ahash"]
 # Enables `machine_learning` and `neural_network`
 default = ["machine_learning", "neural_network"]
 # full access to all modules in the crate
-full = ["machine_learning", "neural_network", "utility", "math", "metric"]
+full = ["machine_learning", "neural_network", "utils", "math", "metrics"]
 
 # Provides support for progress bars in the command line
 show_progress = ["dep:indicatif"]

@@ -2,8 +2,8 @@
 
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
-use rustyml::neural_network::layer::pooling_layer::global_max_pooling_2d::GlobalMaxPooling2D;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::pooling::global_max_pooling_2d::GlobalMaxPooling2D;
+use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

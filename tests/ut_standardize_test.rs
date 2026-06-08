@@ -1,9 +1,9 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 use rustyml::error::Error;
-use rustyml::utility::standardize::*;
+use rustyml::utils::standardize::*;
 
 const EPSILON: f64 = 1e-8;
 

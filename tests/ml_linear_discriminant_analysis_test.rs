@@ -1,7 +1,7 @@
 #![cfg(feature = "machine_learning")]
 
 use ndarray::*;
-use rustyml::machine_learning::linear_discriminant_analysis::*;
+use rustyml::machine_learning::lda::*;
 use rustyml::machine_learning::traits::{Fit, Predict};
 use std::error::Error;
 

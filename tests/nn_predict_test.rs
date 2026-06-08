@@ -9,33 +9,33 @@
 use approx::assert_abs_diff_eq;
 use ndarray::IxDyn;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::activation_layer::Activation;
-use rustyml::neural_network::layer::activation_layer::{relu::ReLU, softmax::Softmax};
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_1d::Conv1D;
-use rustyml::neural_network::layer::convolution_layer::conv_2d::Conv2D;
-use rustyml::neural_network::layer::convolution_layer::conv_3d::Conv3D;
-use rustyml::neural_network::layer::convolution_layer::depthwise_conv_2d::DepthwiseConv2D;
-use rustyml::neural_network::layer::convolution_layer::separable_conv_2d::SeparableConv2D;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::flatten::Flatten;
-use rustyml::neural_network::layer::pooling_layer::average_pooling_1d::AveragePooling1D;
-use rustyml::neural_network::layer::pooling_layer::global_average_pooling_2d::GlobalAveragePooling2D;
-use rustyml::neural_network::layer::pooling_layer::global_max_pooling_2d::GlobalMaxPooling2D;
-use rustyml::neural_network::layer::pooling_layer::max_pooling_2d::MaxPooling2D;
-use rustyml::neural_network::layer::recurrent_layer::gru::GRU;
-use rustyml::neural_network::layer::recurrent_layer::lstm::LSTM;
-use rustyml::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
-use rustyml::neural_network::layer::regularization_layer::dropout_layer::dropout::Dropout;
-use rustyml::neural_network::layer::regularization_layer::dropout_layer::spatial_dropout_2d::SpatialDropout2D;
-use rustyml::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_noise::GaussianNoise;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::batch_normalization::BatchNormalization;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::group_normalization::GroupNormalization;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::instance_normalization::InstanceNormalization;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::layer_normalization::{
+use rustyml::neural_network::layers::activation::Activation;
+use rustyml::neural_network::layers::activation::{relu::ReLU, softmax::Softmax};
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
+use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
+use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
+use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::flatten::Flatten;
+use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
+use rustyml::neural_network::layers::pooling::global_average_pooling_2d::GlobalAveragePooling2D;
+use rustyml::neural_network::layers::pooling::global_max_pooling_2d::GlobalMaxPooling2D;
+use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
+use rustyml::neural_network::layers::recurrent::gru::GRU;
+use rustyml::neural_network::layers::recurrent::lstm::LSTM;
+use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
+use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
+use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_2d::SpatialDropout2D;
+use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
+use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
+use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
+use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
+use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
 };
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::traits::Layer;
 
 /// A deterministic, varying input of the given shape.
 fn ramp(shape: &[usize]) -> Tensor {

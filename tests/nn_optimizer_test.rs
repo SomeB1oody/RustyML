@@ -2,14 +2,14 @@
 
 use ndarray::Array;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::activation_layer::Activation;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Optimizer;
-use rustyml::neural_network::optimizer::kernels::{
+use rustyml::neural_network::layers::activation::Activation;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Optimizer;
+use rustyml::neural_network::optimizers::kernels::{
     adagrad_step, adam_step, rmsprop_step, sgd_step,
 };
-use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
+use rustyml::neural_network::optimizers::{AdaGrad, Adam, RMSprop, SGD};
 use rustyml::neural_network::sequential::Sequential;
 
 // ---------------------------------------------------------------------------

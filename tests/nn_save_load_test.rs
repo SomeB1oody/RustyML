@@ -9,14 +9,14 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array4};
 use rustyml::error::{Error, IoError};
-use rustyml::neural_network::layer::activation_layer::linear::Linear;
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_2d::Conv2D;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::batch_normalization::BatchNormalization;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 /// Builds a unique temp file path so concurrent tests do not collide.

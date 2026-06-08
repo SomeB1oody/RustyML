@@ -1,17 +1,17 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::Array5;
-use rustyml::neural_network::layer::ReLU;
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::layer::activation_layer::sigmoid::Sigmoid;
-use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_3d::Conv3D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::adam::Adam;
-use rustyml::neural_network::optimizer::rms_prop::RMSprop;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::ReLU;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::adam::Adam;
+use rustyml::neural_network::optimizers::rms_prop::RMSprop;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

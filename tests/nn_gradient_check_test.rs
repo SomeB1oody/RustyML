@@ -10,20 +10,20 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::activation_layer::linear::Linear;
-use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_1d::Conv1D;
-use rustyml::neural_network::layer::convolution_layer::conv_2d::Conv2D;
-use rustyml::neural_network::layer::convolution_layer::conv_3d::Conv3D;
-use rustyml::neural_network::layer::convolution_layer::depthwise_conv_2d::DepthwiseConv2D;
-use rustyml::neural_network::layer::convolution_layer::separable_conv_2d::SeparableConv2D;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::regularization_layer::normalization_layer::batch_normalization::BatchNormalization;
-use rustyml::neural_network::layer::recurrent_layer::gru::GRU;
-use rustyml::neural_network::layer::recurrent_layer::lstm::LSTM;
-use rustyml::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
+use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
+use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
+use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
+use rustyml::neural_network::layers::recurrent::gru::GRU;
+use rustyml::neural_network::layers::recurrent::lstm::LSTM;
+use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
+use rustyml::neural_network::traits::Layer;
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of `d sum(output)/dx`.
 fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {

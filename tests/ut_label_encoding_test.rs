@@ -1,8 +1,8 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use ndarray::prelude::*;
 use rustyml::error::Error;
-use rustyml::utility::label_encoding::*;
+use rustyml::utils::label_encoding::*;
 
 #[test]
 fn test_to_categorical_basic() {

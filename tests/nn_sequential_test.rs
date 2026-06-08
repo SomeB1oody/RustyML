@@ -3,14 +3,14 @@
 use ndarray::Array;
 use ndarray_rand::rand::random;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::activation_layer::linear::Linear;
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::activation_layer::softmax::Softmax;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::loss_function::categorical_cross_entropy::CategoricalCrossEntropy;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::adam::Adam;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::softmax::Softmax;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::losses::categorical_cross_entropy::CategoricalCrossEntropy;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::adam::Adam;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

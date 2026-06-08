@@ -2,8 +2,8 @@
 
 use ndarray::Array;
 use rustyml::error::Error;
-use rustyml::neural_network::layer::regularization_layer::noise_injection_layer::gaussian_dropout::GaussianDropout;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout;
+use rustyml::neural_network::traits::Layer;
 
 #[test]
 fn test_gaussian_dropout_new() {

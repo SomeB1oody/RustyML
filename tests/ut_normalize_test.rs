@@ -1,8 +1,8 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use ndarray::prelude::*;
 use rustyml::error::Error;
-use rustyml::utility::normalize::*;
+use rustyml::utils::normalize::*;
 
 // Helper function for approximate equality checks
 fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {

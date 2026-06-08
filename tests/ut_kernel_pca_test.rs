@@ -1,9 +1,9 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 use approx::assert_abs_diff_eq;
 use ndarray::prelude::*;
 use rustyml::error::Error as RustymlError;
-use rustyml::utility::kernel_pca::*;
+use rustyml::utils::kernel_pca::*;
 use std::error::Error;
 
 fn make_kernel_pca_dataset() -> Array2<f64> {

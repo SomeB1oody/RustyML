@@ -1,4 +1,4 @@
-#![cfg(feature = "utility")]
+#![cfg(feature = "utils")]
 
 mod ut_kernel_pca_test;
 mod ut_normalize_test;

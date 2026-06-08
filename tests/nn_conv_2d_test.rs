@@ -1,13 +1,13 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::Array4;
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::activation_layer::sigmoid::Sigmoid;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::conv_2d::Conv2D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::adam::Adam;
-use rustyml::neural_network::optimizer::rms_prop::RMSprop;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::adam::Adam;
+use rustyml::neural_network::optimizers::rms_prop::RMSprop;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

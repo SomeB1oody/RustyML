@@ -1,14 +1,14 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::{Array4, s};
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::layer::activation_layer::linear::Linear;
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::convolution_layer::PaddingType;
-use rustyml::neural_network::layer::convolution_layer::depthwise_conv_2d::DepthwiseConv2D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::activation::linear::Linear;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::convolution::PaddingType;
+use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

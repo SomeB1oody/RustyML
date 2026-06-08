@@ -3,9 +3,9 @@
 use approx::assert_relative_eq;
 use ndarray::IxDyn;
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::layer::pooling_layer::global_max_pooling_1d::GlobalMaxPooling1D;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::pooling::global_max_pooling_1d::GlobalMaxPooling1D;
+use rustyml::neural_network::traits::Layer;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

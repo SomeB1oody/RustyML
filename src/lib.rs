@@ -29,13 +29,13 @@
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy
 //! - **Models**: Sequential architecture for feed-forward networks
 //!
-//! ### [`utility`]
+//! ### [`utils`]
 //! Data preprocessing and dimensionality reduction utilities:
 //! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
 //! - **Preprocessing**: Standardization, train-test splitting
 //! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid, Cosine
 //!
-//! ### [`metric`]
+//! ### [`metrics`]
 //! Comprehensive evaluation metrics for model performance assessment:
 //! - **Regression**: MSE, RMSE, MAE, R² score
 //! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
@@ -115,9 +115,9 @@
 //! ```rust, no_run
 //! use rustyml::neural_network::{
 //!     sequential::Sequential,
-//!     layer::{Dense, ReLU, Softmax},
-//!     optimizer::Adam,
-//!     loss_function::CategoricalCrossEntropy,
+//!     layers::{Dense, ReLU, Softmax},
+//!     optimizers::Adam,
+//!     losses::CategoricalCrossEntropy,
 //! };
 //! use ndarray::Array;
 //!
@@ -168,8 +168,8 @@
 //! |---------|-------------|
 //! | `machine_learning` | Classical ML algorithms (depends on `math`) |
 //! | `neural_network` | Neural network framework |
-//! | `utility` | Data preprocessing and dimensionality reduction |
-//! | `metric` | Evaluation metrics |
+//! | `utils` | Data preprocessing and dimensionality reduction |
+//! | `metrics` | Evaluation metrics |
 //! | `math` | Mathematical utilities |
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
@@ -177,18 +177,18 @@
 
 #[cfg(any(
     feature = "machine_learning",
-    feature = "utility",
+    feature = "utils",
     feature = "neural_network"
 ))]
 use serde::{Deserialize, Serialize};
 
 /// Shared configuration types (kernels, distance metrics, regularization).
-#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 pub mod types;
 
 /// `KernelType` is re-exported at the crate root for backward compatibility; its
 /// canonical home is the [`types`] module.
-#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 pub use types::KernelType;
 
 #[cfg(feature = "show_progress")]
@@ -253,7 +253,7 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
 ///
 /// The macro generates a method that returns the field value,
 /// with documentation that describes what field is being accessed.
-#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -280,7 +280,7 @@ macro_rules! get_field {
 ///
 /// The macro generates a method that returns the field value as a reference,
 /// with documentation that describes what field is being accessed
-#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -301,7 +301,7 @@ macro_rules! get_field_as_ref {
 /// # Parameters
 ///
 /// * `$model_type` - The type of the model struct (e.g., LinearRegression, LogisticRegression)
-#[cfg(any(feature = "machine_learning", feature = "utility"))]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
         /// Saves the trained model to a JSON file at the specified path.
@@ -374,7 +374,7 @@ macro_rules! model_save_and_load_methods {
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
-    feature = "utility"
+    feature = "utils"
 ))]
 pub mod error;
 
@@ -389,9 +389,9 @@ pub mod error;
 /// A function lives in `math` only if it is **(1)** pure and stateless, **(2)**
 /// model-agnostic (it encodes no single algorithm's policy), and **(3)** is — or
 /// plausibly could be — shared by more than one caller. Per-algorithm solvers live
-/// next to their model; post-hoc evaluation metrics live in [`crate::metric`] and
+/// next to their model; post-hoc evaluation metrics live in [`crate::metrics`] and
 /// call these primitives; trainable, gradient-aware losses live in
-/// `neural_network::loss_function`.
+/// `neural_network::losses`.
 ///
 /// # Core Functions
 ///
@@ -517,14 +517,14 @@ pub mod machine_learning;
 /// # Examples
 /// ```rust
 /// use rustyml::prelude::*;
-/// // `use rustyml::prelude::machine_learning_prelude::*;` imports machine learning models
-/// // `use rustyml::prelude::utility_prelude::*;` imports utility functions
-/// // `use rustyml::prelude::math_prelude::*;` imports math functions
-/// // `use rustyml::prelude::metric_prelude::*;` imports metric functions
+/// // `use rustyml::prelude::machine_learning::*;` imports machine learning models
+/// // `use rustyml::prelude::utils::*;` imports utility functions
+/// // `use rustyml::prelude::math::*;` imports math functions
+/// // `use rustyml::prelude::metrics::*;` imports metric functions
 /// ```
 pub mod prelude;
 
-/// Module `utility` provides a collection of utility functions and data processing tools to support machine learning operations.
+/// Module `utils` provides a collection of utility functions and data processing tools to support machine learning operations.
 ///
 /// This module provides essential data transformation and preprocessing capabilities that complement
 /// the main machine learning algorithms, including dimensionality reduction techniques, data splitting
@@ -552,7 +552,7 @@ pub mod prelude;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utility::principal_component_analysis::{PCA, SVDSolver};
+/// use rustyml::utils::pca::{PCA, SVDSolver};
 /// use ndarray::array;
 ///
 /// let mut pca = PCA::new(
@@ -565,10 +565,10 @@ pub mod prelude;
 /// let projected = pca.transform(&x).unwrap();
 /// assert_eq!(projected.ncols(), 2);
 /// ```
-#[cfg(feature = "utility")]
-pub mod utility;
+#[cfg(feature = "utils")]
+pub mod utils;
 
-/// Module `metric` provides comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
+/// Module `metrics` provides comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
 ///
 /// This module provides a complete collection of evaluation functions and structures for measuring
 /// the performance of machine learning models across regression, classification, and clustering tasks
@@ -623,7 +623,7 @@ pub mod utility;
 ///
 /// # Conventions
 ///
-/// - **Panics instead of returning `Result`.** `metric` is a lightweight leaf module — pure
+/// - **Panics instead of returning `Result`.** `metrics` is a lightweight leaf module — pure
 ///   `array -> scalar` functions pulling only `ndarray` and `ahash` — so, like `ndarray` and
 ///   `nalgebra` on a dimension mismatch, the metrics panic on precondition violations (mismatched
 ///   lengths, empty input) rather than returning the crate's `Error`. The panic messages mirror
@@ -635,7 +635,7 @@ pub mod utility;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::metric::*;
+/// use rustyml::metrics::*;
 /// use ndarray::array;
 ///
 /// // Regression evaluation — arguments are (y_true, y_pred)
@@ -655,8 +655,8 @@ pub mod utility;
 /// let scores = array![0.1, 0.4, 0.35, 0.8];
 /// let auc = roc_auc(&labels.view(), &scores.view());
 /// ```
-#[cfg(feature = "metric")]
-pub mod metric;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 
 /// Module `neural_network` provides components for building and training neural networks with flexible architecture design.
 ///
@@ -700,9 +700,9 @@ pub mod metric;
 /// ```rust
 /// use rustyml::neural_network::{
 ///     sequential::Sequential,
-///     layer::{Activation, Dense},
-///     optimizer::Adam,
-///     loss_function::MeanSquaredError,
+///     layers::{Activation, Dense},
+///     optimizers::Adam,
+///     losses::MeanSquaredError,
 /// };
 /// use ndarray::Array;
 ///

@@ -74,7 +74,7 @@
 - **激活层**:
     - ReLU, Tanh, Sigmoid, Softmax
 
-### 工具 (`features = ["utility"]`)
+### 工具 (`features = ["utils"]`)
 数据预处理和降维工具：
 
 - **降维**:
@@ -90,7 +90,7 @@
 - **核函数**:
     - RBF, Linear, Polynomial, Sigmoid: RBF、线性、多项式、Sigmoid
 
-### 评估指标 (`features = ["metric"]`)
+### 评估指标 (`features = ["metrics"]`)
 用于模型性能评估的全面评估指标：
 
 - **回归指标**:
@@ -201,9 +201,9 @@ rustyml = {version = "*", features = ["neural_network"]}
 ``` rust
 use rustyml::neural_network::{
     sequential::Sequential,
-    layer::{Dense, ReLU, Softmax},
-    optimizer::Adam,
-    loss_function::CategoricalCrossEntropy,
+    layers::{Dense, ReLU, Softmax},
+    optimizers::Adam,
+    losses::CategoricalCrossEntropy,
 }; 
 use ndarray::Array;  
   
@@ -253,8 +253,8 @@ println!("Predictions shape: {:?}", predictions.shape());
 |--------------------|-----------------------------------------|
 | `machine_learning` | 经典机器学习算法（依赖于`math`）                     |  
 | `neural_network`   | 神经网络框架                                  |  
-| `utility`          | 数据预处理和降维                                |  
-| `metric`           | 评估指标                                    |  
+| `utils`            | 数据预处理和降维                                |  
+| `metrics`          | 评估指标                                    |  
 | `math`             | 数学工具                                    |  
 | `default`          | 开启`machine_learning`和`neural_network`功能 |
 | `full`             | 启用所有功能                                  |

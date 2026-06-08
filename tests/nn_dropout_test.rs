@@ -2,8 +2,8 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::neural_network::layer::regularization_layer::dropout_layer::dropout::Dropout;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
+use rustyml::neural_network::traits::Layer;
 
 #[test]
 fn test_dropout_forward_pass_dimensions() {

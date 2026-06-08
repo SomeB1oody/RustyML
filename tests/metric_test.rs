@@ -1,8 +1,8 @@
-#![cfg(feature = "metric")]
+#![cfg(feature = "metrics")]
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, arr2, array};
-use rustyml::metric::*;
+use rustyml::metrics::*;
 
 fn assert_float_eq(a: f64, b: f64) {
     assert!((a - b).abs() < f64::EPSILON, "Expected {}, got {}", b, a);

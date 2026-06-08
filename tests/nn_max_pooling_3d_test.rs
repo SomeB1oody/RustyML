@@ -1,11 +1,11 @@
 #![cfg(feature = "neural_network")]
 
 use ndarray::{Array5, ArrayD};
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::layer::pooling_layer::max_pooling_3d::MaxPooling3D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::rms_prop::RMSprop;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::pooling::max_pooling_3d::MaxPooling3D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::rms_prop::RMSprop;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

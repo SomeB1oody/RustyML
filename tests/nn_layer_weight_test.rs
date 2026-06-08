@@ -1,12 +1,12 @@
 #![cfg(feature = "neural_network")]
 
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::layer_weight::LayerWeight;
-use rustyml::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::layer_weight::LayerWeight;
+use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

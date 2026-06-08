@@ -2,10 +2,10 @@
 
 use approx::assert_relative_eq;
 use ndarray::Array3;
-use rustyml::neural_network::layer::pooling_layer::average_pooling_1d::AveragePooling1D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::rms_prop::RMSprop;
+use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::rms_prop::RMSprop;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

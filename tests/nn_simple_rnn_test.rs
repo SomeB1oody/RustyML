@@ -3,15 +3,15 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3};
 use rustyml::neural_network::Tensor;
-use rustyml::neural_network::layer::activation_layer::relu::ReLU;
-use rustyml::neural_network::layer::activation_layer::sigmoid::Sigmoid;
-use rustyml::neural_network::layer::activation_layer::softmax::Softmax;
-use rustyml::neural_network::layer::activation_layer::tanh::Tanh;
-use rustyml::neural_network::layer::dense::Dense;
-use rustyml::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::optimizer::adam::Adam;
-use rustyml::neural_network::optimizer::rms_prop::RMSprop;
+use rustyml::neural_network::layers::activation::relu::ReLU;
+use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
+use rustyml::neural_network::layers::activation::softmax::Softmax;
+use rustyml::neural_network::layers::activation::tanh::Tanh;
+use rustyml::neural_network::layers::dense::Dense;
+use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::optimizers::adam::Adam;
+use rustyml::neural_network::optimizers::rms_prop::RMSprop;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]

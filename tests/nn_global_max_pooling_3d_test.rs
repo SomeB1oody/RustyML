@@ -2,11 +2,11 @@
 
 use approx::assert_relative_eq;
 use ndarray::{Array, IxDyn};
-use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::layer::pooling_layer::global_max_pooling_3d::GlobalMaxPooling3D;
-use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::layers::TrainingParameters;
+use rustyml::neural_network::layers::pooling::global_max_pooling_3d::GlobalMaxPooling3D;
+use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
+use rustyml::neural_network::traits::Layer;
+use rustyml::neural_network::optimizers::sgd::SGD;
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]
