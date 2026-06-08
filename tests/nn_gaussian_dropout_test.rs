@@ -10,7 +10,7 @@ fn test_gaussian_dropout_new() {
     // Test creating a new GaussianDropout layer
     let dropout_layer = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
     assert_eq!(dropout_layer.layer_type(), "GaussianDropout");
-    assert_eq!(dropout_layer.output_shape(), "[32, 128]");
+    assert_eq!(dropout_layer.output_shape(), "(32, 128)");
     println!("GaussianDropout creation test passed");
 }
 

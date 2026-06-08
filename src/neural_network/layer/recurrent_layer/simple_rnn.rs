@@ -1,15 +1,14 @@
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::Activation;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
-use crate::neural_network::layer::recurrent_layer::input_validation_function::{
+use crate::neural_network::layer::recurrent_layer::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
-use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use crate::neural_network::optimizer::OptimizerCache;
-use crate::neural_network::optimizer::ada_grad::AdaGradStates;
-use crate::neural_network::optimizer::adam::AdamStates;
-use crate::neural_network::optimizer::rms_prop::RMSpropCache;
+use crate::neural_network::layer::recurrent_layer::{GRADIENT_CLIP_VALUE, orthogonal_init};
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -31,8 +30,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// - `grad_kernel` - Gradient of the kernel weights
 /// - `grad_recurrent_kernel` - Gradient of the recurrent kernel weights
 /// - `grad_bias` - Gradient of the bias
-/// - `optimizer_cache` - Cache for optimizer state
-/// - `activation` - Activation layer used in the recurrent computation
+/// - `activation` - Activation function applied at each timestep of the recurrence
 ///
 /// # Examples
 /// ```rust
@@ -50,7 +48,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Build model: one SimpleRnn layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new(4, 3, Tanh::new()).unwrap())
+/// .add(SimpleRNN::new(4, 3, Activation::Tanh).unwrap())
 /// .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
@@ -63,7 +61,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let pred = model.predict(&x);
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
-pub struct SimpleRNN<T: ActivationLayer> {
+pub struct SimpleRNN {
     input_dim: usize,
     units: usize,
     kernel: Array2<f32>,
@@ -74,11 +72,10 @@ pub struct SimpleRNN<T: ActivationLayer> {
     grad_kernel: Option<Array2<f32>>,
     grad_recurrent_kernel: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCache,
-    activation: T,
+    activation: Activation,
 }
 
-impl<T: ActivationLayer> SimpleRNN<T> {
+impl SimpleRNN {
     /// Creates a SimpleRNN layer with the specified dimensions and activation.
     ///
     /// # Parameters
@@ -94,7 +91,11 @@ impl<T: ActivationLayer> SimpleRNN<T> {
     /// # Errors
     ///
     /// - `ModelError::InputValidationError` - If `input_dim` or `units` is 0
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+    pub fn new(
+        input_dim: usize,
+        units: usize,
+        activation: impl Into<Activation>,
+    ) -> Result<Self, ModelError> {
         validate_recurrent_dimensions(input_dim, units)?;
 
         // Xavier/Glorot initialization for input kernel
@@ -102,7 +103,7 @@ impl<T: ActivationLayer> SimpleRNN<T> {
         let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
 
         // Orthogonal initialization for recurrent kernel to maintain gradient flow
-        let recurrent_kernel = Self::orthogonal_init(units);
+        let recurrent_kernel = orthogonal_init(units);
 
         let bias = Array::zeros((1, units));
         Ok(SimpleRNN {
@@ -116,56 +117,8 @@ impl<T: ActivationLayer> SimpleRNN<T> {
             grad_kernel: None,
             grad_recurrent_kernel: None,
             grad_bias: None,
-            optimizer_cache: OptimizerCache::default(),
-            activation,
+            activation: activation.into(),
         })
-    }
-
-    /// Generate an orthogonal matrix using Gram-Schmidt orthogonalization
-    /// This helps prevent gradient vanishing/exploding in RNNs
-    fn orthogonal_init(size: usize) -> Array2<f32> {
-        // Generate a random matrix
-        let mut matrix = Array::random((size, size), Uniform::new(-1.0, 1.0).unwrap());
-
-        // Apply Gram-Schmidt orthogonalization
-        for i in 0..size {
-            // Orthogonalize column i against all previous columns
-            for j in 0..i {
-                // Compute projection: dot(col_i, col_j) / dot(col_j, col_j)
-                // Since col_j is already normalized in previous iterations, denominator is 1
-                let mut projection = 0.0;
-                for k in 0..size {
-                    projection += matrix[[k, i]] * matrix[[k, j]];
-                }
-
-                // Subtract projection from column i
-                for k in 0..size {
-                    matrix[[k, i]] -= projection * matrix[[k, j]];
-                }
-            }
-
-            // Normalize column i
-            let mut norm: f32 = 0.0;
-            for k in 0..size {
-                norm += matrix[[k, i]] * matrix[[k, i]];
-            }
-            norm = norm.sqrt();
-
-            const EPSILON: f32 = 1e-8;
-
-            if norm > EPSILON {
-                for k in 0..size {
-                    matrix[[k, i]] /= norm;
-                }
-            } else {
-                // If norm is too small, use standard basis vector
-                for k in 0..size {
-                    matrix[[k, i]] = if k == i { 1.0 } else { 0.0 };
-                }
-            }
-        }
-
-        matrix
     }
 
     /// Sets the weights for this layer.
@@ -180,14 +133,22 @@ impl<T: ActivationLayer> SimpleRNN<T> {
         kernel: Array2<f32>,
         recurrent_kernel: Array2<f32>,
         bias: Array2<f32>,
-    ) {
+    ) -> Result<(), ModelError> {
+        validate_weight_shape("kernel", self.kernel.shape(), kernel.shape())?;
+        validate_weight_shape(
+            "recurrent_kernel",
+            self.recurrent_kernel.shape(),
+            recurrent_kernel.shape(),
+        )?;
+        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.kernel = kernel;
         self.recurrent_kernel = recurrent_kernel;
         self.bias = bias;
+        Ok(())
     }
 }
 
-impl<T: ActivationLayer> Layer for SimpleRNN<T> {
+impl Layer for SimpleRNN {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 3D
         validate_input_3d(input)?;
@@ -200,7 +161,6 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut hs = Vec::with_capacity(timesteps + 1);
-        let mut linear_outputs = Vec::with_capacity(timesteps);
         hs.push(h_prev.clone());
 
         // Sequential timestep processing (required for RNN)
@@ -209,7 +169,6 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
 
             // Compute: z = x_t @ W + h_{t-1} @ U + b
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
-            linear_outputs.push(z.clone());
 
             // Apply activation
             let h_t = self
@@ -222,6 +181,37 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
             hs.push(h_prev.clone());
         }
         self.hidden_state_cache = Some(hs);
+        Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        validate_input_3d(input)?;
+
+        let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
+
+        // Input shape=(batch, timesteps, input_dim)
+        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
+
+        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
+
+        // Sequential timestep processing (required for RNN)
+        for t in 0..timesteps {
+            let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
+
+            // Compute: z = x_t @ W + h_{t-1} @ U + b
+            let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
+
+            // Apply activation
+            let h_t = self
+                .activation
+                .forward(&z.into_dyn())?
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
+
+            h_prev = h_t;
+        }
         Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
     }
 
@@ -265,18 +255,20 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
         for t in (0..timesteps).rev() {
             let h_tm1 = &hs[t];
 
-            // Apply activation backward pass
+            // Backprop through the activation using THIS timestep's cached output `h_t`
+            // (`hs[t + 1]`); every supported activation's derivative is a function of its output.
             let d_z = {
+                let h_t = hs[t + 1].clone().into_dyn();
                 let grad_h_dyn = grad_h.clone().into_dyn();
-                let grad_z_dyn = self.activation.backward(&grad_h_dyn)?;
+                let grad_z_dyn = self.activation.backward(&h_t, &grad_h_dyn)?;
                 grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
             };
 
             // Accumulate gradients for weights
             let x_t = x3.index_axis(Axis(1), t);
-            grad_k = grad_k + &x_t.t().dot(&d_z);
-            grad_rk = grad_rk + &h_tm1.t().dot(&d_z);
-            grad_b = grad_b + &d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
+            grad_k += &x_t.t().dot(&d_z);
+            grad_rk += &h_tm1.t().dot(&d_z);
+            grad_b += &d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
 
             // Gradient w.r.t. input at timestep t
             grad_x3
@@ -288,10 +280,9 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
         }
 
         // Apply gradient clipping to prevent exploding gradients
-        let clip_value = 5.0;
-        grad_k.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
-        grad_rk.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
-        grad_b.mapv_inplace(|x| x.max(-clip_value).min(clip_value));
+        grad_k.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
+        grad_rk.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
+        grad_b.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
 
         self.grad_kernel = Some(grad_k);
         self.grad_recurrent_kernel = Some(grad_rk);
@@ -314,106 +305,40 @@ impl<T: ActivationLayer> Layer for SimpleRNN<T> {
         )
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            kernel,
+            recurrent_kernel,
+            bias,
+            grad_kernel,
+            grad_recurrent_kernel,
+            grad_bias,
+            ..
+        } = self;
+        let mut params = Vec::new();
         if let (Some(gk), Some(grk), Some(gb)) = (
-            &self.grad_kernel,
-            &self.grad_recurrent_kernel,
-            &self.grad_bias,
+            grad_kernel.as_ref(),
+            grad_recurrent_kernel.as_ref(),
+            grad_bias.as_ref(),
         ) {
-            rayon::join(
-                || {
-                    rayon::join(
-                        || self.kernel = &self.kernel - &(lr * gk),
-                        || self.recurrent_kernel = &self.recurrent_kernel - &(lr * grk),
-                    )
-                },
-                || self.bias = &self.bias - &(lr * gb),
-            );
+            params.push(ParamGrad {
+                value: kernel.as_slice_mut().expect("kernel must be contiguous"),
+                grad: gk.as_slice().expect("kernel gradient must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: recurrent_kernel
+                    .as_slice_mut()
+                    .expect("recurrent kernel must be contiguous"),
+                grad: grk
+                    .as_slice()
+                    .expect("recurrent kernel gradient must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: bias.as_slice_mut().expect("bias must be contiguous"),
+                grad: gb.as_slice().expect("bias gradient must be contiguous"),
+            });
         }
-    }
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize Adam states (if not already initialized)
-        if self.optimizer_cache.adam_states.is_none() {
-            let dims_k = (self.input_dim, self.units);
-            let dims_r = (self.units, self.units);
-            let dims_b = (1, self.units);
-
-            self.optimizer_cache.adam_states = Some(AdamStates::new(dims_k, Some(dims_r), dims_b));
-        }
-
-        if let (Some(gk), Some(grk), Some(gb)) = (
-            &self.grad_kernel,
-            &self.grad_recurrent_kernel,
-            &self.grad_bias,
-        ) {
-            let adam_states = self.optimizer_cache.adam_states.as_mut().unwrap();
-            let (w_update, rk_update, b_update) =
-                adam_states.update_parameter(gk, Some(grk), gb, beta1, beta2, epsilon, t, lr);
-
-            // Apply updates
-            self.kernel = &self.kernel - &w_update;
-            self.recurrent_kernel = &self.recurrent_kernel - &rk_update.unwrap();
-            self.bias = &self.bias - &b_update;
-        }
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, eps: f32) {
-        if let (Some(gk), Some(grk), Some(gb)) = (
-            &self.grad_kernel,
-            &self.grad_recurrent_kernel,
-            &self.grad_bias,
-        ) {
-            // Initialize RMSprop cache if it doesn't exist
-            if self.optimizer_cache.rmsprop_cache.is_none() {
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
-                    (self.input_dim, self.units),
-                    Some((self.units, self.units)),
-                    (1, self.units),
-                ));
-            }
-
-            if let Some(ref mut cache) = self.optimizer_cache.rmsprop_cache {
-                cache.update_parameters(
-                    &mut self.kernel,
-                    Some(&mut self.recurrent_kernel),
-                    &mut self.bias,
-                    gk,
-                    Some(grk),
-                    gb,
-                    rho,
-                    lr,
-                    eps,
-                );
-            }
-        }
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        // Initialize AdaGrad cache (if not already initialized)
-        if self.optimizer_cache.ada_grad_cache.is_none() {
-            let dims_k = (self.input_dim, self.units);
-            let dims_r = (self.units, self.units);
-            let dims_b = (1, self.units);
-
-            self.optimizer_cache.ada_grad_cache =
-                Some(AdaGradStates::new(dims_k, Some(dims_r), dims_b));
-        }
-
-        if let (Some(gk), Some(grk), Some(gb)) = (
-            &self.grad_kernel,
-            &self.grad_recurrent_kernel,
-            &self.grad_bias,
-        ) {
-            let ada_grad_cache = self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
-            let (k_update, rk_update, b_update) =
-                ada_grad_cache.update_parameter(gk, Some(grk), gb, epsilon, lr);
-
-            // Apply updates
-            self.kernel = &self.kernel - &k_update;
-            self.recurrent_kernel = &self.recurrent_kernel - &rk_update.unwrap();
-            self.bias = &self.bias - &b_update;
-        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

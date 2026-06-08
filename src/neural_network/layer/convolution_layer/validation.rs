@@ -174,7 +174,7 @@ pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Model
                 .to_string(),
         ));
     }
-    if input_shape.iter().any(|&dim| dim == 0) {
+    if input_shape.contains(&0) {
         return Err(ModelError::InputValidationError(
             "All input dimensions must be greater than 0".to_string(),
         ));

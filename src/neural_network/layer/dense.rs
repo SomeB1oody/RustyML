@@ -1,19 +1,12 @@
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::Activation;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{DenseLayerWeight, LayerWeight};
-use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use crate::neural_network::optimizer::{
-    OptimizerCache, ada_grad::AdaGradStates, adam::AdamStates, rms_prop::RMSpropCache, sgd::SGD,
-};
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-
-/// Threshold for determining when to use parallel computation in dense layer operations.
-/// When the total number of operations (input_dim * output_dim) is below this threshold,
-/// sequential computation is used to avoid parallelization overhead.
-const DENSE_PARALLEL_THRESHOLD: usize = 512;
 
 /// Dense (Fully Connected) layer implementation for neural networks.
 ///
@@ -32,16 +25,16 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 /// - `weights` - Weight matrix with shape (input_dim, output_dim)
 /// - `bias` - Bias vector with shape (1, output_dim)
 /// - `input_cache` - Cache of the input from forward pass for use in backward pass
+/// - `output_cache` - Cache of the activated output, used to backprop through the activation
 /// - `grad_weights` - Stored weight gradients
 /// - `grad_bias` - Stored bias gradients
-/// - `optimizer_cache` - Cache for optimizer
-/// - `activation` - Activation layer from activation_layer module
+/// - `activation` - Activation function applied to the linear output
 ///
 /// # Examples
 /// ```rust
 /// use ndarray::Array;
 /// use rustyml::neural_network::sequential::Sequential;
-/// use rustyml::neural_network::layer::{Dense, ReLU};
+/// use rustyml::neural_network::layer::{Activation, Dense};
 /// use rustyml::neural_network::optimizer::SGD;
 /// use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
 ///
@@ -51,8 +44,8 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, ReLU::new()).unwrap())
-///     .add(Dense::new(3, 1, ReLU::new()).unwrap());
+/// model.add(Dense::new(4, 3, Activation::ReLU).unwrap())
+///     .add(Dense::new(3, 1, Activation::ReLU).unwrap());
 /// model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
@@ -65,26 +58,27 @@ const DENSE_PARALLEL_THRESHOLD: usize = 512;
 /// let prediction = model.predict(&x);
 /// println!("Prediction results: {:?}", prediction);
 /// ```
-pub struct Dense<T: ActivationLayer> {
+pub struct Dense {
     input_dim: usize,
     output_dim: usize,
     weights: Array2<f32>,
     bias: Array2<f32>,
     input_cache: Option<Array2<f32>>,
+    output_cache: Option<Tensor>,
     grad_weights: Option<Array2<f32>>,
     grad_bias: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCache,
-    activation: T,
+    activation: Activation,
 }
 
-impl<T: ActivationLayer> Dense<T> {
-    /// Creates a new dense layer with an activation layer.
+impl Dense {
+    /// Creates a new dense layer with an activation function.
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `activation` - Activation applied to the linear output (any value convertible into
+    ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
     ///
     /// # Returns
     ///
@@ -93,7 +87,11 @@ impl<T: ActivationLayer> Dense<T> {
     /// # Errors
     ///
     /// - `ModelError::InputValidationError` - If `input_dim` or `units` is zero
-    pub fn new(input_dim: usize, units: usize, activation: T) -> Result<Self, ModelError> {
+    pub fn new(
+        input_dim: usize,
+        units: usize,
+        activation: impl Into<Activation>,
+    ) -> Result<Self, ModelError> {
         // Validate that dimensions are greater than zero
         if input_dim == 0 {
             return Err(ModelError::InputValidationError(
@@ -115,14 +113,10 @@ impl<T: ActivationLayer> Dense<T> {
             weights,
             bias,
             input_cache: None,
+            output_cache: None,
             grad_weights: None,
             grad_bias: None,
-            activation,
-            optimizer_cache: OptimizerCache {
-                adam_states: None,
-                rmsprop_cache: None,
-                ada_grad_cache: None,
-            },
+            activation: activation.into(),
         })
     }
 
@@ -132,13 +126,28 @@ impl<T: ActivationLayer> Dense<T> {
     ///
     /// - `weights` - Weight matrix with shape (input_dim, output_dim)
     /// - `bias` - Bias vector with shape (1, output_dim)
-    pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) {
-        self.weights = weights;
-        self.bias = bias;
+    ///
+    /// # Errors
+    ///
+    /// - `ModelError::InputValidationError` - If `weights` or `bias` do not match the layer's
+    ///   configured shape
+    pub fn set_weights(
+        &mut self,
+        weights: Array2<f32>,
+        bias: Array2<f32>,
+    ) -> Result<(), ModelError> {
+        validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
+        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
+        // Force a contiguous standard layout: `parameters()` exposes the weights as a flat
+        // mutable slice (`as_slice_mut().expect(..)`), which panics on a non-contiguous array.
+        // A caller could pass e.g. a transposed/sliced view materialized in non-standard order.
+        self.weights = weights.as_standard_layout().into_owned();
+        self.bias = bias.as_standard_layout().into_owned();
+        Ok(())
     }
 }
 
-impl<T: ActivationLayer> Layer for Dense<T> {
+impl Layer for Dense {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 2D
         if input.ndim() != 2 {
@@ -152,40 +161,40 @@ impl<T: ActivationLayer> Layer for Dense<T> {
         // Input shape is [batch_size, input_dim]
         self.input_cache = Some(input_2d.to_owned());
 
-        // Use adaptive parallel/sequential matrix multiplication
-        let total_ops = self.input_dim * self.output_dim;
-        let z = if total_ops < DENSE_PARALLEL_THRESHOLD {
-            // Sequential computation using dot
-            input_2d.dot(&self.weights) + &self.bias
-        } else {
-            // Parallel computation using par_iter
-            let batch_size = input_2d.nrows();
-            let mut result = Array2::<f32>::zeros((batch_size, self.output_dim));
+        // Linear transform. ndarray's `dot` dispatches to the cache-blocked, SIMD `matrixmultiply`
+        // kernel, which beats a hand-rolled parallel triple loop across all sizes.
+        let z = input_2d.dot(&self.weights) + &self.bias;
 
-            result
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .zip(input_2d.axis_iter(Axis(0)))
-                .for_each(|(mut out_row, in_row)| {
-                    for j in 0..self.output_dim {
-                        let mut sum = self.bias[[0, j]];
-                        for k in 0..self.input_dim {
-                            sum += in_row[k] * self.weights[[k, j]];
-                        }
-                        out_row[j] = sum;
-                    }
-                });
+        // Apply activation and cache the activated output for backpropagation
+        let output = self.activation.forward(&z.into_dyn())?;
+        self.output_cache = Some(output.clone());
+        Ok(output)
+    }
 
-            result
-        };
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 2D
+        if input.ndim() != 2 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 2D".to_string(),
+            ));
+        }
 
-        // Apply activation
+        let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
+
+        // Linear transform (see `forward` for why `dot` rather than a hand-rolled loop).
+        let z = input_2d.dot(&self.weights) + &self.bias;
+
+        // Apply activation (no cache writes during inference)
         self.activation.forward(&z.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        // Apply activation backward pass if activation layer exists
-        let grad_upstream = self.activation.backward(grad_output)?;
+        // Backprop through the activation using the cached activated output
+        let activated = self.output_cache.take().ok_or_else(|| {
+            ModelError::ProcessingError(String::from("Forward pass has not been run"))
+        })?;
+        let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         // Convert gradient to 2D array with shape [batch_size, output_dim]
         let grad_upstream_2d = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
@@ -195,32 +204,8 @@ impl<T: ActivationLayer> Layer for Dense<T> {
             ModelError::ProcessingError(String::from("Forward pass has not been run"))
         })?;
 
-        let total_ops = self.input_dim * self.output_dim;
-
-        // Calculate weight gradients: grad_w = input^T * grad_upstream
-        let grad_w = if total_ops < DENSE_PARALLEL_THRESHOLD {
-            // Sequential computation using dot
-            input.t().dot(&grad_upstream_2d)
-        } else {
-            // Parallel computation using par_iter
-            let mut result = Array2::<f32>::zeros((self.input_dim, self.output_dim));
-
-            result
-                .axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(j, mut out_col)| {
-                    for i in 0..self.input_dim {
-                        let mut sum = 0.0;
-                        for k in 0..input.nrows() {
-                            sum += input[[k, i]] * grad_upstream_2d[[k, j]];
-                        }
-                        out_col[i] = sum;
-                    }
-                });
-
-            result
-        };
+        // Weight gradients: grad_w = input^T · grad_upstream (matmul via `dot`).
+        let grad_w = input.t().dot(&grad_upstream_2d);
 
         // Calculate bias gradients by summing over batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -229,31 +214,8 @@ impl<T: ActivationLayer> Layer for Dense<T> {
         self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
-        // Calculate gradients to be passed to previous layer: grad_input = grad_upstream * weights^T
-        let grad_input = if total_ops < DENSE_PARALLEL_THRESHOLD {
-            // Sequential computation using dot
-            grad_upstream_2d.dot(&self.weights.t())
-        } else {
-            // Parallel computation using par_iter
-            let batch_size = grad_upstream_2d.nrows();
-            let mut result = Array2::<f32>::zeros((batch_size, self.input_dim));
-
-            result
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .zip(grad_upstream_2d.axis_iter(Axis(0)))
-                .for_each(|(mut out_row, grad_row)| {
-                    for j in 0..self.input_dim {
-                        let mut sum = 0.0;
-                        for k in 0..self.output_dim {
-                            sum += grad_row[k] * self.weights[[j, k]];
-                        }
-                        out_row[j] = sum;
-                    }
-                });
-
-            result
-        };
+        // Gradient w.r.t. the input: grad_input = grad_upstream · weights^T.
+        let grad_input = grad_upstream_2d.dot(&self.weights.t());
 
         Ok(grad_input.into_dyn())
     }
@@ -272,93 +234,26 @@ impl<T: ActivationLayer> Layer for Dense<T> {
         TrainingParameters::Trainable(self.input_dim * self.output_dim + self.output_dim)
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
-        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            SGD::update_sgd_parameters(
-                self.weights.as_slice_mut().unwrap(),
-                grad_w.as_slice().unwrap(),
-                self.bias.as_slice_mut().unwrap(),
-                grad_b.as_slice().unwrap(),
-                lr,
-            )
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            weights,
+            bias,
+            grad_weights,
+            grad_bias,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        if let (Some(grad_a), Some(grad_b)) = (grad_weights.as_ref(), grad_bias.as_ref()) {
+            params.push(ParamGrad {
+                value: weights.as_slice_mut().expect("weights must be contiguous"),
+                grad: grad_a.as_slice().expect("grad_weights must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: bias.as_slice_mut().expect("bias must be contiguous"),
+                grad: grad_b.as_slice().expect("grad_bias must be contiguous"),
+            });
         }
-    }
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        // Initialize Adam states (if not already initialized)
-        if self.optimizer_cache.adam_states.is_none() {
-            let dims_w = (self.input_dim, self.output_dim);
-            let dims_b = (1, self.output_dim);
-
-            self.optimizer_cache.adam_states = Some(AdamStates::new(
-                dims_w, None, // No recurrent weights
-                dims_b,
-            ));
-        }
-
-        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            let adam_states = self.optimizer_cache.adam_states.as_mut().unwrap();
-            let (w_update, _, b_update) = adam_states.update_parameter(
-                grad_w, None, // No recurrent weights
-                grad_b, beta1, beta2, epsilon, t, lr,
-            );
-
-            // Apply updates
-            self.weights = &self.weights - &w_update;
-            self.bias = &self.bias - &b_update;
-        }
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            // Initialize RMSprop cache if it doesn't exist
-            if self.optimizer_cache.rmsprop_cache.is_none() {
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCache::new(
-                    (self.input_dim, self.output_dim),
-                    None,
-                    (1, self.output_dim),
-                ));
-            }
-
-            if let Some(ref mut cache) = self.optimizer_cache.rmsprop_cache {
-                cache.update_parameters(
-                    &mut self.weights,
-                    None,
-                    &mut self.bias,
-                    grad_w,
-                    None,
-                    grad_b,
-                    rho,
-                    lr,
-                    epsilon,
-                );
-            }
-        }
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        // Initialize AdaGrad cache (if not already initialized)
-        if self.optimizer_cache.ada_grad_cache.is_none() {
-            let dims_w = (self.input_dim, self.output_dim);
-            let dims_b = (1, self.output_dim);
-
-            self.optimizer_cache.ada_grad_cache = Some(AdaGradStates::new(
-                dims_w, None, // No recurrent weights
-                dims_b,
-            ));
-        }
-
-        if let (Some(grad_w), Some(grad_b)) = (&self.grad_weights, &self.grad_bias) {
-            let ada_grad_cache = self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
-            let (w_update, _, b_update) = ada_grad_cache.update_parameter(
-                grad_w, None, // No recurrent weights
-                grad_b, epsilon, lr,
-            );
-
-            // Apply updates
-            self.weights = &self.weights - &w_update;
-            self.bias = &self.bias - &b_update;
-        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

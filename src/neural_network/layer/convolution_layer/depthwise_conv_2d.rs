@@ -1,25 +1,19 @@
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::Activation;
 use crate::neural_network::layer::convolution_layer::PaddingType;
-use crate::neural_network::layer::convolution_layer::input_validation_function::{
-    validate_filters, validate_kernel_size_2d, validate_strides_2d,
+use crate::neural_network::layer::convolution_layer::validation::{
+    validate_filters, validate_input_shape_2d, validate_kernel_size_2d, validate_strides_2d,
 };
-use crate::neural_network::layer::helper_function::{
-    calculate_output_shape_2d, pad_tensor_2d, update_adam_conv, update_rmsprop,
-};
+use crate::neural_network::layer::conv_op_helpers::pad_tensor_2d;
+use crate::neural_network::layer::shape_helpers::calculate_output_shape_2d;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
-use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use crate::neural_network::optimizer::{
-    OptimizerCacheConv2D, ada_grad::AdaGradStatesConv2D, adam::AdamStatesConv2D,
-    rms_prop::RMSpropCacheConv2D, sgd::SGD,
-};
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
-use ndarray_rand::rand::random;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
-};
+use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Threshold for using parallel computation in forward pass.
 /// If batch_size * channels * output_height * output_width < threshold, use sequential computation.
@@ -44,7 +38,6 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// - `input_shape` - Shape of the input tensor
 /// - `weight_gradients` - Gradients with respect to weights
 /// - `bias_gradients` - Gradients with respect to bias
-/// - `optimizer_cache` - Cache for optimizer state
 ///
 /// # Examples
 /// ```rust
@@ -57,15 +50,15 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// // Create Sequential model
 /// let mut model = Sequential::new();
 ///
-/// // Create and initialize DepthwiseConv2D layer with ReLU activation
-/// let mut depthwise_layer = DepthwiseConv2D::new(
-///     3,                        // filters
+/// // Create DepthwiseConv2D layer with ReLU activation (weights are initialized in `new`)
+/// let depthwise_layer = DepthwiseConv2D::new(
+///     3,                        // filters (must equal input channels)
 ///     (2, 2),                  // kernel_size
+///     vec![1, 3, 4, 4],        // input shape [batch_size, channels, height, width]
 ///     (1, 1),                  // strides
 ///     PaddingType::Valid,      // padding
-///     ReLU::new() // activation
+///     Activation::ReLU // activation
 /// ).unwrap();
-/// depthwise_layer.initialize_weights(3);
 ///
 /// // Add layer and compile model
 /// model
@@ -107,57 +100,78 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///     assert!(*value >= 0.0);
 /// }
 /// ```
-pub struct DepthwiseConv2D<T: ActivationLayer> {
+pub struct DepthwiseConv2D {
     filters: usize,
     kernel_size: (usize, usize),
     strides: (usize, usize),
     padding: PaddingType,
     weights: Array4<f32>,
     bias: Array1<f32>,
-    activation: T,
+    activation: Activation,
+    output_cache: Option<Tensor>,
     input: Option<Tensor>,
     input_shape: Vec<usize>,
     weight_gradients: Option<Array4<f32>>,
     bias_gradients: Option<Array1<f32>>,
-    optimizer_cache: OptimizerCacheConv2D,
 }
 
-impl<T: ActivationLayer> DepthwiseConv2D<T> {
+impl DepthwiseConv2D {
     /// Creates a new DepthwiseConv2D layer.
     ///
     /// # Parameters
     ///
-    /// - `filters` - Number of output filters (should equal input channels for pure depthwise)
+    /// - `filters` - Number of output filters (must equal input channels for pure depthwise)
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
+    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `padding` - Padding strategy (Valid or Same)
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
     ///
     /// # Returns
     ///
-    /// - `Result<Self, ModelError>` - A new `DepthwiseConv2D` instance with randomly initialized weights or an error
+    /// - `Result<Self, ModelError>` - A new `DepthwiseConv2D` instance with Xavier-initialized weights or an error
     ///
     /// # Errors
     ///
     /// - `ModelError::InputValidationError` - If `filters` is 0
     /// - `ModelError::InputValidationError` - If any kernel dimension or stride is 0
+    /// - `ModelError::InputValidationError` - If `input_shape` is not 4D or smaller than the kernel
+    /// - `ModelError::InputValidationError` - If `filters` does not equal the input channels
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
+        input_shape: Vec<usize>,
         strides: (usize, usize),
         padding: PaddingType,
-        activation: T,
+        activation: impl Into<Activation>,
     ) -> Result<Self, ModelError> {
         // Input validation
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
+        validate_input_shape_2d(&input_shape, kernel_size)?;
+
+        // For pure depthwise convolution every input channel is convolved by exactly one filter,
+        // so the filter count is fixed by the input channels. Enforcing it here turns a silent
+        // shape mismatch at the first `forward` into an explicit construction-time error.
+        let channels = input_shape[1];
+        if channels != filters {
+            return Err(ModelError::InputValidationError(format!(
+                "For depthwise convolution the number of filters ({filters}) must equal the input channels ({channels})"
+            )));
+        }
 
         let (kernel_height, kernel_width) = kernel_size;
 
-        // For depthwise convolution, each filter processes one input channel
-        // Weight shape: [filters, 1, kernel_height, kernel_width]
-        let weights = Array4::zeros((filters, 1, kernel_height, kernel_width));
+        // Xavier (Glorot) uniform initialization. Each depthwise filter maps one input channel to
+        // one output channel, so fan_in == fan_out == kernel_area. Weight shape is
+        // [filters, 1, kernel_height, kernel_width]; biases start at zero.
+        let fan = kernel_height * kernel_width;
+        let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
+        let weights = Array4::random(
+            (filters, 1, kernel_height, kernel_width),
+            Uniform::new(-weight_bound, weight_bound).unwrap(),
+        );
         let bias = Array1::zeros(filters);
 
         Ok(Self {
@@ -167,52 +181,13 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
             padding,
             weights,
             bias,
-            activation,
+            activation: activation.into(),
+            output_cache: None,
             input: None,
-            input_shape: Vec::new(),
+            input_shape,
             weight_gradients: None,
             bias_gradients: None,
-            optimizer_cache: OptimizerCacheConv2D {
-                adam_states: None,
-                rmsprop_cache: None,
-                ada_grad_cache: None,
-            },
         })
-    }
-
-    /// Initializes the layer with random weights using Xavier initialization.
-    ///
-    /// # Parameters
-    ///
-    /// - `input_channels` - Number of input channels
-    ///
-    /// # Panics
-    ///
-    /// Panics if `input_channels` does not match `filters`.
-    pub fn initialize_weights(&mut self, input_channels: usize) {
-        assert_eq!(
-            self.filters, input_channels,
-            "For depthwise convolution, number of filters must equal input channels"
-        );
-
-        let (kernel_height, kernel_width) = self.kernel_size;
-        let fan_in = kernel_height * kernel_width;
-        let fan_out = kernel_height * kernel_width; // Each filter outputs to 1 channel
-        let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
-
-        // Xavier initialization
-        self.weights
-            .axis_iter_mut(Axis(0))
-            .into_par_iter()
-            .for_each(|mut filter| {
-                filter
-                    .slice_mut(s![0, .., ..])
-                    .par_mapv_inplace(|_| (random::<f32>() - 0.5) * 2.0 * limit);
-            });
-
-        // bias initialization
-        self.bias
-            .par_mapv_inplace(|_| (random::<f32>() - 0.5) * 0.1);
     }
 
     /// Calculates padding dimensions for Same padding mode.
@@ -241,12 +216,20 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
     ///
     /// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
     /// - `bias` - 1D bias vector with shape \[filters\]
-    pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) {
+    pub fn set_weights(
+        &mut self,
+        weights: Array4<f32>,
+        bias: Array1<f32>,
+    ) -> Result<(), ModelError> {
+        validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
+        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
         self.bias = bias;
+        Ok(())
     }
 
     /// Performs depthwise convolution for a single channel.
+    #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/kernel/padding) are all needed
     fn convolve_channel(
         input_channel: &ArrayView2<f32>,
         kernel: &ArrayView2<f32>,
@@ -287,6 +270,7 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
     }
 
     /// Computes weight and input gradients for a single batch.
+    #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/padding) are all needed
     fn compute_batch_gradients(
         &self,
         input_array: &ArrayViewD<f32>,
@@ -301,7 +285,14 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
         pad_w: usize,
     ) -> (Array4<f32>, Array4<f32>) {
         let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
-        let mut batch_input_grads = Array4::zeros((1, channels, input_height, input_width));
+        // Accumulate input gradients in PADDED coordinates (matching the symmetric padding used in
+        // the forward pass via `pad_tensor_2d`), then strip the padding before returning. The
+        // previous code reused the padded coordinate `oh*stride+kh` directly as an unpadded index,
+        // which dropped/offset contributions under `Same` padding.
+        let padded_height = input_height + pad_h;
+        let padded_width = input_width + pad_w;
+        let mut batch_input_grads_padded =
+            Array4::zeros((1, channels, padded_height, padded_width));
 
         for c in 0..channels {
             let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
@@ -342,8 +333,8 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
                             let ih = oh * self.strides.0 + kh;
                             let iw = ow * self.strides.1 + kw;
 
-                            if ih < input_height && iw < input_width {
-                                batch_input_grads[[0, c, ih, iw]] +=
+                            if ih < padded_height && iw < padded_width {
+                                batch_input_grads_padded[[0, c, ih, iw]] +=
                                     self.weights[[c, 0, kh, kw]] * grad_val;
                             }
                         }
@@ -352,11 +343,23 @@ impl<T: ActivationLayer> DepthwiseConv2D<T> {
             }
         }
 
+        // Strip the symmetric padding so the input gradient matches the original input shape.
+        let pad_top = pad_h / 2;
+        let pad_left = pad_w / 2;
+        let batch_input_grads = batch_input_grads_padded
+            .slice(s![
+                ..,
+                ..,
+                pad_top..pad_top + input_height,
+                pad_left..pad_left + input_width
+            ])
+            .to_owned();
+
         (batch_weight_grads, batch_input_grads)
     }
 }
 
-impl<T: ActivationLayer> Layer for DepthwiseConv2D<T> {
+impl Layer for DepthwiseConv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 4D
         if input.ndim() != 4 {
@@ -457,12 +460,121 @@ impl<T: ActivationLayer> Layer for DepthwiseConv2D<T> {
         let output = output.into_dyn();
 
         // Apply activation
-        self.activation.forward(&output.into_dyn())
+        let activated = self.activation.forward(&output)?;
+        self.output_cache = Some(activated.clone());
+        Ok(activated)
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
+        let input_shape = input.shape().to_vec();
+
+        let input_array = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
+
+        let (batch_size, channels, height, width) = (
+            input_array.shape()[0],
+            input_array.shape()[1],
+            input_array.shape()[2],
+            input_array.shape()[3],
+        );
+
+        assert_eq!(
+            channels, self.filters,
+            "Input channels must equal number of filters for depthwise convolution"
+        );
+
+        // Calculate output dimensions
+        let output_shape = calculate_output_shape_2d(
+            &input_shape,
+            self.kernel_size,
+            self.strides,
+            &self.padding,
+        );
+        let (_, _, output_height, output_width) = (
+            output_shape[0],
+            output_shape[1],
+            output_shape[2],
+            output_shape[3],
+        );
+
+        // Calculate padding dimensions once if needed
+        let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
+
+        let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
+
+        // Determine whether to use parallel or sequential execution
+        let total_elements = batch_size * channels * output_height * output_width;
+
+        if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
+            // Parallel execution for large workloads
+            output
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut batch_output)| {
+                    batch_output
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(c, mut channel_output)| {
+                            let input_channel = input_array.slice(s![b, c, .., ..]);
+                            let kernel = self.weights.slice(s![c, 0, .., ..]);
+                            let result = Self::convolve_channel(
+                                &input_channel,
+                                &kernel,
+                                self.bias[c],
+                                (output_height, output_width),
+                                self.strides,
+                                self.kernel_size,
+                                &self.padding,
+                                pad_h,
+                                pad_w,
+                            );
+                            channel_output.assign(&result);
+                        });
+                });
+        } else {
+            // Sequential execution for small workloads
+            for b in 0..batch_size {
+                for c in 0..channels {
+                    let input_channel = input_array.slice(s![b, c, .., ..]);
+                    let kernel = self.weights.slice(s![c, 0, .., ..]);
+                    let result = Self::convolve_channel(
+                        &input_channel,
+                        &kernel,
+                        self.bias[c],
+                        (output_height, output_width),
+                        self.strides,
+                        self.kernel_size,
+                        &self.padding,
+                        pad_h,
+                        pad_w,
+                    );
+                    output.slice_mut(s![b, c, .., ..]).assign(&result);
+                }
+            }
+        }
+
+        let output = output.into_dyn();
+
+        // Apply activation
+        let activated = self.activation.forward(&output)?;
+        Ok(activated)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Apply activation backward pass
-        let grad_upstream = self.activation.backward(grad_output)?;
+        let activated = self.output_cache.take().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run".to_string())
+        })?;
+        let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         let input = self.input.as_ref().ok_or_else(|| {
             ModelError::ProcessingError("Forward pass has not been run".to_string())
@@ -588,132 +700,30 @@ impl<T: ActivationLayer> Layer for DepthwiseConv2D<T> {
         TrainingParameters::Trainable(self.weights.len() + self.bias.len())
     }
 
-    update_sgd_conv!();
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        if let (Some(weight_grads), Some(bias_grads)) =
-            (&self.weight_gradients, &self.bias_gradients)
-        {
-            // Initialize Adam state (if not already initialized)
-            if self.optimizer_cache.adam_states.is_none() {
-                self.optimizer_cache.adam_states = Some(AdamStatesConv2D {
-                    m: Array4::zeros(self.weights.raw_dim()),
-                    v: Array4::zeros(self.weights.raw_dim()),
-                    m_bias: Array2::zeros((1, self.bias.len())),
-                    v_bias: Array2::zeros((1, self.bias.len())),
-                });
-            }
-
-            if let Some(ref mut adam_states) = self.optimizer_cache.adam_states {
-                // Calculate bias correction factors
-                let bias_correction1 = 1.0 - beta1.powi(t as i32);
-                let bias_correction2 = 1.0 - beta2.powi(t as i32);
-
-                // Update weights
-                if let (Some(weights_slice), Some(grads_slice), Some(m_slice), Some(v_slice)) = (
-                    self.weights.as_slice_mut(),
-                    weight_grads.as_slice(),
-                    adam_states.m.as_slice_mut(),
-                    adam_states.v.as_slice_mut(),
-                ) {
-                    update_adam_conv(
-                        weights_slice,
-                        grads_slice,
-                        m_slice,
-                        v_slice,
-                        lr,
-                        beta1,
-                        beta2,
-                        epsilon,
-                        bias_correction1,
-                        bias_correction2,
-                    );
-                }
-
-                // Update bias
-                if let (
-                    Some(bias_slice),
-                    Some(bias_grads_slice),
-                    Some(m_bias_slice),
-                    Some(v_bias_slice),
-                ) = (
-                    self.bias.as_slice_mut(),
-                    bias_grads.as_slice(),
-                    adam_states.m_bias.as_slice_mut(),
-                    adam_states.v_bias.as_slice_mut(),
-                ) {
-                    update_adam_conv(
-                        bias_slice,
-                        bias_grads_slice,
-                        m_bias_slice,
-                        v_bias_slice,
-                        lr,
-                        beta1,
-                        beta2,
-                        epsilon,
-                        bias_correction1,
-                        bias_correction2,
-                    );
-                }
-            }
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            weights,
+            bias,
+            weight_gradients,
+            bias_gradients,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        if let (Some(grad_a), Some(grad_b)) = (weight_gradients.as_ref(), bias_gradients.as_ref()) {
+            params.push(ParamGrad {
+                value: weights.as_slice_mut().expect("weights must be contiguous"),
+                grad: grad_a
+                    .as_slice()
+                    .expect("weight_gradients must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: bias.as_slice_mut().expect("bias must be contiguous"),
+                grad: grad_b
+                    .as_slice()
+                    .expect("bias_gradients must be contiguous"),
+            });
         }
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        if let (Some(weight_grads), Some(bias_grads)) =
-            (&self.weight_gradients, &self.bias_gradients)
-        {
-            // Initialize RMSprop cache (if not already initialized)
-            if self.optimizer_cache.rmsprop_cache.is_none() {
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv2D {
-                    cache: Array4::zeros(self.weights.raw_dim()),
-                    bias: Array2::zeros((1, self.bias.len())),
-                });
-            }
-
-            if let Some(ref mut rmsprop_cache) = self.optimizer_cache.rmsprop_cache {
-                // Update weights
-                if let (Some(weights_slice), Some(grads_slice), Some(cache_slice)) = (
-                    self.weights.as_slice_mut(),
-                    weight_grads.as_slice(),
-                    rmsprop_cache.cache.as_slice_mut(),
-                ) {
-                    update_rmsprop(weights_slice, grads_slice, cache_slice, rho, epsilon, lr);
-                }
-
-                // Update bias
-                if let (Some(bias_slice), Some(bias_grads_slice), Some(bias_cache_slice)) = (
-                    self.bias.as_slice_mut(),
-                    bias_grads.as_slice(),
-                    rmsprop_cache.bias.as_slice_mut(),
-                ) {
-                    update_rmsprop(
-                        bias_slice,
-                        bias_grads_slice,
-                        bias_cache_slice,
-                        rho,
-                        epsilon,
-                        lr,
-                    );
-                }
-            }
-        }
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        if let (Some(weight_gradients), Some(bias_gradients)) =
-            (&self.weight_gradients, &self.bias_gradients)
-        {
-            // Initialize AdaGrad cache (if not already initialized)
-            if self.optimizer_cache.ada_grad_cache.is_none() {
-                self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv2D {
-                    accumulator: Array4::zeros(self.weights.dim()),
-                    accumulator_bias: Array2::zeros((1, self.bias.len())),
-                });
-            }
-
-            update_adagrad_conv!(self, weight_gradients, bias_gradients, lr, epsilon);
-        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

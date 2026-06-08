@@ -1,3 +1,69 @@
+use crate::neural_network::Tensor;
+use std::borrow::Cow;
+
+/// Returns the axis permutation that moves `channel_axis` to position 1 (channels-first), keeping
+/// the batch axis at 0 and the spatial axes in their original relative order.
+///
+/// Instance/Group normalization is layout-equivariant: normalizing a tensor with the channel at
+/// `channel_axis` is identical to permuting it channels-first, normalizing, and permuting back. The
+/// channels-first numeric cores assume contiguous `[batch, channel, spatial...]` layout, so the
+/// public methods bracket them with [`to_channels_first`] / [`from_channels_first`].
+fn channels_first_perm(ndim: usize, channel_axis: usize) -> Vec<usize> {
+    let mut perm = Vec::with_capacity(ndim);
+    perm.push(0);
+    perm.push(channel_axis);
+    perm.extend((1..ndim).filter(|&ax| ax != channel_axis));
+    perm
+}
+
+/// Permutes `input` so the channel axis sits at position 1, returning a contiguous owned array.
+/// For `channel_axis == 1` the input is borrowed unchanged (no copy — the common fast path).
+pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, Tensor> {
+    if channel_axis == 1 {
+        Cow::Borrowed(input)
+    } else {
+        let perm = channels_first_perm(input.ndim(), channel_axis);
+        Cow::Owned(input.view().permuted_axes(perm).as_standard_layout().to_owned())
+    }
+}
+
+/// Inverse of [`to_channels_first`]: moves the channel axis from position 1 back to `channel_axis`,
+/// returning a contiguous owned array. A no-op for `channel_axis == 1`.
+pub(super) fn from_channels_first(output_cf: Tensor, channel_axis: usize) -> Tensor {
+    if channel_axis == 1 {
+        return output_cf;
+    }
+    let ndim = output_cf.ndim();
+    let fwd = channels_first_perm(ndim, channel_axis);
+    // Invert the forward permutation: position `new_pos` in the channels-first array came from
+    // original axis `old_ax`, so the original axis `old_ax` must read from `new_pos`.
+    let mut inv = vec![0usize; ndim];
+    for (new_pos, &old_ax) in fwd.iter().enumerate() {
+        inv[old_ax] = new_pos;
+    }
+    output_cf
+        .view()
+        .permuted_axes(inv)
+        .as_standard_layout()
+        .to_owned()
+}
+
+/// Batch Normalization layer for neural networks
+pub mod batch_normalization;
+/// Group Normalization layer for neural networks
+pub mod group_normalization;
+/// Instance Normalization layer for neural networks
+pub mod instance_normalization;
+/// Layer Normalization layer for neural networks
+pub mod layer_normalization;
+
+pub use batch_normalization::BatchNormalization;
+pub use group_normalization::GroupNormalization;
+pub use instance_normalization::InstanceNormalization;
+pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
+
+// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
+// so callers import them explicitly rather than relying on textual macro ordering.
 /// Common implementation for `output_shape` method in normalization layers
 macro_rules! normalization_layer_output_shape {
     ($self:expr) => {
@@ -15,138 +81,6 @@ macro_rules! normalization_layer_output_shape {
             String::from("Unknown")
         }
     };
-}
-
-/// Common implementation for `update_parameters_sgd` method in normalization layers
-macro_rules! normalization_layer_update_parameters_sgd {
-    ($self:expr, $lr:expr) => {{
-        if let Some(grad_gamma) = &$self.grad_gamma {
-            $self.gamma = &$self.gamma - &(grad_gamma * $lr);
-        }
-        if let Some(grad_beta) = &$self.grad_beta {
-            $self.beta = &$self.beta - &(grad_beta * $lr);
-        }
-    }};
-}
-
-/// Common implementation for `update_parameters_adam` method in normalization layers
-macro_rules! normalization_layer_update_parameters_adam {
-    ($self:expr, $lr:expr, $beta1:expr, $beta2:expr, $epsilon:expr, $t:expr) => {{
-        // Initialize moment estimates if not already done
-        if $self.optimizer_cache.adam_states.is_none() {
-            $self.optimizer_cache.adam_states = Some(AdamStatesNormalizationLayer {
-                m_gamma: Tensor::zeros($self.gamma.raw_dim()),
-                v_gamma: Tensor::zeros($self.gamma.raw_dim()),
-                m_beta: Tensor::zeros($self.beta.raw_dim()),
-                v_beta: Tensor::zeros($self.beta.raw_dim()),
-            });
-        }
-
-        if let Some(grad_gamma) = &$self.grad_gamma {
-            let adam_states = $self.optimizer_cache.adam_states.as_mut().unwrap();
-            let m_gamma = &mut adam_states.m_gamma;
-            let v_gamma = &mut adam_states.v_gamma;
-
-            // Update biased first moment estimate
-            *m_gamma = m_gamma.clone() * $beta1 + grad_gamma * (1.0 - $beta1);
-
-            // Update biased second raw moment estimate
-            *v_gamma = v_gamma.clone() * $beta2 + &(grad_gamma * grad_gamma) * (1.0 - $beta2);
-
-            // Compute bias-corrected first moment estimate
-            let m_hat = m_gamma.clone() / (1.0 - $beta1.powi($t as i32));
-
-            // Compute bias-corrected second raw moment estimate
-            let v_hat = v_gamma.clone() / (1.0 - $beta2.powi($t as i32));
-
-            // Update parameters
-            $self.gamma = &$self.gamma - &(&m_hat / &(v_hat.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-
-        if let Some(grad_beta) = &$self.grad_beta {
-            let adam_states = $self.optimizer_cache.adam_states.as_mut().unwrap();
-            let m_beta = &mut adam_states.m_beta;
-            let v_beta = &mut adam_states.v_beta;
-
-            *m_beta = m_beta.clone() * $beta1 + grad_beta * (1.0 - $beta1);
-            *v_beta = v_beta.clone() * $beta2 + &(grad_beta * grad_beta) * (1.0 - $beta2);
-
-            let m_hat = m_beta.clone() / (1.0 - $beta1.powi($t as i32));
-            let v_hat = v_beta.clone() / (1.0 - $beta2.powi($t as i32));
-
-            $self.beta = &$self.beta - &(&m_hat / &(v_hat.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-    }};
-}
-
-/// Common implementation for `update_parameters_rmsprop` method in normalization layers
-macro_rules! normalization_layer_update_parameters_rmsprop {
-    ($self:expr, $lr:expr, $rho:expr, $epsilon:expr) => {{
-        // Initialize cache if not already done
-        if $self.optimizer_cache.rmsprop_cache.is_none() {
-            $self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheNormalizationLayer {
-                cache_gamma: Tensor::zeros($self.gamma.raw_dim()),
-                cache_beta: Tensor::zeros($self.beta.raw_dim()),
-            });
-        }
-
-        if let Some(grad_gamma) = &$self.grad_gamma {
-            let rmsprop_cache = $self.optimizer_cache.rmsprop_cache.as_mut().unwrap();
-            let cache_gamma = &mut rmsprop_cache.cache_gamma;
-
-            // Update cache
-            *cache_gamma = cache_gamma.clone() * $rho + &(grad_gamma * grad_gamma) * (1.0 - $rho);
-
-            // Update parameters
-            $self.gamma =
-                &$self.gamma - &(grad_gamma / &(cache_gamma.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-
-        if let Some(grad_beta) = &$self.grad_beta {
-            let rmsprop_cache = $self.optimizer_cache.rmsprop_cache.as_mut().unwrap();
-            let cache_beta = &mut rmsprop_cache.cache_beta;
-
-            *cache_beta = cache_beta.clone() * $rho + &(grad_beta * grad_beta) * (1.0 - $rho);
-
-            $self.beta =
-                &$self.beta - &(grad_beta / &(cache_beta.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-    }};
-}
-
-/// Common implementation for `update_parameters_ada_grad` method in normalization layers
-macro_rules! normalization_layer_update_parameters_ada_grad {
-    ($self:expr, $lr:expr, $epsilon:expr) => {{
-        // Initialize accumulated gradient if not already done
-        if $self.optimizer_cache.ada_grad_cache.is_none() {
-            $self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesNormalizationLayer {
-                acc_grad_gamma: Tensor::zeros($self.gamma.raw_dim()),
-                acc_grad_beta: Tensor::zeros($self.beta.raw_dim()),
-            });
-        }
-
-        if let Some(grad_gamma) = &$self.grad_gamma {
-            let ada_grad_cache = $self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
-            let acc_grad_gamma = &mut ada_grad_cache.acc_grad_gamma;
-
-            // Accumulate squared gradients
-            *acc_grad_gamma = acc_grad_gamma.clone() + &(grad_gamma * grad_gamma);
-
-            // Update parameters
-            $self.gamma = &$self.gamma
-                - &(grad_gamma / &(acc_grad_gamma.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-
-        if let Some(grad_beta) = &$self.grad_beta {
-            let ada_grad_cache = $self.optimizer_cache.ada_grad_cache.as_mut().unwrap();
-            let acc_grad_beta = &mut ada_grad_cache.acc_grad_beta;
-
-            *acc_grad_beta = acc_grad_beta.clone() + &(grad_beta * grad_beta);
-
-            $self.beta =
-                &$self.beta - &(grad_beta / &(acc_grad_beta.mapv(|x| x.sqrt()) + $epsilon) * $lr);
-        }
-    }};
 }
 
 /// Common implementation for computing gamma and beta gradients in normalization layers
@@ -233,17 +167,5 @@ macro_rules! compute_normalization_layer_parameter_gradients {
         }
     }};
 }
-
-/// Batch Normalization layer for neural networks
-pub mod batch_normalization;
-/// Group Normalization layer for neural networks
-pub mod group_normalization;
-/// Instance Normalization layer for neural networks
-pub mod instance_normalization;
-/// Layer Normalization layer for neural networks
-pub mod layer_normalization;
-
-pub use batch_normalization::BatchNormalization;
-pub use group_normalization::GroupNormalization;
-pub use instance_normalization::InstanceNormalization;
-pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
+pub(in crate::neural_network::layer::regularization_layer::normalization_layer) use normalization_layer_output_shape;
+pub(in crate::neural_network::layer::regularization_layer::normalization_layer) use compute_normalization_layer_parameter_gradients;

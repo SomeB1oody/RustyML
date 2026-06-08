@@ -1,3 +1,19 @@
+/// Dropout layers for neural networks
+pub mod dropout_layer;
+/// Input validation functions for regularization layers
+mod validation;
+/// Noise injection layers for neural networks
+pub mod noise_injection_layer;
+/// Normalization layers for neural networks
+pub mod normalization_layer;
+
+pub use dropout_layer::*;
+pub use noise_injection_layer::*;
+pub use normalization_layer::*;
+
+// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export, so callers
+// import them explicitly rather than relying on textual macro ordering.
+
 /// A macro to define a layer-specific method for setting the training mode.
 ///
 /// This macro generates a `set_training` method within the implementing object
@@ -23,6 +39,7 @@ macro_rules! mode_dependent_layer_set_training {
         }
     };
 }
+pub(in crate::neural_network::layer::regularization_layer) use mode_dependent_layer_set_training;
 
 /// A macro that defines a method `set_training_if_mode_dependent` for a layer that may have
 /// behavior dependent on whether it is in training or inference mode.
@@ -33,16 +50,4 @@ macro_rules! mode_dependent_layer_trait {
         }
     };
 }
-
-/// Dropout layers for neural networks
-pub mod dropout_layer;
-/// Input validation functions for regularization layers
-mod input_validation_function;
-/// Noise injection layers for neural networks
-pub mod noise_injection_layer;
-/// Normalization layers for neural networks
-pub mod normalization_layer;
-
-pub use dropout_layer::*;
-pub use noise_injection_layer::*;
-pub use normalization_layer::*;
+pub(in crate::neural_network::layer::regularization_layer) use mode_dependent_layer_trait;

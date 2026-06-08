@@ -20,20 +20,25 @@ fn test_get_weights() {
 
     // Get all layer weights
     let weights = model.get_weights();
+    assert_eq!(weights.len(), 2);
 
-    // Examine the weights of the first layer (Dense layer)
-    if let LayerWeight::Dense(dense_weights) = &weights[0] {
-        println!("Dense layer weights: {:?}", dense_weights.weight);
-        println!("Dense layer bias: {:?}", dense_weights.bias);
+    // First layer is Dense(4 -> 3): weight (4, 3), bias (1, 3). `match` (not a bare `if let`)
+    // so a wrong variant fails the test instead of silently passing.
+    match &weights[0] {
+        LayerWeight::Dense(dense_weights) => {
+            assert_eq!(dense_weights.weight.shape(), &[4, 3]);
+            assert_eq!(dense_weights.bias.shape(), &[1, 3]);
+        }
+        _ => panic!("expected Dense weights for layer 0"),
     }
 
-    // Examine the weights of the second layer (SimpleRNN layer)
-    if let LayerWeight::SimpleRNN(rnn_weights) = &weights[1] {
-        println!("SimpleRNN layer input weights: {:?}", rnn_weights.kernel);
-        println!(
-            "SimpleRNN layer recurrent weights: {:?}",
-            rnn_weights.recurrent_kernel
-        );
-        println!("SimpleRNN layer bias: {:?}", rnn_weights.bias);
+    // Second layer is SimpleRNN(3 -> 2): kernel (3, 2), recurrent (2, 2), bias (1, 2).
+    match &weights[1] {
+        LayerWeight::SimpleRNN(rnn_weights) => {
+            assert_eq!(rnn_weights.kernel.shape(), &[3, 2]);
+            assert_eq!(rnn_weights.recurrent_kernel.shape(), &[2, 2]);
+            assert_eq!(rnn_weights.bias.shape(), &[1, 2]);
+        }
+        _ => panic!("expected SimpleRNN weights for layer 1"),
     }
 }

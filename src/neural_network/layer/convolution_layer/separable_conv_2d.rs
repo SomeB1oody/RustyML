@@ -1,27 +1,20 @@
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::activation_layer::Activation;
 use crate::neural_network::layer::convolution_layer::PaddingType;
-use crate::neural_network::layer::convolution_layer::input_validation_function::{
+use crate::neural_network::layer::convolution_layer::validation::{
     validate_depth_multiplier, validate_filters, validate_input_shape_2d, validate_kernel_size_2d,
     validate_strides_2d,
 };
-use crate::neural_network::layer::helper_function::{
-    calculate_output_height_and_weight, compute_row_gradient_sum, merge_results, update_adam_conv,
-    update_rmsprop,
-};
+use crate::neural_network::layer::conv_op_helpers::{compute_row_gradient_sum, merge_results};
+use crate::neural_network::layer::shape_helpers::calculate_output_height_and_weight;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{LayerWeight, SeparableConv2DLayerWeight};
-use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use crate::neural_network::optimizer::OptimizerCacheConv2D;
-use crate::neural_network::optimizer::ada_grad::AdaGradStatesConv2D;
-use crate::neural_network::optimizer::adam::AdamStatesConv2D;
-use crate::neural_network::optimizer::rms_prop::RMSpropCacheConv2D;
-use ndarray::{Array2, Array3, Array4, ArrayD};
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
+use ndarray::{Array2, Array3, Array4, ArrayD, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Threshold for deciding between parallel and sequential execution.
 /// When `batch_size * output_channels * output_height * output_width >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD`,
@@ -57,7 +50,6 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 /// - `depthwise_weight_gradients` - Gradients for the depthwise weights.
 /// - `pointwise_weight_gradients` - Gradients for the pointwise weights.
 /// - `bias_gradients` - Gradients for the biases.
-/// - `optimizer_cache` - Cache for optimizer-specific state.
 ///
 /// # Examples
 /// ```rust
@@ -83,14 +75,14 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 ///         (1, 1),                      // Stride
 ///         PaddingType::Same,           // Same padding
 ///         1,                           // Depth multiplier
-///         ReLU::new(), // ReLU activation layer
+///         Activation::ReLU, // ReLU activation
 ///     ).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
 /// ```
-pub struct SeparableConv2D<T: ActivationLayer> {
+pub struct SeparableConv2D {
     filters: usize,
     kernel_size: (usize, usize),
     strides: (usize, usize),
@@ -99,17 +91,17 @@ pub struct SeparableConv2D<T: ActivationLayer> {
     depthwise_weights: Array4<f32>,
     pointwise_weights: Array4<f32>,
     bias: Array2<f32>,
-    activation: T,
+    activation: Activation,
+    output_cache: Option<Tensor>,
     input_cache: Option<Tensor>,
     depthwise_output_cache: Option<Tensor>,
     input_shape: Vec<usize>,
     depthwise_weight_gradients: Option<Array4<f32>>,
     pointwise_weight_gradients: Option<Array4<f32>>,
     bias_gradients: Option<Array2<f32>>,
-    optimizer_cache: OptimizerCacheConv2D,
 }
 
-impl<T: ActivationLayer> SeparableConv2D<T> {
+impl SeparableConv2D {
     /// Creates a new 2D separable convolutional layer with the specified parameters.
     ///
     /// Weights are initialized using Xavier (Glorot) uniform initialization.
@@ -143,7 +135,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         strides: (usize, usize),
         padding: PaddingType,
         depth_multiplier: usize,
-        activation: T,
+        activation: impl Into<Activation>,
     ) -> Result<Self, ModelError> {
         // Validate input parameters
         validate_filters(filters)?;
@@ -188,18 +180,14 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
             depthwise_weights,
             pointwise_weights,
             bias,
-            activation,
+            activation: activation.into(),
+            output_cache: None,
             input_cache: None,
             depthwise_output_cache: None,
             input_shape,
             depthwise_weight_gradients: None,
             pointwise_weight_gradients: None,
             bias_gradients: None,
-            optimizer_cache: OptimizerCacheConv2D {
-                adam_states: None,
-                rmsprop_cache: None,
-                ada_grad_cache: None,
-            },
         })
     }
 
@@ -246,7 +234,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         };
 
         // Use merge_results function to combine batch results
-        merge_results(output_shape, results, channels * self.depth_multiplier)
+        merge_results(output_shape, results)
     }
 
     /// Computes depthwise convolution for a single batch.
@@ -324,7 +312,7 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         };
 
         // Use merge_results function to combine batch results
-        merge_results(output_shape, results, self.filters)
+        merge_results(output_shape, results)
     }
 
     /// Computes pointwise convolution for a single batch.
@@ -389,14 +377,26 @@ impl<T: ActivationLayer> SeparableConv2D<T> {
         depthwise_weights: Array4<f32>,
         pointwise_weights: Array4<f32>,
         bias: Array2<f32>,
-    ) {
+    ) -> Result<(), ModelError> {
+        validate_weight_shape(
+            "depthwise_weight",
+            self.depthwise_weights.shape(),
+            depthwise_weights.shape(),
+        )?;
+        validate_weight_shape(
+            "pointwise_weight",
+            self.pointwise_weights.shape(),
+            pointwise_weights.shape(),
+        )?;
+        validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.depthwise_weights = depthwise_weights;
         self.pointwise_weights = pointwise_weights;
         self.bias = bias;
+        Ok(())
     }
 }
 
-impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
+impl Layer for SeparableConv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
         // Validate input is 4D tensor
         if input.ndim() != 4 {
@@ -419,12 +419,37 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
         self.depthwise_output_cache = Some(depthwise_output);
 
         // Apply activation
-        self.activation.forward(&output.into_dyn())
+        let activated = self.activation.forward(&output.into_dyn())?;
+        self.output_cache = Some(activated.clone());
+        Ok(activated)
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 4D tensor
+        if input.ndim() != 4 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 4D".to_string(),
+            ));
+        }
+
+        // Step 1: Depthwise convolution - each input channel convolved independently
+        let depthwise_output = self.depthwise_convolve(input);
+
+        // Step 2: Pointwise convolution (1x1) - combines depthwise outputs
+        let output = self.pointwise_convolve(&depthwise_output);
+
+        // Apply activation
+        let activated = self.activation.forward(&output.into_dyn())?;
+        Ok(activated)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         // Apply activation backward pass
-        let grad_upstream = self.activation.backward(grad_output)?;
+        let activated = self.output_cache.take().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run".to_string())
+        })?;
+        let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         if let (Some(input), Some(depthwise_output)) =
             (&self.input_cache, &self.depthwise_output_cache)
@@ -433,6 +458,7 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
             let batch_size = input_shape[0];
             let channels = input_shape[1];
             let depthwise_shape = depthwise_output.shape();
+            let grad_shape = grad_output.shape();
 
             let gradient = grad_upstream;
 
@@ -441,122 +467,141 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
             let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());
             let mut bias_grads = Array2::zeros((1, self.filters));
 
-            // Calculate bias gradients
-            for f in 0..self.filters {
-                let mut sum = 0.0;
-                for b in 0..batch_size {
-                    for i in 0..grad_output.shape()[2] {
-                        for j in 0..grad_output.shape()[3] {
-                            sum += gradient[[b, f, i, j]];
-                        }
-                    }
-                }
-                bias_grads[[0, f]] = sum;
-            }
+            // Each gradient below is parallelized over an axis whose entries are written
+            // independently (disjoint mutable sub-views), so the parallel result is identical to
+            // the sequential one. The forward pass is already parallel; this stops the backward
+            // pass from being a serial bottleneck.
 
-            // Calculate pointwise weight gradients
-            for f in 0..self.filters {
-                for c in 0..depthwise_shape[1] {
+            // Bias gradients: one independent sum per output filter.
+            bias_grads
+                .axis_iter_mut(Axis(1))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(f, mut bias)| {
                     let mut sum = 0.0;
                     for b in 0..batch_size {
-                        for i in 0..depthwise_shape[2] {
-                            for j in 0..depthwise_shape[3] {
-                                sum += gradient[[b, f, i, j]] * depthwise_output[[b, c, i, j]];
+                        for i in 0..grad_shape[2] {
+                            for j in 0..grad_shape[3] {
+                                sum += gradient[[b, f, i, j]];
                             }
                         }
                     }
-                    pointwise_weight_grads[[f, c, 0, 0]] = sum;
-                }
-            }
+                    *bias.first_mut().unwrap() = sum;
+                });
 
-            // Calculate gradients w.r.t. depthwise output
-            let mut depthwise_grad = ArrayD::zeros(depthwise_output.dim());
-            for b in 0..batch_size {
-                for c in 0..depthwise_shape[1] {
-                    for i in 0..depthwise_shape[2] {
-                        for j in 0..depthwise_shape[3] {
-                            let mut sum = 0.0;
-                            for f in 0..self.filters {
-                                sum +=
-                                    gradient[[b, f, i, j]] * self.pointwise_weights[[f, c, 0, 0]];
-                            }
-                            depthwise_grad[[b, c, i, j]] = sum;
-                        }
-                    }
-                }
-            }
-
-            // Calculate depthwise weight gradients
-            for m in 0..self.depth_multiplier {
-                for c in 0..channels {
-                    for h in 0..self.kernel_size.0 {
-                        for w in 0..self.kernel_size.1 {
-                            let mut sum = 0.0;
-                            let output_channel = c * self.depth_multiplier + m;
-
-                            // 在 depthwise weight gradients 计算中替换 j 循环
-                            for b in 0..batch_size {
-                                for i in 0..depthwise_shape[2] {
-                                    let i_pos = i * self.strides.0 + h;
-                                    if i_pos < input_shape[2] {
-                                        sum += compute_row_gradient_sum(
-                                            &depthwise_grad,
-                                            input,
-                                            b,
-                                            output_channel,
-                                            c,
-                                            i,
-                                            i_pos,
-                                            w,
-                                            depthwise_shape,
-                                            input_shape,
-                                            self.strides.1,
-                                        );
-                                    }
+            // Pointwise weight gradients: parallel over output filters.
+            pointwise_weight_grads
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(f, mut pw_grad)| {
+                    for c in 0..depthwise_shape[1] {
+                        let mut sum = 0.0;
+                        for b in 0..batch_size {
+                            for i in 0..depthwise_shape[2] {
+                                for j in 0..depthwise_shape[3] {
+                                    sum += gradient[[b, f, i, j]] * depthwise_output[[b, c, i, j]];
                                 }
                             }
-                            depthwise_weight_grads[[m, c, h, w]] = sum;
+                        }
+                        pw_grad[[c, 0, 0]] = sum;
+                    }
+                });
+
+            // Gradient w.r.t. the depthwise output: parallel over the batch axis.
+            let mut depthwise_grad = ArrayD::zeros(depthwise_output.dim());
+            depthwise_grad
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut dw_grad_b)| {
+                    for c in 0..depthwise_shape[1] {
+                        for i in 0..depthwise_shape[2] {
+                            for j in 0..depthwise_shape[3] {
+                                let mut sum = 0.0;
+                                for f in 0..self.filters {
+                                    sum += gradient[[b, f, i, j]]
+                                        * self.pointwise_weights[[f, c, 0, 0]];
+                                }
+                                dw_grad_b[[c, i, j]] = sum;
+                            }
                         }
                     }
-                }
-            }
+                });
 
-            // Calculate input gradients
-            let mut input_gradients = ArrayD::zeros(input.dim());
-            for b in 0..batch_size {
-                for c in 0..channels {
-                    for i in 0..input_shape[2] {
-                        for j in 0..input_shape[3] {
-                            let mut sum = 0.0;
-
-                            for m in 0..self.depth_multiplier {
+            // Depthwise weight gradients: parallel over the depth-multiplier axis.
+            depthwise_weight_grads
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(m, mut dw_wgrad_m)| {
+                    for c in 0..channels {
+                        for h in 0..self.kernel_size.0 {
+                            for w in 0..self.kernel_size.1 {
+                                let mut sum = 0.0;
                                 let output_channel = c * self.depth_multiplier + m;
+                                for b in 0..batch_size {
+                                    for i in 0..depthwise_shape[2] {
+                                        let i_pos = i * self.strides.0 + h;
+                                        if i_pos < input_shape[2] {
+                                            sum += compute_row_gradient_sum(
+                                                &depthwise_grad,
+                                                input,
+                                                b,
+                                                output_channel,
+                                                c,
+                                                i,
+                                                i_pos,
+                                                w,
+                                                depthwise_shape,
+                                                input_shape,
+                                                self.strides.1,
+                                            );
+                                        }
+                                    }
+                                }
+                                dw_wgrad_m[[c, h, w]] = sum;
+                            }
+                        }
+                    }
+                });
 
-                                for h in 0..self.kernel_size.0 {
-                                    for w in 0..self.kernel_size.1 {
-                                        if i >= h && j >= w {
-                                            let grad_i = (i - h) / self.strides.0;
-                                            let grad_j = (j - w) / self.strides.1;
-
-                                            if grad_i < depthwise_shape[2]
-                                                && grad_j < depthwise_shape[3]
-                                                && (i - h) % self.strides.0 == 0
-                                                && (j - w) % self.strides.1 == 0
-                                            {
-                                                sum += depthwise_grad
-                                                    [[b, output_channel, grad_i, grad_j]]
-                                                    * self.depthwise_weights[[m, c, h, w]];
+            // Input gradients: parallel over the batch axis.
+            let mut input_gradients = ArrayD::zeros(input.dim());
+            input_gradients
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut in_grad_b)| {
+                    for c in 0..channels {
+                        for i in 0..input_shape[2] {
+                            for j in 0..input_shape[3] {
+                                let mut sum = 0.0;
+                                for m in 0..self.depth_multiplier {
+                                    let output_channel = c * self.depth_multiplier + m;
+                                    for h in 0..self.kernel_size.0 {
+                                        for w in 0..self.kernel_size.1 {
+                                            if i >= h && j >= w {
+                                                let grad_i = (i - h) / self.strides.0;
+                                                let grad_j = (j - w) / self.strides.1;
+                                                if grad_i < depthwise_shape[2]
+                                                    && grad_j < depthwise_shape[3]
+                                                    && (i - h) % self.strides.0 == 0
+                                                    && (j - w) % self.strides.1 == 0
+                                                {
+                                                    sum += depthwise_grad
+                                                        [[b, output_channel, grad_i, grad_j]]
+                                                        * self.depthwise_weights[[m, c, h, w]];
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                in_grad_b[[c, i, j]] = sum;
                             }
-
-                            input_gradients[[b, c, i, j]] = sum;
                         }
                     }
-                }
-            }
+                });
 
             // Store gradients
             self.depthwise_weight_gradients = Some(depthwise_weight_grads);
@@ -589,329 +634,44 @@ impl<T: ActivationLayer> Layer for SeparableConv2D<T> {
         )
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
-        if let (Some(depthwise_grads), Some(pointwise_grads), Some(bias_grads)) = (
-            &self.depthwise_weight_gradients,
-            &self.pointwise_weight_gradients,
-            &self.bias_gradients,
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            depthwise_weights,
+            pointwise_weights,
+            bias,
+            depthwise_weight_gradients,
+            pointwise_weight_gradients,
+            bias_gradients,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        if let (Some(gd), Some(gp), Some(gb)) = (
+            depthwise_weight_gradients.as_ref(),
+            pointwise_weight_gradients.as_ref(),
+            bias_gradients.as_ref(),
         ) {
-            // Update depthwise weights
-            if let (Some(weights_slice), Some(grads_slice)) = (
-                self.depthwise_weights.as_slice_mut(),
-                depthwise_grads.as_slice(),
-            ) {
-                weights_slice
-                    .par_iter_mut()
-                    .zip(grads_slice.par_iter())
-                    .for_each(|(weight, &grad)| {
-                        *weight -= lr * grad;
-                    });
-            }
-
-            // Update pointwise weights
-            if let (Some(weights_slice), Some(grads_slice)) = (
-                self.pointwise_weights.as_slice_mut(),
-                pointwise_grads.as_slice(),
-            ) {
-                weights_slice
-                    .par_iter_mut()
-                    .zip(grads_slice.par_iter())
-                    .for_each(|(weight, &grad)| {
-                        *weight -= lr * grad;
-                    });
-            }
-
-            // Update biases
-            if let (Some(bias_slice), Some(bias_grads_slice)) =
-                (self.bias.as_slice_mut(), bias_grads.as_slice())
-            {
-                bias_slice
-                    .par_iter_mut()
-                    .zip(bias_grads_slice.par_iter())
-                    .for_each(|(bias, &grad)| {
-                        *bias -= lr * grad;
-                    });
-            }
+            params.push(ParamGrad {
+                value: depthwise_weights
+                    .as_slice_mut()
+                    .expect("depthwise weights must be contiguous"),
+                grad: gd
+                    .as_slice()
+                    .expect("depthwise weight gradient must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: pointwise_weights
+                    .as_slice_mut()
+                    .expect("pointwise weights must be contiguous"),
+                grad: gp
+                    .as_slice()
+                    .expect("pointwise weight gradient must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: bias.as_slice_mut().expect("bias must be contiguous"),
+                grad: gb.as_slice().expect("bias gradient must be contiguous"),
+            });
         }
-    }
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        if let (Some(depthwise_grads), Some(pointwise_grads), Some(bias_grads)) = (
-            &self.depthwise_weight_gradients,
-            &self.pointwise_weight_gradients,
-            &self.bias_gradients,
-        ) {
-            // Initialize Adam states if needed
-            if self.optimizer_cache.adam_states.is_none() {
-                let total_depthwise_params = self.depthwise_weights.len();
-                let total_pointwise_params = self.pointwise_weights.len();
-                let total_params = total_depthwise_params + total_pointwise_params;
-
-                self.optimizer_cache.adam_states = Some(AdamStatesConv2D {
-                    m: Array4::zeros((total_params, 1, 1, 1)),
-                    v: Array4::zeros((total_params, 1, 1, 1)),
-                    m_bias: Array2::zeros(self.bias.dim()),
-                    v_bias: Array2::zeros(self.bias.dim()),
-                });
-            }
-
-            let correction1 = 1.0 - beta1.powi(t as i32);
-            let correction2 = 1.0 - beta2.powi(t as i32);
-
-            if let Some(adam_states) = &mut self.optimizer_cache.adam_states {
-                let depthwise_len = self.depthwise_weights.len();
-                let pointwise_len = self.pointwise_weights.len();
-
-                // Update depthwise weights
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.depthwise_weights.as_slice_mut(),
-                    depthwise_grads.as_slice(),
-                ) {
-                    if let (Some(m_full_slice), Some(v_full_slice)) =
-                        (adam_states.m.as_slice_mut(), adam_states.v.as_slice_mut())
-                    {
-                        if let (Some(m_slice), Some(v_slice)) = (
-                            m_full_slice.get_mut(..depthwise_len),
-                            v_full_slice.get_mut(..depthwise_len),
-                        ) {
-                            update_adam_conv(
-                                weights_slice,
-                                grads_slice,
-                                m_slice,
-                                v_slice,
-                                lr,
-                                beta1,
-                                beta2,
-                                epsilon,
-                                correction1,
-                                correction2,
-                            );
-                        }
-                    }
-                }
-
-                // Update pointwise weights
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.pointwise_weights.as_slice_mut(),
-                    pointwise_grads.as_slice(),
-                ) {
-                    if let (Some(m_full_slice), Some(v_full_slice)) =
-                        (adam_states.m.as_slice_mut(), adam_states.v.as_slice_mut())
-                    {
-                        if let (Some(m_slice), Some(v_slice)) = (
-                            m_full_slice.get_mut(depthwise_len..depthwise_len + pointwise_len),
-                            v_full_slice.get_mut(depthwise_len..depthwise_len + pointwise_len),
-                        ) {
-                            update_adam_conv(
-                                weights_slice,
-                                grads_slice,
-                                m_slice,
-                                v_slice,
-                                lr,
-                                beta1,
-                                beta2,
-                                epsilon,
-                                correction1,
-                                correction2,
-                            );
-                        }
-                    }
-                }
-
-                // Update biases
-                if let (
-                    Some(bias_slice),
-                    Some(bias_grads_slice),
-                    Some(m_bias_slice),
-                    Some(v_bias_slice),
-                ) = (
-                    self.bias.as_slice_mut(),
-                    bias_grads.as_slice(),
-                    adam_states.m_bias.as_slice_mut(),
-                    adam_states.v_bias.as_slice_mut(),
-                ) {
-                    update_adam_conv(
-                        bias_slice,
-                        bias_grads_slice,
-                        m_bias_slice,
-                        v_bias_slice,
-                        lr,
-                        beta1,
-                        beta2,
-                        epsilon,
-                        correction1,
-                        correction2,
-                    );
-                }
-            }
-        }
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        if let (Some(depthwise_grads), Some(pointwise_grads), Some(bias_grads)) = (
-            &self.depthwise_weight_gradients,
-            &self.pointwise_weight_gradients,
-            &self.bias_gradients,
-        ) {
-            // Initialize RMSprop cache if needed
-            if self.optimizer_cache.rmsprop_cache.is_none() {
-                let total_depthwise_params = self.depthwise_weights.len();
-                let total_pointwise_params = self.pointwise_weights.len();
-                let total_params = total_depthwise_params + total_pointwise_params;
-
-                self.optimizer_cache.rmsprop_cache = Some(RMSpropCacheConv2D {
-                    cache: Array4::zeros((total_params, 1, 1, 1)),
-                    bias: Array2::zeros(self.bias.dim()),
-                });
-            }
-
-            if let Some(rmsprop_cache) = &mut self.optimizer_cache.rmsprop_cache {
-                let depthwise_len = self.depthwise_weights.len();
-                let pointwise_len = self.pointwise_weights.len();
-
-                // Update depthwise weights
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.depthwise_weights.as_slice_mut(),
-                    depthwise_grads.as_slice(),
-                ) {
-                    if let Some(cache_full_slice) = rmsprop_cache.cache.as_slice_mut() {
-                        if let Some(cache_slice) = cache_full_slice.get_mut(..depthwise_len) {
-                            update_rmsprop(
-                                weights_slice,
-                                grads_slice,
-                                cache_slice,
-                                rho,
-                                epsilon,
-                                lr,
-                            );
-                        }
-                    }
-                }
-
-                // Update pointwise weights
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.pointwise_weights.as_slice_mut(),
-                    pointwise_grads.as_slice(),
-                ) {
-                    if let Some(cache_full_slice) = rmsprop_cache.cache.as_slice_mut() {
-                        if let Some(cache_slice) =
-                            cache_full_slice.get_mut(depthwise_len..depthwise_len + pointwise_len)
-                        {
-                            update_rmsprop(
-                                weights_slice,
-                                grads_slice,
-                                cache_slice,
-                                rho,
-                                epsilon,
-                                lr,
-                            );
-                        }
-                    }
-                }
-
-                // Update biases
-                if let (Some(bias_slice), Some(bias_grads_slice), Some(bias_cache_slice)) = (
-                    self.bias.as_slice_mut(),
-                    bias_grads.as_slice(),
-                    rmsprop_cache.bias.as_slice_mut(),
-                ) {
-                    update_rmsprop(
-                        bias_slice,
-                        bias_grads_slice,
-                        bias_cache_slice,
-                        rho,
-                        epsilon,
-                        lr,
-                    );
-                }
-            }
-        }
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        if let (
-            Some(depthwise_weight_gradients),
-            Some(pointwise_weight_gradients),
-            Some(bias_gradients),
-        ) = (
-            &self.depthwise_weight_gradients,
-            &self.pointwise_weight_gradients,
-            &self.bias_gradients,
-        ) {
-            // Initialize AdaGrad cache (if not already initialized)
-            if self.optimizer_cache.ada_grad_cache.is_none() {
-                let total_depthwise_params = self.depthwise_weights.len();
-                let total_pointwise_params = self.pointwise_weights.len();
-                let total_params = total_depthwise_params + total_pointwise_params;
-
-                self.optimizer_cache.ada_grad_cache = Some(AdaGradStatesConv2D {
-                    accumulator: Array4::zeros((total_params, 1, 1, 1)),
-                    accumulator_bias: Array2::zeros(self.bias.dim()),
-                });
-            }
-
-            if let Some(ada_grad_cache) = &mut self.optimizer_cache.ada_grad_cache {
-                let depthwise_len = self.depthwise_weights.len();
-                let pointwise_len = self.pointwise_weights.len();
-
-                // Define a generic parameter update closure for AdaGrad
-                let update_parameters =
-                    |params: &mut [f32], accumulator: &mut [f32], grads: &[f32]| {
-                        // Update accumulator (accumulated squared gradients) in parallel
-                        accumulator.par_iter_mut().zip(grads.par_iter()).for_each(
-                            |(acc, &grad)| {
-                                *acc += grad * grad;
-                            },
-                        );
-
-                        // Update parameters in parallel
-                        params
-                            .par_iter_mut()
-                            .zip(grads.par_iter())
-                            .zip(accumulator.par_iter())
-                            .for_each(|((param, &grad), &acc_val)| {
-                                *param -= lr * grad / (acc_val.sqrt() + epsilon);
-                            });
-                    };
-
-                // Update depthwise weight parameters
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.depthwise_weights.as_slice_mut(),
-                    depthwise_weight_gradients.as_slice(),
-                ) {
-                    if let Some(accumulator_full_slice) = ada_grad_cache.accumulator.as_slice_mut()
-                    {
-                        if let Some(accumulator_slice) =
-                            accumulator_full_slice.get_mut(..depthwise_len)
-                        {
-                            update_parameters(weights_slice, accumulator_slice, grads_slice);
-                        }
-                    }
-                }
-
-                // Update pointwise weight parameters
-                if let (Some(weights_slice), Some(grads_slice)) = (
-                    self.pointwise_weights.as_slice_mut(),
-                    pointwise_weight_gradients.as_slice(),
-                ) {
-                    if let Some(accumulator_full_slice) = ada_grad_cache.accumulator.as_slice_mut()
-                    {
-                        if let Some(accumulator_slice) = accumulator_full_slice
-                            .get_mut(depthwise_len..depthwise_len + pointwise_len)
-                        {
-                            update_parameters(weights_slice, accumulator_slice, grads_slice);
-                        }
-                    }
-                }
-
-                // Update bias parameters
-                update_parameters(
-                    self.bias.as_slice_mut().unwrap(),
-                    ada_grad_cache.accumulator_bias.as_slice_mut().unwrap(),
-                    bias_gradients.as_slice().unwrap(),
-                );
-            }
-        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

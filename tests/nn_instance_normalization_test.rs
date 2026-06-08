@@ -10,8 +10,8 @@ use rustyml::neural_network::layer::regularization_layer::normalization_layer::i
 use rustyml::neural_network::layer::serialize_weight::SerializableLayerWeight;
 use rustyml::neural_network::layer::TrainingParameters;
 use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
+use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]
@@ -121,28 +121,42 @@ fn test_instance_normalization_4d_input() {
 }
 
 #[test]
-fn test_instance_normalization_custom_channel_axis() {
-    // Test instance normalization with custom channel axis
-    // Format: [batch, height, width, channels]
-    let batch_size = 2;
-    let height = 4;
-    let width = 4;
-    let channels = 3;
+fn test_instance_normalization_channel_last_matches_channels_first() {
+    use ndarray::{ArrayD, IxDyn};
+    // Instance norm is layout-equivariant: normalizing a channels-last (NHWC) tensor must equal
+    // permuting it to channels-first (NCHW), normalizing with the (separately tested) channels-first
+    // path, and permuting the result back. This verifies the channel_axis != 1 support, forward and
+    // backward, against the trusted channels-first path.
+    let shape_nhwc = [2usize, 4, 4, 3];
+    let n: usize = shape_nhwc.iter().product();
+    let data: Vec<f32> = (0..n).map(|i| 0.1 * i as f32 - 1.3).collect();
+    let x_nhwc = ArrayD::from_shape_vec(shape_nhwc.to_vec(), data).unwrap();
+    // NHWC -> NCHW (contiguous)
+    let x_nchw = x_nhwc
+        .clone()
+        .permuted_axes(vec![0, 3, 1, 2])
+        .as_standard_layout()
+        .to_owned();
 
-    let mut in_layer =
-        InstanceNormalization::new(vec![batch_size, height, width, channels], 3, 1e-5).unwrap();
+    let mut in_nhwc = InstanceNormalization::new(vec![2, 4, 4, 3], 3, 1e-5).unwrap();
+    let mut in_nchw = InstanceNormalization::new(vec![2, 3, 4, 4], 1, 1e-5).unwrap();
 
-    let input = Array::from_shape_fn((batch_size, height, width, channels), |(b, h, w, c)| {
-        (b * 100 + c * 10 + h + w) as f32
-    })
-    .into_dyn();
+    let out_nhwc = in_nhwc.forward(&x_nhwc).unwrap();
+    let out_nchw = in_nchw.forward(&x_nchw).unwrap();
+    // Compare the NHWC output to the NCHW output permuted back to NHWC.
+    let out_nchw_as_nhwc = out_nchw.permuted_axes(vec![0, 2, 3, 1]);
+    assert_eq!(out_nhwc.shape(), out_nchw_as_nhwc.shape());
+    for (a, b) in out_nhwc.iter().zip(out_nchw_as_nhwc.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
 
-    in_layer.set_training(true);
-    let output = in_layer.forward(&input).unwrap();
-
-    assert_eq!(output.shape(), &[batch_size, height, width, channels]);
-
-    println!("Custom channel axis test passed");
+    // Backward must be equivariant too.
+    let din_nhwc = in_nhwc.backward(&ArrayD::ones(IxDyn(&[2, 4, 4, 3]))).unwrap();
+    let din_nchw = in_nchw.backward(&ArrayD::ones(IxDyn(&[2, 3, 4, 4]))).unwrap();
+    let din_nchw_as_nhwc = din_nchw.permuted_axes(vec![0, 2, 3, 1]);
+    for (a, b) in din_nhwc.iter().zip(din_nchw_as_nhwc.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
 }
 
 #[test]
@@ -274,7 +288,11 @@ fn test_instance_normalization_parameter_update_sgd() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters
-        in_layer.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut in_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::InstanceNormalizationLayer(updated_weights) = in_layer.get_weights() {
@@ -324,7 +342,11 @@ fn test_instance_normalization_parameter_update_adam() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with Adam
-        in_layer.update_parameters_adam(0.001, 0.9, 0.999, 1e-8, 1);
+        {
+            let mut optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut in_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::InstanceNormalizationLayer(updated_weights) = in_layer.get_weights() {
@@ -374,7 +396,11 @@ fn test_instance_normalization_parameter_update_rmsprop() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with RMSprop
-        in_layer.update_parameters_rmsprop(0.001, 0.9, 1e-8);
+        {
+            let mut optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut in_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::InstanceNormalizationLayer(updated_weights) = in_layer.get_weights() {
@@ -424,7 +450,11 @@ fn test_instance_normalization_parameter_update_adagrad() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with AdaGrad
-        in_layer.update_parameters_ada_grad(0.01, 1e-8);
+        {
+            let mut optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut in_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::InstanceNormalizationLayer(updated_weights) = in_layer.get_weights() {
@@ -495,7 +525,9 @@ fn test_instance_normalization_set_weights() {
     let new_gamma = Array::from_vec(vec![2.0, 2.0, 2.0]).into_dyn();
     let new_beta = Array::from_vec(vec![1.0, 1.0, 1.0]).into_dyn();
 
-    in_layer.set_weights(new_gamma.clone(), new_beta.clone());
+    in_layer
+        .set_weights(new_gamma.clone(), new_beta.clone())
+        .unwrap();
 
     // Verify weights were set correctly
     if let LayerWeight::InstanceNormalizationLayer(weights) = in_layer.get_weights() {
@@ -664,7 +696,11 @@ fn test_instance_normalization_multiple_forward_backward() {
 
         assert_eq!(grad_input.shape(), &[2, 3, 4]);
 
-        in_layer.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut in_layer);
+        }
     }
 
     println!("Multiple forward-backward passes test passed");
@@ -689,7 +725,7 @@ fn test_instance_normalization_serialization() {
         SerializableLayerWeight::InstanceNormalization(w) => {
             assert_eq!(w.gamma.len(), 3); // 3 channels
             assert_eq!(w.beta.len(), 3);
-            assert_eq!(w.shape, vec![3]);
+            assert_eq!(w.gamma.shape(), &[3]);
         }
         _ => panic!("Expected InstanceNormalization weights"),
     }

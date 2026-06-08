@@ -1,7 +1,8 @@
+use crate::neural_network::layer::no_trainable_parameters_layer_functions;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::activation_layer::format_shape;
 use crate::neural_network::layer::layer_weight::LayerWeight;
 use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
 
@@ -11,7 +12,8 @@ use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
 ///
 /// # Fields
 ///
-/// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
+/// - `input_shape` - Shape of the input from the forward pass, used to validate the gradient
+///   during backpropagation (Linear's derivative is 1, so the input values themselves are not needed)
 ///
 /// # Examples
 ///
@@ -39,7 +41,7 @@ use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
 /// // Output will be: [[-1.0, 2.0, -3.0], [4.0, -5.0, 6.0]]
 /// ```
 pub struct Linear {
-    input_cache: Option<Tensor>,
+    input_shape: Option<Vec<usize>>,
 }
 
 impl Linear {
@@ -49,7 +51,13 @@ impl Linear {
     ///
     /// - `Self` - A new `Linear` layer instance
     pub fn new() -> Self {
-        Linear { input_cache: None }
+        Linear { input_shape: None }
+    }
+}
+
+impl Default for Linear {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -69,21 +77,41 @@ impl Layer for Linear {
             ));
         }
 
-        // Save input for backpropagation
-        self.input_cache = Some(input.clone());
+        // Save the input shape for backpropagation (validation only)
+        self.input_shape = Some(input.shape().to_vec());
+
+        // Linear activation: f(x) = x (identity function)
+        Ok(input.clone())
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Check if tensor is empty
+        if input.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input tensor is empty".to_string(),
+            ));
+        }
+
+        // Check for NaN or infinite values
+        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
+            return Err(ModelError::InputValidationError(
+                "Input tensor contains NaN or infinite values".to_string(),
+            ));
+        }
 
         // Linear activation: f(x) = x (identity function)
         Ok(input.clone())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        if let Some(input) = &self.input_cache {
+        if let Some(input_shape) = &self.input_shape {
             // Validate gradient output shape
-            if grad_output.shape() != input.shape() {
+            if grad_output.shape() != input_shape.as_slice() {
                 return Err(ModelError::ProcessingError(format!(
                     "Gradient output shape {:?} doesn't match input shape {:?}",
                     grad_output.shape(),
-                    input.shape()
+                    input_shape
                 )));
             }
 
@@ -108,7 +136,10 @@ impl Layer for Linear {
     }
 
     fn output_shape(&self) -> String {
-        format_output_shape(&self.input_cache)
+        match &self.input_shape {
+            Some(shape) => format_shape(shape),
+            None => "Unknown".to_string(),
+        }
     }
 
     no_trainable_parameters_layer_functions!();

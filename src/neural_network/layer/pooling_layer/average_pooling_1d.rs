@@ -1,20 +1,17 @@
+use crate::neural_network::layer::pooling_layer::layer_functions_1d_pooling;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::helper_function::calculate_output_shape_1d_pooling;
+use crate::neural_network::layer::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::layer::layer_weight::LayerWeight;
-use crate::neural_network::layer::pooling_layer::input_validation_function::{
+use crate::neural_network::layer::pooling_layer::validation::{
     validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_1d,
     validate_stride_1d,
 };
+use crate::neural_network::layer::pooling_layer::pooling_engine::{
+    PoolKind, windowed_pool_backward, windowed_pool_forward,
+};
 use crate::neural_network::neural_network_trait::Layer;
-use ndarray::Array3;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// Threshold for determining when to use parallel vs sequential execution.
-/// When batch_size * channels >= this threshold, parallel execution is used.
-/// Otherwise, sequential execution is used to avoid parallel overhead.
-const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 
 /// 1D average pooling layer.
 ///
@@ -27,8 +24,8 @@ const AVERAGE_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// - `pool_size` - Size of the pooling window
 /// - `stride` - Step size of the pooling operation
-/// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Cached input tensor from the forward pass
+/// - `input_shape` - Shape of the input tensor declared at construction time
+/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
 ///
 /// # Examples
 /// ```rust
@@ -87,7 +84,7 @@ pub struct AveragePooling1D {
     pool_size: usize,
     stride: usize,
     input_shape: Vec<usize>,
-    input_cache: Option<Tensor>,
+    forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling1D {
@@ -126,7 +123,7 @@ impl AveragePooling1D {
             pool_size,
             stride,
             input_shape,
-            input_cache: None,
+            forward_input_shape: None,
         })
     }
 }
@@ -140,114 +137,49 @@ impl Layer for AveragePooling1D {
             ));
         }
 
-        // Cache input for backward pass
-        self.input_cache = Some(input.clone());
+        // Cache the actual input shape for backward (only the shape is needed for averaging)
+        self.forward_input_shape = Some(input.shape().to_vec());
 
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let length = input.shape()[2];
-
-        let output_length = (length - self.pool_size) / self.stride + 1;
-        let mut output = Array3::<f32>::zeros((batch_size, channels, output_length)).into_dyn();
-
-        // Copy needed values from self to avoid capturing self in closure
-        let pool_size = self.pool_size;
-        let stride = self.stride;
-
-        // Helper closure to compute pooling for a single (batch, channel) pair
-        let compute_pooling = |b: usize, c: usize| {
-            let mut batch_channel_output = Vec::new();
-
-            // Perform pooling for each output position
-            for i in 0..output_length {
-                let start_idx = i * stride;
-                let end_idx = start_idx + pool_size;
-
-                // Calculate average of elements in the window
-                let mut sum = 0.0;
-                for j in start_idx..end_idx {
-                    sum += input[[b, c, j]];
-                }
-                batch_channel_output.push((i, sum / (pool_size as f32)));
-            }
-
-            ((b, c), batch_channel_output)
-        };
-
-        // Choose parallel or sequential execution based on workload size
-        let results: Vec<_> = execute_parallel_or_sequential!(
-            batch_size,
-            channels,
-            AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
-            compute_pooling
+        let (output, _) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Average,
         );
+        Ok(output)
+    }
 
-        // Merge results into output tensor
-        for ((b, c), outputs) in results {
-            for (i, val) in outputs {
-                output[[b, c, i]] = val;
-            }
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
         }
 
+        let (output, _) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Average,
+        );
         Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        // Ensure we have cached input
-        let input = match &self.input_cache {
-            Some(input) => input,
-            None => {
-                return Err(ModelError::ProcessingError(
-                    "No cached input for AveragePooling1D".to_string(),
-                ));
-            }
-        };
+        let input_shape = self.forward_input_shape.as_ref().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run yet".to_string())
+        })?;
 
-        let batch_size = input.shape()[0];
-        let channels = input.shape()[1];
-        let length = input.shape()[2];
-        let output_length = grad_output.shape()[2];
-
-        let mut grad_input = Array3::<f32>::zeros((batch_size, channels, length)).into_dyn();
-
-        // Calculate gradient with respect to input
-        let scale_factor = 1.0 / (self.pool_size as f32);
-
-        // Copy member variables needed in closure
-        let pool_size = self.pool_size;
-        let stride = self.stride;
-
-        // Helper closure to compute gradient for a single (batch, channel) pair
-        let compute_gradient = |b: usize, c: usize| {
-            // Only allocate a 1D vector for this channel's gradient
-            let mut channel_grad = vec![0.0f32; length];
-
-            for i in 0..output_length {
-                let start_idx = i * stride;
-                let end_idx = start_idx + pool_size;
-                let grad_val = grad_output[[b, c, i]] * scale_factor;
-
-                // Distribute gradient evenly to each element in the input window
-                for j in start_idx..end_idx {
-                    channel_grad[j] += grad_val;
-                }
-            }
-
-            ((b, c), channel_grad)
-        };
-
-        // Choose parallel or sequential execution based on workload size
-        let results: Vec<_> = execute_parallel_or_sequential!(
-            batch_size,
-            channels,
-            AVERAGE_POOLING_1D_PARALLEL_THRESHOLD,
-            compute_gradient
-        );
-
-        // Write results directly into output tensor
-        merge_gradients_1d!(grad_input, results, length);
-
-        Ok(grad_input)
+        Ok(windowed_pool_backward(
+            grad_output,
+            input_shape,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Average,
+            None,
+        ))
     }
 
     fn layer_type(&self) -> &str {

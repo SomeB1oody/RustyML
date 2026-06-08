@@ -8,33 +8,17 @@ use serde::{Deserialize, Serialize};
 ///
 /// # Fields
 ///
-/// - `gamma` - Scale parameter values flattened into a vector
-/// - `beta` - Shift parameter values flattened into a vector
-/// - `shape` - Original parameter shape used to rebuild arrays
+/// - `gamma` - Scale parameter
+/// - `beta` - Shift parameter
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLayerNormalizationWeight {
-    pub gamma: Vec<f32>,
-    pub beta: Vec<f32>,
-    pub shape: Vec<usize>,
+    pub gamma: ArrayD<f32>,
+    pub beta: ArrayD<f32>,
 }
 
 impl ApplyWeights<LayerNormalization> for SerializableLayerNormalizationWeight {
     fn apply_to_layer(&self, layer: &mut LayerNormalization) -> Result<(), IoError> {
-        let gamma =
-            ArrayD::from_shape_vec(self.shape.as_slice(), self.gamma.clone()).map_err(|e| {
-                IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))
-            })?;
-        let beta =
-            ArrayD::from_shape_vec(self.shape.as_slice(), self.beta.clone()).map_err(|e| {
-                IoError::StdIoError(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    e.to_string(),
-                ))
-            })?;
-        layer.set_weights(gamma, beta);
+        layer.set_weights(self.gamma.clone(), self.beta.clone())?;
         Ok(())
     }
 }

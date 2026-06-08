@@ -61,8 +61,12 @@ impl SVDSolver {
             ModelError::ProcessingError("SVD did not compute V^T matrix".to_string())
         })?;
 
-        let singular_values: Vec<f64> =
-            svd.singular_values.iter().take(n_components).cloned().collect();
+        let singular_values: Vec<f64> = svd
+            .singular_values
+            .iter()
+            .take(n_components)
+            .cloned()
+            .collect();
         // Copy the top components from V^T into ndarray layout.
         let components =
             Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
@@ -114,8 +118,12 @@ impl SVDSolver {
             ModelError::ProcessingError("Randomized SVD did not compute V^T matrix".to_string())
         })?;
 
-        let singular_values: Vec<f64> =
-            svd.singular_values.iter().take(n_components).cloned().collect();
+        let singular_values: Vec<f64> = svd
+            .singular_values
+            .iter()
+            .take(n_components)
+            .cloned()
+            .collect();
         // Expand V^T back to full feature-space components.
         let components =
             Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);

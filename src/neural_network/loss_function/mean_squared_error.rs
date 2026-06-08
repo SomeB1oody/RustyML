@@ -1,9 +1,11 @@
+use crate::error::ModelError;
 use crate::neural_network::Tensor;
+use crate::neural_network::loss_function::validate_same_shape;
 use crate::neural_network::neural_network_trait::LossFunction;
 
 /// Mean Squared Error loss function
 ///
-/// # Example
+/// # Examples
 ///
 /// ```rust
 /// use rustyml::neural_network::loss_function::*;
@@ -25,11 +27,11 @@ use crate::neural_network::neural_network_trait::LossFunction;
 /// ).unwrap();
 ///
 /// // Compute the MSE loss
-/// let loss = mse.compute_loss(&y_true, &y_pred);
+/// let loss = mse.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("MSE Loss: {:.4}", loss);
 ///
 /// // Compute gradients for backpropagation
-/// let gradients = mse.compute_grad(&y_true, &y_pred);
+/// let gradients = mse.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
 pub struct MeanSquaredError;
@@ -45,26 +47,36 @@ impl MeanSquaredError {
     }
 }
 
+impl Default for MeanSquaredError {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LossFunction for MeanSquaredError {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+        validate_same_shape(y_true, y_pred)?;
+
         // Calculate the squared difference
         let squared_diff = (y_pred - y_true).mapv(|x| x * x);
 
         // Calculate the mean (sum divided by number of elements)
         let n = squared_diff.len() as f32;
-        squared_diff.sum() / n
+        Ok(squared_diff.sum() / n)
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+        validate_same_shape(y_true, y_pred)?;
+
         // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
 
-        // Gradient is 2 times the difference divided by sample count
+        // Gradient is 2 times the difference divided by element count
         let n = diff.len() as f32;
 
         let mut result = diff.clone();
         result.par_mapv_inplace(|x| 2.0 * x / n);
 
-        result
+        Ok(result)
     }
 }

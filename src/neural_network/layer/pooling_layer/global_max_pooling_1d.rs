@@ -1,14 +1,12 @@
+use crate::neural_network::layer::pooling_layer::layer_functions_global_pooling;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::pooling_layer::pooling_engine::{
+    PoolKind, global_pool_backward, global_pool_forward,
+};
 use crate::neural_network::neural_network_trait::Layer;
-use ndarray::IxDyn;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// Threshold for deciding between parallel and sequential execution.
-/// When batch_size * channels >= this threshold, use parallel execution.
-const GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 
 /// Global max pooling layer for 1D inputs.
 ///
@@ -19,7 +17,7 @@ const GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 /// # Fields
 ///
 /// - `input_shape` - Shape of the input tensor cached during the forward pass
-/// - `max_positions` - Cached positions of maximum values for backpropagation
+/// - `argmax` - Cached flat per-channel arg-max indices for backpropagation
 ///
 /// # Examples
 /// ```rust
@@ -55,10 +53,10 @@ const GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD` (32).
+/// Parallel execution is used when `batch_size * channels >= 32`.
 pub struct GlobalMaxPooling1D {
     input_shape: Vec<usize>,
-    max_positions: Option<Vec<usize>>,
+    argmax: Option<Vec<usize>>,
 }
 
 impl GlobalMaxPooling1D {
@@ -70,8 +68,14 @@ impl GlobalMaxPooling1D {
     pub fn new() -> Self {
         GlobalMaxPooling1D {
             input_shape: Vec::new(),
-            max_positions: None,
+            argmax: None,
         }
+    }
+}
+
+impl Default for GlobalMaxPooling1D {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -84,91 +88,34 @@ impl Layer for GlobalMaxPooling1D {
             ));
         }
 
-        // Store the input shape for backpropagation
+        // Store the input shape and arg-max positions for backpropagation
         self.input_shape = input.shape().to_vec();
 
-        let batch_size = self.input_shape[0];
-        let channels = self.input_shape[1];
-        let length = self.input_shape[2];
-
-        // Initialize output tensor with shape [batch_size, channels]
-        let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
-
-        // Pre-allocate max_positions vector with correct capacity
-        let mut max_positions = vec![0; batch_size * channels];
-
-        // Helper closure to compute global max pooling for a single (batch, channel) pair
-        let compute_pooling = |b: usize, c: usize| {
-            let mut max_val = f32::NEG_INFINITY;
-            let mut max_pos = 0;
-
-            // Find maximum value and its position along the length dimension
-            for l in 0..length {
-                let val = input[[b, c, l]];
-                if val > max_val {
-                    max_val = val;
-                    max_pos = l;
-                }
-            }
-
-            ((b, c), (max_val, max_pos))
-        };
-
-        // Choose parallel or sequential execution based on workload size
-        let results: Vec<_> = execute_parallel_or_sequential!(
-            batch_size,
-            channels,
-            GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD,
-            compute_pooling
-        );
-
-        // Fill the output tensor and max_positions
-        for ((b, c), (max_val, max_pos)) in results {
-            output[[b, c]] = max_val;
-            let idx = b * channels + c;
-            max_positions[idx] = max_pos;
-        }
-
-        // Cache the positions of maximum values for backpropagation
-        self.max_positions = Some(max_positions);
-
+        let (output, argmax) = global_pool_forward(input, PoolKind::Max);
+        self.argmax = argmax;
         Ok(output)
     }
 
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 3D
+        if input.ndim() != 3 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 3D".to_string(),
+            ));
+        }
+
+        Ok(global_pool_forward(input, PoolKind::Max).0)
+    }
+
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        if let Some(max_positions) = &self.max_positions {
-            let batch_size = self.input_shape[0];
-            let channels = self.input_shape[1];
-            let length = self.input_shape[2];
-
-            // Initialize input gradient tensor
-            let mut grad_input = Tensor::zeros(IxDyn(&self.input_shape));
-
-            // Helper closure to compute gradient for a single (batch, channel) pair
-            let compute_gradient = |b: usize, c: usize| {
-                let idx = b * channels + c;
-                let max_pos = max_positions[idx];
-                let gradient_value = grad_output[[b, c]];
-
-                // Create a gradient vector for this channel (only one position gets the gradient)
-                let mut seq_grad = vec![0.0; length];
-                seq_grad[max_pos] = gradient_value;
-
-                ((b, c), seq_grad)
-            };
-
-            // Choose parallel or sequential execution based on workload size
-            let results: Vec<_> = execute_parallel_or_sequential!(
-                batch_size,
-                channels,
-                GLOBAL_MAX_POOLING_1D_PARALLEL_THRESHOLD,
-                compute_gradient
-            );
-
-            // Apply updates to gradient tensor
-            merge_gradients_1d!(grad_input, results, length);
-
-            Ok(grad_input)
+        if let Some(argmax) = &self.argmax {
+            Ok(global_pool_backward(
+                grad_output,
+                &self.input_shape,
+                PoolKind::Max,
+                Some(argmax),
+            ))
         } else {
             Err(ModelError::ProcessingError(
                 "Forward pass has not been run yet".to_string(),

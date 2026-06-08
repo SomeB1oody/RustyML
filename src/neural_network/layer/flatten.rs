@@ -2,6 +2,7 @@ use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::no_trainable_parameters_layer_functions;
 use crate::neural_network::neural_network_trait::Layer;
 use ndarray::IxDyn;
 
@@ -117,6 +118,27 @@ impl Layer for Flatten {
             .to_owned())
     }
 
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input dimensions
+        let input_shape = input.shape();
+        if input_shape.len() < 3 || input_shape.len() > 5 {
+            return Err(ModelError::InputValidationError(format!(
+                "Flatten layer expects 3D, 4D, or 5D input, got {}D tensor",
+                input_shape.len()
+            )));
+        }
+
+        let batch_size = input_shape[0];
+        let flattened_features: usize = input_shape[1..].iter().product();
+
+        // Reshape to flatten the tensor
+        Ok(input
+            .to_shape(IxDyn(&[batch_size, flattened_features]))
+            .unwrap()
+            .to_owned())
+    }
+
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if let Some(input) = &self.input_cache {
             let input_shape = input.shape().to_vec();
@@ -152,7 +174,9 @@ impl Layer for Flatten {
     }
 
     fn output_shape(&self) -> String {
-        format!("(batch_size, {})", self.flattened_features)
+        // `None` is the batch placeholder used by the other definition-time-shaped layers
+        // (Dense, SimpleRNN, GRU, LSTM), whose batch size is not fixed until forward.
+        format!("(None, {})", self.flattened_features)
     }
 
     no_trainable_parameters_layer_functions!();

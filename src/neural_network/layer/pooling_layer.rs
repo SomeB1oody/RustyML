@@ -1,3 +1,47 @@
+/// 1D Average Pooling Layer
+pub mod average_pooling_1d;
+/// 2D Average Pooling Layer
+pub mod average_pooling_2d;
+/// 3D Average Pooling Layer
+pub mod average_pooling_3d;
+/// Global Average Pooling 1D Layer
+pub mod global_average_pooling_1d;
+/// Global Average Pooling 2D Layer
+pub mod global_average_pooling_2d;
+/// Global Average Pooling 3D Layer
+pub mod global_average_pooling_3d;
+/// Global Max Pooling layer 1D Layer
+pub mod global_max_pooling_1d;
+/// Global Max Pooling layer 2D Layer
+pub mod global_max_pooling_2d;
+/// Global Max Pooling layer 3D Layer
+pub mod global_max_pooling_3d;
+/// Input validation functions for pooling layers
+mod validation;
+/// Dimension-generic pooling engine shared by every pooling layer
+mod pooling_engine;
+/// Max Pooling layer 1D Layer
+pub mod max_pooling_1d;
+/// Max Pooling layer 2D Layer
+pub mod max_pooling_2d;
+/// Max Pooling layer 3D Layer
+pub mod max_pooling_3d;
+
+pub use average_pooling_1d::AveragePooling1D;
+pub use average_pooling_2d::AveragePooling2D;
+pub use average_pooling_3d::AveragePooling3D;
+pub use global_average_pooling_1d::GlobalAveragePooling1D;
+pub use global_average_pooling_2d::GlobalAveragePooling2D;
+pub use global_average_pooling_3d::GlobalAveragePooling3D;
+pub use global_max_pooling_1d::GlobalMaxPooling1D;
+pub use global_max_pooling_2d::GlobalMaxPooling2D;
+pub use global_max_pooling_3d::GlobalMaxPooling3D;
+pub use max_pooling_1d::MaxPooling1D;
+pub use max_pooling_2d::MaxPooling2D;
+pub use max_pooling_3d::MaxPooling3D;
+
+// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
+// so callers import them explicitly rather than relying on textual macro ordering.
 /// A macro that generates standard function implementations for global pooling layers.
 ///
 /// This macro expands to implementations of:
@@ -29,7 +73,7 @@ macro_rules! layer_functions_global_pooling {
             }
         }
 
-        no_trainable_parameters_layer_functions!();
+        $crate::neural_network::layer::no_trainable_parameters_layer_functions!();
     };
 }
 
@@ -74,7 +118,7 @@ macro_rules! layer_functions_1d_pooling {
             }
         }
 
-        no_trainable_parameters_layer_functions!();
+        $crate::neural_network::layer::no_trainable_parameters_layer_functions!();
     };
 }
 
@@ -119,7 +163,7 @@ macro_rules! layer_functions_2d_pooling {
             }
         }
 
-        no_trainable_parameters_layer_functions!();
+        $crate::neural_network::layer::no_trainable_parameters_layer_functions!();
     };
 }
 
@@ -168,46 +212,10 @@ macro_rules! layer_functions_3d_pooling {
             }
         }
 
-        no_trainable_parameters_layer_functions!();
+        $crate::neural_network::layer::no_trainable_parameters_layer_functions!();
     };
 }
-
-/// 1D Average Pooling Layer
-pub mod average_pooling_1d;
-/// 2D Average Pooling Layer
-pub mod average_pooling_2d;
-/// 3D Average Pooling Layer
-pub mod average_pooling_3d;
-/// Global Average Pooling 1D Layer
-pub mod global_average_pooling_1d;
-/// Global Average Pooling 2D Layer
-pub mod global_average_pooling_2d;
-/// Global Average Pooling 3D Layer
-pub mod global_average_pooling_3d;
-/// Global Max Pooling layer 1D Layer
-pub mod global_max_pooling_1d;
-/// Global Max Pooling layer 2D Layer
-pub mod global_max_pooling_2d;
-/// Global Max Pooling layer 3D Layer
-pub mod global_max_pooling_3d;
-/// Input validation functions for pooling layers
-mod input_validation_function;
-/// Max Pooling layer 1D Layer
-pub mod max_pooling_1d;
-/// Max Pooling layer 2D Layer
-pub mod max_pooling_2d;
-/// Max Pooling layer 3D Layer
-pub mod max_pooling_3d;
-
-pub use average_pooling_1d::AveragePooling1D;
-pub use average_pooling_2d::AveragePooling2D;
-pub use average_pooling_3d::AveragePooling3D;
-pub use global_average_pooling_1d::GlobalAveragePooling1D;
-pub use global_average_pooling_2d::GlobalAveragePooling2D;
-pub use global_average_pooling_3d::GlobalAveragePooling3D;
-pub use global_max_pooling_1d::GlobalMaxPooling1D;
-pub use global_max_pooling_2d::GlobalMaxPooling2D;
-pub use global_max_pooling_3d::GlobalMaxPooling3D;
-pub use max_pooling_1d::MaxPooling1D;
-pub use max_pooling_2d::MaxPooling2D;
-pub use max_pooling_3d::MaxPooling3D;
+pub(in crate::neural_network::layer::pooling_layer) use layer_functions_global_pooling;
+pub(in crate::neural_network::layer::pooling_layer) use layer_functions_1d_pooling;
+pub(in crate::neural_network::layer::pooling_layer) use layer_functions_2d_pooling;
+pub(in crate::neural_network::layer::pooling_layer) use layer_functions_3d_pooling;

@@ -15,8 +15,9 @@ use rustyml::neural_network::sequential::Sequential;
 fn test_depthwise_conv2d_creation() {
     // Create DepthwiseConv2D layer
     let layer = DepthwiseConv2D::new(
-        3,                  // filters
+        3,                  // filters (must equal input channels)
         (3, 3),             // kernel_size
+        vec![1, 3, 5, 5],   // input shape [batch, channels, height, width]
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
@@ -30,8 +31,8 @@ fn test_depthwise_conv2d_creation() {
     // Weight shape: [3, 1, 3, 3] = 27, bias: [3] = 3
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(30));
 
-    // Output shape should be "Unknown" before initialization
-    assert_eq!(layer.output_shape(), "Unknown");
+    // Output shape is known at construction: input (1,3,5,5), kernel (3,3), valid -> (1,3,3,3)
+    assert_eq!(layer.output_shape(), "(1, 3, 3, 3)");
 }
 
 #[test]
@@ -59,14 +60,14 @@ fn test_depthwise_conv2d_forward() {
 
     // Create and initialize DepthwiseConv2D layer
     let mut layer = DepthwiseConv2D::new(
-        channels,           // filters must equal input_channels
-        (3, 3),             // kernel_size
-        (1, 1),             // strides
-        PaddingType::Valid, // padding
-        Linear::new(),      // no activation
+        channels,                            // filters must equal input_channels
+        (3, 3),                              // kernel_size
+        vec![batch_size, channels, height, width], // input shape
+        (1, 1),                              // strides
+        PaddingType::Valid,                  // padding
+        Linear::new(),                       // no activation
     )
     .unwrap();
-    layer.initialize_weights(channels);
 
     // Forward propagation
     let output = layer.forward(&input).unwrap();
@@ -86,15 +87,15 @@ fn test_depthwise_conv2d_sequential_model() {
     let mut model = Sequential::new();
 
     // Create and initialize DepthwiseConv2D layer
-    let mut depthwise_layer = DepthwiseConv2D::new(
+    let depthwise_layer = DepthwiseConv2D::new(
         3,                  // filters
         (2, 2),             // kernel_size
+        vec![1, 3, 4, 4],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
     )
     .unwrap();
-    depthwise_layer.initialize_weights(3);
 
     // Add layer and compile model
     model
@@ -142,15 +143,15 @@ fn test_depthwise_conv2d_same_padding() {
     // Test Same padding
     let mut model = Sequential::new();
 
-    let mut depthwise_layer = DepthwiseConv2D::new(
+    let depthwise_layer = DepthwiseConv2D::new(
         2,                 // filters
         (3, 3),            // kernel_size
+        vec![1, 2, 5, 5],  // input shape
         (1, 1),            // strides
         PaddingType::Same, // padding
         Linear::new(),     // no activation
     )
     .unwrap();
-    depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
@@ -173,15 +174,15 @@ fn test_depthwise_conv2d_different_strides() {
     // Test different strides
     let mut model = Sequential::new();
 
-    let mut depthwise_layer = DepthwiseConv2D::new(
+    let depthwise_layer = DepthwiseConv2D::new(
         2,                  // filters
         (3, 3),             // kernel_size
+        vec![1, 2, 8, 8],   // input shape
         (2, 2),             // strides - larger strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
@@ -206,15 +207,15 @@ fn test_depthwise_conv2d_training() {
     // Test training process
     let mut model = Sequential::new();
 
-    let mut depthwise_layer = DepthwiseConv2D::new(
+    let depthwise_layer = DepthwiseConv2D::new(
         2,                  // filters
         (3, 3),             // kernel_size
+        vec![4, 2, 5, 5],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         ReLU::new(),        // activation
     )
     .unwrap();
-    depthwise_layer.initialize_weights(2);
 
     model
         .add(depthwise_layer)
@@ -245,12 +246,12 @@ fn test_depthwise_conv2d_backward() {
     let mut layer = DepthwiseConv2D::new(
         input_channels,     // filters
         (2, 2),             // kernel_size
+        vec![1, 2, 3, 3],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    layer.initialize_weights(input_channels);
 
     // Create simple input data
     let input_data =
@@ -276,12 +277,12 @@ fn test_depthwise_conv2d_channel_independence() {
     let mut layer = DepthwiseConv2D::new(
         2,                  // filters
         (2, 2),             // kernel_size
+        vec![1, 2, 3, 3],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    layer.initialize_weights(2);
 
     // Create special input: first channel all 1s, second channel all 2s
     let mut input_data = Array4::zeros((1, 2, 3, 3));
@@ -321,12 +322,12 @@ fn test_depthwise_conv2d_edge_cases() {
     let mut layer_1x1 = DepthwiseConv2D::new(
         1,                  // filters
         (1, 1),             // kernel_size
+        vec![1, 1, 2, 2],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    layer_1x1.initialize_weights(1);
 
     let input_1x1 = Array4::ones((1, 1, 2, 2)).into_dyn();
     let output_1x1 = layer_1x1.forward(&input_1x1).unwrap();
@@ -336,12 +337,12 @@ fn test_depthwise_conv2d_edge_cases() {
     let mut layer_large_stride = DepthwiseConv2D::new(
         1,                  // filters
         (2, 2),             // kernel_size
+        vec![1, 1, 5, 5],   // input shape
         (3, 3),             // large strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    layer_large_stride.initialize_weights(1);
 
     let input_large = Array4::ones((1, 1, 5, 5)).into_dyn();
     let output_large = layer_large_stride.forward(&input_large).unwrap();
@@ -353,15 +354,15 @@ fn test_depthwise_conv2d_multiple_batches() {
     // Test multiple batch data
     let mut model = Sequential::new();
 
-    let mut depthwise_layer = DepthwiseConv2D::new(
+    let depthwise_layer = DepthwiseConv2D::new(
         3,                  // filters
         (2, 2),             // kernel_size
+        vec![5, 3, 4, 4],   // input shape
         (1, 1),             // strides
         PaddingType::Valid, // padding
         Linear::new(),      // no activation
     )
     .unwrap();
-    depthwise_layer.initialize_weights(3);
 
     model
         .add(depthwise_layer)

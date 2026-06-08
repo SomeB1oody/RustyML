@@ -1,18 +1,16 @@
+use crate::neural_network::layer::pooling_layer::layer_functions_3d_pooling;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::helper_function::calculate_output_shape_3d_pooling;
+use crate::neural_network::layer::shape_helpers::calculate_output_shape_3d_pooling;
 use crate::neural_network::layer::layer_weight::LayerWeight;
-use crate::neural_network::layer::pooling_layer::input_validation_function::{
+use crate::neural_network::layer::pooling_layer::validation::{
     validate_input_shape_dims, validate_pool_size_3d, validate_strides_3d,
 };
+use crate::neural_network::layer::pooling_layer::pooling_engine::{
+    PoolKind, windowed_pool_backward, windowed_pool_forward,
+};
 use crate::neural_network::neural_network_trait::Layer;
-use ndarray::ArrayD;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// Threshold for deciding between parallel and sequential execution.
-/// When batch_size * channels >= this threshold, use parallel execution.
-const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 
 /// 3D max pooling layer.
 ///
@@ -27,9 +25,9 @@ const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// - `pool_size` - Size of the pooling window as (depth, height, width)
 /// - `strides` - Step size of the pooling operation as (depth stride, height stride, width stride)
-/// - `input_shape` - Shape of the input tensor
-/// - `input_cache` - Cached input tensor from the forward pass
-/// - `max_positions` - Cached positions of maximum values for backpropagation
+/// - `input_shape` - Shape of the input tensor declared at construction time
+/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
+/// - `argmax` - Cached flat per-output arg-max indices used for backpropagation
 ///
 /// # Examples
 /// ```rust
@@ -79,13 +77,13 @@ const MAX_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= MAX_POOLING_3D_PARALLEL_THRESHOLD` (32).
+/// Parallel execution is used when `batch_size * channels >= 32`.
 pub struct MaxPooling3D {
     pool_size: (usize, usize, usize),
     strides: (usize, usize, usize),
     input_shape: Vec<usize>,
-    input_cache: Option<Tensor>,
-    max_positions: Option<Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>>,
+    forward_input_shape: Option<Vec<usize>>,
+    argmax: Option<Vec<usize>>,
 }
 
 impl MaxPooling3D {
@@ -116,124 +114,16 @@ impl MaxPooling3D {
 
         // input validation
         validate_input_shape_dims(&input_shape, 5, "MaxPooling3D")?;
-        validate_pool_size_3d(pool_size)?;
+        validate_pool_size_3d(pool_size, input_shape[2], input_shape[3], input_shape[4])?;
         validate_strides_3d(strides)?;
 
         Ok(MaxPooling3D {
             pool_size,
             strides,
             input_shape,
-            input_cache: None,
-            max_positions: None,
+            forward_input_shape: None,
+            argmax: None,
         })
-    }
-
-    /// Calculates the output shape of the max pooling layer.
-    fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
-        calculate_output_shape_3d_pooling(input_shape, self.pool_size, self.strides)
-    }
-
-    /// Performs 3D max pooling operation.
-    ///
-    /// # Parameters
-    ///
-    /// * `input` - The input tensor, with shape \[batch_size, channels, depth, height, width\].
-    ///
-    /// # Returns
-    ///
-    /// * `(Tensor, Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>)` - Result of the pooling operation
-    ///   and positions mapping: (batch, channel, out_d, out_i, out_j, in_d, in_i, in_j)
-    fn max_pool(
-        &self,
-        input: &Tensor,
-    ) -> (
-        Tensor,
-        Vec<(usize, usize, usize, usize, usize, usize, usize, usize)>,
-    ) {
-        let input_shape = input.shape();
-        let batch_size = input_shape[0];
-        let channels = input_shape[1];
-        let output_shape = self.calculate_output_shape(input_shape);
-
-        // Pre-allocate the output array
-        let mut output = ArrayD::zeros(output_shape.clone());
-        // Vector to store maximum value positions
-        let mut max_positions = Vec::new();
-
-        // Helper closure to compute max pooling for a single (batch, channel) pair
-        let compute_pooling = |b: usize, c: usize| {
-            let mut batch_channel_output = Vec::new();
-            let mut batch_channel_positions = Vec::new();
-
-            // Perform pooling for each output position
-            for out_d in 0..output_shape[2] {
-                let d_start = out_d * self.strides.0;
-
-                for out_i in 0..output_shape[3] {
-                    let i_start = out_i * self.strides.1;
-
-                    for out_j in 0..output_shape[4] {
-                        let j_start = out_j * self.strides.2;
-
-                        // Find maximum value in pooling window
-                        let mut max_val = f32::NEG_INFINITY;
-                        let mut max_pos = (0, 0, 0);
-
-                        for dd in 0..self.pool_size.0 {
-                            let d_pos = d_start + dd;
-                            if d_pos >= input_shape[2] {
-                                continue;
-                            }
-
-                            for di in 0..self.pool_size.1 {
-                                let i_pos = i_start + di;
-                                if i_pos >= input_shape[3] {
-                                    continue;
-                                }
-
-                                for dj in 0..self.pool_size.2 {
-                                    let j_pos = j_start + dj;
-                                    if j_pos >= input_shape[4] {
-                                        continue;
-                                    }
-
-                                    let val = input[[b, c, d_pos, i_pos, j_pos]];
-                                    if val > max_val {
-                                        max_val = val;
-                                        max_pos = (d_pos, i_pos, j_pos);
-                                    }
-                                }
-                            }
-                        }
-
-                        batch_channel_output.push((out_d, out_i, out_j, max_val));
-                        // Store complete mapping: (batch, channel, output_d, output_i, output_j, input_d, input_i, input_j)
-                        batch_channel_positions
-                            .push((b, c, out_d, out_i, out_j, max_pos.0, max_pos.1, max_pos.2));
-                    }
-                }
-            }
-
-            ((b, c), (batch_channel_output, batch_channel_positions))
-        };
-
-        // Choose parallel or sequential execution based on workload size
-        let results: Vec<_> = execute_parallel_or_sequential!(
-            batch_size,
-            channels,
-            MAX_POOLING_3D_PARALLEL_THRESHOLD,
-            compute_pooling
-        );
-
-        // Merge results into the output tensor
-        for ((b, c), (outputs, positions)) in results {
-            for (d, i, j, val) in outputs {
-                output[[b, c, d, i, j]] = val;
-            }
-            max_positions.extend(positions);
-        }
-
-        (output, max_positions)
     }
 }
 
@@ -246,74 +136,53 @@ impl Layer for MaxPooling3D {
             ));
         }
 
-        // Save input for backpropagation
-        self.input_cache = Some(input.clone());
+        // Cache the actual input shape and arg-max positions for the backward pass
+        self.forward_input_shape = Some(input.shape().to_vec());
 
-        // Perform max pooling operation
-        let (output, max_positions) = self.max_pool(input);
+        let (output, argmax) = windowed_pool_forward(
+            input,
+            &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
+            &[self.strides.0, self.strides.1, self.strides.2],
+            PoolKind::Max,
+        );
+        self.argmax = argmax;
+        Ok(output)
+    }
 
-        // Store maximum value positions for backpropagation
-        self.max_positions = Some(max_positions);
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
+        }
 
+        let (output, _argmax) = windowed_pool_forward(
+            input,
+            &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
+            &[self.strides.0, self.strides.1, self.strides.2],
+            PoolKind::Max,
+        );
         Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        if let (Some(input), Some(max_positions)) = (&self.input_cache, &self.max_positions) {
-            let input_shape = input.shape();
-            let batch_size = input_shape[0];
-            let channels = input_shape[1];
-            let depth = input_shape[2];
-            let height = input_shape[3];
-            let width = input_shape[4];
+        let input_shape = self.forward_input_shape.as_ref().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run".to_string())
+        })?;
+        let argmax = self.argmax.as_ref().ok_or_else(|| {
+            ModelError::ProcessingError("Forward pass has not been run".to_string())
+        })?;
 
-            // Initialize input gradients with same shape as input
-            let mut input_gradients = ArrayD::zeros(input_shape.to_vec());
-
-            // Group max_positions by (batch, channel) for parallel processing
-            let mut positions_by_bc: std::collections::HashMap<
-                (usize, usize),
-                Vec<(usize, usize, usize, usize, usize, usize)>,
-            > = std::collections::HashMap::new();
-
-            for &(b, c, out_d, out_i, out_j, in_d, in_i, in_j) in max_positions.iter() {
-                positions_by_bc
-                    .entry((b, c))
-                    .or_insert_with(Vec::new)
-                    .push((out_d, out_i, out_j, in_d, in_i, in_j));
-            }
-
-            // Helper closure to compute gradient for a single (batch, channel) pair
-            let compute_gradient = |b: usize, c: usize| {
-                let mut spatial_grad = vec![0.0; depth * height * width];
-
-                if let Some(positions) = positions_by_bc.get(&(b, c)) {
-                    for &(out_d, out_i, out_j, in_d, in_i, in_j) in positions {
-                        let flat_idx = in_d * (height * width) + in_i * width + in_j;
-                        spatial_grad[flat_idx] += grad_output[[b, c, out_d, out_i, out_j]];
-                    }
-                }
-
-                ((b, c), spatial_grad)
-            };
-
-            // Choose parallel or sequential execution based on workload size
-            let results: Vec<_> = execute_parallel_or_sequential!(
-                batch_size,
-                channels,
-                MAX_POOLING_3D_PARALLEL_THRESHOLD,
-                compute_gradient
-            );
-
-            // Write results back to gradient array
-            merge_gradients_3d!(input_gradients, results, depth, height, width);
-
-            Ok(input_gradients)
-        } else {
-            Err(ModelError::ProcessingError(
-                "Forward pass has not been run".to_string(),
-            ))
-        }
+        Ok(windowed_pool_backward(
+            grad_output,
+            input_shape,
+            &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
+            &[self.strides.0, self.strides.1, self.strides.2],
+            PoolKind::Max,
+            Some(argmax),
+        ))
     }
 
     fn layer_type(&self) -> &str {

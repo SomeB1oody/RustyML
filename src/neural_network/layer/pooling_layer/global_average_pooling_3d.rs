@@ -1,15 +1,12 @@
+use crate::neural_network::layer::pooling_layer::layer_functions_global_pooling;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
+use crate::neural_network::layer::pooling_layer::pooling_engine::{
+    PoolKind, global_pool_backward, global_pool_forward,
+};
 use crate::neural_network::neural_network_trait::Layer;
-use ndarray::{Array, IxDyn};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// Threshold for determining when to use parallel vs sequential execution.
-/// When batch_size * channels >= this threshold, parallel execution is used.
-/// Otherwise, sequential execution is used to avoid parallel overhead.
-const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 
 /// Global average pooling layer for 3D inputs.
 ///
@@ -20,7 +17,7 @@ const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 /// # Fields
 ///
 /// - `input_shape` - Shape of the input tensor cached during the forward pass
-/// - `input_cache` - Cached input tensor from the forward pass
+///   (global average pooling only needs the shape, not the input values, in backward)
 ///
 /// # Examples
 /// ```rust
@@ -56,10 +53,9 @@ const GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD: usize = 32;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD` (32).
+/// Parallel execution is used when `batch_size * channels >= 32`.
 pub struct GlobalAveragePooling3D {
     input_shape: Vec<usize>,
-    input_cache: Option<Tensor>,
 }
 
 impl GlobalAveragePooling3D {
@@ -71,8 +67,13 @@ impl GlobalAveragePooling3D {
     pub fn new() -> Self {
         GlobalAveragePooling3D {
             input_shape: Vec::new(),
-            input_cache: None,
         }
+    }
+}
+
+impl Default for GlobalAveragePooling3D {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -85,90 +86,40 @@ impl Layer for GlobalAveragePooling3D {
             ));
         }
 
-        // Extract dimensions
-        let shape = input.shape();
-        let (batch_size, channels, depth, height, width) =
-            (shape[0], shape[1], shape[2], shape[3], shape[4]);
+        // Store input shape for backpropagation (only the shape is needed)
+        self.input_shape = input.shape().to_vec();
 
-        // Store input shape and cache input for backpropagation
-        self.input_shape = vec![batch_size, channels, depth, height, width];
-        self.input_cache = Some(input.clone());
+        let (output, _) = global_pool_forward(input, PoolKind::Average);
+        Ok(output)
+    }
 
-        // Create output tensor
-        let mut output = Tensor::zeros(IxDyn(&[batch_size, channels]));
-
-        // Compute global average pooling
-        let spatial_size = (depth * height * width) as f32;
-
-        // Helper closure to compute pooling for a single (batch, channel) pair
-        let compute_pooling = |b: usize, c: usize| {
-            let mut sum = 0.0;
-            for d in 0..depth {
-                for h in 0..height {
-                    for w in 0..width {
-                        sum += input[[b, c, d, h, w]];
-                    }
-                }
-            }
-            ((b, c), sum / spatial_size)
-        };
-
-        // Choose parallel or sequential execution based on workload size
-        let results: Vec<_> = execute_parallel_or_sequential!(
-            batch_size,
-            channels,
-            GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD,
-            compute_pooling
-        );
-
-        // Merge results into the output tensor
-        for ((b, c), val) in results {
-            output[[b, c]] = val;
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Validate input is 5D
+        if input.ndim() != 5 {
+            return Err(ModelError::InputValidationError(
+                "input tensor is not 5D".to_string(),
+            ));
         }
 
+        let (output, _) = global_pool_forward(input, PoolKind::Average);
         Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        if let Some(input) = &self.input_cache {
-            let input_shape = input.shape();
-            let batch_size = input_shape[0];
-            let channels = input_shape[1];
-            let depth = input_shape[2];
-            let height = input_shape[3];
-            let width = input_shape[4];
-
-            // Calculate the total number of spatial elements
-            let spatial_size = depth * height * width;
-            let scale_factor = 1.0 / (spatial_size as f32);
-
-            // Helper closure to compute gradient for a single (batch, channel) pair
-            let compute_gradient = |b: usize, c: usize| {
-                let grad_val = grad_output[[b, c]] * scale_factor;
-                let spatial_grad = vec![grad_val; spatial_size];
-                ((b, c), spatial_grad)
-            };
-
-            // Choose parallel or sequential execution based on workload size
-            let results: Vec<_> = execute_parallel_or_sequential!(
-                batch_size,
-                channels,
-                GLOBAL_AVERAGE_POOLING_3D_PARALLEL_THRESHOLD,
-                compute_gradient
-            );
-
-            // Create gradient tensor with the same shape as input
-            let mut grad_input = Array::zeros(IxDyn(&input_shape));
-
-            // Merge gradients from all batches and channels
-            merge_gradients_3d!(grad_input, results, depth, height, width);
-
-            Ok(grad_input)
-        } else {
-            Err(ModelError::ProcessingError(
+        // Check that the forward pass has populated the input shape
+        if self.input_shape.is_empty() {
+            return Err(ModelError::ProcessingError(
                 "Forward pass has not been run yet".to_string(),
-            ))
+            ));
         }
+
+        Ok(global_pool_backward(
+            grad_output,
+            &self.input_shape,
+            PoolKind::Average,
+            None,
+        ))
     }
 
     fn layer_type(&self) -> &str {

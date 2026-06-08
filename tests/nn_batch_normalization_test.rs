@@ -6,8 +6,8 @@ use rustyml::neural_network::layer::dense::Dense;
 use rustyml::neural_network::layer::layer_weight::LayerWeight;
 use rustyml::neural_network::layer::regularization_layer::normalization_layer::batch_normalization::BatchNormalization;
 use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
+use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
 use rustyml::neural_network::sequential::Sequential;
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -151,7 +151,11 @@ fn test_batch_normalization_parameter_update_sgd() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters
-        bn.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut bn);
+        }
 
         // Get updated weights
         if let LayerWeight::BatchNormalization(updated_weights) = bn.get_weights() {
@@ -203,7 +207,11 @@ fn test_batch_normalization_parameter_update_adam() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with Adam
-        bn.update_parameters_adam(0.001, 0.9, 0.999, 1e-8, 1);
+        {
+            let mut optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut bn);
+        }
 
         // Get updated weights
         if let LayerWeight::BatchNormalization(updated_weights) = bn.get_weights() {
@@ -255,7 +263,11 @@ fn test_batch_normalization_parameter_update_rmsprop() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with RMSprop
-        bn.update_parameters_rmsprop(0.001, 0.9, 1e-8);
+        {
+            let mut optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut bn);
+        }
 
         // Get updated weights
         if let LayerWeight::BatchNormalization(updated_weights) = bn.get_weights() {
@@ -307,7 +319,11 @@ fn test_batch_normalization_parameter_update_adagrad() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with AdaGrad
-        bn.update_parameters_ada_grad(0.01, 1e-8);
+        {
+            let mut optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut bn);
+        }
 
         // Get updated weights
         if let LayerWeight::BatchNormalization(updated_weights) = bn.get_weights() {
@@ -507,7 +523,8 @@ fn test_batch_normalization_set_weights() {
         new_beta.clone(),
         new_running_mean.clone(),
         new_running_var.clone(),
-    );
+    )
+    .unwrap();
 
     // Verify weights were set correctly
     if let LayerWeight::BatchNormalization(weights) = bn.get_weights() {

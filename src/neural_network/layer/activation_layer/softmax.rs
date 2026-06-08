@@ -1,35 +1,21 @@
+use crate::neural_network::layer::no_trainable_parameters_layer_functions;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::activation_layer::{Activation, format_output_shape};
 use crate::neural_network::layer::layer_weight::LayerWeight;
 use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
-/// Epsilon value for floating point precision handling
-const EPSILON: f32 = 1e-8;
-
-/// Gradient clipping value to prevent exploding gradients
-const GRAD_CLIP_VALUE: f32 = 1e6;
-
-/// Max input clipping values to prevent overflow in exp function
-const INPUT_CLIP_MIN: f32 = -500.0;
-
-/// Min input clipping values to prevent overflow in exp function
-const INPUT_CLIP_MAX: f32 = 500.0;
-
-/// Threshold for determining whether to use parallel or sequential processing (number of rows)
-const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 
 /// Softmax activation layer.
 ///
 /// Applies softmax along the last axis, converting logits into a probability distribution
 /// that sums to 1 for each row while preserving the input shape.
 ///
+/// The activation math is provided by [`Activation::Softmax`]; this layer only adds
+/// boundary validation and the caching required for backpropagation.
+///
 /// # Fields
 ///
-/// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
 /// - `output_cache` - Cached output tensor from the forward pass, used during backpropagation
 ///
 /// # Examples
@@ -58,7 +44,6 @@ const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 /// // Output will be probability distributions that sum to 1.0 for each batch
 /// ```
 pub struct Softmax {
-    input_cache: Option<Tensor>,
     output_cache: Option<Tensor>,
 }
 
@@ -69,10 +54,13 @@ impl Softmax {
     ///
     /// - `Self` - A new `Softmax` layer instance
     pub fn new() -> Self {
-        Softmax {
-            input_cache: None,
-            output_cache: None,
-        }
+        Softmax { output_cache: None }
+    }
+}
+
+impl Default for Softmax {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -92,74 +80,8 @@ impl Layer for Softmax {
             ));
         }
 
-        // Save input for backpropagation
-        self.input_cache = Some(input.clone());
-
-        // Ensure input is at least 2D for softmax computation
-        let shape = input.shape();
-        let ndim = shape.len();
-
-        if ndim < 2 {
-            return Err(ModelError::InputValidationError(format!(
-                "Softmax requires input with at least 2 dimensions, got shape: {:?}",
-                shape
-            )));
-        }
-
-        let output = input.clone();
-
-        // Flatten to 2D: [batch, features]
-        let batch_size: usize = shape[..ndim - 1].iter().product();
-        let num_features = shape[ndim - 1];
-
-        let mut output_2d = output
-            .into_shape_with_order((batch_size, num_features))
-            .map_err(|e| {
-                ModelError::ProcessingError(format!(
-                    "Failed to reshape for softmax computation: {}",
-                    e
-                ))
-            })?;
-
-        // Apply softmax row-wise with numerical stability
-        // For each row: softmax(x_i) = exp(x_i - max(x)) / sum(exp(x_j - max(x)))
-        let apply_softmax = |mut row: ArrayViewMut1<f32>| {
-            // Find max for numerical stability
-            let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let clipped_max = max_val.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-
-            // Compute exp(x - max) with input clipping
-            row.map_inplace(|x| {
-                let clipped_x = x.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-                *x = (clipped_x - clipped_max).exp()
-            });
-
-            // Normalize by sum with epsilon for numerical stability
-            let sum = row.sum().max(EPSILON);
-            row.map_inplace(|x| *x /= sum);
-        };
-
-        if batch_size > SOFTMAX_PARALLEL_THRESHOLD {
-            // Parallel processing for larger batches
-            output_2d
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .for_each(apply_softmax);
-        } else {
-            // Sequential processing for smaller batches
-            output_2d.axis_iter_mut(Axis(0)).for_each(apply_softmax);
-        }
-
-        // Reshape back to original shape
-        let output = output_2d
-            .into_shape_with_order(shape)
-            .map_err(|e| {
-                ModelError::ProcessingError(format!(
-                    "Failed to reshape back after softmax computation: {}",
-                    e
-                ))
-            })?
-            .into_dyn();
+        // Apply softmax over the last axis (input must be at least 2D)
+        let output = Activation::Softmax.forward(input)?;
 
         // Cache output for backpropagation
         self.output_cache = Some(output.clone());
@@ -167,15 +89,35 @@ impl Layer for Softmax {
         Ok(output)
     }
 
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Check if tensor is empty
+        if input.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input tensor is empty".to_string(),
+            ));
+        }
+
+        // Check for NaN or infinite values
+        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
+            return Err(ModelError::InputValidationError(
+                "Input tensor contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        // Apply softmax over the last axis (input must be at least 2D)
+        Activation::Softmax.forward(input)
+    }
+
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        match (&self.input_cache, &self.output_cache) {
-            (Some(input), Some(output)) => {
-                // Validate gradient output shape
-                if grad_output.shape() != input.shape() {
+        match &self.output_cache {
+            Some(output) => {
+                // Validate gradient output shape (softmax preserves shape)
+                if grad_output.shape() != output.shape() {
                     return Err(ModelError::ProcessingError(format!(
-                        "Gradient output shape {:?} doesn't match input shape {:?}",
+                        "Gradient output shape {:?} doesn't match output shape {:?}",
                         grad_output.shape(),
-                        input.shape()
+                        output.shape()
                     )));
                 }
 
@@ -186,88 +128,9 @@ impl Layer for Softmax {
                     ));
                 }
 
-                let shape = input.shape();
-                let ndim = shape.len();
-                let batch_size: usize = shape[..ndim - 1].iter().product();
-                let num_features = shape[ndim - 1];
-
-                // Flatten to 2D for computation
-                let output_2d = output
-                    .clone()
-                    .into_shape_with_order((batch_size, num_features))
-                    .map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to reshape output for backward: {}",
-                            e
-                        ))
-                    })?;
-
-                let grad_output_2d = grad_output
-                    .clone()
-                    .into_shape_with_order((batch_size, num_features))
-                    .map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to reshape grad_output for backward: {}",
-                            e
-                        ))
-                    })?;
-
-                // Compute gradient using the softmax derivative
-                // For softmax: grad_input[i] = output[i] * (grad_output[i] - sum_j(output[j] * grad_output[j]))
-                let mut grad_input_2d = Array2::<f32>::zeros((batch_size, num_features));
-
-                let compute_gradient =
-                    |mut grad_row: ArrayViewMut1<f32>,
-                     out_row: ArrayView1<f32>,
-                     grad_out_row: ArrayView1<f32>| {
-                        // Compute dot product: sum(output * grad_output)
-                        let dot: f32 = out_row
-                            .iter()
-                            .zip(grad_out_row.iter())
-                            .map(|(&o, &g)| o * g)
-                            .sum();
-
-                        // Apply softmax gradient formula with gradient clipping
-                        for j in 0..num_features {
-                            grad_row[j] = out_row[j] * (grad_out_row[j] - dot);
-
-                            // Apply gradient clipping to prevent exploding gradients
-                            if grad_row[j].is_nan() || grad_row[j].is_infinite() {
-                                grad_row[j] = 0.0;
-                            } else {
-                                grad_row[j] = grad_row[j].clamp(-GRAD_CLIP_VALUE, GRAD_CLIP_VALUE);
-                            }
-                        }
-                    };
-
-                if batch_size > SOFTMAX_PARALLEL_THRESHOLD {
-                    // Parallel processing for larger batches
-                    Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
-                        .and(output_2d.axis_iter(Axis(0)))
-                        .and(grad_output_2d.axis_iter(Axis(0)))
-                        .par_for_each(compute_gradient);
-                } else {
-                    // Sequential processing for smaller batches
-                    Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
-                        .and(output_2d.axis_iter(Axis(0)))
-                        .and(grad_output_2d.axis_iter(Axis(0)))
-                        .for_each(compute_gradient);
-                }
-
-                // Reshape back to original shape
-                let grad_input = grad_input_2d
-                    .into_shape_with_order(shape)
-                    .map_err(|e| {
-                        ModelError::ProcessingError(format!(
-                            "Failed to reshape grad_input back: {}",
-                            e
-                        ))
-                    })?
-                    .into_dyn();
-
-                Ok(grad_input)
+                Activation::Softmax.backward(output, grad_output)
             }
-            _ => Err(ModelError::ProcessingError(
+            None => Err(ModelError::ProcessingError(
                 "Forward pass has not been run yet".to_string(),
             )),
         }
@@ -278,7 +141,7 @@ impl Layer for Softmax {
     }
 
     fn output_shape(&self) -> String {
-        format_output_shape(&self.input_cache)
+        format_output_shape(&self.output_cache)
     }
 
     no_trainable_parameters_layer_functions!();

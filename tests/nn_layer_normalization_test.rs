@@ -10,8 +10,8 @@ use rustyml::neural_network::layer::regularization_layer::normalization_layer::l
 use rustyml::neural_network::layer::serialize_weight::SerializableLayerWeight;
 use rustyml::neural_network::layer::TrainingParameters;
 use rustyml::neural_network::loss_function::mean_squared_error::MeanSquaredError;
-use rustyml::neural_network::neural_network_trait::Layer;
-use rustyml::neural_network::optimizer::sgd::SGD;
+use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
+use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
 use rustyml::neural_network::sequential::Sequential;
 
 #[test]
@@ -239,7 +239,11 @@ fn test_layer_normalization_parameter_update_sgd() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters
-        ln.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut ln);
+        }
 
         // Get updated weights
         if let LayerWeight::LayerNormalizationLayer(updated_weights) = ln.get_weights() {
@@ -292,7 +296,11 @@ fn test_layer_normalization_parameter_update_adam() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with Adam
-        ln.update_parameters_adam(0.001, 0.9, 0.999, 1e-8, 1);
+        {
+            let mut optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut ln);
+        }
 
         // Get updated weights
         if let LayerWeight::LayerNormalizationLayer(updated_weights) = ln.get_weights() {
@@ -345,7 +353,11 @@ fn test_layer_normalization_parameter_update_rmsprop() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with RMSprop
-        ln.update_parameters_rmsprop(0.001, 0.9, 1e-8);
+        {
+            let mut optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut ln);
+        }
 
         // Get updated weights
         if let LayerWeight::LayerNormalizationLayer(updated_weights) = ln.get_weights() {
@@ -398,7 +410,11 @@ fn test_layer_normalization_parameter_update_adagrad() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with AdaGrad
-        ln.update_parameters_ada_grad(0.01, 1e-8);
+        {
+            let mut optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut ln);
+        }
 
         // Get updated weights
         if let LayerWeight::LayerNormalizationLayer(updated_weights) = ln.get_weights() {
@@ -528,7 +544,7 @@ fn test_layer_normalization_set_weights() {
     let new_gamma = Array::from_vec(vec![2.0, 2.0, 2.0]).into_dyn();
     let new_beta = Array::from_vec(vec![1.0, 1.0, 1.0]).into_dyn();
 
-    ln.set_weights(new_gamma.clone(), new_beta.clone());
+    ln.set_weights(new_gamma.clone(), new_beta.clone()).unwrap();
 
     // Verify weights were set correctly
     if let LayerWeight::LayerNormalizationLayer(weights) = ln.get_weights() {
@@ -698,7 +714,11 @@ fn test_layer_normalization_multiple_forward_backward() {
 
         assert_eq!(grad_input.shape(), &[2, 3]);
 
-        ln.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut ln);
+        }
     }
 
     println!("Multiple forward-backward passes test passed");
@@ -724,10 +744,65 @@ fn test_layer_normalization_serialization() {
         SerializableLayerWeight::LayerNormalization(w) => {
             assert_eq!(w.gamma.len(), 3);
             assert_eq!(w.beta.len(), 3);
-            assert_eq!(w.shape, vec![3]);
+            assert_eq!(w.gamma.shape(), &[3]);
         }
         _ => panic!("Expected LayerNormalization weights"),
     }
 
     println!("Serialization test passed");
+}
+
+#[test]
+fn test_layer_normalization_multiple_axes() {
+    use ndarray::{ArrayD, IxDyn};
+    // Multi-axis LayerNorm reduces to single-axis normalization of the merged axes. Verify it
+    // against independent references, forward and backward.
+    let shape = [3usize, 4, 5];
+    let n: usize = shape.iter().product();
+    let data: Vec<f32> = (0..n).map(|i| 0.05 * i as f32 - 1.0).collect();
+    let x = ArrayD::from_shape_vec(IxDyn(&shape), data).unwrap();
+
+    // Case 1: normalizing the trailing axes [1, 2] jointly == merging them into one axis (reshape
+    // to [3, 20]) and running the Default (last-axis) normalization.
+    let mut ln_multi = LayerNormalization::new(
+        vec![3, 4, 5],
+        LayerNormalizationAxis::Multiple(vec![1, 2]),
+        1e-5,
+    )
+    .unwrap();
+    let mut ln_merged =
+        LayerNormalization::new(vec![3, 20], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let x_merged = x.clone().into_shape_with_order(vec![3usize, 20]).unwrap();
+
+    let out_multi = ln_multi.forward(&x).unwrap();
+    let out_merged = ln_merged.forward(&x_merged).unwrap();
+    let out_merged_back = out_merged.into_shape_with_order(vec![3usize, 4, 5]).unwrap();
+    assert_eq!(out_multi.shape(), &[3, 4, 5]);
+    for (a, b) in out_multi.iter().zip(out_merged_back.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
+    let din_multi = ln_multi.backward(&ArrayD::ones(IxDyn(&[3, 4, 5]))).unwrap();
+    let din_merged = ln_merged.backward(&ArrayD::ones(IxDyn(&[3, 20]))).unwrap();
+    let din_merged_back = din_merged.into_shape_with_order(vec![3usize, 4, 5]).unwrap();
+    for (a, b) in din_multi.iter().zip(din_merged_back.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
+
+    // Case 2: Multiple([1]) routes a single non-trailing axis through the permute+merge path, which
+    // must match Custom(1) exactly (forward and backward).
+    let mut ln_m1 =
+        LayerNormalization::new(vec![3, 4, 5], LayerNormalizationAxis::Multiple(vec![1]), 1e-5)
+            .unwrap();
+    let mut ln_c1 =
+        LayerNormalization::new(vec![3, 4, 5], LayerNormalizationAxis::Custom(1), 1e-5).unwrap();
+    let o_m1 = ln_m1.forward(&x).unwrap();
+    let o_c1 = ln_c1.forward(&x).unwrap();
+    for (a, b) in o_m1.iter().zip(o_c1.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
+    let d_m1 = ln_m1.backward(&ArrayD::ones(IxDyn(&[3, 4, 5]))).unwrap();
+    let d_c1 = ln_c1.backward(&ArrayD::ones(IxDyn(&[3, 4, 5]))).unwrap();
+    for (a, b) in d_m1.iter().zip(d_c1.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
 }

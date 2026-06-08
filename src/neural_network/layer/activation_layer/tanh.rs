@@ -1,31 +1,22 @@
+use crate::neural_network::layer::no_trainable_parameters_layer_functions;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
-use crate::neural_network::layer::activation_layer::format_output_shape;
+use crate::neural_network::layer::activation_layer::{Activation, format_output_shape};
 use crate::neural_network::layer::layer_weight::LayerWeight;
 use crate::neural_network::neural_network_trait::{ActivationLayer, Layer};
-use ndarray::Zip;
-
-/// Gradient clipping value to prevent exploding gradients
-const GRAD_CLIP_VALUE: f32 = 1e6;
-
-/// Max input clipping values to prevent overflow in tanh function
-const INPUT_CLIP_MIN: f32 = -500.0;
-
-/// Min input clipping values to prevent overflow in tanh function
-const INPUT_CLIP_MAX: f32 = 500.0;
-
-/// Threshold for using parallel computation instead of sequential
-const TANH_PARALLEL_THRESHOLD: usize = 2048;
 
 /// Tanh (Hyperbolic Tangent) activation layer.
 ///
 /// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
 /// preserving the input shape.
 ///
+/// The activation math is provided by [`Activation::Tanh`]; this layer only adds
+/// boundary validation and the caching required for backpropagation.
+///
 /// # Fields
 ///
-/// - `input_cache` - Cached input tensor from the forward pass, used during backpropagation
+/// - `output_cache` - Cached activated output from the forward pass, used during backpropagation
 ///
 /// # Examples
 ///
@@ -53,7 +44,7 @@ const TANH_PARALLEL_THRESHOLD: usize = 2048;
 /// // Output will be approximately: [[-0.76, 0.96, -0.99], [0.99, -0.99, 1.0]]
 /// ```
 pub struct Tanh {
-    input_cache: Option<Tensor>,
+    output_cache: Option<Tensor>,
 }
 
 impl Tanh {
@@ -63,7 +54,13 @@ impl Tanh {
     ///
     /// - `Self` - A new `Tanh` layer instance
     pub fn new() -> Self {
-        Tanh { input_cache: None }
+        Tanh { output_cache: None }
+    }
+}
+
+impl Default for Tanh {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -83,35 +80,43 @@ impl Layer for Tanh {
             ));
         }
 
-        // Save input for backpropagation
-        self.input_cache = Some(input.clone());
-
         // Apply Tanh: tanh(x) with input clipping for numerical stability
-        let output = if input.len() >= TANH_PARALLEL_THRESHOLD {
-            let mut output = input.clone();
-            Zip::from(&mut output).par_for_each(|x| {
-                let clipped_x = x.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-                *x = clipped_x.tanh();
-            });
-            output
-        } else {
-            input.mapv(|x| {
-                let clipped_x = x.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-                clipped_x.tanh()
-            })
-        };
+        let output = Activation::Tanh.forward(input)?;
+
+        // Save activated output for backpropagation
+        self.output_cache = Some(output.clone());
 
         Ok(output)
     }
 
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // Check if tensor is empty
+        if input.is_empty() {
+            return Err(ModelError::InputValidationError(
+                "Input tensor is empty".to_string(),
+            ));
+        }
+
+        // Check for NaN or infinite values
+        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
+            return Err(ModelError::InputValidationError(
+                "Input tensor contains NaN or infinite values".to_string(),
+            ));
+        }
+
+        // Apply Tanh: tanh(x) with input clipping for numerical stability
+        Activation::Tanh.forward(input)
+    }
+
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
-        if let Some(input) = &self.input_cache {
-            // Validate gradient output shape
-            if grad_output.shape() != input.shape() {
+        if let Some(output) = &self.output_cache {
+            // Validate gradient output shape (tanh preserves shape)
+            if grad_output.shape() != output.shape() {
                 return Err(ModelError::ProcessingError(format!(
-                    "Gradient output shape {:?} doesn't match input shape {:?}",
+                    "Gradient output shape {:?} doesn't match output shape {:?}",
                     grad_output.shape(),
-                    input.shape()
+                    output.shape()
                 )));
             }
 
@@ -122,35 +127,8 @@ impl Layer for Tanh {
                 ));
             }
 
-            // Compute gradient: grad_input = grad_output * (1 - tanh^2(input))
-            // Tanh derivative is: d/dx tanh(x) = 1 - tanh^2(x) = sech^2(x)
-            let mut grad_input = grad_output.clone();
-
-            let compute_gradient = |grad: &mut f32, &inp: &f32| {
-                let clipped_inp = inp.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-                let tanh_val = clipped_inp.tanh();
-                let derivative = 1.0 - tanh_val * tanh_val;
-                *grad *= derivative;
-
-                // Apply gradient clipping to prevent exploding gradients
-                if grad.is_nan() || grad.is_infinite() {
-                    *grad = 0.0;
-                } else {
-                    *grad = grad.clamp(-GRAD_CLIP_VALUE, GRAD_CLIP_VALUE);
-                }
-            };
-
-            if input.len() >= TANH_PARALLEL_THRESHOLD {
-                Zip::from(&mut grad_input)
-                    .and(input)
-                    .par_for_each(compute_gradient);
-            } else {
-                Zip::from(&mut grad_input)
-                    .and(input)
-                    .for_each(compute_gradient);
-            }
-
-            Ok(grad_input)
+            // Tanh derivative is: d/dx tanh(x) = 1 - tanh^2(x)
+            Activation::Tanh.backward(output, grad_output)
         } else {
             Err(ModelError::ProcessingError(
                 "Forward pass has not been run yet".to_string(),
@@ -163,7 +141,7 @@ impl Layer for Tanh {
     }
 
     fn output_shape(&self) -> String {
-        format_output_shape(&self.input_cache)
+        format_output_shape(&self.output_cache)
     }
 
     no_trainable_parameters_layer_functions!();

@@ -1,16 +1,15 @@
+use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{BatchNormalizationLayerWeight, LayerWeight};
-use crate::neural_network::layer::regularization_layer::input_validation_function::{
+use crate::neural_network::layer::regularization_layer::validation::{
     validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_momentum,
 };
-use crate::neural_network::neural_network_trait::Layer;
-use crate::neural_network::optimizer::OptimizerCacheNormalizationLayer;
-use crate::neural_network::optimizer::{
-    ada_grad::AdaGradStatesNormalizationLayer, adam::AdamStatesNormalizationLayer,
-    rms_prop::RMSpropCacheNormalizationLayer,
-};
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
 use ndarray::Axis;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -41,7 +40,6 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 /// - `x_centered` - Centered input (used in backward pass)
 /// - `grad_gamma` - Gradient for gamma parameter
 /// - `grad_beta` - Gradient for beta parameter
-/// - `optimizer_cache` - Optimizer state cache for adaptive updates
 ///
 /// # Examples
 /// ```rust
@@ -75,8 +73,6 @@ pub struct BatchNormalization {
     // Gradients
     grad_gamma: Option<Tensor>,
     grad_beta: Option<Tensor>,
-    // Optimizer cache
-    optimizer_cache: OptimizerCacheNormalizationLayer,
 }
 
 impl BatchNormalization {
@@ -127,7 +123,6 @@ impl BatchNormalization {
             x_centered: None,
             grad_gamma: None,
             grad_beta: None,
-            optimizer_cache: OptimizerCacheNormalizationLayer::default(),
         })
     }
 
@@ -147,11 +142,20 @@ impl BatchNormalization {
         beta: Tensor,
         running_mean: Tensor,
         running_var: Tensor,
-    ) {
+    ) -> Result<(), ModelError> {
+        validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
+        validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
+        validate_weight_shape(
+            "running_mean",
+            self.running_mean.shape(),
+            running_mean.shape(),
+        )?;
+        validate_weight_shape("running_var", self.running_var.shape(), running_var.shape())?;
         self.gamma = gamma;
         self.beta = beta;
         self.running_mean = running_mean;
         self.running_var = running_var;
+        Ok(())
     }
 }
 
@@ -268,6 +272,18 @@ impl Layer for BatchNormalization {
         }
     }
 
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        validate_input_shape(input.shape(), &self.input_shape)?;
+
+        // Inference mode: use running statistics
+        let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
+        let x_normalized = (input - &self.running_mean) / &std_dev;
+        let output = &x_normalized * &self.gamma + &self.beta;
+
+        Ok(output)
+    }
+
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
         if !self.training {
             // During inference, pass gradient through unchanged
@@ -377,20 +393,26 @@ impl Layer for BatchNormalization {
         TrainingParameters::Trainable(self.gamma.len() + self.beta.len())
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
-        normalization_layer_update_parameters_sgd!(self, lr)
-    }
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        normalization_layer_update_parameters_adam!(self, lr, beta1, beta2, epsilon, t)
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        normalization_layer_update_parameters_rmsprop!(self, lr, rho, epsilon)
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        normalization_layer_update_parameters_ada_grad!(self, lr, epsilon)
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            gamma,
+            beta,
+            grad_gamma,
+            grad_beta,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        if let (Some(grad_a), Some(grad_b)) = (grad_gamma.as_ref(), grad_beta.as_ref()) {
+            params.push(ParamGrad {
+                value: gamma.as_slice_mut().expect("gamma must be contiguous"),
+                grad: grad_a.as_slice().expect("grad_gamma must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: beta.as_slice_mut().expect("beta must be contiguous"),
+                grad: grad_b.as_slice().expect("grad_beta must be contiguous"),
+            });
+        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

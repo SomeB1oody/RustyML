@@ -1,17 +1,20 @@
+use crate::neural_network::layer::regularization_layer::normalization_layer::compute_normalization_layer_parameter_gradients;
+use crate::neural_network::layer::regularization_layer::normalization_layer::normalization_layer_output_shape;
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
+use crate::neural_network::layer::validation::validate_weight_shape;
 use crate::neural_network::layer::layer_weight::{InstanceNormalizationLayerWeight, LayerWeight};
-use crate::neural_network::layer::regularization_layer::input_validation_function::{
-    validate_channel_axis, validate_channel_axis_with_shape, validate_epsilon,
-    validate_input_shape, validate_input_shape_not_empty, validate_min_input_ndim,
+use crate::neural_network::layer::regularization_layer::validation::{
+    validate_channel_axis, validate_epsilon, validate_input_shape,
+    validate_input_shape_not_empty, validate_min_input_ndim,
 };
-use crate::neural_network::neural_network_trait::Layer;
-use crate::neural_network::optimizer::OptimizerCacheNormalizationLayer;
-use crate::neural_network::optimizer::{
-    ada_grad::AdaGradStatesNormalizationLayer, adam::AdamStatesNormalizationLayer,
-    rms_prop::RMSpropCacheNormalizationLayer,
+use crate::neural_network::layer::regularization_layer::normalization_layer::{
+    from_channels_first, to_channels_first,
 };
+use crate::neural_network::neural_network_trait::{Layer, ParamGrad};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
@@ -40,7 +43,6 @@ const INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 /// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
 /// - `grad_gamma` - Gradient for gamma parameter
 /// - `grad_beta` - Gradient for beta parameter
-/// - `optimizer_cache` - Cache for optimizer states
 ///
 /// # Examples
 /// ```rust
@@ -65,16 +67,13 @@ pub struct InstanceNormalization {
     gamma: Tensor,
     beta: Tensor,
     training: bool,
-    // Cache for backward pass
+    // Cache for backward pass (backward uses x_centered + std_dev, so the raw mean is not stored)
     x_normalized: Option<Tensor>,
     x_centered: Option<Tensor>,
-    mean: Option<Tensor>,
     std_dev: Option<Tensor>,
     // Gradients
     grad_gamma: Option<Tensor>,
     grad_beta: Option<Tensor>,
-    // Optimizer cache
-    optimizer_cache: OptimizerCacheNormalizationLayer,
 }
 
 impl InstanceNormalization {
@@ -101,8 +100,11 @@ impl InstanceNormalization {
         epsilon: f32,
     ) -> Result<Self, ModelError> {
         validate_input_shape_not_empty(&input_shape)?;
-        validate_channel_axis_with_shape(channel_axis, &input_shape)?;
+        validate_channel_axis(channel_axis, input_shape.len())?;
         validate_epsilon(epsilon)?;
+
+        // Any channel position is supported: forward/backward permute the channel axis to position 1
+        // and run a channels-first core, so both channels-first (NCHW) and channels-last (NHWC) work.
 
         // For instance normalization, parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > channel_axis {
@@ -122,11 +124,9 @@ impl InstanceNormalization {
             training: true,
             x_normalized: None,
             x_centered: None,
-            mean: None,
             std_dev: None,
             grad_gamma: None,
             grad_beta: None,
-            optimizer_cache: OptimizerCacheNormalizationLayer::default(),
         })
     }
 
@@ -138,9 +138,12 @@ impl InstanceNormalization {
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
-    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) {
+    pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), ModelError> {
+        validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
+        validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
         self.gamma = gamma;
         self.beta = beta;
+        Ok(())
     }
 }
 
@@ -150,15 +153,20 @@ impl Layer for InstanceNormalization {
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
 
+        // Work in channels-first layout so the core below (which assumes channel at axis 1) supports
+        // any channel position. Borrows for channel_axis == 1; the output is permuted back at the end.
+        let cf_input = to_channels_first(input, self.channel_axis);
+        let input = cf_input.as_ref();
+
         let input_shape = input.shape();
         let batch_size = input_shape[0];
-        let num_channels = input_shape[self.channel_axis];
+        let num_channels = input_shape[1];
 
         // Calculate spatial size (all dimensions except batch and channel)
         let spatial_size: usize = input_shape
             .iter()
             .enumerate()
-            .filter(|&(i, _)| i != 0 && i != self.channel_axis)
+            .filter(|&(i, _)| i != 0 && i != 1)
             .map(|(_, &dim)| dim)
             .product();
 
@@ -167,7 +175,7 @@ impl Layer for InstanceNormalization {
         // Build mean shape: keep batch and channel dimensions, set others to 1
         let mut mean_shape = vec![1; input.ndim()];
         mean_shape[0] = batch_size;
-        mean_shape[self.channel_axis] = num_channels;
+        mean_shape[1] = num_channels;
 
         let mean = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
             // Parallel computation
@@ -292,9 +300,9 @@ impl Layer for InstanceNormalization {
         // Scale and shift
         // Reshape gamma and beta to match the input shape for broadcasting
         let mut gamma_shape = vec![1; input.ndim()];
-        gamma_shape[self.channel_axis] = num_channels;
+        gamma_shape[1] = num_channels;
         let mut beta_shape = vec![1; input.ndim()];
-        beta_shape[self.channel_axis] = num_channels;
+        beta_shape[1] = num_channels;
 
         let gamma_broadcast = self
             .gamma
@@ -330,13 +338,205 @@ impl Layer for InstanceNormalization {
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
-        // Cache values for backward pass
+        // Cache the normalization intermediates the backward pass needs.
         self.x_normalized = Some(x_normalized);
         self.x_centered = Some(x_centered);
-        self.mean = Some(mean);
         self.std_dev = Some(std_dev);
 
-        Ok(output)
+        Ok(from_channels_first(output, self.channel_axis))
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        validate_input_shape(input.shape(), &self.input_shape)?;
+        validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
+        validate_channel_axis(self.channel_axis, input.ndim())?;
+
+        // See `forward`: permute channel to axis 1, run the channels-first core, permute back.
+        let cf_input = to_channels_first(input, self.channel_axis);
+        let input = cf_input.as_ref();
+
+        let input_shape = input.shape();
+        let batch_size = input_shape[0];
+        let num_channels = input_shape[1];
+
+        // Calculate spatial size (all dimensions except batch and channel)
+        let spatial_size: usize = input_shape
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i != 0 && i != 1)
+            .map(|(_, &dim)| dim)
+            .product();
+
+        let total_elements = input.len();
+
+        // Build mean shape: keep batch and channel dimensions, set others to 1
+        let mut mean_shape = vec![1; input.ndim()];
+        mean_shape[0] = batch_size;
+        mean_shape[1] = num_channels;
+
+        let mean = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
+            // Parallel computation
+            let mut mean_flat = vec![0.0f32; batch_size * num_channels];
+
+            mean_flat
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(idx, mean_val)| {
+                    let batch_idx = idx / num_channels;
+                    let channel_idx = idx % num_channels;
+
+                    let start = (batch_idx * num_channels + channel_idx) * spatial_size;
+                    let end = start + spatial_size;
+
+                    let sum: f32 = input.as_slice().unwrap()[start..end].iter().sum();
+                    *mean_val = sum / spatial_size as f32;
+                });
+
+            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
+        } else {
+            // Sequential computation
+            let mut mean_flat = vec![0.0f32; batch_size * num_channels];
+
+            for batch_idx in 0..batch_size {
+                for channel_idx in 0..num_channels {
+                    let start = (batch_idx * num_channels + channel_idx) * spatial_size;
+                    let end = start + spatial_size;
+
+                    let sum: f32 = input.as_slice().unwrap()[start..end].iter().sum();
+                    mean_flat[batch_idx * num_channels + channel_idx] = sum / spatial_size as f32;
+                }
+            }
+
+            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
+        };
+
+        // Center the data and compute variance
+        let (x_centered, var) = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
+            // Parallel centering and variance computation
+            let mut x_centered = Tensor::zeros(input.raw_dim());
+            let mut squared_diff = Tensor::zeros(input.raw_dim());
+
+            x_centered
+                .as_slice_mut()
+                .unwrap()
+                .par_iter_mut()
+                .zip(squared_diff.as_slice_mut().unwrap().par_iter_mut())
+                .zip(input.as_slice().unwrap().par_iter())
+                .enumerate()
+                .for_each(|(i, ((centered, sq_diff), &val))| {
+                    let instance_idx = i / spatial_size;
+                    let mean_val = mean.as_slice().unwrap()[instance_idx];
+                    let diff = val - mean_val;
+                    *centered = diff;
+                    *sq_diff = diff * diff;
+                });
+
+            // Compute variance for each (batch, channel) pair
+            let mut var_flat = vec![0.0f32; batch_size * num_channels];
+
+            var_flat
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(idx, var_val)| {
+                    let start = idx * spatial_size;
+                    let end = start + spatial_size;
+
+                    let sum: f32 = squared_diff.as_slice().unwrap()[start..end].iter().sum();
+                    *var_val = sum / spatial_size as f32;
+                });
+
+            let var = Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap();
+            (x_centered, var)
+        } else {
+            // Sequential computation
+            let x_centered = input - &mean;
+
+            let mut var_flat = vec![0.0f32; batch_size * num_channels];
+
+            for batch_idx in 0..batch_size {
+                for channel_idx in 0..num_channels {
+                    let start = (batch_idx * num_channels + channel_idx) * spatial_size;
+                    let end = start + spatial_size;
+
+                    let sum: f32 = x_centered.as_slice().unwrap()[start..end]
+                        .iter()
+                        .map(|&x| x * x)
+                        .sum();
+                    var_flat[batch_idx * num_channels + channel_idx] = sum / spatial_size as f32;
+                }
+            }
+
+            let var = Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap();
+            (x_centered, var)
+        };
+
+        // Normalize
+        let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
+        let x_normalized = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
+            // Parallel normalization
+            let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
+
+            x_normalized
+                .as_slice_mut()
+                .unwrap()
+                .par_iter_mut()
+                .zip(x_centered.as_slice().unwrap().par_iter())
+                .enumerate()
+                .for_each(|(i, (norm, &centered))| {
+                    let instance_idx = i / spatial_size;
+                    let std_val = std_dev.as_slice().unwrap()[instance_idx];
+                    *norm = centered / std_val;
+                });
+
+            x_normalized
+        } else {
+            // Sequential normalization
+            &x_centered / &std_dev
+        };
+
+        // Scale and shift
+        // Reshape gamma and beta to match the input shape for broadcasting
+        let mut gamma_shape = vec![1; input.ndim()];
+        gamma_shape[1] = num_channels;
+        let mut beta_shape = vec![1; input.ndim()];
+        beta_shape[1] = num_channels;
+
+        let gamma_broadcast = self
+            .gamma
+            .clone()
+            .into_shape_with_order(gamma_shape.as_slice())
+            .unwrap();
+        let beta_broadcast = self
+            .beta
+            .clone()
+            .into_shape_with_order(beta_shape.as_slice())
+            .unwrap();
+
+        let output = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
+            // Parallel scale and shift
+            let mut output = Tensor::zeros(x_normalized.raw_dim());
+
+            output
+                .as_slice_mut()
+                .unwrap()
+                .par_iter_mut()
+                .zip(x_normalized.as_slice().unwrap().par_iter())
+                .enumerate()
+                .for_each(|(i, (out, &norm))| {
+                    let channel_idx = (i / spatial_size) % num_channels;
+                    let gamma_val = self.gamma.as_slice().unwrap()[channel_idx];
+                    let beta_val = self.beta.as_slice().unwrap()[channel_idx];
+                    *out = norm * gamma_val + beta_val;
+                });
+
+            output
+        } else {
+            // Sequential scale and shift
+            &x_normalized * &gamma_broadcast + &beta_broadcast
+        };
+
+        Ok(from_channels_first(output, self.channel_axis))
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {
@@ -345,14 +545,19 @@ impl Layer for InstanceNormalization {
             return Ok(grad_output.clone());
         }
 
+        // Work in channels-first layout (matches the cached channels-first intermediates from the
+        // forward pass); the resulting input-gradient is permuted back at the end.
+        let cf_grad = to_channels_first(grad_output, self.channel_axis);
+        let grad_output = cf_grad.as_ref();
+
         let input_shape = grad_output.shape();
         let batch_size = input_shape[0];
-        let num_channels = input_shape[self.channel_axis];
+        let num_channels = input_shape[1];
 
         let spatial_size: usize = input_shape
             .iter()
             .enumerate()
-            .filter(|&(i, _)| i != 0 && i != self.channel_axis)
+            .filter(|&(i, _)| i != 0 && i != 1)
             .map(|(_, &dim)| dim)
             .product();
         let spatial_size_f32 = spatial_size as f32;
@@ -412,7 +617,7 @@ impl Layer for InstanceNormalization {
         } else {
             // Sequential computation
             let mut gamma_shape = vec![1; grad_output.ndim()];
-            gamma_shape[self.channel_axis] = num_channels;
+            gamma_shape[1] = num_channels;
             let gamma_broadcast = self
                 .gamma
                 .clone()
@@ -485,7 +690,7 @@ impl Layer for InstanceNormalization {
             // Sequential computation
             let mut mean_shape = vec![1; grad_output.ndim()];
             mean_shape[0] = batch_size;
-            mean_shape[self.channel_axis] = num_channels;
+            mean_shape[1] = num_channels;
 
             let mut grad_var_flat = vec![0.0f32; batch_size * num_channels];
             let mut grad_mean_flat = vec![0.0f32; batch_size * num_channels];
@@ -521,7 +726,7 @@ impl Layer for InstanceNormalization {
                 + &grad_mean / spatial_size_f32
         };
 
-        Ok(grad_input)
+        Ok(from_channels_first(grad_input, self.channel_axis))
     }
 
     fn layer_type(&self) -> &str {
@@ -536,20 +741,26 @@ impl Layer for InstanceNormalization {
         TrainingParameters::Trainable(self.gamma.len() + self.beta.len())
     }
 
-    fn update_parameters_sgd(&mut self, lr: f32) {
-        normalization_layer_update_parameters_sgd!(self, lr)
-    }
-
-    fn update_parameters_adam(&mut self, lr: f32, beta1: f32, beta2: f32, epsilon: f32, t: u64) {
-        normalization_layer_update_parameters_adam!(self, lr, beta1, beta2, epsilon, t)
-    }
-
-    fn update_parameters_rmsprop(&mut self, lr: f32, rho: f32, epsilon: f32) {
-        normalization_layer_update_parameters_rmsprop!(self, lr, rho, epsilon)
-    }
-
-    fn update_parameters_ada_grad(&mut self, lr: f32, epsilon: f32) {
-        normalization_layer_update_parameters_ada_grad!(self, lr, epsilon)
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        let Self {
+            gamma,
+            beta,
+            grad_gamma,
+            grad_beta,
+            ..
+        } = self;
+        let mut params = Vec::new();
+        if let (Some(grad_a), Some(grad_b)) = (grad_gamma.as_ref(), grad_beta.as_ref()) {
+            params.push(ParamGrad {
+                value: gamma.as_slice_mut().expect("gamma must be contiguous"),
+                grad: grad_a.as_slice().expect("grad_gamma must be contiguous"),
+            });
+            params.push(ParamGrad {
+                value: beta.as_slice_mut().expect("beta must be contiguous"),
+                grad: grad_b.as_slice().expect("grad_beta must be contiguous"),
+            });
+        }
+        params
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {

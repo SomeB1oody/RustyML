@@ -1,24 +1,24 @@
-use super::*;
-use crate::neural_network::layer::serialize_weight::helper_function::vec2_to_array2;
-use crate::neural_network::neural_network_trait::{ActivationLayer, ApplyWeights};
+use crate::error::IoError;
+use crate::neural_network::layer::dense::Dense;
+use crate::neural_network::neural_network_trait::ApplyWeights;
+use ndarray::Array2;
+use serde::{Deserialize, Serialize};
 
 /// Serializable representation of Dense layer weights.
 ///
 /// # Fields
 ///
-/// - `weight` - 2D weight matrix stored as nested vectors
-/// - `bias` - 2D bias matrix stored as nested vectors
+/// - `weight` - Weight matrix (input_dim, output_dim)
+/// - `bias` - Bias matrix (1, output_dim)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableDenseWeight {
-    pub weight: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
+    pub weight: Array2<f32>,
+    pub bias: Array2<f32>,
 }
 
-impl<T: ActivationLayer> ApplyWeights<Dense<T>> for SerializableDenseWeight {
-    fn apply_to_layer(&self, layer: &mut Dense<T>) -> Result<(), IoError> {
-        let weight_array = vec2_to_array2(&self.weight)?;
-        let bias_array = vec2_to_array2(&self.bias)?;
-        layer.set_weights(weight_array, bias_array);
+impl ApplyWeights<Dense> for SerializableDenseWeight {
+    fn apply_to_layer(&self, layer: &mut Dense) -> Result<(), IoError> {
+        layer.set_weights(self.weight.clone(), self.bias.clone())?;
         Ok(())
     }
 }

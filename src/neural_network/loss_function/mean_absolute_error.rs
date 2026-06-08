@@ -1,4 +1,6 @@
+use crate::error::ModelError;
 use crate::neural_network::Tensor;
+use crate::neural_network::loss_function::validate_same_shape;
 use crate::neural_network::neural_network_trait::LossFunction;
 
 /// Mean Absolute Error loss function
@@ -26,11 +28,11 @@ use crate::neural_network::neural_network_trait::LossFunction;
 /// let mae = MeanAbsoluteError::new();
 ///
 /// // Compute loss
-/// let loss = mae.compute_loss(&y_true, &y_pred);
+/// let loss = mae.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("MAE Loss: {:.4}", loss); // Expected: ~0.175
 ///
 /// // Compute gradients
-/// let gradients = mae.compute_grad(&y_true, &y_pred);
+/// let gradients = mae.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
 pub struct MeanAbsoluteError;
@@ -46,14 +48,22 @@ impl MeanAbsoluteError {
     }
 }
 
+impl Default for MeanAbsoluteError {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LossFunction for MeanAbsoluteError {
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32 {
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError> {
+        validate_same_shape(y_true, y_pred)?;
         let mut diff = y_pred - y_true;
         diff.par_mapv_inplace(|x| x.abs());
-        diff.sum() / (y_true.len() as f32)
+        Ok(diff.sum() / (y_true.len() as f32))
     }
 
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor {
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError> {
+        validate_same_shape(y_true, y_pred)?;
         let n = y_true.len() as f32;
         let mut result = y_pred - y_true;
         result.par_mapv_inplace(|x| {
@@ -65,6 +75,6 @@ impl LossFunction for MeanAbsoluteError {
                 0.0
             }
         });
-        result
+        Ok(result)
     }
 }

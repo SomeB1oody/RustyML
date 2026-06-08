@@ -1,3 +1,6 @@
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_set_training;
+use crate::neural_network::layer::regularization_layer::mode_dependent_layer_trait;
+use crate::neural_network::layer::no_trainable_parameters_layer_functions;
 use crate::error::ModelError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
@@ -5,7 +8,7 @@ use crate::neural_network::layer::layer_weight::LayerWeight;
 use crate::neural_network::layer::regularization_layer::dropout_layer::{
     dropout_backward, dropout_output_shape,
 };
-use crate::neural_network::layer::regularization_layer::input_validation_function::{
+use crate::neural_network::layer::regularization_layer::validation::{
     validate_input_shape, validate_rate,
 };
 use crate::neural_network::neural_network_trait::Layer;
@@ -80,7 +83,7 @@ impl Dropout {
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError> {
-        validate_rate(self.rate, "Dropout rate")?;
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         if !self.training {
@@ -116,6 +119,15 @@ impl Layer for Dropout {
         self.mask = Some(mask);
 
         Ok(output)
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError> {
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        validate_input_shape(input.shape(), &self.input_shape)?;
+
+        // Inverted dropout passes the input through unchanged during inference.
+        Ok(input.clone())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, ModelError> {

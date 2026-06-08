@@ -398,8 +398,9 @@ impl KernelPCA {
 
         // Extract eigenvalues and eigenvectors for projection, then apply Kernel PCA's
         // positivity requirement on the resulting eigenvalues.
-        let (eigenvalues, eigenvectors) =
-            self.eigen_solver.decompose(&kernel_matrix, self.n_components)?;
+        let (eigenvalues, eigenvectors) = self
+            .eigen_solver
+            .decompose(&kernel_matrix, self.n_components)?;
         Self::validate_eigenvalues(&eigenvalues)?;
 
         #[cfg(feature = "show_progress")]

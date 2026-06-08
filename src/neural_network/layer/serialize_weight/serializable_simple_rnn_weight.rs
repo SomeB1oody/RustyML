@@ -1,29 +1,30 @@
 use crate::error::IoError;
 use crate::neural_network::layer::recurrent_layer::simple_rnn::SimpleRNN;
-use crate::neural_network::layer::serialize_weight::helper_function::vec2_to_array2;
-use crate::neural_network::neural_network_trait::{ActivationLayer, ApplyWeights};
+use crate::neural_network::neural_network_trait::ApplyWeights;
+use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
 /// Serializable representation of SimpleRNN layer weights.
 ///
 /// # Fields
 ///
-/// - `kernel` - 2D input kernel matrix stored as nested vectors
-/// - `recurrent_kernel` - 2D recurrent kernel matrix stored as nested vectors
-/// - `bias` - 2D bias matrix stored as nested vectors
+/// - `kernel` - Input kernel matrix (input_dim, units)
+/// - `recurrent_kernel` - Recurrent kernel matrix (units, units)
+/// - `bias` - Bias matrix (1, units)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSimpleRNNWeight {
-    pub kernel: Vec<Vec<f32>>,
-    pub recurrent_kernel: Vec<Vec<f32>>,
-    pub bias: Vec<Vec<f32>>,
+    pub kernel: Array2<f32>,
+    pub recurrent_kernel: Array2<f32>,
+    pub bias: Array2<f32>,
 }
 
-impl<T: ActivationLayer> ApplyWeights<SimpleRNN<T>> for SerializableSimpleRNNWeight {
-    fn apply_to_layer(&self, layer: &mut SimpleRNN<T>) -> Result<(), IoError> {
-        let kernel = vec2_to_array2(&self.kernel)?;
-        let recurrent_kernel = vec2_to_array2(&self.recurrent_kernel)?;
-        let bias = vec2_to_array2(&self.bias)?;
-        layer.set_weights(kernel, recurrent_kernel, bias);
+impl ApplyWeights<SimpleRNN> for SerializableSimpleRNNWeight {
+    fn apply_to_layer(&self, layer: &mut SimpleRNN) -> Result<(), IoError> {
+        layer.set_weights(
+            self.kernel.clone(),
+            self.recurrent_kernel.clone(),
+            self.bias.clone(),
+        )?;
         Ok(())
     }
 }

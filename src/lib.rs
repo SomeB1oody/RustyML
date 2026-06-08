@@ -684,7 +684,7 @@ pub mod metric;
 /// ```rust
 /// use rustyml::neural_network::{
 ///     sequential::Sequential,
-///     layer::{Dense, ReLU, Linear},
+///     layer::{Activation, Dense},
 ///     optimizer::Adam,
 ///     loss_function::MeanSquaredError,
 /// };
@@ -696,9 +696,9 @@ pub mod metric;
 ///
 /// // Build sequential model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 8, ReLU::new()).unwrap())   // Input layer: 4 -> 8
-///      .add(Dense::new(8, 3, ReLU::new()).unwrap())   // Hidden layer: 8 -> 3
-///      .add(Dense::new(3, 1, Linear::new()).unwrap()); // Output layer: 3 -> 1
+/// model.add(Dense::new(4, 8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
+///      .add(Dense::new(8, 3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
+///      .add(Dense::new(3, 1, Activation::Linear).unwrap()); // Output layer: 3 -> 1
 ///
 /// // Compile with optimizer and loss function
 /// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), MeanSquaredError::new());

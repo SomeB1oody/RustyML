@@ -7,9 +7,10 @@ use crate::neural_network::layer::serialize_weight::{
     LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
     apply_weights_to_layer,
 };
-use ndarray::{Array, IxDyn, s};
+use ndarray::{Array, Axis, IxDyn};
 use ndarray_rand::rand::{rng, seq::SliceRandom};
 use serde_json::{from_reader, to_writer_pretty};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -30,7 +31,7 @@ use std::io::{BufWriter, Write};
 /// ```rust
 /// use rustyml::neural_network::{
 ///     sequential::Sequential,
-///     layer::{Dense, ReLU, Softmax},
+///     layer::{Activation, Dense},
 ///     optimizer::Adam,
 ///     loss_function::CategoricalCrossEntropy,
 /// };
@@ -43,9 +44,9 @@ use std::io::{BufWriter, Write};
 /// // Build a neural network
 /// let mut model = Sequential::new();
 /// model
-///     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-///     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-///     .add(Dense::new(64, 10, Softmax::new()).unwrap())
+///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax).unwrap())
 ///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Display model structure
@@ -60,9 +61,9 @@ use std::io::{BufWriter, Write};
 /// // Create a new model with the same architecture
 /// let mut new_model = Sequential::new();
 /// new_model
-///     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-///     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-///     .add(Dense::new(64, 10, Softmax::new()).unwrap());
+///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
 ///
 /// // Load weights from file
 /// new_model.load_from_path("model.json").unwrap();
@@ -81,6 +82,12 @@ pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
     loss: Option<Box<dyn LossFunction>>,
+}
+
+impl Default for Sequential {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Sequential {
@@ -208,17 +215,20 @@ impl Sequential {
         }
 
         // Calculate loss
-        let loss_value = self.loss.as_ref().unwrap().compute_loss(y, &output);
+        let loss_value = self.loss.as_ref().unwrap().compute_loss(y, &output)?;
 
         // Calculate gradient of loss with respect to output
-        let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output);
+        let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output)?;
+
+        // Advance the optimizer's global step once per batch, before the per-layer updates, so
+        // step-dependent optimizers (Adam) use a single consistent timestep across all layers.
+        if let Some(ref mut optimizer) = self.optimizer {
+            optimizer.step();
+        }
 
         // Backward pass and parameter updates (iterate through layers in reverse)
         for layer in self.layers.iter_mut().rev() {
-            grad = match layer.backward(&grad) {
-                Ok(grad) => grad,
-                Err(e) => return Err(e),
-            };
+            grad = layer.backward(&grad)?;
             if let Some(ref mut optimizer) = self.optimizer {
                 optimizer.update(&mut **layer);
             }
@@ -340,14 +350,15 @@ impl Sequential {
                 let mut x_batch_data = Vec::new();
                 let mut y_batch_data = Vec::new();
 
-                // Extract data for selected indices
+                // Extract data for selected indices. Index along axis 0 so this works for any
+                // input rank (Dense=2D, Conv1D/RNN=3D, Conv2D=4D, Conv3D=5D), not just 2D.
                 for &idx in indices {
                     // Extract sample from x
-                    let x_sample = x.slice(s![idx, ..]);
+                    let x_sample = x.index_axis(Axis(0), idx);
                     x_batch_data.extend(x_sample.iter().cloned());
 
                     // Extract sample from y
-                    let y_sample = y.slice(s![idx, ..]);
+                    let y_sample = y.index_axis(Axis(0), idx);
                     y_batch_data.extend(y_sample.iter().cloned());
                 }
 
@@ -456,7 +467,7 @@ impl Sequential {
     ///
     /// - `ModelError::InputValidationError` - If `x` is empty or the model has no layers
     /// - `ModelError::ProcessingError` - If any layer fails during forward pass
-    pub fn predict(&mut self, x: &Tensor) -> Result<Tensor, ModelError> {
+    pub fn predict(&self, x: &Tensor) -> Result<Tensor, ModelError> {
         // Input validation
         if x.is_empty() {
             return Err(ModelError::InputValidationError(
@@ -464,16 +475,16 @@ impl Sequential {
             ));
         }
 
-        let mut layers_iter = self.layers.iter_mut();
+        // Inference path: each layer's `predict` runs in eval mode and writes no caches, so this
+        // only needs `&self` (the model can be shared across threads for concurrent inference).
+        let mut layers_iter = self.layers.iter();
         let first_layer = layers_iter
             .next()
             .ok_or_else(|| ModelError::InputValidationError("Model has no layers".to_string()))?;
-        first_layer.set_training_if_mode_dependent(false);
-        let mut output = first_layer.forward(x)?;
+        let mut output = first_layer.predict(x)?;
 
         for layer in layers_iter {
-            layer.set_training_if_mode_dependent(false);
-            output = layer.forward(&output)?;
+            output = layer.predict(&output)?;
         }
         Ok(output)
     }
@@ -510,36 +521,42 @@ impl Sequential {
         let mut trainable_param_count: usize = 0;
         let mut non_trainable_param_count: usize = 0;
 
-        for (i, layer) in self.layers.iter().enumerate() {
-            // Generate name for each layer: first layer is named "Layer", then "Layer_1", "Layer_2", etc.
-            let layer_name = if i == 0 {
-                "Layer".to_string()
-            } else {
-                format!("Layer_{}", i)
-            };
-            let out_shape = layer.output_shape();
-            let param_count = layer.param_count();
-            let param_count_num: usize;
+        // Per-type counter for Keras-style names: "dense", "dense_1", "conv2d", ...
+        let mut type_counts: HashMap<&str, usize> = HashMap::new();
 
-            match param_count {
+        for layer in self.layers.iter() {
+            let layer_type = layer.layer_type();
+
+            // Generate name from the layer type with a per-type index.
+            let count = type_counts.entry(layer_type).or_insert(0);
+            let layer_name = if *count == 0 {
+                layer_type.to_lowercase()
+            } else {
+                format!("{}_{}", layer_type.to_lowercase(), count)
+            };
+            *count += 1;
+
+            let out_shape = layer.output_shape();
+
+            // Exhaustive match so adding a TrainingParameters variant forces a compile error
+            // instead of silently being counted as zero.
+            let param_count_num = match layer.param_count() {
                 TrainingParameters::Trainable(count) => {
                     trainable_param_count += count;
                     total_params += count;
-                    param_count_num = count;
+                    count
                 }
                 TrainingParameters::NonTrainable(count) => {
                     non_trainable_param_count += count;
                     total_params += count;
-                    param_count_num = count;
+                    count
                 }
-                _ => {
-                    param_count_num = 0;
-                }
+                TrainingParameters::NoTrainable => 0,
             };
 
             output.push_str(&format!(
                 "│ {:<31} │ {:<22} │ {:>13} │\n",
-                format!("{} ({})", layer_name, layer.layer_type()),
+                format!("{} ({})", layer_name, layer_type),
                 out_shape,
                 param_count_num
             ));
@@ -595,7 +612,8 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - File path where the model will be saved (e.g., "stored_model.json")
+    /// - `path` - File path where the model will be saved (e.g., "stored_model.json"). Accepts
+    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...).
     ///
     /// # Returns
     ///
@@ -605,7 +623,7 @@ impl Sequential {
     ///
     /// - `IoError::StdIoError` - File creation or write operation failed
     /// - `IoError::JsonError` - Serialization to JSON failed
-    pub fn save_to_path(&self, path: &str) -> Result<(), IoError> {
+    pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> Result<(), IoError> {
         // Convert layers to serializable format
         let serializable_layers = self
             .layers
@@ -652,7 +670,8 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - File path from which to load the weights (e.g., "stored_model.json")
+    /// - `path` - File path from which to load the weights (e.g., "stored_model.json"). Accepts
+    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...).
     ///
     /// # Returns
     ///
@@ -662,8 +681,9 @@ impl Sequential {
     ///
     /// - `IoError::StdIoError` - File not found or read operation failed
     /// - `IoError::JsonError` - Deserialization from JSON failed
-    /// - `IoError::ModelStructureMismatch` - Model structure doesn't match saved weights
-    pub fn load_from_path(&mut self, path: &str) -> Result<(), IoError> {
+    /// - `IoError::ModelStructureMismatch` - The current model's structure (layer count, a layer
+    ///   type at some position, or a weight shape) does not match the saved model
+    pub fn load_from_path(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), IoError> {
         // Open and buffer the file for reading
         let reader = IoError::load_in_buf_reader(path)?;
 
@@ -673,22 +693,30 @@ impl Sequential {
 
         // Verify layer count matches
         if serializable_model.layers.len() != self.layers.len() {
-            return Err(IoError::StdIoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Layer count mismatch: model has {} layers, file has {} layers",
-                    self.layers.len(),
-                    serializable_model.layers.len()
-                ),
+            return Err(IoError::ModelStructureMismatch(format!(
+                "layer count mismatch: model has {} layers, file has {} layers",
+                self.layers.len(),
+                serializable_model.layers.len()
             )));
         }
 
-        // Apply weights to each layer
+        // Apply weights to each layer, verifying the layer type at each position first.
+        // This catches architecture drift (e.g. a pooling layer where a Dense was saved, or
+        // two parameter-less layers swapped) that weight application alone cannot detect.
         for (i, serializable_layer) in serializable_model.layers.iter().enumerate() {
+            let expected_type = self.layers[i].layer_type();
+            let saved_type = serializable_layer.info.layer_type.as_str();
+            if expected_type != saved_type {
+                return Err(IoError::ModelStructureMismatch(format!(
+                    "layer {} type mismatch: model has `{}`, file has `{}`",
+                    i, expected_type, saved_type
+                )));
+            }
+
             apply_weights_to_layer(
                 &mut *self.layers[i],
                 &serializable_layer.weights,
-                &serializable_layer.info.layer_type,
+                saved_type,
             )?;
         }
 

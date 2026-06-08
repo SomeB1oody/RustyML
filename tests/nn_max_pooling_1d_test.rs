@@ -31,8 +31,8 @@ fn test_max_pooling_1d() {
         .add(
             MaxPooling1D::new(
                 2,             // pool window size
-                2,             // stride
                 vec![2, 3, 8], // input shape
+                Some(2),       // stride
             )
             .unwrap(),
         )
@@ -71,7 +71,7 @@ fn test_max_pooling_1d_backward() {
     let x = input_data.clone().into_dyn();
 
     // Create MaxPooling1D layer
-    let mut pool_layer = MaxPooling1D::new(2, 2, vec![1, 1, 4]).unwrap();
+    let mut pool_layer = MaxPooling1D::new(2, vec![1, 1, 4], Some(2)).unwrap();
 
     // Forward propagation
     let output = pool_layer.forward(&x).unwrap();

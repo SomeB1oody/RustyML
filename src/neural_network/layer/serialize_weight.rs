@@ -1,7 +1,4 @@
 use crate::error::IoError;
-use crate::neural_network::layer::activation_layer::{
-    relu::ReLU, sigmoid::Sigmoid, softmax::Softmax, tanh::Tanh,
-};
 use crate::neural_network::layer::convolution_layer::{
     conv_1d::Conv1D, conv_2d::Conv2D, conv_3d::Conv3D, depthwise_conv_2d::DepthwiseConv2D,
     separable_conv_2d::SeparableConv2D,
@@ -57,6 +54,9 @@ pub enum SerializableLayerWeight {
 impl SerializableLayerWeight {
     /// Converts a `LayerWeight` reference into an owned serializable weight.
     ///
+    /// All weight arrays are cloned directly; serde (via ndarray's `serde` feature)
+    /// encodes each array compactly as its shape plus a flat data buffer.
+    ///
     /// # Parameters
     ///
     /// - `weight` - Layer weights to convert into a serializable form
@@ -67,234 +67,107 @@ impl SerializableLayerWeight {
     pub fn from_layer_weight(weight: &LayerWeight) -> Self {
         match weight {
             LayerWeight::Empty => SerializableLayerWeight::Empty,
-
             LayerWeight::Dense(w) => SerializableLayerWeight::Dense(SerializableDenseWeight {
-                weight: w.weight.outer_iter().map(|row| row.to_vec()).collect(),
-                bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                weight: w.weight.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::SimpleRNN(w) => {
                 SerializableLayerWeight::SimpleRNN(SerializableSimpleRNNWeight {
-                    kernel: w.kernel.outer_iter().map(|row| row.to_vec()).collect(),
-                    recurrent_kernel: w
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                    kernel: w.kernel.clone(),
+                    recurrent_kernel: w.recurrent_kernel.clone(),
+                    bias: w.bias.clone(),
                 })
             }
             LayerWeight::LSTM(w) => SerializableLayerWeight::LSTM(SerializableLSTMWeight {
-                input: SerializableGateWeight {
-                    kernel: w
-                        .input
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .input
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.input.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
-                forget: SerializableGateWeight {
-                    kernel: w
-                        .forget
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .forget
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.forget.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
-                cell: SerializableGateWeight {
-                    kernel: w.cell.kernel.outer_iter().map(|row| row.to_vec()).collect(),
-                    recurrent_kernel: w
-                        .cell
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.cell.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
-                output: SerializableGateWeight {
-                    kernel: w
-                        .output
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .output
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.output.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
+                input: SerializableGateWeight::from_arrays(
+                    w.input.kernel,
+                    w.input.recurrent_kernel,
+                    w.input.bias,
+                ),
+                forget: SerializableGateWeight::from_arrays(
+                    w.forget.kernel,
+                    w.forget.recurrent_kernel,
+                    w.forget.bias,
+                ),
+                cell: SerializableGateWeight::from_arrays(
+                    w.cell.kernel,
+                    w.cell.recurrent_kernel,
+                    w.cell.bias,
+                ),
+                output: SerializableGateWeight::from_arrays(
+                    w.output.kernel,
+                    w.output.recurrent_kernel,
+                    w.output.bias,
+                ),
             }),
             LayerWeight::GRU(w) => SerializableLayerWeight::GRU(SerializableGRUWeight {
-                reset: SerializableGateWeight {
-                    kernel: w
-                        .reset
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .reset
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.reset.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
-                update: SerializableGateWeight {
-                    kernel: w
-                        .update
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .update
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w.update.bias.outer_iter().map(|row| row.to_vec()).collect(),
-                },
-                candidate: SerializableGateWeight {
-                    kernel: w
-                        .candidate
-                        .kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    recurrent_kernel: w
-                        .candidate
-                        .recurrent_kernel
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                    bias: w
-                        .candidate
-                        .bias
-                        .outer_iter()
-                        .map(|row| row.to_vec())
-                        .collect(),
-                },
+                reset: SerializableGateWeight::from_arrays(
+                    w.reset.kernel,
+                    w.reset.recurrent_kernel,
+                    w.reset.bias,
+                ),
+                update: SerializableGateWeight::from_arrays(
+                    w.update.kernel,
+                    w.update.recurrent_kernel,
+                    w.update.bias,
+                ),
+                candidate: SerializableGateWeight::from_arrays(
+                    w.candidate.kernel,
+                    w.candidate.recurrent_kernel,
+                    w.candidate.bias,
+                ),
             }),
             LayerWeight::Conv1D(w) => SerializableLayerWeight::Conv1D(SerializableConv1DWeight {
-                weight: w
-                    .weight
-                    .outer_iter()
-                    .map(|d1| d1.outer_iter().map(|d2| d2.to_vec()).collect())
-                    .collect(),
-                bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                weight: w.weight.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::Conv2D(w) => SerializableLayerWeight::Conv2D(SerializableConv2DWeight {
-                weight: w
-                    .weight
-                    .outer_iter()
-                    .map(|d1| {
-                        d1.outer_iter()
-                            .map(|d2| d2.outer_iter().map(|d3| d3.to_vec()).collect())
-                            .collect()
-                    })
-                    .collect(),
-                bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                weight: w.weight.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::Conv3D(w) => SerializableLayerWeight::Conv3D(SerializableConv3DWeight {
-                weight: w
-                    .weight
-                    .outer_iter()
-                    .map(|d1| {
-                        d1.outer_iter()
-                            .map(|d2| {
-                                d2.outer_iter()
-                                    .map(|d3| d3.outer_iter().map(|d4| d4.to_vec()).collect())
-                                    .collect()
-                            })
-                            .collect()
-                    })
-                    .collect(),
-                bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                weight: w.weight.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::SeparableConv2DLayer(w) => {
                 SerializableLayerWeight::SeparableConv2D(SerializableSeparableConv2DWeight {
-                    depthwise_weight: w
-                        .depthwise_weight
-                        .outer_iter()
-                        .map(|d1| {
-                            d1.outer_iter()
-                                .map(|d2| d2.outer_iter().map(|d3| d3.to_vec()).collect())
-                                .collect()
-                        })
-                        .collect(),
-                    pointwise_weight: w
-                        .pointwise_weight
-                        .outer_iter()
-                        .map(|d1| {
-                            d1.outer_iter()
-                                .map(|d2| d2.outer_iter().map(|d3| d3.to_vec()).collect())
-                                .collect()
-                        })
-                        .collect(),
-                    bias: w.bias.outer_iter().map(|row| row.to_vec()).collect(),
+                    depthwise_weight: w.depthwise_weight.clone(),
+                    pointwise_weight: w.pointwise_weight.clone(),
+                    bias: w.bias.clone(),
                 })
             }
             LayerWeight::DepthwiseConv2DLayer(w) => {
                 SerializableLayerWeight::DepthwiseConv2D(SerializableDepthwiseConv2DWeight {
-                    weight: w
-                        .weight
-                        .outer_iter()
-                        .map(|d1| {
-                            d1.outer_iter()
-                                .map(|d2| d2.outer_iter().map(|d3| d3.to_vec()).collect())
-                                .collect()
-                        })
-                        .collect(),
-                    bias: w.bias.to_vec(),
+                    weight: w.weight.clone(),
+                    bias: w.bias.clone(),
                 })
             }
             LayerWeight::BatchNormalization(w) => {
                 SerializableLayerWeight::BatchNormalization(SerializableBatchNormalizationWeight {
-                    gamma: w.gamma.iter().cloned().collect(),
-                    beta: w.beta.iter().cloned().collect(),
-                    running_mean: w.running_mean.iter().cloned().collect(),
-                    running_var: w.running_var.iter().cloned().collect(),
-                    shape: w.gamma.shape().to_vec(),
+                    gamma: w.gamma.clone(),
+                    beta: w.beta.clone(),
+                    running_mean: w.running_mean.clone(),
+                    running_var: w.running_var.clone(),
                 })
             }
             LayerWeight::LayerNormalizationLayer(w) => {
                 SerializableLayerWeight::LayerNormalization(SerializableLayerNormalizationWeight {
-                    gamma: w.gamma.iter().cloned().collect(),
-                    beta: w.beta.iter().cloned().collect(),
-                    shape: w.gamma.shape().to_vec(),
+                    gamma: w.gamma.clone(),
+                    beta: w.beta.clone(),
                 })
             }
             LayerWeight::InstanceNormalizationLayer(w) => {
                 SerializableLayerWeight::InstanceNormalization(
                     SerializableInstanceNormalizationWeight {
-                        gamma: w.gamma.iter().cloned().collect(),
-                        beta: w.beta.iter().cloned().collect(),
-                        shape: w.gamma.shape().to_vec(),
+                        gamma: w.gamma.clone(),
+                        beta: w.beta.clone(),
                     },
                 )
             }
             LayerWeight::GroupNormalizationLayer(w) => {
                 SerializableLayerWeight::GroupNormalization(SerializableGroupNormalizationWeight {
-                    gamma: w.gamma.iter().cloned().collect(),
-                    beta: w.beta.iter().cloned().collect(),
-                    shape: w.gamma.shape().to_vec(),
+                    gamma: w.gamma.clone(),
+                    beta: w.beta.clone(),
                 })
             }
         }
@@ -335,31 +208,7 @@ pub struct SerializableSequential {
     pub layers: Vec<SerializableLayer>,
 }
 
-/// A macro that applies weights to a layer with activation functions and handles type mismatch errors.
-///
-/// This macro uses `try_apply_with_activations!` to attempt weight application and
-/// returns an error if the layer type doesn't match the expected type.
-///
-/// # Parameters
-///
-/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
-/// - `$weight` - The weight structure to apply to the layer
-/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
-/// - `$layer_name` - String literal of the layer name (for error messages)
-/// - `$expected_type` - String describing the expected layer type (for error messages)
-macro_rules! apply_weights_with_activations {
-    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
-        let applied = try_apply_with_activations!($layer_any, $weight, $layer_type, $layer_name);
-        if !applied {
-            return Err(IoError::StdIoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Expected {} layer but got {}", $layer_name, $expected_type),
-            )));
-        }
-    }};
-}
-
-/// A macro that applies weights to a simple layer (without activation functions) and handles type mismatch errors.
+/// A macro that applies weights to a layer and handles type mismatch errors.
 ///
 /// This macro attempts to downcast the layer to the specified type and applies weights.
 /// Returns an error if the downcast fails.
@@ -376,47 +225,10 @@ macro_rules! apply_weights_simple {
         if let Some(layer) = $layer_any.downcast_mut::<$layer_type>() {
             $weight.apply_to_layer(layer)?;
         } else {
-            return Err(IoError::StdIoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Expected {} layer but got {}", $layer_name, $expected_type),
+            return Err(IoError::ModelStructureMismatch(format!(
+                "expected a {} layer but the target layer has type `{}`",
+                $layer_name, $expected_type
             )));
-        }
-    }};
-}
-
-/// A macro that attempts to apply weights to different activation layer types.
-///
-/// This macro tries to downcast a generic layer to specific layer types with different
-/// activation functions (ReLU, Sigmoid, Softmax, Tanh) and applies the given weights
-/// if the downcast is successful.
-///
-/// # Parameters
-///
-/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
-/// - `$weight` - The weight structure to apply to the layer
-/// - `$layer_type` - The specific layer type (e.g., Dense, Conv2D)
-/// - `$layer_name` - String literal of the layer name (used for debugging)
-///
-/// # Returns
-///
-/// - `true` - If the layer was successfully downcast and weights were applied
-/// - `false` - If none of the activation types matched
-macro_rules! try_apply_with_activations {
-    ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr) => {{
-        if let Some(layer) = $layer_any.downcast_mut::<$layer_type<ReLU>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Sigmoid>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Softmax>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else if let Some(layer) = $layer_any.downcast_mut::<$layer_type<Tanh>>() {
-            $weight.apply_to_layer(layer)?;
-            true
-        } else {
-            false
         }
     }};
 }
@@ -449,28 +261,28 @@ pub fn apply_weights_to_layer(
         SerializableLayerWeight::Empty => {}
 
         SerializableLayerWeight::Dense(w) => {
-            apply_weights_with_activations!(layer_any, w, Dense, "Dense", expected_type);
+            apply_weights_simple!(layer_any, w, Dense, "Dense", expected_type);
         }
         SerializableLayerWeight::SimpleRNN(w) => {
-            apply_weights_with_activations!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);
+            apply_weights_simple!(layer_any, w, SimpleRNN, "SimpleRNN", expected_type);
         }
         SerializableLayerWeight::LSTM(w) => {
-            apply_weights_with_activations!(layer_any, w, LSTM, "LSTM", expected_type);
+            apply_weights_simple!(layer_any, w, LSTM, "LSTM", expected_type);
         }
         SerializableLayerWeight::GRU(w) => {
-            apply_weights_with_activations!(layer_any, w, GRU, "GRU", expected_type);
+            apply_weights_simple!(layer_any, w, GRU, "GRU", expected_type);
         }
         SerializableLayerWeight::Conv1D(w) => {
-            apply_weights_with_activations!(layer_any, w, Conv1D, "Conv1D", expected_type);
+            apply_weights_simple!(layer_any, w, Conv1D, "Conv1D", expected_type);
         }
         SerializableLayerWeight::Conv2D(w) => {
-            apply_weights_with_activations!(layer_any, w, Conv2D, "Conv2D", expected_type);
+            apply_weights_simple!(layer_any, w, Conv2D, "Conv2D", expected_type);
         }
         SerializableLayerWeight::Conv3D(w) => {
-            apply_weights_with_activations!(layer_any, w, Conv3D, "Conv3D", expected_type);
+            apply_weights_simple!(layer_any, w, Conv3D, "Conv3D", expected_type);
         }
         SerializableLayerWeight::SeparableConv2D(w) => {
-            apply_weights_with_activations!(
+            apply_weights_simple!(
                 layer_any,
                 w,
                 SeparableConv2D,
@@ -479,7 +291,7 @@ pub fn apply_weights_to_layer(
             );
         }
         SerializableLayerWeight::DepthwiseConv2D(w) => {
-            apply_weights_with_activations!(
+            apply_weights_simple!(
                 layer_any,
                 w,
                 DepthwiseConv2D,
@@ -528,8 +340,6 @@ pub fn apply_weights_to_layer(
     Ok(())
 }
 
-/// Helper functions used by multiple weight types
-mod helper_function;
 /// Serializable representation of a BatchNormalization layer's weights
 pub mod serializable_batch_normalization_weight;
 /// Serializable representation of a Conv1D layer's weights

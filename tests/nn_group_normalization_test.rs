@@ -6,7 +6,8 @@ use rustyml::neural_network::layer::regularization_layer::normalization_layer::g
 use rustyml::neural_network::layer::regularization_layer::normalization_layer::instance_normalization::InstanceNormalization;
 use rustyml::neural_network::layer::serialize_weight::SerializableLayerWeight;
 use rustyml::neural_network::layer::TrainingParameters;
-use rustyml::neural_network::neural_network_trait::Layer;
+use rustyml::neural_network::neural_network_trait::{Layer, Optimizer};
+use rustyml::neural_network::optimizer::{AdaGrad, Adam, RMSprop, SGD};
 
 #[test]
 fn test_group_normalization_forward_pass_dimensions() {
@@ -293,7 +294,11 @@ fn test_group_normalization_parameter_update_sgd() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters
-        gn_layer.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut gn_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::GroupNormalizationLayer(updated_weights) = gn_layer.get_weights() {
@@ -343,7 +348,11 @@ fn test_group_normalization_parameter_update_adam() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with Adam
-        gn_layer.update_parameters_adam(0.001, 0.9, 0.999, 1e-8, 1);
+        {
+            let mut optimizer = Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut gn_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::GroupNormalizationLayer(updated_weights) = gn_layer.get_weights() {
@@ -393,7 +402,11 @@ fn test_group_normalization_parameter_update_rmsprop() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with RMSprop
-        gn_layer.update_parameters_rmsprop(0.001, 0.9, 1e-8);
+        {
+            let mut optimizer = RMSprop::new(0.001, 0.9, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut gn_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::GroupNormalizationLayer(updated_weights) = gn_layer.get_weights() {
@@ -443,7 +456,11 @@ fn test_group_normalization_parameter_update_adagrad() {
         let initial_beta = weights.beta.clone();
 
         // Update parameters with AdaGrad
-        gn_layer.update_parameters_ada_grad(0.01, 1e-8);
+        {
+            let mut optimizer = AdaGrad::new(0.01, 1e-8).unwrap();
+            optimizer.step();
+            optimizer.update(&mut gn_layer);
+        }
 
         // Get updated weights
         if let LayerWeight::GroupNormalizationLayer(updated_weights) = gn_layer.get_weights() {
@@ -514,7 +531,9 @@ fn test_group_normalization_set_weights() {
     let new_gamma = Array::from_vec(vec![2.0, 2.0, 2.0, 2.0]).into_dyn();
     let new_beta = Array::from_vec(vec![1.0, 1.0, 1.0, 1.0]).into_dyn();
 
-    gn_layer.set_weights(new_gamma.clone(), new_beta.clone());
+    gn_layer
+        .set_weights(new_gamma.clone(), new_beta.clone())
+        .unwrap();
 
     // Verify weights were set correctly
     if let LayerWeight::GroupNormalizationLayer(weights) = gn_layer.get_weights() {
@@ -685,7 +704,11 @@ fn test_group_normalization_multiple_forward_backward() {
 
         assert_eq!(grad_input.shape(), &[2, 4, 8]);
 
-        gn_layer.update_parameters_sgd(0.01);
+        {
+            let mut optimizer = SGD::new(0.01).unwrap();
+            optimizer.step();
+            optimizer.update(&mut gn_layer);
+        }
     }
 
     println!("Multiple forward-backward passes test passed");
@@ -710,7 +733,7 @@ fn test_group_normalization_serialization() {
         SerializableLayerWeight::GroupNormalization(w) => {
             assert_eq!(w.gamma.len(), 4); // 4 channels
             assert_eq!(w.beta.len(), 4);
-            assert_eq!(w.shape, vec![4]);
+            assert_eq!(w.gamma.shape(), &[4]);
         }
         _ => panic!("Expected GroupNormalization weights"),
     }
@@ -751,34 +774,40 @@ fn test_group_normalization_different_group_sizes() {
 }
 
 #[test]
-fn test_group_normalization_custom_channel_axis() {
-    // Test group normalization with custom channel axis
-    // Format: [batch, height, width, channels]
-    let batch_size = 2;
-    let height = 4;
-    let width = 4;
-    let channels = 8;
-    let num_groups = 4;
+fn test_group_normalization_channel_last_matches_channels_first() {
+    use approx::assert_abs_diff_eq;
+    use ndarray::{ArrayD, IxDyn};
+    // Group norm is layout-equivariant (the grouping is over the channel axis wherever it sits):
+    // a channels-last (NHWC) result must equal permuting to channels-first (NCHW), normalizing with
+    // the trusted channels-first path, and permuting back. Verified for forward and backward.
+    let shape_nhwc = [2usize, 4, 4, 8];
+    let n: usize = shape_nhwc.iter().product();
+    let data: Vec<f32> = (0..n).map(|i| 0.07 * i as f32 - 1.1).collect();
+    let x_nhwc = ArrayD::from_shape_vec(shape_nhwc.to_vec(), data).unwrap();
+    let x_nchw = x_nhwc
+        .clone()
+        .permuted_axes(vec![0, 3, 1, 2])
+        .as_standard_layout()
+        .to_owned();
 
-    let mut gn_layer = GroupNormalization::new(
-        vec![batch_size, height, width, channels],
-        num_groups,
-        3,
-        1e-5,
-    )
-    .unwrap();
+    // 8 channels, 4 groups.
+    let mut gn_nhwc = GroupNormalization::new(vec![2, 4, 4, 8], 4, 3, 1e-5).unwrap();
+    let mut gn_nchw = GroupNormalization::new(vec![2, 8, 4, 4], 4, 1, 1e-5).unwrap();
 
-    let input = Array::from_shape_fn((batch_size, height, width, channels), |(b, h, w, c)| {
-        (b * 100 + c * 10 + h + w) as f32
-    })
-    .into_dyn();
+    let out_nhwc = gn_nhwc.forward(&x_nhwc).unwrap();
+    let out_nchw = gn_nchw.forward(&x_nchw).unwrap();
+    let out_nchw_as_nhwc = out_nchw.permuted_axes(vec![0, 2, 3, 1]);
+    assert_eq!(out_nhwc.shape(), out_nchw_as_nhwc.shape());
+    for (a, b) in out_nhwc.iter().zip(out_nchw_as_nhwc.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
 
-    gn_layer.set_training(true);
-    let output = gn_layer.forward(&input).unwrap();
-
-    assert_eq!(output.shape(), &[batch_size, height, width, channels]);
-
-    println!("Custom channel axis test passed");
+    let din_nhwc = gn_nhwc.backward(&ArrayD::ones(IxDyn(&[2, 4, 4, 8]))).unwrap();
+    let din_nchw = gn_nchw.backward(&ArrayD::ones(IxDyn(&[2, 8, 4, 4]))).unwrap();
+    let din_nchw_as_nhwc = din_nchw.permuted_axes(vec![0, 2, 3, 1]);
+    for (a, b) in din_nhwc.iter().zip(din_nchw_as_nhwc.iter()) {
+        assert_abs_diff_eq!(*a, *b, epsilon = 1e-5);
+    }
 }
 
 #[test]

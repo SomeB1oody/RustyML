@@ -3,11 +3,27 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layer::TrainingParameters;
 use crate::neural_network::layer::layer_weight::LayerWeight;
 
+/// A single trainable parameter tensor paired with its gradient, exposed as flat slices.
+///
+/// Layers yield their trainable tensors (weights, biases, kernels, gamma/beta, …) as
+/// `ParamGrad`s so that optimizers can update any parameter shape with one flat-slice kernel,
+/// instead of every layer/optimizer pair re-implementing the update. `value` and `grad` always
+/// have the same length and the same element ordering.
+///
+/// # Fields
+///
+/// - `value` - Mutable view of the parameter's contiguous data, updated in place by the optimizer
+/// - `grad` - The corresponding gradient data (same length and ordering as `value`)
+pub struct ParamGrad<'a> {
+    pub value: &'a mut [f32],
+    pub grad: &'a [f32],
+}
+
 /// Defines the interface for neural network layers.
 ///
 /// This trait provides the core functionality that all neural network layers must implement,
-/// including forward and backward propagation, as well as parameter updates for different
-/// optimization algorithms
+/// including forward and backward propagation, plus exposing trainable parameters and their
+/// gradients to the optimizer via [`parameters`](Layer::parameters).
 pub trait Layer: std::any::Any + Send + Sync {
     /// Performs forward propagation through the layer.
     ///
@@ -19,6 +35,23 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// - `Tensor` - The output tensor after forward computation
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, ModelError>;
+
+    /// Runs the forward pass in inference (eval) mode, taking `&self`.
+    ///
+    /// Unlike [`forward`](Layer::forward), this does **not** record any state for
+    /// backpropagation (it writes no caches) and mode-dependent layers (dropout, batch norm, …)
+    /// always use their inference behavior. Because it borrows `&self`, a model can be shared for
+    /// concurrent inference. Use it for prediction/serving where no backward pass follows; use
+    /// [`forward`](Layer::forward) during training.
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - The input tensor to the layer
+    ///
+    /// # Returns
+    ///
+    /// - `Tensor` - The output tensor, identical to what `forward` produces in inference mode
+    fn predict(&self, input: &Tensor) -> Result<Tensor, ModelError>;
 
     /// Performs backward propagation through the layer.
     ///
@@ -57,47 +90,20 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// - `TrainingParameters` - The count of parameters as an enum variant
     fn param_count(&self) -> TrainingParameters;
 
-    /// Updates the layer parameters using Stochastic Gradient Descent.
+    /// Exposes the layer's trainable parameters and their gradients to the optimizer.
     ///
-    /// # Parameters
+    /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient.
+    /// Layers without trainable parameters (or before a backward pass has produced gradients)
+    /// return an empty vector — the default implementation. The order of the returned entries
+    /// must be stable across calls, because step-based optimizers key their per-parameter state
+    /// by position.
     ///
-    /// - `_lr` - Learning rate for parameter updates
-    fn update_parameters_sgd(&mut self, _lr: f32);
-
-    /// Updates the layer parameters using Adam optimizer.
+    /// # Returns
     ///
-    /// # Parameters
-    ///
-    /// - `_lr` - Learning rate for parameter updates
-    /// - `_beta1` - Exponential decay rate for the first moment estimates
-    /// - `_beta2` - Exponential decay rate for the second moment estimates
-    /// - `_epsilon` - Small constant for numerical stability
-    /// - `_t` - Current training iteration
-    fn update_parameters_adam(
-        &mut self,
-        _lr: f32,
-        _beta1: f32,
-        _beta2: f32,
-        _epsilon: f32,
-        _t: u64,
-    );
-
-    /// Updates the layer parameters using RMSprop optimizer.
-    ///
-    /// # Parameters
-    ///
-    /// - `_lr` - Learning rate for parameter updates
-    /// - `_rho` - Decay rate for moving average of squared gradients
-    /// - `_epsilon` - Small constant for numerical stability
-    fn update_parameters_rmsprop(&mut self, _lr: f32, _rho: f32, _epsilon: f32);
-
-    /// Updates the layer parameters using AdaGrad optimizer.
-    ///
-    /// # Parameters
-    ///
-    /// - `_lr` - Learning rate for parameter updates
-    /// - `_epsilon` - Small constant for numerical stability
-    fn update_parameters_ada_grad(&mut self, _lr: f32, _epsilon: f32);
+    /// - `Vec<ParamGrad<'_>>` - One entry per trainable tensor that currently has a gradient
+    fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
+        Vec::new()
+    }
 
     /// Returns a reference to all weights in the layer.
     ///
@@ -120,8 +126,10 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// to switch between modes. Layers that don't depend on training mode (like Dense,
     /// Activation, Pooling layers) can use the default no-op implementation.
     ///
-    /// Layers implementing `ModeDependentLayer` trait should override this method
-    /// to call their `set_training()` method.
+    /// Mode-dependent layers (Dropout, BatchNormalization, etc.) override this method to
+    /// forward `is_training` to their own `set_training()`. In this crate that override is
+    /// generated by the `mode_dependent_layer_trait!` macro (see the `regularization_layer`
+    /// module), so layers do not implement it by hand.
     ///
     /// # Parameters
     ///
@@ -136,6 +144,21 @@ pub trait Layer: std::any::Any + Send + Sync {
 ///
 /// This trait provides methods to compute both the loss value and its gradient
 /// with respect to the predicted values.
+///
+/// # Averaging convention
+///
+/// Each loss normalizes by what is natural for its family, so the conventions differ on purpose:
+/// `compute_grad` is always exactly the gradient of `compute_loss`, but switching loss families
+/// rescales the gradient magnitude (and thus the effective learning rate):
+///
+/// - [`MeanSquaredError`](crate::neural_network::loss_function::MeanSquaredError),
+///   [`MeanAbsoluteError`](crate::neural_network::loss_function::MeanAbsoluteError) and
+///   [`BinaryCrossEntropy`](crate::neural_network::loss_function::BinaryCrossEntropy) average over
+///   **every element** (`y.len()`), treating each output as an independent target.
+/// - [`CategoricalCrossEntropy`](crate::neural_network::loss_function::CategoricalCrossEntropy) and
+///   [`SparseCategoricalCrossEntropy`](crate::neural_network::loss_function::SparseCategoricalCrossEntropy)
+///   sum over the class axis and average over the **batch** (`y.shape()[0]`), matching the standard
+///   per-sample categorical cross-entropy.
 pub trait LossFunction {
     /// Computes the loss between true and predicted values.
     ///
@@ -146,8 +169,10 @@ pub trait LossFunction {
     ///
     /// # Returns
     ///
-    /// - `f32` - The scalar loss value
-    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> f32;
+    /// - `Ok(f32)` - The scalar loss value
+    /// - `Err(ModelError)` - If the inputs are inconsistent (e.g. mismatched shapes or, for the
+    ///   sparse loss, out-of-range labels)
+    fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, ModelError>;
 
     /// Computes the gradient of the loss with respect to the predictions.
     ///
@@ -158,8 +183,9 @@ pub trait LossFunction {
     ///
     /// # Returns
     ///
-    /// - `Tensor` - Tensor containing the gradient of the loss with respect to predictions
-    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Tensor;
+    /// - `Ok(Tensor)` - Tensor containing the gradient of the loss with respect to predictions
+    /// - `Err(ModelError)` - If the inputs are inconsistent (see [`compute_loss`](LossFunction::compute_loss))
+    fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, ModelError>;
 }
 
 /// Defines the interface for optimization algorithms.
@@ -167,6 +193,14 @@ pub trait LossFunction {
 /// This trait provides methods to update layer parameters during
 /// the training process.
 pub trait Optimizer {
+    /// Advances the optimizer's global training step.
+    ///
+    /// Called exactly once per batch (before the per-layer [`update`](Optimizer::update) calls).
+    /// Step-dependent optimizers such as Adam use this to advance their bias-correction timestep
+    /// once per training step rather than once per layer. The default implementation is a no-op,
+    /// which is correct for step-independent optimizers (SGD, RMSprop, AdaGrad).
+    fn step(&mut self) {}
+
     /// Updates the parameters of a layer according to the optimization algorithm.
     ///
     /// # Parameters

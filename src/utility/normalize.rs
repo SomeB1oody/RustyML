@@ -278,7 +278,11 @@ impl NormalizationAxis {
     /// - [`ModelError::InputValidationError`] - If row/column normalization is requested
     ///   on an array with fewer than 2 dimensions
     /// - [`ModelError::ProcessingError`] - If a norm computation overflows
-    fn apply<D>(&self, data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), ModelError>
+    fn apply<D>(
+        &self,
+        data: &mut Array<f64, D>,
+        order: NormalizationOrder,
+    ) -> Result<(), ModelError>
     where
         D: Dimension,
     {

@@ -69,12 +69,24 @@ pub(super) fn validate_pool_size_1d(
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any dimension is 0.
-pub(super) fn validate_pool_size_2d(pool_size: (usize, usize)) -> Result<(), ModelError> {
+/// Returns `ModelError::InputValidationError` if any dimension is 0, or if a pool dimension is
+/// greater than the corresponding input dimension (which would underflow the output-shape
+/// calculation).
+pub(super) fn validate_pool_size_2d(
+    pool_size: (usize, usize),
+    input_height: usize,
+    input_width: usize,
+) -> Result<(), ModelError> {
     if pool_size.0 == 0 || pool_size.1 == 0 {
         return Err(ModelError::InputValidationError(
             "Pool size must be greater than zero in all dimensions".to_string(),
         ));
+    }
+    if pool_size.0 > input_height || pool_size.1 > input_width {
+        return Err(ModelError::InputValidationError(format!(
+            "pool_size {:?} cannot be greater than the input spatial size ({}, {})",
+            pool_size, input_height, input_width
+        )));
     }
     Ok(())
 }
@@ -83,12 +95,25 @@ pub(super) fn validate_pool_size_2d(pool_size: (usize, usize)) -> Result<(), Mod
 ///
 /// # Errors
 ///
-/// Returns `ModelError::InputValidationError` if any dimension is 0.
-pub(super) fn validate_pool_size_3d(pool_size: (usize, usize, usize)) -> Result<(), ModelError> {
+/// Returns `ModelError::InputValidationError` if any dimension is 0, or if a pool dimension is
+/// greater than the corresponding input dimension (which would underflow the output-shape
+/// calculation).
+pub(super) fn validate_pool_size_3d(
+    pool_size: (usize, usize, usize),
+    input_depth: usize,
+    input_height: usize,
+    input_width: usize,
+) -> Result<(), ModelError> {
     if pool_size.0 == 0 || pool_size.1 == 0 || pool_size.2 == 0 {
         return Err(ModelError::InputValidationError(
             "Pool size dimensions must be greater than zero".to_string(),
         ));
+    }
+    if pool_size.0 > input_depth || pool_size.1 > input_height || pool_size.2 > input_width {
+        return Err(ModelError::InputValidationError(format!(
+            "pool_size {:?} cannot be greater than the input spatial size ({}, {}, {})",
+            pool_size, input_depth, input_height, input_width
+        )));
     }
     Ok(())
 }

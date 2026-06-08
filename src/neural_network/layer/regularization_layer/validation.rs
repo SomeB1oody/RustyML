@@ -13,7 +13,7 @@ pub(super) fn validate_rate(rate: f32, param_name: &str) -> Result<(), ModelErro
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (exclusive of 1.0)
 pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(), ModelError> {
-    if rate < 0.0 || rate >= 1.0 {
+    if !(0.0..1.0).contains(&rate) {
         return Err(ModelError::InputValidationError(format!(
             "{} must be in range [0, 1), got {}",
             param_name, rate
@@ -128,7 +128,7 @@ pub(super) fn validate_num_groups(
     num_channels: usize,
     num_groups: usize,
 ) -> Result<(), ModelError> {
-    if num_channels % num_groups != 0 {
+    if !num_channels.is_multiple_of(num_groups) {
         return Err(ModelError::InputValidationError(format!(
             "Number of channels ({}) must be divisible by num_groups ({})",
             num_channels, num_groups
@@ -157,23 +157,3 @@ pub(super) fn validate_num_groups_positive(num_groups: usize) -> Result<(), Mode
     Ok(())
 }
 
-/// Validates channel axis for normalization layers (checks bounds and that it's not 0)
-/// This is used during layer construction when we have input_shape
-pub(super) fn validate_channel_axis_with_shape(
-    channel_axis: usize,
-    input_shape: &[usize],
-) -> Result<(), ModelError> {
-    if channel_axis >= input_shape.len() {
-        return Err(ModelError::InputValidationError(format!(
-            "Channel axis {} is out of bounds for input shape with {} dimensions",
-            channel_axis,
-            input_shape.len()
-        )));
-    }
-    if channel_axis == 0 {
-        return Err(ModelError::InputValidationError(
-            "Channel axis cannot be 0 (batch axis)".to_string(),
-        ));
-    }
-    Ok(())
-}

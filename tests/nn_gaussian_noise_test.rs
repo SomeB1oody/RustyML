@@ -8,7 +8,7 @@ use rustyml::neural_network::neural_network_trait::Layer;
 fn test_gaussian_noise_new() {
     let noise_layer = GaussianNoise::new(0.1, vec![32, 128]).unwrap();
     assert_eq!(noise_layer.layer_type(), "GaussianNoise");
-    assert_eq!(noise_layer.output_shape(), "[32, 128]");
+    assert_eq!(noise_layer.output_shape(), "(32, 128)");
 }
 
 #[test]
