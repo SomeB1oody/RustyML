@@ -356,24 +356,8 @@ where
     S2: Data<Elem = usize>,
 {
     let n = x.nrows();
-    if n != labels.len() {
-        panic!("dimension mismatch: expected {n}, found {}", labels.len());
-    }
-    if n == 0 {
-        panic!("input is empty: x and labels");
-    }
-
-    // Densify labels to 0..k so cluster sizes and distance sums index contiguously.
     let labels = to_label_vec(labels);
-    let index = label_index(&labels);
-    let k = index.len();
-    if k < 2 || k >= n {
-        panic!(
-            "invalid input: number of clusters is {k}, valid range is 2 to n_samples - 1 ({})",
-            n - 1
-        );
-    }
-    let cluster: Vec<usize> = labels.iter().map(|label| index[label]).collect();
+    let (cluster, k) = validate_clustering_inputs(n, &labels);
 
     let mut sizes = vec![0usize; k];
     for &c in &cluster {
@@ -416,4 +400,377 @@ where
     }
 
     total / n as f64
+}
+
+/// Densifies labels to `0..k` and validates them against an `x` of `n_rows` rows for an internal
+/// clustering metric: equal length, non-empty, and `2..=n_rows - 1` distinct clusters. Returns the
+/// dense cluster index of each sample and the cluster count `k`.
+fn validate_clustering_inputs(n_rows: usize, labels: &[usize]) -> (Vec<usize>, usize) {
+    if n_rows != labels.len() {
+        panic!("dimension mismatch: expected {n_rows}, found {}", labels.len());
+    }
+    if n_rows == 0 {
+        panic!("input is empty: x and labels");
+    }
+    let index = label_index(labels);
+    let k = index.len();
+    if k < 2 || k >= n_rows {
+        panic!(
+            "invalid input: number of clusters is {k}, valid range is 2 to n_samples - 1 ({})",
+            n_rows - 1
+        );
+    }
+    let cluster = labels.iter().map(|label| index[label]).collect();
+    (cluster, k)
+}
+
+/// Computes each cluster's centroid (mean of its points) and size, given dense cluster indices.
+fn cluster_centroids<S>(
+    x: &ArrayBase<S, Ix2>,
+    cluster: &[usize],
+    k: usize,
+) -> (Array2<f64>, Vec<usize>)
+where
+    S: Data<Elem = f64>,
+{
+    let mut centroids = Array2::<f64>::zeros((k, x.ncols()));
+    let mut sizes = vec![0usize; k];
+    for (i, &c) in cluster.iter().enumerate() {
+        sizes[c] += 1;
+        let mut centroid = centroids.row_mut(c);
+        centroid += &x.row(i);
+    }
+    for (mut centroid, &size) in centroids.axis_iter_mut(Axis(0)).zip(sizes.iter()) {
+        if size > 0 {
+            centroid /= size as f64;
+        }
+    }
+    (centroids, sizes)
+}
+
+/// Returns `(homogeneity, completeness)` for two label assignments.
+///
+/// Both reuse the mutual information and entropies already defined above: with `C` the classes
+/// (`labels_true`) and `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and
+/// completeness is `MI / H(K)`. A zero entropy (single cluster) makes its score 1.0.
+fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usize) -> (f64, f64) {
+    let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
+    let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
+    let h_classes = entropy_nats(&row_sums, n);
+    let h_clusters = entropy_nats(&col_sums, n);
+
+    let homogeneity = if h_classes == 0.0 { 1.0 } else { mi / h_classes };
+    let completeness = if h_clusters == 0.0 { 1.0 } else { mi / h_clusters };
+    (homogeneity, completeness)
+}
+
+/// Calculates the homogeneity of a clustering: the degree to which each cluster contains only
+/// members of a single ground-truth class.
+///
+/// Scores range from 0.0 to 1.0, with 1.0 for perfectly homogeneous clusters.
+///
+/// # Parameters
+///
+/// - `labels_true` - Ground-truth class of each sample
+/// - `labels_pred` - Predicted cluster of each sample
+///
+/// # Returns
+///
+/// - `f64` - Homogeneity score in `[0.0, 1.0]`
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::homogeneity_score;
+///
+/// let labels_true = array![0, 0, 1, 1];
+/// let labels_pred = array![0, 0, 1, 1];
+/// assert!((homogeneity_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
+/// ```
+pub fn homogeneity_score<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
+    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    let n = labels_true.len();
+    homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n).0
+}
+
+/// Calculates the completeness of a clustering: the degree to which all members of a given
+/// ground-truth class are assigned to the same cluster.
+///
+/// Scores range from 0.0 to 1.0, with 1.0 for perfectly complete clusters. Completeness is the
+/// dual of [`homogeneity_score`] (swapping the roles of the two labelings).
+///
+/// # Parameters
+///
+/// - `labels_true` - Ground-truth class of each sample
+/// - `labels_pred` - Predicted cluster of each sample
+///
+/// # Returns
+///
+/// - `f64` - Completeness score in `[0.0, 1.0]`
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::completeness_score;
+///
+/// let labels_true = array![0, 0, 1, 1];
+/// let labels_pred = array![0, 0, 1, 1];
+/// assert!((completeness_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
+/// ```
+pub fn completeness_score<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
+    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    let n = labels_true.len();
+    homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n).1
+}
+
+/// Calculates the V-measure: the harmonic mean of [`homogeneity_score`] and [`completeness_score`].
+///
+/// V-measure is symmetric in the two labelings and equals the [`normalized_mutual_info`] computed
+/// with arithmetic-mean normalization. Scores range from 0.0 to 1.0.
+///
+/// # Parameters
+///
+/// - `labels_true` - Ground-truth class of each sample
+/// - `labels_pred` - Predicted cluster of each sample
+///
+/// # Returns
+///
+/// - `f64` - V-measure score in `[0.0, 1.0]`
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::v_measure_score;
+///
+/// let labels_true = array![0, 0, 1, 1, 2, 2];
+/// let labels_pred = array![0, 0, 1, 1, 2, 2];
+/// assert!((v_measure_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
+/// ```
+pub fn v_measure_score<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
+    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    let n = labels_true.len();
+    let (homogeneity, completeness) =
+        homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n);
+
+    if homogeneity + completeness == 0.0 {
+        0.0
+    } else {
+        2.0 * homogeneity * completeness / (homogeneity + completeness)
+    }
+}
+
+/// Calculates the Fowlkes-Mallows index (FMI) between two cluster assignments.
+///
+/// FMI is the geometric mean of the pairwise precision and recall over sample pairs:
+/// `TP / sqrt((TP + FP) * (TP + FN))`, where the counts are over pairs grouped together by each
+/// clustering. Scores range from 0.0 to 1.0, with 1.0 for identical clusterings.
+///
+/// # Parameters
+///
+/// - `labels_true` - Ground-truth cluster assignment of each sample
+/// - `labels_pred` - Predicted cluster assignment of each sample
+///
+/// # Returns
+///
+/// - `f64` - Fowlkes-Mallows index in `[0.0, 1.0]`
+///
+/// # Panics
+///
+/// - Panics if `labels_true` and `labels_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::fowlkes_mallows_score;
+///
+/// let labels_true = array![0, 0, 1, 1];
+/// let labels_pred = array![0, 0, 1, 1];
+/// assert!((fowlkes_mallows_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
+/// ```
+pub fn fowlkes_mallows_score<S>(
+    labels_true: &ArrayBase<S, Ix1>,
+    labels_pred: &ArrayBase<S, Ix1>,
+) -> f64
+where
+    S: Data<Elem = usize>,
+{
+    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+
+    let labels_true = to_label_vec(labels_true);
+    let labels_pred = to_label_vec(labels_pred);
+    let (contingency, row_sums, col_sums) = contingency_matrix(&labels_true, &labels_pred);
+
+    let comb2 = |size: usize| {
+        let size = size as f64;
+        size * (size - 1.0) / 2.0
+    };
+    let tk: f64 = contingency.iter().map(|&n_ij| comb2(n_ij)).sum(); // pairs together in both
+    let pk: f64 = col_sums.iter().map(|&b| comb2(b)).sum(); // pairs together in pred
+    let qk: f64 = row_sums.iter().map(|&a| comb2(a)).sum(); // pairs together in true
+
+    let denominator = (pk * qk).sqrt();
+    if denominator == 0.0 {
+        0.0
+    } else {
+        tk / denominator
+    }
+}
+
+/// Calculates the Davies-Bouldin index of a clustering using Euclidean distance.
+///
+/// Each cluster's worst-case similarity to another is `(s_i + s_j) / d(c_i, c_j)`, where `s` is the
+/// mean distance of a cluster's points to its centroid `c` and `d` is the centroid distance; the
+/// index is the average of these maxima. **Lower is better** (0.0 is ideal), making it a cheaper
+/// `O(n * k)` complement to [`silhouette_score`] for evaluating a clustering without ground truth.
+///
+/// # Parameters
+///
+/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
+/// - `labels` - Cluster assignment of each sample
+///
+/// # Returns
+///
+/// - `f64` - Davies-Bouldin index (>= 0.0; lower is better)
+///
+/// # Panics
+///
+/// - Panics if the number of rows in `x` differs from the length of `labels`
+/// - Panics if the inputs are empty
+/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::davies_bouldin_score;
+///
+/// let x = array![[0.0, 0.0], [0.1, 0.0], [10.0, 0.0], [10.1, 0.0]];
+/// let labels = array![0, 0, 1, 1];
+/// assert!(davies_bouldin_score(&x, &labels) < 0.1); // well separated
+/// ```
+pub fn davies_bouldin_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = usize>,
+{
+    let labels = to_label_vec(labels);
+    let (cluster, k) = validate_clustering_inputs(x.nrows(), &labels);
+    let (centroids, sizes) = cluster_centroids(x, &cluster, k);
+
+    // s[c] = mean distance from cluster c's points to its centroid.
+    let mut s = vec![0.0_f64; k];
+    for (i, &c) in cluster.iter().enumerate() {
+        s[c] += squared_euclidean_distance_row(&x.row(i), &centroids.row(c)).sqrt();
+    }
+    for (distance, &size) in s.iter_mut().zip(sizes.iter()) {
+        if size > 0 {
+            *distance /= size as f64;
+        }
+    }
+
+    let mut db = 0.0;
+    for i in 0..k {
+        let mut max_ratio = 0.0_f64;
+        for j in 0..k {
+            if i != j {
+                let centroid_dist =
+                    squared_euclidean_distance_row(&centroids.row(i), &centroids.row(j)).sqrt();
+                if centroid_dist > 0.0 {
+                    max_ratio = max_ratio.max((s[i] + s[j]) / centroid_dist);
+                }
+            }
+        }
+        db += max_ratio;
+    }
+    db / k as f64
+}
+
+/// Calculates the Calinski-Harabasz index (variance ratio criterion) of a clustering.
+///
+/// The ratio of between-cluster dispersion to within-cluster dispersion, scaled by
+/// `(n - k) / (k - 1)`. **Higher is better**: well-separated, compact clusters score high. Returns
+/// 1.0 in the degenerate case where every point coincides with its centroid (zero within-cluster
+/// dispersion).
+///
+/// # Parameters
+///
+/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
+/// - `labels` - Cluster assignment of each sample
+///
+/// # Returns
+///
+/// - `f64` - Calinski-Harabasz index (>= 0.0; higher is better)
+///
+/// # Panics
+///
+/// - Panics if the number of rows in `x` differs from the length of `labels`
+/// - Panics if the inputs are empty
+/// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::calinski_harabasz_score;
+///
+/// let x = array![[0.0, 0.0], [0.1, 0.0], [10.0, 0.0], [10.1, 0.0]];
+/// let labels = array![0, 0, 1, 1];
+/// assert!(calinski_harabasz_score(&x, &labels) > 100.0); // well separated
+/// ```
+pub fn calinski_harabasz_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
+where
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = usize>,
+{
+    let n = x.nrows();
+    let labels = to_label_vec(labels);
+    let (cluster, k) = validate_clustering_inputs(n, &labels);
+    let (centroids, sizes) = cluster_centroids(x, &cluster, k);
+    let overall = x.mean_axis(Axis(0)).unwrap(); // n > 0 is guaranteed
+
+    let mut between = 0.0;
+    for (centroid, &size) in centroids.axis_iter(Axis(0)).zip(sizes.iter()) {
+        between += size as f64 * squared_euclidean_distance_row(&centroid, &overall);
+    }
+    let mut within = 0.0;
+    for (i, &c) in cluster.iter().enumerate() {
+        within += squared_euclidean_distance_row(&x.row(i), &centroids.row(c));
+    }
+
+    if within == 0.0 {
+        return 1.0;
+    }
+    (between / within) * ((n - k) as f64 / (k - 1) as f64)
 }

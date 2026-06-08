@@ -8,6 +8,10 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 ## [v0.12.0] - 2026-06-08 (UTC-7)
 ### Added
 - Add the `adjusted_rand_index` (Adjusted Rand Index) and `silhouette_score` (mean silhouette coefficient, Euclidean) clustering metrics, completing the clustering set the crate documentation already advertised.
+- Add multi-class classification support: a `MulticlassConfusionMatrix` (K x K counts, per-class precision/recall/F1/support, an `Average` enum for macro/micro/weighted aggregation, and a `summary()` that prints the matrix grid followed by a `classification_report`-style table, mirroring `ConfusionMatrix::summary()`), plus `log_loss`, `cohen_kappa`, `top_k_accuracy`, `average_precision`, `roc_curve`, and `precision_recall_curve`. The binary `ConfusionMatrix` gains `mcc` (Matthews correlation coefficient) and `balanced_accuracy`, both now also shown in its `summary()`.
+- Add the regression metrics `explained_variance_score`, `median_absolute_error`, and `mean_absolute_percentage_error`.
+- Add the clustering metrics `homogeneity_score`, `completeness_score`, `v_measure_score`, `fowlkes_mallows_score` (entropy- and pairwise-based external metrics that reuse the existing contingency/entropy machinery), and the internal indices `davies_bouldin_score` and `calinski_harabasz_score`.
+- Export all of the above from `metric_prelude`.
 
 ### Changed
 - Split the `metric` module into public `regression`, `classification`, and `clustering` submodules, with every item also re-exported at the module root — so each metric is reachable both by category (`metric::regression::mean_squared_error`) and flat (`metric::mean_squared_error`), and the existing flat paths are unchanged.

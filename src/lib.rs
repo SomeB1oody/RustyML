@@ -579,24 +579,41 @@ pub mod utility;
 /// - **root_mean_squared_error**: Square root of MSE, providing error in original data units
 /// - **mean_absolute_error**: Average magnitude of prediction errors without considering direction
 /// - **r2_score**: Coefficient of determination measuring explained variance (R² score)
+/// - **explained_variance_score**: Variance of the residuals relative to the data (ignores constant bias)
+/// - **median_absolute_error**: Median of the absolute errors, robust to outliers
+/// - **mean_absolute_percentage_error**: Mean relative error as a fraction of the true values
 ///
 /// # Classification Metrics
 ///
 /// ## ConfusionMatrix Structure
 /// Comprehensive binary classification evaluation with:
 /// - True/False Positive and Negative counts (TP, FP, TN, FN)
-/// - Derived metrics: accuracy, precision, recall, specificity, F1-score, error rate
+/// - Derived metrics: accuracy, precision, recall, specificity, F1-score, error rate, balanced accuracy, MCC
 /// - Formatted summary generation for detailed performance reporting
+///
+/// ## MulticlassConfusionMatrix Structure
+/// K×K confusion matrix for multi-class evaluation:
+/// - Per-class precision, recall, F1, and support
+/// - Macro / micro / weighted aggregation via the `Average` enum
+/// - `classification_report`-style text summary
 ///
 /// ## Classification Functions
 /// - **accuracy**: Standalone accuracy calculation for multi-class and binary classification
 /// - **roc_auc**: Area Under ROC Curve using Mann-Whitney U statistic for binary classification
+/// - **log_loss**: Multi-class logarithmic loss (cross-entropy) of predicted probabilities
+/// - **cohen_kappa**: Inter-labeling agreement corrected for chance
+/// - **top_k_accuracy**: Fraction of samples whose true class is among the top-k predictions
+/// - **average_precision**: Area under the precision-recall curve
+/// - **roc_curve** / **precision_recall_curve**: Curve points across decision thresholds
 ///
 /// # Clustering Evaluation Metrics
 /// - **adjusted_rand_index**: Adjusted Rand Index for clustering similarity measurement with chance correction
 /// - **normalized_mutual_info**: Normalized Mutual Information measuring clustering agreement
 /// - **adjusted_mutual_info**: Mutual information adjusted for chance agreement between clusterings
+/// - **homogeneity_score** / **completeness_score** / **v_measure_score**: Entropy-based clustering quality and their harmonic mean
+/// - **fowlkes_mallows_score**: Geometric mean of pairwise precision and recall over sample pairs
 /// - **silhouette_score**: Mean silhouette coefficient measuring cluster cohesion and separation
+/// - **davies_bouldin_score** / **calinski_harabasz_score**: Internal cluster-validity indices (no ground truth needed)
 ///
 /// # Key Features
 /// - **Robust Input Validation**: Comprehensive error checking with informative messages

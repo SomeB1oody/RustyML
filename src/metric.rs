@@ -9,11 +9,19 @@ pub mod clustering;
 /// Regression metrics: MSE, RMSE, MAE, and R2.
 pub mod regression;
 
-pub use classification::{ConfusionMatrix, accuracy, roc_auc};
-pub use clustering::{
-    adjusted_mutual_info, adjusted_rand_index, normalized_mutual_info, silhouette_score,
+pub use classification::{
+    Average, ConfusionMatrix, MulticlassConfusionMatrix, accuracy, average_precision, cohen_kappa,
+    log_loss, precision_recall_curve, roc_auc, roc_curve, top_k_accuracy,
 };
-pub use regression::{mean_absolute_error, mean_squared_error, r2_score, root_mean_squared_error};
+pub use clustering::{
+    adjusted_mutual_info, adjusted_rand_index, calinski_harabasz_score, completeness_score,
+    davies_bouldin_score, fowlkes_mallows_score, homogeneity_score, normalized_mutual_info,
+    silhouette_score, v_measure_score,
+};
+pub use regression::{
+    explained_variance_score, mean_absolute_error, mean_absolute_percentage_error,
+    mean_squared_error, median_absolute_error, r2_score, root_mean_squared_error,
+};
 
 /// Validates a `(y_true, y_pred)`-style pair of inputs: equal length and non-empty.
 ///
