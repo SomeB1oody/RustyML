@@ -504,7 +504,7 @@ pub mod machine_learning;
 /// - and more (See details at documentation in utility module)
 ///
 /// ## Evaluation Metrics
-/// - Classification metrics (ConfusionMatrix, accuracy, calculate_auc)
+/// - Classification metrics (ConfusionMatrix, accuracy, roc_auc)
 /// - Regression metrics (mean_squared_error, r2_score, mean_absolute_error)
 /// - Clustering metrics (adjusted_rand_index, silhouette_score)
 /// - and more (See details at documentation in metric module)
@@ -590,12 +590,13 @@ pub mod utility;
 ///
 /// ## Classification Functions
 /// - **accuracy**: Standalone accuracy calculation for multi-class and binary classification
-/// - **calculate_auc**: Area Under ROC Curve using Mann-Whitney U statistic for binary classification
+/// - **roc_auc**: Area Under ROC Curve using Mann-Whitney U statistic for binary classification
 ///
 /// # Clustering Evaluation Metrics
 /// - **adjusted_rand_index**: Adjusted Rand Index for clustering similarity measurement with chance correction
 /// - **normalized_mutual_info**: Normalized Mutual Information measuring clustering agreement
 /// - **adjusted_mutual_info**: Mutual information adjusted for chance agreement between clusterings
+/// - **silhouette_score**: Mean silhouette coefficient measuring cluster cohesion and separation
 ///
 /// # Key Features
 /// - **Robust Input Validation**: Comprehensive error checking with informative messages
@@ -603,27 +604,39 @@ pub mod utility;
 /// - **Performance Optimized**: Single-pass calculations and efficient implementations
 /// - **Statistical Rigor**: Theoretically sound implementations with proper mathematical foundations
 ///
+/// # Conventions
+///
+/// - **Panics instead of returning `Result`.** `metric` is a lightweight leaf module — pure
+///   `array -> scalar` functions pulling only `ndarray` and `ahash` — so, like `ndarray` and
+///   `nalgebra` on a dimension mismatch, the metrics panic on precondition violations (mismatched
+///   lengths, empty input) rather than returning the crate's `Error`. The panic messages mirror
+///   that type's wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency.
+/// - **Arguments are `(y_true, y_pred)`** — ground truth first, matching scikit-learn and the
+///   clustering metrics' `(labels_true, labels_pred)`. The order is irrelevant for the symmetric
+///   metrics (MSE, MAE, accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and
+///   `roc_auc`.
+///
 /// # Examples
 /// ```rust
 /// use rustyml::metric::*;
-/// use ndarray::{Array1, array};
+/// use ndarray::array;
 ///
-/// // Regression evaluation
-/// let predictions = array![3.0, 2.0, 3.5, 4.1];
-/// let actuals = array![2.8, 2.1, 3.3, 4.2];
-/// let mse = mean_squared_error(&actuals.view(), &predictions.view());
-/// let r2 = r2_score(&predictions.view(), &actuals.view());
+/// // Regression evaluation — arguments are (y_true, y_pred)
+/// let y_true = array![2.8, 2.1, 3.3, 4.2];
+/// let y_pred = array![3.0, 2.0, 3.5, 4.1];
+/// let mse = mean_squared_error(&y_true.view(), &y_pred.view());
+/// let r2 = r2_score(&y_true.view(), &y_pred.view());
 ///
 /// // Classification evaluation with confusion matrix
-/// let predicted = array![1.0, 0.0, 1.0, 1.0, 0.0];
-/// let actual = array![1.0, 0.0, 0.0, 1.0, 1.0];
-/// let cm = ConfusionMatrix::new(&predicted.view(), &actual.view());
+/// let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
+/// let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
+/// let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
 /// println!("F1 Score: {:.3}", cm.f1_score());
 ///
-/// // AUC-ROC for binary classification
-/// let scores = array![0.1, 0.4, 0.35, 0.8];
+/// // ROC AUC for binary classification
 /// let labels = array![false, true, false, true];
-/// let auc = calculate_auc(&scores.view(), &labels.view());
+/// let scores = array![0.1, 0.4, 0.35, 0.8];
+/// let auc = roc_auc(&labels.view(), &scores.view());
 /// ```
 #[cfg(feature = "metric")]
 pub mod metric;

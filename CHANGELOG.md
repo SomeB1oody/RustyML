@@ -5,6 +5,35 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.12.0] - 2026-06-08 (UTC-7)
+### Added
+- Add the `adjusted_rand_index` (Adjusted Rand Index) and `silhouette_score` (mean silhouette coefficient, Euclidean) clustering metrics, completing the clustering set the crate documentation already advertised.
+
+### Changed
+- Split the `metric` module into public `regression`, `classification`, and `clustering` submodules, with every item also re-exported at the module root — so each metric is reachable both by category (`metric::regression::mean_squared_error`) and flat (`metric::mean_squared_error`), and the existing flat paths are unchanged.
+- Standardize every paired metric on `(y_true, y_pred)` argument order (ground truth first, matching scikit-learn and the clustering metrics). **Breaking:** this swaps the argument order of `r2_score` and `ConfusionMatrix::new`; for the symmetric metrics (MSE, RMSE, MAE, accuracy) only the parameter names change.
+- Rename `calculate_auc` to `roc_auc` and reorder its arguments to `(labels, scores)`.
+- Make metric panic messages mirror the crate's `Error` wording (`dimension mismatch: expected .., found ..`, `input is empty: ..`), and panic uniformly on empty input — the regression metrics previously returned `0.0` for empty arrays.
+- `r2_score` now returns `1.0` for a perfect fit on zero-variance ground truth (previously always `0.0`), matching scikit-learn.
+- `roc_auc` sorts scores with `total_cmp`, so it no longer panics on `NaN` scores; `normalized_mutual_info` / `adjusted_mutual_info` no longer panic on non-contiguous array views.
+- Optimize the Adjusted Mutual Information's expected-MI term with a shared log-factorial table, turning each binomial coefficient into an `O(1)` lookup.
+- Derive `Debug, Clone, Copy, PartialEq, Eq` for `ConfusionMatrix`, and render `ConfusionMatrix::summary` as an aligned table.
+
+### Removed
+- Remove the now-unused `ActivationLayer` trait from `neural_network`; its forward/derivative dispatch is fully served by the serializable `Activation` enum.
+
+## [v0.12.0] - 2026-06-07 (UTC-7)
+### Changed
+- Refactor error handling into a single unified `Error` type built on `thiserror`, replacing the stringly-typed `ModelError` and the separate `IoError`. Adds structured shared variants (`EmptyInput`, `DimensionMismatch`, `ShapeMismatch`, `NonFinite`, `InvalidParameter`, `InvalidInput`, `NotFitted`, `NotConverged`, `Computation { context, source }`) in place of the `InputValidationError` / `ProcessingError` catch-alls, with domain-specific failures grouped into nested `NnError`, `TreeError`, and `IoError` sub-enums. Adds smart constructors (`Error::dimension_mismatch`, etc.), a `Context` extension trait (`.context()` / `.with_context()`) that wraps foreign errors while preserving the source chain, and a `RustymlResult<T>` alias. **Breaking:** `ModelError` is renamed `Error`, its variants are restructured, and the type is now `#[non_exhaustive]` and no longer derives `PartialEq` / `Clone`.
+- Refactor the entire `neural_network` module for quality, correctness, and consistency (a net reduction of ~1360 lines while adding features). Replaces the `T: ActivationLayer` generic on `Dense` / `Conv*` / `RNN` with a serializable `Activation` enum (eliminating the load-time downcast cascade and monomorphization bloat); adds a generic optimizer interface (`Layer::parameters() -> Vec<ParamGrad>` plus flat-slice `sgd` / `adam` / `rmsprop` / `adagrad` kernels) that removes all per-layer/per-optimizer update code; adds an inference-mode `Layer::predict(&self)` / `Sequential::predict(&self)` that writes no caches and borrows `&self` for concurrent inference; replaces the per-rank convolution/pooling code with dimension-generic engines; adds channel-last (NHWC) Instance/Group normalization and multi-axis `LayerNorm`; uses a real Gram-Schmidt orthogonal recurrent-kernel initializer for SimpleRNN/GRU/LSTM; makes the loss trait return `Result` instead of `assert!` panics; and splits `helper_function.rs` into `shape_helpers` / `conv_op_helpers` / `validation`.
+- Make `cargo doc` warning-free: drop 37 redundant explicit targets on `[`Layer::predict`]` intra-doc links, and fully-qualify the unresolved `RegularizationType` / `DistanceCalculationMetric` links in the `types` module-level docs.
+
+## [v0.12.0] - 2026-06-06 (UTC-7)
+### Changed
+- Refactor the `utility` module: add shared `validation` (input checks) and `linalg` (power iteration plus a new pure-Rust Lanczos solver) submodules, removing duplicated validation and the two near-identical power-iteration copies across PCA and Kernel PCA; move per-variant computation onto the config enums (`SVDSolver`, `EigenSolver`, the normalization/standardization axes). Kernel PCA gains an `EigenSolver::Lanczos` variant and renames the mislabeled `ARPACK` solver to `PowerIteration` (likewise for PCA); t-SNE drops the meaningless save/load on a stateless model and vectorizes its momentum update; `label_encoding` now returns `Result` instead of panicking (NaN-safe argmax); `train_test_split` gains a generic label type; and `utility` switches to explicit re-exports.
+- Move `LinearDiscriminantAnalysis` from `utility` to `machine_learning` — as a supervised classifier (`fit(x, y)` + `predict`) it belongs with the estimators. It now implements the shared `Fit` / `Predict` traits, reuses `machine_learning::validation`, and moves per-solver logic onto the `Solver` enum (within-class scatter computed as a single GEMM). **Breaking:** LDA's import path changes from `utility` to `machine_learning`, and the `machine_learning` feature now enables `nalgebra`.
+- Collapse nested `if`s into edition-2024 let-chains (`clippy::collapsible_if`) in `isolation_forest`, `kmeans`, and `knn`.
+
 ## [v0.12.0] - 2026-06-05 (UTC-7)
 ### Added
 - Add `hinge_loss` to the `math` module (mean hinge loss for margin-based classifiers), alongside `logistic_loss`, and export it from the math prelude.
@@ -15,6 +44,7 @@ Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more
 - `LinearSVC` now computes its training cost through `math::hinge_loss` instead of an inline hinge sum.
 - `MeanShift` now computes its RBF neighbour weights through `KernelType::RBF`, sharing the single kernel-dispatch implementation in `types` (mirroring how the distance metrics are already dispatched).
 - `metric::r2_score` now reuses `math::sum_of_squared_errors` and `math::sum_of_square_total` instead of recomputing SSE/SST inline. The `metric` feature now enables `math`.
+- Update dependencies and raise the minimum supported Rust version to 1.89.0: `nalgebra` 0.34.1 -> 0.35.0 (source-compatible; required by the PCA / LDA / Kernel PCA solvers), `rayon` 1.11 -> 1.12, and `serde_json` 1.0.149 -> 1.0.150, plus refreshed transitive dependencies. 1.89 is the true minimum (nalgebra 0.35 -> simba 0.10 -> wide / safe_arch require it).
 
 ### Removed
 - Remove the unused `information_gain` and `gain_ratio` functions from the `math` module; the decision tree computes its split criteria directly.

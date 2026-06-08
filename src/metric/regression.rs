@@ -1,0 +1,190 @@
+use ndarray::{ArrayBase, Data, Ix1};
+
+use super::validate_pair;
+use crate::math::{sum_of_square_total, sum_of_squared_errors};
+
+/// Variance below which the total sum of squares is treated as zero (all `y_true` identical).
+const SST_EPSILON: f64 = 1e-10;
+
+/// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values.
+///
+/// MSE is the average of the squared differences between predictions and ground truth. Because the
+/// per-sample error is squared, the order of the two arguments does not affect the result.
+///
+/// # Parameters
+///
+/// - `y_true` - Ground-truth values for each sample
+/// - `y_pred` - Predicted values for each sample
+///
+/// # Returns
+///
+/// - `f64` - Mean squared error
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::mean_squared_error;
+///
+/// let y_true = array![3.0, -0.5, 2.0, 7.0];
+/// let y_pred = array![2.5, 0.0, 2.1, 7.8];
+/// let mse = mean_squared_error(&y_true, &y_pred);
+/// // MSE = ((3.0 - 2.5)^2 + (-0.5 - 0.0)^2 + (2.0 - 2.1)^2 + (7.0 - 7.8)^2) / 4
+/// //     = (0.25 + 0.25 + 0.01 + 0.64) / 4 = 0.2875
+/// assert!((mse - 0.2875).abs() < 1e-10);
+/// ```
+pub fn mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
+    validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
+
+    // Single pass over both arrays, accumulating the squared error.
+    let sum_squared_error = y_true
+        .iter()
+        .zip(y_pred.iter())
+        .fold(0.0, |acc, (&t, &p)| {
+            let error = t - p;
+            acc + error * error
+        });
+
+    sum_squared_error / y_true.len() as f64
+}
+
+/// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values.
+///
+/// RMSE is the square root of the [`mean_squared_error`], giving an error in the same units as the
+/// original data. As MSE is non-negative, the square root is always well-defined.
+///
+/// # Parameters
+///
+/// - `y_true` - Ground-truth values for each sample
+/// - `y_pred` - Predicted values for each sample
+///
+/// # Returns
+///
+/// - `f64` - Root mean squared error
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::root_mean_squared_error;
+///
+/// let y_true = array![1.0, 2.0, 3.0];
+/// let y_pred = array![2.0, 3.0, 4.0];
+/// let rmse = root_mean_squared_error(&y_true, &y_pred);
+/// // RMSE = sqrt(((2 - 1)^2 + (3 - 2)^2 + (4 - 3)^2) / 3) = sqrt(3/3) = 1.0
+/// assert!((rmse - 1.0).abs() < 1e-6);
+/// ```
+pub fn root_mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
+    mean_squared_error(y_true, y_pred).sqrt()
+}
+
+/// Calculates the Mean Absolute Error (MAE) between ground-truth and predicted values.
+///
+/// MAE is the average absolute difference between predictions and ground truth, ignoring the
+/// direction of the error. The order of the two arguments does not affect the result.
+///
+/// # Parameters
+///
+/// - `y_true` - Ground-truth values for each sample
+/// - `y_pred` - Predicted values for each sample
+///
+/// # Returns
+///
+/// - `f64` - Mean absolute error
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::mean_absolute_error;
+///
+/// let y_true = array![1.0, 2.0, 3.0];
+/// let y_pred = array![2.0, 3.0, 4.0];
+/// let mae = mean_absolute_error(&y_true, &y_pred);
+/// // MAE = (|2 - 1| + |3 - 2| + |4 - 3|) / 3 = (1 + 1 + 1) / 3 = 1.0
+/// assert!((mae - 1.0).abs() < 1e-6);
+/// ```
+pub fn mean_absolute_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
+    validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
+
+    let sum_absolute_error = y_true
+        .iter()
+        .zip(y_pred.iter())
+        .fold(0.0, |acc, (&t, &p)| acc + (t - p).abs());
+
+    sum_absolute_error / y_true.len() as f64
+}
+
+/// Calculates the R-squared (coefficient of determination) score.
+///
+/// R² measures how well predictions explain the variance in the ground truth, using
+/// `R² = 1 - SSE / SST` where `SSE = Σ(y_pred - y_true)²` and `SST = Σ(y_true - mean(y_true))²`.
+/// Because SST is computed from `y_true` alone, the argument order is significant.
+///
+/// When `y_true` has (near-)zero variance the score is undefined; following scikit-learn, this
+/// returns `1.0` for a perfect fit (`SSE ≈ 0`) and `0.0` otherwise.
+///
+/// # Parameters
+///
+/// - `y_true` - Ground-truth values for each sample
+/// - `y_pred` - Predicted values for each sample
+///
+/// # Returns
+///
+/// - `f64` - R-squared value (typically in `(-∞, 1.0]`)
+///
+/// # Panics
+///
+/// - Panics if `y_true` and `y_pred` have different lengths
+/// - Panics if the inputs are empty
+///
+/// # Examples
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::metric::r2_score;
+///
+/// let y_true = array![1.0, 3.0, 5.0];
+/// let y_pred = array![2.0, 3.0, 4.0];
+/// let r2 = r2_score(&y_true, &y_pred);
+/// // mean(y_true) = 3, SST = 4 + 0 + 4 = 8, SSE = 1 + 0 + 1 = 2, so R² = 1 - 2/8 = 0.75
+/// assert!((r2 - 0.75).abs() < 1e-6);
+/// ```
+pub fn r2_score<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+where
+    S: Data<Elem = f64>,
+{
+    validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
+
+    // Reuse the shared primitives. SSE is symmetric; SST depends only on y_true.
+    let sse = sum_of_squared_errors(y_pred, y_true);
+    let sst = sum_of_square_total(y_true);
+
+    // When all y_true are identical SST is zero and R² is undefined: a perfect fit scores 1.0,
+    // anything else 0.0.
+    if sst < SST_EPSILON {
+        return if sse < SST_EPSILON { 1.0 } else { 0.0 };
+    }
+
+    1.0 - sse / sst
+}
