@@ -91,7 +91,7 @@ impl Layer for GlobalAveragePooling2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {

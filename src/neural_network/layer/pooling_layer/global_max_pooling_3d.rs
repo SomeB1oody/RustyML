@@ -94,7 +94,7 @@ impl Layer for GlobalMaxPooling3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 5D
         if input.ndim() != 5 {

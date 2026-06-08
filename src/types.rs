@@ -2,7 +2,7 @@
 //!
 //! These enums live here, in one place, because they are shared by more than one
 //! module:
-//! - [`RegularizationType`] and [`DistanceCalculationMetric`] — used by the machine
+//! - [`RegularizationType`](crate::types::RegularizationType) and [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) — used by the machine
 //!   learning models.
 //! - [`KernelType`] — used by both [`SVC`](crate::machine_learning::svc::SVC) and
 //!   [`KernelPCA`](crate::utility::kernel_pca::KernelPCA).

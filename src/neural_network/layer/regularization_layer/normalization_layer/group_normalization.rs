@@ -422,7 +422,7 @@ impl Layer for GroupNormalization {
         Ok(from_channels_first(output, self.channel_axis))
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`](crate::neural_network::neural_network_trait::Layer::predict).
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
