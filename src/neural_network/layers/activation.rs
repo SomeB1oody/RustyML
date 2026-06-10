@@ -1,4 +1,4 @@
-use crate::error::{Error, Context};
+use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
@@ -363,4 +363,185 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
         .into_shape_with_order(shape)
         .context("Failed to reshape grad_input back")?
         .into_dyn())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use ndarray::Array2;
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /// Build a 2-D Tensor (ArrayD<f32>) from a row-major `data` vec with shape `(rows, cols)`.
+    fn tensor2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
+        Array2::from_shape_vec((rows, cols), data)
+            .expect("shape/data mismatch")
+            .into_dyn()
+    }
+
+    // ── clip_grad ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn clip_grad_nan_becomes_zero() {
+        let mut g = f32::NAN;
+        clip_grad(&mut g);
+        assert_eq!(g, 0.0, "NaN should be zeroed");
+    }
+
+    #[test]
+    fn clip_grad_pos_inf_becomes_zero() {
+        let mut g = f32::INFINITY;
+        clip_grad(&mut g);
+        assert_eq!(g, 0.0, "+Inf should be zeroed");
+    }
+
+    #[test]
+    fn clip_grad_neg_inf_becomes_zero() {
+        let mut g = f32::NEG_INFINITY;
+        clip_grad(&mut g);
+        assert_eq!(g, 0.0, "-Inf should be zeroed");
+    }
+
+    #[test]
+    fn clip_grad_normal_value_unchanged() {
+        // -5.0 is well within [-1e6, 1e6], so it must pass through untouched.
+        let mut g = -5.0_f32;
+        clip_grad(&mut g);
+        assert_abs_diff_eq!(g, -5.0_f32, epsilon = 1e-6);
+    }
+
+    #[test]
+    fn clip_grad_above_max_clamped() {
+        // 2e6 > GRAD_CLIP_VALUE (1e6) → should be clamped to GRAD_CLIP_VALUE.
+        let mut g = 2.0e6_f32;
+        clip_grad(&mut g);
+        assert_abs_diff_eq!(g, GRAD_CLIP_VALUE, epsilon = 1.0);
+    }
+
+    #[test]
+    fn clip_grad_below_min_clamped() {
+        // -2e6 < -GRAD_CLIP_VALUE → should be clamped to -GRAD_CLIP_VALUE.
+        let mut g = -2.0e6_f32;
+        clip_grad(&mut g);
+        assert_abs_diff_eq!(g, -GRAD_CLIP_VALUE, epsilon = 1.0);
+    }
+
+    // ── softmax_forward ──────────────────────────────────────────────────────
+
+    /// Hand derivation for [[0.0, 1.0, 2.0]]:
+    ///   e^0 = 1.0, e^1 ≈ 2.71828, e^2 ≈ 7.38906  sum ≈ 11.10734
+    ///   [1/11.10734, 2.71828/11.10734, 7.38906/11.10734]
+    ///   ≈ [0.09003, 0.24473, 0.66524]
+    #[test]
+    fn softmax_forward_basic_row() {
+        let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
+        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let vals = output.as_slice().expect("not contiguous");
+        assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[1], 0.24473_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
+    }
+
+    /// Probabilities must sum to 1.0.
+    #[test]
+    fn softmax_forward_sums_to_one() {
+        let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
+        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let sum: f32 = output.iter().sum();
+        assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
+    }
+
+    /// Numerical-stability test: a row of all 1000.0 should produce [1/3, 1/3, 1/3]
+    /// because the max-shift makes every argument exp(0) = 1, sum = 3.
+    #[test]
+    fn softmax_forward_large_equal_values_stable() {
+        let input = tensor2(1, 3, vec![1000.0, 1000.0, 1000.0]);
+        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let vals = output.as_slice().expect("not contiguous");
+        let third = 1.0_f32 / 3.0;
+        assert_abs_diff_eq!(vals[0], third, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[1], third, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[2], third, epsilon = 1e-6);
+    }
+
+    /// A single-element row must map to 1.0:  e^5 / e^5 = 1.
+    #[test]
+    fn softmax_forward_single_element_row() {
+        let input = tensor2(1, 1, vec![5.0]);
+        let output = softmax_forward(&input).expect("softmax_forward failed");
+        let vals = output.as_slice().expect("not contiguous");
+        assert_abs_diff_eq!(vals[0], 1.0_f32, epsilon = 1e-6);
+    }
+
+    /// A 1-D input (ndim < 2) must return an error.
+    #[test]
+    fn softmax_forward_rejects_1d_input() {
+        use ndarray::Array1;
+        let input = Array1::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
+        assert!(
+            softmax_forward(&input).is_err(),
+            "1-D input should return Err"
+        );
+    }
+
+    // ── softmax_backward ─────────────────────────────────────────────────────
+
+    /// Hand derivation for a=[0.25, 0.25, 0.5], g=[1.0, 0.0, 0.0]:
+    ///   dot = Σ a_j g_j = 0.25*1 + 0.25*0 + 0.5*0 = 0.25
+    ///   grad[0] = 0.25 * (1.0 - 0.25) =  0.1875
+    ///   grad[1] = 0.25 * (0.0 - 0.25) = -0.0625
+    ///   grad[2] = 0.5  * (0.0 - 0.25) = -0.125
+    ///   sum = 0.1875 - 0.0625 - 0.125 = 0  (Jacobian rows sum to zero)
+    #[test]
+    fn softmax_backward_jacobian_vector_product() {
+        let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
+        let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
+        let grad_input = softmax_backward(&output, &grad_output).expect("softmax_backward failed");
+        let vals = grad_input.as_slice().expect("not contiguous");
+        assert_abs_diff_eq!(vals[0], 0.1875_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[1], -0.0625_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
+    }
+
+    /// The gradient row must sum to (approximately) zero for any input,
+    /// because the softmax Jacobian rows sum to zero.
+    #[test]
+    fn softmax_backward_row_sums_to_zero() {
+        let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
+        let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
+        let grad_input = softmax_backward(&output, &grad_output).expect("softmax_backward failed");
+        let row_sum: f32 = grad_input.iter().sum();
+        assert_abs_diff_eq!(row_sum, 0.0_f32, epsilon = 1e-6);
+    }
+
+    // ── Activation enum — round-trip through the public API ──────────────────
+
+    /// Verify that Activation::Softmax::forward delegates correctly to softmax_forward.
+    #[test]
+    fn activation_softmax_forward_via_enum() {
+        let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
+        let output = Activation::Softmax
+            .forward(&input)
+            .expect("Activation::Softmax forward failed");
+        let vals = output.as_slice().expect("not contiguous");
+        // Same expected values as softmax_forward_basic_row.
+        assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[1], 0.24473_f32, epsilon = 1e-4);
+        assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
+    }
+
+    /// Verify that Activation::Softmax::backward delegates correctly to softmax_backward.
+    #[test]
+    fn activation_softmax_backward_via_enum() {
+        let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
+        let grad_output = tensor2(1, 3, vec![1.0, 0.0, 0.0]);
+        let grad_input = Activation::Softmax
+            .backward(&output, &grad_output)
+            .expect("Activation::Softmax backward failed");
+        let vals = grad_input.as_slice().expect("not contiguous");
+        assert_abs_diff_eq!(vals[0], 0.1875_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[1], -0.0625_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
+    }
 }

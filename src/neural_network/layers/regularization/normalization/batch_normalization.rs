@@ -1,14 +1,14 @@
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{BatchNormalizationLayerWeight, LayerWeight};
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape, validate_input_shape_not_empty, validate_momentum,
 };
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::Axis;
 use rayon::iter::{
@@ -56,6 +56,7 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 /// // During training, normalizes the input
 /// let output = bn.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct BatchNormalization {
     epsilon: f32,
     momentum: f32,
@@ -80,7 +81,11 @@ impl BatchNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor
+    /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0. The
+    ///   trainable `gamma`/`beta` (and the running mean/variance) are shaped from
+    ///   `input_shape[1..]` — the per-feature dimensions. A 1-D `input_shape` (e.g. `vec![4]`)
+    ///   therefore has *no* feature dimensions and yields scalar (length-1) parameters broadcast
+    ///   over the whole input; pass `vec![batch, 4]` if you mean "4 features".
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///

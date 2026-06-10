@@ -65,10 +65,7 @@ impl Default for SparseCategoricalCrossEntropy {
 /// Predictions must be 2D `[batch, num_classes]` and labels must be 2D `[batch, 1]` with
 /// non-negative integer values strictly less than `num_classes`. Without these checks an
 /// out-of-range label would cause an opaque index-out-of-bounds panic inside a Rayon worker.
-fn validate_and_extract_labels(
-    y_true: &Tensor,
-    y_pred: &Tensor,
-) -> Result<Vec<usize>, Error> {
+fn validate_and_extract_labels(y_true: &Tensor, y_pred: &Tensor) -> Result<Vec<usize>, Error> {
     if y_pred.ndim() != 2 {
         return Err(Error::invalid_input(format!(
             "SparseCategoricalCrossEntropy expects 2D predictions [batch, num_classes], got shape {:?}",

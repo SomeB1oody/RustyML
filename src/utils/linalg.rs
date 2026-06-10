@@ -48,9 +48,7 @@ fn dominant_eigenpair(
         let w = matrix.dot(&v);
         let w_norm = w.dot(&w).sqrt();
         if w_norm <= f64::EPSILON || !w_norm.is_finite() {
-            return Err(Error::not_converged(
-                "Power iteration failed to converge",
-            ));
+            return Err(Error::not_converged("Power iteration failed to converge"));
         }
         let v_next = &w / w_norm;
         let lambda = v_next.dot(&matrix.dot(&v_next));
@@ -314,5 +312,118 @@ mod tests {
             );
             assert_eigenpair(&a, vals[i], &vecs[i], 1e-8);
         }
+    }
+
+    // --- edge-case tests added for top_eigenpairs_power_iteration ---
+
+    /// k=0 must return two empty vecs without error.
+    /// Derivation: the extraction loop runs 0 times (loop body skipped when k=0),
+    /// so both Vecs remain empty.
+    #[test]
+    fn power_iteration_k_zero_returns_empty() {
+        let a = symmetric_test_matrix();
+        let (vals, vecs) = top_eigenpairs_power_iteration(a, 0, 0, 2000, 1e-10).unwrap();
+        assert_eq!(vals.len(), 0, "eigenvalues should be empty for k=0");
+        assert_eq!(vecs.len(), 0, "eigenvectors should be empty for k=0");
+    }
+
+    /// Eigenvalues returned for k>1 must be in strictly descending order.
+    /// Derivation: eigenvalues of symmetric_test_matrix (verified by nalgebra
+    /// reference in reference_eigenvalues_desc) satisfy λ_0 > λ_1 > λ_2 > λ_3.
+    /// Power iteration with Hotelling deflation extracts them largest-first.
+    #[test]
+    fn power_iteration_eigenvalues_descending_order() {
+        let a = symmetric_test_matrix();
+        let (vals, _) = top_eigenpairs_power_iteration(a, 3, 0, 2000, 1e-10).unwrap();
+        assert_eq!(vals.len(), 3);
+        assert!(
+            vals[0] > vals[1],
+            "λ_0 ({}) must be > λ_1 ({})",
+            vals[0],
+            vals[1]
+        );
+        assert!(
+            vals[1] > vals[2],
+            "λ_1 ({}) must be > λ_2 ({})",
+            vals[1],
+            vals[2]
+        );
+    }
+
+    /// Eigenvectors for k>=2 must be mutually orthogonal.
+    /// Derivation: by the spectral theorem, eigenvectors of a symmetric matrix
+    /// with distinct eigenvalues are orthogonal.  After Hotelling deflation the
+    /// extracted vectors span orthogonal directions, so |v_i · v_j| ≈ 0. The
+    /// tolerance is 1e-5: power iteration + deflation is an iterative method whose
+    /// orthogonality error is of the same order as its eigenvalue error (the
+    /// reference-value tests in this file likewise use a 1e-4 power-iteration tolerance,
+    /// versus 1e-8 for Lanczos).
+    #[test]
+    fn power_iteration_eigenvectors_mutually_orthogonal() {
+        let a = symmetric_test_matrix();
+        let (_, vecs) = top_eigenpairs_power_iteration(a, 3, 0, 2000, 1e-10).unwrap();
+        assert_eq!(vecs.len(), 3);
+        for i in 0..3 {
+            for j in (i + 1)..3 {
+                let dot = vecs[i].dot(&vecs[j]).abs();
+                assert!(dot < 1e-5, "v_{} · v_{} = {} (expected < 1e-5)", i, j, dot);
+            }
+        }
+    }
+
+    // --- edge-case tests added for top_eigenpairs_lanczos ---
+
+    /// k=0 must return two empty vecs without error.
+    /// Derivation: take = k.min(dim) = 0.min(dim) = 0, so the eigenpair loop
+    /// is skipped regardless of how many Lanczos steps were taken.
+    #[test]
+    fn lanczos_k_zero_returns_empty() {
+        let a = symmetric_test_matrix();
+        let (vals, vecs) = top_eigenpairs_lanczos(&a, 0, 0).unwrap();
+        assert_eq!(vals.len(), 0, "eigenvalues should be empty for k=0");
+        assert_eq!(vecs.len(), 0, "eigenvectors should be empty for k=0");
+    }
+
+    /// On a rank-1 matrix the Lanczos algorithm reaches an invariant subspace
+    /// after at most 2 steps, so at most 1 non-trivial eigenpair is returned.
+    ///
+    /// Derivation: M = aᵀa for a = [1, 0, 0] (3×3).  The image of M is
+    /// 1-dimensional (span of a), so the Krylov subspace K_2(M, q_0) is
+    /// contained in span{a, q_0}.  After the second Lanczos step the residual w
+    /// lies in span{a, q_0} ∩ {q_0, q_1}⊥ = {0}, giving beta ≈ 0.  Hence the
+    /// loop breaks with dim ≤ 2.  The tridiagonal eigenvalues of a dim×dim
+    /// problem where M has rank 1 contain at most one non-trivially large
+    /// eigenvalue (≈ 1.0 = ‖a‖²), so at most 1 returned eigenvalue exceeds
+    /// 1e-3.
+    #[test]
+    fn lanczos_rank_one_invariant_subspace_early_exit() {
+        // 3×3 rank-1 matrix: outer product of [1, 0, 0] with itself.
+        // Only eigenvalue is 1 (with eigenvector [1,0,0]); the other two are 0.
+        let a: Array2<f64> = ndarray::array![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],];
+
+        // Request k=5 to ensure we'd get more pairs if the matrix weren't rank-1.
+        let (vals, vecs) = top_eigenpairs_lanczos(&a, 5, 7).unwrap();
+
+        // The invariant subspace is reached early: at most 2 Lanczos vectors
+        // are produced (dim ≤ 2), so the return length is at most 2.
+        assert!(
+            vals.len() <= 2,
+            "expected at most 2 eigenpairs from a rank-1 matrix, got {}",
+            vals.len()
+        );
+        assert_eq!(
+            vals.len(),
+            vecs.len(),
+            "eigenvalues and eigenvectors must have equal length"
+        );
+
+        // At most 1 eigenvalue should be non-trivially large (≥ 1e-3).
+        // Mathematically: rank-1 matrix has exactly 1 non-zero eigenvalue = 1.0.
+        let n_large = vals.iter().filter(|&&v| v.abs() >= 1e-3).count();
+        assert!(
+            n_large <= 1,
+            "at most 1 non-trivial eigenvalue expected for rank-1 matrix, found {}",
+            n_large
+        );
     }
 }

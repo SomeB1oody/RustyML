@@ -1,0 +1,944 @@
+//! Integration tests for `rustyml::machine_learning::lda::LDA`.
+//!
+//! All expected values are derived from the problem design or closed-form
+//! definitions — never by running the model and recording its output.
+
+use approx::assert_abs_diff_eq;
+use ndarray::{Array1, Array2, array};
+use rustyml::error::Error;
+use rustyml::machine_learning::lda::{LDA, Shrinkage, Solver};
+
+use crate::common::assert_allclose;
+
+// ---------------------------------------------------------------------------
+// Local helpers
+// ---------------------------------------------------------------------------
+
+/// Three well-separated classes in 2D, 3 samples per class.
+///
+/// Class 0: cluster near (1, 1)
+/// Class 1: cluster near (5, 5)
+/// Class 2: cluster near (9, 1)
+///
+/// The classes are geometrically separated by ~4 units so every solver should
+/// achieve 100 % training accuracy on this dataset.
+fn make_three_class_2d() -> (Array2<f64>, Array1<i32>) {
+    let x = array![
+        [1.0, 1.0],
+        [1.5, 0.8],
+        [0.8, 1.2],
+        [5.0, 5.0],
+        [5.2, 4.8],
+        [4.8, 5.2],
+        [9.0, 1.0],
+        [9.2, 0.8],
+        [8.8, 1.2]
+    ];
+    let y = array![0, 0, 0, 1, 1, 1, 2, 2, 2];
+    (x, y)
+}
+
+/// Holdout test set: one sample clearly within each of the three clusters.
+fn make_three_class_holdout() -> (Array2<f64>, Array1<i32>) {
+    let x = array![
+        [1.1, 1.0], // → class 0
+        [5.1, 5.0], // → class 1
+        [9.1, 1.0], // → class 2
+    ];
+    let y = array![0, 1, 2];
+    (x, y)
+}
+
+/// Minimal 2-class, 1-feature dataset. Values chosen so that projections can
+/// be verified by hand:
+///
+///   Class 0: [1.0], [2.0], [3.0]  →  class mean = 2.0
+///   Class 1: [7.0], [8.0], [9.0]  →  class mean = 8.0
+///   Overall mean = 5.0
+///
+///   Sw (within-class scatter, 1×1) = 2 + 2 = 4.0
+///   Cov = Sw / (6-2) = 1.0  (plus a tiny regularisation ε≈1e-6)
+///
+///   The projection vector w is derived from cov⁻¹·Sb and has magnitude ≈ 1.
+///   The projected coordinates satisfy:
+///     proj_class0 ≈ {1, 2, 3} × (±1)
+///     proj_class1 ≈ {7, 8, 9} × (±1)
+///   In all cases, the projected class-0 centroid (2.0) and class-1 centroid
+///   (8.0) are on opposite sides of the grand mean projection (5.0).
+fn make_two_class_1d() -> (Array2<f64>, Array1<i32>) {
+    let x = array![[1.0], [2.0], [3.0], [7.0], [8.0], [9.0]];
+    let y = array![0, 0, 0, 1, 1, 1];
+    (x, y)
+}
+
+/// Percentage of predictions that match `true_labels`.
+fn accuracy(predicted: &Array1<i32>, true_labels: &Array1<i32>) -> f64 {
+    let correct = predicted
+        .iter()
+        .zip(true_labels.iter())
+        .filter(|(p, t)| p == t)
+        .count();
+    correct as f64 / true_labels.len() as f64
+}
+
+// ===========================================================================
+// 1.  Constructor validation
+// ===========================================================================
+
+#[test]
+fn test_new_default_values() {
+    let lda = LDA::new(2, None, None).expect("default construction should succeed");
+    assert_eq!(lda.get_n_components(), 2);
+    assert_eq!(lda.get_solver(), Solver::SVD);
+    assert!(lda.get_shrinkage().is_none());
+    // Pre-fit getters return None
+    assert!(lda.get_classes().is_none());
+    assert!(lda.get_priors().is_none());
+    assert!(lda.get_means().is_none());
+    assert!(lda.get_projection().is_none());
+}
+
+#[test]
+fn test_default_impl() {
+    let lda = LDA::default();
+    assert_eq!(lda.get_n_components(), 2);
+    assert_eq!(lda.get_solver(), Solver::SVD);
+    assert!(lda.get_shrinkage().is_none());
+}
+
+#[test]
+fn test_new_explicit_solver_and_shrinkage() {
+    let lda =
+        LDA::new(1, Some(Solver::Eigen), Some(Shrinkage::Manual(0.3))).expect("valid construction");
+    assert_eq!(lda.get_solver(), Solver::Eigen);
+    assert_eq!(lda.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
+}
+
+#[test]
+fn test_new_zero_components_errors() {
+    let err = LDA::new(0, None, None).expect_err("n_components=0 must fail");
+    assert!(
+        matches!(err, Error::InvalidParameter { .. }),
+        "expected InvalidParameter, got {err:?}"
+    );
+}
+
+#[test]
+fn test_new_shrinkage_below_zero_errors() {
+    let err = LDA::new(1, None, Some(Shrinkage::Manual(-0.1))).expect_err("alpha<0 must fail");
+    assert!(matches!(err, Error::InvalidParameter { .. }));
+}
+
+#[test]
+fn test_new_shrinkage_above_one_errors() {
+    let err = LDA::new(1, None, Some(Shrinkage::Manual(1.1))).expect_err("alpha>1 must fail");
+    assert!(matches!(err, Error::InvalidParameter { .. }));
+}
+
+#[test]
+fn test_new_shrinkage_nan_errors() {
+    let err =
+        LDA::new(1, None, Some(Shrinkage::Manual(f64::NAN))).expect_err("NaN shrinkage must fail");
+    assert!(matches!(err, Error::InvalidParameter { .. }));
+}
+
+#[test]
+fn test_new_shrinkage_pos_infinity_errors() {
+    let err = LDA::new(1, None, Some(Shrinkage::Manual(f64::INFINITY)))
+        .expect_err("Inf shrinkage must fail");
+    assert!(matches!(err, Error::InvalidParameter { .. }));
+}
+
+#[test]
+fn test_new_shrinkage_neg_infinity_errors() {
+    let err = LDA::new(1, None, Some(Shrinkage::Manual(f64::NEG_INFINITY)))
+        .expect_err("-Inf shrinkage must fail");
+    assert!(matches!(err, Error::InvalidParameter { .. }));
+}
+
+#[test]
+fn test_new_shrinkage_boundary_zero_succeeds() {
+    LDA::new(1, None, Some(Shrinkage::Manual(0.0))).expect("Manual(0.0) must be valid");
+}
+
+#[test]
+fn test_new_shrinkage_boundary_one_succeeds() {
+    LDA::new(1, None, Some(Shrinkage::Manual(1.0))).expect("Manual(1.0) must be valid");
+}
+
+// ===========================================================================
+// 2.  fit() error paths
+// ===========================================================================
+
+#[test]
+fn test_fit_empty_rows_errors() {
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x: Array2<f64> = Array2::zeros((0, 2));
+    let y: Array1<i32> = Array1::zeros(0);
+    let err = lda.fit(&x, &y).expect_err("empty x must fail");
+    assert!(
+        matches!(err, Error::EmptyInput(..)),
+        "expected EmptyInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_x_y_length_mismatch_errors() {
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+    // y has 2 entries but x has 3 rows
+    let y = array![0, 1];
+    let err = lda.fit(&x, &y).expect_err("x/y length mismatch must fail");
+    assert!(
+        matches!(err, Error::DimensionMismatch { .. }),
+        "expected DimensionMismatch, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_single_class_errors() {
+    // All samples belong to class 0: LDA requires >= 2 classes
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+    let y = array![0, 0, 0];
+    let err = lda.fit(&x, &y).expect_err("single class must fail");
+    assert!(
+        matches!(err, Error::InvalidInput(..)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_n_samples_le_n_classes_errors() {
+    // 2 samples, 2 classes → n_samples (2) == n_classes (2), which is not > n_classes
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![[1.0, 2.0], [5.0, 6.0]];
+    let y = array![0, 1];
+    let err = lda
+        .fit(&x, &y)
+        .expect_err("n_samples <= n_classes must fail");
+    assert!(
+        matches!(err, Error::InvalidInput(..)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_class_with_single_sample_errors() {
+    // Class 1 has only 1 sample — must get InvalidInput ("each class must have at least 2")
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![
+        [1.0, 1.0],
+        [1.5, 1.0],
+        [1.0, 1.5],
+        [5.0, 5.0] // class 1 with exactly 1 sample
+    ];
+    let y = array![0, 0, 0, 1];
+    let err = lda.fit(&x, &y).expect_err("class with 1 sample must fail");
+    assert!(
+        matches!(err, Error::InvalidInput(..)),
+        "expected InvalidInput (per-class min), got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_n_components_exceeds_max_errors() {
+    // 3 classes → max_components = min(n_classes-1, n_features) = min(2, 2) = 2
+    // Requesting n_components=3 should fail at fit time.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(3, None, None).unwrap(); // constructor allows any n_components > 0
+    let err = lda
+        .fit(&x, &y)
+        .expect_err("n_components > n_classes-1 must fail at fit");
+    assert!(
+        matches!(err, Error::InvalidInput(..)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_nan_in_x_errors() {
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![
+        [1.0, f64::NAN],
+        [2.0, 1.0],
+        [3.0, 1.0],
+        [7.0, 5.0],
+        [8.0, 5.0],
+        [9.0, 5.0]
+    ];
+    let y = array![0, 0, 0, 1, 1, 1];
+    let err = lda.fit(&x, &y).expect_err("NaN in x must fail");
+    assert!(
+        matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
+        "expected NonFinite or InvalidInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_fit_inf_in_x_errors() {
+    let mut lda = LDA::new(1, None, None).unwrap();
+    let x = array![
+        [1.0, f64::INFINITY],
+        [2.0, 1.0],
+        [3.0, 1.0],
+        [7.0, 5.0],
+        [8.0, 5.0],
+        [9.0, 5.0]
+    ];
+    let y = array![0, 0, 0, 1, 1, 1];
+    let err = lda.fit(&x, &y).expect_err("Inf in x must fail");
+    assert!(
+        matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
+        "expected NonFinite or InvalidInput, got {err:?}"
+    );
+}
+
+// ===========================================================================
+// 3.  predict / transform NotFitted errors
+// ===========================================================================
+
+#[test]
+fn test_predict_before_fit_errors() {
+    let lda = LDA::new(1, None, None).unwrap();
+    let x = array![[1.0, 2.0]];
+    let err = lda.predict(&x).expect_err("predict before fit must fail");
+    assert!(
+        matches!(err, Error::NotFitted(..)),
+        "expected NotFitted, got {err:?}"
+    );
+}
+
+#[test]
+fn test_transform_before_fit_errors() {
+    let lda = LDA::new(1, None, None).unwrap();
+    let x = array![[1.0, 2.0]];
+    let err = lda
+        .transform(&x)
+        .expect_err("transform before fit must fail");
+    assert!(
+        matches!(err, Error::NotFitted(..)),
+        "expected NotFitted, got {err:?}"
+    );
+}
+
+// ===========================================================================
+// 4.  predict / transform dimension-mismatch errors (after fit)
+// ===========================================================================
+
+#[test]
+fn test_predict_wrong_feature_count_errors() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    // 3 features instead of 2
+    let x_bad = array![[1.0, 2.0, 3.0]];
+    let err = lda
+        .predict(&x_bad)
+        .expect_err("feature count mismatch in predict must fail");
+    assert!(
+        matches!(
+            err,
+            Error::DimensionMismatch { .. } | Error::InvalidInput(..)
+        ),
+        "expected DimensionMismatch or InvalidInput, got {err:?}"
+    );
+}
+
+#[test]
+fn test_transform_wrong_feature_count_errors() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let x_bad = array![[1.0, 2.0, 3.0]];
+    let err = lda
+        .transform(&x_bad)
+        .expect_err("feature count mismatch in transform must fail");
+    assert!(
+        matches!(
+            err,
+            Error::DimensionMismatch { .. } | Error::InvalidInput(..)
+        ),
+        "expected DimensionMismatch or InvalidInput, got {err:?}"
+    );
+}
+
+// ===========================================================================
+// 5.  Correctness: fit → predict on training data (3-class, SVD solver)
+// ===========================================================================
+
+#[test]
+fn test_fit_predict_train_100pct_svd() {
+    // The three clusters are 4 units apart; perfect classification is guaranteed
+    // for any reasonable LDA implementation.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let preds = lda.predict(&x).unwrap();
+    assert_eq!(
+        accuracy(&preds, &y),
+        1.0,
+        "training accuracy on well-separated 3-class data must be 100 %"
+    );
+}
+
+#[test]
+fn test_fit_predict_holdout_svd() {
+    // Holdout samples sit clearly in each cluster — must also be classified correctly.
+    let (x_train, y_train) = make_three_class_2d();
+    let (x_test, y_test) = make_three_class_holdout();
+
+    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x_train, &y_train).unwrap();
+
+    let preds = lda.predict(&x_test).unwrap();
+    assert_eq!(
+        accuracy(&preds, &y_test),
+        1.0,
+        "holdout accuracy must be 100 % on well-separated clusters"
+    );
+}
+
+#[test]
+fn test_predict_labels_are_i32_domain() {
+    // Contract: predict emits i32 labels identical to the training labels {0, 1, 2}.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let preds = lda.predict(&x).unwrap();
+    for p in preds.iter() {
+        assert!(
+            *p == 0 || *p == 1 || *p == 2,
+            "predicted label {p} not in {{0,1,2}}"
+        );
+    }
+}
+
+#[test]
+fn test_classes_sorted_after_fit() {
+    // classes_vec is sorted_unstable before storing; confirm the getter reflects this.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let classes = lda.get_classes().expect("classes must be set after fit");
+    assert_eq!(classes.as_slice().unwrap(), &[0, 1, 2]);
+}
+
+// ===========================================================================
+// 6.  Correctness: all three solvers
+// ===========================================================================
+
+#[test]
+fn test_all_solvers_classify_correctly() {
+    let (x, y) = make_three_class_2d();
+    for solver in [Solver::SVD, Solver::Eigen, Solver::LSQR] {
+        let mut lda = LDA::new(2, Some(solver), None).unwrap();
+        lda.fit(&x, &y).unwrap();
+
+        let preds = lda.predict(&x).unwrap();
+        assert_eq!(
+            accuracy(&preds, &y),
+            1.0,
+            "solver {solver:?} must achieve 100 % on well-separated data"
+        );
+    }
+}
+
+// ===========================================================================
+// 7.  transform() output shape and finiteness
+// ===========================================================================
+
+#[test]
+fn test_transform_output_shape_2d_3class() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let out = lda.transform(&x).unwrap();
+    assert_eq!(
+        out.shape(),
+        &[9, 2],
+        "transform shape must be [n_samples, n_components]"
+    );
+}
+
+#[test]
+fn test_transform_output_finite() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let out = lda.transform(&x).unwrap();
+    for (i, v) in out.iter().enumerate() {
+        assert!(v.is_finite(), "transform output[{i}] = {v} is not finite");
+    }
+}
+
+#[test]
+fn test_transform_n_components_1() {
+    // Successful reduce to 1 component (n_classes-1 = 2, so 1 is valid)
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(1, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let out = lda.transform(&x).unwrap();
+    assert_eq!(out.shape(), &[9, 1]);
+    for v in out.iter() {
+        assert!(v.is_finite());
+    }
+}
+
+#[test]
+fn test_transform_single_sample() {
+    // Single-sample inputs always take the sequential path (< 500)
+    let (x_train, y_train) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x_train, &y_train).unwrap();
+
+    let x_one = array![[5.0, 5.0]]; // should map to class 1
+    let out = lda.transform(&x_one).unwrap();
+    assert_eq!(out.shape(), &[1, 2]);
+    for v in out.iter() {
+        assert!(v.is_finite());
+    }
+}
+
+// ===========================================================================
+// 8.  Hand-computed reference for 2-class 1D case
+// ===========================================================================
+
+#[test]
+fn test_two_class_1d_classification_correctness() {
+    // Design: class 0 ~ {1,2,3}, class 1 ~ {7,8,9}.
+    // LDA (any solver) must classify all 6 training samples correctly.
+    let (x, y) = make_two_class_1d();
+    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let preds = lda.predict(&x).unwrap();
+    assert_eq!(
+        accuracy(&preds, &y),
+        1.0,
+        "2-class 1D LDA must classify training data with 100 % accuracy"
+    );
+}
+
+#[test]
+fn test_two_class_1d_projected_class_separation() {
+    // After LDA projection onto 1 component the two classes must be separated:
+    // the centroid of class-0 projections must be on one side of the class-1
+    // centroid.  We verify this by checking that the sign of
+    //   (mean_proj_class1 - mean_proj_class0)
+    // is consistent (non-zero).
+    //
+    // Class 0: [1,2,3] → mean=2.0;  Class 1: [7,8,9] → mean=8.0
+    // After projection by a unit vector w (≈ ±1), projected means are 2w and 8w.
+    // |projected_mean_diff| = |8w - 2w| = 6|w| = 6.0 (since w is unit).
+    let (x, y) = make_two_class_1d();
+    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let proj = lda.transform(&x).unwrap(); // shape [6, 1]
+
+    // Collect projected values by known class membership
+    let proj_class0: Vec<f64> = (0..3).map(|i| proj[[i, 0]]).collect();
+    let proj_class1: Vec<f64> = (3..6).map(|i| proj[[i, 0]]).collect();
+
+    let mean0: f64 = proj_class0.iter().sum::<f64>() / 3.0;
+    let mean1: f64 = proj_class1.iter().sum::<f64>() / 3.0;
+
+    // The absolute difference of projected means should be close to 6.0
+    // (= |8 - 2| × |w| where w is the unit projection vector).
+    assert_abs_diff_eq!((mean1 - mean0).abs(), 6.0, epsilon = 0.05);
+
+    // Within each class the projections should be sorted the same way the
+    // original data is (strictly increasing or strictly decreasing).
+    let class0_sorted_asc = proj_class0[0] < proj_class0[1] && proj_class0[1] < proj_class0[2];
+    let class0_sorted_desc = proj_class0[0] > proj_class0[1] && proj_class0[1] > proj_class0[2];
+    assert!(
+        class0_sorted_asc || class0_sorted_desc,
+        "class-0 projections {proj_class0:?} must be monotone"
+    );
+}
+
+#[test]
+fn test_two_class_1d_unit_projection_vector() {
+    // The LDA projection matrix for a 1-feature dataset and n_components=1
+    // must be a single unit vector (L2-norm = 1.0).
+    let (x, y) = make_two_class_1d();
+    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let w = lda.get_projection().expect("projection must be set");
+    // w shape: [n_features=1, n_components=1]
+    assert_eq!(w.shape(), &[1, 1]);
+    let norm: f64 = w.iter().map(|v| v * v).sum::<f64>().sqrt();
+    assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+}
+
+// ===========================================================================
+// 9.  fit_transform consistency
+// ===========================================================================
+
+#[test]
+fn test_fit_transform_equals_fit_then_transform() {
+    // fit_transform(x, y) must produce the same output as fit(x,y); transform(x).
+    let (x, y) = make_three_class_2d();
+
+    let mut lda_a = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let out_a = lda_a.fit_transform(&x, &y).unwrap();
+
+    let mut lda_b = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda_b.fit(&x, &y).unwrap();
+    let out_b = lda_b.transform(&x).unwrap();
+
+    assert_allclose(&out_a, &out_b, 1e-12);
+}
+
+#[test]
+fn test_fit_transform_sets_projection() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit_transform(&x, &y).unwrap();
+    assert!(
+        lda.get_projection().is_some(),
+        "projection must be set after fit_transform"
+    );
+}
+
+// ===========================================================================
+// 10.  Shrinkage variants
+// ===========================================================================
+
+#[test]
+fn test_shrinkage_auto_classifies_correctly() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, Some(Shrinkage::Auto)).unwrap();
+    lda.fit(&x, &y).unwrap();
+    let preds = lda.predict(&x).unwrap();
+    assert_eq!(accuracy(&preds, &y), 1.0);
+}
+
+#[test]
+fn test_shrinkage_manual_half_classifies_correctly() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, Some(Shrinkage::Manual(0.5))).unwrap();
+    lda.fit(&x, &y).unwrap();
+    let preds = lda.predict(&x).unwrap();
+    assert_eq!(accuracy(&preds, &y), 1.0);
+}
+
+#[test]
+fn test_shrinkage_manual_zero_matches_no_shrinkage() {
+    // Manual(0.0): the alpha <= 0.0 early-return path returns the unmodified
+    // covariance, so the result must be identical to None shrinkage.
+    let (x, y) = make_three_class_2d();
+
+    let mut lda_none = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda_none.fit(&x, &y).unwrap();
+    let out_none = lda_none.transform(&x).unwrap();
+
+    let mut lda_zero = LDA::new(2, Some(Solver::SVD), Some(Shrinkage::Manual(0.0))).unwrap();
+    lda_zero.fit(&x, &y).unwrap();
+    let out_zero = lda_zero.transform(&x).unwrap();
+
+    // Both code paths (None and Manual(0.0)) skip shrinkage: outputs must agree.
+    assert_allclose(&out_none, &out_zero, 1e-10);
+}
+
+#[test]
+fn test_shrinkage_manual_boundary_one_produces_finite_output() {
+    // Manual(1.0): shrinks the covariance entirely to a scaled identity.
+    // Fit and transform should still succeed on well-separated data.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, Some(Shrinkage::Manual(1.0))).unwrap();
+    lda.fit(&x, &y).unwrap();
+    let out = lda.transform(&x).unwrap();
+    for v in out.iter() {
+        assert!(v.is_finite());
+    }
+}
+
+// ===========================================================================
+// 11.  Projection columns are unit-norm
+// ===========================================================================
+
+#[test]
+fn test_projection_columns_are_unit_norm_svd() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let w = lda.get_projection().unwrap(); // shape [2, 2]
+    for col_idx in 0..w.ncols() {
+        let col = w.column(col_idx);
+        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-10,
+            "column {col_idx} of projection must be a unit vector"
+        );
+    }
+}
+
+#[test]
+fn test_projection_columns_are_unit_norm_eigen() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, Some(Solver::Eigen), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let w = lda.get_projection().unwrap();
+    for col_idx in 0..w.ncols() {
+        let col = w.column(col_idx);
+        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+    }
+}
+
+#[test]
+fn test_projection_columns_are_unit_norm_lsqr() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, Some(Solver::LSQR), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let w = lda.get_projection().unwrap();
+    for col_idx in 0..w.ncols() {
+        let col = w.column(col_idx);
+        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+    }
+}
+
+// ===========================================================================
+// 12.  Priors sum to 1 after fit
+// ===========================================================================
+
+#[test]
+fn test_priors_sum_to_one() {
+    // Priors are n_class/n_samples per class; they must sum to 1.0.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let priors = lda.get_priors().expect("priors must be set after fit");
+    let sum: f64 = priors.iter().sum();
+    assert_abs_diff_eq!(sum, 1.0, epsilon = 1e-12);
+}
+
+#[test]
+fn test_priors_equal_for_balanced_classes() {
+    // 9 samples, 3 balanced classes → prior for each class = 3/9 = 1/3.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let priors = lda.get_priors().unwrap();
+    for p in priors.iter() {
+        assert_abs_diff_eq!(*p, 1.0 / 3.0, epsilon = 1e-12);
+    }
+}
+
+// ===========================================================================
+// 13.  Class means after fit
+// ===========================================================================
+
+#[test]
+fn test_class_means_correct_2class_1d() {
+    // Class 0: [1,2,3] → mean = 2.0;  Class 1: [7,8,9] → mean = 8.0
+    let (x, y) = make_two_class_1d();
+    let mut lda = LDA::new(1, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let means = lda.get_means().expect("means must be set");
+    // classes are sorted: [0, 1] → row 0 = class 0, row 1 = class 1
+    assert_abs_diff_eq!(means[[0, 0]], 2.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(means[[1, 0]], 8.0, epsilon = 1e-12);
+}
+
+// ===========================================================================
+// 14.  Determinism (same seed → identical result)
+// ===========================================================================
+
+#[test]
+fn test_determinism_svd_same_data() {
+    // LDA is deterministic given the same data; running fit twice on the same
+    // dataset must produce identical transforms.
+    let (x, y) = make_three_class_2d();
+
+    let mut lda1 = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda1.fit(&x, &y).unwrap();
+    let out1 = lda1.transform(&x).unwrap();
+
+    let mut lda2 = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda2.fit(&x, &y).unwrap();
+    let out2 = lda2.transform(&x).unwrap();
+
+    // Eigenvector sign may flip between runs if the underlying decomposition
+    // is not deterministic, so we compare absolute values column-wise.
+    assert_eq!(out1.shape(), out2.shape());
+    for col in 0..out1.ncols() {
+        let col1: Vec<f64> = out1.column(col).iter().copied().collect();
+        let col2: Vec<f64> = out2.column(col).iter().copied().collect();
+        let sign = if col1[0] * col2[0] >= 0.0 { 1.0 } else { -1.0 };
+        for (a, b) in col1.iter().zip(col2.iter()) {
+            assert_abs_diff_eq!(a, &(sign * b), epsilon = 1e-12);
+        }
+    }
+}
+
+// ===========================================================================
+// 15.  save_to_path / load_from_path round-trip
+// ===========================================================================
+
+#[test]
+fn test_save_load_round_trip() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let preds_before = lda.predict(&x).unwrap();
+    let proj_before = lda.transform(&x).unwrap();
+
+    let path = "/tmp/rustyml_lda_roundtrip_test.json";
+    lda.save_to_path(path).expect("save must succeed");
+
+    let lda_loaded = LDA::load_from_path(path).expect("load must succeed");
+
+    let preds_after = lda_loaded.predict(&x).unwrap();
+    let proj_after = lda_loaded.transform(&x).unwrap();
+
+    // Predictions must be identical after round-trip
+    assert_eq!(
+        preds_before, preds_after,
+        "predictions must survive JSON round-trip"
+    );
+    // Projections must be bit-for-bit identical (same floating-point state)
+    assert_allclose(&proj_before, &proj_after, 1e-12);
+}
+
+#[test]
+fn test_save_load_preserves_hyperparameters() {
+    let mut lda = LDA::new(1, Some(Solver::Eigen), Some(Shrinkage::Manual(0.3))).unwrap();
+    let (x, y) = make_two_class_1d();
+    lda.fit(&x, &y).unwrap();
+
+    let path = "/tmp/rustyml_lda_hp_roundtrip_test.json";
+    lda.save_to_path(path).unwrap();
+    let loaded = LDA::load_from_path(path).unwrap();
+
+    assert_eq!(loaded.get_n_components(), 1);
+    assert_eq!(loaded.get_solver(), Solver::Eigen);
+    assert_eq!(loaded.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
+}
+
+#[test]
+fn test_load_preserves_fit_state() {
+    // After round-trip, get_classes / get_priors / get_means / get_projection
+    // must all be Some and match the pre-save state.
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::new(2, None, None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let path = "/tmp/rustyml_lda_state_roundtrip_test.json";
+    lda.save_to_path(path).unwrap();
+    let loaded = LDA::load_from_path(path).unwrap();
+
+    assert!(
+        loaded.get_classes().is_some(),
+        "classes must survive round-trip"
+    );
+    assert!(
+        loaded.get_priors().is_some(),
+        "priors must survive round-trip"
+    );
+    assert!(
+        loaded.get_means().is_some(),
+        "means must survive round-trip"
+    );
+    assert!(
+        loaded.get_projection().is_some(),
+        "projection must survive round-trip"
+    );
+}
+// ===========================================================================
+// 16.  Large-batch Rayon paths (fit `use_parallel` + predict parallel scoring)
+// ===========================================================================
+
+/// Builds a >500-sample, 3-class, 2-D dataset that is linearly separable by
+/// construction, so its labelling is ground truth independent of the model.
+///
+/// Layout (200 samples per class -> 600 total, > LDA_PARALLEL_THRESHOLD = 500):
+///   Class 0 centroid C0 = (0, 0)
+///   Class 1 centroid C1 = (10, 10)
+///   Class 2 centroid C2 = (20, 0)
+///
+/// Each point is its class centroid plus a deterministic bounded jitter in
+/// [-0.8, 0.8] on each axis (generated with `sin`, so the dataset is fully
+/// reproducible without an RNG). The maximum displacement of any point from
+/// its class mean is therefore < sqrt(0.8^2 + 0.8^2) ~= 1.131. The closest
+/// pair of centroids are sqrt(200) ~= 14.142 apart, so the nearest
+/// class-decision boundary (their perpendicular bisector) is >= sqrt(200)/2
+/// ~= 7.071 from every point. Since 1.131 << 7.071, every sample lies
+/// strictly on the correct side of every boundary, i.e. the three classes are
+/// linearly separable. Class sizes are equal (balanced priors), so a correct
+/// LDA must reproduce the labels exactly: expected training accuracy = 1.0,
+/// derived purely from this geometry, never from running the model.
+fn make_large_separable_3class_2d() -> (Array2<f64>, Array1<i32>) {
+    const PER_CLASS: usize = 200;
+    let centroids: [(f64, f64); 3] = [(0.0, 0.0), (10.0, 10.0), (20.0, 0.0)];
+    let n = PER_CLASS * centroids.len();
+
+    let mut data: Vec<f64> = Vec::with_capacity(n * 2);
+    let mut labels: Vec<i32> = Vec::with_capacity(n);
+
+    for (class, &(cx, cy)) in centroids.iter().enumerate() {
+        for i in 0..PER_CLASS {
+            // Deterministic, bounded jitter in [-0.8, 0.8] on each axis.
+            let t = (class * PER_CLASS + i) as f64;
+            let jx = (t * 0.7).sin() * 0.8;
+            let jy = (t * 1.3 + 0.5).sin() * 0.8;
+            data.push(cx + jx);
+            data.push(cy + jy);
+            labels.push(class as i32);
+        }
+    }
+
+    let x = Array2::from_shape_vec((n, 2), data).unwrap();
+    let y = Array1::from_vec(labels);
+    (x, y)
+}
+
+#[test]
+fn test_fit_predict_large_separable_parallel_paths() {
+    // 600 samples (> 500) exercises BOTH Rayon branches:
+    //   * fit(): the `use_parallel = n_samples > 500` per-class par_iter path.
+    //   * predict(): the `x.nrows() > 500` parallel scoring path.
+    // The dataset is linearly separable by construction (see helper doc), so a
+    // correct implementation must achieve 100 % training accuracy regardless of
+    // which code path runs.
+    let (x, y) = make_large_separable_3class_2d();
+    assert!(
+        x.nrows() > 500,
+        "dataset must exceed the 500-sample parallel threshold, got {}",
+        x.nrows()
+    );
+
+    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    lda.fit(&x, &y).unwrap();
+
+    let preds = lda.predict(&x).unwrap();
+    assert_eq!(
+        preds.len(),
+        y.len(),
+        "prediction count must match the number of input rows"
+    );
+    assert_eq!(
+        accuracy(&preds, &y),
+        1.0,
+        "linearly-separable 3-class data must be classified perfectly on the parallel path"
+    );
+}

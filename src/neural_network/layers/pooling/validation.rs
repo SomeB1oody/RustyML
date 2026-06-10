@@ -38,10 +38,7 @@ pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Er
 /// Returns [`Error::InvalidParameter`] if:
 /// - pool_size is 0
 /// - pool_size is greater than input length
-pub(super) fn validate_pool_size_1d(
-    pool_size: usize,
-    input_length: usize,
-) -> Result<(), Error> {
+pub(super) fn validate_pool_size_1d(pool_size: usize, input_length: usize) -> Result<(), Error> {
     if pool_size == 0 {
         return Err(Error::invalid_parameter(
             "pool_size",
@@ -155,4 +152,51 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    /// validate_pool_size_3d HEIGHT over-size branch.
+    ///
+    /// Input spatial dims depth=4, height=4, width=4; pool_size = (depth=2, height=5, width=2).
+    /// Depth 2 ≤ 4 and width 2 ≤ 4 both pass; only `pool_size.1 > input_height` (5 > 4) is true,
+    /// so the `cannot exceed the corresponding input dimension` guard must fire on the HEIGHT axis.
+    /// (Depth-axis over-size is already covered elsewhere.) The zero-check is skipped because no
+    /// dimension is 0. Expected: Err(Error::InvalidParameter { name: "pool_size", .. }).
+    #[test]
+    fn test_validate_pool_size_3d_oversized_height() {
+        let result = validate_pool_size_3d((2, 5, 2), 4, 4, 4);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { ref name, .. }) if name == "pool_size"),
+            "oversized height pool must yield InvalidParameter(pool_size), got {:?}",
+            result
+        );
+    }
+
+    /// validate_pool_size_3d WIDTH over-size branch.
+    ///
+    /// Input spatial dims depth=4, height=4, width=4; pool_size = (depth=2, height=2, width=5).
+    /// Depth 2 ≤ 4 and height 2 ≤ 4 both pass; only `pool_size.2 > input_width` (5 > 4) is true,
+    /// so the `cannot exceed the corresponding input dimension` guard must fire on the WIDTH axis.
+    /// Expected: Err(Error::InvalidParameter { name: "pool_size", .. }).
+    #[test]
+    fn test_validate_pool_size_3d_oversized_width() {
+        let result = validate_pool_size_3d((2, 2, 5), 4, 4, 4);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { ref name, .. }) if name == "pool_size"),
+            "oversized width pool must yield InvalidParameter(pool_size), got {:?}",
+            result
+        );
+    }
+
+    /// Control: an all-fitting 3D pool (every axis ≤ its input dim, none zero) must succeed,
+    /// confirming the two failing tests above trip specifically on the over-size comparison and
+    /// not on some unrelated guard.
+    #[test]
+    fn test_validate_pool_size_3d_all_fitting_ok() {
+        assert!(validate_pool_size_3d((2, 2, 2), 4, 4, 4).is_ok());
+    }
 }

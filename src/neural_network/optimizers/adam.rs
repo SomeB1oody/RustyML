@@ -1,9 +1,9 @@
 use crate::error::Error;
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_decay_rate, validate_epsilon, validate_learning_rate,
 };
-use crate::neural_network::optimizers::kernels;
+use crate::neural_network::traits::{Layer, Optimizer};
 
 /// Adam's per-parameter first/second moment buffers, sized lazily on first use.
 #[derive(Debug, Clone, Default)]
@@ -23,6 +23,7 @@ struct AdamParamState {
 /// - `beta2` - Exponential decay rate for the second moment estimates
 /// - `epsilon` - Small constant added for numerical stability
 /// - `t` - Current timestep, incremented with each update
+#[derive(Debug)]
 pub struct Adam {
     learning_rate: f32,
     beta1: f32,
@@ -54,12 +55,7 @@ impl Adam {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If any hyperparameter is out of range
-    pub fn new(
-        learning_rate: f32,
-        beta1: f32,
-        beta2: f32,
-        epsilon: f32,
-    ) -> Result<Self, Error> {
+    pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Result<Self, Error> {
         // input validation
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(beta1, "beta1")?;

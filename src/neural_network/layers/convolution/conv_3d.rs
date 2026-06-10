@@ -3,14 +3,12 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{
-    conv_backward, conv_forward,
-};
+use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
 use crate::neural_network::layers::convolution::validation::{
     validate_filters, validate_input_shape_3d, validate_kernel_size_3d, validate_strides_3d,
 };
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{Conv3DLayerWeight, LayerWeight};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array5};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -66,6 +64,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///         (1, 1, 1),                 // Stride
 ///         PaddingType::Valid,        // No padding
 ///         Activation::ReLU, // ReLU activation
+///         None,                      // random_state
 ///     ).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
@@ -82,6 +81,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Check if output shape is correct - should be [2, 3, 6, 6, 6]
 /// assert_eq!(prediction.shape(), &[2, 3, 6, 6, 6]);
 /// ```
+#[derive(Debug)]
 pub struct Conv3D {
     filters: usize,
     kernel_size: (usize, usize, usize),
@@ -108,6 +108,7 @@ impl Conv3D {
     /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
     /// - `padding` - Padding type (Valid or Same)
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -125,6 +126,7 @@ impl Conv3D {
         strides: (usize, usize, usize),
         padding: PaddingType,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate input arguments
         validate_filters(filters)?;
@@ -141,9 +143,11 @@ impl Conv3D {
         let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
         // Initialize weights with Xavier initialization
-        let weights = Array5::random(
+        let mut rng = crate::random::make_rng(random_state);
+        let weights = Array5::random_using(
             (filters, channels, kd, kh, kw),
             Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
         );
 
         // Initialize bias to zeros
@@ -202,11 +206,7 @@ impl Conv3D {
     ///
     /// - `weights` - 5D array of filter weights with shape \[filters, channels, kernel_depth, kernel_height, kernel_width\]
     /// - `bias` - 2D array of bias values with shape \[1, filters\]
-    pub fn set_weights(
-        &mut self,
-        weights: Array5<f32>,
-        bias: Array2<f32>,
-    ) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array5<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;

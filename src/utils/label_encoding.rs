@@ -206,6 +206,7 @@ where
 ///
 /// This function finds the class with the highest probability for each sample,
 /// making it suitable for converting model predictions back to class labels.
+/// Ties resolve to the first (lowest) index, matching numpy/sklearn/keras `argmax`.
 pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
 where
     S: Data<Elem = f64>,
@@ -217,9 +218,12 @@ where
         .rows()
         .into_iter()
         .map(|row| {
+            // First-index argmax: ties resolve to the earliest column, matching
+            // numpy/sklearn/keras `argmax`. (`Iterator::max_by` would take the LAST element on
+            // ties, so `reduce` with a strict `>` is used to keep the first instead.)
             row.iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .reduce(|best, cur| if cur.1 > best.1 { cur } else { best })
                 .map(|(idx, _)| idx as i32)
                 .unwrap_or(0)
         })

@@ -1,15 +1,16 @@
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
     validate_input_shape, validate_rate_exclusive,
 };
 use crate::neural_network::traits::Layer;
 use ndarray_rand::RandomExt;
+use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Normal;
 
 /// Gaussian Dropout layer for neural networks.
@@ -24,6 +25,7 @@ use ndarray_rand::rand_distr::Normal;
 /// - `rate` - Dropout rate used to compute standard deviation
 /// - `input_shape` - Expected shape of the input tensor
 /// - `training` - Whether the layer is in training mode or inference mode
+/// - `rng` - Random number generator used to sample the multiplicative Gaussian noise
 ///
 /// # Examples
 /// ```rust
@@ -32,7 +34,7 @@ use ndarray_rand::rand_distr::Normal;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianDropout layer with dropout rate of 0.3
-/// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
+/// let mut gaussian_dropout = GaussianDropout::new(0.3, vec![32, 128], None).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -40,10 +42,12 @@ use ndarray_rand::rand_distr::Normal;
 /// // During training, values will be multiplied by Gaussian noise N(1, sqrt(rate/(1-rate)))
 /// let output = gaussian_dropout.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct GaussianDropout {
     rate: f32,
     input_shape: Vec<usize>,
     training: bool,
+    rng: StdRng,
 }
 
 impl GaussianDropout {
@@ -53,6 +57,7 @@ impl GaussianDropout {
     ///
     /// - `rate` - Dropout rate, must be between 0 and 1 (exclusive)
     /// - `input_shape` - Shape of the input tensor
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -61,13 +66,20 @@ impl GaussianDropout {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not in range [0, 1)
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(
+        rate: f32,
+        input_shape: Vec<usize>,
+        random_state: Option<u64>,
+    ) -> Result<Self, Error> {
         validate_rate_exclusive(rate, "Dropout rate")?;
+
+        let rng = crate::random::make_rng(random_state);
 
         Ok(GaussianDropout {
             rate,
             input_shape,
             training: true,
+            rng,
         })
     }
 
@@ -91,7 +103,11 @@ impl Layer for GaussianDropout {
         let stddev = (self.rate / (1.0 - self.rate)).sqrt();
 
         // Generate multiplicative Gaussian noise with mean=1 and computed stddev
-        let noise = Tensor::random(input.raw_dim(), Normal::new(1.0, stddev).unwrap());
+        let noise = Tensor::random_using(
+            input.raw_dim(),
+            Normal::new(1.0, stddev).unwrap(),
+            &mut self.rng,
+        );
 
         // Multiply input by noise
         let output = input * &noise;

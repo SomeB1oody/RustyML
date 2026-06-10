@@ -4,8 +4,8 @@ pub use crate::KernelType;
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
+use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::rand::{Rng, SeedableRng, rng};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
     ParallelIterator,
@@ -131,10 +131,7 @@ impl SVC {
         if regularization_param <= 0.0 || !regularization_param.is_finite() {
             return Err(Error::invalid_parameter(
                 "regularization_param",
-                format!(
-                    "must be positive and finite, got {}",
-                    regularization_param
-                ),
+                format!("must be positive and finite, got {}", regularization_param),
             ));
         }
 
@@ -330,10 +327,7 @@ impl SVC {
 
         // RNG for SMO working-set selection. Seeding it from `random_state` makes
         // training fully reproducible; otherwise fall back to a non-deterministic seed.
-        let mut rng = match self.random_state {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_rng(&mut rng()),
-        };
+        let mut rng = crate::random::make_rng(self.random_state);
 
         // Create progress bar for SMO iterations
         #[cfg(feature = "show_progress")]
@@ -840,12 +834,20 @@ impl SVC {
         // Calculate new value for alpha1
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
-        // Update bias
+        // Update bias.
+        //
+        // The decision function is `u(x) = Σ αⱼ yⱼ K(xⱼ, x) + b` (see `compute_error` /
+        // `compute_decision_value`, both of which add `+ b`). Requiring a now-unbound support
+        // vector to sit on the margin, `u(x₁) = y₁`, and substituting `Eᵢ = u_old(xᵢ) - yᵢ`, gives
+        //   b_new = b_old − Eᵢ − y₁·Δα₁·K(x₁,xᵢ) − y₂·Δα₂·K(x₂,xᵢ).
+        // (Platt's textbook formula has the opposite signs because it uses the `u = Σ − b`
+        // convention; using it here drove the bias the wrong way, so the classifier only worked
+        // when the optimal bias happened to be ≈ 0.)
         let b_old = *b;
         let b1 =
-            *b + e1 + y1 * (alpha1_new - alpha1_old) * k11 + y2 * (alpha2_new - alpha2_old) * k12;
+            *b - e1 - y1 * (alpha1_new - alpha1_old) * k11 - y2 * (alpha2_new - alpha2_old) * k12;
         let b2 =
-            *b + e2 + y1 * (alpha1_new - alpha1_old) * k12 + y2 * (alpha2_new - alpha2_old) * k22;
+            *b - e2 - y1 * (alpha1_new - alpha1_old) * k12 - y2 * (alpha2_new - alpha2_old) * k22;
 
         if alpha1_new > 0.0 && alpha1_new < self.regularization_param {
             *b = b1;
@@ -959,4 +961,54 @@ impl SVC {
     }
 
     model_save_and_load_methods!(SVC);
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    /// predict() must return Error::NonFinite (svc.rs:512-514) when a fitted, fully
+    /// FINITE model produces a non-finite decision value from FINITE input.
+    ///
+    /// This branch is unreachable through the normal fit->predict flow (a model fitted
+    /// from finite data has finite support vectors/alphas/bias, and `preliminary_check`
+    /// only rejects non-finite *input*, not large-magnitude input), so the malformed-but-
+    /// legal state is built directly via the private fields in this same-module test.
+    ///
+    /// Trigger: a high-degree polynomial kernel. The decision value over the single
+    /// support vector [1,1] for the finite test point [40,40] is
+    ///   alpha*label*(gamma*(x·sv)+coef0)^degree + bias
+    ///     = 1.0*1.0*(1*80 + 1)^400 + 0.0 = 81^400.
+    /// 81^400 overflows f64 (log10(81)*400 ≈ 763 >> 308.25) to +inf, so the decision
+    /// value is non-finite and predict() must surface Error::NonFinite. Everything fed in
+    /// (kernel params, support vector, alpha, label, bias, input) is finite — the non-
+    /// finiteness is produced purely by the (finite-input) kernel evaluation.
+    #[test]
+    fn predict_non_finite_decision_value_returns_non_finite() {
+        let svc = SVC {
+            kernel: KernelType::Poly {
+                degree: 400,
+                gamma: 1.0,
+                coef0: 1.0,
+            },
+            regularization_param: 1.0,
+            alphas: Some(Array1::from_vec(vec![1.0])),
+            support_vectors: Some(Array2::from_shape_vec((1, 2), vec![1.0, 1.0]).unwrap()),
+            support_vector_labels: Some(Array1::from_vec(vec![1.0])),
+            bias: Some(0.0),
+            tol: 1e-3,
+            max_iter: 1000,
+            eps: 1e-8,
+            n_iter: Some(1),
+            random_state: None,
+        };
+
+        // Finite input whose Poly-kernel value against the support vector overflows to +inf.
+        let x = Array2::from_shape_vec((1, 2), vec![40.0, 40.0]).unwrap();
+        let result = svc.predict(&x);
+        assert!(
+            matches!(result, Err(Error::NonFinite(_))),
+            "expected NonFinite for overflowing (finite-input) decision value, got {result:?}"
+        );
+    }
 }

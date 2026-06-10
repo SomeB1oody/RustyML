@@ -1,9 +1,9 @@
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::{Activation, format_output_shape};
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
 /// Tanh (Hyperbolic Tangent) activation layer.
@@ -43,6 +43,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Output will be approximately: [[-0.76, 0.96, -0.99], [0.99, -0.99, 1.0]]
 /// ```
+#[derive(Debug)]
 pub struct Tanh {
     output_cache: Option<Tensor>,
 }

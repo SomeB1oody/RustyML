@@ -12,10 +12,7 @@ use crate::neural_network::Tensor;
 ///
 /// - `Ok(())` if validation passes
 /// - `Err(Error::InvalidParameter)` if validation fails
-pub(super) fn validate_dimension_greater_than_zero(
-    value: usize,
-    name: &str,
-) -> Result<(), Error> {
+pub(super) fn validate_dimension_greater_than_zero(value: usize, name: &str) -> Result<(), Error> {
     if value == 0 {
         return Err(Error::invalid_parameter(name, "must be greater than 0"));
     }
@@ -33,10 +30,7 @@ pub(super) fn validate_dimension_greater_than_zero(
 ///
 /// - `Ok(())` if validation passes
 /// - `Err(Error::InvalidParameter)` if validation fails
-pub(super) fn validate_recurrent_dimensions(
-    input_dim: usize,
-    units: usize,
-) -> Result<(), Error> {
+pub(super) fn validate_recurrent_dimensions(input_dim: usize, units: usize) -> Result<(), Error> {
     validate_dimension_greater_than_zero(input_dim, "input_dim")?;
     validate_dimension_greater_than_zero(units, "units")?;
     Ok(())

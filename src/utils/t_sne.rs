@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
-use ndarray_rand::rand::{Rng, SeedableRng, rng, rngs::StdRng};
+use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Finds the sigma matching a target perplexity for one point's distances, via binary search.
@@ -18,8 +18,11 @@ where
     S: Data<Elem = f64>,
 {
     let tol = 1e-5;
+    // sigma_max starts unbounded: while no finite upper bound is known, the search grows sigma
+    // geometrically (the `sigma *= 2.0` path below) until the perplexity overshoots and brackets
+    // it, then bisects. sigma_min is a small positive floor (sigma must stay > 0).
     let mut sigma_min: f64 = 1e-20;
-    let mut sigma_max: f64 = 1e20;
+    let mut sigma_max: f64 = f64::INFINITY;
     let mut sigma: f64 = 1.0;
     let n = distances.len();
     let mut p = Array1::<f64>::zeros(n);
@@ -52,16 +55,25 @@ where
         if diff.abs() < tol {
             break;
         }
+        // Perplexity increases monotonically with sigma (larger sigma → flatter distribution →
+        // higher entropy → higher perplexity). So when the current perplexity is too HIGH we must
+        // SHRINK sigma, and when it is too LOW we must GROW it. NOTE: the canonical t-SNE search is
+        // written in terms of the precision beta = 1/(2·sigma²), which has the OPPOSITE monotonicity
+        // to sigma — these two branches are the mirror image of that reference update rule, because
+        // the search variable here is sigma itself. (Swapping them is what broke neighborhood
+        // preservation: sigma ran away to its bound and every P(j|i) collapsed to uniform.)
         if diff > 0.0 {
+            // Perplexity too high → sigma too large → tighten the upper bound and shrink.
+            sigma_max = sigma;
+            sigma = (sigma + sigma_min) / 2.0;
+        } else {
+            // Perplexity too low → sigma too small → raise the lower bound and grow.
             sigma_min = sigma;
             if sigma_max.is_infinite() {
                 sigma *= 2.0;
             } else {
                 sigma = (sigma + sigma_max) / 2.0;
             }
-        } else {
-            sigma_max = sigma;
-            sigma = (sigma + sigma_min) / 2.0;
         }
     }
     (p, sigma)
@@ -320,13 +332,7 @@ impl TSNE {
 
     fn init_embedding(&self, n_samples: usize) -> Array2<f64> {
         // Seeded RNG for reproducibility if provided
-        let mut rng = match self.random_state {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => {
-                let mut thread_rng = rng();
-                StdRng::from_rng(&mut thread_rng)
-            }
-        };
+        let mut rng = crate::random::make_rng(self.random_state);
 
         let mut y = Array2::<f64>::zeros((n_samples, self.n_components));
         for i in 0..n_samples {
@@ -543,5 +549,51 @@ impl TSNE {
             row -= &mean;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use ndarray::array;
+
+    /// `binary_search_sigma` on a hand-built distance vector whose first entry is the
+    /// self/zero distance.
+    ///
+    /// Distances = [0.0, 1.0, 1.0, 4.0, 9.0, 16.0] with target perplexity 2.0.
+    /// The solver calibrates sigma so the conditional distribution P(j|i) achieves the
+    /// target perplexity. Independent of the exact sigma found, the contract is:
+    ///   * P sums to 1 (it is normalized each iteration),
+    ///   * the achieved perplexity exp(-Σ p ln p) is within the solver's tolerance of
+    ///     the target (the loop breaks once |perplexity - target| < 1e-5),
+    ///   * the self/zero-distance entry maps to exactly p = 0 (the `d == 0.0` branch).
+    #[test]
+    fn binary_search_sigma_distribution_and_perplexity() {
+        let distances = array![0.0_f64, 1.0, 1.0, 4.0, 9.0, 16.0];
+        let target_perplexity = 2.0_f64;
+
+        let (p, _sigma) = binary_search_sigma(&distances, target_perplexity);
+
+        // P is a probability distribution: sums to 1.
+        assert_abs_diff_eq!(p.sum(), 1.0_f64, epsilon = 1e-9);
+
+        // Self / zero-distance entry must be exactly 0 (the `d == 0.0` branch).
+        assert_abs_diff_eq!(p[0], 0.0_f64, epsilon = 1e-12);
+
+        // Achieved perplexity = exp(-Σ p ln p) (entropy uses the same >1e-10 guard as the
+        // solver) must be within tolerance of the target. The loop exits on |diff| < 1e-5;
+        // allow a slightly looser bound for accumulated float error.
+        let h: f64 = p
+            .iter()
+            .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
+            .sum();
+        let achieved_perplexity = h.exp();
+        assert_abs_diff_eq!(achieved_perplexity, target_perplexity, epsilon = 1e-4);
+
+        // All probabilities are non-negative.
+        for &v in p.iter() {
+            assert!(v >= 0.0, "probability must be non-negative, got {v}");
+        }
     }
 }

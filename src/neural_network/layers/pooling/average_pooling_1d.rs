@@ -1,16 +1,16 @@
-use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
+use crate::neural_network::layers::pooling::pooling_engine::{
+    PoolKind, windowed_pool_backward, windowed_pool_forward,
+};
 use crate::neural_network::layers::pooling::validation::{
     validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_1d,
     validate_stride_1d,
 };
-use crate::neural_network::layers::pooling::pooling_engine::{
-    PoolKind, windowed_pool_backward, windowed_pool_forward,
-};
+use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::traits::Layer;
 
 /// 1D average pooling layer.
@@ -80,6 +80,7 @@ use crate::neural_network::traits::Layer;
 ///     }
 /// }
 /// ```
+#[derive(Debug)]
 pub struct AveragePooling1D {
     pool_size: usize,
     stride: usize,
@@ -140,12 +141,8 @@ impl Layer for AveragePooling1D {
         // Cache the actual input shape for backward (only the shape is needed for averaging)
         self.forward_input_shape = Some(input.shape().to_vec());
 
-        let (output, _) = windowed_pool_forward(
-            input,
-            &[self.pool_size],
-            &[self.stride],
-            PoolKind::Average,
-        );
+        let (output, _) =
+            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average);
         Ok(output)
     }
 
@@ -156,12 +153,8 @@ impl Layer for AveragePooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        let (output, _) = windowed_pool_forward(
-            input,
-            &[self.pool_size],
-            &[self.stride],
-            PoolKind::Average,
-        );
+        let (output, _) =
+            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average);
         Ok(output)
     }
 

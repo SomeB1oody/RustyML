@@ -262,9 +262,7 @@ impl LogisticRegression {
             if gradients.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite gradients");
-                return Err(Error::non_finite(
-                    "gradient calculation",
-                ));
+                return Err(Error::non_finite("gradient calculation"));
             }
 
             if let Some(reg_type) = &self.regularization_type {
@@ -298,9 +296,7 @@ impl LogisticRegression {
             if weights.iter().any(|&val| !val.is_finite()) {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite weights");
-                return Err(Error::non_finite(
-                    "weight update",
-                ));
+                return Err(Error::non_finite("weight update"));
             }
 
             // Calculate loss using existing predictions
@@ -331,9 +327,7 @@ impl LogisticRegression {
             if !cost.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
-                return Err(Error::non_finite(
-                    "cost calculation",
-                ));
+                return Err(Error::non_finite("cost calculation"));
             }
 
             // Update progress bar with current loss
@@ -444,9 +438,7 @@ impl LogisticRegression {
 
         // Check if probabilities contain invalid values
         if probs.iter().any(|&val| !val.is_finite()) {
-            return Err(Error::non_finite(
-                "probability calculation",
-            ));
+            return Err(Error::non_finite("probability calculation"));
         }
 
         Ok(probs)

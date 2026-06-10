@@ -2,14 +2,14 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
+use crate::neural_network::layers::conv_op_helpers::pad_tensor_2d;
 use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::convolution::validation::{
     validate_filters, validate_input_shape_2d, validate_kernel_size_2d, validate_strides_2d,
 };
-use crate::neural_network::layers::conv_op_helpers::pad_tensor_2d;
+use crate::neural_network::layers::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::layers::layer_weight::{DepthwiseConv2DLayerWeight, LayerWeight};
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -57,7 +57,8 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///     vec![1, 3, 4, 4],        // input shape [batch_size, channels, height, width]
 ///     (1, 1),                  // strides
 ///     PaddingType::Valid,      // padding
-///     Activation::ReLU // activation
+///     Activation::ReLU, // activation
+///     None,                    // random_state
 /// ).unwrap();
 ///
 /// // Add layer and compile model
@@ -100,6 +101,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 ///     assert!(*value >= 0.0);
 /// }
 /// ```
+#[derive(Debug)]
 pub struct DepthwiseConv2D {
     filters: usize,
     kernel_size: (usize, usize),
@@ -126,6 +128,7 @@ impl DepthwiseConv2D {
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `padding` - Padding strategy (Valid or Same)
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -144,6 +147,7 @@ impl DepthwiseConv2D {
         strides: (usize, usize),
         padding: PaddingType,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Input validation
         validate_filters(filters)?;
@@ -169,9 +173,11 @@ impl DepthwiseConv2D {
         // [filters, 1, kernel_height, kernel_width]; biases start at zero.
         let fan = kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
-        let weights = Array4::random(
+        let mut rng = crate::random::make_rng(random_state);
+        let weights = Array4::random_using(
             (filters, 1, kernel_height, kernel_width),
             Uniform::new(-weight_bound, weight_bound).unwrap(),
+            &mut rng,
         );
         let bias = Array1::zeros(filters);
 
@@ -217,11 +223,7 @@ impl DepthwiseConv2D {
     ///
     /// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
     /// - `bias` - 1D bias vector with shape \[filters\]
-    pub fn set_weights(
-        &mut self,
-        weights: Array4<f32>,
-        bias: Array1<f32>,
-    ) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;
@@ -488,12 +490,8 @@ impl Layer for DepthwiseConv2D {
         );
 
         // Calculate output dimensions
-        let output_shape = calculate_output_shape_2d(
-            &input_shape,
-            self.kernel_size,
-            self.strides,
-            &self.padding,
-        );
+        let output_shape =
+            calculate_output_shape_2d(&input_shape, self.kernel_size, self.strides, &self.padding);
         let (_, _, output_height, output_width) = (
             output_shape[0],
             output_shape[1],

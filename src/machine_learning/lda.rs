@@ -1,4 +1,4 @@
-use crate::error::{Error, Context};
+use crate::error::{Context, Error};
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2, s};
@@ -25,9 +25,9 @@ impl Solver {
     /// Inverts the (regularized) shared covariance matrix under this solver strategy.
     fn invert_covariance(&self, cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_features = cov.ncols();
-        let cov_slice = cov.as_slice().ok_or_else(|| {
-            Error::computation("Failed to convert covariance matrix to slice")
-        })?;
+        let cov_slice = cov
+            .as_slice()
+            .ok_or_else(|| Error::computation("Failed to convert covariance matrix to slice"))?;
         let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
 
         let cov_inv_mat = match *self {
@@ -544,7 +544,10 @@ impl LDA {
             .classes
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LDA"))?;
-        let means = self.means.as_ref().ok_or_else(|| Error::not_fitted("LDA"))?;
+        let means = self
+            .means
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
         let cov_inv = self
             .cov_inv
             .as_ref()

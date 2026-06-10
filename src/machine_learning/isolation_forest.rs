@@ -3,8 +3,8 @@ use crate::error::Error;
 use crate::math::average_path_length_factor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
+use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::rand::{Rng, SeedableRng, rng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction
@@ -219,11 +219,8 @@ impl IsolationForest {
         // Build multiple isolation trees
         let build_tree = |i: usize| -> Result<IsolationTree, Error> {
             // Create an independent RNG for each tree to maintain reproducibility
-            let mut rng = if let Some(seed) = self.random_state {
-                StdRng::seed_from_u64(seed.wrapping_add(i as u64))
-            } else {
-                StdRng::from_rng(&mut rng())
-            };
+            let mut rng =
+                crate::random::make_rng(self.random_state.map(|s| s.wrapping_add(i as u64)));
 
             // Sample a subset of data for this tree
             let sample_size = self.max_samples.min(x.nrows());

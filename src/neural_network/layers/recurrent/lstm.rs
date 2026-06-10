@@ -2,7 +2,6 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{LSTMGateWeight, LSTMLayerWeight, LayerWeight};
 use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{
@@ -11,6 +10,7 @@ use crate::neural_network::layers::recurrent::gate::{
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3, Axis, Ix2, Ix3};
 
@@ -60,7 +60,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 ///
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(LSTM::new(4, 3, Activation::Tanh).unwrap())
+/// model.add(LSTM::new(4, 3, Activation::Tanh, None).unwrap())
 ///      .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
@@ -71,6 +71,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// println!("LSTM output shape: {:?}", predictions.shape());
 /// // Output: [2, 3] (batch_size, units)
 /// ```
+#[derive(Debug)]
 pub struct LSTM {
     input_dim: usize,
     units: usize,
@@ -104,6 +105,7 @@ impl LSTM {
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation layer from activation module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -116,17 +118,22 @@ impl LSTM {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate input dimensions and units
         validate_recurrent_dimensions(input_dim, units)?;
 
+        // One RNG threaded through all four gates so the whole layer shares a single
+        // reproducible initialization stream.
+        let mut rng = crate::random::make_rng(random_state);
+
         Ok(Self {
             input_dim,
             units,
-            input_gate: Gate::new(input_dim, units, 0.0)?,
-            forget_gate: Gate::new(input_dim, units, 1.0)?, // forget gate bias = 1.0
-            cell_gate: Gate::new(input_dim, units, 0.0)?,
-            output_gate: Gate::new(input_dim, units, 0.0)?,
+            input_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
+            forget_gate: Gate::new(input_dim, units, 1.0, &mut rng)?, // forget gate bias = 1.0
+            cell_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
+            output_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
             input_cache: None,
             hidden_cache: None,
             cell_cache: None,

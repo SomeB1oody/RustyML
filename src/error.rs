@@ -215,7 +215,9 @@ pub enum NnError {
     /// An output or gradient was requested from a layer before its forward pass had run.
     ///
     /// The payload is the layer's name (e.g. `"Dense"`, `"LSTM"`).
-    #[error("forward pass has not been run on layer `{0}`; run `forward` before accessing outputs or `backward`")]
+    #[error(
+        "forward pass has not been run on layer `{0}`; run `forward` before accessing outputs or `backward`"
+    )]
     ForwardPassNotRun(&'static str),
 
     /// A weight array assigned to a layer did not match the shape the layer expects.
@@ -276,7 +278,9 @@ pub enum IoError {
 impl IoError {
     /// Opens `path` and wraps it in a [`BufReader`], returning the raw [`std::io::Error`] on
     /// failure (callers in `Error`-returning functions receive it as [`Error::Io`] via `?`).
-    pub fn load_in_buf_reader(path: impl AsRef<std::path::Path>) -> std::io::Result<BufReader<File>> {
+    pub fn load_in_buf_reader(
+        path: impl AsRef<std::path::Path>,
+    ) -> std::io::Result<BufReader<File>> {
         Ok(BufReader::new(File::open(path)?))
     }
 }
@@ -341,5 +345,165 @@ where
             context: f().into(),
             source: Some(Box::new(e)),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::error::Error as StdError;
+
+    /// `.context(msg)` on an `Err` wraps it as `Error::Computation` carrying the message, and the
+    /// original error is preserved as the `source` (downcastable to the concrete type), so the
+    /// error chain is not lost.
+    #[test]
+    fn context_wraps_err_as_computation_preserving_source() {
+        let parsed: Result<i32, _> = "not a number".parse::<i32>();
+        match parsed.context("parsing the threshold") {
+            Err(Error::Computation { context, source }) => {
+                assert_eq!(context, "parsing the threshold");
+                let src = source.expect("the original error must be preserved as the source");
+                assert!(
+                    src.downcast_ref::<std::num::ParseIntError>().is_some(),
+                    "source must downcast back to the original ParseIntError"
+                );
+            }
+            other => panic!("expected Error::Computation, got {other:?}"),
+        }
+    }
+
+    /// The wrapped error is reachable through the standard `std::error::Error::source()` chain.
+    #[test]
+    fn context_exposes_wrapped_error_via_std_source() {
+        let err = "x".parse::<i32>().context("ctx").unwrap_err();
+        let src = StdError::source(&err).expect("source() must return Some");
+        assert!(src.downcast_ref::<std::num::ParseIntError>().is_some());
+    }
+
+    /// `.context(_)` is a transparent pass-through on the `Ok` path.
+    #[test]
+    fn context_is_passthrough_on_ok() {
+        let ok: Result<i32, std::num::ParseIntError> = Ok(42);
+        assert_eq!(ok.context("unused").unwrap(), 42);
+    }
+
+    /// `with_context`'s closure is **lazy**: it runs only on the `Err` path, never on `Ok`.
+    #[test]
+    fn with_context_closure_runs_only_on_err() {
+        // Ok path: the closure must NOT run.
+        let ran_on_ok = Cell::new(false);
+        let ok: Result<i32, std::num::ParseIntError> = Ok(7);
+        let passed = ok.with_context(|| {
+            ran_on_ok.set(true);
+            "should never be built"
+        });
+        assert_eq!(passed.unwrap(), 7);
+        assert!(
+            !ran_on_ok.get(),
+            "with_context closure must not run on the Ok path"
+        );
+
+        // Err path: the closure runs and supplies the context.
+        let ran_on_err = Cell::new(false);
+        let wrapped = "nope".parse::<i32>().with_context(|| {
+            ran_on_err.set(true);
+            format!("lazy context {}", 1)
+        });
+        assert!(
+            ran_on_err.get(),
+            "with_context closure must run on the Err path"
+        );
+        match wrapped {
+            Err(Error::Computation { context, source }) => {
+                assert_eq!(context, "lazy context 1");
+                assert!(source.is_some(), "source must be preserved");
+            }
+            other => panic!("expected Error::Computation, got {other:?}"),
+        }
+    }
+    // ── Display / to_string rendering of the #[error("...")] messages ──────────
+    //
+    // Each expected string is reproduced by hand from the `#[error("...")]` format
+    // string on the corresponding variant; nothing here runs the impl to obtain the
+    // text. Debug-formatted `Vec<usize>` (the `{:?}` in ShapeMismatch) renders as
+    // `[a, b]` with `, ` separators.
+
+    /// `#[error("input is empty: {0}")]` with payload `"target vector"`.
+    #[test]
+    fn display_empty_input() {
+        let e = Error::empty_input("target vector");
+        assert_eq!(e.to_string(), "input is empty: target vector");
+    }
+
+    /// `#[error("dimension mismatch: expected {expected}, found {found}")]`.
+    #[test]
+    fn display_dimension_mismatch() {
+        let e = Error::dimension_mismatch(3, 5);
+        assert_eq!(e.to_string(), "dimension mismatch: expected 3, found 5");
+    }
+
+    /// `#[error("shape mismatch: expected {expected:?}, found {found:?}")]`; the `{:?}`
+    /// renders each `Vec<usize>` as `[.., ..]`.
+    #[test]
+    fn display_shape_mismatch() {
+        let e = Error::shape_mismatch(vec![2usize, 3], vec![2usize, 4]);
+        assert_eq!(
+            e.to_string(),
+            "shape mismatch: expected [2, 3], found [2, 4]"
+        );
+    }
+
+    /// `#[error("invalid parameter `{name}`: {reason}")]` — note the literal backticks
+    /// around the parameter name.
+    #[test]
+    fn display_invalid_parameter() {
+        let e = Error::invalid_parameter("C", "must be > 0");
+        assert_eq!(e.to_string(), "invalid parameter `C`: must be > 0");
+    }
+
+    /// `#[error("model `{0}` has not been fitted; call `fit` before this operation")]`.
+    #[test]
+    fn display_not_fitted() {
+        let e = Error::not_fitted("KMeans");
+        assert_eq!(
+            e.to_string(),
+            "model `KMeans` has not been fitted; call `fit` before this operation"
+        );
+    }
+
+    /// `#[error(transparent)]` on `Error::NeuralNetwork` forwards the inner `NnError`'s
+    /// own Display: `EmptyModel` => `#[error("model has no layers")]`.
+    #[test]
+    fn display_neural_network_transparent_forwards_inner() {
+        let inner = NnError::EmptyModel;
+        assert_eq!(inner.to_string(), "model has no layers");
+        // The transparent outer variant must render identically to the inner enum.
+        let outer: Error = Error::from(NnError::EmptyModel);
+        assert_eq!(outer.to_string(), inner.to_string());
+    }
+
+    /// Transparent forwarding also holds for a parameterized `NnError` variant:
+    /// `NotCompiled("optimizer")` => `"model has not been compiled: `optimizer` is not specified"`.
+    #[test]
+    fn display_neural_network_transparent_forwards_parameterized_inner() {
+        let outer: Error = Error::from(NnError::NotCompiled("optimizer"));
+        assert_eq!(
+            outer.to_string(),
+            "model has not been compiled: `optimizer` is not specified"
+        );
+    }
+
+    /// `#[error(transparent)]` on `Error::Tree` forwards the inner `TreeError`'s Display:
+    /// `NotClassificationTree` => `#[error("operation requires a classification tree")]`.
+    #[test]
+    fn display_tree_transparent_forwards_inner() {
+        let inner = TreeError::NotClassificationTree;
+        assert_eq!(
+            inner.to_string(),
+            "operation requires a classification tree"
+        );
+        let outer: Error = Error::from(TreeError::NotClassificationTree);
+        assert_eq!(outer.to_string(), inner.to_string());
     }
 }

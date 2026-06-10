@@ -111,8 +111,7 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
             for k in lower..=upper {
                 // ln P(k) = log C(a_i, k) + log C(n - a_i, b_j - k) - log C(n, b_j)
                 let log_p = log_binom(a_i, k) + log_binom(n - a_i, b_j - k) - log_c_n_bj;
-                let term =
-                    (k as f64 / n_f) * ((n_f * k as f64) / (a_i as f64 * b_j as f64)).ln();
+                let term = (k as f64 / n_f) * ((n_f * k as f64) / (a_i as f64 * b_j as f64)).ln();
                 emi += log_p.exp() * term;
             }
         }
@@ -165,7 +164,11 @@ pub fn normalized_mutual_info<S>(
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
 
     let n = labels_true.len();
     let labels_true = to_label_vec(labels_true);
@@ -222,7 +225,11 @@ pub fn adjusted_mutual_info<S>(
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
 
     let n = labels_true.len();
     let labels_true = to_label_vec(labels_true);
@@ -281,7 +288,11 @@ pub fn adjusted_rand_index<S>(
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
 
     let n = labels_true.len();
     let labels_true = to_label_vec(labels_true);
@@ -407,7 +418,10 @@ where
 /// dense cluster index of each sample and the cluster count `k`.
 fn validate_clustering_inputs(n_rows: usize, labels: &[usize]) -> (Vec<usize>, usize) {
     if n_rows != labels.len() {
-        panic!("dimension mismatch: expected {n_rows}, found {}", labels.len());
+        panic!(
+            "dimension mismatch: expected {n_rows}, found {}",
+            labels.len()
+        );
     }
     if n_rows == 0 {
         panic!("input is empty: x and labels");
@@ -459,8 +473,16 @@ fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usi
     let h_classes = entropy_nats(&row_sums, n);
     let h_clusters = entropy_nats(&col_sums, n);
 
-    let homogeneity = if h_classes == 0.0 { 1.0 } else { mi / h_classes };
-    let completeness = if h_clusters == 0.0 { 1.0 } else { mi / h_clusters };
+    let homogeneity = if h_classes == 0.0 {
+        1.0
+    } else {
+        mi / h_classes
+    };
+    let completeness = if h_clusters == 0.0 {
+        1.0
+    } else {
+        mi / h_clusters
+    };
     (homogeneity, completeness)
 }
 
@@ -492,14 +514,15 @@ fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usi
 /// let labels_pred = array![0, 0, 1, 1];
 /// assert!((homogeneity_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
-pub fn homogeneity_score<S>(
-    labels_true: &ArrayBase<S, Ix1>,
-    labels_pred: &ArrayBase<S, Ix1>,
-) -> f64
+pub fn homogeneity_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
     let n = labels_true.len();
     homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n).0
 }
@@ -540,7 +563,11 @@ pub fn completeness_score<S>(
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
     let n = labels_true.len();
     homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n).1
 }
@@ -573,14 +600,15 @@ where
 /// let labels_pred = array![0, 0, 1, 1, 2, 2];
 /// assert!((v_measure_score(&labels_true, &labels_pred) - 1.0).abs() < 1e-12);
 /// ```
-pub fn v_measure_score<S>(
-    labels_true: &ArrayBase<S, Ix1>,
-    labels_pred: &ArrayBase<S, Ix1>,
-) -> f64
+pub fn v_measure_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
     let n = labels_true.len();
     let (homogeneity, completeness) =
         homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n);
@@ -628,7 +656,11 @@ pub fn fowlkes_mallows_score<S>(
 where
     S: Data<Elem = usize>,
 {
-    validate_pair(labels_true.len(), labels_pred.len(), "labels_true and labels_pred");
+    validate_pair(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true and labels_pred",
+    );
 
     let labels_true = to_label_vec(labels_true);
     let labels_pred = to_label_vec(labels_pred);
@@ -773,4 +805,257 @@ where
         return 1.0;
     }
     (between / within) * ((n - k) as f64 / (k - 1) as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use ndarray::array;
+
+    // ── label_index ──────────────────────────────────────────────────────────
+
+    /// First-appearance dense remap: distinct labels [5,5,3,3,10] -> {5:0, 3:1, 10:2}.
+    /// Verifies length and that each label maps to its first-seen ordinal position.
+    #[test]
+    fn test_label_index_first_appearance_order() {
+        let idx = label_index(&[5, 5, 3, 3, 10]);
+        assert_eq!(idx.len(), 3, "three distinct labels expected");
+        assert_eq!(idx[&5], 0, "5 appears first, should map to 0");
+        assert_eq!(idx[&3], 1, "3 appears second, should map to 1");
+        assert_eq!(idx[&10], 2, "10 appears third, should map to 2");
+    }
+
+    /// A single repeated label maps to index 0 only.
+    #[test]
+    fn test_label_index_single_label() {
+        let idx = label_index(&[7, 7, 7]);
+        assert_eq!(idx.len(), 1);
+        assert_eq!(idx[&7], 0);
+    }
+
+    /// All distinct labels each get a unique index in [0, n).
+    #[test]
+    fn test_label_index_all_distinct() {
+        let idx = label_index(&[10, 20, 30]);
+        assert_eq!(idx.len(), 3);
+        // Each appears once in first-seen order: 10->0, 20->1, 30->2.
+        assert_eq!(idx[&10], 0);
+        assert_eq!(idx[&20], 1);
+        assert_eq!(idx[&30], 2);
+    }
+
+    // ── contingency_matrix ───────────────────────────────────────────────────
+
+    /// true=[0,0,1,1], pred=[0,1,0,1]: every pairing appears exactly once,
+    /// producing the all-ones 2x2 matrix with row_sums=col_sums=[2,2].
+    #[test]
+    fn test_contingency_matrix_uniform() {
+        let (mat, row_sums, col_sums) = contingency_matrix(&[0, 0, 1, 1], &[0, 1, 0, 1]);
+        assert_eq!(mat.shape(), &[2, 2]);
+        assert_eq!(mat[[0, 0]], 1);
+        assert_eq!(mat[[0, 1]], 1);
+        assert_eq!(mat[[1, 0]], 1);
+        assert_eq!(mat[[1, 1]], 1);
+        assert_eq!(row_sums, vec![2, 2]);
+        assert_eq!(col_sums, vec![2, 2]);
+    }
+
+    /// Identical labels [0,0,1,1]: contingency is diagonal [[2,0],[0,2]].
+    #[test]
+    fn test_contingency_matrix_identical_labels() {
+        let (mat, row_sums, col_sums) = contingency_matrix(&[0, 0, 1, 1], &[0, 0, 1, 1]);
+        assert_eq!(mat.shape(), &[2, 2]);
+        assert_eq!(mat[[0, 0]], 2, "class-0 samples all in pred-cluster-0");
+        assert_eq!(mat[[0, 1]], 0);
+        assert_eq!(mat[[1, 0]], 0);
+        assert_eq!(mat[[1, 1]], 2, "class-1 samples all in pred-cluster-1");
+        assert_eq!(row_sums, vec![2, 2]);
+        assert_eq!(col_sums, vec![2, 2]);
+    }
+
+    // ── entropy_nats ─────────────────────────────────────────────────────────
+
+    /// Two equal clusters: H = -2*(0.5*ln 0.5) = ln 2 ≈ 0.693147.
+    #[test]
+    fn test_entropy_nats_two_equal_clusters() {
+        // H = -2 * (0.5 * ln(0.5)) = ln(2)
+        let h = entropy_nats(&[2, 2], 4);
+        assert_abs_diff_eq!(h, std::f64::consts::LN_2, epsilon = 1e-10);
+    }
+
+    /// A single cluster covering all samples: H = 0 (no uncertainty).
+    #[test]
+    fn test_entropy_nats_single_cluster() {
+        let h = entropy_nats(&[4], 4);
+        assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
+    }
+
+    /// Four equal singleton clusters: H = -4*(0.25*ln 0.25) = ln 4 ≈ 1.386294.
+    #[test]
+    fn test_entropy_nats_four_equal_clusters() {
+        // H = -4 * (0.25 * ln(0.25)) = ln(4) = 2*ln(2)
+        let h = entropy_nats(&[1, 1, 1, 1], 4);
+        let expected = (4.0_f64).ln(); // ln(4)
+        assert_abs_diff_eq!(h, expected, epsilon = 1e-10);
+    }
+
+    /// Zero-count entry contributes nothing: (&[0, 4], 4) → 0.0.
+    /// The only non-zero cluster covers all samples: p=1, -p*ln(p)=0.
+    #[test]
+    fn test_entropy_nats_zero_count_skipped() {
+        let h = entropy_nats(&[0, 4], 4);
+        assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
+    }
+
+    // ── mutual_information ───────────────────────────────────────────────────
+
+    /// Independent uniform assignment: MI should be 0.
+    /// Contingency = [[1,1],[1,1]], n=4, row=col=[2,2].
+    /// MI = 4 * (1/4) * ln(4*1 / (2*2)) = 4*(1/4)*ln(1) = 0.
+    #[test]
+    fn test_mutual_information_independent() {
+        let mat = array![[1usize, 1], [1, 1]];
+        let mi = mutual_information(&mat, 4, &[2, 2], &[2, 2]);
+        assert_abs_diff_eq!(mi, 0.0, epsilon = 1e-10);
+    }
+
+    /// Perfect assignment: MI = H(true) = ln 2.
+    /// Contingency = [[2,0],[0,2]], n=4, row=col=[2,2].
+    /// MI = (2/4)*ln(4*2/(2*2)) + (2/4)*ln(4*2/(2*2)) = 2*(0.5*ln2) = ln(2).
+    #[test]
+    fn test_mutual_information_identical() {
+        let mat = array![[2usize, 0], [0, 2]];
+        let mi = mutual_information(&mat, 4, &[2, 2], &[2, 2]);
+        assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
+    }
+
+    // ── homogeneity_completeness ──────────────────────────────────────────────
+
+    /// Asymmetric case: true=[0,0,1,1] (2 classes), pred=[0,1,2,3] (4 pure clusters).
+    ///
+    /// Math derivation:
+    ///   Contingency = [[1,1,0,0],[0,0,1,1]], row_sums=[2,2], col_sums=[1,1,1,1]
+    ///   MI = 4*(1/4)*ln(4*1/(2*1)) = ln(2)
+    ///   H(classes)  = entropy_nats([2,2], 4) = ln(2)
+    ///   H(clusters) = entropy_nats([1,1,1,1], 4) = ln(4) = 2*ln(2)
+    ///   homogeneity = MI / H(classes)  = ln(2)/ln(2)        = 1.0
+    ///   completeness= MI / H(clusters) = ln(2)/(2*ln(2))    = 0.5
+    ///
+    /// This case also pins the tuple ordering: first element is homogeneity,
+    /// second is completeness.
+    #[test]
+    fn test_homogeneity_completeness_pure_clusters() {
+        let labels_true = [0usize, 0, 1, 1];
+        let labels_pred = [0usize, 1, 2, 3];
+        let (h, c) = homogeneity_completeness(&labels_true, &labels_pred, 4);
+        assert_abs_diff_eq!(h, 1.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(c, 0.5, epsilon = 1e-10);
+    }
+
+    /// Identical labels: both homogeneity and completeness should be 1.0.
+    #[test]
+    fn test_homogeneity_completeness_identical() {
+        let labels = [0usize, 0, 1, 1];
+        let (h, c) = homogeneity_completeness(&labels, &labels, 4);
+        assert_abs_diff_eq!(h, 1.0, epsilon = 1e-10);
+        assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
+    }
+
+    /// Swapping roles: true=[0,1,2,3] (4 pure classes), pred=[0,0,1,1] (2 clusters).
+    /// By symmetry with the test above (roles swapped), homogeneity=0.5, completeness=1.0.
+    ///
+    /// Math:
+    ///   Contingency = [[1,0],[1,0],[0,1],[0,1]], row_sums=[1,1,1,1], col_sums=[2,2]
+    ///   MI = 4*(1/4)*ln(4*1/(1*2)) = ln(2)
+    ///   H(classes)  = entropy_nats([1,1,1,1],4) = ln(4)
+    ///   H(clusters) = entropy_nats([2,2],4)      = ln(2)
+    ///   homogeneity = ln(2)/ln(4) = 0.5
+    ///   completeness= ln(2)/ln(2) = 1.0
+    #[test]
+    fn test_homogeneity_completeness_swapped_roles() {
+        let labels_true = [0usize, 1, 2, 3];
+        let labels_pred = [0usize, 0, 1, 1];
+        let (h, c) = homogeneity_completeness(&labels_true, &labels_pred, 4);
+        assert_abs_diff_eq!(h, 0.5, epsilon = 1e-10);
+        assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
+    }
+
+    // ── entropy_nats: additional edge cases ───────────────────────────────────
+
+    /// Unequal clusters [1,3]: H = -(1/4)*ln(1/4) - (3/4)*ln(3/4).
+    /// = (1/4)*ln(4) + (3/4)*ln(4/3)
+    /// = 0.25*1.386294 + 0.75*0.287682 = 0.346574 + 0.215762 = 0.562335
+    #[test]
+    fn test_entropy_nats_unequal_clusters() {
+        let h = entropy_nats(&[1, 3], 4);
+        // H = -(1/4)*ln(1/4) - (3/4)*ln(3/4)
+        let expected =
+            -(1.0_f64 / 4.0) * (1.0_f64 / 4.0).ln() - (3.0_f64 / 4.0) * (3.0_f64 / 4.0).ln();
+        assert_abs_diff_eq!(h, expected, epsilon = 1e-10);
+    }
+
+    // ── mutual_information: non-trivial case ─────────────────────────────────
+
+    /// true=[0,0,1,1], pred=[0,1,2,3]: 4 pure clusters.
+    /// Contingency = [[1,1,0,0],[0,0,1,1]], n=4, row=[2,2], col=[1,1,1,1].
+    /// MI = 4*(1/4)*ln(4*1/(2*1)) = ln(2).
+    #[test]
+    fn test_mutual_information_pure_clusters() {
+        // Build contingency directly to avoid dependency on contingency_matrix correctness
+        let mat = array![[1usize, 1, 0, 0], [0, 0, 1, 1]];
+        let mi = mutual_information(&mat, 4, &[2, 2], &[1, 1, 1, 1]);
+        assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
+    }
+    // ── expected_mutual_information (EMI hypergeometric kernel) ──────────────────
+
+    /// EMI for the symmetric 2x2 case row_sums=[2,2], col_sums=[2,2], n=4.
+    ///
+    /// EMI = Σ_{i,j} Σ_k P(k) · (k/n) · ln(n·k / (a_i·b_j)), with P(k) the hypergeometric
+    /// pmf P(k) = C(a_i,k)·C(n-a_i, b_j-k) / C(n, b_j).
+    ///
+    /// For every pair (a_i=2, b_j=2), n=4: support is k ∈ {1,2} (C(4,2)=6).
+    ///   k=1: P = C(2,1)·C(2,1)/6 = 4/6;  term = (1/4)·ln(4·1/(2·2)) = (1/4)·ln(1) = 0
+    ///   k=2: P = C(2,2)·C(2,0)/6 = 1/6;  term = (2/4)·ln(4·2/(2·2)) = 0.5·ln(2)
+    /// per-pair contribution = (1/6)·0.5·ln(2) = ln(2)/12.
+    /// There are 2·2 = 4 identical pairs ⇒ EMI = 4·ln(2)/12 = ln(2)/3 ≈ 0.231049060.
+    #[test]
+    fn test_expected_mutual_information_symmetric_2x2() {
+        let emi = expected_mutual_information(&[2, 2], &[2, 2], 4);
+        let expected = std::f64::consts::LN_2 / 3.0;
+        assert_abs_diff_eq!(emi, expected, epsilon = 1e-12);
+    }
+    // ── ln_factorial_table ───────────────────────────────────────────
+
+    /// table[i] = ln(i!), built by cumulative summation.
+    /// ln(0!) = ln(1) = 0; ln(1!) = ln(1) = 0; ln(5!) = ln(120).
+    /// The table also has length n_max + 1.
+    #[test]
+    fn test_ln_factorial_table_known_values() {
+        let table = ln_factorial_table(5);
+        assert_eq!(table.len(), 6, "length should be n_max + 1");
+        assert_abs_diff_eq!(table[0], 0.0, epsilon = 1e-12); // ln(0!) = ln(1)
+        assert_abs_diff_eq!(table[1], 0.0, epsilon = 1e-12); // ln(1!) = ln(1)
+        assert_abs_diff_eq!(table[5], (120.0_f64).ln(), epsilon = 1e-10); // ln(5!) = ln(120)
+    }
+
+    // ── cluster_centroids ───────────────────────────────────────────
+
+    /// Per-cluster mean and size from dense cluster indices.
+    /// Points (0,0),(2,0) -> cluster 0, point (10,10) -> cluster 1, k = 2.
+    ///   centroid[0] = mean of (0,0),(2,0) = (1.0, 0.0), size 2
+    ///   centroid[1] = mean of (10,10)     = (10.0, 10.0), size 1
+    #[test]
+    fn test_cluster_centroids_known_means_and_sizes() {
+        let x = array![[0.0, 0.0], [2.0, 0.0], [10.0, 10.0]];
+        let cluster = [0usize, 0, 1];
+        let (centroids, sizes) = cluster_centroids(&x, &cluster, 2);
+
+        assert_eq!(centroids.shape(), &[2, 2]);
+        assert_abs_diff_eq!(centroids[[0, 0]], 1.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(centroids[[0, 1]], 0.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(centroids[[1, 0]], 10.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(centroids[[1, 1]], 10.0, epsilon = 1e-12);
+        assert_eq!(sizes, vec![2, 1]);
+    }
 }

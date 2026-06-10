@@ -1,14 +1,14 @@
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::error::{Error, Context};
+use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{LayerNormalizationLayerWeight, LayerWeight};
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::validation::{
     validate_epsilon, validate_input_shape,
 };
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::Axis;
 use rayon::iter::{
@@ -144,6 +144,7 @@ fn unmerge_normalized_axes(
 /// // During training, normalizes the input
 /// let output = ln.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct LayerNormalization {
     epsilon: f32,
     normalized_axis: LayerNormalizationAxis,
@@ -628,7 +629,9 @@ impl Layer for LayerNormalization {
         // Same layout handling as `forward` (see there); the cached intermediates are already in the
         // merged layout, so we transform `grad_output` to match and invert on the input gradient.
         let merged = match &self.normalized_axis {
-            LayerNormalizationAxis::Multiple(axes) => Some(merge_normalized_axes(grad_output, axes)?),
+            LayerNormalizationAxis::Multiple(axes) => {
+                Some(merge_normalized_axes(grad_output, axes)?)
+            }
             _ => None,
         };
         let (grad_output, axis_idx): (&Tensor, usize) = match (&self.normalized_axis, &merged) {
@@ -821,4 +824,161 @@ impl Layer for LayerNormalization {
     }
 
     mode_dependent_layer_trait!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::ArrayD;
+
+    // Helper: build a Tensor from a flat Vec and shape.
+    fn make_tensor(data: Vec<f32>, shape: &[usize]) -> Tensor {
+        ArrayD::from_shape_vec(shape, data).expect("shape/data mismatch in test helper")
+    }
+
+    // ─── merge_normalized_axes: output shape ────────────────────────────────
+
+    /// merge_normalized_axes on shape [3,4,5] with axes=[1,2] → merged shape [3,20].
+    ///
+    /// Derivation:
+    ///   ndim=3, axes=[1,2].
+    ///   Non-normalized axes: [0].  perm = [0, 1, 2].
+    ///   permuted shape = [3, 4, 5] (perm is identity here).
+    ///   outer = ndim - |axes| = 3 - 2 = 1.
+    ///   inner = shape[1] * shape[2] = 4 * 5 = 20.
+    ///   merged shape = [3, 20].
+    #[test]
+    fn test_merge_normalized_axes_shape() {
+        let n = 3 * 4 * 5;
+        let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let x = make_tensor(data, &[3, 4, 5]);
+
+        let (merged, _perm, _permuted_shape) =
+            merge_normalized_axes(&x, &[1, 2]).expect("merge_normalized_axes failed");
+
+        assert_eq!(merged.shape(), &[3, 20]);
+    }
+
+    /// merge_normalized_axes: perm returned for [3,4,5] with axes=[1,2].
+    ///
+    /// Derivation:
+    ///   Non-normalized axes (in order): 0.
+    ///   Normalized axes (in given order): 1, 2.
+    ///   perm = [0, 1, 2].
+    #[test]
+    fn test_merge_normalized_axes_perm() {
+        let n = 3 * 4 * 5;
+        let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let x = make_tensor(data, &[3, 4, 5]);
+
+        let (_merged, perm, _permuted_shape) =
+            merge_normalized_axes(&x, &[1, 2]).expect("merge_normalized_axes failed");
+
+        assert_eq!(perm, vec![0usize, 1, 2]);
+    }
+
+    /// merge_normalized_axes: permuted_shape for [3,4,5] with axes=[1,2].
+    ///
+    /// Derivation:
+    ///   perm = [0,1,2] (identity) → permuted shape = [3,4,5].
+    #[test]
+    fn test_merge_normalized_axes_permuted_shape() {
+        let n = 3 * 4 * 5;
+        let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let x = make_tensor(data, &[3, 4, 5]);
+
+        let (_merged, _perm, permuted_shape) =
+            merge_normalized_axes(&x, &[1, 2]).expect("merge_normalized_axes failed");
+
+        assert_eq!(permuted_shape, vec![3usize, 4, 5]);
+    }
+
+    // ─── merge + unmerge round-trip ─────────────────────────────────────────
+
+    /// unmerge_normalized_axes(merge_normalized_axes(x)) == x element-wise,
+    /// for shape [3,4,5] with axes=[1,2].
+    ///
+    /// Derivation:
+    ///   merge: reshapes [3,4,5] → [3,20] via identity perm [0,1,2], permuted_shape=[3,4,5].
+    ///   unmerge: reshapes [3,20] → [3,4,5] then applies inverse of [0,1,2] = [0,1,2] (identity).
+    ///   Net effect is a reshape→reshape identity, so every element is preserved.
+    #[test]
+    fn test_merge_unmerge_round_trip() {
+        let n = 3 * 4 * 5;
+        let data: Vec<f32> = (0..n).map(|i| i as f32 * 1.1).collect();
+        let x = make_tensor(data, &[3, 4, 5]);
+
+        let (merged, perm, permuted_shape) =
+            merge_normalized_axes(&x, &[1, 2]).expect("merge_normalized_axes failed");
+
+        let recovered = unmerge_normalized_axes(merged, &perm, &permuted_shape);
+
+        assert_eq!(recovered.shape(), x.shape());
+        let x_flat: &[f32] = x.as_slice().unwrap();
+        let r_flat: &[f32] = recovered.as_slice().unwrap();
+        for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
+            assert_eq!(
+                orig, got,
+                "round-trip mismatch at flat index {i}: orig={orig}, got={got}"
+            );
+        }
+    }
+
+    /// Round-trip also holds when axes require a non-trivial permutation.
+    /// Shape [2,3,4], axes=[0,2]:
+    ///   Non-normalized axes: [1]. perm = [1, 0, 2].
+    ///   permuted shape = [3, 2, 4].
+    ///   merged shape = [3, 8].
+    ///   unmerge inverts: reshape [3,8]→[3,2,4], then inverse of [1,0,2] is [1,0,2].
+    ///   Result shape is [2,3,4] and elements match original.
+    #[test]
+    fn test_merge_unmerge_round_trip_nontrivial_perm() {
+        let n = 2 * 3 * 4;
+        let data: Vec<f32> = (0..n).map(|i| i as f32 * 0.7 + 0.3).collect();
+        let x = make_tensor(data, &[2, 3, 4]);
+
+        let (merged, perm, permuted_shape) =
+            merge_normalized_axes(&x, &[0, 2]).expect("merge_normalized_axes failed");
+
+        // Verify intermediate merged shape: outer=1 (axis 1), inner=2*4=8 → [3,8].
+        assert_eq!(merged.shape(), &[3, 8]);
+
+        let recovered = unmerge_normalized_axes(merged, &perm, &permuted_shape);
+
+        assert_eq!(recovered.shape(), x.shape());
+        let x_flat: &[f32] = x.as_slice().unwrap();
+        let r_flat: &[f32] = recovered.as_slice().unwrap();
+        for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
+            assert_eq!(
+                orig, got,
+                "non-trivial round-trip mismatch at flat index {i}: orig={orig}, got={got}"
+            );
+        }
+    }
+
+    // ─── merge_normalized_axes: error cases ─────────────────────────────────
+
+    /// merge_normalized_axes returns Err for an empty axes slice.
+    #[test]
+    fn test_merge_normalized_axes_empty_axes_error() {
+        let x = make_tensor(vec![1.0f32, 2.0, 3.0], &[3]);
+        let result = merge_normalized_axes(&x, &[]);
+        assert!(result.is_err(), "expected Err for empty axes");
+    }
+
+    /// merge_normalized_axes returns Err when an axis is out of bounds.
+    #[test]
+    fn test_merge_normalized_axes_out_of_bounds_error() {
+        let x = make_tensor(vec![1.0f32; 6], &[2, 3]);
+        let result = merge_normalized_axes(&x, &[2]); // ndim=2, axis 2 is OOB
+        assert!(result.is_err(), "expected Err for out-of-bounds axis");
+    }
+
+    /// merge_normalized_axes returns Err for duplicate axes.
+    #[test]
+    fn test_merge_normalized_axes_duplicate_axes_error() {
+        let x = make_tensor(vec![1.0f32; 12], &[3, 4]);
+        let result = merge_normalized_axes(&x, &[0, 0]);
+        assert!(result.is_err(), "expected Err for duplicate axis");
+    }
 }

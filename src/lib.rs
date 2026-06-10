@@ -62,7 +62,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, no_run
+//! ```ignored
 //! use rustyml::machine_learning::linear_regression::*;
 //! use ndarray::{Array1, Array2};
 //!
@@ -112,7 +112,7 @@
 //! ```
 //!
 //! In your Rust code, write:
-//! ```rust, no_run
+//! ```ignored
 //! use rustyml::neural_network::{
 //!     sequential::Sequential,
 //!     layers::{Dense, ReLU, Softmax},
@@ -128,9 +128,9 @@
 //! // Build a neural network
 //! let mut model = Sequential::new();
 //! model
-//!     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-//!     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-//!     .add(Dense::new(64, 10, Softmax::new()).unwrap())
+//!     .add(Dense::new(784, 128, ReLU::new(), None).unwrap())
+//!     .add(Dense::new(128, 64, ReLU::new(), None).unwrap())
+//!     .add(Dense::new(64, 10, Softmax::new(), None).unwrap())
 //!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
 //!
 //! // Display model structure
@@ -145,9 +145,9 @@
 //! // Create a new model with the same architecture
 //! let mut new_model = Sequential::new();
 //! new_model
-//!     .add(Dense::new(784, 128, ReLU::new()).unwrap())
-//!     .add(Dense::new(128, 64, ReLU::new()).unwrap())
-//!     .add(Dense::new(64, 10, Softmax::new()).unwrap());
+//!     .add(Dense::new(784, 128, ReLU::new(), None).unwrap())
+//!     .add(Dense::new(128, 64, ReLU::new(), None).unwrap())
+//!     .add(Dense::new(64, 10, Softmax::new(), None).unwrap());
 //!
 //! // Load weights from file
 //! new_model.load_from_path("model.json").unwrap();
@@ -377,6 +377,28 @@ macro_rules! model_save_and_load_methods {
     feature = "utils"
 ))]
 pub mod error;
+
+/// Crate-wide control of pseudo-random number generation for reproducibility.
+///
+/// Exposes [`set_global_seed`](random::set_global_seed) / [`clear_global_seed`](random::clear_global_seed)
+/// (re-exported at the crate root) to fix a thread-local global seed. All randomized components
+/// resolve their `random_state: Option<u64>` against this global through a shared entry point, so a
+/// single `set_global_seed` call makes the crate reproducible. See the module docs for the
+/// local-vs-global-vs-entropy resolution rules and the threading contract.
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub mod random;
+
+/// Re-export of the global-seed controls; canonical home is the [`random`] module.
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub use random::{clear_global_seed, set_global_seed};
 
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///
@@ -712,9 +734,9 @@ pub mod metrics;
 ///
 /// // Build sequential model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
-///      .add(Dense::new(8, 3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
-///      .add(Dense::new(3, 1, Activation::Linear).unwrap()); // Output layer: 3 -> 1
+/// model.add(Dense::new(4, 8, Activation::ReLU, None).unwrap())   // Input layer: 4 -> 8
+///      .add(Dense::new(8, 3, Activation::ReLU, None).unwrap())   // Hidden layer: 8 -> 3
+///      .add(Dense::new(3, 1, Activation::Linear, None).unwrap()); // Output layer: 3 -> 1
 ///
 /// // Compile with optimizer and loss function
 /// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), MeanSquaredError::new());

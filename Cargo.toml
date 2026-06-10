@@ -12,6 +12,8 @@ repository = "https://github.com/SomeB1oody/RustyML"
 documentation = "https://docs.rs/crate/rustyml"
 categories = ["mathematics", "science", "algorithms"]
 
+autotests = false
+
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
 machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:serde_json", "dep:thiserror"]
@@ -44,6 +46,31 @@ thiserror = { version = "2.0.17", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
+
+[[test]]
+name = "machine_learning"
+path = "tests/machine_learning/main.rs"
+required-features = ["machine_learning"]
+
+[[test]]
+name = "neural_network"
+path = "tests/neural_network/main.rs"
+required-features = ["neural_network"]
+
+[[test]]
+name = "utils"
+path = "tests/utils/main.rs"
+required-features = ["utils"]
+
+[[test]]
+name = "metrics"
+path = "tests/metrics/main.rs"
+required-features = ["metrics"]
+
+[[test]]
+name = "math"
+path = "tests/math.rs"
+required-features = ["math"]
 
 [profile.dev]
 opt-level = 0

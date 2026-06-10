@@ -1,11 +1,11 @@
 /// Dropout layers for neural networks
 pub mod dropout;
-/// Input validation functions for regularization layers
-mod validation;
 /// Noise injection layers for neural networks
 pub mod noise_injection;
 /// Normalization layers for neural networks
 pub mod normalization;
+/// Input validation functions for regularization layers
+mod validation;
 
 pub use dropout::*;
 pub use noise_injection::*;

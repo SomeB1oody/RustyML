@@ -1,7 +1,7 @@
 pub use super::DistanceCalculationMetric;
 use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_predict_input};
-use crate::error::{Error, Context};
+use crate::error::{Context, Error};
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
@@ -238,9 +238,7 @@ impl DBSCAN {
                 continue;
             }
 
-            let neighbors = self
-                .region_query(data, p)
-                .context("region query failed")?;
+            let neighbors = self.region_query(data, p).context("region query failed")?;
 
             if neighbors.len() < self.min_samples {
                 labels[p] = -1; // Mark as noise
@@ -290,9 +288,7 @@ impl DBSCAN {
             if cluster_id == isize::MAX {
                 #[cfg(feature = "show_progress")]
                 pb.finish_with_message("Error: cluster ID overflow");
-                return Err(Error::computation(
-                    "Too many clusters: cluster ID overflow",
-                ));
+                return Err(Error::computation("Too many clusters: cluster ID overflow"));
             }
         }
 
@@ -416,4 +412,35 @@ impl DBSCAN {
     }
 
     model_save_and_load_methods!(DBSCAN);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    /// Calling the private `region_query` with a point index >= data.nrows()
+    /// must return Error::Computation (the defensive bounds-check arm).
+    ///
+    /// Derivation: the guard at the top of region_query is `if p >= data.nrows()`.
+    /// With a 3-row matrix, passing p = 3 makes `3 >= 3` true, so the code returns
+    /// Err(Error::computation(...)), whose discriminant is the Computation variant.
+    /// This arm is unreachable through the public fit/predict API (which only ever
+    /// feeds indices drawn from 0..n_samples), so it is exercised here by calling
+    /// the private method directly from an in-module test. The index 3 == nrows is
+    /// chosen because the message formats `data.nrows() - 1`, which would underflow
+    /// if nrows were 0; a non-empty matrix keeps the message well-formed.
+    ///
+    /// Note: Error::Computation is a STRUCT variant (`{ context, source }`), so it
+    /// is matched with `{ .. }`, not as a tuple.
+    #[test]
+    fn region_query_out_of_bounds_index_gives_computation() {
+        let data = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]; // 3 rows
+        let model = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+        let err = model.region_query(&data, 3).unwrap_err(); // 3 >= nrows (3)
+        match err {
+            Error::Computation { .. } => {}
+            other => panic!("expected Computation, got {:?}", other),
+        }
+    }
 }

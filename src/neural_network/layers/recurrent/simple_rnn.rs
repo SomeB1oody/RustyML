@@ -2,12 +2,12 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::recurrent::{GRADIENT_CLIP_VALUE, orthogonal_init};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -48,7 +48,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Build model: one SimpleRnn layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new(4, 3, Activation::Tanh).unwrap())
+/// .add(SimpleRNN::new(4, 3, Activation::Tanh, None).unwrap())
 /// .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
@@ -61,6 +61,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let pred = model.predict(&x);
 /// println!("SimpleRnn prediction:\n{:#?}\n", pred);
 /// ```
+#[derive(Debug)]
 pub struct SimpleRNN {
     input_dim: usize,
     units: usize,
@@ -83,6 +84,7 @@ impl SimpleRNN {
     /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -95,15 +97,22 @@ impl SimpleRNN {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
 
+        let mut rng = crate::random::make_rng(random_state);
+
         // Xavier/Glorot initialization for input kernel
         let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
+        let kernel = Array::random_using(
+            (input_dim, units),
+            Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
+        );
 
         // Orthogonal initialization for recurrent kernel to maintain gradient flow
-        let recurrent_kernel = orthogonal_init(units);
+        let recurrent_kernel = orthogonal_init(units, &mut rng);
 
         let bias = Array::zeros((1, units));
         Ok(SimpleRNN {

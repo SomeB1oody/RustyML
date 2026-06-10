@@ -1,8 +1,8 @@
-use crate::neural_network::layers::pooling::layer_functions_global_pooling;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::pooling::layer_functions_global_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, global_pool_backward, global_pool_forward,
 };
@@ -54,6 +54,7 @@ use crate::neural_network::traits::Layer;
 /// # Performance
 ///
 /// Parallel execution is used when `batch_size * channels >= 32`.
+#[derive(Debug)]
 pub struct GlobalAveragePooling1D {
     input_shape: Vec<usize>,
 }

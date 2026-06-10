@@ -1,17 +1,18 @@
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
     dropout_backward, dropout_output_shape,
 };
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
     validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
+use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Threshold for using parallel computation in Dropout layer.
@@ -37,7 +38,7 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate
-/// let mut dropout = Dropout::new(0.5, vec![32, 128]).unwrap();
+/// let mut dropout = Dropout::new(0.5, vec![32, 128], None).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -45,11 +46,13 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 /// // During training, approximately 50% of values will be set to 0
 /// let output = dropout.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct Dropout {
     rate: f32,
     input_shape: Vec<usize>,
     mask: Option<Tensor>,
     training: bool,
+    rng: StdRng,
 }
 
 impl Dropout {
@@ -59,6 +62,7 @@ impl Dropout {
     ///
     /// - `rate` - Dropout rate, fraction of the input units to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -67,7 +71,11 @@ impl Dropout {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
-    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
+    pub fn new(
+        rate: f32,
+        input_shape: Vec<usize>,
+        random_state: Option<u64>,
+    ) -> Result<Self, Error> {
         validate_rate(rate, "Dropout rate")?;
 
         Ok(Dropout {
@@ -75,6 +83,7 @@ impl Dropout {
             input_shape,
             mask: None,
             training: true,
+            rng: crate::random::make_rng(random_state),
         })
     }
 
@@ -101,7 +110,11 @@ impl Layer for Dropout {
         }
 
         // Generate random mask: 1 with probability (1 - rate), 0 with probability rate
-        let mut mask = Tensor::random(input.raw_dim(), Uniform::new(0.0, 1.0).unwrap());
+        let mut mask = Tensor::random_using(
+            input.raw_dim(),
+            Uniform::new(0.0, 1.0).unwrap(),
+            &mut self.rng,
+        );
 
         // Apply threshold to create binary mask with parallel or sequential computation
         if input.len() >= DROPOUT_PARALLEL_THRESHOLD {
@@ -131,7 +144,7 @@ impl Layer for Dropout {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        dropout_backward(grad_output, &self.mask, self.training, self.rate)
+        dropout_backward(grad_output, &self.mask, self.training, self.rate, "Dropout")
     }
 
     fn layer_type(&self) -> &str {

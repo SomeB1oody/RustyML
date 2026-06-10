@@ -1,7 +1,7 @@
 use crate::error::Error;
-use crate::neural_network::traits::{Layer, Optimizer};
-use crate::neural_network::optimizers::validation::validate_positive_finite;
 use crate::neural_network::optimizers::kernels;
+use crate::neural_network::optimizers::validation::validate_positive_finite;
+use crate::neural_network::traits::{Layer, Optimizer};
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer.
 ///
@@ -11,6 +11,7 @@ use crate::neural_network::optimizers::kernels;
 ///
 /// - `learning_rate` - Initial learning rate controlling the size of parameter updates
 /// - `epsilon` - Small constant added for numerical stability
+#[derive(Debug)]
 pub struct AdaGrad {
     learning_rate: f32,
     epsilon: f32,

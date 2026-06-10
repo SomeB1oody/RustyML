@@ -144,10 +144,7 @@ fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
 }
 
 /// Normalizes the entire array as a single flat vector.
-fn normalize_global<D>(
-    data: &mut Array<f64, D>,
-    order: NormalizationOrder,
-) -> Result<(), Error>
+fn normalize_global<D>(data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), Error>
 where
     D: Dimension,
 {
@@ -277,11 +274,7 @@ impl NormalizationAxis {
     /// - [`Error::InvalidInput`] - If row/column normalization is requested
     ///   on an array with fewer than 2 dimensions
     /// - [`Error::NonFinite`] - If a norm computation overflows
-    fn apply<D>(
-        &self,
-        data: &mut Array<f64, D>,
-        order: NormalizationOrder,
-    ) -> Result<(), Error>
+    fn apply<D>(&self, data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), Error>
     where
         D: Dimension,
     {

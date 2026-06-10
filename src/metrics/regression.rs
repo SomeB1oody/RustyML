@@ -44,13 +44,10 @@ where
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
     // Single pass over both arrays, accumulating the squared error.
-    let sum_squared_error = y_true
-        .iter()
-        .zip(y_pred.iter())
-        .fold(0.0, |acc, (&t, &p)| {
-            let error = t - p;
-            acc + error * error
-        });
+    let sum_squared_error = y_true.iter().zip(y_pred.iter()).fold(0.0, |acc, (&t, &p)| {
+        let error = t - p;
+        acc + error * error
+    });
 
     sum_squared_error / y_true.len() as f64
 }
@@ -236,7 +233,11 @@ where
     let true_variance = variance(y_true);
 
     if true_variance < SST_EPSILON {
-        return if residual_variance < SST_EPSILON { 1.0 } else { 0.0 };
+        return if residual_variance < SST_EPSILON {
+            1.0
+        } else {
+            0.0
+        };
     }
 
     1.0 - residual_variance / true_variance

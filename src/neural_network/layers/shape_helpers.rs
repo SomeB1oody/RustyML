@@ -171,3 +171,82 @@ pub(super) fn calculate_output_shape_2d(
 
     vec![batch_size, channels, output_height, output_width]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These tests verify the spatial-dimension formulas straight from their definitions.
+    // For `Valid` padding / pooling the output extent along an axis is
+    //   out = floor((in - window) / stride) + 1   (integer division)
+    // and for `Same` padding it is
+    //   out = ceil(in / stride).
+    //
+    // `PaddingType` is brought into the test module by `use super::*;` (the parent module's
+    // `use crate::neural_network::layers::convolution::PaddingType;` is visible to this child
+    // module); it derives `Copy`, so passing it by value is fine.
+
+    /// 1D pooling: in=10, pool=3, stride=2 => floor((10-3)/2)+1 = floor(7/2)+1 = 3+1 = 4.
+    /// Batch and channel axes pass through unchanged.
+    #[test]
+    fn test_calculate_output_shape_1d_pooling() {
+        let out = calculate_output_shape_1d_pooling(&[8, 5, 10], 3, 2);
+        assert_eq!(out, vec![8, 5, 4]);
+    }
+
+    /// 1D pooling with stride 1 and a window equal to the length leaves a single position:
+    /// in=6, pool=6, stride=1 => floor((6-6)/1)+1 = 1.
+    #[test]
+    fn test_calculate_output_shape_1d_pooling_full_window() {
+        let out = calculate_output_shape_1d_pooling(&[2, 3, 6], 6, 1);
+        assert_eq!(out, vec![2, 3, 1]);
+    }
+
+    /// 2D pooling: height 7/pool 2/stride 2 => floor((7-2)/2)+1 = floor(5/2)+1 = 2+1 = 3;
+    /// width 8/pool 3/stride 1 => floor((8-3)/1)+1 = 5+1 = 6.
+    #[test]
+    fn test_calculate_output_shape_2d_pooling() {
+        let out = calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1));
+        assert_eq!(out, vec![4, 6, 3, 6]);
+    }
+
+    /// 3D pooling: depth 5/pool 2/stride 1 => floor(3/1)+1 = 4; height 6/pool 2/stride 2 =>
+    /// floor(4/2)+1 = 3; width 9/pool 3/stride 3 => floor(6/3)+1 = 3.
+    #[test]
+    fn test_calculate_output_shape_3d_pooling() {
+        let out = calculate_output_shape_3d_pooling(&[2, 4, 5, 6, 9], (2, 2, 3), (1, 2, 3));
+        assert_eq!(out, vec![2, 4, 4, 3, 3]);
+    }
+
+    /// `Valid` padding reduces dimensions: height 5/kernel 3/stride 1 => floor((5-3)/1)+1 = 3;
+    /// width 7/kernel 2/stride 2 => floor((7-2)/2)+1 = floor(5/2)+1 = 2+1 = 3.
+    #[test]
+    fn test_calculate_output_height_and_weight_valid() {
+        let (h, w) = calculate_output_height_and_weight(PaddingType::Valid, 5, 7, (3, 2), (1, 2));
+        assert_eq!((h, w), (3, 3));
+    }
+
+    /// `Same` padding preserves the input divided by the stride (rounded up), independent of
+    /// the kernel: height 7/stride 2 => ceil(7/2) = 4; width 8/stride 3 => ceil(8/3) = 3.
+    #[test]
+    fn test_calculate_output_height_and_weight_same() {
+        let (h, w) = calculate_output_height_and_weight(PaddingType::Same, 7, 8, (3, 3), (2, 3));
+        assert_eq!((h, w), (4, 3));
+    }
+
+    /// `Same` with stride 1 keeps the spatial size exactly: 5x5 stays 5x5 regardless of kernel.
+    #[test]
+    fn test_calculate_output_height_and_weight_same_stride_one() {
+        let (h, w) = calculate_output_height_and_weight(PaddingType::Same, 5, 5, (3, 3), (1, 1));
+        assert_eq!((h, w), (5, 5));
+    }
+
+    /// `calculate_output_shape_2d` threads batch/channels through and delegates the spatial
+    /// extents to the formula above. With Valid padding, kernel (3,3), stride (1,1) on a
+    /// [2, 4, 5, 5] input: out_h = floor((5-3)/1)+1 = 3, out_w = 3.
+    #[test]
+    fn test_calculate_output_shape_2d_valid() {
+        let out = calculate_output_shape_2d(&[2, 4, 5, 5], (3, 3), (1, 1), &PaddingType::Valid);
+        assert_eq!(out, vec![2, 4, 3, 3]);
+    }
+}

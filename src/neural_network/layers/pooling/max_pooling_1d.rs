@@ -1,16 +1,16 @@
-use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
+use crate::neural_network::layers::pooling::pooling_engine::{
+    PoolKind, windowed_pool_backward, windowed_pool_forward,
+};
 use crate::neural_network::layers::pooling::validation::{
     validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_1d,
     validate_stride_1d,
 };
-use crate::neural_network::layers::pooling::pooling_engine::{
-    PoolKind, windowed_pool_backward, windowed_pool_forward,
-};
+use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::traits::Layer;
 
 /// 1D max pooling layer.
@@ -85,6 +85,7 @@ use crate::neural_network::traits::Layer;
 /// # Performance
 ///
 /// Parallel execution is used when `batch_size * channels >= 32`.
+#[derive(Debug)]
 pub struct MaxPooling1D {
     pool_size: usize,
     stride: usize,

@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::math::hinge_loss;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
-use ndarray_rand::rand::{rng, seq::SliceRandom};
+use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 /// Threshold for batch size above which parallel processing is used
@@ -27,6 +27,7 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// - `penalty` - Regularization type (L1 or L2) with strength parameter
 /// - `fit_intercept` - Whether to calculate and use an intercept/bias term
 /// - `tol` - Training convergence tolerance
+/// - `random_state` - Optional seed for the per-epoch minibatch shuffling, enabling reproducible training
 /// - `n_iter` - Number of iterations that were actually performed during training
 ///
 /// # Example
@@ -40,7 +41,8 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 ///     0.001,                          // learning_rate
 ///     RegularizationType::L2(1.0),    // penalty type with regularization strength
 ///     true,                           // fit_intercept
-///     1e-4                            // tolerance
+///     1e-4,                           // tolerance
+///     Some(42),                       // random_state for reproducible training
 /// ).unwrap();
 ///
 /// let x = Array2::from_shape_vec((8, 2), vec![
@@ -70,6 +72,7 @@ pub struct LinearSVC {
     penalty: RegularizationType,
     fit_intercept: bool,
     tol: f64,
+    random_state: Option<u64>,
     n_iter: Option<usize>,
 }
 
@@ -83,6 +86,7 @@ impl Default for LinearSVC {
     /// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
     /// - `fit_intercept`: true
     /// - `tol`: 1e-4
+    /// - `random_state`: None (non-deterministic minibatch shuffling)
     ///
     /// # Returns
     ///
@@ -96,6 +100,7 @@ impl Default for LinearSVC {
             penalty: RegularizationType::L2(1.0),
             fit_intercept: true,
             tol: 1e-4,
+            random_state: None,
             n_iter: None,
         }
     }
@@ -111,6 +116,7 @@ impl LinearSVC {
     /// - `penalty` - Type and strength of regularization (L1(lambda) or L2(lambda))
     /// - `fit_intercept` - Whether to calculate and use bias term
     /// - `tol` - Convergence tolerance that stops training when reached
+    /// - `random_state` - Optional seed for the per-epoch minibatch shuffling. Pass `Some(seed)` for reproducible training, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
@@ -129,6 +135,7 @@ impl LinearSVC {
         penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate parameters
         validate_max_iterations(max_iter)?;
@@ -142,7 +149,9 @@ impl LinearSVC {
         if reg_param < 0.0 || !reg_param.is_finite() {
             return Err(Error::invalid_parameter(
                 "penalty",
-                format!("regularization parameter must be non-negative and finite, got {reg_param}"),
+                format!(
+                    "regularization parameter must be non-negative and finite, got {reg_param}"
+                ),
             ));
         }
 
@@ -154,6 +163,7 @@ impl LinearSVC {
             penalty,
             fit_intercept,
             tol,
+            random_state,
             n_iter: None,
         })
     }
@@ -185,6 +195,7 @@ impl LinearSVC {
     get_field_as_ref!(get_weights, weights, Option<&Array1<f64>>);
     get_field!(get_bias, bias, Option<f64>);
     get_field!(get_penalty, penalty, RegularizationType);
+    get_field!(get_random_state, random_state, Option<u64>);
 
     /// Trains the model on the provided data.
     ///
@@ -230,9 +241,10 @@ impl LinearSVC {
         // Convert labels to -1 and 1
         let y_binary = y.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
 
-        // Create index array for random sampling
+        // Create index array for random sampling. Seeding the RNG from `random_state`
+        // makes the per-epoch minibatch shuffling reproducible.
         let mut indices: Vec<usize> = (0..n_samples).collect();
-        let mut rng = rng();
+        let mut rng = crate::random::make_rng(self.random_state);
 
         let mut prev_weights = weights.clone();
         let mut prev_bias = bias;

@@ -1,9 +1,9 @@
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::format_shape;
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
 /// Linear (Identity) activation layer.
@@ -40,6 +40,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Output will be: [[-1.0, 2.0, -3.0], [4.0, -5.0, 6.0]]
 /// ```
+#[derive(Debug)]
 pub struct Linear {
     input_shape: Option<Vec<usize>>,
 }

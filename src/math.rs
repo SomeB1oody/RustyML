@@ -86,7 +86,11 @@ where
 /// Calculates the mean squared error (variance) of a set of values.
 ///
 /// The variance is the average of the squared differences between each value
-/// and the mean of all values.
+/// and the mean.
+///
+/// Non-finite entries (`NaN`/`±∞`) are **skipped**: both the mean and the variance are
+/// computed over the finite subset, dividing by the count of finite values. A few bad
+/// entries therefore do not poison the statistic.
 ///
 /// # Parameters
 ///
@@ -94,7 +98,8 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Variance of the input values (0.0 when the array is empty)
+/// - `f64` - Population variance over the finite values (0.0 when the array is empty or has
+///   no finite values)
 ///
 /// # Examples
 /// ```rust
@@ -111,33 +116,39 @@ pub fn variance<S>(y: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
 {
-    let n = y.len();
-
     // Return 0.0 for empty arrays
-    if n == 0 {
+    if y.is_empty() {
         return 0.0;
     }
 
-    // Calculate mean using ndarray's mean method
-    // Handle potential NaN case when all values are NaN
-    let mean = match y.mean() {
-        Some(m) if m.is_finite() => m,
-        _ => return 0.0, // Return 0.0 if mean is NaN or can't be calculated
-    };
+    // Mean over the FINITE values only, in one pass: NaN/infinite entries are skipped rather
+    // than poisoning the whole statistic (e.g. `y.mean()` would be NaN for any NaN element).
+    let (finite_sum, finite_count) = y.fold((0.0_f64, 0_usize), |(sum, count), &val| {
+        if val.is_finite() {
+            (sum + val, count + 1)
+        } else {
+            (sum, count)
+        }
+    });
 
-    // Use fold for potentially better performance than map/sum
-    // This computes the sum of squared differences in one pass
+    // No finite values to summarize (all entries were NaN/infinite).
+    if finite_count == 0 {
+        return 0.0;
+    }
+    let mean = finite_sum / finite_count as f64;
+
+    // Sum of squared differences over the same finite subset.
     let sum_squared_diff = y.fold(0.0, |acc, &val| {
         if val.is_finite() {
             let diff = val - mean;
             acc + diff * diff
         } else {
-            acc // Skip NaN or infinite values
+            acc // Skip NaN / infinite values.
         }
     });
 
-    // Compute variance (MSE)
-    sum_squared_diff / n as f64
+    // Population variance of the finite subset: divide by the finite count, not the full length.
+    sum_squared_diff / finite_count as f64
 }
 
 /// Computes the logistic sigmoid for a scalar input.
@@ -443,10 +454,13 @@ where
         return 0.0;
     }
 
+    // Normalize by the number of VALID (non-NaN) samples, not `y.len()` (see `entropy` above).
+    let valid_samples: f64 = class_counts.values().map(|&c| c as f64).sum();
+
     // Calculate Gini impurity more efficiently
     let mut sum_squared_proportions = 0.0;
     for &count in class_counts.values() {
-        let p = count as f64 / total_samples;
+        let p = count as f64 / valid_samples;
         sum_squared_proportions += p * p;
     }
 
@@ -507,10 +521,15 @@ where
         return 0.0;
     }
 
+    // Normalize by the number of VALID (non-NaN) samples, not `y.len()`. NaN entries were
+    // skipped above, so dividing by the full length would make the class probabilities sum to
+    // less than 1 and understate the impurity whenever the input contains NaN.
+    let valid_samples: f64 = class_counts.values().map(|&c| c as f64).sum();
+
     // Calculate entropy more efficiently with direct loop
     let mut entropy = 0.0;
     for &count in class_counts.values() {
-        let p = count as f64 / total_samples;
+        let p = count as f64 / valid_samples;
         // Safeguard against log2(0), although this shouldn't happen in this context
         if p > 0.0 {
             entropy -= p * p.log2();
@@ -522,13 +541,17 @@ where
 
 /// Calculates the population standard deviation of a set of values.
 ///
+/// This is `sqrt(`[`variance`]`)`, and inherits its NaN/infinite-skipping contract: the
+/// statistic is computed over the finite subset of `values`.
+///
 /// # Parameters
 ///
 /// - `values` - Values to measure dispersion
 ///
 /// # Returns
 ///
-/// - `f64` - Population standard deviation (0.0 when the array is empty)
+/// - `f64` - Population standard deviation over the finite values (0.0 when the array is
+///   empty or has no finite values)
 ///
 /// # Examples
 /// ```rust
@@ -545,27 +568,10 @@ pub fn standard_deviation<S>(values: &ArrayBase<S, Ix1>) -> f64
 where
     S: Data<Elem = f64>,
 {
-    let n = values.len();
-
-    // Return 0.0 for empty arrays
-    if n == 0 {
-        return 0.0;
-    }
-
-    // Use built-in methods when available for better performance
-    // calculate variance and then take the square root
-
-    // First calculate the mean efficiently
-    let mean = values.mean().unwrap(); // Safe since we've validated input
-
-    // Calculate variance in one pass
-    let variance = values.fold(0.0, |acc, &x| {
-        let diff = x - mean;
-        acc + diff * diff
-    }) / n as f64;
-
-    // Take the square root for standard deviation
-    variance.sqrt()
+    // The standard deviation is the square root of the population variance. Delegating to
+    // `variance` keeps the two statistics consistent — same finite-subset / NaN-skipping
+    // contract, same divisor — so `standard_deviation == variance.sqrt()` always holds.
+    variance(values).sqrt()
 }
 
 /// Calculates the average path length adjustment factor for isolation trees.
@@ -612,4 +618,233 @@ pub fn average_path_length_factor(n: usize) -> f64 {
     };
 
     2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+    use ndarray::array;
+
+    // ─── hinge_loss ───────────────────────────────────────────────────────────
+
+    /// Docstring example: scores=[0.8,-0.5,2.0], labels=[1.0,-1.0,1.0]
+    /// Per-sample: max(0,1-0.8)=0.2, max(0,1-0.5)=0.5, max(0,1-2)=0.0
+    /// mean = 0.7/3 = 0.23333...
+    #[test]
+    fn test_hinge_loss_basic() {
+        let margins = array![0.8, -0.5, 2.0];
+        let labels = array![1.0, -1.0, 1.0];
+        let expected = 0.7_f64 / 3.0;
+        assert_abs_diff_eq!(hinge_loss(&margins, &labels), expected, epsilon = 1e-6);
+    }
+
+    /// When all margins are correctly classified with margin >= 1 the loss is 0.
+    /// scores=[2.0, 3.0], labels=[1.0, -1.0]:
+    ///   max(0,1-2.0)=0, max(0,1-(-1.0)*(-3.0))=max(0,1-3)=0 → mean=0.0
+    #[test]
+    fn test_hinge_loss_all_correct() {
+        let margins = array![2.0, -3.0];
+        let labels = array![1.0, -1.0];
+        // item 0: max(0, 1 - 1.0*2.0) = max(0,-1)=0
+        // item 1: max(0, 1 - (-1.0)*(-3.0)) = max(0,1-3)=0
+        assert_abs_diff_eq!(hinge_loss(&margins, &labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Empty input → 0.0 (code early-returns 0.0 when n==0)
+    #[test]
+    fn test_hinge_loss_empty() {
+        let margins: ndarray::Array1<f64> = array![];
+        let labels: ndarray::Array1<f64> = array![];
+        assert_abs_diff_eq!(hinge_loss(&margins, &labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Single sample: score=0.5, label=1.0
+    /// loss = max(0, 1 - 1.0*0.5) = 0.5
+    #[test]
+    fn test_hinge_loss_single_sample() {
+        let margins = array![0.5];
+        let labels = array![1.0];
+        assert_abs_diff_eq!(hinge_loss(&margins, &labels), 0.5, epsilon = 1e-10);
+    }
+
+    // ─── average_path_length_factor ───────────────────────────────────────────
+
+    #[test]
+    fn test_average_path_length_factor_n0() {
+        assert_abs_diff_eq!(average_path_length_factor(0), 0.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_average_path_length_factor_n1() {
+        assert_abs_diff_eq!(average_path_length_factor(1), 0.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_average_path_length_factor_n2() {
+        assert_abs_diff_eq!(average_path_length_factor(2), 1.0, epsilon = 1e-10);
+    }
+
+    /// n=3: harmonic branch (n<=50), H_2 = 1 + 0.5 = 1.5
+    /// result = 2*1.5 - 2*(3-1)/3 = 3.0 - 4/3 = 5/3 ≈ 1.666667
+    #[test]
+    fn test_average_path_length_factor_n3() {
+        // Independent derivation:
+        //   h_{n-1} = H_2 = 1/1 + 1/2 = 1.5
+        //   c(3) = 2*1.5 - 2*2/3 = 3.0 - 1.3333... = 1.6666...
+        let expected = 5.0_f64 / 3.0;
+        assert_abs_diff_eq!(average_path_length_factor(3), expected, epsilon = 1e-9);
+    }
+
+    /// Monotonically increasing: c(10) < c(100) < c(1000)
+    #[test]
+    fn test_average_path_length_factor_monotone() {
+        let f10 = average_path_length_factor(10);
+        let f100 = average_path_length_factor(100);
+        let f1000 = average_path_length_factor(1000);
+        assert!(
+            f10 < f100,
+            "expected factor(10) < factor(100), got {f10} vs {f100}"
+        );
+        assert!(
+            f100 < f1000,
+            "expected factor(100) < factor(1000), got {f100} vs {f1000}"
+        );
+    }
+
+    /// The factor is strictly increasing in `n`, INCLUDING across the n=50/51 switch
+    /// from the exact harmonic sum to the `ln(n-1)+γ` approximation.
+    ///
+    /// Ground truth: c(n) = 2·H_{n-1} − 2(n-1)/n is strictly increasing (H_{n-1} strictly
+    /// increases; 2(n-1)/n increases toward 2 but more slowly). The approximation preserves
+    /// this — the boundary values are c(49)≈6.958 < c(50)≈6.998 < c(51)≈7.018 < c(52)≈7.057.
+    #[test]
+    fn test_average_path_length_factor_monotone_across_branch_boundary() {
+        let f49 = average_path_length_factor(49); // exact-harmonic branch
+        let f50 = average_path_length_factor(50); // exact-harmonic branch (last)
+        let f51 = average_path_length_factor(51); // ln+γ branch (first)
+        let f52 = average_path_length_factor(52); // ln+γ branch
+        assert!(f49 < f50, "factor(49)={f49} should be < factor(50)={f50}");
+        assert!(f50 < f51, "factor(50)={f50} should be < factor(51)={f51}");
+        assert!(f51 < f52, "factor(51)={f51} should be < factor(52)={f52}");
+    }
+
+    /// For n>50 the implementation uses the standard `ln(n-1)+γ` approximation of the
+    /// harmonic number (the same form scikit-learn's isolation forest uses). It must stay
+    /// within the known approximation error of the exact theoretical value
+    /// c(n) = 2·H_{n-1} − 2(n-1)/n, computed here independently from the exact harmonic sum.
+    /// The error is ≈ 1/(n-1) ≤ ~0.02 for n≥51 and shrinks as n grows.
+    #[test]
+    fn test_average_path_length_factor_matches_exact_harmonic_within_tolerance() {
+        for &n in &[51usize, 100, 1000] {
+            // Independent reference: the exact (n-1)-th harmonic number.
+            let exact_h: f64 = (1..n).map(|i| 1.0 / i as f64).sum();
+            let theoretical = 2.0 * exact_h - 2.0 * (n - 1) as f64 / n as f64;
+            let got = average_path_length_factor(n);
+            assert!(
+                (got - theoretical).abs() < 0.025,
+                "n={n}: factor={got} deviates from theoretical {theoretical} by more than the documented approximation bound",
+            );
+        }
+    }
+
+    // ─── logistic_loss ────────────────────────────────────────────────────────
+
+    /// Single sample, logit=0.0, label=1.0
+    /// Formula (numerically stable): max(0,x) - x*y + ln(1+exp(-|x|))
+    ///   = 0 - 0 + ln(1+1) = ln(2) ≈ 0.693147
+    /// Matches cross-entropy: -ln(sigmoid(0)) = -ln(0.5) = ln(2)
+    #[test]
+    fn test_logistic_loss_single_logit_zero_label_one() {
+        let logits = array![0.0];
+        let labels = array![1.0];
+        let expected = 2.0_f64.ln(); // ln(2) ≈ 0.693147
+        assert_abs_diff_eq!(logistic_loss(&logits, &labels), expected, epsilon = 1e-6);
+    }
+
+    /// Docstring example: logits=[0.0,2.0,-1.0], labels=[0.0,1.0,0.0]
+    /// Per-sample (stable formula max(0,x) - x*y + ln(1+exp(-|x|))):
+    ///   x=0, y=0: 0 - 0 + ln(2) ≈ 0.693147
+    ///   x=2, y=1: 2 - 2 + ln(1+e^{-2}) = ln(1+0.135335) ≈ 0.126928
+    ///   x=-1,y=0: 0 - 0 + ln(1+e^{-1}) = ln(1+0.367879) ≈ 0.313261
+    ///   mean ≈ 1.133336/3 ≈ 0.377779
+    #[test]
+    fn test_logistic_loss_docstring_example() {
+        let logits = array![0.0, 2.0, -1.0];
+        let labels = array![0.0, 1.0, 0.0];
+        // Independent: 0.693147 + 0.126928 + 0.313261 = 1.133336; /3 = 0.377779
+        assert_abs_diff_eq!(logistic_loss(&logits, &labels), 0.377779, epsilon = 1e-5);
+    }
+
+    // ─── gini / entropy — float-key rounding behavior ─────────────────────────
+
+    // The code rounds (value * 1000.0) to an i64, so two values collapse to
+    // the same class iff |v1*1000 - v2*1000| < 0.5, i.e. |v1 - v2| < 0.0005.
+
+    /// Two values differing by 0.0003 → same rounded key → ONE class → gini=0.0
+    /// 1.0000 * 1000 = 1000.0 → key 1000
+    /// 1.0003 * 1000 = 1000.3 → round → key 1000  (same)
+    #[test]
+    fn test_gini_float_key_collapse_same_class() {
+        let labels = array![1.0000_f64, 1.0003_f64];
+        assert_abs_diff_eq!(gini(&labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Two values differing by 0.001 → different rounded keys → TWO classes → gini=0.5
+    /// 1.000 * 1000 = 1000.0 → key 1000
+    /// 1.001 * 1000 = 1001.0 → key 1001  (different)
+    /// p = 0.5 each; gini = 1 - (0.25 + 0.25) = 0.5
+    #[test]
+    fn test_gini_float_key_two_distinct_classes() {
+        let labels = array![1.000_f64, 1.001_f64];
+        assert_abs_diff_eq!(gini(&labels), 0.5, epsilon = 1e-10);
+    }
+
+    /// NaN labels are skipped. An array of only NaNs → 0.0.
+    /// (NaN values do not count toward total_samples denominator check either,
+    ///  but total_samples = y.len() = 1 and class_counts is empty → return 0.0)
+    #[test]
+    fn test_gini_all_nan() {
+        let labels = array![f64::NAN];
+        assert_abs_diff_eq!(gini(&labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Two values differing by 0.0003 → same key → ONE class → entropy=0.0
+    #[test]
+    fn test_entropy_float_key_collapse_same_class() {
+        let labels = array![1.0000_f64, 1.0003_f64];
+        assert_abs_diff_eq!(entropy(&labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Two equal-frequency distinct classes → entropy = 1.0 bit
+    /// 1.000 and 1.001 → keys 1000 and 1001, p=0.5 each
+    /// entropy = -0.5*log2(0.5) - 0.5*log2(0.5) = 1.0
+    #[test]
+    fn test_entropy_float_key_two_distinct_classes() {
+        let labels = array![1.000_f64, 1.001_f64];
+        assert_abs_diff_eq!(entropy(&labels), 1.0, epsilon = 1e-10);
+    }
+
+    /// NaN-only input → 0.0
+    #[test]
+    fn test_entropy_all_nan() {
+        let labels = array![f64::NAN];
+        assert_abs_diff_eq!(entropy(&labels), 0.0, epsilon = 1e-10);
+    }
+
+    /// Regression guard for the NaN-denominator fix: with a MIX of NaN and valid labels, NaN is
+    /// skipped from the class counts AND from the denominator. `[0.0, NaN, 1.0]` is two balanced
+    /// valid classes → entropy = 1.0 bit, gini = 0.5 — NOT the ~1.057 / ~0.556 produced if NaN is
+    /// wrongly kept in the denominator (`y.len()` = 3 instead of the 2 valid samples).
+    #[test]
+    fn test_entropy_nan_excluded_from_denominator() {
+        let labels = array![0.0_f64, f64::NAN, 1.0];
+        assert_abs_diff_eq!(entropy(&labels), 1.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_gini_nan_excluded_from_denominator() {
+        let labels = array![0.0_f64, f64::NAN, 1.0];
+        assert_abs_diff_eq!(gini(&labels), 0.5, epsilon = 1e-10);
+    }
 }

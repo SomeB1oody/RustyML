@@ -5,9 +5,7 @@ use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Data, Ix2};
-use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::rand::{Rng, SeedableRng};
-use ndarray_rand::rand::{RngCore, rng};
+use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
 
@@ -27,7 +25,7 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// - `n_clusters` - Number of clusters to form
 /// - `max_iter` - Maximum number of iterations for a single run
 /// - `tol` - Tolerance for declaring convergence
-/// - `random_seed` - Optional seed for random number generation
+/// - `random_state` - Optional seed for random number generation
 /// - `centroids` - Computed cluster centers after fitting
 /// - `labels` - Cluster labels for training data after fitting
 /// - `inertia` - Sum of squared distances to the closest centroid after fitting
@@ -110,7 +108,7 @@ pub struct KMeans {
     n_clusters: usize,
     max_iter: usize,
     tol: f64,
-    random_seed: Option<u64>,
+    random_state: Option<u64>,
     centroids: Option<Array2<f64>>,
     labels: Option<Array1<usize>>,
     inertia: Option<f64>,
@@ -125,7 +123,7 @@ impl Default for KMeans {
     /// - `n_clusters` - 8
     /// - `max_iter` - 300
     /// - `tolerance` - 1e-4
-    /// - `random_seed` - None
+    /// - `random_state` - None
     ///
     /// # Returns
     ///
@@ -144,7 +142,7 @@ impl KMeans {
     /// - `n_clusters` - Number of clusters to form (must be greater than 0)
     /// - `max_iterations` - Maximum number of iterations for the algorithm (must be greater than 0)
     /// - `tolerance` - Convergence tolerance; the algorithm stops when centroids move less than this value
-    /// - `random_seed` - Optional seed for random number generation to ensure reproducibility
+    /// - `random_state` - Optional seed for random number generation to ensure reproducibility
     ///
     /// # Returns
     ///
@@ -157,7 +155,7 @@ impl KMeans {
         n_clusters: usize,
         max_iterations: usize,
         tolerance: f64,
-        random_seed: Option<u64>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Input validation
         if n_clusters == 0 {
@@ -174,7 +172,7 @@ impl KMeans {
             n_clusters,
             max_iter: max_iterations,
             tol: tolerance,
-            random_seed,
+            random_state,
             centroids: None,
             labels: None,
             inertia: None,
@@ -186,7 +184,7 @@ impl KMeans {
     get_field!(get_n_clusters, n_clusters, usize);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
-    get_field!(get_random_seed, random_seed, Option<u64>);
+    get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field_as_ref!(get_labels, labels, Option<&Array1<usize>>);
     get_field!(get_inertia, inertia, Option<f64>);
@@ -236,10 +234,7 @@ impl KMeans {
         // Initialize cluster centers matrix
         let mut centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
 
-        let mut rng = match self.random_seed {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::seed_from_u64(rng().next_u64()),
-        };
+        let mut rng = crate::random::make_rng(self.random_state);
 
         // K-means++ initialization method
 
@@ -357,24 +352,23 @@ impl KMeans {
             counts.fill(0);
 
             // Find the closest cluster center and distance for each sample
-            let compute_assignments =
-                |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
-                    let mut min_dist = f64::MAX;
-                    let mut min_cluster = 0;
+            let compute_assignments = |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
+                let mut min_dist = f64::MAX;
+                let mut min_cluster = 0;
 
-                    // Find closest centroid for this sample
-                    for (cluster_idx, centroid) in
-                        self.centroids.as_ref().unwrap().outer_iter().enumerate()
-                    {
-                        let dist = squared_euclidean_distance_row(&sample, &centroid);
-                        if dist < min_dist {
-                            min_dist = dist;
-                            min_cluster = cluster_idx;
-                        }
+                // Find closest centroid for this sample
+                for (cluster_idx, centroid) in
+                    self.centroids.as_ref().unwrap().outer_iter().enumerate()
+                {
+                    let dist = squared_euclidean_distance_row(&sample, &centroid);
+                    if dist < min_dist {
+                        min_dist = dist;
+                        min_cluster = cluster_idx;
                     }
+                }
 
-                    Ok((min_cluster, min_dist))
-                };
+                Ok((min_cluster, min_dist))
+            };
 
             let results: Result<Vec<(usize, f64)>, Error> =
                 if n_samples >= KMEANS_PARALLEL_THRESHOLD {

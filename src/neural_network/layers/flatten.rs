@@ -1,4 +1,4 @@
-use crate::error::{Error, Context};
+use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
@@ -46,6 +46,7 @@ use ndarray::IxDyn;
 /// // Check output shape - should be [2, 48]
 /// assert_eq!(flattened.shape(), &[2, 48]);
 /// ```
+#[derive(Debug)]
 pub struct Flatten {
     flattened_features: usize,
     input_cache: Option<Tensor>,

@@ -480,10 +480,7 @@ impl PCA {
         if self.n_components > max_components {
             return Err(Error::invalid_parameter(
                 "n_components",
-                format!(
-                    "should be <= {}, got {}",
-                    max_components, self.n_components
-                ),
+                format!("should be <= {}, got {}", max_components, self.n_components),
             ));
         }
 

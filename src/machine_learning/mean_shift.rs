@@ -8,8 +8,7 @@ use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
-use ndarray_rand::rand::rngs::StdRng;
-use ndarray_rand::rand::{SeedableRng, rng, seq::SliceRandom};
+use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{
     IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
 };
@@ -32,6 +31,7 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// - `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
 /// - `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
 /// - `cluster_all` - Whether to assign all points to clusters, including potential noise.
+/// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled, enabling reproducible fitting.
 /// - `n_samples_per_center` - Number of samples assigned to each cluster center.
 /// - `cluster_centers` - The final cluster centers found by the algorithm.
 /// - `labels` - Cluster labels assigned to each input sample.
@@ -69,6 +69,7 @@ pub struct MeanShift {
     tol: f64,
     bin_seeding: bool,
     cluster_all: bool,
+    random_state: Option<u64>,
     n_samples_per_center: Option<Array1<usize>>,
     cluster_centers: Option<Array2<f64>>,
     labels: Option<Array1<usize>>,
@@ -85,12 +86,13 @@ impl Default for MeanShift {
     /// - `tol` - `1e-3`. Convergence tolerance threshold.
     /// - `bin_seeding` - `false`. Bin seeding is disabled by default.
     /// - `cluster_all` - `true`. All data points will be assigned to clusters by default.
+    /// - `random_state` - `None`. Non-deterministic seed-point selection.
     ///
     /// # Returns
     ///
     /// - `Self` - A new MeanShift instance with default parameters.
     fn default() -> Self {
-        Self::new(1.0, None, None, None, None).expect("Default parameters should be valid")
+        Self::new(1.0, None, None, None, None, None).expect("Default parameters should be valid")
     }
 }
 
@@ -104,6 +106,7 @@ impl MeanShift {
     /// - `tol` - The convergence threshold for the algorithm. Must be positive and finite.
     /// - `bin_seeding` - Whether to use bin seeding for initialization.
     /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
+    /// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled. Pass `Some(seed)` for reproducible fitting, or `None` for non-deterministic behavior.
     ///
     /// # Returns
     ///
@@ -117,6 +120,7 @@ impl MeanShift {
         tol: Option<f64>,
         bin_seeding: Option<bool>,
         cluster_all: Option<bool>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate bandwidth
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
@@ -141,6 +145,7 @@ impl MeanShift {
             tol: tol_val,
             bin_seeding: bin_seeding.unwrap_or(false),
             cluster_all: cluster_all.unwrap_or(true),
+            random_state,
             n_samples_per_center: None,
             cluster_centers: None,
             labels: None,
@@ -162,6 +167,7 @@ impl MeanShift {
     get_field!(get_tolerance, tol, f64);
     get_field!(get_bin_seeding, bin_seeding, bool);
     get_field!(get_cluster_all, cluster_all, bool);
+    get_field!(get_random_state, random_state, Option<u64>);
 
     /// Fits the MeanShift clustering model to the input data.
     ///
@@ -193,9 +199,10 @@ impl MeanShift {
         let seeds: Vec<usize> = if self.bin_seeding {
             self.get_bin_seeds(x)
         } else {
-            // Randomly select points as initial seeds
+            // Randomly select points as initial seeds. Seeding the RNG from `random_state`
+            // makes the seed-point selection reproducible.
             let mut indices: Vec<usize> = (0..n_samples).collect();
-            let mut rng = rng();
+            let mut rng = crate::random::make_rng(self.random_state);
             indices.shuffle(&mut rng);
             // Limit number of seeds to avoid excessive computation
             let max_seeds = n_samples.min(100);
@@ -511,13 +518,20 @@ impl MeanShift {
         // Get the final HashMap
         let bins = bins_mutex.into_inner().unwrap();
 
-        // Select one point from each grid cell as seed
+        // Select one representative point from each grid cell as a seed. Two sources of
+        // non-determinism have to be pinned down to make `bin_seeding` reproducible:
+        //   1. Within a cell the points are pushed in parallel, so their order is
+        //      non-deterministic — pick the smallest index as the representative.
+        //   2. `AHashMap` iteration order is non-deterministic (its hasher is randomly
+        //      seeded per run) and the downstream center-merging step is order-sensitive
+        //      — sort the resulting seeds so the merge always sees the same order.
         let mut seeds = Vec::new();
         for (_, indices) in bins {
-            if !indices.is_empty() {
-                seeds.push(indices[0]);
+            if let Some(&min_idx) = indices.iter().min() {
+                seeds.push(min_idx);
             }
         }
+        seeds.sort_unstable();
 
         seeds
     }
@@ -558,15 +572,12 @@ where
     }
 
     let (n_samples_total, _) = x.dim();
-    let n_samples = n_samples.unwrap_or(n_samples_total);
+    // Clamp the requested sample count to the dataset size. Requesting more samples than there are
+    // rows must fall back to using every row; without the clamp the pair indices below run up to
+    // `n_samples` while `x_samples` only has `n_samples_total` rows, causing an out-of-bounds panic.
+    let n_samples = n_samples.unwrap_or(n_samples_total).min(n_samples_total);
 
-    let mut rng = match random_state {
-        Some(seed) => StdRng::seed_from_u64(seed),
-        None => {
-            let mut thread_rng = rng();
-            StdRng::from_rng(&mut thread_rng)
-        }
-    };
+    let mut rng = crate::random::make_rng(random_state);
 
     // If we have fewer samples than requested, use all samples
     let x_samples = if n_samples >= n_samples_total {

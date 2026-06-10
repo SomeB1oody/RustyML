@@ -1,6 +1,6 @@
 use crate::error::Error;
 use ndarray::{Array1, Array2, Axis};
-use ndarray_rand::rand::{SeedableRng, rng, rngs::StdRng, seq::SliceRandom};
+use ndarray_rand::rand::seq::SliceRandom;
 
 /// The four arrays produced by [`train_test_split`], in order:
 /// `(x_train, x_test, y_train, y_test)`.
@@ -67,7 +67,10 @@ where
     if test_size <= 0.0 || test_size >= 1.0 {
         return Err(Error::invalid_parameter(
             "test_size",
-            format!("test_size must be between 0 and 1 (exclusive), got {}", test_size),
+            format!(
+                "test_size must be between 0 and 1 (exclusive), got {}",
+                test_size
+            ),
         ));
     }
 
@@ -89,16 +92,8 @@ where
     let mut indices: Vec<usize> = (0..n_samples).collect();
 
     // Shuffle indices based on random state
-    match random_state {
-        Some(seed) => {
-            let mut rng = StdRng::seed_from_u64(seed);
-            indices.shuffle(&mut rng);
-        }
-        None => {
-            let mut rng = rng();
-            indices.shuffle(&mut rng);
-        }
-    }
+    let mut rng = crate::random::make_rng(random_state);
+    indices.shuffle(&mut rng);
 
     // Split indices into train and test sets
     let (test_indices, train_indices) = indices.split_at(n_test);

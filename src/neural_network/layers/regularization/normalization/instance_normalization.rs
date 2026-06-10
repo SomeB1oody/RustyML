@@ -1,19 +1,19 @@
-use crate::neural_network::layers::regularization::normalization::compute_normalization_layer_parameter_gradients;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{InstanceNormalizationLayerWeight, LayerWeight};
-use crate::neural_network::layers::regularization::validation::{
-    validate_channel_axis, validate_epsilon, validate_input_shape,
-    validate_input_shape_not_empty, validate_min_input_ndim,
-};
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
+use crate::neural_network::layers::regularization::normalization::compute_normalization_layer_parameter_gradients;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::normalization::{
     from_channels_first, to_channels_first,
 };
+use crate::neural_network::layers::regularization::validation::{
+    validate_channel_axis, validate_epsilon, validate_input_shape, validate_input_shape_not_empty,
+    validate_min_input_ndim,
+};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -60,6 +60,7 @@ const INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 /// // During training, normalizes each channel of each sample independently
 /// let output = in_layer.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct InstanceNormalization {
     epsilon: f32,
     channel_axis: usize,
@@ -94,11 +95,7 @@ impl InstanceNormalization {
     /// - `Error::EmptyInput` - If `input_shape` is empty
     /// - `Error::InvalidParameter` - If `channel_axis` is out of bounds or is 0 (batch axis)
     /// - `Error::InvalidParameter` - If `epsilon` is not positive or not finite
-    pub fn new(
-        input_shape: Vec<usize>,
-        channel_axis: usize,
-        epsilon: f32,
-    ) -> Result<Self, Error> {
+    pub fn new(input_shape: Vec<usize>, channel_axis: usize, epsilon: f32) -> Result<Self, Error> {
         validate_input_shape_not_empty(&input_shape)?;
         validate_channel_axis(channel_axis, input_shape.len())?;
         validate_epsilon(epsilon)?;

@@ -1,20 +1,19 @@
-use crate::neural_network::layers::regularization::normalization::compute_normalization_layer_parameter_gradients;
-use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
-use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
-use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{GroupNormalizationLayerWeight, LayerWeight};
-use crate::neural_network::layers::regularization::validation::{
-    validate_channel_axis, validate_epsilon, validate_input_shape,
-    validate_input_shape_not_empty, validate_min_input_ndim, validate_num_groups,
-    validate_num_groups_positive,
-};
+use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
+use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
+use crate::neural_network::layers::regularization::normalization::compute_normalization_layer_parameter_gradients;
+use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::normalization::{
     from_channels_first, to_channels_first,
 };
+use crate::neural_network::layers::regularization::validation::{
+    validate_channel_axis, validate_epsilon, validate_input_shape, validate_input_shape_not_empty,
+    validate_min_input_ndim, validate_num_groups, validate_num_groups_positive,
+};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -72,6 +71,7 @@ macro_rules! channel_range {
 /// // During training, normalizes within each group independently
 /// let output = gn_layer.forward(&input).unwrap();
 /// ```
+#[derive(Debug)]
 pub struct GroupNormalization {
     num_groups: usize,
     epsilon: f32,

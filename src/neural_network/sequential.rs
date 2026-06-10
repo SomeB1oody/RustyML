@@ -1,5 +1,5 @@
 use super::traits::{Layer, Loss, Optimizer};
-use crate::error::{Error, IoError, NnError, Context};
+use crate::error::{Context, Error, IoError, NnError};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
@@ -8,7 +8,7 @@ use crate::neural_network::layers::serialize_weight::{
     apply_weights_to_layer,
 };
 use ndarray::{Array, Axis, IxDyn};
-use ndarray_rand::rand::{rng, seq::SliceRandom};
+use ndarray_rand::rand::seq::SliceRandom;
 use serde_json::{from_reader, to_writer_pretty};
 use std::collections::HashMap;
 use std::fs::File;
@@ -26,6 +26,7 @@ use std::io::{BufWriter, Write};
 /// - `layers` - A vector containing all layers in the model
 /// - `optimizer` - Optimizer used for updating parameters during training
 /// - `loss` - Loss function used to compute training loss
+/// - `seed` - Optional seed governing the fit-time batch shuffle; falls back to the global seed or entropy. See crate::random.
 ///
 /// # Examples
 /// ```rust
@@ -44,9 +45,9 @@ use std::io::{BufWriter, Write};
 /// // Build a neural network
 /// let mut model = Sequential::new();
 /// model
-///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax).unwrap())
+///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
 ///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Display model structure
@@ -61,9 +62,9 @@ use std::io::{BufWriter, Write};
 /// // Create a new model with the same architecture
 /// let mut new_model = Sequential::new();
 /// new_model
-///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
+///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap());
 ///
 /// // Load weights from file
 /// new_model.load_from_path("model.json").unwrap();
@@ -82,6 +83,7 @@ pub struct Sequential {
     layers: Vec<Box<dyn Layer>>,
     optimizer: Option<Box<dyn Optimizer>>,
     loss: Option<Box<dyn Loss>>,
+    seed: Option<u64>,
 }
 
 impl Default for Sequential {
@@ -101,7 +103,44 @@ impl Sequential {
             layers: Vec::new(),
             optimizer: None,
             loss: None,
+            seed: None,
         }
+    }
+
+    /// Sets the seed governing the fit-time batch shuffle.
+    ///
+    /// This is a pure setter that only controls the data shuffling order used by
+    /// `fit_with_batches`; it does not reinitialize or otherwise touch the model's layers.
+    /// Setting a fixed seed makes the per-epoch shuffle reproducible.
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random.
+    ///
+    /// # Returns
+    ///
+    /// - `&mut Self` - Mutable reference to self for method chaining
+    pub fn set_seed(&mut self, seed: u64) -> &mut Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    /// Creates a new empty Sequential model with the fit-time shuffle seed preset.
+    ///
+    /// Equivalent to `Sequential::new()` followed by `set_seed(seed)`. The seed only governs
+    /// the per-epoch batch shuffle used by `fit_with_batches`; see crate::random.
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random.
+    ///
+    /// # Returns
+    ///
+    /// - `Sequential` - An empty Sequential model with the shuffle seed set
+    pub fn new_with_seed(seed: u64) -> Self {
+        let mut model = Self::new();
+        model.seed = Some(seed);
+        model
     }
 
     /// Adds a layer to the model.
@@ -169,7 +208,9 @@ impl Sequential {
             return Err(Error::empty_input("input tensors"));
         }
 
-        // Verify batch size match
+        // Verify batch size match. `dimension_mismatch(expected, found)` takes the input batch
+        // as the reference (`expected`) and the target batch as `found` — the same `(x, y)`
+        // ordering used crate-wide (e.g. knn, lda, machine_learning::validation).
         if x.shape()[0] != y.shape()[0] {
             return Err(Error::dimension_mismatch(x.shape()[0], y.shape()[0]));
         }
@@ -324,7 +365,10 @@ impl Sequential {
         if batch_size > n_samples {
             return Err(Error::invalid_parameter(
                 "batch_size",
-                format!("({}) cannot be larger than dataset size ({})", batch_size, n_samples),
+                format!(
+                    "({}) cannot be larger than dataset size ({})",
+                    batch_size, n_samples
+                ),
             ));
         }
 
@@ -369,8 +413,11 @@ impl Sequential {
         // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
+        // Seed the per-epoch shuffle once; `None` consults the thread-local global seed.
+        let mut shuffle_rng = crate::random::make_rng(self.seed);
+
         #[cfg(feature = "show_progress")]
-        let total_batches = (n_samples + batch_size - 1) / batch_size;
+        let total_batches = n_samples.div_ceil(batch_size);
         #[cfg(feature = "show_progress")]
         let total_iterations = epochs as u64 * total_batches as u64;
 
@@ -385,7 +432,7 @@ impl Sequential {
         #[cfg(feature = "show_progress")]
         for epoch in 0..epochs {
             // Shuffle data at the beginning of each epoch
-            indices.shuffle(&mut rng());
+            indices.shuffle(&mut shuffle_rng);
 
             let mut epoch_loss = 0.0;
             let mut batch_count = 0;
@@ -416,7 +463,7 @@ impl Sequential {
         #[cfg(not(feature = "show_progress"))]
         for _ in 0..epochs {
             // Shuffle data at the beginning of each epoch
-            indices.shuffle(&mut rng());
+            indices.shuffle(&mut shuffle_rng);
 
             // Process data in batches
             for batch_indices in indices.chunks(batch_size) {
@@ -606,7 +653,10 @@ impl Sequential {
     ///
     /// - `Error::Io(IoError::Std)` - File creation or write operation failed
     /// - `Error::Io(IoError::Json)` - Serialization to JSON failed
-    pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> crate::error::RustymlResult<()> {
+    pub fn save_to_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> crate::error::RustymlResult<()> {
         // Convert layers to serializable format
         let serializable_layers = self
             .layers
@@ -666,7 +716,10 @@ impl Sequential {
     /// - `Error::Io(IoError::Json)` - Deserialization from JSON failed
     /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer count, a layer
     ///   type at some position, or a weight shape) does not match the saved model
-    pub fn load_from_path(&mut self, path: impl AsRef<std::path::Path>) -> crate::error::RustymlResult<()> {
+    pub fn load_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> crate::error::RustymlResult<()> {
         // Open and buffer the file for reading
         let reader = IoError::load_in_buf_reader(path)?;
 

@@ -341,6 +341,19 @@ where
 /// let auc = roc_auc(&labels, &scores);
 /// println!("ROC AUC: {}", auc);
 /// ```
+/// NaN-aware score equality used to group ties after a [`f64::total_cmp`] sort.
+///
+/// The ranking functions sort by `total_cmp` (a total order that places NaN deterministically),
+/// then walk the sorted pairs grouping equal scores. Plain `==` cannot be used for that grouping
+/// because `NaN == NaN` is `false`, which would leave the group-advancing loop stuck on a NaN
+/// element forever (an infinite loop / unbounded allocation). Treating two NaNs as equal here
+/// groups a NaN tie-run so the loop advances; finite values fall back to `==`, so ±0.0 still group
+/// together and all finite behavior is unchanged.
+#[inline]
+fn scores_tie(a: f64, b: f64) -> bool {
+    a == b || (a.is_nan() && b.is_nan())
+}
+
 pub fn roc_auc<S1, S2>(labels: &ArrayBase<S1, Ix1>, scores: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = bool>,
@@ -368,7 +381,7 @@ where
     while i < n {
         let current_score = pairs[i].0;
         let mut j = i;
-        while j < n && pairs[j].0 == current_score {
+        while j < n && scores_tie(pairs[j].0, current_score) {
             j += 1;
         }
         // Average rank of the tie group [i, j): (rank + ... + rank + count - 1) / count.
@@ -618,12 +631,20 @@ impl MulticlassConfusionMatrix {
         let mut out = String::from("Confusion Matrix (rows = true, columns = predicted):\n");
         out.push_str(&border);
         out.push('\n');
-        out.push_str(&make_row("", self.labels.iter().map(|l| l.to_string()).collect()));
+        out.push_str(&make_row(
+            "",
+            self.labels.iter().map(|l| l.to_string()).collect(),
+        ));
         out.push('\n');
         out.push_str(&border);
         out.push('\n');
         for (i, &label) in self.labels.iter().enumerate() {
-            let counts = self.matrix.row(i).iter().map(|count| count.to_string()).collect();
+            let counts = self
+                .matrix
+                .row(i)
+                .iter()
+                .map(|count| count.to_string())
+                .collect();
             out.push_str(&make_row(&label.to_string(), counts));
             out.push('\n');
         }
@@ -651,7 +672,11 @@ impl MulticlassConfusionMatrix {
         out.push('\n');
         out.push_str(&format!(
             "{:>12} {:>10} {:>10} {:>10.4} {:>10}\n",
-            "accuracy", "", "", self.accuracy(), total
+            "accuracy",
+            "",
+            "",
+            self.accuracy(),
+            total
         ));
         out.push_str(&format!(
             "{:>12} {:>10.4} {:>10.4} {:>10.4} {:>10}\n",
@@ -883,7 +908,7 @@ where
     let mut i = 0;
     while i < n {
         let score = pairs[i].0;
-        while i < n && pairs[i].0 == score {
+        while i < n && scores_tie(pairs[i].0, score) {
             if pairs[i].1 {
                 tp += 1;
             } else {
@@ -1081,4 +1106,44 @@ where
         Array1::from(recall),
         Array1::from(thresholds),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── MulticlassConfusionMatrix::aggregate empty-support guards ─────────────
+    //
+    // `new()` panics on empty input, so an empty matrix is unreachable through the public
+    // constructor. We build the private internal state directly (the fields `matrix` and
+    // `labels` are private-but-in-file, so reachable from this inline module via `use super::*`)
+    // to exercise the defensive branches in `aggregate`.
+
+    /// Helper: a confusion matrix with no classes and a 0x0 count matrix.
+    fn empty_cm() -> MulticlassConfusionMatrix {
+        MulticlassConfusionMatrix {
+            matrix: Array2::<usize>::zeros((0, 0)),
+            labels: Vec::new(),
+        }
+    }
+
+    /// Macro averaging over an empty per-class slice is defined as 0.0
+    /// (guards the 0/0 that `sum / len` would otherwise produce). The Macro branch reads only the
+    /// passed `per_class` slice, so passing `&[]` deterministically takes the `is_empty()` guard.
+    #[test]
+    fn test_aggregate_macro_empty_per_class_is_zero() {
+        let cm = empty_cm();
+        assert_eq!(cm.aggregate(&[], Average::Macro), 0.0);
+    }
+
+    /// Weighted averaging when the total support is 0 is defined as 0.0
+    /// (guards a division by the zero support total). `aggregate` derives the weights from
+    /// `self.support()`, which for the 0x0 matrix is empty (sum_axis over axis 1 of a (0,0)
+    /// array yields a length-0 vector), so `total == 0` and the guard fires regardless of the
+    /// per-class slice passed.
+    #[test]
+    fn test_aggregate_weighted_zero_support_is_zero() {
+        let cm = empty_cm();
+        assert_eq!(cm.aggregate(&[], Average::Weighted), 0.0);
+    }
 }

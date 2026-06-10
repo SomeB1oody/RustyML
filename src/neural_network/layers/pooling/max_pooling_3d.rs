@@ -1,15 +1,16 @@
-use crate::neural_network::layers::pooling::layer_functions_3d_pooling;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
-use crate::neural_network::layers::shape_helpers::calculate_output_shape_3d_pooling;
 use crate::neural_network::layers::layer_weight::LayerWeight;
-use crate::neural_network::layers::pooling::validation::{
-    validate_input_shape_dims, validate_pool_size_3d, validate_strides_3d,
-};
+use crate::neural_network::layers::pooling::layer_functions_3d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
     PoolKind, windowed_pool_backward, windowed_pool_forward,
 };
+use crate::neural_network::layers::pooling::validation::{
+    validate_all_dims_positive, validate_input_shape_dims, validate_pool_size_3d,
+    validate_strides_3d,
+};
+use crate::neural_network::layers::shape_helpers::calculate_output_shape_3d_pooling;
 use crate::neural_network::traits::Layer;
 
 /// 3D max pooling layer.
@@ -78,6 +79,7 @@ use crate::neural_network::traits::Layer;
 /// # Performance
 ///
 /// Parallel execution is used when `batch_size * channels >= 32`.
+#[derive(Debug)]
 pub struct MaxPooling3D {
     pool_size: (usize, usize, usize),
     strides: (usize, usize, usize),
@@ -114,6 +116,7 @@ impl MaxPooling3D {
 
         // input validation
         validate_input_shape_dims(&input_shape, 5, "MaxPooling3D")?;
+        validate_all_dims_positive(&input_shape)?;
         validate_pool_size_3d(pool_size, input_shape[2], input_shape[3], input_shape[4])?;
         validate_strides_3d(strides)?;
 

@@ -124,3 +124,111 @@ where
     }
     check_finite(x)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+    use ndarray::Array2;
+
+    // --- check_non_empty ---
+
+    /// An empty Array2 (0 rows, 0 cols) must produce EmptyInput.
+    /// Derivation: x.is_empty() is true when the total number of elements is 0;
+    /// the code returns Err(Error::empty_input(...)) in that case.
+    #[test]
+    fn check_non_empty_empty_array_gives_empty_input() {
+        let empty: Array2<f64> = Array2::zeros((0, 3));
+        let err = check_non_empty(&empty).unwrap_err();
+        match err {
+            Error::EmptyInput(_) => {}
+            other => panic!("expected EmptyInput, got {:?}", other),
+        }
+    }
+
+    /// A non-empty Array2 must return Ok(()).
+    /// Derivation: x.is_empty() is false for shape (2, 3); no error is raised.
+    #[test]
+    fn check_non_empty_non_empty_array_gives_ok() {
+        let a: Array2<f64> = Array2::zeros((2, 3));
+        assert!(check_non_empty(&a).is_ok());
+    }
+
+    // --- check_finite ---
+
+    /// An array containing NaN must produce NonFinite.
+    /// Derivation: f64::NAN.is_finite() is false; the iterator finds it and
+    /// returns Err(Error::non_finite(...)).
+    #[test]
+    fn check_finite_nan_gives_non_finite() {
+        let a = ndarray::array![[1.0, f64::NAN], [2.0, 3.0]];
+        let err = check_finite(&a).unwrap_err();
+        match err {
+            Error::NonFinite(_) => {}
+            other => panic!("expected NonFinite, got {:?}", other),
+        }
+    }
+
+    /// An array containing positive infinity must produce NonFinite.
+    /// Derivation: f64::INFINITY.is_finite() is false.
+    #[test]
+    fn check_finite_inf_gives_non_finite() {
+        let a = ndarray::array![[f64::INFINITY, 2.0]];
+        let err = check_finite(&a).unwrap_err();
+        match err {
+            Error::NonFinite(_) => {}
+            other => panic!("expected NonFinite, got {:?}", other),
+        }
+    }
+
+    /// An array containing negative infinity must also produce NonFinite.
+    /// Derivation: f64::NEG_INFINITY.is_finite() is false.
+    #[test]
+    fn check_finite_neg_inf_gives_non_finite() {
+        let a = ndarray::array![[1.0, f64::NEG_INFINITY]];
+        let err = check_finite(&a).unwrap_err();
+        match err {
+            Error::NonFinite(_) => {}
+            other => panic!("expected NonFinite, got {:?}", other),
+        }
+    }
+
+    /// An array of finite values must return Ok(()).
+    /// Derivation: every element passes is_finite(); no error is raised.
+    #[test]
+    fn check_finite_all_finite_gives_ok() {
+        let a = ndarray::array![[0.0, -1.5, 1e10], [f64::MIN, f64::MAX, 0.0]];
+        assert!(check_finite(&a).is_ok());
+    }
+
+    // --- check_min_samples ---
+
+    /// When nrows < min_samples the function must return an InvalidInput error.
+    /// Derivation: 1 < 2 triggers the error branch; the code calls
+    /// Error::invalid_input(...) which produces Error::InvalidInput.
+    #[test]
+    fn check_min_samples_too_few_gives_invalid_input() {
+        let a: Array2<f64> = Array2::zeros((1, 3));
+        let err = check_min_samples(&a, 2, "TestModel").unwrap_err();
+        match err {
+            Error::InvalidInput(_) => {}
+            other => panic!("expected InvalidInput, got {:?}", other),
+        }
+    }
+
+    /// When nrows == min_samples the function must return Ok(()).
+    /// Derivation: 2 < 2 is false; no error branch is taken.
+    #[test]
+    fn check_min_samples_exactly_min_gives_ok() {
+        let a: Array2<f64> = Array2::zeros((2, 3));
+        assert!(check_min_samples(&a, 2, "TestModel").is_ok());
+    }
+
+    /// When nrows > min_samples the function must also return Ok(()).
+    /// Derivation: 5 < 2 is false; the guard is not triggered.
+    #[test]
+    fn check_min_samples_more_than_min_gives_ok() {
+        let a: Array2<f64> = Array2::zeros((5, 3));
+        assert!(check_min_samples(&a, 2, "TestModel").is_ok());
+    }
+}

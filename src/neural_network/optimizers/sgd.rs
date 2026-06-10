@@ -1,7 +1,7 @@
 use crate::error::Error;
-use crate::neural_network::traits::{Layer, Optimizer};
-use crate::neural_network::optimizers::validation::validate_learning_rate;
 use crate::neural_network::optimizers::kernels;
+use crate::neural_network::optimizers::validation::validate_learning_rate;
+use crate::neural_network::traits::{Layer, Optimizer};
 
 /// SGD (Stochastic Gradient Descent) optimizer.
 ///
@@ -10,6 +10,7 @@ use crate::neural_network::optimizers::kernels;
 /// # Fields
 ///
 /// - `learning_rate` - Learning rate controlling the size of parameter updates
+#[derive(Debug)]
 pub struct SGD {
     learning_rate: f32,
 }

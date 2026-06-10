@@ -103,10 +103,7 @@ pub(super) fn validate_momentum(momentum: f32) -> Result<(), Error> {
 }
 
 /// Validates that channel axis is valid (not 0, within bounds)
-pub(super) fn validate_channel_axis(
-    channel_axis: usize,
-    input_ndim: usize,
-) -> Result<(), Error> {
+pub(super) fn validate_channel_axis(channel_axis: usize, input_ndim: usize) -> Result<(), Error> {
     if channel_axis == 0 {
         return Err(Error::invalid_parameter(
             "channel_axis",
@@ -157,4 +154,3 @@ pub(super) fn validate_num_groups_positive(num_groups: usize) -> Result<(), Erro
     }
     Ok(())
 }
-

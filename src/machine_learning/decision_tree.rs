@@ -4,6 +4,7 @@ use crate::math::{entropy, gini, variance};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
+use ndarray_rand::rand::{Rng, rngs::StdRng};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 #[cfg(feature = "show_progress")]
@@ -122,7 +123,7 @@ impl Algorithm {
 /// - `min_samples_split` - Minimum number of samples required to split an internal node. Must be at least 2.
 /// - `min_samples_leaf` - Minimum number of samples required to be at a leaf node. Splits that result in leaves with fewer samples are rejected.
 /// - `min_impurity_decrease` - Minimum impurity decrease required for a split. A node will be split if the decrease in impurity is greater than or equal to this value.
-/// - `random_state` - Seed for random number generation. Currently not used but reserved for future stochastic features.
+/// - `random_state` - Seed for breaking ties between equally-scoring splits. With `Some(seed)` — or when a crate-global seed is set (see [`crate::random`]) — tied splits are chosen randomly but reproducibly; with `None` and no global seed the tree is deterministic. Only affects results on data where two or more splits achieve the same score.
 #[derive(Debug, Copy, Clone, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
     pub max_depth: Option<usize>,
@@ -553,13 +554,16 @@ impl DecisionTree {
             pb
         };
 
-        // Build the tree
+        // Build the tree. The RNG is `Some` only when a local `random_state` or the global seed is
+        // set; otherwise split-tie-breaking stays deterministic.
+        let mut rng = crate::random::make_rng_opt(self.params.random_state);
         let indices: Vec<usize> = (0..x.nrows()).collect();
         self.root = Some(Box::new(self.build_tree(
             x,
             y,
             &indices,
             0,
+            &mut rng,
             #[cfg(feature = "show_progress")]
             &progress_bar,
         )?));
@@ -579,6 +583,7 @@ impl DecisionTree {
         y: &ArrayBase<S, Ix1>,
         indices: &[usize],
         depth: usize,
+        rng: &mut Option<StdRng>,
         #[cfg(feature = "show_progress")] progress_bar: &ProgressBar,
     ) -> Result<Node, Error>
     where
@@ -600,7 +605,7 @@ impl DecisionTree {
         }
 
         // Find the best split
-        let split_result = self.find_best_split(x, y, indices)?;
+        let split_result = self.find_best_split(x, y, indices, rng)?;
 
         let Some((split, impurity_decrease)) = split_result else {
             // No valid split found
@@ -633,6 +638,7 @@ impl DecisionTree {
                     y,
                     &left,
                     depth + 1,
+                    rng,
                     #[cfg(feature = "show_progress")]
                     progress_bar,
                 )?));
@@ -641,6 +647,7 @@ impl DecisionTree {
                     y,
                     &right,
                     depth + 1,
+                    rng,
                     #[cfg(feature = "show_progress")]
                     progress_bar,
                 )?));
@@ -672,6 +679,7 @@ impl DecisionTree {
                         y,
                         &idx,
                         depth + 1,
+                        rng,
                         #[cfg(feature = "show_progress")]
                         progress_bar,
                     )?;
@@ -695,6 +703,7 @@ impl DecisionTree {
         x: &ArrayBase<S, Ix2>,
         y: &ArrayBase<S, Ix1>,
         indices: &[usize],
+        rng: &mut Option<StdRng>,
     ) -> Result<Option<(Split, f64)>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -714,19 +723,56 @@ impl DecisionTree {
             }
         };
 
-        // Use parallel evaluation only when sample size exceeds threshold
-        let best = if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
-            (0..self.n_features)
-                .into_par_iter()
-                .filter_map(process_feature)
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-        } else {
-            (0..self.n_features)
-                .filter_map(process_feature)
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
-        };
+        // Collect every feature's best candidate, then pick the winner. Collecting (rather than a
+        // streaming `max_by`) lets `select_best_split` resolve score ties explicitly — randomly when
+        // seeded, otherwise deterministically (which also makes the parallel path order-independent).
+        let candidates: Vec<(f64, Split, f64)> =
+            if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
+                (0..self.n_features)
+                    .into_par_iter()
+                    .filter_map(process_feature)
+                    .collect()
+            } else {
+                (0..self.n_features).filter_map(process_feature).collect()
+            };
 
+        let best = Self::select_best_split(candidates, rng);
         Ok(best.map(|(_score, split, impurity_decrease)| (split, impurity_decrease)))
+    }
+
+    /// Picks the highest-scoring split candidate, resolving exact-score ties.
+    ///
+    /// With `rng == None` the last tied candidate wins, which preserves the previous `max_by`
+    /// tie-breaking and makes the parallel path deterministic. With `rng == Some`, a uniformly
+    /// random tied candidate is chosen — seeded, sklearn-style tie-breaking that is active only
+    /// when a local `random_state` or the global seed is set.
+    fn select_best_split(
+        mut candidates: Vec<(f64, Split, f64)>,
+        rng: &mut Option<StdRng>,
+    ) -> Option<(f64, Split, f64)> {
+        // Ignore non-finite (NaN) scores: a NaN-scoring split is degenerate and must never be
+        // selected. Filtering NaN out also keeps `partial_cmp().unwrap()` infallible. If every
+        // score is NaN (or there are no candidates) there is no usable split, so return `None`.
+        let max_score = candidates
+            .iter()
+            .map(|(score, _, _)| *score)
+            .filter(|score| !score.is_nan())
+            .max_by(|a, b| a.partial_cmp(b).unwrap())?;
+        // Indices of all candidates tied at the maximum score (a NaN score never equals `max_score`,
+        // so NaN candidates are excluded here too).
+        let tied: Vec<usize> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, (score, _, _))| *score == max_score)
+            .map(|(i, _)| i)
+            .collect();
+        let chosen = match rng {
+            // Seeded: pick a uniformly random tied candidate.
+            Some(r) => tied[r.random_range(0..tied.len())],
+            // Unseeded: last tied candidate (matches the previous `max_by`; deterministic in parallel too).
+            None => *tied.last().unwrap(),
+        };
+        Some(candidates.swap_remove(chosen))
     }
 
     /// Evaluates the best binary numeric split for a single feature.
@@ -992,7 +1038,9 @@ impl DecisionTree {
                     if let Some(ref left) = node.left {
                         self.traverse_tree(left, x)
                     } else {
-                        Err(Error::Tree(TreeError::CorruptStructure("Missing left child")))
+                        Err(Error::Tree(TreeError::CorruptStructure(
+                            "Missing left child",
+                        )))
                     }
                 } else {
                     if let Some(ref right) = node.right {
@@ -1034,23 +1082,23 @@ impl DecisionTree {
         validate_predict_input(x, self.n_features)?;
 
         // Use parallel processing only when sample size exceeds threshold
-        let predictions: Result<Vec<f64>, Error> =
-            if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
-                x.axis_iter(Axis(0))
-                    .into_par_iter()
-                    .map(|row| {
-                        let row_slice = row.to_vec();
-                        self.predict_one(&row_slice)
-                    })
-                    .collect()
-            } else {
-                x.axis_iter(Axis(0))
-                    .map(|row| {
-                        let row_slice = row.to_vec();
-                        self.predict_one(&row_slice)
-                    })
-                    .collect()
-            };
+        let predictions: Result<Vec<f64>, Error> = if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD
+        {
+            x.axis_iter(Axis(0))
+                .into_par_iter()
+                .map(|row| {
+                    let row_slice = row.to_vec();
+                    self.predict_one(&row_slice)
+                })
+                .collect()
+        } else {
+            x.axis_iter(Axis(0))
+                .map(|row| {
+                    let row_slice = row.to_vec();
+                    self.predict_one(&row_slice)
+                })
+                .collect()
+        };
 
         Ok(Array1::from_vec(predictions?))
     }
@@ -1178,9 +1226,11 @@ impl DecisionTree {
     /// Traverses the tree to retrieve class probabilities from the appropriate leaf node.
     fn get_probabilities(&self, node: &Node, x: &[f64]) -> Result<Vec<f64>, Error> {
         match &node.node_type {
-            NodeType::Leaf { probabilities, .. } => probabilities.as_ref().cloned().ok_or_else(
-                || Error::Tree(TreeError::CorruptStructure("No probabilities in leaf node")),
-            ),
+            NodeType::Leaf { probabilities, .. } => {
+                probabilities.as_ref().cloned().ok_or_else(|| {
+                    Error::Tree(TreeError::CorruptStructure("No probabilities in leaf node"))
+                })
+            }
             NodeType::Internal {
                 feature_index,
                 threshold,
@@ -1205,7 +1255,9 @@ impl DecisionTree {
                     if let Some(ref left) = node.left {
                         self.get_probabilities(left, x)
                     } else {
-                        Err(Error::Tree(TreeError::CorruptStructure("Missing left child")))
+                        Err(Error::Tree(TreeError::CorruptStructure(
+                            "Missing left child",
+                        )))
                     }
                 } else {
                     if let Some(ref right) = node.right {
@@ -1340,4 +1392,188 @@ impl DecisionTree {
     }
 
     model_save_and_load_methods!(DecisionTree);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A numeric-split candidate with the given selection score and feature index.
+    /// `select_best_split` only inspects the score, so the threshold/child indices are dummies.
+    fn numeric_candidate(score: f64, feature: usize) -> (f64, Split, f64) {
+        (
+            score,
+            Split::Numeric {
+                feature,
+                threshold: 0.0,
+                left: Vec::new(),
+                right: Vec::new(),
+            },
+            score,
+        )
+    }
+
+    /// A NaN selection score is degenerate and must never be chosen: the finite best-scoring
+    /// candidate wins, with no panic. Without the NaN filter in `select_best_split`, the
+    /// `partial_cmp(..).unwrap()` over a NaN score would panic — so this test guards the filter.
+    #[test]
+    fn select_best_split_ignores_nan_and_picks_finite_best() {
+        let candidates = vec![
+            numeric_candidate(f64::NAN, 0),
+            numeric_candidate(0.25, 1),
+            numeric_candidate(0.75, 2), // the finite best
+            numeric_candidate(f64::NAN, 3),
+        ];
+        let mut rng: Option<StdRng> = None;
+        let (score, split, _) = DecisionTree::select_best_split(candidates, &mut rng)
+            .expect("a finite-scoring split exists");
+        assert_eq!(score, 0.75);
+        match split {
+            Split::Numeric { feature, .. } => assert_eq!(feature, 2),
+            _ => panic!("expected the finite best numeric split"),
+        }
+    }
+
+    /// If every candidate scores NaN there is no usable split, so `select_best_split` returns
+    /// `None` rather than panicking or selecting a NaN-scoring split.
+    #[test]
+    fn select_best_split_all_nan_scores_is_none() {
+        let candidates = vec![
+            numeric_candidate(f64::NAN, 0),
+            numeric_candidate(f64::NAN, 1),
+        ];
+        let mut rng: Option<StdRng> = None;
+        assert!(DecisionTree::select_best_split(candidates, &mut rng).is_none());
+    }
+    /// `category_key` rounds `value * 1e6` to the nearest integer before dividing back, so two
+    /// values that differ only in the 7th decimal place collapse to the SAME key (this is what
+    /// makes categorical routing robust to floating-point noise), while genuinely distinct integer
+    /// categories keep distinct keys.
+    ///
+    /// Hand derivation: 1.0000001 * 1e6 = 1000000.1 -> round -> 1000000 -> /1e6 = 1 -> "1";
+    /// 1.0000002 * 1e6 = 1000000.2 -> round -> 1000000 -> /1e6 = 1 -> "1"  (equal).
+    /// 1.0 -> "1";  2.0 -> "2"  (distinct). (Rust's `Display` for f64 prints integer-valued
+    /// floats without a trailing `.0`, so 1.0 formats as "1".)
+    #[test]
+    fn category_key_collapses_subkey_noise_but_separates_distinct_values() {
+        // Sub-1e-6 noise rounds to the same canonical key.
+        assert_eq!(category_key(1.0000001), category_key(1.0000002));
+        // ... and that shared key is exactly "1".
+        assert_eq!(category_key(1.0000001), "1");
+        // Distinct integer categories stay distinct.
+        assert_ne!(category_key(1.0), category_key(2.0));
+        assert_eq!(category_key(1.0), "1");
+        assert_eq!(category_key(2.0), "2");
+    }
+
+    /// `split_information` is the C4.5 intrinsic value -Σ (cᵢ/total)·log2(cᵢ/total).
+    /// For an even 2/2 partition of 4 samples each branch has p = 0.5, so the value is
+    /// -(0.5·log2 0.5)·2 = -(0.5·(-1))·2 = 1.0 bit (a fair binary split carries exactly one bit).
+    /// A single all-in-one-branch partition (counts = [4], total = 4) has p = 1, log2 1 = 0, so the
+    /// intrinsic value is 0 — the degenerate case the gain-ratio guard must reject.
+    #[test]
+    fn split_information_even_two_way_is_one_bit_and_single_branch_is_zero() {
+        assert!((split_information(&[2.0, 2.0], 4.0) - 1.0).abs() < 1e-12);
+        assert!(split_information(&[4.0], 4.0).abs() < 1e-12);
+    }
+
+    /// C4.5 normalizes gain by split information (gain ratio). When the split is degenerate — a
+    /// single branch holding every sample — the split information is 0, which is not > f64::EPSILON,
+    /// so `selection_score` returns `None` (the caller then skips this split). ID3 and CART ignore
+    /// split information and always return the raw impurity decrease.
+    #[test]
+    fn selection_score_c45_none_on_degenerate_split_info() {
+        // Degenerate single-branch partition => split_info ≈ 0 => None for C4.5.
+        assert!(
+            Algorithm::C45.selection_score(0.5, &[4.0], 4.0).is_none(),
+            "C4.5 must reject a split whose intrinsic value is ~0"
+        );
+        // A well-formed 2/2 split has split_info = 1.0, so the gain ratio is decrease / 1.0.
+        let ratio = Algorithm::C45
+            .selection_score(0.4, &[2.0, 2.0], 4.0)
+            .expect("non-degenerate split has a gain ratio");
+        assert!((ratio - 0.4).abs() < 1e-12);
+        // ID3 and CART return the raw decrease unconditionally (no split-info guard).
+        assert_eq!(Algorithm::ID3.selection_score(0.4, &[4.0], 4.0), Some(0.4));
+        assert_eq!(Algorithm::CART.selection_score(0.4, &[4.0], 4.0), Some(0.4));
+    }
+
+    /// A binary internal node whose `left` child is missing is a corrupt structure. Routing a
+    /// sample that should go left (feature value ≤ threshold) hits the `None` arm of
+    /// `traverse_tree` and must surface `Error::Tree(TreeError::CorruptStructure(_))` rather than
+    /// panic. Built by hand here because the grower never produces such a node.
+    #[test]
+    fn traverse_tree_missing_left_child_is_corrupt_structure() {
+        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        // Internal binary node, threshold 0.5, with NO left child.
+        let mut node = Node::new_internal(0, 0.5);
+        node.right = Some(Box::new(Node::new_leaf(1.0, Some(1), Some(vec![0.0, 1.0]))));
+        // 0.0 <= 0.5 routes left, where there is no child.
+        let err = tree.traverse_tree(&node, &[0.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
+            "expected CorruptStructure for missing left child, got {err:?}"
+        );
+    }
+
+    /// Symmetric to the above: a binary node missing its `right` child is corrupt. A sample that
+    /// routes right (feature value > threshold) hits the `None` arm and yields CorruptStructure.
+    #[test]
+    fn traverse_tree_missing_right_child_is_corrupt_structure() {
+        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let mut node = Node::new_internal(0, 0.5);
+        node.left = Some(Box::new(Node::new_leaf(0.0, Some(0), Some(vec![1.0, 0.0]))));
+        // 1.0 > 0.5 routes right, where there is no child.
+        let err = tree.traverse_tree(&node, &[1.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
+            "expected CorruptStructure for missing right child, got {err:?}"
+        );
+    }
+
+    /// A categorical node with an EMPTY children map and no fallback (`left == None`) cannot route
+    /// any sample: no key matches and there is no default branch. `traverse_tree` must return
+    /// CorruptStructure. `new_categorical` gives an empty `children` map and `left == None`, so the
+    /// node is malformed exactly as the defensive arm expects.
+    #[test]
+    fn traverse_tree_categorical_no_match_no_fallback_is_corrupt_structure() {
+        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        // Categorical internal node: children map present but empty, and left (fallback) is None.
+        let node = Node::new_categorical(0, vec!["0".to_string()]);
+        // No category key can match an empty map; with no fallback this is corrupt.
+        let err = tree.traverse_tree(&node, &[0.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
+            "expected CorruptStructure for categorical node with no child and no fallback, got {err:?}"
+        );
+    }
+
+    /// A leaf that stores no probability vector is corrupt for the probability path: `get_probabilities`
+    /// must return `Error::Tree(TreeError::CorruptStructure(_))` instead of unwrapping a `None`.
+    /// A real classification leaf always carries `Some(probabilities)`; we build a `probabilities: None`
+    /// leaf by hand to drive the defensive arm.
+    #[test]
+    fn get_probabilities_leaf_without_probabilities_is_corrupt_structure() {
+        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        // Leaf with class set but no stored probability distribution.
+        let leaf = Node::new_leaf(0.0, Some(0), None);
+        let err = tree.get_probabilities(&leaf, &[0.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
+            "expected CorruptStructure for a leaf missing probabilities, got {err:?}"
+        );
+    }
+
+    /// The categorical defensive arm of `get_probabilities` mirrors `traverse_tree`: an empty
+    /// children map with no fallback leaf must return CorruptStructure rather than panic.
+    #[test]
+    fn get_probabilities_categorical_no_match_no_fallback_is_corrupt_structure() {
+        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let node = Node::new_categorical(0, vec!["0".to_string()]);
+        let err = tree.get_probabilities(&node, &[0.0]).unwrap_err();
+        assert!(
+            matches!(err, Error::Tree(TreeError::CorruptStructure(_))),
+            "expected CorruptStructure for categorical get_probabilities with no child and no fallback, got {err:?}"
+        );
+    }
 }

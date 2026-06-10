@@ -175,10 +175,15 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     {
         preliminary_check(x, None)?;
 
+        // KNN labels are a generic type `T` (not `f64`), so `preliminary_check` cannot validate
+        // them; check the row counts here. Without this, a mismatched `y` is silently stored and
+        // later panics with an out-of-bounds index at predict time instead of failing cleanly.
+        if y.len() != x.nrows() {
+            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
+        }
+
         if x.nrows() < self.k {
-            return Err(Error::invalid_input(
-                "The number of samples is less than k",
-            ));
+            return Err(Error::invalid_input("The number of samples is less than k"));
         }
 
         // Build label encoding map: label -> index and index -> label

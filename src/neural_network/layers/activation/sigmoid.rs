@@ -1,9 +1,9 @@
-use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::{Activation, format_output_shape};
 use crate::neural_network::layers::layer_weight::LayerWeight;
+use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
 /// Sigmoid activation layer.
@@ -43,6 +43,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Output will be approximately: [[0.27, 0.88, 0.05], [0.98, 0.007, 0.998]]
 /// ```
+#[derive(Debug)]
 pub struct Sigmoid {
     output_cache: Option<Tensor>,
 }

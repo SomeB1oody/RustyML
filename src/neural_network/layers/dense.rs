@@ -2,8 +2,8 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -44,8 +44,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, Activation::ReLU).unwrap())
-///     .add(Dense::new(3, 1, Activation::ReLU).unwrap());
+/// model.add(Dense::new(4, 3, Activation::ReLU, None).unwrap())
+///     .add(Dense::new(3, 1, Activation::ReLU, None).unwrap());
 /// model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
@@ -58,6 +58,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let prediction = model.predict(&x);
 /// println!("Prediction results: {:?}", prediction);
 /// ```
+#[derive(Debug)]
 pub struct Dense {
     input_dim: usize,
     output_dim: usize,
@@ -79,6 +80,8 @@ impl Dense {
     /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation applied to the linear output (any value convertible into
     ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global
+    ///   seed or entropy. See [`crate::random`].
     ///
     /// # Returns
     ///
@@ -91,6 +94,7 @@ impl Dense {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate that dimensions are greater than zero
         if input_dim == 0 {
@@ -104,7 +108,12 @@ impl Dense {
         }
 
         let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let weights = Array::random((input_dim, units), Uniform::new(-limit, limit).unwrap());
+        let mut rng = crate::random::make_rng(random_state);
+        let weights = Array::random_using(
+            (input_dim, units),
+            Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
+        );
         let bias = Array::zeros((1, units));
         Ok(Self {
             input_dim,
@@ -130,11 +139,7 @@ impl Dense {
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` do not match the
     ///   layer's configured shape
-    pub fn set_weights(
-        &mut self,
-        weights: Array2<f32>,
-        bias: Array2<f32>,
-    ) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         // Force a contiguous standard layout: `parameters()` exposes the weights as a flat

@@ -82,7 +82,9 @@ fn conv_geometry(
     let r = sp.len();
     match padding {
         PaddingType::Valid => {
-            let out_sp: Vec<usize> = (0..r).map(|d| (sp[d] - k_dims[d]) / strides[d] + 1).collect();
+            let out_sp: Vec<usize> = (0..r)
+                .map(|d| (sp[d] - k_dims[d]) / strides[d] + 1)
+                .collect();
             (out_sp, vec![0; r], sp.to_vec())
         }
         PaddingType::Same => {
@@ -159,7 +161,13 @@ pub(super) fn conv_forward(
         .as_slice()
         .expect("standard-layout array is contiguous");
     let padded_storage = if padded_sp.as_slice() != sp {
-        Some(build_padded(in_flat, batch * cin, sp, &padded_sp, &pad_before))
+        Some(build_padded(
+            in_flat,
+            batch * cin,
+            sp,
+            &padded_sp,
+            &pad_before,
+        ))
     } else {
         None
     };
@@ -245,7 +253,13 @@ pub(super) fn conv_backward(
         .as_slice()
         .expect("standard-layout array is contiguous");
     let padded_storage = if padded_sp.as_slice() != sp {
-        Some(build_padded(in_flat, batch * cin, sp, &padded_sp, &pad_before))
+        Some(build_padded(
+            in_flat,
+            batch * cin,
+            sp,
+            &padded_sp,
+            &pad_before,
+        ))
     } else {
         None
     };
@@ -376,5 +390,230 @@ pub(super) fn conv_backward(
         weight_grad,
         bias_grad,
         input_grad,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // row_major_strides
+    // -----------------------------------------------------------------------
+
+    /// 3-D shape [2, 3, 4]:
+    ///   strides[2] = 1
+    ///   strides[1] = 1 * 4 = 4
+    ///   strides[0] = 4 * 3 = 12
+    /// Expected: [12, 4, 1]
+    #[test]
+    fn test_row_major_strides_3d() {
+        let got = row_major_strides(&[2, 3, 4]);
+        assert_eq!(got, vec![12, 4, 1]);
+    }
+
+    /// 1-D shape [5]: only one element so strides[0] = 1. Expected: [1]
+    #[test]
+    fn test_row_major_strides_1d() {
+        let got = row_major_strides(&[5]);
+        assert_eq!(got, vec![1]);
+    }
+
+    /// Empty shape: no dimensions, no strides. Expected: []
+    #[test]
+    fn test_row_major_strides_empty() {
+        let got = row_major_strides(&[]);
+        assert_eq!(got, Vec::<usize>::new());
+    }
+
+    // -----------------------------------------------------------------------
+    // increment_index
+    // -----------------------------------------------------------------------
+
+    /// dims = [2, 3] (last axis fastest).
+    /// Walk: [0,0] -> [0,1] -> [0,2] -> [1,0] -> [1,1] -> [1,2] -> false (wraps to [0,0]).
+    #[test]
+    fn test_increment_index_2d() {
+        let dims = [2usize, 3];
+        let mut idx = vec![0usize, 0];
+
+        // Step 1: [0,0] -> [0,1], returns true
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![0, 1]);
+
+        // Step 2: [0,1] -> [0,2], returns true
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![0, 2]);
+
+        // Step 3: [0,2] -> [1,0] (last-axis overflow carries), returns true
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![1, 0]);
+
+        // Step 4: [1,0] -> [1,1], returns true
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![1, 1]);
+
+        // Step 5: [1,1] -> [1,2], returns true
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![1, 2]);
+
+        // Step 6: [1,2] -> overflow on both axes, returns false; index wraps to [0,0]
+        assert!(!increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![0, 0]);
+    }
+
+    /// dims = [3] (single axis).
+    /// Walk: 0 -> 1 -> 2 -> false.
+    #[test]
+    fn test_increment_index_1d() {
+        let dims = [3usize];
+        let mut idx = vec![0usize];
+
+        // 0 -> 1
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![1]);
+
+        // 1 -> 2
+        assert!(increment_index(&mut idx, &dims));
+        assert_eq!(idx, vec![2]);
+
+        // 2 -> overflow, returns false
+        assert!(!increment_index(&mut idx, &dims));
+    }
+
+    // -----------------------------------------------------------------------
+    // conv_geometry – Valid padding
+    // -----------------------------------------------------------------------
+
+    /// sp=[5], k=[3], stride=[1], Valid:
+    ///   out = (5 - 3) / 1 + 1 = 3
+    ///   pad_before = [0]
+    ///   padded_sp = [5]  (same as input, no padding needed)
+    #[test]
+    fn test_conv_geometry_valid_1d() {
+        let (out_sp, pad_before, padded_sp) = conv_geometry(&[5], &[3], &[1], PaddingType::Valid);
+        assert_eq!(out_sp, vec![3]);
+        assert_eq!(pad_before, vec![0]);
+        assert_eq!(padded_sp, vec![5]);
+    }
+
+    // -----------------------------------------------------------------------
+    // conv_geometry – Same padding, 1-D
+    // -----------------------------------------------------------------------
+
+    /// sp=[7], k=[3], stride=[2], Same:
+    ///   out = ceil(7 / 2) = 4
+    ///   total_pad = (out-1)*stride + k - sp = (4-1)*2 + 3 - 7 = 6 + 3 - 7 = 2
+    ///   pad_before = 2 / 2 = 1
+    ///   padded_sp = max((4-1)*2 + 3, 7) = max(9, 7) = 9
+    #[test]
+    fn test_conv_geometry_same_1d() {
+        let (out_sp, pad_before, padded_sp) = conv_geometry(&[7], &[3], &[2], PaddingType::Same);
+        assert_eq!(out_sp, vec![4]);
+        assert_eq!(pad_before, vec![1]);
+        assert_eq!(padded_sp, vec![9]);
+    }
+
+    // -----------------------------------------------------------------------
+    // conv_geometry – Same padding, 2-D
+    // -----------------------------------------------------------------------
+
+    /// sp=[4,4], k=[3,3], stride=[1,1], Same:
+    ///   Per axis (identical for both):
+    ///     out_d = ceil(4 / 1) = 4
+    ///     total_pad = (4-1)*1 + 3 - 4 = 3 + 3 - 4 = 2
+    ///     pad_before_d = 2 / 2 = 1
+    ///     padded_d = max((4-1)*1 + 3, 4) = max(6, 4) = 6
+    #[test]
+    fn test_conv_geometry_same_2d() {
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[4, 4], &[3, 3], &[1, 1], PaddingType::Same);
+        assert_eq!(out_sp, vec![4, 4]);
+        assert_eq!(pad_before, vec![1, 1]);
+        assert_eq!(padded_sp, vec![6, 6]);
+    }
+
+    // -----------------------------------------------------------------------
+    // build_padded
+    // -----------------------------------------------------------------------
+
+    /// bc=1, sp=[2,2], in_flat=[1,2,3,4] (row-major), padded_sp=[4,4], pad_before=[1,1].
+    ///
+    /// padded_strides for [4,4] = [4, 1].
+    /// The 2×2 block is placed at (row+1, col+1) in the 4×4 padded grid:
+    ///   in[0,0]=1 -> padded[1*4 + 1] = padded[5]  = 1.0
+    ///   in[0,1]=2 -> padded[1*4 + 2] = padded[6]  = 2.0
+    ///   in[1,0]=3 -> padded[2*4 + 1] = padded[9]  = 3.0
+    ///   in[1,1]=4 -> padded[2*4 + 2] = padded[10] = 4.0
+    /// All other 12 positions must be 0.0.
+    #[test]
+    fn test_build_padded_2x2_into_4x4() {
+        let in_flat = [1.0f32, 2.0, 3.0, 4.0];
+        let got = build_padded(&in_flat, 1, &[2, 2], &[4, 4], &[1, 1]);
+
+        assert_eq!(got.len(), 16, "padded buffer should have 16 elements");
+
+        // Positions that should hold data
+        assert_eq!(got[5], 1.0, "padded[5] should be in[0,0]=1.0");
+        assert_eq!(got[6], 2.0, "padded[6] should be in[0,1]=2.0");
+        assert_eq!(got[9], 3.0, "padded[9] should be in[1,0]=3.0");
+        assert_eq!(got[10], 4.0, "padded[10] should be in[1,1]=4.0");
+
+        // All border positions must be zero
+        let non_zero_positions = [5usize, 6, 9, 10];
+        for (i, &val) in got.iter().enumerate() {
+            if !non_zero_positions.contains(&i) {
+                assert_eq!(val, 0.0, "padded[{i}] should be 0.0 (border), got {val}");
+            }
+        }
+    }
+
+    /// Two batch-channels (bc=2), same 2×2 content in each channel, placed at
+    /// pad_before=[1,1] inside a 4×4 padded plane.  Each channel occupies a
+    /// disjoint 16-element slice.
+    #[test]
+    fn test_build_padded_two_channels() {
+        let in_flat = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let got = build_padded(&in_flat, 2, &[2, 2], &[4, 4], &[1, 1]);
+
+        assert_eq!(got.len(), 32);
+
+        // Channel 0 (offset 0)
+        assert_eq!(got[5], 1.0);
+        assert_eq!(got[6], 2.0);
+        assert_eq!(got[9], 3.0);
+        assert_eq!(got[10], 4.0);
+
+        // Channel 1 (offset 16)
+        assert_eq!(got[16 + 5], 5.0);
+        assert_eq!(got[16 + 6], 6.0);
+        assert_eq!(got[16 + 9], 7.0);
+        assert_eq!(got[16 + 10], 8.0);
+    }
+
+    /// 1-D case: bc=1, sp=[3], in_flat=[10,20,30], padded_sp=[5], pad_before=[1].
+    ///
+    /// padded_strides for [5] = [1].
+    /// Placements: in[0]=10 -> padded[0+1]=padded[1]; in[1]=20 -> padded[2]; in[2]=30 -> padded[3].
+    /// padded[0] and padded[4] must be 0.
+    #[test]
+    fn test_build_padded_1d() {
+        let in_flat = [10.0f32, 20.0, 30.0];
+        let got = build_padded(&in_flat, 1, &[3], &[5], &[1]);
+
+        assert_eq!(got.len(), 5);
+        assert_eq!(got[0], 0.0, "leading pad must be 0");
+        assert_eq!(got[1], 10.0);
+        assert_eq!(got[2], 20.0);
+        assert_eq!(got[3], 30.0);
+        assert_eq!(got[4], 0.0, "trailing pad must be 0");
+    }
+
+    /// Zero padding (pad_before all zeros): output must be identical to input.
+    #[test]
+    fn test_build_padded_no_padding() {
+        let in_flat = [5.0f32, 6.0, 7.0, 8.0];
+        let got = build_padded(&in_flat, 1, &[2, 2], &[2, 2], &[0, 0]);
+        assert_eq!(got, vec![5.0f32, 6.0, 7.0, 8.0]);
     }
 }

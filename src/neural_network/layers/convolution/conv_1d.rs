@@ -3,14 +3,12 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::convolution::PaddingType;
-use crate::neural_network::layers::convolution::convolution_engine::{
-    conv_backward, conv_forward,
-};
+use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
 use crate::neural_network::layers::convolution::validation::{
     validate_filters, validate_input_shape_1d, validate_kernel_size_1d, validate_strides_1d,
 };
-use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::layers::layer_weight::{Conv1DLayerWeight, LayerWeight};
+use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -66,6 +64,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///         1,                      // Stride
 ///         PaddingType::Valid,     // No padding
 ///         Activation::ReLU, // ReLU activation
+///         None,                   // random_state
 ///     ).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
 ///
@@ -82,6 +81,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Check if output shape is correct - should be [2, 3, 8]
 /// assert_eq!(prediction.shape(), &[2, 3, 8]);
 /// ```
+#[derive(Debug)]
 pub struct Conv1D {
     filters: usize,
     kernel_size: usize,
@@ -108,6 +108,7 @@ impl Conv1D {
     /// - `stride` - Stride for the convolution operation
     /// - `padding` - Padding type (Valid or Same)
     /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
     ///
     /// # Returns
     ///
@@ -125,6 +126,7 @@ impl Conv1D {
         stride: usize,
         padding: PaddingType,
         activation: impl Into<Activation>,
+        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate input parameters
         validate_filters(filters)?;
@@ -140,9 +142,11 @@ impl Conv1D {
         let fan_out = filters * kernel_size;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
 
-        let weights = Array3::random(
+        let mut rng = crate::random::make_rng(random_state);
+        let weights = Array3::random_using(
             (filters, input_channels, kernel_size),
             Uniform::new(-weight_bound, weight_bound).unwrap(),
+            &mut rng,
         );
 
         // Initialize bias to zero
@@ -186,11 +190,7 @@ impl Conv1D {
     ///
     /// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\]
     /// - `bias` - 2D array of bias values with shape \[1, filters\]
-    pub fn set_weights(
-        &mut self,
-        weights: Array3<f32>,
-        bias: Array2<f32>,
-    ) -> Result<(), Error> {
+    pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
         self.weights = weights;

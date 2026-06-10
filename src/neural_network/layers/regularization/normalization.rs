@@ -23,7 +23,13 @@ pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, 
         Cow::Borrowed(input)
     } else {
         let perm = channels_first_perm(input.ndim(), channel_axis);
-        Cow::Owned(input.view().permuted_axes(perm).as_standard_layout().to_owned())
+        Cow::Owned(
+            input
+                .view()
+                .permuted_axes(perm)
+                .as_standard_layout()
+                .to_owned(),
+        )
     }
 }
 
@@ -167,5 +173,104 @@ macro_rules! compute_normalization_layer_parameter_gradients {
         }
     }};
 }
-pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape;
 pub(in crate::neural_network::layers::regularization::normalization) use compute_normalization_layer_parameter_gradients;
+pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::ArrayD;
+
+    // Helper: build a Tensor from a flat Vec and shape.
+    fn make_tensor(data: Vec<f32>, shape: &[usize]) -> Tensor {
+        ArrayD::from_shape_vec(shape, data).expect("shape/data mismatch in test helper")
+    }
+
+    // ─── channels_first_perm ────────────────────────────────────────────────
+
+    /// (ndim=4, channel_axis=3) → [0,3,1,2]
+    ///
+    /// Derivation: batch stays at 0, channel_axis=3 moves to position 1,
+    /// then the spatial axes from 1..4 excluding 3, i.e. [1,2], follow in order.
+    /// Expected: [0, 3, 1, 2].
+    #[test]
+    fn test_channels_first_perm_4_3() {
+        let perm = channels_first_perm(4, 3);
+        assert_eq!(perm, vec![0usize, 3, 1, 2]);
+    }
+
+    /// (ndim=4, channel_axis=1) → identity [0,1,2,3]
+    ///
+    /// Derivation: batch stays at 0, channel_axis=1 is already position 1,
+    /// spatial axes from 1..4 excluding 1 are [2,3].
+    /// Expected: [0, 1, 2, 3].
+    #[test]
+    fn test_channels_first_perm_4_1_identity() {
+        let perm = channels_first_perm(4, 1);
+        assert_eq!(perm, vec![0usize, 1, 2, 3]);
+    }
+
+    /// (ndim=3, channel_axis=2) → [0,2,1]
+    ///
+    /// Derivation: batch stays at 0, channel_axis=2 moves to position 1,
+    /// spatial axes from 1..3 excluding 2, i.e. [1], follow.
+    /// Expected: [0, 2, 1].
+    #[test]
+    fn test_channels_first_perm_3_2() {
+        let perm = channels_first_perm(3, 2);
+        assert_eq!(perm, vec![0usize, 2, 1]);
+    }
+
+    // ─── to_channels_first + from_channels_first round-trip ─────────────────
+
+    /// Round-trip identity: from_channels_first(to_channels_first(x), ca) == x,
+    /// for shape [2,4,3,3] with channel_axis=3.
+    ///
+    /// Derivation:
+    ///   forward perm for (ndim=4, ca=3) = [0,3,1,2]   (tested above)
+    ///   inverse perm: inv[0]=0, inv[3]=1, inv[1]=2, inv[2]=3 → [0,2,3,1]
+    ///   Composing [0,3,1,2] then [0,2,3,1] yields the identity permutation,
+    ///   so every element returns to its original position.
+    #[test]
+    fn test_to_from_channels_first_roundtrip() {
+        // Build a recognisably non-constant tensor so any element swap would
+        // be caught.
+        let n: usize = 2 * 4 * 3 * 3;
+        let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let x = make_tensor(data, &[2, 4, 3, 3]);
+
+        let channel_axis = 3usize;
+        let cf = to_channels_first(&x, channel_axis);
+        let recovered = from_channels_first(cf.into_owned(), channel_axis);
+
+        // Element-wise equality: every element must return to its original slot.
+        let x_flat: &[f32] = x.as_slice().unwrap();
+        let r_flat: &[f32] = recovered.as_slice().unwrap();
+        for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
+            assert_eq!(
+                orig, got,
+                "round-trip mismatch at flat index {i}: orig={orig}, got={got}"
+            );
+        }
+    }
+
+    /// When channel_axis==1, to_channels_first is a no-op borrow and
+    /// from_channels_first returns the same data — round-trip still holds.
+    #[test]
+    fn test_to_from_channels_first_channel_axis_1_noop() {
+        let data: Vec<f32> = (0..24usize).map(|i| i as f32 * 0.5).collect();
+        let x = make_tensor(data, &[2, 4, 3]);
+        let channel_axis = 1usize;
+
+        let cf = to_channels_first(&x, channel_axis);
+        // Must be a Borrow (no copy).
+        assert!(matches!(cf, std::borrow::Cow::Borrowed(_)));
+        let recovered = from_channels_first(cf.into_owned(), channel_axis);
+
+        let x_flat: &[f32] = x.as_slice().unwrap();
+        let r_flat: &[f32] = recovered.as_slice().unwrap();
+        for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
+            assert_eq!(orig, got, "noop round-trip mismatch at flat index {i}");
+        }
+    }
+}

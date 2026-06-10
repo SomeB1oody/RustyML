@@ -16,16 +16,16 @@ pub mod global_max_pooling_1d;
 pub mod global_max_pooling_2d;
 /// Global Max Pooling layer 3D Layer
 pub mod global_max_pooling_3d;
-/// Input validation functions for pooling layers
-mod validation;
-/// Dimension-generic pooling engine shared by every pooling layer
-mod pooling_engine;
 /// Max Pooling layer 1D Layer
 pub mod max_pooling_1d;
 /// Max Pooling layer 2D Layer
 pub mod max_pooling_2d;
 /// Max Pooling layer 3D Layer
 pub mod max_pooling_3d;
+/// Dimension-generic pooling engine shared by every pooling layer
+mod pooling_engine;
+/// Input validation functions for pooling layers
+mod validation;
 
 pub use average_pooling_1d::AveragePooling1D;
 pub use average_pooling_2d::AveragePooling2D;
@@ -215,7 +215,7 @@ macro_rules! layer_functions_3d_pooling {
         $crate::neural_network::layers::no_trainable_parameters_layer_functions!();
     };
 }
-pub(in crate::neural_network::layers::pooling) use layer_functions_global_pooling;
 pub(in crate::neural_network::layers::pooling) use layer_functions_1d_pooling;
 pub(in crate::neural_network::layers::pooling) use layer_functions_2d_pooling;
 pub(in crate::neural_network::layers::pooling) use layer_functions_3d_pooling;
+pub(in crate::neural_network::layers::pooling) use layer_functions_global_pooling;

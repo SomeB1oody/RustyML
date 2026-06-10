@@ -24,18 +24,14 @@ pub enum TrainingParameters {
 
 /// A module containing activation layer implementations for neural networks
 pub mod activation;
+/// Convolution-internal helpers (output assembly, gradient accumulation, padding)
+mod conv_op_helpers;
 /// Convolutional layer for neural networks
 pub mod convolution;
 /// Dense (Fully Connected) layer implementation for neural networks
 pub mod dense;
 /// A layer that flattens a 3D, 4D, or 5D tensor into a 2D tensor
 pub mod flatten;
-/// Convolution-internal helpers (output assembly, gradient accumulation, padding)
-mod conv_op_helpers;
-/// Output-shape calculators for pooling and convolution layers
-mod shape_helpers;
-/// Shared input/weight validation for the layer module
-mod validation;
 /// Container for different types of neural network layer weights
 pub mod layer_weight;
 /// Pooling layer for neural networks
@@ -46,6 +42,10 @@ pub mod recurrent;
 pub mod regularization;
 /// A module containing helper functions and structs for serializing neural network weights
 pub mod serialize_weight;
+/// Output-shape calculators for pooling and convolution layers
+mod shape_helpers;
+/// Shared input/weight validation for the layer module
+mod validation;
 
 pub use activation::*;
 pub use convolution::*;

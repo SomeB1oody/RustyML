@@ -12,6 +12,8 @@ use crate::neural_network::Tensor;
 /// - `mask` - The dropout mask applied during forward pass
 /// - `training` - Whether the layer is in training mode
 /// - `rate` - The dropout rate
+/// - `layer_name` - Concrete layer name, used in the "forward pass not run" error message so the
+///   error identifies the actual layer (e.g. `SpatialDropout2D`) rather than always `Dropout`
 ///
 /// # Returns
 ///
@@ -21,6 +23,7 @@ fn dropout_backward(
     mask: &Option<Tensor>,
     training: bool,
     rate: f32,
+    layer_name: &'static str,
 ) -> Result<Tensor, Error> {
     if !training || rate == 0.0 {
         // During inference or if rate is 0, pass gradient through unchanged
@@ -38,7 +41,7 @@ fn dropout_backward(
         let grad_input = grad_output * mask * scale;
         Ok(grad_input)
     } else {
-        Err(Error::forward_pass_not_run("Dropout"))
+        Err(Error::forward_pass_not_run(layer_name))
     }
 }
 
@@ -92,6 +95,9 @@ fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_thr
 }
 
 /// Dropout layer for neural networks
+// The `Dropout` struct lives in a `dropout` submodule alongside the sibling spatial-dropout
+// modules; the repeated name is the file layout, not an accident.
+#[allow(clippy::module_inception)]
 pub mod dropout;
 /// Spatial Dropout layer for 1D data
 pub mod spatial_dropout_1d;

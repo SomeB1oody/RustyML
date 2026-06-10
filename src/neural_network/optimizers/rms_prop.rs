@@ -1,9 +1,9 @@
 use crate::error::Error;
-use crate::neural_network::traits::{Layer, Optimizer};
+use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_decay_rate, validate_epsilon, validate_learning_rate,
 };
-use crate::neural_network::optimizers::kernels;
+use crate::neural_network::traits::{Layer, Optimizer};
 
 /// RMSprop (Root Mean Square Propagation) optimizer.
 ///
@@ -14,6 +14,7 @@ use crate::neural_network::optimizers::kernels;
 /// - `learning_rate` - Learning rate controlling the size of parameter updates
 /// - `rho` - Decay rate for the moving average of squared gradients
 /// - `epsilon` - Small constant added for numerical stability
+#[derive(Debug)]
 pub struct RMSprop {
     learning_rate: f32,
     rho: f32,
