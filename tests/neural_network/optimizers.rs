@@ -645,14 +645,16 @@ fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
 // Multi-layer convergence: one test per remaining optimizer
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// SGD on a 2-layer net (1→4→1): loss must fall over 50 epochs.
-/// Uses a higher learning rate to compensate for SGD's lack of adaptivity.
+/// SGD on a 2-layer net (1→4→1): loss must fall and converge over 50 epochs.
+/// Uses a higher learning rate to compensate for SGD's lack of adaptivity, and a seeded init
+/// so the convergence check is deterministic (an unseeded init made it depend on the entropy draw).
 #[test]
 fn sgd_two_layer_loss_decreases() {
+    const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new(), None).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new(), None).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new(), Some(SEED)).unwrap();
+    let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
 
     let mut model = Sequential::new();
     model
@@ -668,29 +670,44 @@ fn sgd_two_layer_loss_decreases() {
         mse_after < mse_before,
         "SGD 2-layer: loss should decrease; before={mse_before}, after={mse_after}"
     );
+    assert!(
+        mse_after < 0.1,
+        "SGD 2-layer: loss should converge near 0; after={mse_after}"
+    );
 }
 
-/// RMSprop on a 2-layer net (1→4→1): loss must fall over 30 epochs.
+/// RMSprop on a 2-layer net (1→4→1): loss must fall and converge.
+///
+/// Seeded init (like the Adam two-layer test) so the result is deterministic — an UNSEEDED
+/// init made this flaky: RMSprop's adaptive step can transiently overshoot from a near-optimal
+/// random start, so on ~1% of entropy draws the loss ended slightly *higher* over the original
+/// 30 epochs. A gentle learning rate over enough epochs converges to ~0 for any init (verified
+/// across seeds), and `y = 2x` is exactly fittable so the final loss must be clearly low.
 #[test]
 fn rmsprop_two_layer_loss_decreases() {
+    const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new(), None).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new(), None).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new(), Some(SEED)).unwrap();
+    let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
 
     let mut model = Sequential::new();
     model.add(layer1).add(layer2).compile(
-        RMSprop::new(0.05, 0.9, 1e-8).unwrap(),
+        RMSprop::new(0.01, 0.9, 1e-8).unwrap(),
         MeanSquaredError::new(),
     );
 
     let mse_before = eval_mse(&model, &x, &y);
-    model.fit(&x, &y, 30).unwrap();
+    model.fit(&x, &y, 150).unwrap();
     let mse_after = eval_mse(&model, &x, &y);
 
     assert!(
         mse_after < mse_before,
         "RMSprop 2-layer: loss should decrease; before={mse_before}, after={mse_after}"
+    );
+    assert!(
+        mse_after < 0.1,
+        "RMSprop 2-layer: loss should converge near 0; after={mse_after}"
     );
 }
 
