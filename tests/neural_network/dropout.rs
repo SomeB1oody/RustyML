@@ -1,8 +1,8 @@
-//! Integration tests for Dropout, SpatialDropout1D, SpatialDropout2D, and SpatialDropout3D.
+//! Integration tests for Dropout, SpatialDropout1D, SpatialDropout2D, and SpatialDropout3D
 //!
 //! Focus areas:
 //! - Forward values (not just shapes): inverted-dropout scaling, rate=0 identity, rate=1 zeros
-//! - EVAL mode: output == input (identity), predict() == forward() in eval mode
+//! - Eval mode: output == input (identity), predict() == forward() in eval mode
 //! - SpatialDropout channel-consistency: whole channel 0 or fully kept and scaled
 //! - Constructor rejects invalid rates
 //! - backward-before-forward -> Err(ForwardPassNotRun)
@@ -20,30 +20,25 @@ use rustyml::neural_network::traits::Layer;
 
 use super::common::assert_allclose;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// A tensor of all-ones with the given flat shape.
+/// Tensor of all-ones with the given flat shape
 fn ones(shape: &[usize]) -> Tensor {
     Tensor::ones(shape)
 }
 
-/// A flat tensor filled with the given constant value.
+/// Flat tensor filled with the given constant value
 fn filled(shape: &[usize], value: f32) -> Tensor {
     let n: usize = shape.iter().product();
     let data: Vec<f32> = vec![value; n];
     Tensor::from_shape_vec(ndarray::IxDyn(shape), data).unwrap()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dropout – basic forward values
-// ─────────────────────────────────────────────────────────────────────────────
+// Dropout - basic forward values
 
 #[test]
 fn dropout_rate_zero_is_identity_in_training_mode() {
-    // Mathematical definition: rate=0 → no units dropped → output = input * 1.0/1.0 = input.
-    // The implementation has a dedicated early-return path for rate == 0.0.
+    // rate=0 -> no units dropped -> output == input (dedicated early-return path)
     let mut layer = Dropout::new(0.0, vec![3, 4], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -62,7 +57,7 @@ fn dropout_rate_zero_is_identity_in_training_mode() {
 
 #[test]
 fn dropout_rate_one_yields_zeros_in_training_mode() {
-    // Mathematical definition: rate=1 → every unit dropped → output = zeros.
+    // rate=1 -> every unit dropped -> output = zeros
     let mut layer = Dropout::new(1.0, vec![2, 5], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -74,7 +69,7 @@ fn dropout_rate_one_yields_zeros_in_training_mode() {
 
 #[test]
 fn dropout_eval_mode_is_exact_identity() {
-    // Inverted dropout: inference passes input through unchanged.
+    // Inverted dropout: inference passes input through unchanged
     let mut layer = Dropout::new(0.5, vec![2, 3], None).unwrap();
     layer.set_training_if_mode_dependent(false);
 
@@ -87,7 +82,7 @@ fn dropout_eval_mode_is_exact_identity() {
 
 #[test]
 fn dropout_predict_equals_forward_in_eval_mode() {
-    // predict() must equal forward() in eval mode (both are identity).
+    // predict() must equal forward() in eval mode (both are identity)
     let mut layer = Dropout::new(0.3, vec![2, 4], None).unwrap();
     layer.set_training_if_mode_dependent(false);
 
@@ -98,13 +93,13 @@ fn dropout_predict_equals_forward_in_eval_mode() {
     let out_forward = layer.forward(&input).unwrap();
     let out_predict = layer.predict(&input).unwrap();
     assert_allclose(&out_forward, &out_predict, 1e-6_f32);
-    // Both must equal input exactly.
+    // Both must equal input exactly
     assert_allclose(&out_forward, &input, 1e-6_f32);
 }
 
 #[test]
 fn dropout_predict_is_identity_in_training_mode() {
-    // predict() is always identity, regardless of training flag.
+    // predict() is always identity, regardless of training flag
     let mut layer = Dropout::new(0.9, vec![3], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -117,10 +112,7 @@ fn dropout_predict_is_identity_in_training_mode() {
 
 #[test]
 fn dropout_training_inverted_scaling_on_kept_units() {
-    // Inverted dropout: kept units are scaled by 1/(1-rate).
-    // With rate=0.5, scale = 2.0.
-    // We iterate over a large all-ones input and assert every non-zero output element == 2.0,
-    // and count the fraction zeroed (should be approximately 0.5 ± generous tolerance for 200 elems).
+    // Inverted dropout: kept units scaled by 1/(1-rate); with rate=0.5, scale = 2.0
     let mut layer = Dropout::new(0.5, vec![200], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -132,12 +124,11 @@ fn dropout_training_inverted_scaling_on_kept_units() {
         if v == 0.0 {
             zero_count += 1;
         } else {
-            // Inverted dropout: kept element == input * 1/(1-0.5) = 1.0 * 2.0 = 2.0
+            // Kept element == input * 1/(1-0.5) = 2.0
             approx::assert_abs_diff_eq!(v, 2.0_f32, epsilon = 1e-5);
         }
     }
-    // With an unbiased coin over 200 elements, the zeroed fraction should be roughly 0.5.
-    // We accept a very loose window: [20%, 80%] so the test is statistically robust.
+    // Loose window [20%, 80%] keeps the ~50% zeroed-fraction check statistically robust
     let zero_frac = zero_count as f32 / 200.0;
     assert!(
         (0.20..=0.80).contains(&zero_frac),
@@ -148,7 +139,7 @@ fn dropout_training_inverted_scaling_on_kept_units() {
 
 #[test]
 fn dropout_rate_one_backward_returns_zeros() {
-    // rate=1 → forward zeros, backward returns zeros (distinct early-return path).
+    // rate=1 -> forward zeros, backward returns zeros (distinct early-return path)
     let mut layer = Dropout::new(1.0, vec![2, 3], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -163,7 +154,7 @@ fn dropout_rate_one_backward_returns_zeros() {
 
 #[test]
 fn dropout_rate_zero_backward_passes_gradient_through() {
-    // rate=0 → forward identity, backward passes gradient through unchanged.
+    // rate=0 -> forward identity, backward passes gradient through unchanged
     let mut layer = Dropout::new(0.0, vec![2, 3], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -179,7 +170,7 @@ fn dropout_rate_zero_backward_passes_gradient_through() {
 
 #[test]
 fn dropout_eval_backward_passes_gradient_through() {
-    // Inference mode: backward() passes gradient through unchanged.
+    // Inference mode: backward() passes gradient through unchanged
     let mut layer = Dropout::new(0.5, vec![2, 3], None).unwrap();
     layer.set_training_if_mode_dependent(false);
 
@@ -195,10 +186,8 @@ fn dropout_eval_backward_passes_gradient_through() {
 
 #[test]
 fn dropout_backward_kept_units_scaled_correctly() {
-    // Kept units in backward pass receive grad_output * 1/(1-rate).
-    // With rate=0.5 and all-ones input: kept units in output == 2.0, dropped == 0.0.
-    // In backward: kept units get grad * 2.0, dropped get 0.0.
-    // We find a run with some kept units by retrying.
+    // Kept units in backward receive grad_output * 1/(1-rate); with rate=0.5 and
+    // all-ones input, kept output == 2.0 and kept gradient == 2.0, dropped == 0.0
     let mut layer = Dropout::new(0.5, vec![50], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -209,11 +198,10 @@ fn dropout_backward_kept_units_scaled_correctly() {
 
     for (i, (&out_v, &grad_v)) in output.iter().zip(grad_in.iter()).enumerate() {
         if out_v == 0.0 {
-            // Dropped unit: gradient must be 0.
+            // Dropped unit: gradient must be 0
             approx::assert_abs_diff_eq!(grad_v, 0.0_f32, epsilon = 1e-5);
         } else {
-            // Kept unit: output = 2.0 (scale applied to ones input),
-            // gradient = 1.0 * 2.0 = 2.0 (same scale factor applied to ones upstream grad).
+            // Kept unit: output = 2.0 and gradient = 1.0 * 2.0 = 2.0 (same scale factor)
             assert!(
                 (grad_v - 2.0_f32).abs() < 1e-5,
                 "index {i}: kept unit gradient should be 2.0, got {grad_v}"
@@ -222,9 +210,7 @@ fn dropout_backward_kept_units_scaled_correctly() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dropout – error paths
-// ─────────────────────────────────────────────────────────────────────────────
+// Dropout - error paths
 
 #[test]
 fn dropout_constructor_rejects_negative_rate() {
@@ -254,7 +240,7 @@ fn dropout_constructor_accepts_boundary_rates_zero_and_one() {
 
 #[test]
 fn dropout_backward_before_forward_returns_forward_pass_not_run() {
-    // mask is None → backward before forward → ForwardPassNotRun error.
+    // mask is None -> backward before forward -> ForwardPassNotRun error
     let mut layer = Dropout::new(0.5, vec![4], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -269,9 +255,8 @@ fn dropout_backward_before_forward_returns_forward_pass_not_run() {
 
 #[test]
 fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
-    // Regression: all SpatialDropout layers delegate backward to the shared `dropout_backward`,
-    // which used to hardcode the error name as "Dropout". The error must now name the concrete
-    // layer (training=true + rate∈(0,1) + mask=None is the only path that reaches the error).
+    // Regression: shared dropout_backward must name the concrete SpatialDropout layer
+    // in ForwardPassNotRun, not a hardcoded "Dropout"
     let mut d1 = SpatialDropout1D::new(0.5, vec![2, 4, 8], None).unwrap();
     d1.set_training_if_mode_dependent(true);
     let err1 = d1.backward(&filled(&[2, 4, 8], 1.0)).unwrap_err();
@@ -336,7 +321,7 @@ fn dropout_predict_rejects_shape_mismatch() {
 
 #[test]
 fn dropout_empty_input_shape_accepts_any_shape() {
-    // validate_input_shape skips when expected_shape is empty.
+    // validate_input_shape skips when expected_shape is empty
     let mut layer = Dropout::new(0.0, vec![], None).unwrap();
     let a = Array::ones((2, 3)).into_dyn();
     let b = Array::ones((5, 7, 2)).into_dyn();
@@ -344,13 +329,11 @@ fn dropout_empty_input_shape_accepts_any_shape() {
     assert!(layer.forward(&b).is_ok());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpatialDropout1D – channel-consistency and values
-// ─────────────────────────────────────────────────────────────────────────────
+// SpatialDropout1D - channel-consistency and values
 
 #[test]
 fn spatial_dropout_1d_rate_zero_is_identity() {
-    // rate=0 → identity in training mode.
+    // rate=0 -> identity in training mode
     let mut layer = SpatialDropout1D::new(0.0, vec![2, 4, 8], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -361,7 +344,7 @@ fn spatial_dropout_1d_rate_zero_is_identity() {
 
 #[test]
 fn spatial_dropout_1d_rate_one_yields_zeros() {
-    // rate=1 → all zeros.
+    // rate=1 -> all zeros
     let mut layer = SpatialDropout1D::new(1.0, vec![1, 3, 5], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
@@ -391,9 +374,8 @@ fn spatial_dropout_1d_predict_is_identity() {
 
 #[test]
 fn spatial_dropout_1d_channel_consistency() {
-    // Core property: for each (batch, channel), all length positions have the SAME value.
-    // Either all zero (channel dropped) or all equal to input * scale (channel kept).
-    // Use an all-ones input so: kept value = 1/(1-rate), dropped value = 0.
+    // For each (batch, channel), all length positions share one value: either 0 (dropped)
+    // or input * scale (kept); all-ones input gives kept value 1/(1-rate), dropped value 0
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate); // = 2.0
 
@@ -409,14 +391,13 @@ fn spatial_dropout_1d_channel_consistency() {
 
     for b in 0..batch_size {
         for c in 0..channels {
-            // Determine state from first position.
+            // State is taken from the first position: must be 0 (dropped) or scale (kept)
             let first = output[[b, c, 0]];
-            // Must be either 0 (dropped) or scale (kept).
             assert!(
                 first == 0.0 || (first - scale).abs() < 1e-5,
                 "channel ({b},{c}) first element {first} is neither 0 nor {scale}"
             );
-            // All other positions in this channel must match.
+            // All other positions in this channel must match
             for l in 1..length {
                 let v = output[[b, c, l]];
                 assert!(
@@ -430,16 +411,15 @@ fn spatial_dropout_1d_channel_consistency() {
 
 #[test]
 fn spatial_dropout_1d_kept_channel_exact_scale() {
-    // For a kept channel: output value = input * 1/(1-rate).
-    // Use a unique per-position value so we can detect partial masking.
+    // Kept channel: output = input * 1/(1-rate); distinct per-position values catch
+    // partial masking
     let rate = 0.4_f32;
-    let scale = 1.0 / (1.0 - rate); // ~1.6667
+    let scale = 1.0 / (1.0 - rate); // ~=1.6667
 
-    // Run multiple forward passes and collect at least one kept channel.
     let mut layer = SpatialDropout1D::new(rate, vec![1, 10, 4], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
-    // Give each spatial position a distinct value: input[0, c, l] = (c * 4 + l) as f32
+    // Give each spatial position a distinct value
     let data: Vec<f32> = (0..40).map(|i| i as f32 + 1.0).collect();
     let input = Tensor::from_shape_vec(ndarray::IxDyn(&[1, 10, 4]), data).unwrap();
 
@@ -449,7 +429,7 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
     for c in 0..10 {
         let first = output[[0, c, 0]];
         if first != 0.0 {
-            // Kept channel: assert all positions == input * scale
+            // Kept channel: every position == input * scale
             found_kept = true;
             for l in 0..4 {
                 let expected = input[[0, c, l]] * scale;
@@ -461,9 +441,8 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
             }
         }
     }
-    // With rate=0.4 and 10 channels, the probability of ALL channels being dropped
-    // is 0.4^10 ≈ 0.0001. We can safely assert at least one kept channel in practice.
-    // If this flakes, it signals a serious bug (everything is being dropped).
+    // With rate=0.4 and 10 channels, the chance of all channels being dropped is
+    // 0.4^10 ~= 0.0001, so at least one kept channel is expected; failure signals a bug
     assert!(
         found_kept,
         "all channels were dropped — likely a bug (rate=0.4, 10 channels)"
@@ -472,7 +451,7 @@ fn spatial_dropout_1d_kept_channel_exact_scale() {
 
 #[test]
 fn spatial_dropout_1d_backward_channel_consistency() {
-    // Backward: gradient is zeroed for dropped channels and scaled for kept channels.
+    // Backward: gradient zeroed for dropped channels, scaled for kept channels
     let rate = 0.5_f32;
     let mut layer = SpatialDropout1D::new(rate, vec![1, 6, 4], None).unwrap();
     layer.set_training_if_mode_dependent(true);
@@ -486,13 +465,13 @@ fn spatial_dropout_1d_backward_channel_consistency() {
     for c in 0..6 {
         let out_first = output[[0, c, 0]];
         let grad_first = grad_in[[0, c, 0]];
-        // If the channel was dropped in forward, gradient must be 0.
+        // Dropped channel: gradient must be 0
         if out_first == 0.0 {
             for l in 0..4 {
                 approx::assert_abs_diff_eq!(grad_in[[0, c, l]], 0.0_f32, epsilon = 1e-5);
             }
         } else {
-            // Kept: gradient = upstream * scale (mask=1, scale applied)
+            // Kept channel: gradient = upstream * scale
             approx::assert_abs_diff_eq!(grad_first, scale, epsilon = 1e-4);
             for l in 1..4 {
                 approx::assert_abs_diff_eq!(grad_in[[0, c, l]], grad_first, epsilon = 1e-5);
@@ -501,9 +480,7 @@ fn spatial_dropout_1d_backward_channel_consistency() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpatialDropout1D – error paths
-// ─────────────────────────────────────────────────────────────────────────────
+// SpatialDropout1D - error paths
 
 #[test]
 fn spatial_dropout_1d_rejects_invalid_rate() {
@@ -525,7 +502,7 @@ fn spatial_dropout_1d_accepts_boundary_rates() {
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
-    // SpatialDropout1D requires 3D input.
+    // SpatialDropout1D requires 3D input
     let mut layer = SpatialDropout1D::new(0.5, vec![2, 4, 8], None).unwrap();
     let input_2d = Array::ones((2, 4)).into_dyn();
     assert!(layer.forward(&input_2d).is_err());
@@ -536,7 +513,7 @@ fn spatial_dropout_1d_rejects_wrong_ndim_forward() {
 
 #[test]
 fn spatial_dropout_1d_rejects_wrong_ndim_predict() {
-    // predict() also enforces ndim.
+    // predict() also enforces ndim
     let layer = SpatialDropout1D::new(0.5, vec![2, 4, 8], None).unwrap();
     let input_2d = Array::ones((2, 4)).into_dyn();
     assert!(layer.predict(&input_2d).is_err());
@@ -556,9 +533,7 @@ fn spatial_dropout_1d_backward_before_forward_returns_error() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpatialDropout2D – channel-consistency and values
-// ─────────────────────────────────────────────────────────────────────────────
+// SpatialDropout2D - channel-consistency and values
 
 #[test]
 fn spatial_dropout_2d_rate_zero_is_identity() {
@@ -600,7 +575,7 @@ fn spatial_dropout_2d_predict_is_identity() {
 
 #[test]
 fn spatial_dropout_2d_channel_consistency() {
-    // For each (batch, channel): all (height, width) positions share the same value.
+    // For each (batch, channel): all (height, width) positions share the same value
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
@@ -664,8 +639,8 @@ fn spatial_dropout_2d_backward_before_forward_returns_error() {
 
 #[test]
 fn spatial_dropout_2d_backward_channel_consistency() {
-    // Backward channel-consistency: gradient of dropped channel == 0 at all (h,w);
-    // gradient of kept channel == upstream * scale at all (h,w).
+    // Backward: dropped-channel gradient == 0 at all (h,w); kept-channel gradient ==
+    // upstream * scale at all (h,w)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
@@ -692,9 +667,7 @@ fn spatial_dropout_2d_backward_channel_consistency() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SpatialDropout3D – channel-consistency and values
-// ─────────────────────────────────────────────────────────────────────────────
+// SpatialDropout3D - channel-consistency and values
 
 #[test]
 fn spatial_dropout_3d_rate_zero_is_identity() {
@@ -736,7 +709,7 @@ fn spatial_dropout_3d_predict_is_identity() {
 
 #[test]
 fn spatial_dropout_3d_channel_consistency() {
-    // For each (batch, channel): all (depth, height, width) voxels share the same value.
+    // For each (batch, channel): all (depth, height, width) voxels share the same value
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
@@ -802,7 +775,7 @@ fn spatial_dropout_3d_backward_before_forward_returns_error() {
 
 #[test]
 fn spatial_dropout_3d_backward_channel_consistency() {
-    // Backward: whole channel's gradient must be uniform (all zero or all scaled).
+    // Backward: a whole channel's gradient must be uniform (all zero or all scaled)
     let rate = 0.5_f32;
     let scale = 1.0 / (1.0 - rate);
 
@@ -831,29 +804,27 @@ fn spatial_dropout_3d_backward_channel_consistency() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cross-type: predict() never caches mask; backward after predict should still
-// use the mask from the PREVIOUS forward(), not the predict call.
-// ─────────────────────────────────────────────────────────────────────────────
+// Cross-type: predict() never caches a mask; backward after predict uses the mask
+// from the previous forward(), not the predict call
 
 #[test]
 fn dropout_predict_does_not_overwrite_mask_from_forward() {
-    // Sequence: forward() → predict() → backward()
-    // predict() must NOT touch the stored mask. backward() should use the forward() mask.
+    // Sequence forward() -> predict() -> backward(): predict() must not touch the stored
+    // mask, so backward() still uses the forward() mask
     let mut layer = Dropout::new(0.5, vec![10], None).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let input = ones(&[10]);
     let fwd_output = layer.forward(&input).unwrap();
 
-    // Calling predict (in training mode) does not cache a mask.
+    // Calling predict (in training mode) does not cache a mask
     let _ = layer.predict(&input).unwrap();
 
-    // backward() should still succeed using the mask from forward().
+    // backward() still succeeds using the mask from forward()
     let grad = ones(&[10]);
     let grad_in = layer.backward(&grad).unwrap();
 
-    // Verify: zero where output was zero, 2.0 where output was 2.0.
+    // Zero where output was zero, 2.0 where output was 2.0
     for (o, g) in fwd_output.iter().zip(grad_in.iter()) {
         if *o == 0.0 {
             approx::assert_abs_diff_eq!(*g, 0.0_f32, epsilon = 1e-5);

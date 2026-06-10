@@ -1,13 +1,13 @@
+//! Integration tests for `train_test_split`: split shapes, determinism,
+//! row/label alignment, clamping, generic label types, and error paths
+
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::utils::train_test_split::train_test_split;
 
-// ---------------------------------------------------------------------------
 // Happy-path: split shapes
-// ---------------------------------------------------------------------------
 
-/// 10 samples, test_size=0.3:
-///   n_test = round(10 * 0.3) = round(3.0) = 3  → 3 test, 7 train
+/// Default test_size yields 3 test, 7 train rows for 10 samples
 #[test]
 fn test_default_test_size_shapes() {
     let x = Array2::from_shape_fn((10, 2), |(i, j)| (i * 2 + j) as f64);
@@ -20,8 +20,7 @@ fn test_default_test_size_shapes() {
     assert_eq!(y_test.len(), 3, "test labels");
 }
 
-/// 5 samples, test_size=0.4:
-///   n_test = round(5 * 0.4) = round(2.0) = 2  → 2 test, 3 train
+/// Explicit test_size=0.4 yields 2 test, 3 train rows for 5 samples
 #[test]
 fn test_explicit_test_size_shapes() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i * 2 + j) as f64);
@@ -34,7 +33,7 @@ fn test_explicit_test_size_shapes() {
     assert_eq!(y_test.len(), 2, "test labels");
 }
 
-/// Total row count is always preserved: n_train + n_test == n_samples.
+/// Total row count is preserved: n_train + n_test == n_samples
 #[test]
 fn test_row_count_preserved() {
     let n = 10usize;
@@ -54,12 +53,9 @@ fn test_row_count_preserved() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Default test_size = None → 0.3 behaviour
-// ---------------------------------------------------------------------------
+// Default test_size = None behaves as 0.3
 
-/// test_size=None must yield the same shapes as test_size=Some(0.3).
-/// 10 rows: round(10 * 0.3) = 3 test, 7 train.
+/// test_size=None yields the same shapes as test_size=Some(0.3)
 #[test]
 fn test_none_test_size_defaults_to_0_3() {
     let x = Array2::from_shape_fn((10, 2), |(i, j)| (i * 2 + j) as f64);
@@ -73,11 +69,9 @@ fn test_none_test_size_defaults_to_0_3() {
     assert_eq!(x_test.nrows(), x_test_explicit.nrows());
 }
 
-// ---------------------------------------------------------------------------
-// Determinism: seed determinism
-// ---------------------------------------------------------------------------
+// Determinism: seed behaviour
 
-/// Same random_state → byte-identical splits.
+/// Same random_state yields byte-identical splits
 #[test]
 fn test_same_seed_identical_split() {
     let x = Array2::from_shape_fn((20, 3), |(i, j)| (i + j * 5) as f64);
@@ -100,7 +94,7 @@ fn test_same_seed_identical_split() {
     assert_eq!(ya_test, yb_test, "y_test must be identical for same seed");
 }
 
-/// Different seeds → different shuffles (probability of collision is negligible at n=100).
+/// Different seeds yield different shuffles (collision negligible at n=100)
 #[test]
 fn test_different_seeds_different_splits() {
     let x = Array2::from_shape_fn((100, 2), |(i, j)| (i + j * 100) as f64);
@@ -117,15 +111,9 @@ fn test_different_seeds_different_splits() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Row-value determinism: verify actual values, not just counts
-// ---------------------------------------------------------------------------
 
-/// With a known dataset and seed=42, we can derive what ends up in each partition
-/// by checking that no data is invented: every row in the output was a row in the input.
-///
-/// We use unique row-identifying values: row i has x[i, 0] = (i*10) as f64.
-/// After split, each output row must trace back to exactly one input row.
+/// Every output row traces back to exactly one input row, with no cross-partition duplicates
 #[test]
 fn test_output_rows_are_subsets_of_input() {
     // Rows: [0,1], [10,11], [20,21], [30,31], [40,41]
@@ -138,17 +126,17 @@ fn test_output_rows_are_subsets_of_input() {
     let (x_train, x_test, _y_train, _y_test) =
         train_test_split(x.clone(), y, Some(0.4), Some(42)).unwrap();
 
-    // Every row in x_train must appear as a row in x (no invented rows).
+    // Every x_train row must appear as a row in x
     for row in x_train.rows() {
         let found = x.rows().into_iter().any(|r| r == row);
         assert!(found, "x_train row {:?} not found in original x", row);
     }
-    // Every row in x_test must also appear in x.
+    // Every x_test row must appear as a row in x
     for row in x_test.rows() {
         let found = x.rows().into_iter().any(|r| r == row);
         assert!(found, "x_test row {:?} not found in original x", row);
     }
-    // No row is duplicated across partitions (uniqueness via x[:,0] as key).
+    // No row is duplicated across partitions, keyed by x[:,0]
     let train_keys: Vec<i32> = x_train.column(0).iter().map(|&v| v as i32).collect();
     let test_keys: Vec<i32> = x_test.column(0).iter().map(|&v| v as i32).collect();
     for tk in &test_keys {
@@ -160,26 +148,20 @@ fn test_output_rows_are_subsets_of_input() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Row-label alignment: x[i] and y[i] must land in the same partition
-// ---------------------------------------------------------------------------
 
-/// Encode the row index in y so we can check alignment.
-/// Row i: x[i, 0] = i as f64; y[i] = i * 100.
-/// After split, for each row in x_train we know the original index, and y_train
-/// at that position must match i * 100.
+/// x[i] and y[i] stay paired after the split, in both partitions
 #[test]
 fn test_x_y_alignment() {
     let n = 10usize;
     // x[i, 0] = i as f64 (unique identifier)
     let x = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
-    // y[i] = i * 100 (unique, different scale to prevent confusion)
+    // y[i] = i * 100 (unique, distinct scale)
     let y = Array1::from_iter((0..n as i32).map(|i| i * 100));
 
     let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.3), Some(42)).unwrap();
 
-    // For each position in the train split, x value / 1.0 should be the row index,
-    // and y value / 100 should match.
+    // In the train split, the x value and y/100 must agree on the row index
     for (x_val, y_val) in x_train.column(0).iter().zip(y_train.iter()) {
         let row_from_x = *x_val as i32;
         let row_from_y = *y_val / 100;
@@ -190,7 +172,7 @@ fn test_x_y_alignment() {
         );
     }
 
-    // Same for the test partition.
+    // Same check for the test partition
     for (x_val, y_val) in x_test.column(0).iter().zip(y_test.iter()) {
         let row_from_x = *x_val as i32;
         let row_from_y = *y_val / 100;
@@ -202,18 +184,15 @@ fn test_x_y_alignment() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // n_samples == 2: always 1 test regardless of test_size
-// ---------------------------------------------------------------------------
 
-/// Special case: 2 samples → exactly 1 test row, regardless of test_size.
-/// Source line 80-81: `} else if n_samples == 2 { 1 }`.
+/// With 2 samples, the split is always 1 test and 1 train, regardless of test_size
 #[test]
 fn test_two_samples_always_one_test() {
     let x = array![[1.0, 2.0], [3.0, 4.0]];
     let y = Array1::from(vec![10i32, 20i32]);
 
-    // test_size=0.1 would normally give round(2*0.1)=0 → clamped to 1, but special-cased first
+    // test_size=0.1: 2-sample case is special-cased before any rounding/clamping
     let (x_train_a, x_test_a, _, _) =
         train_test_split(x.clone(), y.clone(), Some(0.1), Some(42)).unwrap();
     assert_eq!(
@@ -227,7 +206,7 @@ fn test_two_samples_always_one_test() {
         "n_samples=2, test_size=0.1 → 1 train row"
     );
 
-    // test_size=0.9 would give round(2*0.9)=2 → clamped to 1, but special-cased first
+    // test_size=0.9: same special case applies
     let (x_train_b, x_test_b, _, _) =
         train_test_split(x.clone(), y.clone(), Some(0.9), Some(42)).unwrap();
     assert_eq!(
@@ -241,7 +220,7 @@ fn test_two_samples_always_one_test() {
         "n_samples=2, test_size=0.9 → 1 train row"
     );
 
-    // Even with default test_size
+    // Default test_size: same special case applies
     let (x_train_c, x_test_c, _, _) = train_test_split(x, y, None, Some(42)).unwrap();
     assert_eq!(
         x_test_c.nrows(),
@@ -255,49 +234,43 @@ fn test_two_samples_always_one_test() {
     );
 }
 
-// ---------------------------------------------------------------------------
 // Clamping: test_size near 1.0 or near 0.0
-// ---------------------------------------------------------------------------
 
-/// test_size=0.99, 10 samples:
-///   n_test = round(10 * 0.99) = round(9.9) = 10, then .min(10-1) = 9 → 9 test, 1 train.
+/// test_size=0.99 over 10 samples clamps to 9 test, leaving at least 1 train row
 #[test]
 fn test_large_test_size_keeps_at_least_one_train() {
     let x = Array2::from_shape_fn((10, 2), |(i, j)| (i + j) as f64);
     let y = Array1::from_iter(0..10i32);
     let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.99), Some(42)).unwrap();
 
-    // round(10 * 0.99) = round(9.9) = 10, clamped via .min(n_samples-1) = 9
+    // round(10 * 0.99) = 10, clamped via .min(n_samples-1) = 9
     assert_eq!(x_test.nrows(), 9, "9 test rows expected");
     assert_eq!(x_train.nrows(), 1, "at least 1 train row must remain");
     assert_eq!(y_test.len(), 9);
     assert_eq!(y_train.len(), 1);
 }
 
-/// test_size=0.01, 10 samples:
-///   n_test = round(10 * 0.01) = round(0.1) = 0, then .max(1) = 1 → 1 test, 9 train.
+/// test_size=0.01 over 10 samples clamps to 1 test, leaving 9 train rows
 #[test]
 fn test_small_test_size_keeps_at_least_one_test() {
     let x = Array2::from_shape_fn((10, 2), |(i, j)| (i + j) as f64);
     let y = Array1::from_iter(0..10i32);
     let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.01), Some(42)).unwrap();
 
-    // round(10 * 0.01) = round(0.1) = 0, clamped via .max(1) = 1
+    // round(10 * 0.01) = 0, clamped via .max(1) = 1
     assert_eq!(x_test.nrows(), 1, "at least 1 test row must exist");
     assert_eq!(x_train.nrows(), 9, "9 train rows expected");
     assert_eq!(y_test.len(), 1);
     assert_eq!(y_train.len(), 9);
 }
 
-// ---------------------------------------------------------------------------
 // Generic label type: &str
-// ---------------------------------------------------------------------------
 
-/// Verify the generic A: Clone path works with string slice labels.
+/// The generic A: Clone path works with string-slice labels
 #[test]
 fn test_str_labels() {
     let x = Array2::from_shape_fn((6, 2), |(i, j)| (i + j) as f64);
-    // 6 samples, test_size=0.5: round(6 * 0.5) = round(3.0) = 3 → 3 test, 3 train
+    // 6 samples, test_size=0.5: round(6 * 0.5) = 3 test, 3 train
     let y = Array1::from(vec!["cat", "dog", "fish", "bird", "rat", "cow"]);
     let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.5), Some(42)).unwrap();
 
@@ -306,13 +279,13 @@ fn test_str_labels() {
     assert_eq!(y_train.len(), 3);
     assert_eq!(y_test.len(), 3);
 
-    // Every label in y_train/y_test must come from the original set.
+    // Every label in y_train/y_test must come from the original set
     let known = ["cat", "dog", "fish", "bird", "rat", "cow"];
     for lbl in y_train.iter().chain(y_test.iter()) {
         assert!(known.contains(lbl), "unexpected label: {}", lbl);
     }
 
-    // No label should appear in both train and test (all labels are unique here).
+    // No label appears in both partitions (labels are all unique here)
     for lbl in y_test.iter() {
         assert!(
             !y_train.iter().any(|l| l == lbl),
@@ -322,11 +295,9 @@ fn test_str_labels() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // None random_state: non-deterministic but valid
-// ---------------------------------------------------------------------------
 
-/// None seed must not panic and must produce a valid split with correct total row count.
+/// None seed produces a valid split with the correct total row count
 #[test]
 fn test_none_seed_produces_valid_split() {
     let x = Array2::from_shape_fn((10, 2), |(i, j)| (i + j) as f64);
@@ -340,11 +311,9 @@ fn test_none_seed_produces_valid_split() {
     assert_eq!(y_train.len() + y_test.len(), 10);
 }
 
-// ---------------------------------------------------------------------------
 // Error paths
-// ---------------------------------------------------------------------------
 
-/// Empty dataset (0 rows) → EmptyInput.
+/// Empty dataset (0 rows) yields EmptyInput
 #[test]
 fn test_error_empty_input() {
     let x: Array2<f64> = Array2::zeros((0, 2));
@@ -357,7 +326,7 @@ fn test_error_empty_input() {
     );
 }
 
-/// x.nrows() != y.len() → DimensionMismatch.
+/// x.nrows() != y.len() yields DimensionMismatch
 #[test]
 fn test_error_dimension_mismatch() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
@@ -376,7 +345,7 @@ fn test_error_dimension_mismatch() {
     );
 }
 
-/// test_size = 0.0 (exact lower boundary, exclusive) → InvalidParameter.
+/// test_size=0.0 (exclusive lower boundary) yields InvalidParameter
 #[test]
 fn test_error_test_size_zero() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
@@ -389,7 +358,7 @@ fn test_error_test_size_zero() {
     );
 }
 
-/// test_size = 1.0 (exact upper boundary, exclusive) → InvalidParameter.
+/// test_size=1.0 (exclusive upper boundary) yields InvalidParameter
 #[test]
 fn test_error_test_size_one() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
@@ -402,7 +371,7 @@ fn test_error_test_size_one() {
     );
 }
 
-/// test_size < 0.0 → InvalidParameter.
+/// test_size < 0.0 yields InvalidParameter
 #[test]
 fn test_error_test_size_negative() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
@@ -415,7 +384,7 @@ fn test_error_test_size_negative() {
     );
 }
 
-/// test_size > 1.0 → InvalidParameter.
+/// test_size > 1.0 yields InvalidParameter
 #[test]
 fn test_error_test_size_greater_than_one() {
     let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
@@ -428,7 +397,7 @@ fn test_error_test_size_greater_than_one() {
     );
 }
 
-/// n_samples == 1 → InvalidInput (cannot form both a train and test set).
+/// n_samples == 1 yields InvalidInput (cannot form both a train and test set)
 #[test]
 fn test_error_single_sample() {
     let x = array![[1.0, 2.0]];

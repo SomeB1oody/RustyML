@@ -1,9 +1,8 @@
 //! Integration tests for Conv1D and Conv2D forward values, shapes, error paths,
-//! param counts, set_weights, and predict==forward equivalence.
+//! param counts, set_weights, and predict==forward equivalence
 //!
-//! All expected values are derived from the mathematical definition (cross-correlation
-//! with known weights), NOT from running the implementation and recording output.
-//! Gradient checks live in gradient_check.rs and are NOT duplicated here.
+//! Expected values come from the cross-correlation definition with known weights,
+//! not from recorded implementation output. Gradient checks live in gradient_check.rs
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4};
@@ -18,15 +17,9 @@ use rustyml::neural_network::traits::Layer;
 
 use super::common::assert_allclose;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — forward with known weights
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - forward with known weights
 
-/// All-ones filter, 1 channel, kernel=3, stride=1, Valid padding, Linear activation.
-/// Input (row-major): [1, 2, 3, 4, 5]
-/// Weight [1, 1, 3] = [1, 1, 1], bias [1, 1] = 0
-/// Output length = (5 - 3) / 1 + 1 = 3
-/// Out[0] = 1+2+3 = 6, Out[1] = 2+3+4 = 9, Out[2] = 3+4+5 = 12
+/// All-ones kernel=3, stride=1, Valid, Linear: each output is a windowed sum
 #[test]
 fn conv1d_all_ones_kernel_windowed_sums() {
     let mut layer = Conv1D::new(
@@ -55,10 +48,7 @@ fn conv1d_all_ones_kernel_windowed_sums() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// All-ones filter, stride=2, Valid padding: selects every other window.
-/// Input [1, 2, 3, 4, 5, 6], kernel=3, stride=2
-/// Output length = (6 - 3) / 2 + 1 = 2
-/// Out[0] = 1+2+3 = 6, Out[1] = 3+4+5 = 12
+/// All-ones kernel, stride=2, Valid: selects every other window
 #[test]
 fn conv1d_stride2_windowed_sums() {
     let mut layer = Conv1D::new(
@@ -87,11 +77,7 @@ fn conv1d_stride2_windowed_sums() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Non-trivial (non-symmetric) weight kernel: weight=[2, 0, 1], bias=0
-/// Input [1, 2, 3, 4, 5], kernel=3, stride=1, Valid
-/// Out[0] = 2*1 + 0*2 + 1*3 = 5
-/// Out[1] = 2*2 + 0*3 + 1*4 = 8
-/// Out[2] = 2*3 + 0*4 + 1*5 = 11
+/// Asymmetric kernel weight=[2, 0, 1], bias=0: output respects tap positions
 #[test]
 fn conv1d_asymmetric_kernel_values() {
     let mut layer = Conv1D::new(
@@ -121,11 +107,7 @@ fn conv1d_asymmetric_kernel_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Bias offset test: weight=[1, 0], bias=5.0
-/// Input [1, 2, 3, 4, 5], kernel=2, stride=1, Valid
-/// Out length = (5-2)/1 + 1 = 4
-/// Out[i] = x[i]*1 + x[i+1]*0 + 5 = x[i] + 5
-/// Out = [6, 7, 8, 9]
+/// Bias adds a constant to every output element
 #[test]
 fn conv1d_bias_offset_adds_to_every_output() {
     let mut layer = Conv1D::new(
@@ -154,10 +136,7 @@ fn conv1d_bias_offset_adds_to_every_output() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Two-filter layer: each filter has an all-ones kernel of size 2, but different biases.
-/// Filter 0 bias=0, filter 1 bias=10.
-/// Input [1, 2, 3, 4, 5], kernel=2, stride=1, Valid
-/// Out length = 4; filter 0: [3, 5, 7, 9]; filter 1: [13, 15, 17, 19]
+/// Two filters share an all-ones kernel but differ in bias, producing independent outputs
 #[test]
 fn conv1d_two_filters_independent_outputs() {
     let mut layer = Conv1D::new(
@@ -170,9 +149,8 @@ fn conv1d_two_filters_independent_outputs() {
         None,
     )
     .unwrap();
-    // weight shape [2, 1, 2]: filter0=[1,1], filter1=[1,1]
+    // weight [2, 1, 2]: filter0=[1,1], filter1=[1,1]; bias [1, 2]: [0, 10]
     let weights = Array3::from_shape_vec((2, 1, 2), vec![1.0f32, 1.0, 1.0, 1.0]).unwrap();
-    // bias shape [1, 2]: [0, 10]
     let bias = Array2::from_shape_vec((1, 2), vec![0.0f32, 10.0]).unwrap();
     layer.set_weights(weights, bias).unwrap();
 
@@ -183,20 +161,17 @@ fn conv1d_two_filters_independent_outputs() {
 
     assert_eq!(output.shape(), &[1, 2, 4]);
 
-    // Filter 0 outputs: windowed sums
+    // Filter 0: windowed sums
     for (i, expected_val) in [3.0f32, 5.0, 7.0, 9.0].iter().enumerate() {
         assert_abs_diff_eq!(output[[0, 0, i]], *expected_val, epsilon = 1e-6f32);
     }
-    // Filter 1 outputs: windowed sums + 10
+    // Filter 1: windowed sums + 10
     for (i, expected_val) in [13.0f32, 15.0, 17.0, 19.0].iter().enumerate() {
         assert_abs_diff_eq!(output[[0, 1, i]], *expected_val, epsilon = 1e-6f32);
     }
 }
 
-/// ReLU activation: pre-activation negatives become zero.
-/// Input [-1, -2, 1, 2, 3], all-ones kernel size 3, bias=0, stride=1, Valid
-/// Pre-activation: [(-1-2+1)=-2, (-2+1+2)=1, (1+2+3)=6]
-/// After ReLU: [0, 1, 6]
+/// ReLU activation clips negative pre-activations to zero
 #[test]
 fn conv1d_relu_activation_clips_negatives() {
     let mut layer = Conv1D::new(
@@ -225,12 +200,7 @@ fn conv1d_relu_activation_clips_negatives() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Same padding: output length == ceil(input_len / stride).
-/// Input length=5, kernel=3, stride=1:
-///   out_len = ceil(5/1) = 5
-///   total_pad = (5-1)*1 + 3 - 5 = 2, pad_before = 1
-///   padded = [0, 1, 2, 3, 4, 5, 0]
-///   Out[0]=0+1+2=3, Out[1]=1+2+3=6, Out[2]=2+3+4=9, Out[3]=3+4+5=12, Out[4]=4+5+0=9
+/// Same padding, stride=1: output length stays at input length with symmetric zero padding
 #[test]
 fn conv1d_same_padding_forward_values() {
     let mut layer = Conv1D::new(
@@ -259,13 +229,7 @@ fn conv1d_same_padding_forward_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Same padding with stride=2: output length = ceil(6/2) = 3.
-/// Input [1,2,3,4,5,6], kernel=3, stride=2, all-ones weight, bias=0
-/// out_len=3; total_pad = (3-1)*2 + 3 - 6 = 1, pad_before = 0
-/// padded = [1,2,3,4,5,6,0] (trailing pad only)
-/// Out[0] = 1+2+3 = 6 (window at pos 0)
-/// Out[1] = 3+4+5 = 12 (window at pos 2)
-/// Out[2] = 5+6+0 = 11 (window at pos 4)
+/// Same padding, stride=2: output length is ceil(input_len / stride) with trailing-only pad
 #[test]
 fn conv1d_same_padding_stride2_output_length_and_values() {
     let mut layer = Conv1D::new(
@@ -294,7 +258,7 @@ fn conv1d_same_padding_stride2_output_length_and_values() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// Batch size > 1: each sample is processed independently, identical inputs produce identical outputs.
+/// Batch size > 1: identical samples are processed independently and yield identical outputs
 #[test]
 fn conv1d_batch_forward_independent_samples() {
     let mut layer = Conv1D::new(
@@ -311,8 +275,7 @@ fn conv1d_batch_forward_independent_samples() {
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
 
-    // Two identical samples: [1,2,3,4] each
-    // Out per sample: [3,5,7] (windows of size 2 summed)
+    // Two identical samples [1,2,3,4]; each yields windowed sums [3,5,7]
     let input = Array::from_shape_vec((2, 1, 4), vec![1.0f32, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0])
         .unwrap()
         .into_dyn();
@@ -327,9 +290,7 @@ fn conv1d_batch_forward_independent_samples() {
     }
 }
 
-/// Edge case: input_length == kernel_size produces exactly one output element.
-/// Input [10, 20, 30], kernel=3, stride=1, Valid → out length = 1
-/// Out = 10+20+30 = 60
+/// input_length == kernel_size produces exactly one output element
 #[test]
 fn conv1d_input_equals_kernel_produces_single_output() {
     let mut layer = Conv1D::new(
@@ -355,13 +316,7 @@ fn conv1d_input_equals_kernel_produces_single_output() {
     assert_abs_diff_eq!(output[[0, 0, 0]], 60.0f32, epsilon = 1e-6f32);
 }
 
-/// Two input channels: weight shape [1, 2, 2], sums over both channels.
-/// Input [1,1,2,2,3,3] batch=1, channels=2, length=3
-/// Channel 0: [1,2,3], Channel 1: [1,2,3]
-/// Weight: filter 0, chan 0 = [1,1], filter 0, chan 1 = [2,2]
-/// Out length = (3-2)/1 + 1 = 2
-/// Out[0] = (1*1 + 2*1) + (1*2 + 2*2) = 3 + 6 = 9
-/// Out[1] = (2*1 + 3*1) + (2*2 + 3*2) = 5 + 10 = 15
+/// Two input channels: the filter sums contributions across both channels
 #[test]
 fn conv1d_two_input_channels_cross_channel_sum() {
     let mut layer = Conv1D::new(
@@ -374,13 +329,12 @@ fn conv1d_two_input_channels_cross_channel_sum() {
         None,
     )
     .unwrap();
-    // weight [filters=1, channels=2, kernel=2]
-    // filter 0, channel 0: [1,1]; filter 0, channel 1: [2,2]
+    // weight [1, 2, 2]: filter 0 channel 0 = [1,1], channel 1 = [2,2]
     let weights = Array3::from_shape_vec((1, 2, 2), vec![1.0f32, 1.0, 2.0, 2.0]).unwrap();
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
 
-    // input [batch=1, channels=2, length=3]: ch0=[1,2,3], ch1=[1,2,3]
+    // input [1, 2, 3]: ch0=[1,2,3], ch1=[1,2,3]
     let input = Array::from_shape_vec((1, 2, 3), vec![1.0f32, 2.0, 3.0, 1.0, 2.0, 3.0])
         .unwrap()
         .into_dyn();
@@ -391,12 +345,9 @@ fn conv1d_two_input_channels_cross_channel_sum() {
     assert_abs_diff_eq!(output[[0, 0, 1]], 15.0f32, epsilon = 1e-6f32);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — param_count
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - param_count
 
 /// param_count = filters * channels * kernel_size + filters
-/// filters=4, channels=3, kernel=2 → 4*3*2 + 4 = 28
 #[test]
 fn conv1d_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
@@ -413,7 +364,7 @@ fn conv1d_param_count_formula() {
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(28));
 }
 
-/// filters=2, channels=1, kernel=3 → 2*1*3 + 2 = 8
+/// param_count for filters=2, channels=1, kernel=3 is 2*1*3 + 2 = 8
 #[test]
 fn conv1d_param_count_single_channel() {
     use rustyml::neural_network::layers::TrainingParameters;
@@ -430,11 +381,9 @@ fn conv1d_param_count_single_channel() {
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(8));
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — set_weights
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - set_weights
 
-/// set_weights with the correct shape succeeds and the forward output changes.
+/// set_weights with the correct shape succeeds and the forward output reflects it
 #[test]
 fn conv1d_set_weights_correct_shape_succeeds() {
     let mut layer = Conv1D::new(
@@ -448,7 +397,7 @@ fn conv1d_set_weights_correct_shape_succeeds() {
     )
     .unwrap();
 
-    // Set weights to all-twos: output should be 2× the windowed sum
+    // All-twos weights: output is 2x the windowed sum
     let weights = Array3::from_elem((1, 1, 3), 2.0f32);
     let bias = Array2::zeros((1, 1));
     assert!(layer.set_weights(weights, bias).is_ok());
@@ -458,14 +407,13 @@ fn conv1d_set_weights_correct_shape_succeeds() {
         .into_dyn();
     let output = layer.forward(&input).unwrap();
 
-    // Out[0] = 2*(1+2+3) = 12, Out[1] = 2*(2+3+4) = 18, Out[2] = 2*(3+4+5) = 24
     let expected = Array::from_shape_vec((1, 1, 3), vec![12.0f32, 18.0, 24.0])
         .unwrap()
         .into_dyn();
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// set_weights with a mismatched weight shape returns Err(NeuralNetwork(WeightShape)).
+/// set_weights with a mismatched weight shape returns a WeightShape error
 #[test]
 fn conv1d_set_weights_mismatched_weight_shape_errors() {
     let mut layer = Conv1D::new(
@@ -479,7 +427,7 @@ fn conv1d_set_weights_mismatched_weight_shape_errors() {
     )
     .unwrap();
 
-    // Wrong weight shape: [2, 1, 3] instead of [1, 1, 3]
+    // Wrong weight shape [2, 1, 3] instead of [1, 1, 3]
     let wrong_weights = Array3::zeros((2, 1, 3));
     let bias = Array2::zeros((1, 1));
     let result = layer.set_weights(wrong_weights, bias);
@@ -493,7 +441,7 @@ fn conv1d_set_weights_mismatched_weight_shape_errors() {
     );
 }
 
-/// set_weights with a mismatched bias shape returns Err(NeuralNetwork(WeightShape)).
+/// set_weights with a mismatched bias shape returns a WeightShape error
 #[test]
 fn conv1d_set_weights_mismatched_bias_shape_errors() {
     let mut layer = Conv1D::new(
@@ -508,7 +456,7 @@ fn conv1d_set_weights_mismatched_bias_shape_errors() {
     .unwrap();
 
     let weights = Array3::zeros((1, 1, 3));
-    // Wrong bias: [1, 2] instead of [1, 1]
+    // Wrong bias [1, 2] instead of [1, 1]
     let wrong_bias = Array2::zeros((1, 2));
     let result = layer.set_weights(weights, wrong_bias);
     assert!(
@@ -521,9 +469,7 @@ fn conv1d_set_weights_mismatched_bias_shape_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — constructor error paths
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - constructor error paths
 
 #[test]
 fn conv1d_filters_zero_errors() {
@@ -579,7 +525,7 @@ fn conv1d_stride_zero_errors() {
     );
 }
 
-/// input_shape must be 3D; a 2D shape should return InvalidInput.
+/// input_shape must be 3D; a 2D shape returns InvalidInput
 #[test]
 fn conv1d_wrong_input_ndim_2d_errors() {
     let result = Conv1D::new(1, 3, vec![1, 5], 1, PaddingType::Valid, Linear::new(), None);
@@ -590,7 +536,7 @@ fn conv1d_wrong_input_ndim_2d_errors() {
     );
 }
 
-/// input_shape must be 3D; a 4D shape should return InvalidInput.
+/// input_shape must be 3D; a 4D shape returns InvalidInput
 #[test]
 fn conv1d_wrong_input_ndim_4d_errors() {
     let result = Conv1D::new(
@@ -609,7 +555,7 @@ fn conv1d_wrong_input_ndim_4d_errors() {
     );
 }
 
-/// input_shape channels=0 should return InvalidInput.
+/// input_shape with channels=0 returns InvalidInput
 #[test]
 fn conv1d_zero_input_channels_errors() {
     let result = Conv1D::new(
@@ -628,7 +574,7 @@ fn conv1d_zero_input_channels_errors() {
     );
 }
 
-/// input length < kernel_size should return InvalidInput.
+/// input length < kernel_size returns InvalidInput
 #[test]
 fn conv1d_input_smaller_than_kernel_errors() {
     // length=2 < kernel=3
@@ -648,11 +594,9 @@ fn conv1d_input_smaller_than_kernel_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — forward error paths
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - forward error paths
 
-/// Passing a 2D tensor to forward() returns InvalidInput.
+/// Passing a 2D tensor to forward() returns InvalidInput
 #[test]
 fn conv1d_forward_wrong_ndim_errors() {
     let mut layer = Conv1D::new(
@@ -674,7 +618,7 @@ fn conv1d_forward_wrong_ndim_errors() {
     );
 }
 
-/// backward() before forward() returns ForwardPassNotRun.
+/// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv1d_backward_before_forward_errors() {
     let mut layer = Conv1D::new(
@@ -699,11 +643,9 @@ fn conv1d_backward_before_forward_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — predict == forward in eval mode (no randomness; layer is stateless)
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - predict == forward in eval mode (no randomness; layer is stateless)
 
-/// predict() must return the same values as forward() for a deterministic layer.
+/// predict() returns the same values as forward() for a deterministic layer
 #[test]
 fn conv1d_predict_equals_forward() {
     let mut layer = Conv1D::new(
@@ -730,7 +672,7 @@ fn conv1d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
-/// predict() can be called multiple times and always returns the same result.
+/// predict() returns the same result across repeated calls
 #[test]
 fn conv1d_predict_deterministic() {
     let mut layer = Conv1D::new(
@@ -756,12 +698,9 @@ fn conv1d_predict_deterministic() {
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — get_weights shape
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - get_weights shape
 
-/// get_weights returns LayerWeight::Conv1D with weight shape [filters, channels, kernel]
-/// and bias shape [1, filters].
+/// get_weights returns Conv1D weights with shape [filters, channels, kernel] and bias [1, filters]
 #[test]
 fn conv1d_get_weights_correct_shapes() {
     let layer = Conv1D::new(
@@ -783,18 +722,9 @@ fn conv1d_get_weights_correct_shapes() {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — forward with known weights
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - forward with known weights
 
-/// All-ones 2x2 filter, 1 channel, Valid padding, stride=(1,1).
-/// Input [1,1,4,4] = 1..16 row-major.
-/// Weight [1,1,2,2] = [[1,1],[1,1]], bias=0
-/// Output shape = [1,1,3,3]
-/// Each output[h,w] = x[h,w]+x[h,w+1]+x[h+1,w]+x[h+1,w+1]
-/// Row 0: [1+2+5+6, 2+3+6+7, 3+4+7+8]   = [14, 18, 22]
-/// Row 1: [5+6+9+10, 6+7+10+11, 7+8+11+12] = [30, 34, 38]
-/// Row 2: [9+10+13+14, 10+11+14+15, 11+12+15+16] = [46, 50, 54]
+/// All-ones 2x2 kernel, 1 channel, Valid, stride=(1,1): each output is a 2x2 windowed sum
 #[test]
 fn conv2d_all_ones_kernel_windowed_sums() {
     let mut layer = Conv2D::new(
@@ -811,7 +741,6 @@ fn conv2d_all_ones_kernel_windowed_sums() {
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
 
-    // Input values 1..=16
     let input_data: Vec<f32> = (1..=16).map(|v| v as f32).collect();
     let input = Array::from_shape_vec((1, 1, 4, 4), input_data)
         .unwrap()
@@ -828,9 +757,7 @@ fn conv2d_all_ones_kernel_windowed_sums() {
     }
 }
 
-/// 1x1 kernel acts as a per-element scalar multiply.
-/// Input [1,1,3,3] = 1..9, weight=2.0, bias=0
-/// Output = 2 * input (each element doubles)
+/// 1x1 kernel acts as a per-element scalar multiply
 #[test]
 fn conv2d_1x1_kernel_scalar_multiply() {
     let mut layer = Conv2D::new(
@@ -862,9 +789,7 @@ fn conv2d_1x1_kernel_scalar_multiply() {
     }
 }
 
-/// Bias adds a constant to every output element.
-/// Input [1,1,2,2]=[1,2,3,4], kernel=(1,1), weight=1.0, bias=3.0
-/// Output = input + 3: [4,5,6,7]
+/// Bias adds a constant to every output element
 #[test]
 fn conv2d_bias_shifts_all_outputs() {
     let mut layer = Conv2D::new(
@@ -893,10 +818,7 @@ fn conv2d_bias_shifts_all_outputs() {
     assert_allclose(&output, &expected, 1e-6f32);
 }
 
-/// stride=(2,2) with Valid padding: output shape = floor((H-k)/s)+1.
-/// Input 4x4, kernel 2x2, stride (2,2): output shape = [1,1,2,2]
-/// Out[0,0] = 1+2+5+6=14, Out[0,1] = 3+4+7+8=22,
-/// Out[1,0] = 9+10+13+14=46, Out[1,1] = 11+12+15+16=54
+/// stride=(2,2) with Valid padding: output shape is floor((H-k)/s)+1 with strided windows
 #[test]
 fn conv2d_stride2_valid_output_shape_and_values() {
     let mut layer = Conv2D::new(
@@ -926,18 +848,7 @@ fn conv2d_stride2_valid_output_shape_and_values() {
     assert_abs_diff_eq!(output[[0, 0, 1, 1]], 54.0f32, epsilon = 1e-5f32);
 }
 
-/// Two filters with independent weight patterns.
-/// Filter 0 = all-ones kernel, filter 1 = kernel where only top-left=1, rest=0.
-/// Input [1,1,3,3]=1..9, kernel=(2,2), stride=(1,1), Valid
-/// Output shape [1,2,2,2]
-///
-/// Filter 0 (all-ones), stride=1, output 2x2:
-///   [0,0] = 1+2+4+5=12, [0,1] = 2+3+5+6=16,
-///   [1,0] = 4+5+7+8=24, [1,1] = 5+6+8+9=28
-///
-/// Filter 1 (top-left only):
-///   [0,0] = 1, [0,1] = 2,
-///   [1,0] = 4, [1,1] = 5
+/// Two filters with independent weight patterns: all-ones kernel vs top-left-only kernel
 #[test]
 fn conv2d_two_filters_independent_outputs() {
     let mut layer = Conv2D::new(
@@ -973,17 +884,14 @@ fn conv2d_two_filters_independent_outputs() {
     assert_abs_diff_eq!(output[[0, 0, 1, 0]], 24.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 1, 1]], 28.0f32, epsilon = 1e-5f32);
 
-    // Filter 1 (top-left position only)
+    // Filter 1: top-left position only
     assert_abs_diff_eq!(output[[0, 1, 0, 0]], 1.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 1, 0, 1]], 2.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 1, 1, 0]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 1, 1, 1]], 5.0f32, epsilon = 1e-5f32);
 }
 
-/// ReLU clips negative pre-activations to zero.
-/// Input [1,1,3,1] = [-3, 1, 2], kernel=(2,1) = [1, 1], bias=0
-/// Pre-activation: [(-3+1)=-2, (1+2)=3]
-/// After ReLU: [0, 3]
+/// ReLU clips negative pre-activations to zero
 #[test]
 fn conv2d_relu_clips_negatives() {
     let mut layer = Conv2D::new(
@@ -1010,9 +918,7 @@ fn conv2d_relu_clips_negatives() {
     assert_abs_diff_eq!(output[[0, 0, 1, 0]], 3.0f32, epsilon = 1e-6f32);
 }
 
-/// Same padding output shape = ceil(H/stride) × ceil(W/stride).
-/// Input [1,1,5,5], kernel=(3,3), stride=(1,1): out=[1,1,5,5]
-/// Input [1,1,4,4], kernel=(3,3), stride=(2,2): out=[1,1,2,2]
+/// Same padding output shape is ceil(H/stride) x ceil(W/stride)
 #[test]
 fn conv2d_same_padding_output_shapes() {
     // Case 1: stride=(1,1)
@@ -1046,15 +952,7 @@ fn conv2d_same_padding_output_shapes() {
     assert_eq!(out2.shape(), &[1, 1, 2, 2]);
 }
 
-/// Same padding, all-ones kernel (3,3), all-ones input 3x3, filter=1, Linear.
-/// This exhaustively verifies the symmetric padding behavior.
-/// padded_sp for 3x3, k=(3,3), stride=(1,1):
-///   out=(3,3), total_pad=(3-1)*1+3-3=2 per axis, pad_before=(1,1)
-///   padded is 5x5 with the input centered.
-/// Each output pixel sums the overlapping padded window:
-///   Corner pixels [0,0],[0,2],[2,0],[2,2]: sum of 4 ones = 4.0
-///   Edge pixels (non-corner, on border): sum of 6 ones = 6.0
-///   Center pixel [1,1]: sum of 9 ones = 9.0
+/// Same padding with all-ones kernel and input: corners sum 4, edges 6, center 9 ones
 #[test]
 fn conv2d_same_padding_all_ones_values() {
     let mut layer = Conv2D::new(
@@ -1075,26 +973,23 @@ fn conv2d_same_padding_all_ones_values() {
     let output = layer.forward(&input).unwrap();
 
     assert_eq!(output.shape(), &[1, 1, 3, 3]);
-    // Corners: 4 overlapping 1s
+    // Corners: 4 overlapping ones
     assert_abs_diff_eq!(output[[0, 0, 0, 0]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 0, 2]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 2, 0]], 4.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 2, 2]], 4.0f32, epsilon = 1e-5f32);
-    // Edge midpoints: 6 overlapping 1s
+    // Edge midpoints: 6 overlapping ones
     assert_abs_diff_eq!(output[[0, 0, 0, 1]], 6.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 1, 0]], 6.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 1, 2]], 6.0f32, epsilon = 1e-5f32);
     assert_abs_diff_eq!(output[[0, 0, 2, 1]], 6.0f32, epsilon = 1e-5f32);
-    // Center: 9 overlapping 1s
+    // Center: 9 overlapping ones
     assert_abs_diff_eq!(output[[0, 0, 1, 1]], 9.0f32, epsilon = 1e-5f32);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — param_count
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - param_count
 
 /// param_count = filters * channels * kh * kw + filters
-/// filters=2, channels=3, kernel=(3,3) → 2*3*3*3 + 2 = 56
 #[test]
 fn conv2d_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
@@ -1111,7 +1006,7 @@ fn conv2d_param_count_formula() {
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(56));
 }
 
-/// filters=1, channels=1, kernel=(2,2) → 1*1*2*2 + 1 = 5
+/// param_count for filters=1, channels=1, kernel=(2,2) is 1*1*2*2 + 1 = 5
 #[test]
 fn conv2d_param_count_single_filter_single_channel() {
     use rustyml::neural_network::layers::TrainingParameters;
@@ -1128,11 +1023,9 @@ fn conv2d_param_count_single_filter_single_channel() {
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(5));
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — set_weights
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - set_weights
 
-/// set_weights with correct shape succeeds and new weights change the output.
+/// set_weights with the correct shape succeeds and new weights change the output
 #[test]
 fn conv2d_set_weights_correct_shape_succeeds() {
     let mut layer = Conv2D::new(
@@ -1145,7 +1038,7 @@ fn conv2d_set_weights_correct_shape_succeeds() {
         None,
     )
     .unwrap();
-    // Set weight=3.0: output should be 3 * input
+    // weight=3.0 with a 1x1 kernel: output is 3 * input
     let weights = Array4::from_elem((1, 1, 1, 1), 3.0f32);
     let bias = Array2::zeros((1, 1));
     assert!(layer.set_weights(weights, bias).is_ok());
@@ -1168,7 +1061,7 @@ fn conv2d_set_weights_correct_shape_succeeds() {
     }
 }
 
-/// set_weights with mismatched weight shape returns WeightShape error.
+/// set_weights with a mismatched weight shape returns a WeightShape error
 #[test]
 fn conv2d_set_weights_mismatched_weight_shape_errors() {
     let mut layer = Conv2D::new(
@@ -1181,7 +1074,7 @@ fn conv2d_set_weights_mismatched_weight_shape_errors() {
         None,
     )
     .unwrap();
-    // Wrong: [2,1,2,2] instead of [1,1,2,2]
+    // Wrong weight shape [2,1,2,2] instead of [1,1,2,2]
     let wrong_weights = Array4::zeros((2, 1, 2, 2));
     let bias = Array2::zeros((1, 1));
     let result = layer.set_weights(wrong_weights, bias);
@@ -1195,7 +1088,7 @@ fn conv2d_set_weights_mismatched_weight_shape_errors() {
     );
 }
 
-/// set_weights with mismatched bias shape returns WeightShape error.
+/// set_weights with a mismatched bias shape returns a WeightShape error
 #[test]
 fn conv2d_set_weights_mismatched_bias_shape_errors() {
     let mut layer = Conv2D::new(
@@ -1209,7 +1102,7 @@ fn conv2d_set_weights_mismatched_bias_shape_errors() {
     )
     .unwrap();
     let weights = Array4::zeros((1, 1, 2, 2));
-    // Wrong: [1,3] instead of [1,1]
+    // Wrong bias [1,3] instead of [1,1]
     let wrong_bias = Array2::zeros((1, 3));
     let result = layer.set_weights(weights, wrong_bias);
     assert!(
@@ -1222,9 +1115,7 @@ fn conv2d_set_weights_mismatched_bias_shape_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — constructor error paths
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - constructor error paths
 
 #[test]
 fn conv2d_filters_zero_errors() {
@@ -1316,7 +1207,7 @@ fn conv2d_stride_width_zero_errors() {
     );
 }
 
-/// input_shape must be 4D; a 3D shape should return InvalidInput.
+/// input_shape must be 4D; a 3D shape returns InvalidInput
 #[test]
 fn conv2d_wrong_input_ndim_3d_errors() {
     let result = Conv2D::new(
@@ -1335,7 +1226,7 @@ fn conv2d_wrong_input_ndim_3d_errors() {
     );
 }
 
-/// input_shape must be 4D; a 5D shape should return InvalidInput.
+/// input_shape must be 4D; a 5D shape returns InvalidInput
 #[test]
 fn conv2d_wrong_input_ndim_5d_errors() {
     let result = Conv2D::new(
@@ -1354,7 +1245,7 @@ fn conv2d_wrong_input_ndim_5d_errors() {
     );
 }
 
-/// input height < kernel height should return InvalidInput.
+/// input height < kernel height returns InvalidInput
 #[test]
 fn conv2d_input_height_smaller_than_kernel_errors() {
     // height=2 < kernel_h=3
@@ -1374,7 +1265,7 @@ fn conv2d_input_height_smaller_than_kernel_errors() {
     );
 }
 
-/// input width < kernel width should return InvalidInput.
+/// input width < kernel width returns InvalidInput
 #[test]
 fn conv2d_input_width_smaller_than_kernel_errors() {
     // width=2 < kernel_w=3
@@ -1394,11 +1285,9 @@ fn conv2d_input_width_smaller_than_kernel_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — forward error paths
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - forward error paths
 
-/// Passing a 3D tensor to forward() returns InvalidInput (expects 4D).
+/// Passing a 3D tensor to forward() returns InvalidInput (4D expected)
 #[test]
 fn conv2d_forward_wrong_ndim_errors() {
     let mut layer = Conv2D::new(
@@ -1420,7 +1309,7 @@ fn conv2d_forward_wrong_ndim_errors() {
     );
 }
 
-/// backward() before forward() returns ForwardPassNotRun.
+/// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv2d_backward_before_forward_errors() {
     let mut layer = Conv2D::new(
@@ -1445,11 +1334,9 @@ fn conv2d_backward_before_forward_errors() {
     );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — predict == forward
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - predict == forward
 
-/// predict() must equal forward() for a deterministic layer (no stochasticity).
+/// predict() equals forward() for a deterministic layer
 #[test]
 fn conv2d_predict_equals_forward() {
     let mut layer = Conv2D::new(
@@ -1477,7 +1364,7 @@ fn conv2d_predict_equals_forward() {
     assert_allclose(&predict_output, &forward_output, 1e-7f32);
 }
 
-/// predict() is deterministic: calling it twice gives the same result.
+/// predict() returns the same result across repeated calls
 #[test]
 fn conv2d_predict_deterministic() {
     let mut layer = Conv2D::new(
@@ -1504,12 +1391,9 @@ fn conv2d_predict_deterministic() {
     assert_allclose(&out1, &out2, 0.0f32);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — get_weights shape
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - get_weights shape
 
-/// get_weights returns LayerWeight::Conv2D with weight shape [filters, channels, kh, kw]
-/// and bias shape [1, filters].
+/// get_weights returns Conv2D weights with shape [filters, channels, kh, kw] and bias [1, filters]
 #[test]
 fn conv2d_get_weights_correct_shapes() {
     let layer = Conv2D::new(
@@ -1531,12 +1415,9 @@ fn conv2d_get_weights_correct_shapes() {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — Valid output length formula for diverse (len, kernel, stride) cases
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - Valid output length formula for diverse (len, kernel, stride) cases
 
-/// Valid: output_length = (input_len - kernel) / stride + 1.
-/// Multiple parameterized cases verified via forward output shape.
+/// Valid output length is (input_len - kernel) / stride + 1 across parameterized cases
 #[test]
 fn conv1d_valid_output_length_cases() {
     // (input_len, kernel, stride, expected_out_len)
@@ -1568,11 +1449,9 @@ fn conv1d_valid_output_length_cases() {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv1D — Same output length = ceil(input_len / stride) for diverse cases
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv1D - Same output length = ceil(input_len / stride) for diverse cases
 
-/// Same: output_length = ceil(input_len / stride).
+/// Same output length is ceil(input_len / stride) across parameterized cases
 #[test]
 fn conv1d_same_output_length_cases() {
     let cases = [
@@ -1603,9 +1482,7 @@ fn conv1d_same_output_length_cases() {
     }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — Valid output shape for diverse (H, W, kh, kw, sh, sw) cases
-// ══════════════════════════════════════════════════════════════════════════════
+// Conv2D - Valid output shape for diverse (H, W, kh, kw, sh, sw) cases
 
 #[test]
 fn conv2d_valid_output_shape_cases() {
@@ -1639,25 +1516,12 @@ fn conv2d_valid_output_shape_cases() {
         );
     }
 }
-// ══════════════════════════════════════════════════════════════════════════════
-// Conv2D — convolution_engine PARALLEL forward / weight-grad backward branches
-// ══════════════════════════════════════════════════════════════════════════════
-//
-// The engine switches to rayon when the workload reaches CONV_PARALLEL_THRESHOLD
-// (10_000). All other conv tests here are tiny and only exercise the sequential
-// path; these two cross the threshold with the smallest tensors that do so and
-// pin the result to the cross-correlation definition.
+// Conv2D - convolution_engine parallel forward / weight-grad backward branches
 
-/// Parallel FORWARD branch: `batch * filters * out_plane >= 10_000`.
-///
-/// batch=2, filters=2, 1 channel, input [2,1,51,51], all-ones 2x2 kernel, stride 1, Valid.
-///   out_sp = (51-2)/1+1 = 50  →  out_plane = 50*50 = 2500
-///   workload = batch*filters*out_plane = 2*2*2500 = 10_000  (>= 10_000 → parallel)
-///
-/// Input is the ramp x[b,0,i,j] = i + j (identical for both batches). With an all-ones
-/// 2x2 kernel each output sums its 2x2 receptive field:
-///   out[b,0,oh,ow] = (oh+ow) + (oh+ow+1) + (oh+1+ow) + (oh+1+ow+1) = 4*oh + 4*ow + 4
-/// Filter 1 has bias 100, so out[b,1,oh,ow] = out[b,0,oh,ow] + 100.
+// The engine switches to rayon at CONV_PARALLEL_THRESHOLD (10_000); these two tests cross
+// it with the smallest qualifying tensors and pin results to the cross-correlation definition
+
+/// Parallel forward branch (workload batch * filters * out_plane >= 10_000): windowed sums
 #[test]
 fn conv2d_parallel_forward_windowed_sums() {
     let mut layer = Conv2D::new(
@@ -1670,12 +1534,12 @@ fn conv2d_parallel_forward_windowed_sums() {
         None,
     )
     .unwrap();
-    // Both filters: all-ones 2x2 kernel. Bias: filter0=0, filter1=100.
+    // Both filters use an all-ones 2x2 kernel; bias filter0=0, filter1=100
     let weights = Array4::from_elem((2, 1, 2, 2), 1.0f32);
     let bias = Array2::from_shape_vec((1, 2), vec![0.0f32, 100.0]).unwrap();
     layer.set_weights(weights, bias).unwrap();
 
-    // x[b,0,i,j] = i + j, identical across the two batch samples.
+    // x[b,0,i,j] = i + j, identical across the two batch samples
     let mut input = Array4::<f32>::zeros((2, 1, 51, 51));
     for b in 0..2 {
         for i in 0..51 {
@@ -1688,7 +1552,7 @@ fn conv2d_parallel_forward_windowed_sums() {
 
     assert_eq!(output.shape(), &[2, 2, 50, 50]);
 
-    // out[b,0,oh,ow] = 4*oh + 4*ow + 4 ; out[b,1,..] = that + 100. Check both batches.
+    // out[b,0,oh,ow] = 4*oh + 4*ow + 4; out[b,1,..] = that + 100, checked over both batches
     let f0 = |oh: usize, ow: usize| (4 * oh + 4 * ow + 4) as f32;
     for b in 0..2 {
         // corners / edges of filter 0
@@ -1696,7 +1560,7 @@ fn conv2d_parallel_forward_windowed_sums() {
         assert_abs_diff_eq!(output[[b, 0, 0, 1]], f0(0, 1), epsilon = 1e-4f32); // 8
         assert_abs_diff_eq!(output[[b, 0, 1, 0]], f0(1, 0), epsilon = 1e-4f32); // 8
         assert_abs_diff_eq!(output[[b, 0, 49, 49]], f0(49, 49), epsilon = 1e-4f32); // 396
-        // filter 1 is filter 0 + bias 100
+        // filter 1 = filter 0 + bias 100
         assert_abs_diff_eq!(output[[b, 1, 0, 0]], f0(0, 0) + 100.0, epsilon = 1e-4f32); // 104
         assert_abs_diff_eq!(
             output[[b, 1, 49, 49]],
@@ -1706,19 +1570,7 @@ fn conv2d_parallel_forward_windowed_sums() {
     }
 }
 
-/// Parallel WEIGHT-GRADIENT backward branch: `batch * out_plane * cin * k_plane >= 10_000`.
-///
-/// batch=4, channels=2, filters=1, input [4,2,14,14], kernel (3,3), stride 1, Valid, Linear.
-///   out_sp = (14-3)/1+1 = 12  →  out_plane = 144,  k_plane = 9,  cin = 2
-///   workload = 4*144*2*9 = 10_368  (>= 10_000 → parallel weight-grad pass)
-///
-/// Ground truth (cross-correlation weight gradient, stride 1, Valid):
-///   dW[0,c,kh,kw] = Σ_b Σ_{oh,ow} grad_out[b,0,oh,ow] * input[b,c, oh+kh, ow+kw]
-/// With input ≡ 1 and grad_out ≡ 1 every term is 1, summed over batch(4)*out_plane(144):
-///   dW[0,c,kh,kw] = 4 * 144 = 576  for every one of the 1*2*3*3 = 18 kernel taps.
-/// With Linear activation the activation backward is the identity, so grad_out reaches the
-/// engine unchanged. The gradient is read back via `parameters()` (weights pushed first),
-/// whose `.grad` slice is the flat row-major [F, Cin, kh, kw] weight gradient.
+/// Parallel weight-gradient backward branch (workload >= 10_000): every kernel tap gets 576
 #[test]
 fn conv2d_parallel_weight_grad_constant_count() {
     let mut layer = Conv2D::new(
@@ -1731,7 +1583,7 @@ fn conv2d_parallel_weight_grad_constant_count() {
         None,
     )
     .unwrap();
-    // Weights are irrelevant to the weight gradient; set all-ones, bias 0, for determinism.
+    // Weights do not affect the weight gradient; all-ones, bias 0, for determinism
     let weights = Array4::from_elem((1, 2, 3, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -1739,11 +1591,11 @@ fn conv2d_parallel_weight_grad_constant_count() {
     let input = Array::ones((4, 2, 14, 14)).into_dyn();
     let _ = layer.forward(&input).unwrap();
 
-    // grad w.r.t. the conv output: all ones, shape [batch, filters, out_h, out_w].
+    // grad w.r.t. the conv output: all ones, shape [batch, filters, out_h, out_w]
     let grad = Array::ones((4, 1, 12, 12)).into_dyn();
     let _input_grad = layer.backward(&grad).unwrap();
 
-    // parameters() returns weights first; its `.grad` is the flat weight gradient.
+    // parameters() returns weights first; its `.grad` is the flat weight gradient
     let params = layer.parameters();
     let weight_grad = params[0].grad;
     assert_eq!(weight_grad.len(), 18, "expected 18 weight-grad entries");

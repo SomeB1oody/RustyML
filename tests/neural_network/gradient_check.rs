@@ -1,9 +1,9 @@
-//! Numerical (finite-difference) gradient checks for layer backward passes.
+//! Numerical (finite-difference) gradient checks for layer backward passes
 //!
-//! For each layer we set `L = sum(output)`, so `dL/dx = backward(ones)`. We then compare that
-//! analytic input gradient against a central finite-difference estimate of `dL/dx`. This catches
-//! gradient bugs that shape-only or "loss decreased" convergence tests miss — in particular it
-//! guards the SimpleRNN BPTT per-timestep activation-derivative fix.
+//! For each layer, L = sum(output), so dL/dx = backward(ones). The analytic input gradient is
+//! compared against a central finite-difference estimate of dL/dx, catching gradient bugs that
+//! shape-only or "loss decreased" convergence tests miss - in particular the SimpleRNN BPTT
+//! per-timestep activation-derivative fix
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
@@ -41,9 +41,9 @@ use rustyml::neural_network::layers::regularization::normalization::layer_normal
 };
 use rustyml::neural_network::traits::Layer;
 
-/// Compares `layer.backward(ones)` against a central finite-difference estimate of `d sum(output)/dx`.
+/// Compares `layer.backward(ones)` against a central finite-difference estimate of d sum(output)/dx
 fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
-    // Analytic input gradient: with L = sum(output), dL/dx = backward(ones).
+    // Analytic input gradient: with L = sum(output), dL/dx = backward(ones)
     let out = layer.forward(x).unwrap();
     let upstream = Tensor::ones(out.raw_dim());
     let analytic = layer.backward(&upstream).unwrap();
@@ -76,7 +76,7 @@ fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
 
 #[test]
 fn dense_input_gradient_matches_finite_difference() {
-    // Linear activation keeps the layer smooth (no ReLU kink at 0).
+    // Linear activation keeps the layer smooth (no ReLU kink at 0)
     let mut dense = Dense::new(3, 2, Linear::new(), None).unwrap();
     let x = Array::from_shape_vec((4, 3), (0..12).map(|v| 0.1 * v as f32 - 0.5).collect())
         .unwrap()
@@ -108,7 +108,7 @@ fn conv2d_input_gradient_matches_finite_difference() {
 #[test]
 fn conv1d_input_gradient_matches_finite_difference() {
     // Linear activation makes the convolution exactly linear in its input, so the central
-    // finite-difference estimate matches the analytic gradient tightly.
+    // finite-difference estimate matches the analytic gradient tightly
     let mut conv = Conv1D::new(
         2,
         2,
@@ -170,9 +170,8 @@ fn separable_conv2d_input_gradient_matches_finite_difference() {
 
 #[test]
 fn separable_conv2d_same_padding_input_gradient_matches_finite_difference() {
-    // A 3×3 kernel under `Same` adds leading padding. This guards that backward accumulates the
-    // input gradient in padded coordinates and strips the padding, staying consistent with the
-    // padded forward pass (a backward that still clipped would diverge from finite differences).
+    // A 3x3 kernel under `Same` adds leading padding; guards that backward accumulates the input
+    // gradient in padded coordinates and strips the padding, consistent with the padded forward pass
     let mut conv = SeparableConv2D::new(
         2,
         (3, 3),
@@ -195,7 +194,7 @@ fn separable_conv2d_same_padding_input_gradient_matches_finite_difference() {
 
 #[test]
 fn depthwise_conv2d_input_gradient_matches_finite_difference() {
-    // `new` Xavier-initializes the weights, so the layer is a genuine (non-constant) map.
+    // `new` Xavier-initializes the weights, so the layer is a genuine (non-constant) map
     let mut conv = DepthwiseConv2D::new(
         2,
         (2, 2),
@@ -217,8 +216,8 @@ fn depthwise_conv2d_input_gradient_matches_finite_difference() {
 
 #[test]
 fn simple_rnn_input_gradient_matches_finite_difference() {
-    // Multi-timestep + Tanh: this fails if BPTT reuses a single stale activation cache, so it
-    // directly guards the per-timestep activation-derivative fix.
+    // Multi-timestep + Tanh: fails if BPTT reuses a single stale activation cache, so it guards
+    // the per-timestep activation-derivative fix
     let mut rnn = SimpleRNN::new(2, 3, Tanh::new(), None).unwrap();
     let x = Array::from_shape_vec((1, 3, 2), vec![0.3, -0.6, 0.9, -0.2, 0.5, -0.8])
         .unwrap()
@@ -229,8 +228,7 @@ fn simple_rnn_input_gradient_matches_finite_difference() {
 #[test]
 fn lstm_input_gradient_matches_finite_difference() {
     // Design A: the configurable activation is the per-timestep candidate AND cell-state
-    // nonlinearity. This finite-difference check guards the BPTT through both activation
-    // derivatives (a stale or wrong derivative here would fail).
+    // nonlinearity; guards BPTT through both activation derivatives
     let mut lstm = LSTM::new(2, 3, Tanh::new(), None).unwrap();
     let x = Array::from_shape_vec((1, 3, 2), vec![0.3, -0.6, 0.9, -0.2, 0.5, -0.8])
         .unwrap()
@@ -240,7 +238,7 @@ fn lstm_input_gradient_matches_finite_difference() {
 
 #[test]
 fn gru_input_gradient_matches_finite_difference() {
-    // Design A: the configurable activation is the per-timestep candidate nonlinearity.
+    // Design A: the configurable activation is the per-timestep candidate nonlinearity
     let mut gru = GRU::new(2, 3, Tanh::new(), None).unwrap();
     let x = Array::from_shape_vec((1, 3, 2), vec![0.3, -0.6, 0.9, -0.2, 0.5, -0.8])
         .unwrap()
@@ -259,14 +257,14 @@ fn batch_normalization_input_gradient_matches_finite_difference() {
     )
     .unwrap()
     .into_dyn();
-    // Batch-norm gradients are more sensitive, so use a slightly looser tolerance.
+    // Batch-norm gradients are more sensitive, so use a slightly looser tolerance
     check_input_gradient(&mut bn, &x, 1e-3, 5e-2);
 }
 
 #[test]
 fn conv1d_same_padding_output_length_is_ceil_of_input() {
     // `Same` padding output length must be ceil(input_len / stride), computed from the ORIGINAL
-    // (unpadded) length — not from the padded buffer.
+    // (unpadded) length, not from the padded buffer
     let cases = [
         // (input_len, kernel, stride, expected_out_len)
         (10usize, 3usize, 1usize, 10usize),
@@ -298,19 +296,19 @@ fn conv1d_same_padding_output_length_is_ceil_of_input() {
     }
 }
 
-/// Compares the analytic parameter gradients (from `layer.parameters()` after `backward(ones)`)
-/// against a central finite-difference estimate of `d sum(output)/d param`.
+/// Compares analytic parameter gradients (from `layer.parameters()` after `backward(ones)`) against
+/// a central finite-difference estimate of d sum(output)/d param
 ///
-/// This is generic over any trainable layer: `parameters()` exposes each weight/bias tensor as a
-/// flat `(value, grad)` slice pair, so we perturb each value in place and re-run the forward pass.
-/// It complements [`check_input_gradient`] by guarding the *weight* gradient paths (e.g. the
-/// parallelized SeparableConv2D backward).
+/// Generic over any trainable layer: `parameters()` exposes each weight/bias tensor as a flat
+/// `(value, grad)` slice pair, so each value is perturbed in place and the forward pass re-run
+/// Complements [`check_input_gradient`] by guarding the weight gradient paths (e.g. the
+/// parallelized SeparableConv2D backward)
 fn check_weight_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
     let out = layer.forward(x).unwrap();
     let upstream = Tensor::ones(out.raw_dim());
     layer.backward(&upstream).unwrap();
 
-    // Snapshot each parameter tensor's current values and analytic gradients.
+    // Snapshot each parameter tensor's current values and analytic gradients
     let params: Vec<(Vec<f32>, Vec<f32>)> = layer
         .parameters()
         .into_iter()
@@ -323,7 +321,7 @@ fn check_weight_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) 
             let orig = values[i];
 
             // `parameters()[p_idx].value` is a mutable view into the live weight array, so writing
-            // through it perturbs the actual parameter; the temporary Vec is only a handle.
+            // through it perturbs the actual parameter; the temporary Vec is only a handle
             layer.parameters()[p_idx].value[i] = orig + eps;
             let l_plus: f32 = layer.forward(x).unwrap().sum();
 
@@ -431,8 +429,8 @@ fn separable_conv2d_weight_gradient_matches_finite_difference() {
 
 #[test]
 fn separable_conv2d_same_padding_weight_gradient_matches_finite_difference() {
-    // Companion to the `Same` input-gradient check: a 3×3 kernel with leading padding guards that
-    // the depthwise weight gradient is accumulated against the padded input.
+    // Companion to the `Same` input-gradient check: a 3x3 kernel with leading padding guards that
+    // the depthwise weight gradient is accumulated against the padded input
     let mut conv = SeparableConv2D::new(
         2,
         (3, 3),
@@ -474,35 +472,26 @@ fn depthwise_conv2d_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Weighted-loss gradient checks.
-//
-// The `*_ones` helpers above use L = sum(output), i.e. an all-ones upstream gradient. That is
-// DEGENERATE for layers whose output-sum is constant in the input: softmax rows always sum to 1,
-// and zero-mean normalizers (Layer/Group/Instance/BatchNorm with γ=1, β=0) sum to ~0 — so
-// `backward(ones)` is ~0 and the check validates nothing. To exercise those gradients we use a
-// non-uniform weighted loss L = sum(W ⊙ output), whose upstream gradient is the fixed weight
-// tensor W. This is non-degenerate for every layer and strictly more discriminating (different
-// output positions carry different weights, so a mis-routed gradient is caught).
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Weighted-loss gradient checks: L = sum(output) is degenerate where the output-sum is constant in
+// the input (softmax, zero-mean normalizers), so a weighted loss L = sum(W * output) is used instead
 
-/// A fixed, non-uniform weight tensor shaped like `like`, with all entries in [0.7, 1.3].
+/// A fixed, non-uniform weight tensor shaped like `like`, with all entries in [0.7, 1.3]
 fn loss_weights(like: &Tensor) -> Tensor {
     let n = like.len();
     let flat: Vec<f32> = (0..n).map(|k| 1.0 + 0.1 * ((k % 7) as f32 - 3.0)).collect();
     Tensor::from_shape_vec(like.raw_dim(), flat).unwrap()
 }
 
-/// A tensor of distinct, well-separated values (gap 0.5 ≫ eps), so max-pooling argmax positions are
-/// unambiguous and never flip under a finite-difference perturbation.
+/// A tensor of distinct, well-separated values (gap 0.5 >> eps), so max-pooling argmax positions are
+/// unambiguous and never flip under a finite-difference perturbation
 fn ramp(shape: &[usize]) -> Tensor {
     let n: usize = shape.iter().product();
     let data: Vec<f32> = (0..n).map(|v| 0.5 * v as f32 - 0.25 * n as f32).collect();
     Array::from_shape_vec(shape.to_vec(), data).unwrap()
 }
 
-/// Like [`check_input_gradient`] but with a weighted loss L = sum(W ⊙ output), so it is
-/// non-degenerate for softmax and zero-mean normalization layers.
+/// Like [`check_input_gradient`] but with a weighted loss L = sum(W * output), so it is
+/// non-degenerate for softmax and zero-mean normalization layers
 fn check_input_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
     let out = layer.forward(x).unwrap();
     let w = loss_weights(&out);
@@ -533,8 +522,8 @@ fn check_input_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, to
     }
 }
 
-// ── Softmax: the Jacobian-vector backward. L = sum(output) is degenerate (rows sum to 1), so this
-//    MUST use the weighted loss — it is the test that actually exercises a[i]*(g[i] - Σ a·g). ──
+// Softmax: the Jacobian-vector backward. L = sum(output) is degenerate (rows sum to 1), so this
+// must use the weighted loss - it actually exercises a[i]*(g[i] - sum(a * g))
 #[test]
 fn softmax_input_gradient_matches_finite_difference() {
     let mut softmax = Softmax::new();
@@ -544,7 +533,7 @@ fn softmax_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut softmax, &x, 1e-3, 2e-2);
 }
 
-// ── Pooling layers (no trainable parameters → input gradient only). ──
+// Pooling layers (no trainable parameters -> input gradient only)
 
 #[test]
 fn max_pooling_1d_input_gradient_matches_finite_difference() {
@@ -630,9 +619,8 @@ fn global_average_pooling_3d_input_gradient_matches_finite_difference() {
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
-// ── Convolution with `Same` padding: a different backward code path than `Valid` (the existing
-//    conv checks all use `Valid`). These reuse the ones-based helpers (conv output sum is not
-//    constant, so it is non-degenerate). Odd kernels keep the padding symmetric. ──
+// Convolution with `Same` padding: a different backward code path than `Valid` (existing conv checks
+// all use `Valid`). Ones-based helpers suffice (conv output sum is non-constant); odd kernels keep padding symmetric
 
 #[test]
 fn conv1d_same_padding_input_gradient_matches_finite_difference() {
@@ -754,12 +742,11 @@ fn conv3d_same_padding_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
 }
 
-// ── SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. Complements the
-//    2x2 (asymmetric-padding) Same checks earlier in this file; together they guard the depthwise
-//    zero-padding fix (the stage previously clamped at the border, making `Same` act like `Valid`). ──
+// SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. With the 2x2
+// (asymmetric-padding) Same checks above, guards the depthwise zero-padding fix (the stage previously clamped at the border)
 #[test]
 fn separable_conv2d_same_padding_3x3_dm2_gradients_match_finite_difference() {
-    // 3x3 (symmetric padding) + depth_multiplier=2 — input and weight gradients together.
+    // 3x3 (symmetric padding) + depth_multiplier=2: input and weight gradients together
     let make = || {
         SeparableConv2D::new(
             2,
@@ -783,8 +770,8 @@ fn separable_conv2d_same_padding_3x3_dm2_gradients_match_finite_difference() {
     check_weight_gradient(&mut make(), &x, 1e-3, 3e-2);
 }
 
-// ── Recurrent weight gradients (the existing recurrent checks cover only the INPUT gradient).
-//    BPTT accumulates weight gradients across timesteps, so a per-timestep bug shows up here. ──
+// Recurrent weight gradients (existing recurrent checks cover only the INPUT gradient). BPTT
+// accumulates weight gradients across timesteps, so a per-timestep bug shows up here
 
 #[test]
 fn simple_rnn_weight_gradient_matches_finite_difference() {
@@ -813,9 +800,9 @@ fn gru_weight_gradient_matches_finite_difference() {
     check_weight_gradient(&mut gru, &x, 1e-3, 3e-2);
 }
 
-/// Like [`check_weight_gradient`] but with the weighted loss L = sum(W ⊙ output). Needed for
-/// normalization layers: with γ=1, β=0 the all-ones upstream gives a ~0 γ-gradient (Σ over the
-/// normalization group of the zero-mean normalized values), so the plain check is degenerate.
+/// Like [`check_weight_gradient`] but with the weighted loss L = sum(W * output). Needed for
+/// normalization layers: with gamma=1, beta=0 the all-ones upstream gives a ~0 gamma-gradient (sum
+/// over the normalization group of the zero-mean normalized values), so the plain check is degenerate
 fn check_weight_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
     let out = layer.forward(x).unwrap();
     let w = loss_weights(&out);
@@ -846,13 +833,8 @@ fn check_weight_gradient_weighted(layer: &mut dyn Layer, x: &Tensor, eps: f32, t
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Normalization layers, in TRAINING mode (the default, and the path with the tricky grad_mean /
-// grad_var terms). These use the WEIGHTED loss: with γ=1, β=0 a zero-mean normalizer's output sums
-// to ~0, so an all-ones upstream gives a ~0 gradient that hides bugs. We check BOTH the input
-// gradient and the γ/β weight gradients. (The existing `batch_normalization_input_gradient...` test
-// is, for this reason, degenerate; the weighted version below is the meaningful one.)
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Normalization layers in TRAINING mode (the grad_mean / grad_var path), using the WEIGHTED loss
+// since a zero-mean normalizer's output sums to ~0; checks both input and gamma/beta gradients
 
 #[test]
 fn layer_normalization_default_input_gradient_matches_finite_difference() {

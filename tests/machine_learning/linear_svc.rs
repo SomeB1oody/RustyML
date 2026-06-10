@@ -1,18 +1,15 @@
+//! Integration tests for LinearSVC: constructor validation, fit/predict error
+//! paths, label domain, sign consistency, separable-data correctness, getters,
+//! penalties, save/load round-trip, and random_state reproducibility
+
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::linear_svc::{LinearSVC, RegularizationType};
 
-// ─── helper ────────────────────────────────────────────────────────────────
+// helper
 
-/// Return (x, y) for a perfectly linearly-separable 2-feature problem.
-///
-/// Class 0 (y=0.0): points at x1 = -5, -6, -7, -4  (far left)
-/// Class 1 (y=1.0): points at x1 = +5, +6, +7, +4  (far right)
-///
-/// By construction, a linear classifier need only learn that w[0] > 0 separates
-/// the two classes (the boundary x1=0 separates them with margin 4). We KNOW:
-///   - All class-1 training samples satisfy x·w + b > 0  → predict = 1.0
-///   - All class-0 training samples satisfy x·w + b < 0  → predict = 0.0
+/// Return (x, y) for a perfectly linearly-separable 2-feature problem split by
+/// the boundary x1=0 (class 0 at negative x1, class 1 at positive x1)
 fn make_separable() -> (Array2<f64>, Array1<f64>) {
     let x = Array2::from_shape_vec(
         (8, 2),
@@ -25,8 +22,8 @@ fn make_separable() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Fit a default (L2) LinearSVC on the separable dataset and return the trained
-/// model, using enough iterations that convergence is expected.
+/// Fit a default (L2) LinearSVC on the separable dataset with enough iterations
+/// that convergence is expected, returning the trained model
 fn fit_separable_model() -> LinearSVC {
     let (x, y) = make_separable();
     let mut model =
@@ -35,7 +32,7 @@ fn fit_separable_model() -> LinearSVC {
     model
 }
 
-// ─── constructor validation ────────────────────────────────────────────────
+// constructor validation
 
 #[test]
 fn new_rejects_max_iter_zero() {
@@ -166,14 +163,14 @@ fn new_rejects_penalty_lambda_infinity() {
     );
 }
 
-/// Lambda = 0.0 is explicitly allowed (no regularization).
+/// Lambda = 0.0 is explicitly allowed (no regularization)
 #[test]
 fn new_accepts_zero_penalty_lambda() {
     let result = LinearSVC::new(100, 0.01, RegularizationType::L2(0.0), true, 1e-4, None);
     assert!(result.is_ok(), "L2(0.0) must be accepted");
 }
 
-/// Verify all defaults match documented values.
+/// All defaults match documented values
 #[test]
 fn default_constructor_has_documented_defaults() {
     let model = LinearSVC::default();
@@ -193,7 +190,7 @@ fn default_constructor_has_documented_defaults() {
     );
 }
 
-/// Constructor stores the passed parameters exactly.
+/// Constructor stores the passed parameters exactly
 #[test]
 fn new_stores_parameters() {
     let model = LinearSVC::new(500, 0.005, RegularizationType::L1(0.1), false, 1e-6, None).unwrap();
@@ -204,7 +201,7 @@ fn new_stores_parameters() {
     assert_eq!(model.get_tolerance(), 1e-6);
 }
 
-// ─── fit error paths ───────────────────────────────────────────────────────
+// fit error paths
 
 #[test]
 fn fit_rejects_empty_x() {
@@ -224,8 +221,8 @@ fn fit_rejects_empty_y() {
     let y: Array1<f64> = Array1::zeros(0);
     let mut model = LinearSVC::default();
     let result = model.fit(&x, &y);
-    // preliminary_check fires dimension mismatch (y.len()=0 != x.nrows()=3)
-    // or EmptyInput depending on which guard fires first — either is valid
+    // Either DimensionMismatch (y.len()=0 != x.nrows()=3) or EmptyInput is valid,
+    // depending on which guard fires first
     assert!(result.is_err(), "mismatched empty y must return an error");
 }
 
@@ -266,7 +263,7 @@ fn fit_rejects_infinite_in_x() {
     );
 }
 
-// ─── predict / decision_function error paths ──────────────────────────────
+// predict / decision_function error paths
 
 #[test]
 fn predict_not_fitted_returns_not_fitted_error() {
@@ -337,7 +334,7 @@ fn predict_empty_input_after_fit_returns_error() {
     );
 }
 
-// ─── output label domain: must be exactly 0.0 or 1.0 ─────────────────────
+// output label domain: must be exactly 0.0 or 1.0
 
 #[test]
 fn predict_labels_are_in_zero_one_domain() {
@@ -352,13 +349,8 @@ fn predict_labels_are_in_zero_one_domain() {
     }
 }
 
-// ─── sign-consistency invariant ───────────────────────────────────────────
-//
-// CONTRACT: predict(x)==1.0  iff  decision_function(x)>0.0
-//           predict(x)==0.0  iff  decision_function(x)<=0.0
-//
-// This is enforced by the source:
-//   Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
+// sign-consistency invariant
+// Contract: predict(x)==1.0 iff decision_function(x)>0.0, else predict(x)==0.0
 
 #[test]
 fn sign_consistency_on_training_data() {
@@ -378,11 +370,8 @@ fn sign_consistency_on_training_data() {
 
 #[test]
 fn sign_consistency_on_new_points() {
-    // Craft points we know the sign for independently:
-    //   [+10, 0] → should score > 0 → class 1
-    //   [-10, 0] → should score < 0 → class 0
-    // We verify the invariant holds, not a hardcoded class value, because the
-    // classifier might flip the sign axis — but both samples must be consistent.
+    // [+10, 0] should score > 0 (class 1), [-10, 0] should score < 0 (class 0);
+    // assert the invariant rather than a hardcoded class, since the sign axis may flip
     let model = fit_separable_model();
     let x_new = Array2::from_shape_vec((2, 2), vec![10.0, 0.0, -10.0, 0.0]).unwrap();
     let preds = model.predict(&x_new).unwrap();
@@ -397,12 +386,10 @@ fn sign_consistency_on_new_points() {
     }
 }
 
-// ─── correctness on separable data ────────────────────────────────────────
+// correctness on separable data
 
-/// On perfectly linearly-separable data the classifier must predict the true
-/// class for EVERY training sample.  We know the true classes by construction,
-/// and we use a generous tolerance + iteration budget so convergence is
-/// reliable.
+/// On perfectly linearly-separable data the classifier predicts the true class
+/// for every training sample
 #[test]
 fn predicts_all_training_samples_correctly_on_separable_data() {
     let (x, y) = make_separable();
@@ -420,20 +407,20 @@ fn predicts_all_training_samples_correctly_on_separable_data() {
     }
 }
 
-/// Fit-predict convenience method must agree with fit+predict on same data.
+/// fit_predict agrees with fit then predict on the same data
 #[test]
 fn fit_predict_agrees_with_fit_then_predict() {
     let (x, y) = make_separable();
-    // model A: fit_predict
+    // model A uses fit_predict
     let mut model_a =
         LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5, None).unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
-    // model B: fit then predict on same data
+    // model B uses fit then predict on the same data
     let preds_b = model_a.predict(&x).unwrap();
     assert_eq!(preds_a, preds_b, "fit_predict and fit→predict must agree");
 }
 
-// ─── getters after fit ────────────────────────────────────────────────────
+// getters after fit
 
 #[test]
 fn getters_are_some_after_fit() {
@@ -471,8 +458,7 @@ fn n_iter_is_in_valid_range() {
     );
 }
 
-/// With very tight tolerance and lots of iterations on well-separated data,
-/// early stopping should fire before max_iter is exhausted.
+/// Early stopping fires before max_iter on well-separated data with tight tolerance
 #[test]
 fn convergence_stops_before_max_iter_on_separable_data() {
     let max_iter = 50_000usize;
@@ -498,7 +484,7 @@ fn convergence_stops_before_max_iter_on_separable_data() {
 fn weights_have_correct_dimensionality() {
     let model = fit_separable_model();
     let weights = model.get_weights().unwrap();
-    // Training data has 2 features → weight vector must have length 2
+    // Training data has 2 features, so the weight vector must have length 2
     assert_eq!(
         weights.len(),
         2,
@@ -506,13 +492,12 @@ fn weights_have_correct_dimensionality() {
     );
 }
 
-// ─── fit_intercept = false ────────────────────────────────────────────────
+// fit_intercept = false
 
-/// When fit_intercept=false the bias is never updated and must remain 0.0.
+/// When fit_intercept=false the bias is never updated and stays 0.0
 #[test]
 fn fit_intercept_false_bias_stays_zero() {
-    // Use data centred at origin so the zero-bias model can still solve the
-    // problem: class 0 at negative x1, class 1 at positive x1.
+    // Data centred at origin lets the zero-bias model solve the problem
     let (x, y) = make_separable();
     let mut model = LinearSVC::new(
         5000,
@@ -531,8 +516,7 @@ fn fit_intercept_false_bias_stays_zero() {
     );
 }
 
-/// When fit_intercept=false, decision_function(x) = x · weights exactly
-/// (bias is 0.0 and therefore adds nothing).
+/// When fit_intercept=false, decision_function(x) = x . weights exactly (bias is 0.0)
 #[test]
 fn fit_intercept_false_decision_function_equals_dot_product() {
     let (x, y) = make_separable();
@@ -556,10 +540,10 @@ fn fit_intercept_false_decision_function_equals_dot_product() {
     }
 }
 
-// ─── L1 vs L2 penalty produce different weight vectors ────────────────────
+// L1 vs L2 penalty produce different weight vectors
 
-/// L1 and L2 penalties with the same lambda on the same data must yield
-/// different weight vectors (the regularization gradient is different for each).
+/// L1 and L2 penalties with the same lambda on the same data yield different
+/// weight vectors
 #[test]
 fn l1_and_l2_penalties_produce_different_weights() {
     let (x, y) = make_separable();
@@ -580,16 +564,12 @@ fn l1_and_l2_penalties_produce_different_weights() {
     );
 }
 
-/// Strong L1 regularization on this 2-feature dataset (only feature 0 matters)
-/// should drive the irrelevant feature (feature 1, all zeros) toward zero.
-/// We verify that |w_l1[1]| < |w_l1[0]| — the relevant feature dominates.
-/// (We cannot assert exact zero since SGD may not fully converge, but the
-/// irrelevant feature must be closer to zero than the relevant one.)
+/// Strong L1 keeps the irrelevant feature (column 1, all zeros) smaller in
+/// magnitude than the relevant feature: |w[1]| < |w[0]|
 #[test]
 fn l1_sparsity_irrelevant_feature_closer_to_zero() {
     let (x, y) = make_separable();
-    // x column 1 is all zeros — it carries no information.
-    // A strong L1 penalty should shrink w[1] toward zero.
+    // x column 1 is all zeros, so a strong L1 penalty shrinks w[1] toward zero
     let mut model = LinearSVC::new(
         10_000,
         0.001,
@@ -610,7 +590,7 @@ fn l1_sparsity_irrelevant_feature_closer_to_zero() {
     );
 }
 
-// ─── save / load round-trip ───────────────────────────────────────────────
+// save / load round-trip
 
 #[test]
 fn save_load_round_trip_yields_identical_predictions() {
@@ -630,7 +610,7 @@ fn save_load_round_trip_yields_identical_predictions() {
         "loaded model must produce identical predictions"
     );
 
-    // Verify decision scores are also bit-identical after round-trip.
+    // Decision scores are also bit-identical after round-trip
     let scores_orig = model.decision_function(&x).unwrap();
     let scores_loaded = loaded.decision_function(&x).unwrap();
     for i in 0..scores_orig.len() {
@@ -642,7 +622,6 @@ fn save_load_round_trip_yields_identical_predictions() {
         );
     }
 
-    // Clean up
     let _ = std::fs::remove_file(path);
 }
 
@@ -672,12 +651,10 @@ fn save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// ─── correctness invariant: class-1 must be on positive side ──────────────
+// correctness invariant: class-1 must be on positive side
 
-/// After training on fully separable data with the designed dataset, we verify
-/// that all class-1 samples score positively and all class-0 samples score
-/// negatively (the margin is large enough that a converged linear SVC must
-/// separate them).
+/// On separable data, all class-1 samples score positive and all class-0 samples
+/// score negative
 #[test]
 fn class_one_samples_score_positive_class_zero_samples_score_negative() {
     let (x, y) = make_separable();
@@ -687,9 +664,8 @@ fn class_one_samples_score_positive_class_zero_samples_score_negative() {
 
     let scores = model.decision_function(&x).unwrap();
 
-    // First 4 samples: true class 0 (y=0.0), last 4: true class 1 (y=1.0)
-    // Since the data is fully separable with large margin, all should be
-    // correctly placed on their respective sides of the hyperplane.
+    // First 4 samples are class 0, last 4 are class 1; the large margin means all
+    // land on their respective sides of the hyperplane
     let mut all_correct = true;
     for i in 0..4 {
         if scores[i] >= 0.0 {
@@ -709,7 +685,7 @@ fn class_one_samples_score_positive_class_zero_samples_score_negative() {
     );
 }
 
-// ─── decision_function returns finite values ──────────────────────────────
+// decision_function returns finite values
 
 #[test]
 fn decision_function_returns_finite_values() {
@@ -721,14 +697,12 @@ fn decision_function_returns_finite_values() {
     }
 }
 
-// ─── reproducibility via random_state ──────────────────────────────────────
-//
-// Training shuffles the sample indices once per epoch to form minibatches. With
-// 200 samples the batch size is clamp(200/10, 32, 512) = 32, so ~7 minibatches
-// form and the shuffle order genuinely affects the trained weights — which makes
-// this a real test of the random_state seeding rather than a no-op.
+// reproducibility via random_state
 
-/// 200 deterministic, roughly-separable samples (no RNG needed in the test).
+// Training shuffles sample indices each epoch to form minibatches (batch size 32
+// here), so the shuffle order affects the trained weights and the seed matters
+
+/// 200 deterministic, roughly-separable samples
 fn make_many() -> (Array2<f64>, Array1<f64>) {
     let n = 200;
     let mut x = Array2::zeros((n, 2));
@@ -742,7 +716,7 @@ fn make_many() -> (Array2<f64>, Array1<f64>) {
     (x, y)
 }
 
-/// Two models trained with the SAME seed must produce bit-identical weights/bias.
+/// Two models trained with the same seed produce bit-identical weights and bias
 #[test]
 fn same_random_state_is_reproducible() {
     let (x, y) = make_many();
@@ -773,8 +747,7 @@ fn same_random_state_is_reproducible() {
     );
 }
 
-/// Different seeds drive different minibatch orders, so on this data the trained
-/// weights must differ — proving the shuffle (and therefore the seed) is wired in.
+/// Different seeds drive different minibatch orders, so the trained weights differ
 #[test]
 fn different_random_state_changes_result() {
     let (x, y) = make_many();
@@ -797,25 +770,13 @@ fn different_random_state_changes_result() {
         "different seeds should produce different weights on this dataset"
     );
 }
-// ─── in-training weight-explosion guard (check_weights_validity) ───────────
+// in-training weight-explosion guard (check_weights_validity)
 
-/// A huge but finite learning rate on large-magnitude finite features must trip
-/// the in-training weight-explosion guard `check_weights_validity` and surface
-/// `Error::NonFinite`.
-///
-/// Derivation (not by running the model):
-/// - The data is finite (so `preliminary_check` passes) and `learning_rate =
-///   f64::MAX` is positive and finite (so the constructor passes). Any
-///   `NonFinite` therefore comes only from the in-training guard at the end of
-///   the batch loop (`Self::check_weights_validity(&weights, bias)?`).
-/// - On the very first batch, `weight_grad_sum` has magnitude on the order of
-///   |x| ≈ 1e8 summed over the batch. The update
-///   `w ← 0 + weight_grad_sum * (f64::MAX / batch_len)` overflows to ±∞, and the
-///   subsequent L2 step `w * (1 - f64::MAX * lambda)` keeps it non-finite. The
-///   guard then returns `NonFinite`.
+/// A huge but finite learning rate on large-magnitude finite features trips the
+/// in-training weight-explosion guard and surfaces Error::NonFinite
 #[test]
 fn fit_huge_learning_rate_on_large_finite_data_returns_non_finite() {
-    // Balanced, separable, *large-magnitude* finite data.
+    // Balanced, separable, large-magnitude finite data
     let x = Array2::from_shape_vec(
         (8, 2),
         vec![
@@ -844,25 +805,10 @@ fn fit_huge_learning_rate_on_large_finite_data_returns_non_finite() {
     );
 }
 
-// ─── decision_function applies a NON-zero fitted bias (fit_intercept=true) ──
+// decision_function applies a non-zero fitted bias (fit_intercept=true)
 
-/// Asymmetric, separable, origin-shifted data forces a NON-zero trained bias;
-/// `decision_function(x)[i]` must then equal `x.row(i)·weights + bias` using the
-/// model's OWN getters — proving the intercept is actually applied (the existing
-/// numeric df test forces bias==0 with fit_intercept=false).
-///
-/// Design / ground truth:
-/// - All points sit at positive x1 (class 0 at x1∈{8,9,10,11}, class 1 at
-///   x1∈{14,15,16,17}), x2=0 carries no information. A hyperplane through the
-///   origin `w0*x1` would give EVERY point the same sign (all x1>0), so it
-///   cannot separate the classes: a correct boundary at x1≈12.5 requires
-///   `w0*12.5 + b = 0` ⇒ `b ≈ -12.5*w0 ≠ 0`. The bias is unregularized (the L2
-///   step scales only `weights`), so with 10_000 iterations it grows to order
-///   ~10 — far above the 1e-6 floor we assert. This is a geometric necessity,
-///   not an impl-traced number.
-/// - The decision function is defined as `X·w + b`; the test recomputes that
-///   per-row from the model's getters and checks equality, which only passes
-///   if the source adds the (non-zero) intercept.
+/// Origin-shifted separable data forces a non-zero trained bias, so
+/// decision_function(x)[i] must equal x.row(i).weights + bias from the getters
 #[test]
 fn decision_function_applies_nonzero_fitted_bias() {
     let x = Array2::from_shape_vec(
@@ -889,8 +835,8 @@ fn decision_function_applies_nonzero_fitted_bias() {
     let weights = model.get_weights().unwrap().clone();
     let bias = model.get_bias().unwrap();
 
-    // The shifted boundary forces a clearly non-zero intercept — this is what
-    // makes the identity below a real test of "the bias is applied".
+    // The shifted boundary forces a clearly non-zero intercept, which makes the
+    // identity below a real test that the bias is applied
     assert!(
         bias.abs() > 1e-6,
         "origin-shifted separable data must yield a non-zero bias, got {bias}"

@@ -1,10 +1,7 @@
-//! Integration tests for `LogisticRegression` and `generate_polynomial_features`.
+//! Integration tests for `LogisticRegression` and `generate_polynomial_features`
 //!
-//! Every expected value is derived from the problem design or a closed-form
-//! computation — never by running the model and recording its output.
-//!
-//! Label contract: `predict` returns `Array1<i32>` with values in {0, 1}.
-//! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0).
+//! Label contract: `predict` returns `Array1<i32>` with values in {0, 1};
+//! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0)
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -16,10 +13,9 @@ use rustyml::machine_learning::logistic_regression::{
 
 use crate::common::assert_allclose;
 
-// ── Constructor validation ──────────────────────────────────────────────────
+// Constructor validation
 
-/// Zero learning rate is rejected with InvalidParameter.
-/// Contract: validate_learning_rate rejects lr <= 0.0.
+/// Zero learning rate is rejected with InvalidParameter
 #[test]
 fn new_zero_learning_rate_is_invalid() {
     let result = LogisticRegression::new(true, 0.0, 100, 1e-4, None);
@@ -30,7 +26,7 @@ fn new_zero_learning_rate_is_invalid() {
     );
 }
 
-/// Negative learning rate is rejected with InvalidParameter.
+/// Negative learning rate is rejected with InvalidParameter
 #[test]
 fn new_negative_learning_rate_is_invalid() {
     let result = LogisticRegression::new(true, -0.01, 100, 1e-4, None);
@@ -41,7 +37,7 @@ fn new_negative_learning_rate_is_invalid() {
     );
 }
 
-/// NaN learning rate is rejected with InvalidParameter.
+/// NaN learning rate is rejected with InvalidParameter
 #[test]
 fn new_nan_learning_rate_is_invalid() {
     let result = LogisticRegression::new(true, f64::NAN, 100, 1e-4, None);
@@ -52,7 +48,7 @@ fn new_nan_learning_rate_is_invalid() {
     );
 }
 
-/// Infinite learning rate is rejected with InvalidParameter.
+/// Infinite learning rate is rejected with InvalidParameter
 #[test]
 fn new_inf_learning_rate_is_invalid() {
     let result = LogisticRegression::new(true, f64::INFINITY, 100, 1e-4, None);
@@ -63,7 +59,7 @@ fn new_inf_learning_rate_is_invalid() {
     );
 }
 
-/// max_iterations = 0 is rejected with InvalidParameter.
+/// max_iterations = 0 is rejected with InvalidParameter
 #[test]
 fn new_zero_max_iterations_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 0, 1e-4, None);
@@ -74,7 +70,7 @@ fn new_zero_max_iterations_is_invalid() {
     );
 }
 
-/// Tolerance = 0.0 is rejected (must be strictly positive).
+/// Tolerance = 0.0 is rejected (must be strictly positive)
 #[test]
 fn new_zero_tolerance_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 100, 0.0, None);
@@ -85,7 +81,7 @@ fn new_zero_tolerance_is_invalid() {
     );
 }
 
-/// Negative tolerance is rejected with InvalidParameter.
+/// Negative tolerance is rejected with InvalidParameter
 #[test]
 fn new_negative_tolerance_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 100, -1e-4, None);
@@ -96,7 +92,7 @@ fn new_negative_tolerance_is_invalid() {
     );
 }
 
-/// Negative L1 alpha is rejected with InvalidParameter.
+/// Negative L1 alpha is rejected with InvalidParameter
 #[test]
 fn new_negative_l1_alpha_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 100, 1e-4, Some(RegularizationType::L1(-0.5)));
@@ -107,7 +103,7 @@ fn new_negative_l1_alpha_is_invalid() {
     );
 }
 
-/// Negative L2 alpha is rejected with InvalidParameter.
+/// Negative L2 alpha is rejected with InvalidParameter
 #[test]
 fn new_negative_l2_alpha_is_invalid() {
     let result = LogisticRegression::new(true, 0.1, 100, 1e-4, Some(RegularizationType::L2(-1.0)));
@@ -118,7 +114,7 @@ fn new_negative_l2_alpha_is_invalid() {
     );
 }
 
-/// NaN L2 alpha is rejected with InvalidParameter.
+/// NaN L2 alpha is rejected with InvalidParameter
 #[test]
 fn new_nan_l2_alpha_is_invalid() {
     let result =
@@ -130,7 +126,7 @@ fn new_nan_l2_alpha_is_invalid() {
     );
 }
 
-/// Valid constructor parameters succeed and getters return stored values.
+/// Valid constructor parameters succeed and getters return stored values
 #[test]
 fn new_valid_params_succeeds_getters_correct() {
     let model = LogisticRegression::new(false, 0.05, 200, 1e-5, Some(RegularizationType::L2(0.1)))
@@ -151,7 +147,7 @@ fn new_valid_params_succeeds_getters_correct() {
     assert!(model.get_actual_iterations().is_none());
 }
 
-/// Default model has correct parameter values.
+/// Default model has correct parameter values
 #[test]
 fn default_model_has_correct_params() {
     let model = LogisticRegression::default();
@@ -163,9 +159,9 @@ fn default_model_has_correct_params() {
     assert!(model.get_weights().is_none());
 }
 
-// ── Fit validation error paths ─────────────────────────────────────────────
+// Fit validation error paths
 
-/// Empty input data returns EmptyInput.
+/// Empty input data returns EmptyInput
 #[test]
 fn fit_empty_x_returns_empty_input() {
     let mut model = LogisticRegression::default();
@@ -177,7 +173,7 @@ fn fit_empty_x_returns_empty_input() {
     );
 }
 
-/// NaN in x returns NonFinite.
+/// NaN in x returns NonFinite
 #[test]
 fn fit_nan_in_x_returns_non_finite() {
     let mut model = LogisticRegression::default();
@@ -189,7 +185,7 @@ fn fit_nan_in_x_returns_non_finite() {
     );
 }
 
-/// Infinity in x returns NonFinite.
+/// Infinity in x returns NonFinite
 #[test]
 fn fit_inf_in_x_returns_non_finite() {
     let mut model = LogisticRegression::default();
@@ -201,8 +197,7 @@ fn fit_inf_in_x_returns_non_finite() {
     );
 }
 
-/// Mismatched x rows and y length returns DimensionMismatch.
-/// x has 3 rows, y has 2 elements.
+/// Mismatched x rows (3) and y length (2) returns DimensionMismatch
 #[test]
 fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
     let mut model = LogisticRegression::default();
@@ -214,8 +209,7 @@ fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
     );
 }
 
-/// y containing 0.5 (non-binary) returns InvalidInput.
-/// Contract: fit rejects values other than 0.0 and 1.0.
+/// y containing 0.5 (non-binary) returns InvalidInput
 #[test]
 fn fit_non_binary_label_half_returns_invalid_input() {
     let mut model = LogisticRegression::default();
@@ -227,7 +221,7 @@ fn fit_non_binary_label_half_returns_invalid_input() {
     );
 }
 
-/// y containing 2.0 (non-binary) returns InvalidInput.
+/// y containing 2.0 (non-binary) returns InvalidInput
 #[test]
 fn fit_non_binary_label_two_returns_invalid_input() {
     let mut model = LogisticRegression::default();
@@ -239,8 +233,7 @@ fn fit_non_binary_label_two_returns_invalid_input() {
     );
 }
 
-/// y containing -1.0 (non-binary) returns InvalidInput.
-/// This confirms the label domain is strictly {0, 1}, not {-1, +1}.
+/// y containing -1.0 returns InvalidInput: label domain is strictly {0, 1}, not {-1, +1}
 #[test]
 fn fit_non_binary_label_minus_one_returns_invalid_input() {
     let mut model = LogisticRegression::default();
@@ -252,9 +245,9 @@ fn fit_non_binary_label_minus_one_returns_invalid_input() {
     );
 }
 
-// ── Predict / predict_proba error paths ────────────────────────────────────
+// Predict / predict_proba error paths
 
-/// predict on an unfitted model returns NotFitted.
+/// predict on an unfitted model returns NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
     let model = LogisticRegression::default();
@@ -265,7 +258,7 @@ fn predict_before_fit_returns_not_fitted() {
     );
 }
 
-/// predict_proba on an unfitted model returns NotFitted.
+/// predict_proba on an unfitted model returns NotFitted
 #[test]
 fn predict_proba_before_fit_returns_not_fitted() {
     let model = LogisticRegression::default();
@@ -276,17 +269,16 @@ fn predict_proba_before_fit_returns_not_fitted() {
     );
 }
 
-/// predict with wrong number of features returns DimensionMismatch.
-/// Model trained on 2 features; predict called with 3 features.
+/// predict with wrong feature count (trained on 2, called with 3) returns DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
     let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6, None).expect("valid params");
-    // Train on 2-feature data.
+    // Train on 2-feature data
     let x_train = array![[0.0, 0.0], [0.0, 10.0], [10.0, 0.0], [10.0, 10.0],];
     let y_train = array![0.0, 0.0, 1.0, 1.0];
     model.fit(&x_train, &y_train).expect("fit should succeed");
 
-    // Predict with 3 features → DimensionMismatch.
+    // Predict with 3 features -> DimensionMismatch
     let x_wrong = array![[1.0, 2.0, 3.0]];
     assert!(
         matches!(
@@ -297,7 +289,7 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-/// predict with NaN input returns NonFinite.
+/// predict with NaN input returns NonFinite
 #[test]
 fn predict_nan_input_returns_non_finite() {
     let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6, None).expect("valid params");
@@ -312,17 +304,9 @@ fn predict_nan_input_returns_non_finite() {
     );
 }
 
-// ── Correctness: linearly separable data ──────────────────────────────────
+// Correctness: linearly separable data
 
-/// On perfectly separable data the model must classify training points correctly.
-///
-/// Design: class 0 occupies x1 << 0, class 1 occupies x1 >> 0. With many
-/// iterations and a reasonable learning rate, the classifier must learn a
-/// boundary near zero and correctly label all training points.
-///
-/// Expected labels (by design, not by running the model):
-/// - (-10, 0) → 0, (-10, 5) → 0
-/// - (10, 0) → 1, (10, -5) → 1
+/// On perfectly separable data (class 0 at x1 << 0, class 1 at x1 >> 0) all training points are classified correctly
 #[test]
 fn predict_linearly_separable_classifies_correctly() {
     let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7, None).expect("valid params");
@@ -340,12 +324,12 @@ fn predict_linearly_separable_classifies_correctly() {
 
     let preds = model.predict(&x_train).expect("predict should succeed");
 
-    // Predictions must be exactly in {0, 1} (label domain contract).
+    // Predictions must be exactly in {0, 1} (label domain contract)
     for &p in preds.iter() {
         assert!(p == 0 || p == 1, "label {p} outside {{0,1}}");
     }
 
-    // All training points must be classified correctly.
+    // All training points must be classified correctly
     assert_eq!(preds[0], 0, "(-10,0) should be class 0");
     assert_eq!(preds[1], 0, "(-10,5) should be class 0");
     assert_eq!(preds[2], 0, "(-8,-3) should be class 0");
@@ -354,9 +338,7 @@ fn predict_linearly_separable_classifies_correctly() {
     assert_eq!(preds[5], 1, "(8,3) should be class 1");
 }
 
-/// predict_proba returns values strictly in (0, 1).
-/// For well-separated data, class-0 points must have probability < 0.5 and
-/// class-1 points must have probability > 0.5, consistent with predict.
+/// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and class-1 > 0.5, consistent with predict
 #[test]
 fn predict_proba_range_and_consistency_with_predict() {
     let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7, None).expect("valid params");
@@ -369,12 +351,12 @@ fn predict_proba_range_and_consistency_with_predict() {
         .predict_proba(&x_train)
         .expect("predict_proba should succeed");
 
-    // All probabilities must be strictly within (0, 1).
+    // All probabilities must be strictly within (0, 1)
     for &p in probs.iter() {
         assert!(p > 0.0 && p < 1.0, "probability {p} not in (0,1)");
     }
 
-    // Class-0 samples must have probability < 0.5.
+    // Class-0 samples must have probability < 0.5
     assert!(
         probs[0] < 0.5,
         "class-0 sample prob {} should be < 0.5",
@@ -386,7 +368,7 @@ fn predict_proba_range_and_consistency_with_predict() {
         probs[1]
     );
 
-    // Class-1 samples must have probability > 0.5.
+    // Class-1 samples must have probability > 0.5
     assert!(
         probs[2] > 0.5,
         "class-1 sample prob {} should be > 0.5",
@@ -398,7 +380,7 @@ fn predict_proba_range_and_consistency_with_predict() {
         probs[3]
     );
 
-    // predict and predict_proba must agree: predict is threshold at 0.5.
+    // predict and predict_proba must agree: predict thresholds at 0.5
     let preds = model.predict(&x_train).expect("predict should succeed");
     for (i, (&prob, &pred)) in probs.iter().zip(preds.iter()).enumerate() {
         let expected_label = if prob >= 0.5 { 1 } else { 0 };
@@ -409,7 +391,7 @@ fn predict_proba_range_and_consistency_with_predict() {
     }
 }
 
-/// fit_predict returns the same labels as a separate fit + predict on training data.
+/// fit_predict returns the same labels as a separate fit + predict on training data
 #[test]
 fn fit_predict_agrees_with_fit_then_predict() {
     let x = array![[-5.0, 0.0], [-5.0, 1.0], [5.0, 0.0], [5.0, 1.0],];
@@ -427,11 +409,9 @@ fn fit_predict_agrees_with_fit_then_predict() {
     assert_eq!(labels_fit_predict, labels_separate);
 }
 
-// ── fit_intercept=false ────────────────────────────────────────────────────
+// fit_intercept=false
 
-/// Without an intercept, the model has exactly n_features weights.
-///
-/// Verification: for 2 features, weights.len() == 2 (no bias column appended).
+/// Without an intercept, the model has exactly n_features weights (2 features -> 2 weights, no bias column)
 #[test]
 fn fit_no_intercept_weight_count_equals_features() {
     let mut model = LogisticRegression::new(false, 0.1, 1000, 1e-7, None).expect("valid params");
@@ -446,7 +426,7 @@ fn fit_no_intercept_weight_count_equals_features() {
     assert_eq!(w.len(), 2, "without intercept, weight length == n_features");
 }
 
-/// With an intercept, the model has n_features + 1 weights (bias is first element).
+/// With an intercept, the model has n_features + 1 weights (bias is first element)
 #[test]
 fn fit_with_intercept_weight_count_equals_features_plus_one() {
     let mut model = LogisticRegression::new(true, 0.1, 1000, 1e-7, None).expect("valid params");
@@ -465,9 +445,9 @@ fn fit_with_intercept_weight_count_equals_features_plus_one() {
     );
 }
 
-// ── n_iter tracking ────────────────────────────────────────────────────────
+// n_iter tracking
 
-/// After fitting, n_iter is Some and at least 1.
+/// After fitting, n_iter is Some and at least 1
 #[test]
 fn fit_sets_n_iter() {
     let mut model = LogisticRegression::new(true, 0.1, 500, 1e-7, None).expect("valid params");
@@ -482,17 +462,12 @@ fn fit_sets_n_iter() {
     assert!(n <= 500, "n_iter should not exceed max_iter");
 }
 
-// ── Regularization reduces weight magnitude ────────────────────────────────
+// Regularization reduces weight magnitude
 
-/// L2 regularization should produce a smaller weight norm than no regularization.
-///
-/// Derivation: L2 adds a penalty proportional to sum(w^2), pulling weights
-/// toward zero. On the same data with enough iterations, the regularized model
-/// must have a strictly smaller squared weight norm (excluding the bias if
-/// fit_intercept=true).
+/// L2 regularization produces a smaller feature-weight norm than no regularization
 #[test]
 fn l2_regularization_shrinks_weight_norm() {
-    // Build a simple dataset so gradients are well-defined.
+    // Build a simple dataset so gradients are well-defined
     let x = array![
         [-4.0, -3.0],
         [-3.0, -4.0],
@@ -515,7 +490,7 @@ fn l2_regularization_shrinks_weight_norm() {
     let w_unreg = model_unreg.get_weights().expect("weights present");
     let w_l2 = model_l2.get_weights().expect("weights present");
 
-    // Compute squared norm of the feature weights only (skip index 0 = bias).
+    // Squared norm of the feature weights only (skip index 0 = bias)
     let norm_sq_unreg: f64 = w_unreg.iter().skip(1).map(|&w| w * w).sum();
     let norm_sq_l2: f64 = w_l2.iter().skip(1).map(|&w| w * w).sum();
 
@@ -525,10 +500,7 @@ fn l2_regularization_shrinks_weight_norm() {
     );
 }
 
-/// L1 regularization should produce a smaller weight norm than no regularization.
-///
-/// Derivation: L1 adds a penalty proportional to sum(|w|), which typically
-/// drives weights toward zero more aggressively than L2.
+/// L1 regularization produces a smaller feature-weight norm than no regularization
 #[test]
 fn l1_regularization_shrinks_weight_norm() {
     let x = array![
@@ -562,9 +534,9 @@ fn l1_regularization_shrinks_weight_norm() {
     );
 }
 
-// ── Save / load round-trip ──────────────────────────────────────────────────
+// Save / load round-trip
 
-/// Save + load produces a model whose predictions are bit-identical to the original.
+/// Save + load produces a model whose predictions are bit-identical to the original
 #[test]
 fn save_load_round_trip_identical_predictions() {
     let x_train = array![[-5.0, 1.0], [-4.0, -1.0], [4.0, 1.0], [5.0, -1.0],];
@@ -598,7 +570,7 @@ fn save_load_round_trip_identical_predictions() {
     assert_allclose(&probs_original, &probs_loaded, 1e-15);
 }
 
-/// After loading, the hyperparameters match the original model.
+/// After loading, the hyperparameters match the original model
 #[test]
 fn save_load_preserves_hyperparameters() {
     let x = array![[-1.0], [1.0]];
@@ -623,12 +595,9 @@ fn save_load_preserves_hyperparameters() {
     );
 }
 
-// ── generate_polynomial_features ─────────────────────────────────────────
+// generate_polynomial_features
 
-/// degree=1 on n features returns x unchanged (shape and values).
-///
-/// Derivation: For d=1, the formula generates only the original n features.
-/// No higher-order terms are added. The output must equal the input exactly.
+/// degree=1 on n features returns x unchanged in shape and values
 #[test]
 fn poly_features_degree1_returns_x_unchanged() {
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
@@ -642,11 +611,7 @@ fn poly_features_degree1_returns_x_unchanged() {
     assert_allclose(&result, &x, 1e-14);
 }
 
-/// 1 feature, degree=2: output is [x, x^2] — 2 columns.
-///
-/// Derivation: n=1, d_max=2.
-/// Column count = C(1,1) + C(2,2) = 1 + 1 = 2.
-/// For x=[[2.0]]: col 0 = 2.0 (degree-1), col 1 = 2.0*2.0 = 4.0 (degree-2).
+/// 1 feature, degree=2: output is [x, x^2] - 2 columns
 #[test]
 fn poly_features_one_feature_degree2_gives_x_and_x_squared() {
     let x = array![[2.0]];
@@ -661,13 +626,7 @@ fn poly_features_one_feature_degree2_gives_x_and_x_squared() {
     assert_abs_diff_eq!(result[[0, 1]], 4.0, epsilon = 1e-14); // x^2
 }
 
-/// 2 features, degree=2: output has 5 columns.
-///
-/// Derivation: n=2, d_max=2.
-/// Column count = C(2,1) + C(3,2) = 2 + 3 = 5.
-/// Columns in order: [x1, x2, x1^2, x1*x2, x2^2].
-/// For x=[[3.0, 2.0]]:
-///   col0=3.0, col1=2.0, col2=9.0, col3=6.0, col4=4.0.
+/// 2 features, degree=2: output has 5 columns [x1, x2, x1^2, x1*x2, x2^2]
 #[test]
 fn poly_features_two_features_degree2_gives_five_columns() {
     let x = array![[3.0, 2.0]];
@@ -685,10 +644,7 @@ fn poly_features_two_features_degree2_gives_five_columns() {
     assert_abs_diff_eq!(result[[0, 4]], 4.0, epsilon = 1e-14); // x2^2
 }
 
-/// 3 features, degree=3: output has 19 columns.
-///
-/// Derivation: n=3, d_max=3.
-/// Column count = C(3,1) + C(4,2) + C(5,3) = 3 + 6 + 10 = 19.
+/// 3 features, degree=3: output has 19 columns
 #[test]
 fn poly_features_three_features_degree3_gives_nineteen_columns() {
     let x = array![[1.0, 2.0, 3.0]];
@@ -701,10 +657,7 @@ fn poly_features_three_features_degree3_gives_nineteen_columns() {
     );
 }
 
-/// Multiple samples are transformed independently: each row is correct.
-///
-/// Derivation: 1 feature, degree=2. Row 0: x=3.0 → [3.0, 9.0].
-///                                   Row 1: x=5.0 → [5.0, 25.0].
+/// Multiple samples are transformed independently: each row is expanded correctly
 #[test]
 fn poly_features_multiple_samples_each_row_correct() {
     let x = array![[3.0], [5.0]];
@@ -717,18 +670,10 @@ fn poly_features_multiple_samples_each_row_correct() {
     assert_abs_diff_eq!(result[[1, 1]], 25.0, epsilon = 1e-14);
 }
 
-/// Polynomial features pipeline: generate degree-2 features then classify.
-///
-/// Design: data lies on a circle; the two classes are separated in (x1^2 + x2^2).
-/// After degree-2 expansion the problem becomes linearly separable, so
-/// logistic regression should classify all training points correctly.
-///
-/// Class 0: points near origin (x1^2 + x2^2 ≈ 1).
-/// Class 1: points far from origin (x1^2 + x2^2 ≈ 25).
+/// Degree-2 expansion makes circular data (classes split by x1^2 + x2^2) linearly separable, classifying all training points correctly
 #[test]
 fn poly_features_pipeline_makes_circular_data_separable() {
-    // Class 0: on circle of radius ~1.
-    // Class 1: on circle of radius ~5.
+    // Class 0: on circle of radius ~1; class 1: on circle of radius ~5
     let x = array![
         [1.0, 0.0],  // radius 1, class 0
         [0.0, 1.0],  // radius 1, class 0
@@ -740,7 +685,7 @@ fn poly_features_pipeline_makes_circular_data_separable() {
     let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
 
     let x_poly = generate_polynomial_features(&x, 2);
-    // 2 features, degree 2 → 5 columns.
+    // 2 features, degree 2 -> 5 columns
     assert_eq!(x_poly.ncols(), 5);
 
     let mut model = LogisticRegression::new(true, 0.01, 3000, 1e-7, None).expect("valid params");
@@ -750,21 +695,16 @@ fn poly_features_pipeline_makes_circular_data_separable() {
 
     let preds = model.predict(&x_poly).expect("predict should succeed");
 
-    // All training points must be classified correctly.
+    // All training points must be classified correctly
     for (i, (&p, &truth)) in preds.iter().zip(y.iter()).enumerate() {
         let expected = truth as i32;
         assert_eq!(p, expected, "sample {i}: expected {expected}, got {p}");
     }
 }
 
-// ── Determinism (same seed = identical weights) ────────────────────────────
+// Determinism (same seed = identical weights)
 
-/// Two independently constructed and fitted models with the same hyperparameters
-/// on the same deterministic data must produce exactly the same weights.
-///
-/// The logistic regression implementation uses gradient descent with no
-/// randomness: weights start at zero, updates are deterministic functions of
-/// the data. Two runs on the same data must be identical.
+/// Two fits with the same hyperparameters on the same data produce bit-identical weights (gradient descent has no randomness)
 #[test]
 fn deterministic_fit_produces_identical_weights() {
     let x = array![[-3.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [3.0, -1.0],];
@@ -782,7 +722,7 @@ fn deterministic_fit_produces_identical_weights() {
     assert_allclose(w_a, w_b, 0.0); // bit-identical
 }
 
-/// Two fits produce the same predictions on unseen data.
+/// Two fits produce the same predictions on unseen data
 #[test]
 fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
     let x_train = array![[-3.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [3.0, -1.0],];
@@ -804,25 +744,12 @@ fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
         "both runs must produce identical predictions"
     );
 }
-// ── In-loop NonFinite guards (huge learning rate on finite data) ─────────
+// In-loop NonFinite guards (huge learning rate on finite data)
 
-/// A huge but finite learning rate on finite, large-magnitude data must trip
-/// one of the in-loop numerical guards in `fit` and surface `Error::NonFinite`.
-///
-/// Derivation (not by running the model):
-/// - The data is finite, so `preliminary_check` passes, and `learning_rate =
-///   f64::MAX` is positive and finite, so `validate_learning_rate` passes. Hence
-///   any `NonFinite` here can only come from the *in-loop* guards.
-/// - Iteration 1: weights start at 0, so predictions are 0 and sigmoid(0)=0.5,
-///   giving errors in [-0.5, 0.5]. The gradient `Xᵀ·errors / n` therefore has
-///   magnitude on the order of |x| ≈ 1e9 (finite). The weight update
-///   `w ← 0 - f64::MAX * gradient` ≈ 1.8e308 * 1e9 overflows to ±∞, so the
-///   updated-weights guard ("weight update") fires and returns `NonFinite`.
-///   (Should the gradient itself overflow first, the gradient guard fires
-///   instead — either way the variant is `NonFinite`.)
+/// A huge but finite learning rate on finite, large-magnitude data trips an in-loop numerical guard in `fit` and returns `Error::NonFinite`
 #[test]
 fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
-    // Large-magnitude *finite* features so an overflowing update is guaranteed.
+    // Large-magnitude finite features so an overflowing update is guaranteed
     let x = array![[-1.0e9, 0.0], [-1.0e9, 1.0], [1.0e9, 0.0], [1.0e9, -1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
 

@@ -1,7 +1,7 @@
-//! Integration tests for `Sequential`: add/compile/fit/predict/summary + error paths.
+//! Integration tests for `Sequential`: add/compile/fit/predict/summary plus error paths
 //!
-//! Ground-truth rule: every expected value is derived from the mathematical definition or a
-//! hand calculation, never by running the layer and recording its output.
+//! Every expected value is derived from the mathematical definition or a hand calculation,
+//! never by running the layer and recording its output
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2};
@@ -13,23 +13,18 @@ use rustyml::neural_network::losses::{CategoricalCrossEntropy, MeanSquaredError}
 use rustyml::neural_network::optimizers::{Adam, SGD};
 use rustyml::neural_network::sequential::Sequential;
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// helpers
 
-/// Build a 2-D Tensor from row-major data.
+/// Build a 2-D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
         .unwrap()
         .into_dyn()
 }
 
-// ─── predict: forward values with known weights ─────────────────────────────
+// predict: forward values with known weights
 
-/// Dense(2→2, Linear), identity weights, zero bias.
-/// For input [[3.0, 4.0]], output must equal input.
-///
-/// Hand calculation:
-///   z = x · W + b = [[3,4]] · [[1,0],[0,1]] + [[0,0]] = [[3,4]]
-///   Linear: f(z) = z  →  output = [[3.0, 4.0]]
+/// Dense(2->2, Linear) with identity weights and zero bias returns the input unchanged
 #[test]
 fn test_predict_identity_weights_linear_dense() {
     let mut dense = Dense::new(2, 2, Activation::Linear, None).unwrap();
@@ -47,8 +42,7 @@ fn test_predict_identity_weights_linear_dense() {
     assert_abs_diff_eq!(out[[0, 1]], 4.0_f32, epsilon = 1e-6);
 }
 
-/// Dense(1→1, Linear), weight=[[2.0]], bias=[[1.0]].
-/// For input [[5.0]]:  2.0 * 5.0 + 1.0 = 11.0
+/// Dense(1->1, Linear) applies the scalar affine map 2*x + 1
 #[test]
 fn test_predict_scalar_affine() {
     let mut dense = Dense::new(1, 1, Activation::Linear, None).unwrap();
@@ -65,20 +59,17 @@ fn test_predict_scalar_affine() {
     assert_abs_diff_eq!(out[[0, 0]], 11.0_f32, epsilon = 1e-6);
 }
 
-/// Dense(3→2, Linear), w = [[1,0],[0,1],[1,1]], b = [[0,0]].
-/// Input row: [2, 3, 4].
-/// z[0] = 2*1 + 3*0 + 4*1 = 6
-/// z[1] = 2*0 + 3*1 + 4*1 = 7
+/// Dense(3->2, Linear) applies a known linear transform to one input row
 #[test]
 fn test_predict_2d_linear_transform() {
     let mut dense = Dense::new(3, 2, Activation::Linear, None).unwrap();
-    // weights shape: (in=3, out=2), stored column-major in ndarray's row-major slice
+    // weights shape (in=3, out=2)
     let w = Array2::from_shape_vec(
         (3, 2),
         vec![
-            1.0_f32, 0.0, // row 0: feature-0 contributes to out-0 and out-1
-            0.0, 1.0, // row 1
-            1.0, 1.0, // row 2
+            1.0_f32, 0.0, // feature 0 contributes to out 0 and out 1
+            0.0, 1.0, // feature 1
+            1.0, 1.0, // feature 2
         ],
     )
     .unwrap();
@@ -91,19 +82,12 @@ fn test_predict_2d_linear_transform() {
     let x = t2(1, 3, vec![2.0, 3.0, 4.0]);
     let out = model.predict(&x).unwrap();
 
-    // z[0] = 2*1 + 3*0 + 4*1 = 6
-    // z[1] = 2*0 + 3*1 + 4*1 = 7
+    // z = [2*1 + 4*1, 3*1 + 4*1] = [6, 7]
     assert_abs_diff_eq!(out[[0, 0]], 6.0_f32, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[0, 1]], 7.0_f32, epsilon = 1e-5);
 }
 
-/// Dense(3→2, Linear) followed by Dense(2→1, Linear).
-/// First layer identity-ish; second sums both inputs.
-///
-/// w1 = [[1,0],[0,1],[0,0]], b1 = [[0,0]]
-/// w2 = [[1],[1]], b2 = [[0]]
-///
-/// x = [5, 7, 99] → layer1 → [5, 7] → layer2 → [12]
+/// Two stacked Linear Dense layers chain correctly: first projects, second sums both inputs
 #[test]
 fn test_predict_two_layer_stack() {
     let mut d1 = Dense::new(3, 2, Activation::Linear, None).unwrap();
@@ -122,15 +106,11 @@ fn test_predict_two_layer_stack() {
     let x = t2(1, 3, vec![5.0, 7.0, 99.0]);
     let out = model.predict(&x).unwrap();
 
-    // layer1 output: [5, 7]  (third feature is zeroed by w1)
-    // layer2 output: 5 + 7 = 12
+    // layer1 zeroes the third feature -> [5, 7]; layer2 sums them -> 12
     assert_abs_diff_eq!(out[[0, 0]], 12.0_f32, epsilon = 1e-5);
 }
 
-/// Dense(1→3, Softmax), bias zero, w = [[1,2,3]].
-/// For input [[0.0]]:
-///   z = [0*1, 0*2, 0*3] = [0, 0, 0]
-///   softmax([0,0,0]) = [1/3, 1/3, 1/3]  (all equal)
+/// Dense(1->3, Softmax) on a zero pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
 #[test]
 fn test_predict_dense_softmax_equal_input() {
     let mut dense = Dense::new(1, 3, Activation::Softmax, None).unwrap();
@@ -141,7 +121,7 @@ fn test_predict_dense_softmax_equal_input() {
     let mut model = Sequential::new();
     model.add(dense);
 
-    // input=0 → z=[0,0,0] → softmax → [1/3, 1/3, 1/3]
+    // input 0 -> z = [0, 0, 0] -> softmax -> [1/3, 1/3, 1/3]
     let x = t2(1, 1, vec![0.0]);
     let out = model.predict(&x).unwrap();
 
@@ -150,15 +130,12 @@ fn test_predict_dense_softmax_equal_input() {
     assert_abs_diff_eq!(out[[0, 1]], third, epsilon = 1e-5);
     assert_abs_diff_eq!(out[[0, 2]], third, epsilon = 1e-5);
 
-    // Probabilities must sum to 1.
+    // probabilities must sum to 1
     let sum: f32 = out.iter().sum();
     assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
 }
 
-/// Dense(1→3, Softmax), bias zero, w = [[0,0,0]].
-/// For input [[99.0]]:
-///   z = [0,0,0]  (weight is all-zero regardless of input)
-///   softmax([0,0,0]) = [1/3, 1/3, 1/3]
+/// Dense(1->3, Softmax) with all-zero weights ignores the input and stays uniform
 #[test]
 fn test_predict_dense_softmax_known_probs() {
     let mut dense = Dense::new(1, 3, Activation::Softmax, None).unwrap();
@@ -178,10 +155,9 @@ fn test_predict_dense_softmax_known_probs() {
     assert_abs_diff_eq!(out[[0, 2]], third, epsilon = 1e-5);
 }
 
-// ─── predict == forward in eval mode ─────────────────────────────────────────
+// predict == forward in eval mode
 
-/// predict() must produce the same values as the last eval-mode forward pass.
-/// We use a layer where both are deterministic and equal (Linear Dense).
+/// predict() produces the same values as an eval-mode forward pass for a Linear Dense layer
 #[test]
 fn test_predict_equals_forward_eval_mode() {
     let mut dense = Dense::new(2, 2, Activation::Linear, None).unwrap();
@@ -196,16 +172,15 @@ fn test_predict_equals_forward_eval_mode() {
 
     let pred = model.predict(&x).unwrap();
 
-    // Forward pass output (using &self semantics via predict).
-    // Layer is stateless for Linear Dense, so a second predict call is identical.
+    // Linear Dense is stateless, so a second predict call must match
     let pred2 = model.predict(&x).unwrap();
 
     crate::common::assert_allclose(&pred, &pred2, 1e-7_f32);
 }
 
-// ─── predict: determinism (two consecutive calls identical) ──────────────────
+// predict: determinism (two consecutive calls identical)
 
-/// Two back-to-back predict() calls on the same input must produce identical tensors.
+/// Two back-to-back predict() calls on the same input produce identical tensors
 #[test]
 fn test_predict_is_deterministic() {
     let mut dense = Dense::new(3, 2, Activation::Linear, None).unwrap();
@@ -222,27 +197,25 @@ fn test_predict_is_deterministic() {
     crate::common::assert_allclose(&out1, &out2, 0.0_f32);
 }
 
-// ─── summary smoke-test ──────────────────────────────────────────────────────
+// summary smoke-test
 
-/// summary() must not panic; we only check that it runs without error.
+/// summary() runs without panicking
 #[test]
 fn test_summary_does_not_panic() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(4, 8, Activation::ReLU, None).unwrap())
         .add(Dense::new(8, 2, Activation::Softmax, None).unwrap());
-    // Should print to stdout without panicking
     model.summary();
 }
 
-// ─── error paths ─────────────────────────────────────────────────────────────
+// error paths
 
-/// fit() before compile() must return NotCompiled.
+/// fit() before compile() returns NotCompiled
 #[test]
 fn test_fit_before_compile_returns_not_compiled() {
     let mut model = Sequential::new();
     model.add(Dense::new(2, 1, Activation::Linear, None).unwrap());
-    // No compile call.
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
     let y = t2(2, 1, vec![1.0, 0.0]);
     assert!(
@@ -254,7 +227,7 @@ fn test_fit_before_compile_returns_not_compiled() {
     );
 }
 
-/// fit() on a model with no layers must return EmptyModel.
+/// fit() on a model with no layers returns EmptyModel
 #[test]
 fn test_fit_empty_model_returns_empty_model_error() {
     let mut model = Sequential::new();
@@ -270,7 +243,7 @@ fn test_fit_empty_model_returns_empty_model_error() {
     );
 }
 
-/// predict() on a model with no layers must return EmptyModel.
+/// predict() on a model with no layers returns EmptyModel
 #[test]
 fn test_predict_empty_model_returns_empty_model_error() {
     let model = Sequential::new();
@@ -282,7 +255,7 @@ fn test_predict_empty_model_returns_empty_model_error() {
     );
 }
 
-/// fit() with an empty input tensor must return EmptyInput.
+/// fit() with an empty input tensor returns EmptyInput
 #[test]
 fn test_fit_empty_x_returns_empty_input_error() {
     let mut model = Sequential::new();
@@ -298,7 +271,7 @@ fn test_fit_empty_x_returns_empty_input_error() {
     );
 }
 
-/// fit() with mismatched x/y batch sizes must return DimensionMismatch.
+/// fit() with mismatched x/y batch sizes returns DimensionMismatch
 #[test]
 fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     let mut model = Sequential::new();
@@ -314,7 +287,7 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     );
 }
 
-/// predict() with an empty input tensor must return EmptyInput.
+/// predict() with an empty input tensor returns EmptyInput
 #[test]
 fn test_predict_empty_x_returns_empty_input_error() {
     let mut model = Sequential::new();
@@ -328,7 +301,7 @@ fn test_predict_empty_x_returns_empty_input_error() {
     );
 }
 
-/// fit_with_batches with batch_size=0 must return InvalidParameter.
+/// fit_with_batches with batch_size=0 returns InvalidParameter
 #[test]
 fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     let mut model = Sequential::new();
@@ -348,7 +321,7 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     );
 }
 
-/// fit_with_batches with batch_size > n_samples must return InvalidParameter.
+/// fit_with_batches with batch_size > n_samples returns InvalidParameter
 #[test]
 fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() {
     let mut model = Sequential::new();
@@ -369,12 +342,9 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
     );
 }
 
-// ─── epochs=0 leaves the model unchanged ─────────────────────────────────────
+// epochs=0 leaves the model unchanged
 
-/// Training for 0 epochs must leave the weights identical to before the call.
-///
-/// We set known weights, call fit with epochs=0, then predict and verify the output
-/// equals the hand-computed value. If fit corrupted the weights, the assertion fails.
+/// Training for 0 epochs leaves the weights identical to before the call
 #[test]
 fn test_fit_zero_epochs_unchanged_weights() {
     let mut dense = Dense::new(1, 1, Activation::Linear, None).unwrap();
@@ -388,26 +358,21 @@ fn test_fit_zero_epochs_unchanged_weights() {
         .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
     let x = t2(1, 1, vec![2.0]);
-    let y = t2(1, 1, vec![10.0]); // irrelevant — 0 epochs
+    let y = t2(1, 1, vec![10.0]); // irrelevant with 0 epochs
 
     model.fit(&x, &y, 0).unwrap();
 
     let out = model.predict(&x).unwrap();
-    // weight unchanged → 3.0 * 2.0 + 0.0 = 6.0
+    // weight unchanged -> 3.0 * 2.0 + 0.0 = 6.0
     assert_abs_diff_eq!(out[[0, 0]], 6.0_f32, epsilon = 1e-5);
 }
 
-// ─── end-to-end convergence: y = 2x + 1 ─────────────────────────────────────
+// end-to-end convergence: y = 2x + 1
 
-/// A single Dense(1→1, Linear) + SGD + MSE on 4 points of y = 2x+1 must reduce loss
-/// substantially over 300 epochs compared to epoch 0.
-///
-/// This is not a gradient test — it is a convergence smoke-test. We verify that:
-///   1. The final prediction is within ±0.5 of the true value at x=3 (≈ 7).
-///   2. The model can be called twice (determinism after training).
+/// Dense(1->1, Linear) + SGD + MSE converges on y = 2x+1, predicting ~7 at x=3 after 300 epochs
 #[test]
 fn test_convergence_linear_regression_y_eq_2x_plus_1() {
-    // Training points: (1,3), (2,5), (3,7), (4,9)
+    // training points: (1,3), (2,5), (3,7), (4,9)
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
@@ -418,15 +383,14 @@ fn test_convergence_linear_regression_y_eq_2x_plus_1() {
 
     model.fit(&x, &y, 300).unwrap();
 
-    // Predict at x=3, true value = 7.0
+    // predict at x=3, true value 7.0
     let x_test = t2(1, 1, vec![3.0]);
     let pred = model.predict(&x_test).unwrap();
 
     assert_abs_diff_eq!(pred[[0, 0]], 7.0_f32, epsilon = 0.5);
 }
 
-/// Same regression, but using fit_with_batches with batch_size=2.
-/// After 500 epochs the model should converge to approximately y = 2x+1.
+/// Same regression via fit_with_batches with batch_size=2 converges to y = 2x+1 after 500 epochs
 #[test]
 fn test_convergence_linear_regression_with_batches() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
@@ -442,26 +406,17 @@ fn test_convergence_linear_regression_with_batches() {
     let x_test = t2(1, 1, vec![2.0]);
     let pred = model.predict(&x_test).unwrap();
 
-    // True value at x=2 is 5.0
+    // true value at x=2 is 5.0
     assert_abs_diff_eq!(pred[[0, 0]], 5.0_f32, epsilon = 1.0);
 }
 
-// ─── end-to-end convergence: 2-class softmax + Adam + CategoricalCrossEntropy ─
+// end-to-end convergence: 2-class softmax + Adam + CategoricalCrossEntropy
 
-/// 2-class linearly separable task.
-///
-/// Architecture:  Dense(2→4, ReLU) → Dense(4→2, Softmax)
-/// Optimizer:     Adam(lr=0.01)
-/// Loss:          CategoricalCrossEntropy
-///
-/// Class 0 samples: x close to [1, 0]; one-hot y = [1, 0]
-/// Class 1 samples: x close to [0, 1]; one-hot y = [0, 1]
-///
-/// After 200 epochs the model must assign >0.7 probability to the correct class
-/// for a test point from each class.
+/// Dense(2->8, Tanh) -> Dense(8->2, Softmax) with Adam + cross-entropy assigns >0.7 probability
+/// to the correct class for a separable 2-class task after 600 epochs
 #[test]
 fn test_convergence_2class_softmax_adam() {
-    // 8 training samples (4 per class) — well-separated
+    // 8 training samples (4 per class), well separated
     #[rustfmt::skip]
     let x = t2(8, 2, vec![
         1.0, 0.0,   // class 0
@@ -486,10 +441,8 @@ fn test_convergence_2class_softmax_adam() {
     ]);
 
     let mut model = Sequential::new();
-    // Weight init is currently UNSEEDED, so this test must converge for any starting point. A Tanh
-    // hidden layer (instead of ReLU) avoids the "all hidden units dead at init" trap that no number
-    // of epochs can recover from; a generous epoch budget then guarantees convergence on this tiny
-    // separable problem regardless of the initial weights.
+    // Weight init is unseeded, so a Tanh hidden layer plus a generous epoch budget guarantees
+    // convergence on this tiny separable problem regardless of the initial weights
     model
         .add(Dense::new(2, 8, Activation::Tanh, None).unwrap())
         .add(Dense::new(8, 2, Activation::Softmax, None).unwrap())
@@ -500,7 +453,7 @@ fn test_convergence_2class_softmax_adam() {
 
     model.fit(&x, &y, 600).unwrap();
 
-    // Class 0 test point
+    // class 0 test point
     let x0 = t2(1, 2, vec![0.9, 0.1]);
     let p0 = model.predict(&x0).unwrap();
     assert!(
@@ -509,7 +462,7 @@ fn test_convergence_2class_softmax_adam() {
         p0[[0, 0]]
     );
 
-    // Class 1 test point
+    // class 1 test point
     let x1 = t2(1, 2, vec![0.1, 0.9]);
     let p1 = model.predict(&x1).unwrap();
     assert!(
@@ -519,9 +472,9 @@ fn test_convergence_2class_softmax_adam() {
     );
 }
 
-// ─── predict determinism after training ──────────────────────────────────────
+// predict determinism after training
 
-/// Two predict() calls after training must return byte-identical tensors.
+/// Two predict() calls after training return byte-identical tensors
 #[test]
 fn test_predict_deterministic_after_training() {
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
@@ -540,10 +493,9 @@ fn test_predict_deterministic_after_training() {
     crate::common::assert_allclose(&p1, &p2, 0.0_f32);
 }
 
-// ─── fit returns &mut Self (method chaining) ─────────────────────────────────
+// fit returns &mut Self (method chaining)
 
-/// The return value of fit() must be Ok(&mut model) (method-chainable).
-/// We verify by immediately calling predict on the returned reference.
+/// fit() returns Ok(&mut Self) so calls can be chained
 #[test]
 fn test_fit_returns_mutable_self() {
     let mut model = Sequential::new();
@@ -554,14 +506,12 @@ fn test_fit_returns_mutable_self() {
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
 
-    // fit returns Ok(&mut Self) — we simply assert it succeeds
     model.fit(&x, &y, 1).unwrap();
 }
 
-// ─── multi-batch convergence with fit_with_batches, full validation ──────────
+// multi-batch convergence with fit_with_batches, full validation
 
-/// fit_with_batches with batch_size == n_samples is equivalent to full-batch fit.
-/// After 400 epochs the model should converge to y = 2x+1.
+/// fit_with_batches with batch_size == n_samples behaves like full-batch fit, converging to y = 2x+1
 #[test]
 fn test_fit_with_batches_full_batch_equivalent() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
@@ -577,6 +527,6 @@ fn test_fit_with_batches_full_batch_equivalent() {
 
     let x_test = t2(1, 1, vec![4.0]);
     let pred = model.predict(&x_test).unwrap();
-    // True value: 2*4 + 1 = 9
+    // true value: 2*4 + 1 = 9
     assert_abs_diff_eq!(pred[[0, 0]], 9.0_f32, epsilon = 1.0);
 }

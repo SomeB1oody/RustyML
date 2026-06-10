@@ -1,8 +1,5 @@
-//! Integration tests for Dense and Flatten layers.
-//!
-//! All expected values are derived from the mathematical definition or hand calculations.
-//! Gradient correctness is already covered by tests/neural_network/gradient_check.rs;
-//! this file focuses on forward VALUES, error paths, param counts, and get_weights shape.
+//! Integration tests for Dense and Flatten layers: forward values, error paths,
+//! param counts, and get_weights shape (gradients are covered in gradient_check.rs)
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4};
@@ -17,32 +14,39 @@ use rustyml::neural_network::traits::Layer;
 
 use super::common::assert_allclose;
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// helpers
 
-/// Build a 2D Tensor from row-major data.
+/// Build a 2D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
         .expect("shape/data mismatch")
         .into_dyn()
 }
 
-/// Build a 3D Tensor from row-major data.
+/// Build a 3D Tensor from row-major data
 fn t3(a: usize, b: usize, c: usize, data: Vec<f32>) -> Tensor {
     Array3::from_shape_vec((a, b, c), data)
         .expect("shape/data mismatch")
         .into_dyn()
 }
 
-/// Build a 4D Tensor from row-major data.
+/// Build a 4D Tensor from row-major data
 fn t4(a: usize, b: usize, c: usize, d: usize, data: Vec<f32>) -> Tensor {
     Array4::from_shape_vec((a, b, c, d), data)
         .expect("shape/data mismatch")
         .into_dyn()
 }
 
-/// Build a Dense(2→2, Linear) with an injected weight matrix and zero bias.
+/// Build a Dense(2 -> 2, Linear) with an injected weight matrix (2x2) and bias (1x2)
 ///
-/// W shape = (2, 2), b shape = (1, 2).
+/// # Parameters
+///
+/// - `w_flat` - row-major weight values for the 2x2 matrix
+/// - `b_flat` - bias values for the 1x2 vector
+///
+/// # Returns
+///
+/// - A `Dense` layer with the given weights and bias set
 fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
     let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
     let w = Array2::from_shape_vec((2, 2), w_flat).unwrap();
@@ -51,9 +55,7 @@ fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
     d
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — constructor validation
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - constructor validation
 
 #[test]
 fn dense_new_rejects_zero_input_dim() {
@@ -80,9 +82,7 @@ fn dense_new_accepts_valid_dims() {
     Dense::new(3, 5, Linear::new(), None).unwrap();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — param_count
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - param_count
 
 /// param_count = input_dim * units + units (weights + bias elements)
 #[test]
@@ -101,15 +101,9 @@ fn dense_param_count_3x5() {
     assert_eq!(d.param_count(), TrainingParameters::Trainable(20));
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — forward: identity weight → output == input
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - forward: identity weight gives output == input
 
-/// Hand derivation:
-///   W = I₂ = [[1,0],[0,1]], b = [[0,0]]
-///   X = [[1,2],[3,4]]
-///   Z = X·W + b = [[1,2],[3,4]]
-///   Linear activation: output = [[1,2],[3,4]]
+/// Identity weight with zero bias and Linear activation passes input through unchanged
 #[test]
 fn dense_forward_identity_weight_output_equals_input() {
     let mut d = dense_2x2_with_weights(
@@ -122,16 +116,9 @@ fn dense_forward_identity_weight_output_equals_input() {
     assert_allclose(&out, &expected, 1e-6_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — forward: known non-identity weight + bias
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - forward: known non-identity weight + bias
 
-/// Hand derivation:
-///   W = [[2,0],[0,3]], b = [[1,2]]
-///   X = [[1,2],[3,4]]
-///   Row 0: z = [1·2+2·0+1, 1·0+2·3+2] = [3, 8]
-///   Row 1: z = [3·2+4·0+1, 3·0+4·3+2] = [7, 14]
-///   Linear activation: output = [[3,8],[7,14]]
+/// Forward computes X*W + b with a diagonal weight and nonzero bias under Linear activation
 #[test]
 fn dense_forward_known_weights_and_bias() {
     let mut d = dense_2x2_with_weights(
@@ -144,15 +131,9 @@ fn dense_forward_known_weights_and_bias() {
     assert_allclose(&out, &expected, 1e-5_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — forward: ReLU activation zeroes negative pre-activations
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - forward: ReLU activation zeroes negative pre-activations
 
-/// Hand derivation:
-///   W = [[1,-1],[1,-1]], b = [[0,0]]
-///   X = [[2,1],[1,3]]
-///   Row 0: z = [2·1+1·1, 2·(-1)+1·(-1)] = [3, -3] → ReLU: [3, 0]
-///   Row 1: z = [1·1+3·1, 1·(-1)+3·(-1)] = [4, -4] → ReLU: [4, 0]
+/// ReLU activation clamps negative pre-activations to zero
 #[test]
 fn dense_forward_relu_zeroes_negative_preactivations() {
     let mut d = Dense::new(2, 2, ReLU::new(), None).unwrap();
@@ -166,18 +147,9 @@ fn dense_forward_relu_zeroes_negative_preactivations() {
     assert_allclose(&out, &expected, 1e-6_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — forward: single batch item (batch_size == 1)
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - forward: single batch item (batch_size == 1)
 
-/// Hand derivation (3→2 layer):
-///   W = [[1,2],[3,4],[5,6]], b = [[0,1]]
-///   X = [[1,2,3]]
-///   z = [1·1+2·3+3·5, 1·2+2·4+3·6] + [0,1]
-///     = [1+6+15, 2+8+18] + [0,1]
-///     = [22, 28] + [0,1]
-///     = [22, 29]
-///   Linear: output = [[22, 29]]
+/// Forward on a 3 -> 2 Linear layer with a single-row input
 #[test]
 fn dense_forward_3_to_2_linear_single_row() {
     let mut d = Dense::new(3, 2, Linear::new(), None).unwrap();
@@ -191,12 +163,9 @@ fn dense_forward_3_to_2_linear_single_row() {
     assert_allclose(&out, &expected, 1e-5_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — predict == forward in eval mode (no activation side-effects)
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - predict == forward in eval mode (no activation side-effects)
 
-/// Dense has no mode-dependent behaviour (no dropout, no batchnorm), so
-/// predict and forward must produce identical outputs.
+/// Dense has no mode-dependent behaviour, so predict and forward produce identical outputs
 #[test]
 fn dense_predict_equals_forward() {
     let mut d = dense_2x2_with_weights(vec![1.0, 2.0, 3.0, 4.0], vec![0.5, -0.5]);
@@ -207,9 +176,7 @@ fn dense_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — error paths
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - error paths
 
 #[test]
 fn dense_forward_rejects_non_2d_input_1d() {
@@ -254,7 +221,7 @@ fn dense_backward_before_forward_returns_err() {
 #[test]
 fn dense_set_weights_wrong_weight_shape_returns_err() {
     let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
-    // correct shape is (2,2); supply (3,2) → should fail
+    // correct shape is (2,2); supply (3,2) which should fail
     let w_bad = Array2::from_shape_vec((3, 2), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
     let b_ok = Array2::from_shape_vec((1, 2), vec![0.0, 0.0]).unwrap();
     let result = d.set_weights(w_bad, b_ok);
@@ -272,7 +239,7 @@ fn dense_set_weights_wrong_weight_shape_returns_err() {
 fn dense_set_weights_wrong_bias_shape_returns_err() {
     let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
     let w_ok = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, 0.0, 1.0]).unwrap();
-    // correct bias shape is (1,2); supply (1,3) → should fail
+    // correct bias shape is (1,2); supply (1,3) which should fail
     let b_bad = Array2::from_shape_vec((1, 3), vec![0.0, 0.0, 0.0]).unwrap();
     let result = d.set_weights(w_ok, b_bad);
     assert!(
@@ -285,14 +252,12 @@ fn dense_set_weights_wrong_bias_shape_returns_err() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — get_weights returns Dense variant with correct shapes
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - get_weights returns Dense variant with correct shapes
 
 #[test]
 fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
     let mut d = Dense::new(3, 4, Linear::new(), None).unwrap();
-    // Inject known weights so we can assert exact values too.
+    // inject known weights so exact values can be asserted too
     let w = Array2::from_shape_vec(
         (3, 4),
         vec![
@@ -307,7 +272,7 @@ fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
         LayerWeight::Dense(lw) => {
             assert_eq!(lw.weight.shape(), &[3, 4]);
             assert_eq!(lw.bias.shape(), &[1, 4]);
-            // Spot-check values
+            // spot-check values
             assert_abs_diff_eq!(lw.weight[[0, 0]], 1.0_f32, epsilon = 1e-6);
             assert_abs_diff_eq!(lw.weight[[2, 3]], 12.0_f32, epsilon = 1e-6);
             assert_abs_diff_eq!(lw.bias[[0, 1]], 0.2_f32, epsilon = 1e-6);
@@ -316,13 +281,10 @@ fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — backward restores correct grad shape after forward
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - backward restores correct grad shape after forward
 
-/// After a 2-row forward pass on a Dense(2→3) layer, backward(ones_like_output)
-/// must return a gradient with the same shape as the input (2×2).
-/// We do NOT assert specific gradient values — those are covered by gradient_check.rs.
+/// backward returns a gradient with the same shape as the input (specific values
+/// are covered by gradient_check.rs)
 #[test]
 fn dense_backward_output_shape_matches_input() {
     let mut d = Dense::new(2, 3, Linear::new(), None).unwrap();
@@ -337,9 +299,7 @@ fn dense_backward_output_shape_matches_input() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — layer_type string
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - layer_type string
 
 #[test]
 fn dense_layer_type_is_dense() {
@@ -347,9 +307,7 @@ fn dense_layer_type_is_dense() {
     assert_eq!(d.layer_type(), "Dense");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — constructor validation
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - constructor validation
 
 #[test]
 fn flatten_new_rejects_fewer_than_2_dims() {
@@ -376,13 +334,9 @@ fn flatten_new_accepts_valid_3d_shape() {
     Flatten::new(vec![2, 3, 4]).unwrap();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — forward VALUES: 3D input
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - forward VALUES: 3D input
 
-/// Input shape [2, 3, 4] → output shape [2, 12].
-/// Values must be preserved in row-major (C) order:
-///   batch 0 = first 12 elements, batch 1 = next 12.
+/// Flatten of [2, 3, 4] yields [2, 12] with values preserved in row-major order
 #[test]
 fn flatten_forward_3d_correct_shape_and_values() {
     let data: Vec<f32> = (0..24).map(|v| v as f32).collect();
@@ -393,19 +347,16 @@ fn flatten_forward_3d_correct_shape_and_values() {
 
     assert_eq!(out.shape(), &[2, 12]);
 
-    // Row 0 should be 0..12, row 1 should be 12..24
+    // row 0 should be 0..12, row 1 should be 12..24
     let out_slice = out.as_slice().expect("output not contiguous");
     for (i, &val) in out_slice.iter().enumerate() {
         assert_abs_diff_eq!(val, i as f32, epsilon = 1e-6);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — forward VALUES: 4D input
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - forward VALUES: 4D input
 
-/// Input shape [2, 2, 3, 4] → output shape [2, 24].
-/// Same value preservation check as for 3D.
+/// Flatten of [2, 2, 3, 4] yields [2, 24] with values preserved in row-major order
 #[test]
 fn flatten_forward_4d_correct_shape_and_values() {
     let data: Vec<f32> = (0..48).map(|v| v as f32).collect();
@@ -422,11 +373,9 @@ fn flatten_forward_4d_correct_shape_and_values() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — forward VALUES: 5D input
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - forward VALUES: 5D input
 
-/// Input shape [2, 2, 2, 3, 4] → output shape [2, 48].
+/// Flatten of [2, 2, 2, 3, 4] yields [2, 48] with values preserved
 #[test]
 fn flatten_forward_5d_correct_shape_and_values() {
     use ndarray::Array5;
@@ -446,12 +395,9 @@ fn flatten_forward_5d_correct_shape_and_values() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — backward restores original shape and values
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - backward restores original shape and values
 
-/// After flatten.forward(x), backward(grad_flat) must return the original 3D shape
-/// and the gradient values must be identical to grad_flat reshaped.
+/// backward returns the original 3D shape with gradient values matching grad_flat reshaped
 #[test]
 fn flatten_backward_restores_3d_shape_and_values() {
     let data: Vec<f32> = (0..24).map(|v| v as f32).collect();
@@ -460,23 +406,23 @@ fn flatten_backward_restores_3d_shape_and_values() {
     let mut fl = Flatten::new(vec![2, 3, 4]).unwrap();
     let _out = fl.forward(&x).unwrap();
 
-    // Gradient has the flattened shape [2, 12]
+    // gradient has the flattened shape [2, 12]
     let grad_flat_data: Vec<f32> = (0..24).map(|v| (v as f32) * 2.0).collect();
     let grad_flat = t2(2, 12, grad_flat_data.clone());
 
     let grad_input = fl.backward(&grad_flat).unwrap();
 
-    // Shape must be restored to [2, 3, 4]
+    // shape must be restored to [2, 3, 4]
     assert_eq!(grad_input.shape(), &[2, 3, 4]);
 
-    // Values must match the flattened gradient (same underlying data, different view)
+    // values must match the flattened gradient (same underlying data, different view)
     let gs = grad_input.as_slice().expect("grad not contiguous");
     for (i, &val) in gs.iter().enumerate() {
         assert_abs_diff_eq!(val, (i as f32) * 2.0, epsilon = 1e-6);
     }
 }
 
-/// Same for 4D.
+/// backward restores the original 4D shape with gradient values matching grad_flat reshaped
 #[test]
 fn flatten_backward_restores_4d_shape_and_values() {
     let data: Vec<f32> = (0..48).map(|v| v as f32).collect();
@@ -498,9 +444,7 @@ fn flatten_backward_restores_4d_shape_and_values() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — error paths
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - error paths
 
 #[test]
 fn flatten_forward_rejects_2d_input() {
@@ -518,7 +462,7 @@ fn flatten_forward_rejects_2d_input() {
 fn flatten_forward_rejects_6d_input() {
     use ndarray::ArrayD;
     let mut fl = Flatten::new(vec![1, 2, 2, 2, 2]).unwrap();
-    // Build a 6D tensor manually
+    // build a 6D tensor manually
     let x: Tensor = ArrayD::zeros(vec![1, 2, 2, 2, 2, 2]);
     let result = fl.forward(&x);
     assert!(
@@ -544,9 +488,7 @@ fn flatten_backward_before_forward_returns_err() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — predict == forward (no training-mode difference)
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - predict == forward (no training-mode difference)
 
 #[test]
 fn flatten_predict_equals_forward() {
@@ -559,9 +501,7 @@ fn flatten_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — get_weights returns Empty variant (no trainable parameters)
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - get_weights returns Empty variant (no trainable parameters)
 
 #[test]
 fn flatten_get_weights_is_empty() {
@@ -572,9 +512,7 @@ fn flatten_get_weights_is_empty() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — param_count is NoTrainable
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - param_count is NoTrainable
 
 #[test]
 fn flatten_param_count_is_no_trainable() {
@@ -583,9 +521,7 @@ fn flatten_param_count_is_no_trainable() {
     assert_eq!(fl.param_count(), TrainingParameters::NoTrainable);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Flatten — layer_type string
-// ═══════════════════════════════════════════════════════════════════════════
+// Flatten - layer_type string
 
 #[test]
 fn flatten_layer_type_is_flatten() {
@@ -593,11 +529,9 @@ fn flatten_layer_type_is_flatten() {
     assert_eq!(fl.layer_type(), "Flatten");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Dense — LayerWeight::Dense variant for Dense layer
-// ═══════════════════════════════════════════════════════════════════════════
+// Dense - LayerWeight::Dense variant for Dense layer
 
-/// Dense.get_weights() must return a LayerWeight::Dense (not Empty or another variant).
+/// get_weights returns a LayerWeight::Dense, not Empty or another variant
 #[test]
 fn dense_get_weights_is_dense_variant() {
     let d = Dense::new(2, 3, Linear::new(), None).unwrap();

@@ -1,16 +1,11 @@
-//! Integration tests for the reproducibility / RNG API.
+//! Integration tests for the reproducibility / RNG API
 //!
-//! Exercises the public seeding surface:
-//!   - per-layer `random_state: Option<u64>` on constructors (e.g. `Dense::new`),
-//!   - the thread-local global seed (`rustyml::set_global_seed` / `clear_global_seed`),
-//!   - the `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`).
+//! Exercises the public seeding surface: per-layer `random_state: Option<u64>` on
+//! constructors, the thread-local global seed (`set_global_seed` / `clear_global_seed`),
+//! and the `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`)
 //!
-//! Core idea: an identical seed produces identical weight initialization, and since
-//! `predict()` is a pure deterministic function of the weights and the input, identical
-//! seeds must yield byte-identical `predict()` output on a fixed input. We therefore use
-//! a zero epsilon (`assert_allclose(.., 0.0)`) for the "same" assertions — identical
-//! computation yields identical f32 values, not merely close ones. For "different"
-//! assertions we require the max absolute difference to clear a small threshold.
+//! Equal seeds yield byte-identical output, so the "same" assertions use zero epsilon; the
+//! "different" assertions require the max absolute difference to clear a small threshold
 
 use ndarray::Array2;
 use rustyml::neural_network::Tensor;
@@ -23,21 +18,21 @@ use rustyml::neural_network::traits::Layer;
 
 use super::common::{GlobalSeedGuard, assert_allclose};
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// helpers
 
-/// Build a 2-D Tensor from row-major data.
+/// Build a 2-D Tensor from row-major data
 fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
         .expect("shape/data mismatch")
         .into_dyn()
 }
 
-/// A fixed 4-feature input row reused across the layer-level tests.
+/// A fixed 4-feature input row reused across the layer-level tests
 fn fixed_input_4() -> Tensor {
     t2(1, 4, vec![0.5, -1.0, 2.0, 0.25])
 }
 
-/// Maximum element-wise absolute difference between two equally-shaped tensors.
+/// Maximum element-wise absolute difference between two equally-shaped tensors
 fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
     assert_eq!(a.shape(), b.shape(), "shape mismatch in max_abs_diff");
     a.iter()
@@ -46,18 +41,15 @@ fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
         .fold(0.0_f32, f32::max)
 }
 
-/// Build a tiny `Dense(4 -> 3, ReLU)` with the given `random_state`.
+/// Build a tiny `Dense(4 -> 3, ReLU)` with the given `random_state`
 fn dense_4_3(seed: Option<u64>) -> Dense {
     Dense::new(4, 3, Activation::ReLU, seed).expect("Dense::new(4,3) must succeed")
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 1. same_seed_same_init
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// Two `Dense::new(4, 3, ReLU, Some(7))` layers initialized with the SAME explicit seed
-/// must produce byte-identical `predict()` output on the same input (identical weights ⇒
-/// identical computation ⇒ identical values).
+/// Two `Dense` layers with the same explicit seed produce byte-identical `predict()`
+/// output on the same input
 #[test]
 fn same_seed_same_init() {
     let a = dense_4_3(Some(7));
@@ -67,17 +59,14 @@ fn same_seed_same_init() {
     let pa = a.predict(&x).unwrap();
     let pb = b.predict(&x).unwrap();
 
-    // Identical seed ⇒ identical weights ⇒ identical predict output. Zero epsilon.
+    // Identical seed => identical weights => identical predict output, zero epsilon
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 2. different_seed_differs
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// `Some(1)` vs `Some(2)` must initialize different weights and therefore produce a
-/// DIFFERENT `predict()` output. We require the max absolute difference to clear a small
-/// threshold (anything well above f32 noise demonstrates the seeds genuinely differ).
+/// `Some(1)` vs `Some(2)` initialize different weights and produce a different `predict()`
+/// output (max absolute difference clears a small threshold)
 #[test]
 fn different_seed_differs() {
     let a = dense_4_3(Some(1));
@@ -94,14 +83,10 @@ fn different_seed_differs() {
     );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 3. global_seed_reproducible
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// With the SAME global seed set, an UNSEEDED model (`random_state == None`) must rebuild
-/// to the same weights and produce identical `predict()` output. The unseeded layer derives
-/// its RNG from the thread-local global stream, so resetting the global to the same value and
-/// rebuilding the same architecture reproduces the initialization exactly.
+/// With the same global seed set, an unseeded model (`random_state == None`) rebuilds to the
+/// same weights and produces identical `predict()` output
 #[test]
 fn global_seed_reproducible() {
     let x = fixed_input_4();
@@ -110,54 +95,43 @@ fn global_seed_reproducible() {
     let first = dense_4_3(None); // unseeded: draws from the global stream
     let p_first = first.predict(&x).unwrap();
 
-    // Reset the global to the same value and rebuild the identical unseeded model.
+    // Reset the global to the same value and rebuild the identical unseeded model
     rustyml::set_global_seed(123);
     let second = dense_4_3(None);
     let p_second = second.predict(&x).unwrap();
 
-    // `_seed` clears the global on drop — even if this assertion panics.
+    // `_seed` clears the global on drop, even if this assertion panics
     assert_allclose(&p_first, &p_second, 0.0_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 4. local_overrides_global
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// An explicit local seed must IGNORE the global seed entirely. A `Dense::new(.., Some(5))`
-/// built while a global seed is set must equal a `Dense::new(.., Some(5))` built with NO
-/// global set — i.e. the local seed alone determines the weights, regardless of the global.
+/// An explicit local seed ignores the global seed: a `Some(5)` layer built with a global set
+/// equals one built with no global, so the local seed alone determines the weights
 #[test]
 fn local_overrides_global() {
     let x = fixed_input_4();
 
-    // Built WITH a global seed active; the guard clears it at the end of this block — even on panic.
+    // Built with a global seed active; the guard clears it at the end of this block, even on panic
     let p_with_global = {
         let _seed = GlobalSeedGuard::set(999);
         dense_4_3(Some(5)).predict(&x).unwrap()
     };
 
-    // Built with NO global seed active.
+    // Built with no global seed active
     let p_without_global = dense_4_3(Some(5)).predict(&x).unwrap();
 
-    // Local Some(5) ignores the global ⇒ identical weights ⇒ identical output. Zero epsilon.
+    // Local Some(5) ignores the global => identical weights => identical output, zero epsilon
     assert_allclose(&p_with_global, &p_without_global, 0.0_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 5. training_reproducible
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// Two `Sequential` models with identical architecture — every layer seeded with the SAME
-/// `Some(seed)` AND the model itself carrying the same shuffle seed — trained with the same
-/// data for a few epochs must reach an identical final `predict()` output.
-///
-/// We deliberately use `fit_with_batches(.., batch_size = 2)` over 4 samples so the per-epoch
-/// shuffle is genuinely exercised: this demonstrates that BOTH the weight initialization AND
-/// the fit-time shuffle are reproducible together. (Plain `fit` trains on one full batch and
-/// would not exercise the shuffle.)
+/// Two `Sequential` models with identical architecture, layer seeds, and shuffle seed reach
+/// an identical `predict()` output after batched training (batch_size 2 exercises the shuffle)
 #[test]
 fn training_reproducible() {
-    // Tiny 4-sample dataset for a 4 -> 3 -> 1 regression model.
+    // Tiny 4-sample dataset for a 4 -> 3 -> 1 regression model
     #[rustfmt::skip]
     let x = t2(4, 4, vec![
         0.5, -1.0, 2.0, 0.25,
@@ -167,14 +141,14 @@ fn training_reproducible() {
     ]);
     let y = t2(4, 1, vec![1.0, 0.0, -1.0, 0.5]);
 
-    // Build two identical, fully-seeded models and train them identically.
+    // Build two identical, fully-seeded models and train them identically
     let build_and_train = || -> Sequential {
         let mut model = Sequential::new_with_seed(42);
         model
             .add(dense_4_3(Some(7)))
             .add(Dense::new(3, 1, Activation::Linear, Some(11)).unwrap())
             .compile(SGD::new(0.05).unwrap(), MeanSquaredError::new());
-        // batch_size < n_samples ⇒ the seeded per-epoch shuffle is actually used.
+        // batch_size < n_samples => the seeded per-epoch shuffle is actually used
         model.fit_with_batches(&x, &y, 5, 2).unwrap();
         model
     };
@@ -186,25 +160,14 @@ fn training_reproducible() {
     let pa = model_a.predict(&x_test).unwrap();
     let pb = model_b.predict(&x_test).unwrap();
 
-    // Reproducible init + reproducible shuffle ⇒ identical trained weights ⇒ identical output.
+    // Reproducible init + reproducible shuffle => identical trained weights => identical output
     assert_allclose(&pa, &pb, 0.0_f32);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 6. global_seed_advances_between_unseeded_draws
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// Under a SINGLE global seed, two consecutively-built UNSEEDED layers must get
-/// DIFFERENT initializations: each `random_state == None` draw pulls a fresh sub-seed
-/// from the global stream, so the stream must ADVANCE between draws. If it did not
-/// (e.g. the global RNG were cloned rather than advanced), every unseeded layer in a
-/// network would initialize identically — a silent weight-symmetry bug that the
-/// same-seed-reproduces tests above would NOT catch. This guards the documented
-/// "unseeded components draw in construction order" contract.
-///
-/// A `Linear` readout is used so `predict()` is a faithful linear function of the
-/// weights (no ReLU masking could coincidentally collapse two distinct draws to the
-/// same output).
+/// Under a single global seed, two consecutively-built unseeded layers get different
+/// initializations, since each draw advances the global stream (`Linear` readout)
 #[test]
 fn global_seed_advances_between_unseeded_draws() {
     let x = fixed_input_4();
@@ -212,9 +175,9 @@ fn global_seed_advances_between_unseeded_draws() {
     let (p_first, p_second) = {
         let _seed = GlobalSeedGuard::set(2024);
         let first = Dense::new(4, 3, Activation::Linear, None).unwrap(); // sub-seed #1 from the global
-        let second = Dense::new(4, 3, Activation::Linear, None).unwrap(); // sub-seed #2 — must differ
+        let second = Dense::new(4, 3, Activation::Linear, None).unwrap(); // sub-seed #2, must differ
         (first.predict(&x).unwrap(), second.predict(&x).unwrap())
-        // `_seed` clears the global here, before the assertion below.
+        // `_seed` clears the global here, before the assertion below
     };
 
     let diff = max_abs_diff(&p_first, &p_second);
@@ -223,32 +186,20 @@ fn global_seed_advances_between_unseeded_draws() {
         "two unseeded layers under one global seed must differ (global stream must advance), max abs diff = {diff}"
     );
 }
-// ═══════════════════════════════════════════════════════════════════════════
-// 7. cleared_global_seed_unseeded_layers_differ (entropy fallback)
-// ═══════════════════════════════════════════════════════════════════════════
 
-/// The inverse of `global_seed_reproducible`: with NO global seed installed, an
-/// unseeded layer (`random_state == None`) falls back to OS entropy
-/// (`StdRng::from_rng(&mut rng())`), which is non-deterministic. So after the global
-/// seed is cleared, two freshly-built unseeded `Dense` layers must initialize to
-/// DIFFERENT weights and therefore produce DIFFERENT `predict()` output.
-///
-/// We first set a global seed and build one unseeded layer (mirroring the
-/// reproducibility setup), then CLEAR the global so the subsequent two unseeded layers
-/// each draw from entropy. A `Linear` readout keeps `predict()` a faithful function of
-/// the weights (no ReLU masking can coincidentally collapse two distinct entropy draws
-/// to the same output). The probability that two independent OS-entropy draws produce
-/// weights matching to within 1e-4 is vanishingly small.
+// 7. cleared_global_seed_unseeded_layers_differ (entropy fallback)
+
+/// Inverse of `global_seed_reproducible`: with no global seed installed, two unseeded `Dense`
+/// layers fall back to OS entropy and produce different `predict()` output
 #[test]
 fn cleared_global_seed_unseeded_layers_differ() {
     let x = fixed_input_4();
 
-    // Set a global, build one unseeded layer from it (matches the reproducibility setup).
+    // Set a global, build one unseeded layer from it (matches the reproducibility setup)
     let guard = GlobalSeedGuard::set(777);
     let _seeded_from_global = Dense::new(4, 3, Activation::Linear, None).unwrap();
-    // Now clear the global: subsequent unseeded layers must fall back to entropy.
-    // Dropping the guard already calls clear_global_seed (GlobalSeedGuard::Drop); the
-    // explicit call below is an idempotent belt-and-suspenders for readability.
+    // Clear the global so subsequent unseeded layers fall back to entropy. Dropping the guard
+    // already calls clear_global_seed; the explicit call below is an idempotent reaffirmation
     drop(guard);
     rustyml::clear_global_seed(); // explicit: no global seed is installed
 

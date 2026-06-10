@@ -1,8 +1,7 @@
-//! Integration tests for Conv3D, DepthwiseConv2D, and SeparableConv2D.
+//! Integration tests for Conv3D, DepthwiseConv2D, and SeparableConv2D
 //!
-//! Every expected value is derived from the mathematical definition or a hand calculation,
-//! not by recording the layer's output. Gradient checks are already covered by
-//! tests/neural_network/gradient_check.rs and are NOT duplicated here.
+//! Expected values come from the mathematical definition or hand calculation, not from
+//! recording layer output. Gradient checks live in tests/neural_network/gradient_check.rs
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2, Array4, Array5};
@@ -16,11 +15,9 @@ use rustyml::neural_network::traits::Layer;
 
 use crate::common::assert_allclose;
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Conv3D — constructor validation
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Conv3D - constructor validation
 
-/// filters=0 must be rejected with InvalidParameter.
+/// filters=0 must be rejected with InvalidParameter
 #[test]
 fn conv3d_new_rejects_zero_filters() {
     let err = Conv3D::new(
@@ -39,10 +36,10 @@ fn conv3d_new_rejects_zero_filters() {
     );
 }
 
-/// A zero in the kernel tuple must be rejected with InvalidParameter.
+/// A zero in the kernel tuple must be rejected with InvalidParameter
 #[test]
 fn conv3d_new_rejects_zero_kernel_dimension() {
-    // Second kernel dimension is 0.
+    // Second kernel dimension is 0
     let err = Conv3D::new(
         2,
         (2, 0, 2),
@@ -59,7 +56,7 @@ fn conv3d_new_rejects_zero_kernel_dimension() {
     );
 }
 
-/// A zero in the stride tuple must be rejected with InvalidParameter.
+/// A zero in the stride tuple must be rejected with InvalidParameter
 #[test]
 fn conv3d_new_rejects_zero_stride() {
     let err = Conv3D::new(
@@ -78,7 +75,7 @@ fn conv3d_new_rejects_zero_stride() {
     );
 }
 
-/// A 4D input_shape (not 5D) must be rejected with InvalidInput.
+/// A 4D input_shape (not 5D) must be rejected with InvalidInput
 #[test]
 fn conv3d_new_rejects_non_5d_input_shape() {
     let err = Conv3D::new(
@@ -97,7 +94,7 @@ fn conv3d_new_rejects_non_5d_input_shape() {
     );
 }
 
-/// An input_shape containing a 0 dimension must be rejected with InvalidInput.
+/// An input_shape containing a 0 dimension must be rejected with InvalidInput
 #[test]
 fn conv3d_new_rejects_zero_input_dimension() {
     let err = Conv3D::new(
@@ -116,14 +113,9 @@ fn conv3d_new_rejects_zero_input_dimension() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Conv3D — forward output shape
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Conv3D - forward output shape
 
-/// Valid padding output shape formula:
-///   out_d = (D - Kd) / sd + 1,  similarly for h, w.
-/// With input [1,1,4,4,4], kernel (2,2,2), stride (1,1,1):
-///   out_d = (4-2)/1+1 = 3, same for h, w → [1, 2, 3, 3, 3].
+/// Valid padding forward output shape is [1, 2, 3, 3, 3] for input [1,1,4,4,4], kernel (2,2,2)
 #[test]
 fn conv3d_forward_output_shape_valid_padding() {
     let mut conv = Conv3D::new(
@@ -145,9 +137,7 @@ fn conv3d_forward_output_shape_valid_padding() {
     );
 }
 
-/// Same padding: output shape must equal ceil(input / stride) in each spatial dim.
-/// With input [1,1,4,4,4], kernel (3,3,3), stride (1,1,1):
-///   out = ceil(4/1) = 4 in each dim → [1, 2, 4, 4, 4].
+/// Same padding forward output shape equals ceil(input / stride): [1, 2, 4, 4, 4] here
 #[test]
 fn conv3d_forward_output_shape_same_padding() {
     let mut conv = Conv3D::new(
@@ -169,9 +159,7 @@ fn conv3d_forward_output_shape_same_padding() {
     );
 }
 
-/// Stride-2 Valid output:
-/// input [2,1,5,5,5], kernel (3,3,3), stride (2,2,2):
-///   out_d = (5-3)/2+1 = 2, same for h, w → [2, 1, 2, 2, 2].
+/// Stride-2 Valid forward output shape is [2, 1, 2, 2, 2] for input [2,1,5,5,5], kernel (3,3,3)
 #[test]
 fn conv3d_forward_output_shape_stride2_valid() {
     let mut conv = Conv3D::new(
@@ -193,33 +181,9 @@ fn conv3d_forward_output_shape_stride2_valid() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Conv3D — known-weight forward value
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Conv3D - known-weight forward value
 
-/// Known-weight forward value test.
-///
-/// Layer: 1 filter, kernel (2,2,2), 1 input channel, stride (1,1,1), Valid, Linear activation.
-/// Weights: all 1s (shape [1,1,2,2,2]), bias: 0.
-/// Input: x[i] = 0.05*i - 0.40 for i in 0..27, shaped [1,1,3,3,3].
-///
-/// The 3D convolution at each output position is the sum of the 8 input elements in the
-/// corresponding [2,2,2] window.
-///
-/// Hand calculation (row-major order, d×h×w indexing, flat index = d*9 + h*3 + w):
-///   out[0,0,0,0,0] = Σ x[d,h,w] for d in 0..2, h in 0..2, w in 0..2
-///     flat indices: 0,1,2,3,4,5,9,10,11,12,13,14 ... wait, 2×2×2 window:
-///     d=0,h=0: w=0→idx0, w=1→idx1
-///     d=0,h=1: w=0→idx3, w=1→idx4
-///     d=1,h=0: w=0→idx9, w=1→idx10
-///     d=1,h=1: w=0→idx12, w=1→idx13
-///     sum of indices = 0+1+3+4+9+10+12+13 = 52
-///     sum = 0.05*52 - 8*0.40 = 2.60 - 3.20 = -0.60
-///
-///   out[0,0,1,1,1] = window starting at (d=1,h=1,w=1):
-///     flat indices: 1*9+1*3+1=13, 13+1=14, 1*9+2*3+1=16, 16+1=17,
-///                   2*9+1*3+1=22, 22+1=23, 2*9+2*3+1=25, 25+1=26
-///     sum = 0.05*(13+14+16+17+22+23+25+26) - 8*0.40 = 0.05*156 - 3.20 = 7.80 - 3.20 = 4.60
+/// All-ones 2x2x2 kernel sums the 8-element window: forward output matches the hand calculation
 #[test]
 fn conv3d_known_weight_forward_values() {
     let mut conv = Conv3D::new(
@@ -233,12 +197,12 @@ fn conv3d_known_weight_forward_values() {
     )
     .unwrap();
 
-    // Set all weights to 1, bias to 0.
+    // All weights 1, bias 0
     let w = Array5::ones((1_usize, 1, 2, 2, 2));
     let b = Array2::zeros((1_usize, 1));
     conv.set_weights(w, b).unwrap();
 
-    // Input: x[i] = 0.05*i - 0.40 for i = 0..27.
+    // Input: x[i] = 0.05*i - 0.40 for i = 0..27
     let input_data: Vec<f32> = (0..27).map(|i| 0.05 * i as f32 - 0.40).collect();
     let x = Array::from_shape_vec((1_usize, 1, 3, 3, 3), input_data)
         .unwrap()
@@ -246,31 +210,21 @@ fn conv3d_known_weight_forward_values() {
 
     let out = conv.forward(&x).unwrap();
 
-    // Output shape: [1,1,2,2,2]
     assert_eq!(out.shape(), &[1, 1, 2, 2, 2]);
 
-    // out[0,0,0,0,0]: window d in 0..2, h in 0..2, w in 0..2
-    // flat indices: 0,1,3,4,9,10,12,13 → sum = 52 → 0.05*52 - 3.20 = -0.60
+    // window sum = 52 -> 0.05*52 - 3.20 = -0.60
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 0]], -0.60_f32, epsilon = 1e-5);
-
-    // out[0,0,0,0,1]: window d in 0..2, h in 0..2, w in 1..3
-    // flat indices: 1,2,4,5,10,11,13,14 → sum = 60 → 0.05*60 - 3.20 = -0.20
+    // window sum = 60 -> 0.05*60 - 3.20 = -0.20
     assert_abs_diff_eq!(out[[0, 0, 0, 0, 1]], -0.20_f32, epsilon = 1e-5);
-
-    // out[0,0,0,1,0]: window d in 0..2, h in 1..3, w in 0..2
-    // flat indices: 3,4,6,7,12,13,15,16 → sum = 76 → 0.05*76 - 3.20 = 0.60
+    // window sum = 76 -> 0.05*76 - 3.20 = 0.60
     assert_abs_diff_eq!(out[[0, 0, 0, 1, 0]], 0.60_f32, epsilon = 1e-5);
-
-    // out[0,0,1,1,1]: window d in 1..3, h in 1..3, w in 1..3
-    // flat indices: 13,14,16,17,22,23,25,26 → sum = 156 → 0.05*156 - 3.20 = 4.60
+    // window sum = 156 -> 0.05*156 - 3.20 = 4.60
     assert_abs_diff_eq!(out[[0, 0, 1, 1, 1]], 4.60_f32, epsilon = 1e-5);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Conv3D — predict() == forward() in eval mode
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Conv3D - predict() == forward() in eval mode
 
-/// predict() must return identical values to forward() (Conv3D has no train/eval difference).
+/// predict() returns identical values to forward() (Conv3D has no train/eval difference)
 #[test]
 fn conv3d_predict_equals_forward() {
     let mut conv = Conv3D::new(
@@ -296,11 +250,9 @@ fn conv3d_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// Conv3D — error paths
-// ════════════════════════════════════════════════════════════════════════════════════════
+// Conv3D - error paths
 
-/// Calling backward before forward must return NeuralNetwork(ForwardPassNotRun).
+/// Calling backward before forward must return NeuralNetwork(ForwardPassNotRun)
 #[test]
 fn conv3d_backward_before_forward_errors() {
     let mut conv = Conv3D::new(
@@ -321,7 +273,7 @@ fn conv3d_backward_before_forward_errors() {
     );
 }
 
-/// A non-5D input to forward() must return InvalidInput.
+/// A non-5D input to forward() must return InvalidInput
 #[test]
 fn conv3d_forward_rejects_non_5d_input() {
     let mut conv = Conv3D::new(
@@ -342,7 +294,7 @@ fn conv3d_forward_rejects_non_5d_input() {
     );
 }
 
-/// set_weights with wrong shape must return NeuralNetwork(WeightShape).
+/// set_weights with wrong shape must return NeuralNetwork(WeightShape)
 #[test]
 fn conv3d_set_weights_shape_mismatch_errors() {
     let mut conv = Conv3D::new(
@@ -355,7 +307,7 @@ fn conv3d_set_weights_shape_mismatch_errors() {
         None,
     )
     .unwrap();
-    // Layer expects weights [1,1,2,2,2]; supply [2,1,2,2,2].
+    // Layer expects weights [1,1,2,2,2]; supply [2,1,2,2,2]
     let wrong_w = Array5::zeros((2_usize, 1, 2, 2, 2));
     let b = Array2::zeros((1_usize, 1));
     let err = conv.set_weights(wrong_w, b).unwrap_err();
@@ -365,14 +317,12 @@ fn conv3d_set_weights_shape_mismatch_errors() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — constructor validation
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - constructor validation
 
-/// filters != channels must be rejected with InvalidParameter.
+/// filters != channels must be rejected with InvalidParameter
 #[test]
 fn depthwise_conv2d_new_rejects_filters_not_equal_channels() {
-    // input_shape has 2 channels, but we specify 3 filters.
+    // input_shape has 2 channels, but 3 filters are requested
     let err = DepthwiseConv2D::new(
         3,
         (2, 2),
@@ -389,7 +339,7 @@ fn depthwise_conv2d_new_rejects_filters_not_equal_channels() {
     );
 }
 
-/// filters=0 must be rejected.
+/// filters=0 must be rejected
 #[test]
 fn depthwise_conv2d_new_rejects_zero_filters() {
     let err = DepthwiseConv2D::new(
@@ -408,7 +358,7 @@ fn depthwise_conv2d_new_rejects_zero_filters() {
     );
 }
 
-/// A zero kernel dimension must be rejected.
+/// A zero kernel dimension must be rejected
 #[test]
 fn depthwise_conv2d_new_rejects_zero_kernel_dimension() {
     let err = DepthwiseConv2D::new(
@@ -427,28 +377,9 @@ fn depthwise_conv2d_new_rejects_zero_kernel_dimension() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — channel independence (the core correctness invariant)
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - channel independence (the core correctness invariant)
 
-/// Channel independence test.
-///
-/// Layer: 2 channels (hence 2 filters), 2×2 kernel, stride (1,1), Valid, Linear activation.
-/// Weight layout: shape [filters, 1, kH, kW] = [2, 1, 2, 2].
-///   Channel 0 kernel: [[1,1],[1,1]]  (all ones)
-///   Channel 1 kernel: [[0,0],[0,0]]  (all zeros)
-///   Biases: [0.0, 0.0]
-///
-/// Input [1, 2, 3, 3]:
-///   Channel 0: all 1s → output is 2×2 with every value = 4.0
-///     (sum of 4 ones-weighted input elements)
-///   Channel 1: all 2s → output is 2×2 with every value = 0.0
-///     (kernel is zero so all contributions cancel)
-///
-/// This test verifies that:
-///   1. Channel 0 output depends ONLY on channel 0 weights and channel 0 input.
-///   2. Channel 1 output is identically zero (the zero kernel kills all input).
-///   3. Channel 1 input values (which are non-zero) do NOT leak into channel 0 output.
+/// Each channel convolves only its own input: all-ones kernel gives 4.0, zero kernel gives 0.0
 #[test]
 fn depthwise_conv2d_channel_independence() {
     let mut conv = DepthwiseConv2D::new(
@@ -462,17 +393,16 @@ fn depthwise_conv2d_channel_independence() {
     )
     .unwrap();
 
-    // Channel 0 kernel = all 1s; Channel 1 kernel = all 0s.
+    // Channel 0 kernel = all 1s; channel 1 kernel stays zero
     let mut w = Array4::<f32>::zeros((2, 1, 2, 2));
     w[[0, 0, 0, 0]] = 1.0;
     w[[0, 0, 0, 1]] = 1.0;
     w[[0, 0, 1, 0]] = 1.0;
     w[[0, 0, 1, 1]] = 1.0;
-    // channel 1 stays zero
     let bias = Array1::<f32>::zeros(2);
     conv.set_weights(w, bias).unwrap();
 
-    // Input: channel 0 = 1s, channel 1 = 2s.
+    // Input: channel 0 = 1s, channel 1 = 2s
     let mut input = Array::zeros((1_usize, 2, 3, 3));
     for h in 0..3 {
         for ww in 0..3 {
@@ -484,18 +414,16 @@ fn depthwise_conv2d_channel_independence() {
 
     let out = conv.forward(&x).unwrap();
 
-    // Output shape: [1, 2, 2, 2]
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
-    // Channel 0: every 2×2 window of all-1 input summed by all-1 kernel = 4.0
+    // Channel 0: every 2x2 window of all-1 input summed by all-1 kernel = 4.0
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out[[0, 0, oh, ow]], 4.0_f32, epsilon = 1e-6,);
         }
     }
 
-    // Channel 1: zero kernel → output must be 0.0 everywhere,
-    // regardless of non-zero input values.
+    // Channel 1: zero kernel -> 0.0 everywhere, regardless of non-zero input
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out[[0, 1, oh, ow]], 0.0_f32, epsilon = 1e-6,);
@@ -503,9 +431,7 @@ fn depthwise_conv2d_channel_independence() {
     }
 }
 
-/// Verify that channel 0's output does NOT change when channel 1 input changes.
-/// This is the dual of channel_independence: non-zero channel-1 input must NOT
-/// bleed into channel-0 output.
+/// Channel 0 output does not change when channel 1 input changes (no cross-channel bleed)
 #[test]
 fn depthwise_conv2d_cross_channel_no_bleed() {
     let mut conv = DepthwiseConv2D::new(
@@ -519,13 +445,13 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
     )
     .unwrap();
 
-    // Channel 0 kernel = [[1,0],[0,0]] (only top-left), channel 1 kernel = all zeros.
+    // Channel 0 kernel = [[1,0],[0,0]] (only top-left); channel 1 kernel = all zeros
     let mut w = Array4::<f32>::zeros((2, 1, 2, 2));
     w[[0, 0, 0, 0]] = 1.0;
     let bias = Array1::<f32>::zeros(2);
     conv.set_weights(w, bias).unwrap();
 
-    // Input A: channel 0 = 1s everywhere, channel 1 = 0s.
+    // Input A: channel 0 = 1s everywhere, channel 1 = 0s
     let mut inp_a = Array::zeros((1_usize, 2, 3, 3));
     for h in 0..3 {
         for ww in 0..3 {
@@ -534,7 +460,7 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
     }
     let out_a = conv.forward(&inp_a.into_dyn()).unwrap();
 
-    // Input B: channel 0 = 1s everywhere, channel 1 = 999s.
+    // Input B: channel 0 = 1s everywhere, channel 1 = 999s
     let mut inp_b = Array::zeros((1_usize, 2, 3, 3));
     for h in 0..3 {
         for ww in 0..3 {
@@ -544,21 +470,21 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
     }
     let out_b = conv.forward(&inp_b.into_dyn()).unwrap();
 
-    // Channel 0 output must be identical in both cases.
+    // Channel 0 output must be identical in both cases
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out_a[[0, 0, oh, ow]], out_b[[0, 0, oh, ow]], epsilon = 1e-6,);
         }
     }
 
-    // Channel 0: top-left kernel picks up x[oh,ow] = 1.0 for all positions.
+    // Channel 0: top-left kernel picks up x[oh,ow] = 1.0 for all positions
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out_b[[0, 0, oh, ow]], 1.0_f32, epsilon = 1e-6);
         }
     }
 
-    // Channel 1: zero kernel → 0.0 everywhere even though input was 999.
+    // Channel 1: zero kernel -> 0.0 everywhere even though input was 999
     for oh in 0..2 {
         for ow in 0..2 {
             assert_abs_diff_eq!(out_b[[0, 1, oh, ow]], 0.0_f32, epsilon = 1e-6);
@@ -566,25 +492,9 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — known-weight forward values
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - known-weight forward values
 
-/// Single-channel, 2×2 kernel with non-trivial weights.
-/// Input [1,1,3,3]: row-major values 1..=9.
-/// Kernel: [[1,2],[3,4]], bias: 0.5.
-///
-/// Output [1,1,2,2]:
-///   out[0,0,0,0] = 1*1 + 2*2 + 3*4 + 4*7 + 0.5 = 1+4+12+28+0.5 = ... let me redo:
-///     input window (h=0,w=0): [input[0,0]=1, input[0,1]=2, input[1,0]=4, input[1,1]=5]
-///     kernel: k[0,0]=1, k[0,1]=2, k[1,0]=3, k[1,1]=4
-///     sum = 1*1 + 2*2 + 4*3 + 5*4 = 1 + 4 + 12 + 20 = 37, + bias 0.5 = 37.5
-///   out[0,0,0,1]: window (h=0,w=1): input values [2,3,5,6]
-///     sum = 2*1 + 3*2 + 5*3 + 6*4 = 2+6+15+24 = 47 + 0.5 = 47.5
-///   out[0,0,1,0]: window (h=1,w=0): input values [4,5,7,8]
-///     sum = 4*1 + 5*2 + 7*3 + 8*4 = 4+10+21+32 = 67 + 0.5 = 67.5
-///   out[0,0,1,1]: window (h=1,w=1): input values [5,6,8,9]
-///     sum = 5*1 + 6*2 + 8*3 + 9*4 = 5+12+24+36 = 77 + 0.5 = 77.5
+/// Single-channel 2x2 kernel [[1,2],[3,4]] with bias 0.5 over input 1..=9 matches hand calculation
 #[test]
 fn depthwise_conv2d_known_weight_single_channel() {
     let mut conv = DepthwiseConv2D::new(
@@ -598,7 +508,7 @@ fn depthwise_conv2d_known_weight_single_channel() {
     )
     .unwrap();
 
-    // Kernel: [[1,2],[3,4]], bias: 0.5
+    // Kernel: [[1,2],[3,4]], bias 0.5
     let mut w = Array4::<f32>::zeros((1, 1, 2, 2));
     w[[0, 0, 0, 0]] = 1.0;
     w[[0, 0, 0, 1]] = 2.0;
@@ -607,7 +517,7 @@ fn depthwise_conv2d_known_weight_single_channel() {
     let bias = Array1::from_vec(vec![0.5_f32]);
     conv.set_weights(w, bias).unwrap();
 
-    // Input: 1..=9 in row-major order.
+    // Input: 1..=9 in row-major order
     let x = Array::from_shape_vec(
         (1_usize, 1, 3, 3),
         vec![1.0_f32, 2., 3., 4., 5., 6., 7., 8., 9.],
@@ -624,9 +534,7 @@ fn depthwise_conv2d_known_weight_single_channel() {
     assert_abs_diff_eq!(out[[0, 0, 1, 1]], 77.5_f32, epsilon = 1e-5);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — predict() == forward() in eval mode
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - predict() == forward() in eval mode
 
 #[test]
 fn depthwise_conv2d_predict_equals_forward() {
@@ -653,11 +561,9 @@ fn depthwise_conv2d_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — error paths
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - error paths
 
-/// backward before forward must return ForwardPassNotRun.
+/// backward before forward must return ForwardPassNotRun
 #[test]
 fn depthwise_conv2d_backward_before_forward_errors() {
     let mut conv = DepthwiseConv2D::new(
@@ -678,7 +584,7 @@ fn depthwise_conv2d_backward_before_forward_errors() {
     );
 }
 
-/// set_weights with wrong weight shape must return NeuralNetwork(WeightShape).
+/// set_weights with wrong weight shape must return NeuralNetwork(WeightShape)
 #[test]
 fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
     let mut conv = DepthwiseConv2D::new(
@@ -691,7 +597,7 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
         None,
     )
     .unwrap();
-    // Layer expects weights [2,1,2,2]; supply [3,1,2,2].
+    // Layer expects weights [2,1,2,2]; supply [3,1,2,2]
     let wrong_w = Array4::<f32>::zeros((3, 1, 2, 2));
     let bias = Array1::<f32>::zeros(2);
     let err = conv.set_weights(wrong_w, bias).unwrap_err();
@@ -701,11 +607,9 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — constructor validation
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - constructor validation
 
-/// filters=0 must be rejected.
+/// filters=0 must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_filters() {
     let err = SeparableConv2D::new(
@@ -725,7 +629,7 @@ fn separable_conv2d_new_rejects_zero_filters() {
     );
 }
 
-/// depth_multiplier=0 must be rejected.
+/// depth_multiplier=0 must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_depth_multiplier() {
     let err = SeparableConv2D::new(
@@ -745,7 +649,7 @@ fn separable_conv2d_new_rejects_zero_depth_multiplier() {
     );
 }
 
-/// Zero kernel dimension must be rejected.
+/// Zero kernel dimension must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_kernel() {
     let err = SeparableConv2D::new(
@@ -765,7 +669,7 @@ fn separable_conv2d_new_rejects_zero_kernel() {
     );
 }
 
-/// Non-4D input_shape must be rejected.
+/// Non-4D input_shape must be rejected
 #[test]
 fn separable_conv2d_new_rejects_non_4d_input_shape() {
     let err = SeparableConv2D::new(
@@ -785,13 +689,9 @@ fn separable_conv2d_new_rejects_non_4d_input_shape() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — depth_multiplier behavior and output shape
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - depth_multiplier behavior and output shape
 
-/// depth_multiplier=1, filters=1, 1 input channel:
-/// depthwise output: [batch, channels*dm, oh, ow] = [1, 1*1, 2, 2]
-/// pointwise output: [1, 1, 2, 2]
+/// depth_multiplier=1, filters=1, 1 input channel: forward output shape is [1, 1, 2, 2]
 #[test]
 fn separable_conv2d_output_shape_dm1() {
     let mut conv = SeparableConv2D::new(
@@ -814,11 +714,7 @@ fn separable_conv2d_output_shape_dm1() {
     );
 }
 
-/// depth_multiplier=2 with 2 input channels and 4 output filters:
-///   depthwise channels = 2*2 = 4
-///   pointwise: input channels=4, output=4
-///   spatial: (3-2)/1+1 = 2 in each dim
-///   final output: [1, 4, 2, 2]
+/// depth_multiplier=2, 2 input channels, 4 output filters: forward output shape is [1, 4, 2, 2]
 #[test]
 fn separable_conv2d_output_shape_dm2() {
     let mut conv = SeparableConv2D::new(
@@ -841,27 +737,9 @@ fn separable_conv2d_output_shape_dm2() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — identity depthwise + identity pointwise reproduces input
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - identity depthwise + identity pointwise reproduces input
 
-/// Identity test.
-///
-/// Setup: 1 input channel, depth_multiplier=1, 1 output filter,
-///        1×1 kernel (all operations are pointwise), Valid padding, stride (1,1), Linear.
-///
-/// With a 1×1 kernel:
-///   depthwise_weights shape = [1, 1, 1, 1]; set to [[[[1.0]]]].
-///   pointwise_weights shape = [1, 1*1, 1, 1] = [1, 1, 1, 1]; set to [[[[1.0]]]].
-///   bias = 0.
-///
-/// Valid-padded 1×1 convolution with stride 1 leaves spatial dimensions unchanged:
-///   output_h = (H - 1)/1 + 1 = H, likewise W.
-///
-/// Mathematical result:
-///   depthwise out[b,0,i,j] = input[b,0,i,j] * 1.0 = input[b,0,i,j]
-///   pointwise out[b,0,i,j] = depthwise_out[b,0,i,j] * 1.0 + 0.0 = input[b,0,i,j]
-/// So the output must equal the input exactly.
+/// Identity 1x1 depthwise and pointwise kernels with zero bias reproduce the input exactly
 #[test]
 fn separable_conv2d_identity_reproduces_input() {
     let mut conv = SeparableConv2D::new(
@@ -876,9 +754,9 @@ fn separable_conv2d_identity_reproduces_input() {
     )
     .unwrap();
 
-    // depthwise_weights: [dm=1, channels=1, 1, 1] → 1.0
+    // depthwise_weights: [dm=1, channels=1, 1, 1] -> 1.0
     let dw = Array4::<f32>::ones((1, 1, 1, 1));
-    // pointwise_weights: [filters=1, channels*dm=1, 1, 1] → 1.0
+    // pointwise_weights: [filters=1, channels*dm=1, 1, 1] -> 1.0
     let pw = Array4::<f32>::ones((1, 1, 1, 1));
     let bias = Array2::<f32>::zeros((1, 1));
     conv.set_weights(dw, pw, bias).unwrap();
@@ -891,7 +769,7 @@ fn separable_conv2d_identity_reproduces_input() {
     let out = conv.forward(&x).unwrap();
     assert_eq!(out.shape(), &[1, 1, 3, 3]);
 
-    // Every output value must equal the corresponding input value.
+    // Every output value must equal the corresponding input value
     for h in 0..3 {
         for w in 0..3 {
             assert_abs_diff_eq!(out[[0, 0, h, w]], x[[0, 0, h, w]], epsilon = 1e-6);
@@ -899,27 +777,9 @@ fn separable_conv2d_identity_reproduces_input() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — known-weight forward value
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - known-weight forward value
 
-/// Manually calculated forward pass.
-///
-/// Setup: 1 channel, depth_multiplier=1, 1 output filter, 2×2 kernel, Valid, stride (1,1).
-///   depthwise_weights [1, 1, 2, 2]: [[1, 0], [0, 1]]  (identity-like kernel)
-///   pointwise_weights [1, 1, 1, 1]: [[[[2.0]]]]
-///   bias [1, 1]: 1.0
-///
-/// Input [1, 1, 3, 3]: 1..=9 in row-major order.
-///
-/// Step 1 – depthwise (Valid, kernel [[1,0],[0,1]]):
-///   out_dw[i,j] = 1*x[i,j] + 0*x[i,j+1] + 0*x[i+1,j] + 1*x[i+1,j+1]
-///              = x[i,j] + x[i+1,j+1]
-///   dw[0,0] = 1+5=6, dw[0,1] = 2+6=8, dw[1,0] = 4+8=12, dw[1,1] = 5+9=14
-///
-/// Step 2 – pointwise (multiply by 2, add bias 1):
-///   out[0,0] = 6*2 + 1 = 13, out[0,1] = 8*2 + 1 = 17
-///   out[1,0] = 12*2 + 1 = 25, out[1,1] = 14*2 + 1 = 29
+/// Depthwise [[1,0],[0,1]] then pointwise scale-by-2 plus bias 1 over input 1..=9 matches by hand
 #[test]
 fn separable_conv2d_known_weight_forward_values() {
     let mut conv = SeparableConv2D::new(
@@ -934,16 +794,15 @@ fn separable_conv2d_known_weight_forward_values() {
     )
     .unwrap();
 
-    // depthwise: [[1,0],[0,1]] — picks up (i,j) and (i+1,j+1)
+    // depthwise: [[1,0],[0,1]] picks up (i,j) and (i+1,j+1)
     let mut dw = Array4::<f32>::zeros((1, 1, 2, 2));
     dw[[0, 0, 0, 0]] = 1.0;
     dw[[0, 0, 1, 1]] = 1.0;
 
-    // pointwise: scale by 2
+    // pointwise: scale by 2, bias 1.0
     let mut pw = Array4::<f32>::zeros((1, 1, 1, 1));
     pw[[0, 0, 0, 0]] = 2.0;
 
-    // bias: 1.0
     let bias = Array2::from_elem((1, 1), 1.0_f32);
     conv.set_weights(dw, pw, bias).unwrap();
 
@@ -963,27 +822,8 @@ fn separable_conv2d_known_weight_forward_values() {
     assert_abs_diff_eq!(out[[0, 0, 1, 1]], 29.0_f32, epsilon = 1e-5);
 }
 
-/// SeparableConv2D with `Same` padding must zero-pad the depthwise stage, not boundary-clip.
-///
-/// Regression test: the depthwise stage used to align every kernel window at `i*stride` and clip
-/// at the input border, silently computing a `Valid`-style, top-left-aligned result even under
-/// `Same`. With a 3×3 kernel, correct `Same` padding adds a *leading* zero row/column
-/// (`pad_top = pad_left = 1`), which the buggy code never produced.
-///
-/// Setup: 1 channel, depth_multiplier=1, 1 filter, 3×3 all-ones depthwise kernel, identity
-/// pointwise (weight 1, bias 0), Linear, stride (1,1), `Same`. The output equals the zero-padded
-/// 3×3 box filter over `1..=9`:
-///
-/// ```text
-///   padded (pad 1 every edge):        output[i,j] = sum of centered 3×3 window
-///     0 0 0 0 0                            12 21 16
-///     0 1 2 3 0          ==>               27 45 33
-///     0 4 5 6 0                            24 39 28
-///     0 7 8 9 0
-///     0 0 0 0 0
-/// ```
-///
-/// The old boundary-clipping code instead produced 45 at `[0,0]` (the full unpadded 3×3 sum).
+/// `Same` padding zero-pads the depthwise stage: output is the zero-padded 3x3 box filter over 1..=9
+/// (regression - the old boundary-clipping code returned the unpadded 3x3 sum 45 at [0,0])
 #[test]
 fn separable_conv2d_same_padding_zero_pads_depthwise() {
     let mut conv = SeparableConv2D::new(
@@ -998,7 +838,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     )
     .unwrap();
 
-    // depthwise: 3×3 all-ones box filter; pointwise: identity (scale by 1); bias: 0.
+    // depthwise: 3x3 all-ones box filter; pointwise: identity (scale by 1); bias 0
     let dw = Array4::<f32>::from_elem((1, 1, 3, 3), 1.0);
     let pw = Array4::<f32>::from_elem((1, 1, 1, 1), 1.0);
     let bias = Array2::<f32>::zeros((1, 1));
@@ -1012,7 +852,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     .into_dyn();
 
     let out = conv.forward(&x).unwrap();
-    // `Same` keeps the spatial shape.
+    // `Same` keeps the spatial shape
     assert_eq!(out.shape(), &[1, 1, 3, 3]);
 
     let expected = [
@@ -1027,9 +867,7 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — predict() == forward() in eval mode
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - predict() == forward() in eval mode
 
 #[test]
 fn separable_conv2d_predict_equals_forward() {
@@ -1057,11 +895,9 @@ fn separable_conv2d_predict_equals_forward() {
     assert_allclose(&fwd, &pred, 1e-6_f32);
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — error paths
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - error paths
 
-/// backward before forward must return ForwardPassNotRun.
+/// backward before forward must return ForwardPassNotRun
 #[test]
 fn separable_conv2d_backward_before_forward_errors() {
     let mut conv = SeparableConv2D::new(
@@ -1083,7 +919,7 @@ fn separable_conv2d_backward_before_forward_errors() {
     );
 }
 
-/// set_weights with wrong depthwise shape must return NeuralNetwork(WeightShape).
+/// set_weights with wrong depthwise shape must return NeuralNetwork(WeightShape)
 #[test]
 fn separable_conv2d_set_weights_shape_mismatch_errors() {
     let mut conv = SeparableConv2D::new(
@@ -1097,7 +933,7 @@ fn separable_conv2d_set_weights_shape_mismatch_errors() {
         None,
     )
     .unwrap();
-    // depthwise_weights should be [dm=1, channels=2, 2, 2]; supply wrong dm=3.
+    // depthwise_weights should be [dm=1, channels=2, 2, 2]; supply wrong dm=3
     let bad_dw = Array4::<f32>::zeros((3, 2, 2, 2));
     let ok_pw = Array4::<f32>::zeros((2, 2, 1, 1));
     let ok_b = Array2::<f32>::zeros((1, 2));
@@ -1108,24 +944,9 @@ fn separable_conv2d_set_weights_shape_mismatch_errors() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — depth_multiplier correctly expands intermediate channels
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - depth_multiplier correctly expands intermediate channels
 
-/// With depth_multiplier=2, 1 input channel, 2 output filters, 1×1 kernel, Valid:
-///   depthwise_weights [2, 1, 1, 1]: dm0=1.0, dm1=2.0 → two scaled copies of input
-///   pointwise_weights [2, 2, 1, 1]: pw[0,0]=1.0,pw[0,1]=0.0; pw[1,0]=0.0,pw[1,1]=1.0
-///   bias [1, 2]: 0.0
-///
-/// Input [1, 1, 2, 2]: [[1,2],[3,4]]
-///
-/// Step 1 – depthwise (1×1 kernel, no spatial reduction):
-///   Intermediate channel 0 (dm=0): input * 1.0 → [[1,2],[3,4]]
-///   Intermediate channel 1 (dm=1): input * 2.0 → [[2,4],[6,8]]
-///
-/// Step 2 – pointwise:
-///   Output filter 0: picks intermediate channel 0 → [[1,2],[3,4]]
-///   Output filter 1: picks intermediate channel 1 → [[2,4],[6,8]]
+/// depth_multiplier=2 yields two scaled copies; filter 0 reproduces input, filter 1 is 2x input
 #[test]
 fn separable_conv2d_depth_multiplier_2_forward_values() {
     let mut conv = SeparableConv2D::new(
@@ -1145,8 +966,7 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
     dw[[0, 0, 0, 0]] = 1.0; // dm=0: scale by 1
     dw[[1, 0, 0, 0]] = 2.0; // dm=1: scale by 2
 
-    // pointwise_weights shape [filters=2, channels*dm=2, 1, 1]
-    // filter 0 selects intermediate channel 0 only; filter 1 selects channel 1 only.
+    // pointwise_weights [filters=2, channels*dm=2, 1, 1]: filter 0 selects channel 0, filter 1 channel 1
     let mut pw = Array4::<f32>::zeros((2, 2, 1, 1));
     pw[[0, 0, 0, 0]] = 1.0;
     pw[[1, 1, 0, 0]] = 1.0;
@@ -1161,7 +981,7 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
     let out = conv.forward(&x).unwrap();
     assert_eq!(out.shape(), &[1, 2, 2, 2]);
 
-    // Filter 0: should reproduce input (dm=0, scale=1, pw=1).
+    // Filter 0: should reproduce input (dm=0, scale=1, pw=1)
     let expected_f0 = [[1.0_f32, 2.], [3., 4.]];
     for h in 0..2 {
         for w in 0..2 {
@@ -1169,7 +989,7 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
         }
     }
 
-    // Filter 1: should be 2× input (dm=1, scale=2, pw=1).
+    // Filter 1: should be 2x input (dm=1, scale=2, pw=1)
     let expected_f1 = [[2.0_f32, 4.], [6., 8.]];
     for h in 0..2 {
         for w in 0..2 {
@@ -1177,21 +997,9 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
         }
     }
 }
-// ════════════════════════════════════════════════════════════════════════════════════════
-// DepthwiseConv2D — PARALLEL branch (workload >= 1500)
-// ════════════════════════════════════════════════════════════════════════════════════════
+// DepthwiseConv2D - PARALLEL branch (workload >= 1500)
 
-/// DepthwiseConv2D parallel forward branch.
-///
-/// The layer runs in parallel once `batch*channels*out_h*out_w >= 1500`
-/// (DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD). All other depthwise tests here are tiny and only
-/// hit the sequential path; this is the smallest tensor that crosses the threshold.
-///
-/// batch=1, channels=1 (=filters), input [1,1,40,40], all-ones 2x2 kernel, stride 1, Valid:
-///   out = (40-2)/1+1 = 39  →  workload = 1*1*39*39 = 1521  (>= 1500 → parallel)
-///
-/// Input ramp x[0,0,i,j] = i + j; an all-ones 2x2 kernel sums its receptive field:
-///   out[0,0,oh,ow] = (oh+ow)+(oh+ow+1)+(oh+1+ow)+(oh+1+ow+1) = 4*oh + 4*ow + 4
+/// All-ones 2x2 kernel over a [1,1,40,40] ramp crosses the parallel threshold and sums correctly
 #[test]
 fn depthwise_conv2d_parallel_windowed_sums() {
     let mut conv = DepthwiseConv2D::new(
@@ -1204,7 +1012,7 @@ fn depthwise_conv2d_parallel_windowed_sums() {
         None,
     )
     .unwrap();
-    // All-ones 2x2 kernel, zero bias.
+    // All-ones 2x2 kernel, zero bias
     let w = Array4::<f32>::from_elem((1, 1, 2, 2), 1.0);
     let bias = Array1::<f32>::zeros(1);
     conv.set_weights(w, bias).unwrap();
@@ -1227,24 +1035,9 @@ fn depthwise_conv2d_parallel_windowed_sums() {
     assert_abs_diff_eq!(out[[0, 0, 38, 38]], expect(38, 38), epsilon = 1e-4); // 308
 }
 
-// ════════════════════════════════════════════════════════════════════════════════════════
-// SeparableConv2D — PARALLEL branch (depthwise & pointwise workloads >= 5000)
-// ════════════════════════════════════════════════════════════════════════════════════════
+// SeparableConv2D - PARALLEL branch (depthwise & pointwise workloads >= 5000)
 
-/// SeparableConv2D parallel depthwise + pointwise branches.
-///
-/// Both stages switch to parallel at SEPARABLE_CONV_2D_PARALLEL_THRESHOLD (5000):
-///   depthwise: batch*channels*depth_multiplier*out_h*out_w >= 5000
-///   pointwise: batch*filters*out_h*out_w >= 5000
-///
-/// batch=1, channels=1, dm=1, filters=1, input [1,1,72,72], kernel (2,2), stride 1, Valid:
-///   out = (72-2)/1+1 = 71  →  depthwise = 1*1*1*71*71 = 5041 (>=5000 → parallel)
-///                            pointwise = 1*1*71*71 = 5041 (>=5000 → parallel)
-///
-/// depthwise = all-ones 2x2 box filter; pointwise weight = 2.0; bias = 1.0.
-/// With input ramp x[0,0,i,j] = i + j:
-///   depthwise out[0,0,oh,ow] = 4*oh + 4*ow + 4   (single channel, dm=1)
-///   final     out[0,0,oh,ow] = depthwise * 2.0 + 1.0 = 8*oh + 8*ow + 9
+/// A [1,1,72,72] ramp crosses both parallel thresholds; final out = 8*oh + 8*ow + 9
 #[test]
 fn separable_conv2d_parallel_windowed_sums() {
     let mut conv = SeparableConv2D::new(
@@ -1259,7 +1052,7 @@ fn separable_conv2d_parallel_windowed_sums() {
     )
     .unwrap();
 
-    // depthwise: all-ones 2x2; pointwise: scale by 2; bias: 1.0.
+    // depthwise: all-ones 2x2; pointwise: scale by 2; bias 1.0
     let dw = Array4::<f32>::from_elem((1, 1, 2, 2), 1.0);
     let pw = Array4::<f32>::from_elem((1, 1, 1, 1), 2.0);
     let bias = Array2::<f32>::from_elem((1, 1), 1.0);

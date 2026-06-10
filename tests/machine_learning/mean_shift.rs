@@ -1,28 +1,29 @@
+//! Integration tests for MeanShift clustering and estimate_bandwidth: constructor
+//! validation, fit/predict correctness, cluster_all and bin_seeding behavior,
+//! reproducibility, save/load, and edge cases
+
 use approx::assert_abs_diff_eq;
 use ndarray::{Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::mean_shift::{MeanShift, estimate_bandwidth};
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// helpers
 
-/// Two perfectly separated unit blobs:
-///   Blob A  → 5 points near (0.0, 0.0)
-///   Blob B  → 5 points near (20.0, 20.0)
-/// The blobs are ~28 units apart; with bandwidth=2.0 every intra-blob point
-/// is well inside the kernel window and inter-blob points are invisible to it.
+/// Two well-separated unit blobs of 5 points each, near (0,0) and (20,20); with
+/// bandwidth=2.0 every intra-blob point sits inside the kernel window
 fn two_blob_data() -> Array2<f64> {
     Array2::from_shape_vec(
         (10, 2),
         vec![
-            // Blob A: near (0, 0)
-            -0.1, 0.0, 0.1, 0.0, 0.0, -0.1, 0.0, 0.1, 0.0, 0.0, // Blob B: near (20, 20)
+            // Blob A near (0, 0)
+            -0.1, 0.0, 0.1, 0.0, 0.0, -0.1, 0.0, 0.1, 0.0, 0.0, // Blob B near (20, 20)
             19.9, 20.0, 20.1, 20.0, 20.0, 19.9, 20.0, 20.1, 20.0, 20.0,
         ],
     )
     .unwrap()
 }
 
-// ── constructor validation ────────────────────────────────────────────────────
+// constructor validation
 
 #[test]
 fn test_new_zero_bandwidth_is_invalid_parameter() {
@@ -136,7 +137,7 @@ fn test_default_constructor_values() {
     assert!(ms.get_cluster_all());
 }
 
-// ── pre-fit state ─────────────────────────────────────────────────────────────
+// pre-fit state
 
 #[test]
 fn test_getters_return_none_before_fit() {
@@ -147,7 +148,7 @@ fn test_getters_return_none_before_fit() {
     assert!(ms.get_actual_iterations().is_none());
 }
 
-// ── predict errors before fitting ────────────────────────────────────────────
+// predict errors before fitting
 
 #[test]
 fn test_predict_before_fit_returns_not_fitted() {
@@ -167,7 +168,7 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
     let mut ms = MeanShift::new(2.0, None, None, Some(false), Some(true), None).unwrap();
     ms.fit(&data).unwrap();
 
-    // Provide 3-feature points; the model was trained on 2-feature points.
+    // Provide 3-feature points; the model was trained on 2-feature points
     let x_wrong = Array2::from_shape_vec((2, 3), vec![0.0, 0.0, 0.0, 20.0, 20.0, 20.0]).unwrap();
     let result = ms.predict(&x_wrong);
     assert!(
@@ -177,22 +178,20 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
     );
 }
 
-// ── fit / predict correctness on designed data ────────────────────────────────
+// fit / predict correctness on designed data
 
-/// The core correctness test: two tight, well-separated blobs.
-/// True cluster centers are (0,0) and (20,20).
-/// Mean-shift with bandwidth=2 converges all intra-blob seeds to the blob mean
-/// and must discover exactly 2 cluster centers numerically close to those means.
+/// fit on two tight, well-separated blobs discovers exactly 2 centers numerically
+/// close to the true blob means (0,0) and (20,20)
 #[test]
 fn test_fit_produces_two_centers_near_true_means() {
     let data = two_blob_data();
-    // Use bin_seeding=true for deterministic seed selection and a fixed bandwidth.
+    // bin_seeding=true for deterministic seed selection at a fixed bandwidth
     let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true), None).unwrap();
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
 
-    // Must discover exactly 2 clusters.
+    // Must discover exactly 2 clusters
     assert_eq!(
         centers.nrows(),
         2,
@@ -201,8 +200,8 @@ fn test_fit_produces_two_centers_near_true_means() {
     );
     assert_eq!(centers.ncols(), 2, "centers must have 2 features");
 
-    // Each center must be within 0.5 units of one of the true blob means.
-    // We find the true centers by matching whichever fitted center is closest.
+    // Each center must be within 0.5 units of one true blob mean, matched by
+    // whichever fitted center is closest
     let true_centers = [[0.0_f64, 0.0_f64], [20.0_f64, 20.0_f64]];
     for tc in &true_centers {
         let closest_dist = (0..centers.nrows())
@@ -221,8 +220,8 @@ fn test_fit_produces_two_centers_near_true_means() {
     }
 }
 
-/// Labels from fit must group the 5 Blob-A samples together and the
-/// 5 Blob-B samples together (cluster structure, not absolute label values).
+/// fit labels group the 5 Blob-A samples together and the 5 Blob-B samples
+/// together (cluster structure, not absolute label values)
 #[test]
 fn test_fit_labels_match_known_cluster_structure() {
     let data = two_blob_data();
@@ -232,8 +231,7 @@ fn test_fit_labels_match_known_cluster_structure() {
     let labels = ms.get_labels().unwrap();
     assert_eq!(labels.len(), 10);
 
-    // Samples 0-4 are Blob A; samples 5-9 are Blob B.
-    // All samples in the same blob must have the same label.
+    // Samples 0-4 are Blob A, samples 5-9 are Blob B; same-blob samples share a label
     let label_a = labels[0];
     let label_b = labels[5];
     assert_ne!(label_a, label_b, "blobs must be assigned different labels");
@@ -246,7 +244,7 @@ fn test_fit_labels_match_known_cluster_structure() {
     }
 }
 
-/// predict must assign new points to the correct known cluster.
+/// predict assigns new points to the correct known cluster
 #[test]
 fn test_predict_assigns_points_to_correct_cluster() {
     let data = two_blob_data();
@@ -257,7 +255,7 @@ fn test_predict_assigns_points_to_correct_cluster() {
     let label_a = labels_train[0]; // label for blob-A region
     let label_b = labels_train[5]; // label for blob-B region
 
-    // Two canonical predict points, one deep inside each blob.
+    // Two canonical predict points, one deep inside each blob
     let x_new = Array2::from_shape_vec(
         (2, 2),
         vec![
@@ -279,7 +277,7 @@ fn test_predict_assigns_points_to_correct_cluster() {
     );
 }
 
-/// fit_predict must return the same labels as the stored labels.
+/// fit_predict returns the same labels as the stored labels
 #[test]
 fn test_fit_predict_consistent_with_fit_then_labels() {
     let data = two_blob_data();
@@ -292,11 +290,10 @@ fn test_fit_predict_consistent_with_fit_then_labels() {
     }
 }
 
-// ── cluster_all=false outlier label ──────────────────────────────────────────
+// cluster_all=false outlier label
 
-/// When cluster_all=false, a point that lies farther than bandwidth from every
-/// fitted center must receive the label n_clusters (not 0, not usize::MAX, not -1).
-/// Documented contract from the source: outlier label == n_clusters.
+/// With cluster_all=false, a point farther than bandwidth from every fitted center
+/// receives the label n_clusters (the documented outlier sentinel)
 #[test]
 fn test_cluster_all_false_outlier_label_is_n_clusters() {
     let data = two_blob_data(); // blobs at (0,0) and (20,20)
@@ -306,8 +303,7 @@ fn test_cluster_all_false_outlier_label_is_n_clusters() {
     let centers = ms.get_cluster_centers().unwrap();
     let n_clusters = centers.nrows(); // documented outlier sentinel
 
-    // A point far from every fitted center: (10,10) is ~14 units from both blob centers,
-    // which is well beyond the bandwidth of 2.0.
+    // (10,10) is ~14 units from both blob centers, well beyond the bandwidth of 2.0
     let x_far = Array2::from_shape_vec((1, 2), vec![10.0, 10.0]).unwrap();
     let preds = ms.predict(&x_far).unwrap();
 
@@ -318,7 +314,7 @@ fn test_cluster_all_false_outlier_label_is_n_clusters() {
     );
 }
 
-/// When cluster_all=true (default) predict must never produce the outlier sentinel.
+/// With cluster_all=true (default) predict never produces the outlier sentinel
 #[test]
 fn test_cluster_all_true_never_produces_outlier_label() {
     let data = two_blob_data();
@@ -328,7 +324,7 @@ fn test_cluster_all_true_never_produces_outlier_label() {
     let centers = ms.get_cluster_centers().unwrap();
     let n_clusters = centers.nrows();
 
-    // Even a far-away point must be assigned a real cluster when cluster_all=true.
+    // Even a far-away point must be assigned a real cluster when cluster_all=true
     let x_far = Array2::from_shape_vec((1, 2), vec![10.0, 10.0]).unwrap();
     let preds = ms.predict(&x_far).unwrap();
 
@@ -337,12 +333,11 @@ fn test_cluster_all_true_never_produces_outlier_label() {
         "cluster_all=true should never produce outlier label {}, got {}",
         n_clusters, preds[0]
     );
-    // Must be a valid cluster index.
+    // Must be a valid cluster index
     assert!(preds[0] < n_clusters);
 }
 
-/// The fit labels themselves obey the same invariant: no label equals n_clusters
-/// when cluster_all=true.
+/// fit labels obey the same invariant: no label equals n_clusters when cluster_all=true
 #[test]
 fn test_fit_labels_cluster_all_true_all_assigned() {
     let data = two_blob_data();
@@ -363,7 +358,7 @@ fn test_fit_labels_cluster_all_true_all_assigned() {
     }
 }
 
-// ── max_iter respected ────────────────────────────────────────────────────────
+// max_iter respected
 
 #[test]
 fn test_actual_iterations_bounded_by_max_iter() {
@@ -374,13 +369,10 @@ fn test_actual_iterations_bounded_by_max_iter() {
     assert_eq!(actual, 1, "with max_iter=1, actual iterations must equal 1");
 }
 
-// ── n_samples_per_center semantics ───────────────────────────────────────────
+// n_samples_per_center semantics
 
-/// n_samples_per_center counts the number of converged seeds that merged into
-/// each cluster center — NOT the number of data points assigned to each cluster.
-/// For two well-separated blobs of 5 points each (10 seeds total via bin_seeding),
-/// the counts must sum to the number of seeds that were processed, which is at
-/// most n_samples = 10.
+/// n_samples_per_center counts converged seeds merged into each center (not points
+/// assigned), so the counts sum to at most n_samples = 10
 #[test]
 fn test_n_samples_per_center_sums_equal_seeds_processed() {
     let data = two_blob_data();
@@ -390,10 +382,10 @@ fn test_n_samples_per_center_sums_equal_seeds_processed() {
     let counts = ms.get_n_samples_per_center().unwrap();
     let centers = ms.get_cluster_centers().unwrap();
 
-    // There must be as many count entries as cluster centers.
+    // There must be as many count entries as cluster centers
     assert_eq!(counts.len(), centers.nrows());
 
-    // The total number of seed-center assignments must not exceed n_samples (10).
+    // The total number of seed-center assignments must not exceed n_samples (10)
     let total: usize = counts.iter().sum();
     assert!(
         total <= 10,
@@ -403,7 +395,7 @@ fn test_n_samples_per_center_sums_equal_seeds_processed() {
     assert!(total > 0, "at least one seed must have been processed");
 }
 
-// ── bin_seeding flag ──────────────────────────────────────────────────────────
+// bin_seeding flag
 
 #[test]
 fn test_bin_seeding_produces_valid_centers() {
@@ -421,10 +413,8 @@ fn test_bin_seeding_produces_valid_centers() {
 #[test]
 fn test_no_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
-    // bin_seeding=false shuffles the points and keeps up to 100 as seeds. With only 10 samples
-    // (<= 100) the whole set is always kept, so the shuffle cannot change WHICH points are seeds —
-    // this just checks the non-bin_seeding branch yields valid centers. Reproducibility of the
-    // (now random_state-seeded) shuffle is covered by the >100-sample test below.
+    // bin_seeding=false keeps up to 100 shuffled points as seeds; with only 10 samples
+    // the whole set is kept, so this just checks the non-bin_seeding branch is valid
     let mut ms_no_bin =
         MeanShift::new(2.0, Some(300), Some(1e-5), Some(false), Some(true), None).unwrap();
     ms_no_bin.fit(&data).unwrap();
@@ -434,9 +424,8 @@ fn test_no_bin_seeding_produces_valid_centers() {
     assert_eq!(centers.ncols(), 2);
 }
 
-/// 120 points in three well-separated blobs (40 each) with deterministic 2-D jitter (no RNG).
-/// More than 100 points is the whole point: `fit` caps the seed set at 100, so only above that
-/// threshold does the `random_state`-seeded shuffle actually decide WHICH points become seeds.
+/// 120 points in three well-separated blobs (40 each) with deterministic 2-D jitter;
+/// above the 100-seed cap, the random_state-seeded shuffle decides which points seed
 fn three_blobs_over_100() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (12.0, 0.0), (6.0, 11.0)];
     let mut v = Vec::with_capacity(120 * 2);
@@ -449,12 +438,8 @@ fn three_blobs_over_100() -> Array2<f64> {
     Array2::from_shape_vec((120, 2), v).unwrap()
 }
 
-/// Gap-B regression guard: with >100 samples the seed set is a random 100-of-120 subset, so
-/// `random_state` must make the non-bin_seeding `fit` reproducible. (Before the fix the shuffle
-/// used an unseeded RNG and ignored `random_state`.) Two fits with the same seed must produce
-/// identical centers AND identical labels. The dedup keeps modes in discovery order and labels
-/// index into that order, so both the center row-order and the label ids follow the
-/// seed-determined processing order — they would diverge run-to-run without the seeding.
+/// With >100 samples (random 100-of-120 seed subset), two non-bin_seeding fits with
+/// the same random_state produce identical centers and identical labels
 #[test]
 fn same_random_state_makes_non_bin_seeding_fit_reproducible() {
     let data = three_blobs_over_100();
@@ -485,7 +470,7 @@ fn same_random_state_makes_non_bin_seeding_fit_reproducible() {
     assert_eq!(l1, l2, "same seed must yield identical labels");
 }
 
-// ── estimate_bandwidth ────────────────────────────────────────────────────────
+// estimate_bandwidth
 
 #[test]
 fn test_estimate_bandwidth_quantile_zero_is_invalid() {
@@ -531,14 +516,14 @@ fn test_estimate_bandwidth_quantile_greater_than_one_is_invalid() {
     );
 }
 
-/// Two-point dataset [[0,0],[3,4]]: only one pair, Euclidean distance = 5.0.
-/// Regardless of quantile, the only distance in the list is 5.0.
+/// Two-point dataset has a single pair, so estimate_bandwidth returns that pair's
+/// distance (5.0) for any quantile
 #[test]
 fn test_estimate_bandwidth_two_point_known_distance() {
-    // Distance between (0,0) and (3,4) = sqrt(9+16) = sqrt(25) = 5.0 (exact).
+    // Distance between (0,0) and (3,4) = sqrt(9+16) = sqrt(25) = 5.0 (exact)
     let x = Array2::from_shape_vec((2, 2), vec![0.0_f64, 0.0, 3.0, 4.0]).unwrap();
 
-    // Any quantile in (0,1) must return 5.0 because there is only one pair.
+    // Any quantile in (0,1) returns 5.0 because there is only one pair
     let bw = estimate_bandwidth(&x, Some(0.3), None, Some(42)).unwrap();
     assert_abs_diff_eq!(bw, 5.0, epsilon = 1e-10);
 
@@ -546,7 +531,7 @@ fn test_estimate_bandwidth_two_point_known_distance() {
     assert_abs_diff_eq!(bw_high, 5.0, epsilon = 1e-10);
 }
 
-/// estimate_bandwidth returns a positive value for typical data.
+/// estimate_bandwidth returns a positive value for typical data
 #[test]
 fn test_estimate_bandwidth_returns_positive() {
     let data = two_blob_data();
@@ -554,7 +539,7 @@ fn test_estimate_bandwidth_returns_positive() {
     assert!(bw > 0.0, "bandwidth estimate must be positive, got {}", bw);
 }
 
-/// Determinism: same seed → identical result.
+/// estimate_bandwidth is deterministic: the same seed gives an identical result
 #[test]
 fn test_estimate_bandwidth_deterministic_with_seed() {
     let data = two_blob_data();
@@ -563,19 +548,19 @@ fn test_estimate_bandwidth_deterministic_with_seed() {
     assert_abs_diff_eq!(bw1, bw2, epsilon = 1e-15);
 }
 
-/// n_samples larger than n_rows falls back to using all rows without panic.
+/// estimate_bandwidth with n_samples larger than n_rows falls back to all rows without panic
 #[test]
 fn test_estimate_bandwidth_n_samples_larger_than_rows() {
     let x = Array2::from_shape_vec((3, 2), vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.866]).unwrap();
-    // Requesting 1000 samples when only 3 exist should use all 3, not panic.
+    // Requesting 1000 samples when only 3 exist uses all 3, not a panic
     let result = estimate_bandwidth(&x, Some(0.5), Some(1000), Some(42));
     assert!(result.is_ok());
     assert!(result.unwrap() > 0.0);
 }
 
-// ── fit on minimal (single-point) dataset ────────────────────────────────────
+// fit on minimal (single-point) dataset
 
-/// A single-point dataset must produce one cluster center equal to that point.
+/// A single-point dataset produces one cluster center equal to that point
 #[test]
 fn test_fit_single_point_produces_one_center() {
     let x = Array2::from_shape_vec((1, 2), vec![3.0_f64, 7.0]).unwrap();
@@ -592,7 +577,7 @@ fn test_fit_single_point_produces_one_center() {
     assert_eq!(labels[0], 0);
 }
 
-// ── fit on empty data ─────────────────────────────────────────────────────────
+// fit on empty data
 
 #[test]
 fn test_fit_empty_data_returns_error() {
@@ -603,7 +588,7 @@ fn test_fit_empty_data_returns_error() {
         result.is_err(),
         "fit on empty data should return Err, got Ok"
     );
-    // The error should be EmptyInput or InvalidInput (preliminary_check).
+    // The error should be EmptyInput or InvalidInput (preliminary_check)
     let is_expected = matches!(
         result,
         Err(Error::EmptyInput(_)) | Err(Error::InvalidInput(_))
@@ -615,7 +600,7 @@ fn test_fit_empty_data_returns_error() {
     );
 }
 
-// ── save / load round-trip ────────────────────────────────────────────────────
+// save / load round-trip
 
 #[test]
 fn test_save_load_round_trip_identical_predictions() {
@@ -628,7 +613,7 @@ fn test_save_load_round_trip_identical_predictions() {
 
     let loaded = MeanShift::load_from_path(path).expect("load_from_path should succeed");
 
-    // Both must predict identically on the training data.
+    // Both must predict identically on the training data
     let preds_original = ms.predict(&data).unwrap();
     let preds_loaded = loaded.predict(&data).unwrap();
 
@@ -645,32 +630,31 @@ fn test_save_load_round_trip_identical_predictions() {
         );
     }
 
-    // Cluster centers must be identical after round-trip.
+    // Cluster centers must be identical after round-trip
     let centers_original = ms.get_cluster_centers().unwrap();
     let centers_loaded = loaded.get_cluster_centers().unwrap();
     crate::common::assert_allclose(centers_original, centers_loaded, 1e-15);
 
-    // Clean up temp file.
+    // Clean up temp file
     let _ = std::fs::remove_file(path);
 }
 
-// ── determinism of estimate_bandwidth with fixed seed ────────────────────────
+// determinism of estimate_bandwidth with fixed seed
 
-/// Two calls to estimate_bandwidth with the same seed and n_samples must return
-/// exactly the same value. This tests that random_state wires through to StdRng.
+/// estimate_bandwidth with the same seed and n_samples returns exactly the same
+/// value (random_state wires through to StdRng)
 #[test]
 fn test_estimate_bandwidth_same_seed_same_result() {
     let data = two_blob_data();
-    // Use n_samples smaller than n_rows to exercise the sampling path.
+    // n_samples smaller than n_rows to exercise the sampling path
     let bw1 = estimate_bandwidth(&data, Some(0.5), Some(5), Some(77)).unwrap();
     let bw2 = estimate_bandwidth(&data, Some(0.5), Some(5), Some(77)).unwrap();
     assert_abs_diff_eq!(bw1, bw2, epsilon = 1e-15);
     assert!(bw1 > 0.0);
 }
 
-/// Different seeds should generally produce different results on a dataset with
-/// enough spread (10-point two-blob data, sampling 5 of 10 rows).
-/// This is a probabilistic sanity check; the only thing asserted is positivity.
+/// estimate_bandwidth with different seeds (sampling 5 of 10 rows) yields positive
+/// values; a probabilistic sanity check asserting only positivity
 #[test]
 fn test_estimate_bandwidth_different_seeds_both_positive() {
     let data = two_blob_data();
@@ -680,13 +664,10 @@ fn test_estimate_bandwidth_different_seeds_both_positive() {
     assert!(bw_b > 0.0);
 }
 
-// ── reproducibility of fit ────────────────────────────────────────────────────
-//
-// `fit` selects up to 100 random seed points when `bin_seeding` is disabled. With
-// 150 points the selection is a genuine random subset, so this exercises the
-// `random_state` seeding rather than trivially selecting every point.
+// reproducibility of fit: with bin_seeding disabled, `fit` selects up to 100 random
+// seed points, so 150 points exercise random_state on a genuine random subset
 
-/// 150 deterministic points across three well-separated blobs (no RNG in the test).
+/// 150 deterministic points across three well-separated blobs (no RNG in the test)
 fn three_blob_data() -> Array2<f64> {
     let n = 150;
     let mut x = Array2::zeros((n, 2));
@@ -702,8 +683,8 @@ fn three_blob_data() -> Array2<f64> {
     x
 }
 
-/// Two fits with the SAME seed (and `bin_seeding = false`) must produce identical
-/// labels and cluster centers.
+/// Two fits with the same seed (and bin_seeding = false) produce identical labels
+/// and cluster centers
 #[test]
 fn test_fit_same_seed_is_reproducible() {
     let data = three_blob_data();
@@ -734,9 +715,8 @@ fn test_fit_same_seed_is_reproducible() {
     );
 }
 
-/// With `bin_seeding = true` there is no RNG, but the result was previously
-/// non-deterministic because of `AHashMap` iteration order and the per-cell
-/// representative choice. Two fits must now agree exactly across runs.
+/// With bin_seeding = true (no RNG), two fits agree exactly across runs despite
+/// AHashMap iteration order and the per-cell representative choice
 #[test]
 fn test_bin_seeding_is_deterministic_across_runs() {
     let data = three_blob_data();
@@ -759,19 +739,11 @@ fn test_bin_seeding_is_deterministic_across_runs() {
         1e-15,
     );
 }
-// ── large-dataset parallel seed-loop + label branch (n_samples > 1000) ────────────
-//
-// `fit` uses parallelism only when `n_samples > MEANSHIFT_PARALLEL_THRESHOLD` (1000),
-// i.e. strictly greater, so a 1200-point dataset is needed to exercise both the
-// parallel seed `.par_iter()` loop (src mean_shift.rs ~line 278) and the parallel
-// label `map_collect` (src ~line 372). `bin_seeding = true` keeps seed selection
-// deterministic.
+// large-dataset parallel seed-loop + label branch: `fit` parallelizes only when
+// n_samples > MEANSHIFT_PARALLEL_THRESHOLD (1000), so 1200 points hit both branches
 
-/// 1200 points: three tight, well-separated blobs (400 each) with deterministic
-/// jitter (no RNG). Centres (0,0), (10,0), (5,10); jitter dx in [-0.20,+0.20],
-/// dy in [-0.18,+0.18]. Inter-blob separation >= ~9.6 ≫ intra-blob spread
-/// (max pairwise ≈ 0.54). The per-blob offset means are ~0 (x=0.0, y=-3e-4,
-/// hand-checked), so each blob mean is within ~3e-4 of its nominal centre.
+/// 1200 points: three tight, well-separated blobs (400 each) with deterministic jitter
+/// around centers (0,0), (10,0), (5,10), separation far exceeding intra-blob spread
 fn three_blobs_1200() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (10.0, 0.0), (5.0, 10.0)];
     let mut v = Vec::with_capacity(1200 * 2);
@@ -784,17 +756,14 @@ fn three_blobs_1200() -> Array2<f64> {
     Array2::from_shape_vec((1200, 2), v).unwrap()
 }
 
-/// PARALLEL seed-loop + label branch: fit MeanShift on 1200 points (> 1000) and
-/// require it to recover the 3 known blob centres. With bandwidth = 2.0 each blob's
-/// seeds converge to that blob's mean, and centres closer than bandwidth merge, so
-/// exactly 3 centres remain — each within 0.5 of a true mean. The label assignment
-/// (also parallel at this size) must group the three 400-point blocks distinctly.
+/// fit on 1200 points (> 1000, parallel seed-loop and label branch) recovers exactly
+/// 3 centers each within 0.5 of a true mean and groups the three 400-point blocks distinctly
 #[test]
 fn test_fit_parallel_branch_three_blobs_1200() {
     let data = three_blobs_1200();
     assert_eq!(data.nrows(), 1200, "dataset must exceed the 1000 threshold");
 
-    // bin_seeding=true → deterministic seeds; bandwidth=2.0 separates the blobs.
+    // bin_seeding=true gives deterministic seeds; bandwidth=2.0 separates the blobs
     let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true), None).unwrap();
     ms.fit(&data).unwrap();
 
@@ -807,7 +776,7 @@ fn test_fit_parallel_branch_three_blobs_1200() {
     );
     assert_eq!(centers.ncols(), 2);
 
-    // Each true mean must have a fitted center within 0.5.
+    // Each true mean must have a fitted center within 0.5
     let true_centers = [[0.0_f64, 0.0_f64], [10.0, 0.0], [5.0, 10.0]];
     for tc in &true_centers {
         let closest = (0..centers.nrows())
@@ -825,7 +794,7 @@ fn test_fit_parallel_branch_three_blobs_1200() {
         );
     }
 
-    // Labels (parallel map_collect at this size) must respect the blob blocks.
+    // Labels (parallel map_collect at this size) must respect the blob blocks
     let labels = ms.get_labels().unwrap();
     assert_eq!(labels.len(), 1200);
     let block_label = [labels[0], labels[400], labels[800]];

@@ -1,16 +1,16 @@
-//! Shared helpers for the `metrics` integration tests.
+//! Shared helpers for the `metrics` integration tests
 //!
 //! The `metrics` feature does not pull in `ndarray-rand`, so there is no seeded-RNG
-//! helper here — metric tests are deterministic closed-form checks against ground truth.
+//! helper here - metric tests are deterministic closed-form checks against ground truth
 
 #![allow(dead_code)]
 
 use ndarray::{ArrayBase, Data, Dimension};
 
-/// Asserts two arrays are element-wise equal within `eps` (absolute difference).
+/// Asserts two arrays are element-wise equal within `eps` (absolute difference)
 ///
-/// Use this for array comparisons. For single scalars, use approx's
-/// `assert_abs_diff_eq!` / `assert_relative_eq!` macros directly.
+/// Use for array comparisons. For single scalars, use approx's
+/// `assert_abs_diff_eq!` / `assert_relative_eq!` macros directly
 pub fn assert_allclose<A, S1, S2, D>(actual: &ArrayBase<S1, D>, expected: &ArrayBase<S2, D>, eps: A)
 where
     A: approx::AbsDiffEq<Epsilon = A> + Copy + std::fmt::Debug,

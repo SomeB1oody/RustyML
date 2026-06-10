@@ -1,4 +1,4 @@
-//! Shared helpers for the `machine_learning` integration tests.
+//! Shared helpers for the `machine_learning` integration tests
 
 #![allow(dead_code)]
 
@@ -6,17 +6,17 @@ use ndarray::{ArrayBase, Data, Dimension};
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 
-/// A deterministically seeded RNG, for reproducible tests.
+/// A deterministically seeded RNG, for reproducible tests
 ///
-/// Always seed test RNGs — never use the thread RNG — so failures are reproducible.
+/// Always seed test RNGs (never the thread RNG) so failures are reproducible
 pub fn seeded_rng(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)
 }
 
-/// Asserts two arrays are element-wise equal within `eps` (absolute difference).
+/// Asserts two arrays are element-wise equal within `eps` (absolute difference)
 ///
-/// Use this for array comparisons. For single scalars, use approx's
-/// `assert_abs_diff_eq!` / `assert_relative_eq!` macros directly.
+/// For single scalars, use approx's `assert_abs_diff_eq!` /
+/// `assert_relative_eq!` macros directly
 pub fn assert_allclose<A, S1, S2, D>(actual: &ArrayBase<S1, D>, expected: &ArrayBase<S2, D>, eps: A)
 where
     A: approx::AbsDiffEq<Epsilon = A> + Copy + std::fmt::Debug,

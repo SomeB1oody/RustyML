@@ -1,23 +1,15 @@
-//! Integration tests for KNN (K-Nearest Neighbours) classifier.
-//!
-//! Every expected value is derived from the problem design or a closed-form
-//! calculation — never from running the model and recording its output.
-//!
-//! Notation used in derivations:
-//!   dist_E(a,b) = Euclidean distance
-//!   dist_M(a,b) = Manhattan (L1) distance
-//!   dist_K(p)(a,b) = Minkowski distance with parameter p
-//!   Minkowski(1) == Manhattan, Minkowski(2) == Euclidean
+//! Integration tests for the KNN (K-Nearest Neighbours) classifier: constructor
+//! validation, fit/predict error paths, distance metrics, weighting, parallel
+//! paths, and save/load round-trips
 
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;
 use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
 
-// ─── Constructor validation ──────────────────────────────────────────────────
+// Constructor validation
 
-/// k=0 must return Error::InvalidParameter.
-/// Contract (src/machine_learning/knn.rs:127): "if k == 0 { return Err(Error::invalid_parameter(...)) }"
+/// k=0 must return Error::InvalidParameter
 #[test]
 fn constructor_k_zero_returns_invalid_parameter() {
     let err = KNN::<i32>::new(0, WeightingStrategy::Uniform, Metric::Euclidean).unwrap_err();
@@ -27,14 +19,13 @@ fn constructor_k_zero_returns_invalid_parameter() {
     );
 }
 
-/// k=1 (minimum legal) must succeed.
+/// k=1 (minimum legal) must succeed
 #[test]
 fn constructor_k_one_succeeds() {
     KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
 }
 
-/// Default constructor must expose k=5, Uniform, Euclidean.
-/// Contract (src/machine_learning/knn.rs:92-101): default values documented.
+/// Default constructor must expose k=5, Uniform, Euclidean
 #[test]
 fn constructor_default_values() {
     let knn = KNN::<i32>::default();
@@ -44,7 +35,7 @@ fn constructor_default_values() {
     assert!(knn.get_x_train().is_none());
 }
 
-/// new() must store and expose the exact parameters supplied.
+/// new() must store and expose the exact parameters supplied
 #[test]
 fn constructor_stores_parameters() {
     let knn = KNN::<i32>::new(3, WeightingStrategy::Distance, Metric::Manhattan).unwrap();
@@ -53,11 +44,9 @@ fn constructor_stores_parameters() {
     assert_eq!(knn.get_metric(), Metric::Manhattan);
 }
 
-// ─── fit error paths ─────────────────────────────────────────────────────────
+// fit error paths
 
-/// Fitting with fewer samples than k returns Error::InvalidInput.
-/// Contract: "if x.nrows() < self.k { return Err(Error::invalid_input(...)) }"
-/// Here k=5 but we supply only 3 rows.
+/// Fitting with fewer samples than k returns Error::InvalidInput (k=5, 3 rows)
 #[test]
 fn fit_fewer_samples_than_k_returns_invalid_input() {
     let mut knn = KNN::<i32>::new(5, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -70,9 +59,7 @@ fn fit_fewer_samples_than_k_returns_invalid_input() {
     );
 }
 
-/// Fitting with y length != x.nrows() returns DimensionMismatch (instead of panicking at predict).
-/// KNN labels are a generic type `T`, so `preliminary_check(x, None)` cannot validate them; `fit`
-/// checks the row counts explicitly. Here x has 3 rows but y has only 2 labels.
+/// Fitting with y length != x.nrows() returns DimensionMismatch (x has 3 rows, y has 2 labels)
 #[test]
 fn fit_mismatched_y_length_returns_dimension_mismatch() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -85,8 +72,7 @@ fn fit_mismatched_y_length_returns_dimension_mismatch() {
     );
 }
 
-/// Fitting with NaN in x must return Error::NonFinite (via preliminary_check).
-/// Contract: preliminary_check checks for non-finite values in x.
+/// Fitting with NaN in x must return Error::NonFinite
 #[test]
 fn fit_nan_in_x_returns_non_finite() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -99,7 +85,7 @@ fn fit_nan_in_x_returns_non_finite() {
     );
 }
 
-/// Fitting with Inf in x must return Error::NonFinite.
+/// Fitting with Inf in x must return Error::NonFinite
 #[test]
 fn fit_inf_in_x_returns_non_finite() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -112,7 +98,7 @@ fn fit_inf_in_x_returns_non_finite() {
     );
 }
 
-/// Fitting with an empty x (0 rows) must return Error::EmptyInput.
+/// Fitting with an empty x (0 rows) must return Error::EmptyInput
 #[test]
 fn fit_empty_x_returns_empty_input() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -125,10 +111,9 @@ fn fit_empty_x_returns_empty_input() {
     );
 }
 
-// ─── predict error paths ─────────────────────────────────────────────────────
+// predict error paths
 
-/// predict before fit must return Error::NotFitted.
-/// Contract: check_is_fitted fires before any computation.
+/// predict before fit must return Error::NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
     let knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -140,7 +125,7 @@ fn predict_before_fit_returns_not_fitted() {
     );
 }
 
-/// predict_parallel before fit must return Error::NotFitted.
+/// predict_parallel before fit must return Error::NotFitted
 #[test]
 fn predict_parallel_before_fit_returns_not_fitted() {
     let knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -152,9 +137,7 @@ fn predict_parallel_before_fit_returns_not_fitted() {
     );
 }
 
-/// predict with wrong number of features (dimension mismatch) must return
-/// Error::DimensionMismatch.
-/// Training uses 2 features; predict uses 3 features.
+/// predict with wrong feature count must return Error::DimensionMismatch (train 2, predict 3)
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -171,7 +154,7 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-/// predict with NaN in x_test must return Error::NonFinite.
+/// predict with NaN in x_test must return Error::NonFinite
 #[test]
 fn predict_nan_in_x_test_returns_non_finite() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -187,7 +170,7 @@ fn predict_nan_in_x_test_returns_non_finite() {
     );
 }
 
-/// predict with empty x_test must return Error::EmptyInput.
+/// predict with empty x_test must return Error::EmptyInput
 #[test]
 fn predict_empty_x_test_returns_empty_input() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -203,33 +186,9 @@ fn predict_empty_x_test_returns_empty_input() {
     );
 }
 
-// ─── k=1 Euclidean correctness ───────────────────────────────────────────────
+// k=1 Euclidean correctness
 
-/// k=1, Euclidean, Uniform.
-///
-/// Training set (2-D):
-///   P0 = (0, 0)  → class 0
-///   P1 = (10, 0) → class 1
-///   P2 = (0, 10) → class 1
-///
-/// Queries:
-///   Q0 = (0.5, 0):
-///     dist_E(Q0, P0) = 0.5
-///     dist_E(Q0, P1) = 9.5
-///     dist_E(Q0, P2) = sqrt(0.25 + 100) ≈ 10.012
-///     nearest = P0 → class 0 ✓
-///
-///   Q1 = (9.5, 0):
-///     dist_E(Q1, P0) = 9.5
-///     dist_E(Q1, P1) = 0.5
-///     dist_E(Q1, P2) = sqrt(90.25 + 100) ≈ 13.8
-///     nearest = P1 → class 1 ✓
-///
-///   Q2 = (0, 9.5):
-///     dist_E(Q2, P0) = 9.5
-///     dist_E(Q2, P1) = sqrt(100 + 90.25) ≈ 13.8
-///     dist_E(Q2, P2) = 0.5
-///     nearest = P2 → class 1 ✓
+/// k=1 Euclidean Uniform picks the single nearest neighbour per query
 #[test]
 fn predict_k1_euclidean_correctness() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -245,33 +204,9 @@ fn predict_k1_euclidean_correctness() {
     assert_eq!(predictions[2], 1, "Q2=(0,9.5) should map to class 1");
 }
 
-// ─── k=1 Manhattan correctness ───────────────────────────────────────────────
+// k=1 Manhattan correctness
 
-/// k=1, Manhattan distance, Uniform.
-///
-/// Training set (2-D, same as Euclidean test):
-///   P0 = (0, 0)  → class 0
-///   P1 = (10, 0) → class 1
-///   P2 = (0, 10) → class 1
-///
-/// Queries:
-///   Q0 = (0.5, 0):
-///     dist_M(Q0, P0) = 0.5
-///     dist_M(Q0, P1) = 9.5
-///     dist_M(Q0, P2) = 0.5 + 10 = 10.5
-///     nearest = P0 → class 0 ✓
-///
-///   Q1 = (9.5, 0):
-///     dist_M(Q1, P0) = 9.5
-///     dist_M(Q1, P1) = 0.5
-///     dist_M(Q1, P2) = 9.5 + 10 = 19.5
-///     nearest = P1 → class 1 ✓
-///
-///   Q2 = (0, 9.5):
-///     dist_M(Q2, P0) = 9.5
-///     dist_M(Q2, P1) = 10 + 9.5 = 19.5
-///     dist_M(Q2, P2) = 0.5
-///     nearest = P2 → class 1 ✓
+/// k=1 Manhattan Uniform picks the single nearest neighbour per query
 #[test]
 fn predict_k1_manhattan_correctness() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Manhattan).unwrap();
@@ -287,22 +222,18 @@ fn predict_k1_manhattan_correctness() {
     assert_eq!(predictions[2], 1, "Q2=(0,9.5) should map to class 1");
 }
 
-// ─── Minkowski p=1 equals Manhattan ─────────────────────────────────────────
+// Minkowski p=1 equals Manhattan
 
-/// Minkowski(p=1) must equal Manhattan by definition:
-///   dist_K(1)(a,b) = sum |a_i - b_i| = dist_M(a,b)
-///
-/// We use the same 3-point layout and verify predictions match the Manhattan
-/// result, confirming the metric integration is correct end-to-end.
+/// Minkowski(p=1) predictions must equal Manhattan predictions on the same data
 #[test]
 fn predict_minkowski_p1_equals_manhattan() {
-    // Build Manhattan model (reference)
+    // Manhattan reference model
     let mut knn_man = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Manhattan).unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn_man.fit(&x_train, &y_train).unwrap();
 
-    // Build Minkowski(p=1) model
+    // Minkowski(p=1) model
     let mut knn_mink =
         KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(1.0)).unwrap();
     knn_mink.fit(&x_train, &y_train).unwrap();
@@ -317,19 +248,18 @@ fn predict_minkowski_p1_equals_manhattan() {
     );
 }
 
-// ─── Minkowski p=2 equals Euclidean ─────────────────────────────────────────
+// Minkowski p=2 equals Euclidean
 
-/// Minkowski(p=2) must equal Euclidean by definition:
-///   dist_K(2)(a,b) = (sum (a_i - b_i)^2)^(1/2) = dist_E(a,b)
+/// Minkowski(p=2) predictions must equal Euclidean predictions on the same data
 #[test]
 fn predict_minkowski_p2_equals_euclidean() {
-    // Build Euclidean model (reference)
+    // Euclidean reference model
     let mut knn_euc = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn_euc.fit(&x_train, &y_train).unwrap();
 
-    // Build Minkowski(p=2) model
+    // Minkowski(p=2) model
     let mut knn_mink =
         KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(2.0)).unwrap();
     knn_mink.fit(&x_train, &y_train).unwrap();
@@ -344,19 +274,9 @@ fn predict_minkowski_p2_equals_euclidean() {
     );
 }
 
-// ─── k=3 majority vote ───────────────────────────────────────────────────────
+// k=3 majority vote
 
-/// k=3, Euclidean, Uniform — clean 3-vs-0 majority.
-///
-/// Training set (1-D embedded in 2-D):
-///   P0=(0,0)->0, P1=(1,0)->0, P2=(2,0)->0  ← cluster of class 0
-///   P3=(10,0)->1, P4=(11,0)->1, P5=(12,0)->1  ← cluster of class 1
-///
-/// Queries (6 training points, need exactly 6 for k=3 to not exceed nrows):
-///   Q0=(0.5,0): distances {P0=0.5, P1=0.5, P2=1.5, P3=9.5, ...}
-///               3 nearest: P0,P1,P2 → 3 votes class 0 → class 0 ✓
-///   Q1=(10.5,0): distances {P3=0.5, P4=0.5, P5=1.5, ...}
-///               3 nearest: P3,P4,P5 → 3 votes class 1 → class 1 ✓
+/// k=3 Euclidean Uniform resolves a clean 3-vs-0 majority per query
 #[test]
 fn predict_k3_majority_clean() {
     let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -378,35 +298,17 @@ fn predict_k3_majority_clean() {
     assert_eq!(predictions[1], 1, "Q1=(10.5,0) → 3 votes for class 1");
 }
 
-/// k=3, Euclidean, Uniform — 2:1 split majority.
-///
-/// Training set (4 points):
-///   P0=(0,0)->0, P1=(1,0)->0, P2=(2,0)->0, P3=(20,0)->1
-///
-/// Query Q=(0.5,0):
-///   dist to P0=0.5, P1=0.5, P2=1.5, P3=19.5
-///   3 nearest: P0,P1,P2 → votes: class 0=3, class 1=0 → class 0 ✓
-///
-/// Query Q2=(1.5,0):
-///   dist to P0=1.5, P1=0.5, P2=0.5, P3=18.5
-///   3 nearest: P1,P2,P0 → all class 0 → class 0 ✓
-///
-/// This exercises the "2:1 split" scenario where 2 of 3 neighbors agree:
-/// Use 3 class-0 and 1 class-1, query midpoint between class-0 and class-1:
-///
-/// Training: P0=(0,0)->0, P1=(1,0)->0, P2=(5,0)->1, P3=(6,0)->1 (4 points)
-/// Query (0.5,0): k=3 nearest = P0(0.5), P1(0.5), P2(4.5) → 2×class0, 1×class1 → class 0
-/// Query (5.5,0): k=3 nearest = P2(0.5), P3(0.5), P1(4.5) → 2×class1, 1×class0 → class 1
+/// k=3 Euclidean Uniform resolves a 2:1 split (2 of 3 neighbours decide the class)
 #[test]
 fn predict_k3_majority_two_to_one_split() {
     let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
-    // 4 training points — exactly k+1 to keep the problem minimal
+    // 4 training points - exactly k+1 to keep the problem minimal
     let x_train = array![[0.0, 0.0], [1.0, 0.0], [5.0, 0.0], [6.0, 0.0]];
     let y_train = array![0, 0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
 
-    // Q=(0.5,0): 3 nearest = P0(dist=0.5), P1(dist=0.5), P2(dist=4.5) → 2×0, 1×1 → 0
-    // Q=(5.5,0): 3 nearest = P2(dist=0.5), P3(dist=0.5), P1(dist=4.5) → 2×1, 1×0 → 1
+    // Q=(0.5,0): 3 nearest P0,P1,P2 -> 2 class 0, 1 class 1 -> 0
+    // Q=(5.5,0): 3 nearest P2,P3,P1 -> 2 class 1, 1 class 0 -> 1
     let x_test = array![[0.5, 0.0], [5.5, 0.0]];
     let predictions = knn.predict(&x_test).unwrap();
 
@@ -420,24 +322,9 @@ fn predict_k3_majority_two_to_one_split() {
     );
 }
 
-// ─── Distance weighting ──────────────────────────────────────────────────────
+// Distance weighting
 
-/// k=2, Distance weighting: closer neighbour has more influence.
-///
-/// Training set (on x-axis):
-///   P0=(0,0)->class 0, P1=(10,0)->class 1
-///
-/// Query Q=(1,0):
-///   dist to P0 = 1.0  → weight = 1/1 = 1.0
-///   dist to P1 = 9.0  → weight = 1/9 ≈ 0.111
-///   class 0 total weight = 1.0
-///   class 1 total weight = 0.111
-///   → class 0 wins ✓
-///
-/// Query Q=(9,0):
-///   dist to P0 = 9.0  → weight = 1/9 ≈ 0.111
-///   dist to P1 = 1.0  → weight = 1/1 = 1.0
-///   → class 1 wins ✓
+/// k=2 Distance weighting: the closer neighbour decides the class
 #[test]
 fn predict_distance_weighting_closer_wins() {
     let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
@@ -458,18 +345,11 @@ fn predict_distance_weighting_closer_wins() {
     );
 }
 
-/// Distance weighting: exact-match query (distance == 0) returns the
-/// matched point's class immediately (early-return code path in predict_one).
-///
-/// Contract (src/machine_learning/knn.rs:396-399):
-///   "if distance == 0.0 { return Ok(y_train_encoded[idx]); }"
-///
-/// Training: P0=(3,4)->class 7.
-/// Query=(3,4): distance to P0 = 0 → immediate return of class 7.
+/// Distance weighting: an exact-match query (distance 0) returns the matched point's class
 #[test]
 fn predict_distance_zero_exact_match_returns_immediately() {
     let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
-    // Need at least k=2 training samples to fit
+    // at least k=2 training samples needed to fit
     let x_train = array![[3.0, 4.0], [100.0, 100.0]];
     let y_train = array![7, 99];
     knn.fit(&x_train, &y_train).unwrap();
@@ -477,21 +357,13 @@ fn predict_distance_zero_exact_match_returns_immediately() {
     let x_test = array![[3.0, 4.0]]; // exact match for P0
     let predictions = knn.predict(&x_test).unwrap();
 
-    // Regardless of the other neighbour, the exact match must win
+    // exact match wins regardless of the other neighbour
     assert_eq!(predictions[0], 7, "exact-match query must return class 7");
 }
 
-// ─── String labels ───────────────────────────────────────────────────────────
+// String labels
 
-/// KNN is generic: T=String must work correctly.
-///
-/// Same spatial layout as the basic Euclidean test:
-///   P0=(0,0)->  "cat"
-///   P1=(10,0)-> "dog"
-///   P2=(0,10)-> "dog"
-///
-/// Q0=(0.5,0) → nearest P0 → "cat"
-/// Q1=(9.5,0) → nearest P1 → "dog"
+/// KNN with T=String returns the nearest neighbour's string label
 #[test]
 fn predict_string_labels() {
     let mut knn = KNN::<String>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -510,13 +382,9 @@ fn predict_string_labels() {
     assert_eq!(predictions[1], "dog");
 }
 
-// ─── predict == predict_parallel ─────────────────────────────────────────────
+// predict == predict_parallel
 
-/// predict and predict_parallel must produce identical results on the same data
-/// (both use Uniform weighting, k < 100 threshold — sequential inner path).
-///
-/// This is a contractual requirement: both entry points call predict_one
-/// identically; any divergence would indicate a threading bug.
+/// predict and predict_parallel must produce identical results (Uniform, small k)
 #[test]
 fn predict_and_predict_parallel_agree_small_k() {
     let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -541,7 +409,7 @@ fn predict_and_predict_parallel_agree_small_k() {
     );
 }
 
-/// predict and predict_parallel must also agree with Distance weighting.
+/// predict and predict_parallel must also agree with Distance weighting
 #[test]
 fn predict_and_predict_parallel_agree_distance_weights() {
     let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
@@ -559,24 +427,14 @@ fn predict_and_predict_parallel_agree_distance_weights() {
     );
 }
 
-// ─── k>=100 parallel voting path ─────────────────────────────────────────────
+// k>=100 parallel voting path
 
-/// When k >= 100 the Uniform voting branch switches to parallel aggregation
-/// (VOTING_PARALLEL_THRESHOLD = 100 in predict_one).
-///
-/// Design: 200 training points split evenly: 100 class-0 points at x∈[0,99]
-/// and 100 class-1 points at x∈[200,299].
-///
-/// Query Q=(50,0): 100 nearest are class-0 → majority vote = class 0.
-/// Query Q=(250,0): 100 nearest are class-1 → majority vote = class 1.
-///
-/// This exercises the k>=100 parallel branch of predict_one AND
-/// predict_parallel's outer parallelism, so both entry points are tested.
+/// k>=100 Uniform exercises the parallel voting branch; both entry points must agree
 #[test]
 fn predict_parallel_large_k_exercises_parallel_voting_branch() {
     const N: usize = 200; // 100 per class
 
-    // Build training data: 100 class-0 at y=0,x=0..99 and 100 class-1 at y=0,x=200..299
+    // 100 class-0 at x=0..99, 100 class-1 at x=200..299 (all on y=0)
     let mut x_rows: Vec<[f64; 2]> = Vec::with_capacity(N);
     let mut y_vals: Vec<i32> = Vec::with_capacity(N);
     for i in 0..100_usize {
@@ -607,7 +465,7 @@ fn predict_parallel_large_k_exercises_parallel_voting_branch() {
         "Q=(250,0): 100 class-1 neighbours → class 1"
     );
 
-    // parallel path — must match
+    // parallel path must match
     let preds_par = knn.predict_parallel(&x_test).unwrap();
     assert_eq!(
         preds_seq, preds_par,
@@ -615,20 +473,14 @@ fn predict_parallel_large_k_exercises_parallel_voting_branch() {
     );
 }
 
-/// k>=100 with Distance weighting exercises the parallel weight-aggregation branch.
-///
-/// Design: same 200-point split layout.
-/// Query at (50,0): all 100 class-0 points are within [0,99]×0 and much closer
-/// than any class-1 point (nearest class-1 is at (200,0), distance=150). Even
-/// with inverse-distance weighting the aggregate class-0 weight enormously
-/// exceeds class-1 weight.
+/// k>=100 with Distance weighting exercises the parallel weight-aggregation branch
 #[test]
 fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch() {
     const N: usize = 200;
     let mut x_rows: Vec<[f64; 2]> = Vec::with_capacity(N);
     let mut y_vals: Vec<i32> = Vec::with_capacity(N);
     for i in 0..100_usize {
-        x_rows.push([i as f64 + 1.0, 0.0]); // avoid x=0 to prevent dist=0 edge case
+        x_rows.push([i as f64 + 1.0, 0.0]); // avoid x=0 to prevent the dist=0 edge case
         y_vals.push(0);
     }
     for i in 200..300_usize {
@@ -646,8 +498,8 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
     let preds_seq = knn.predict(&x_test).unwrap();
     let preds_par = knn.predict_parallel(&x_test).unwrap();
 
-    // class-0 points are all within distance ≤ 100, class-1 points start at distance ≥ 149.5
-    // Even with 100 neighbours, class-0 aggregate weight >> class-1 aggregate weight.
+    // class-0 points are all within distance <= 100, class-1 points start at distance >= 149.5,
+    // so class-0 aggregate weight far exceeds class-1 even with 100 neighbours
     assert_eq!(
         preds_seq[0], 0,
         "distance-weighted: class-0 should win near x=50.5"
@@ -655,13 +507,9 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
     assert_eq!(preds_seq, preds_par, "parallel must agree with sequential");
 }
 
-// ─── fit_predict convenience method ──────────────────────────────────────────
+// fit_predict convenience method
 
-/// fit_predict on training data: with k=1 each point's nearest neighbour is
-/// itself (distance 0), so every training label is returned unchanged.
-///
-/// Training: P0=(0,0)->0, P1=(10,0)->1.
-/// fit_predict on the same x_train → [0, 1].
+/// fit_predict with k=1 on the training data returns every training label unchanged
 #[test]
 fn fit_predict_returns_training_labels() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -673,23 +521,9 @@ fn fit_predict_returns_training_labels() {
     assert_eq!(result[1], 1);
 }
 
-// ─── Minkowski p=3 numerical check (end-to-end) ──────────────────────────────
+// Minkowski p=3 numerical check (end-to-end)
 
-/// k=1, Minkowski(p=3), verify the correct nearest-neighbour is found using
-/// the Lp-3 metric.
-///
-/// Training (axis-aligned):
-///   P0=(3,0)->class 0, P1=(0,4)->class 1
-///
-/// Query Q=(0,0):
-///   dist_K(3)(Q, P0) = (3^3)^(1/3) = 3
-///   dist_K(3)(Q, P1) = (4^3)^(1/3) = 4
-///   nearest = P0 → class 0 ✓
-///
-/// Query Q2=(0,3):
-///   dist_K(3)(Q2, P0) = (3^3 + 3^3)^(1/3) = (54)^(1/3) ≈ 3.780
-///   dist_K(3)(Q2, P1) = (0^3 + 1^3)^(1/3) = 1
-///   nearest = P1 → class 1 ✓
+/// k=1 Minkowski(p=3) finds the correct nearest neighbour under the Lp-3 metric
 #[test]
 fn predict_minkowski_p3_correct_nearest_neighbour() {
     let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(3.0)).unwrap();
@@ -697,8 +531,8 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
 
-    // Q=(0,0): dist_K3 to P0=3, to P1=4 → nearest P0 → class 0
-    // Q=(0,3): dist_K3 to P0=(54)^(1/3)≈3.78, to P1=1 → nearest P1 → class 1
+    // Q=(0,0): dist to P0=3, to P1=4 -> nearest P0 -> class 0
+    // Q=(0,3): dist to P0=(54)^(1/3)~=3.78, to P1=1 -> nearest P1 -> class 1
     let x_test = array![[0.0, 0.0], [0.0, 3.0]];
     let predictions = knn.predict(&x_test).unwrap();
 
@@ -712,13 +546,9 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
     );
 }
 
-// ─── Save / Load round-trip ───────────────────────────────────────────────────
+// Save / Load round-trip
 
-/// Serialise a fitted KNN model to disk and reload it; predictions from
-/// the reloaded model must be identical to predictions from the original.
-///
-/// The save_to_path / load_from_path methods are generated by the
-/// model_save_and_load_methods! macro and use serde_json for persistence.
+/// A reloaded KNN model must produce predictions identical to the original
 #[test]
 fn save_and_load_produces_identical_predictions() {
     let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
@@ -747,12 +577,10 @@ fn save_and_load_produces_identical_predictions() {
         "predictions must be identical after save/load round-trip"
     );
 
-    // Clean up
     let _ = std::fs::remove_file(path);
 }
 
-/// Save/load also preserves the Distance weighting strategy and metric.
-/// Verify by checking the loaded model's getters.
+/// Save/load preserves the Distance weighting strategy, metric, and k
 #[test]
 fn save_and_load_preserves_model_metadata() {
     let mut knn = KNN::<i32>::new(7, WeightingStrategy::Distance, Metric::Manhattan).unwrap();

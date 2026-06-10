@@ -1,11 +1,9 @@
-//! Integration tests for the `neural_network` feature.
+//! Integration tests for the `neural_network` feature
 //!
 //! Crate root of the `neural_network` test binary (declared as a `[[test]]` target in
-//! `Cargo.toml`, `autotests = false`). Per-topic files in this directory are submodules.
-//! Shared helpers live in [`common`].
-//!
-//! `gradient_check` is the finite-difference backprop-correctness harness, carried over
-//! from the previous suite and expanded in P2.
+//! `Cargo.toml`, `autotests = false`). Per-topic files in this directory are submodules,
+//! shared helpers live in [`common`], and `gradient_check` is the finite-difference
+//! backprop-correctness harness
 
 mod common;
 mod gradient_check;

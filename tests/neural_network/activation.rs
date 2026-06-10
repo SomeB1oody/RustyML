@@ -1,19 +1,12 @@
-//! Integration tests for the activation layers and the `Activation` enum.
+//! Integration tests for the activation layers and the `Activation` enum
 //!
-//! Ground-truth rule: every expected value is derived from the mathematical definition
-//! by hand calculation, not by running the code. The only exception is the
-//! assert_allclose / assert_abs_diff_eq helpers, which compare against those
-//! pre-computed constants.
-//!
-//! Gradient-correctness is already covered by tests/neural_network/gradient_check.rs;
-//! this file does NOT duplicate those backward-value checks. Focus:
-//!   - Forward VALUES (from-definition)
-//!   - predict() == forward() in eval mode
-//!   - backward-before-forward → NnError::ForwardPassNotRun
-//!   - NaN/Inf input → NonFinite error
-//!   - Empty input → EmptyInput error
-//!   - Activation enum's forward delegates correctly
-//!   - Linear layer (missing from the old suite)
+//! Expected values are derived from the mathematical definitions. Gradient
+//! correctness is covered by tests/neural_network/gradient_check.rs, so this
+//! file does not duplicate those backward-value checks. Coverage:
+//!   - forward values, predict() == forward()
+//!   - backward before forward -> NnError::ForwardPassNotRun
+//!   - NaN/Inf input -> NonFinite, empty input -> EmptyInput
+//!   - Activation enum forward delegation, and the Linear layer
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2};
@@ -29,21 +22,16 @@ use rustyml::neural_network::traits::Layer;
 
 use crate::common::assert_allclose;
 
-/// Build a 2-D tensor from row-major `data` with shape `(rows, cols)`.
+/// Build a 2-D tensor from row-major `data` with shape `(rows, cols)`
 fn tensor2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
     Array2::from_shape_vec((rows, cols), data)
         .expect("shape/data mismatch in tensor2")
         .into_dyn()
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // ReLU layer
-// ════════════════════════════════════════════════════════════════════════════
 
-/// Hand derivation: ReLU(x) = max(0, x).
-///   ReLU(-2.0) = 0.0
-///   ReLU(0.0)  = 0.0   (boundary: x == 0 is NOT > 0)
-///   ReLU(3.0)  = 3.0
+/// ReLU(x) = max(0, x) on known values
 #[test]
 fn relu_forward_known_values() {
     let mut layer = ReLU::new();
@@ -54,7 +42,7 @@ fn relu_forward_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// Negative integers: ReLU(-5)=0, ReLU(-1)=0.
+/// All-negative input maps to zeros
 #[test]
 fn relu_forward_all_negative() {
     let mut layer = ReLU::new();
@@ -67,7 +55,7 @@ fn relu_forward_all_negative() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// Positive input: output == input.
+/// All-positive input passes through unchanged
 #[test]
 fn relu_forward_all_positive() {
     let mut layer = ReLU::new();
@@ -78,7 +66,7 @@ fn relu_forward_all_positive() {
     assert_allclose(&output, &input, 1e-6_f32);
 }
 
-/// predict() must equal forward() (no caching side-effect difference for ReLU).
+/// predict() equals forward()
 #[test]
 fn relu_predict_equals_forward() {
     let mut layer = ReLU::new();
@@ -88,7 +76,7 @@ fn relu_predict_equals_forward() {
     assert_allclose(&pred, &fwd, 1e-7_f32);
 }
 
-/// backward before forward must return NnError::ForwardPassNotRun.
+/// backward before forward returns NnError::ForwardPassNotRun
 #[test]
 fn relu_backward_before_forward_is_error() {
     let mut layer = ReLU::new();
@@ -104,7 +92,7 @@ fn relu_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input → NonFinite error.
+/// NaN in input -> NonFinite error
 #[test]
 fn relu_nan_input_is_error() {
     let mut layer = ReLU::new();
@@ -117,7 +105,7 @@ fn relu_nan_input_is_error() {
     );
 }
 
-/// Inf in input → NonFinite error.
+/// Inf in input -> NonFinite error
 #[test]
 fn relu_inf_input_is_error() {
     let mut layer = ReLU::new();
@@ -130,14 +118,9 @@ fn relu_inf_input_is_error() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // Sigmoid layer
-// ════════════════════════════════════════════════════════════════════════════
 
-/// Hand derivation: sigmoid(x) = 1 / (1 + exp(-x)).
-///   sigmoid(0.0) = 1 / (1 + 1) = 0.5
-///   sigmoid(2.0) = 1 / (1 + exp(-2)) = 1 / (1 + 0.135335...) ≈ 0.880797
-///   sigmoid(-2.0) = 1 / (1 + exp(2)) = 1 / (1 + 7.38906...) ≈ 0.119203
+/// sigmoid(x) = 1 / (1 + exp(-x)) on known values
 #[test]
 fn sigmoid_forward_known_values() {
     let mut layer = Sigmoid::new();
@@ -145,16 +128,12 @@ fn sigmoid_forward_known_values() {
     let output = layer.forward(&input).expect("Sigmoid forward failed");
 
     let vals: Vec<f32> = output.iter().cloned().collect();
-    // sigmoid(0) = 0.5 exactly
     assert_abs_diff_eq!(vals[0], 0.5_f32, epsilon = 1e-6);
-    // sigmoid(2) ≈ 0.880797
     assert_abs_diff_eq!(vals[1], 0.880797_f32, epsilon = 1e-5);
-    // sigmoid(-2) ≈ 0.119203
     assert_abs_diff_eq!(vals[2], 0.119203_f32, epsilon = 1e-5);
 }
 
-/// Outputs lie in [0, 1]. (Mathematically the range is the open interval (0,1), but in f32 the
-/// function SATURATES to exactly 0.0 / 1.0 for extreme inputs such as ±100, so the bound is closed.)
+/// Outputs lie in [0, 1] (f32 saturates to exactly 0.0/1.0 at extreme inputs)
 #[test]
 fn sigmoid_forward_outputs_bounded() {
     let mut layer = Sigmoid::new();
@@ -163,7 +142,7 @@ fn sigmoid_forward_outputs_bounded() {
     for &v in output.iter() {
         assert!((0.0..=1.0).contains(&v), "sigmoid output {v} outside [0,1]");
     }
-    // For moderate inputs the output is strictly interior.
+    // For moderate inputs the output is strictly interior
     let moderate = tensor2(1, 3, vec![-1.0, 0.0, 1.0]);
     for &v in layer.forward(&moderate).unwrap().iter() {
         assert!(
@@ -173,7 +152,7 @@ fn sigmoid_forward_outputs_bounded() {
     }
 }
 
-/// sigmoid(x) + sigmoid(-x) == 1  (anti-symmetry identity).
+/// sigmoid(x) + sigmoid(-x) == 1 (anti-symmetry identity)
 #[test]
 fn sigmoid_forward_antisymmetry() {
     let mut layer = Sigmoid::new();
@@ -186,7 +165,7 @@ fn sigmoid_forward_antisymmetry() {
     }
 }
 
-/// predict() must equal forward().
+/// predict() equals forward()
 #[test]
 fn sigmoid_predict_equals_forward() {
     let mut layer = Sigmoid::new();
@@ -196,7 +175,7 @@ fn sigmoid_predict_equals_forward() {
     assert_allclose(&pred, &fwd, 1e-7_f32);
 }
 
-/// backward before forward → NnError::ForwardPassNotRun.
+/// backward before forward returns NnError::ForwardPassNotRun
 #[test]
 fn sigmoid_backward_before_forward_is_error() {
     let mut layer = Sigmoid::new();
@@ -212,7 +191,7 @@ fn sigmoid_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input → NonFinite.
+/// NaN in input -> NonFinite
 #[test]
 fn sigmoid_nan_input_is_error() {
     let mut layer = Sigmoid::new();
@@ -225,15 +204,9 @@ fn sigmoid_nan_input_is_error() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // Tanh layer
-// ════════════════════════════════════════════════════════════════════════════
 
-/// Hand derivation: tanh(x) = (e^x - e^{-x}) / (e^x + e^{-x}).
-///   tanh(0)    = 0
-///   tanh(1)    ≈ 0.761594   (from definition; can be computed as (e-1/e)/(e+1/e))
-///   tanh(-1)   ≈ -0.761594
-///   tanh(2)    ≈ 0.964028
+/// tanh(x) = (e^x - e^-x) / (e^x + e^-x) on known values
 #[test]
 fn tanh_forward_known_values() {
     let mut layer = Tanh::new();
@@ -247,7 +220,7 @@ fn tanh_forward_known_values() {
     assert_abs_diff_eq!(vals[3], 0.964028_f32, epsilon = 1e-5);
 }
 
-/// tanh is odd: tanh(-x) == -tanh(x).
+/// tanh is odd: tanh(-x) == -tanh(x)
 #[test]
 fn tanh_forward_odd_symmetry() {
     let mut layer = Tanh::new();
@@ -261,8 +234,7 @@ fn tanh_forward_odd_symmetry() {
     }
 }
 
-/// Outputs lie in [-1, 1]. (Mathematically the range is the open interval (-1,1), but in f32 tanh
-/// SATURATES to exactly ±1.0 for extreme inputs such as ±100, so the bound is closed.)
+/// Outputs lie in [-1, 1] (f32 saturates to exactly +/-1.0 at extreme inputs)
 #[test]
 fn tanh_forward_outputs_bounded() {
     let mut layer = Tanh::new();
@@ -271,7 +243,7 @@ fn tanh_forward_outputs_bounded() {
     for &v in output.iter() {
         assert!((-1.0..=1.0).contains(&v), "tanh output {v} outside [-1, 1]");
     }
-    // For moderate inputs the output is strictly interior.
+    // For moderate inputs the output is strictly interior
     let moderate = tensor2(1, 3, vec![-1.0, 0.0, 1.0]);
     for &v in layer.forward(&moderate).unwrap().iter() {
         assert!(
@@ -281,7 +253,7 @@ fn tanh_forward_outputs_bounded() {
     }
 }
 
-/// predict() must equal forward().
+/// predict() equals forward()
 #[test]
 fn tanh_predict_equals_forward() {
     let mut layer = Tanh::new();
@@ -291,7 +263,7 @@ fn tanh_predict_equals_forward() {
     assert_allclose(&pred, &fwd, 1e-7_f32);
 }
 
-/// backward before forward → NnError::ForwardPassNotRun.
+/// backward before forward returns NnError::ForwardPassNotRun
 #[test]
 fn tanh_backward_before_forward_is_error() {
     let mut layer = Tanh::new();
@@ -307,7 +279,7 @@ fn tanh_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input → NonFinite.
+/// NaN in input -> NonFinite
 #[test]
 fn tanh_nan_input_is_error() {
     let mut layer = Tanh::new();
@@ -320,7 +292,7 @@ fn tanh_nan_input_is_error() {
     );
 }
 
-/// -Inf in input → NonFinite.
+/// -Inf in input -> NonFinite
 #[test]
 fn tanh_neg_inf_input_is_error() {
     let mut layer = Tanh::new();
@@ -333,15 +305,9 @@ fn tanh_neg_inf_input_is_error() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 // Softmax layer
-// ════════════════════════════════════════════════════════════════════════════
 
-/// Hand derivation for [[0.0, 1.0, 2.0]]:
-///   exp(0)=1, exp(1)≈2.71828, exp(2)≈7.38906; sum≈11.10734
-///   p0 = 1/11.10734 ≈ 0.09003
-///   p1 = 2.71828/11.10734 ≈ 0.24473
-///   p2 = 7.38906/11.10734 ≈ 0.66524
+/// softmax([0,1,2]) ~= [0.09003, 0.24473, 0.66524]
 #[test]
 fn softmax_forward_known_values_1x3() {
     let mut layer = Softmax::new();
@@ -354,11 +320,10 @@ fn softmax_forward_known_values_1x3() {
     assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
 }
 
-/// Each row must sum to 1.0 (probability simplex constraint).
+/// Each row sums to 1.0 (probability simplex constraint)
 #[test]
 fn softmax_forward_rows_sum_to_one() {
     let mut layer = Softmax::new();
-    // Two rows
     let input = tensor2(2, 3, vec![0.0, 1.0, 2.0, -1.0, 0.5, 3.0]);
     let output = layer.forward(&input).expect("Softmax forward failed");
     let flat: Vec<f32> = output.iter().cloned().collect();
@@ -368,9 +333,7 @@ fn softmax_forward_rows_sum_to_one() {
     assert_abs_diff_eq!(row1_sum, 1.0_f32, epsilon = 1e-6);
 }
 
-/// Shift-invariance: adding a constant to every logit doesn't change the output.
-/// Hand derivation: softmax([c+0, c+1, c+2]) = softmax([0,1,2]) for any c
-/// because exp(x+c)/Σexp(x_i+c) = exp(x)*exp(c) / (Σexp(x_i)*exp(c)) = exp(x)/Σexp(x_i).
+/// Shift-invariance: adding a constant to every logit leaves the output unchanged
 #[test]
 fn softmax_forward_shift_invariant() {
     let mut layer = Softmax::new();
@@ -383,7 +346,7 @@ fn softmax_forward_shift_invariant() {
     assert_allclose(&shifted_out, &base_out, 1e-5_f32);
 }
 
-/// Equal logits → uniform probability: softmax([5,5,5]) = [1/3, 1/3, 1/3].
+/// Equal logits give uniform probability: softmax([5,5,5]) = [1/3, 1/3, 1/3]
 #[test]
 fn softmax_forward_equal_logits_uniform() {
     let mut layer = Softmax::new();
@@ -395,11 +358,7 @@ fn softmax_forward_equal_logits_uniform() {
     }
 }
 
-/// Two identical-difference rows: [[1,2],[3,4]].
-/// For [a, a+1]: after max-shift → [0, 1].
-///   exp(0)=1, exp(1)=e≈2.71828; sum=1+e
-///   p0 = 1/(1+e) ≈ 0.26894, p1 = e/(1+e) ≈ 0.73106
-/// Both rows share the same difference so they have the same probs.
+/// Rows with the same logit difference produce the same probabilities
 #[test]
 fn softmax_forward_two_rows_same_difference() {
     let mut layer = Softmax::new();
@@ -407,15 +366,13 @@ fn softmax_forward_two_rows_same_difference() {
     let output = layer.forward(&input).expect("Softmax forward failed");
 
     let flat: Vec<f32> = output.iter().cloned().collect();
-    // Row 0
     assert_abs_diff_eq!(flat[0], 0.26894_f32, epsilon = 1e-4);
     assert_abs_diff_eq!(flat[1], 0.73106_f32, epsilon = 1e-4);
-    // Row 1 (same difference)
     assert_abs_diff_eq!(flat[2], 0.26894_f32, epsilon = 1e-4);
     assert_abs_diff_eq!(flat[3], 0.73106_f32, epsilon = 1e-4);
 }
 
-/// predict() must equal forward().
+/// predict() equals forward()
 #[test]
 fn softmax_predict_equals_forward() {
     let mut layer = Softmax::new();
@@ -425,7 +382,7 @@ fn softmax_predict_equals_forward() {
     assert_allclose(&pred, &fwd, 1e-7_f32);
 }
 
-/// backward before forward → NnError::ForwardPassNotRun.
+/// backward before forward returns NnError::ForwardPassNotRun
 #[test]
 fn softmax_backward_before_forward_is_error() {
     let mut layer = Softmax::new();
@@ -441,7 +398,7 @@ fn softmax_backward_before_forward_is_error() {
     );
 }
 
-/// 1-D input → InvalidInput error (Softmax requires at least 2 dimensions).
+/// 1-D input -> InvalidInput error (Softmax requires at least 2 dimensions)
 #[test]
 fn softmax_1d_input_is_error() {
     let mut layer = Softmax::new();
@@ -454,7 +411,7 @@ fn softmax_1d_input_is_error() {
     );
 }
 
-/// NaN in input → NonFinite.
+/// NaN in input -> NonFinite
 #[test]
 fn softmax_nan_input_is_error() {
     let mut layer = Softmax::new();
@@ -467,11 +424,9 @@ fn softmax_nan_input_is_error() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Linear layer  (not covered by the old suite — explicitly required)
-// ════════════════════════════════════════════════════════════════════════════
+// Linear layer
 
-/// Linear is the identity: output == input exactly (not approximately — it's a clone).
+/// Linear is the identity: output == input exactly
 #[test]
 fn linear_forward_is_identity() {
     let mut layer = Linear::new();
@@ -482,7 +437,7 @@ fn linear_forward_is_identity() {
     assert_allclose(&output, &expected, 0.0_f32);
 }
 
-/// Linear preserves arbitrary shapes.
+/// Linear preserves arbitrary shapes
 #[test]
 fn linear_forward_preserves_3d_shape() {
     let mut layer = Linear::new();
@@ -496,7 +451,7 @@ fn linear_forward_preserves_3d_shape() {
     assert_allclose(&output, &expected, 0.0_f32);
 }
 
-/// predict() must equal forward() (both return the input unchanged).
+/// predict() equals forward() (both return the input unchanged)
 #[test]
 fn linear_predict_equals_forward() {
     let mut layer = Linear::new();
@@ -506,8 +461,7 @@ fn linear_predict_equals_forward() {
     assert_allclose(&pred, &fwd, 0.0_f32);
 }
 
-/// Linear backward passes the upstream gradient through unchanged (derivative is 1).
-/// After a forward pass, backward(g) == g.
+/// Linear backward passes the upstream gradient through unchanged (derivative is 1)
 #[test]
 fn linear_backward_passes_gradient_through() {
     let mut layer = Linear::new();
@@ -516,11 +470,10 @@ fn linear_backward_passes_gradient_through() {
 
     let grad = tensor2(1, 3, vec![0.1, -0.2, 0.5]);
     let grad_in = layer.backward(&grad).expect("backward");
-    // gradient is passed through unchanged
     assert_allclose(&grad_in, &grad, 0.0_f32);
 }
 
-/// backward before forward → NnError::ForwardPassNotRun.
+/// backward before forward returns NnError::ForwardPassNotRun
 #[test]
 fn linear_backward_before_forward_is_error() {
     let mut layer = Linear::new();
@@ -536,7 +489,7 @@ fn linear_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input → NonFinite.
+/// NaN in input -> NonFinite
 #[test]
 fn linear_nan_input_is_error() {
     let mut layer = Linear::new();
@@ -549,7 +502,7 @@ fn linear_nan_input_is_error() {
     );
 }
 
-/// Inf in input → NonFinite.
+/// Inf in input -> NonFinite
 #[test]
 fn linear_inf_input_is_error() {
     let mut layer = Linear::new();
@@ -562,7 +515,7 @@ fn linear_inf_input_is_error() {
     );
 }
 
-/// predict() also rejects NaN.
+/// predict() also rejects NaN
 #[test]
 fn linear_predict_nan_is_error() {
     let layer = Linear::new();
@@ -575,15 +528,10 @@ fn linear_predict_nan_is_error() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Activation enum — forward delegates correctly
-//
-// The standalone layers delegate to the Activation enum, so we also confirm
-// the enum's forward() matches the same hand-derived values. This is the
-// "single source of truth" the doc-comments describe.
-// ════════════════════════════════════════════════════════════════════════════
+// Activation enum - forward delegates to the standalone layers, so the enum's
+// forward() must match the same values
 
-/// Activation::Linear.forward is identity.
+/// Activation::Linear.forward is identity
 #[test]
 fn activation_enum_linear_is_identity() {
     let input = tensor2(1, 3, vec![-1.0, 0.0, 2.0]);
@@ -593,7 +541,7 @@ fn activation_enum_linear_is_identity() {
     assert_allclose(&output, &input, 0.0_f32);
 }
 
-/// Activation::ReLU.forward: ReLU(-2,0,3) = (0,0,3).
+/// Activation::ReLU.forward: ReLU(-2,0,3) = (0,0,3)
 #[test]
 fn activation_enum_relu_known_values() {
     let input = tensor2(1, 3, vec![-2.0, 0.0, 3.0]);
@@ -602,7 +550,7 @@ fn activation_enum_relu_known_values() {
     assert_allclose(&output, &expected, 1e-6_f32);
 }
 
-/// Activation::Sigmoid.forward: sigmoid(0)=0.5, sigmoid(2)≈0.880797.
+/// Activation::Sigmoid.forward: sigmoid(0)=0.5, sigmoid(2)~=0.880797
 #[test]
 fn activation_enum_sigmoid_known_values() {
     let input = tensor2(1, 2, vec![0.0, 2.0]);
@@ -614,7 +562,7 @@ fn activation_enum_sigmoid_known_values() {
     assert_abs_diff_eq!(vals[1], 0.880797_f32, epsilon = 1e-5);
 }
 
-/// Activation::Tanh.forward: tanh(0)=0, tanh(1)≈0.761594.
+/// Activation::Tanh.forward: tanh(0)=0, tanh(1)~=0.761594
 #[test]
 fn activation_enum_tanh_known_values() {
     let input = tensor2(1, 2, vec![0.0, 1.0]);
@@ -624,8 +572,7 @@ fn activation_enum_tanh_known_values() {
     assert_abs_diff_eq!(vals[1], 0.761594_f32, epsilon = 1e-5);
 }
 
-/// Activation::Softmax.forward: softmax([0,1,2]) ≈ [0.0900, 0.2447, 0.6652],
-/// and the row sums to 1.
+/// Activation::Softmax.forward: softmax([0,1,2]) ~= [0.0900, 0.2447, 0.6652], row sums to 1
 #[test]
 fn activation_enum_softmax_known_values() {
     let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
@@ -640,7 +587,7 @@ fn activation_enum_softmax_known_values() {
     assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
 }
 
-/// Activation::Softmax.forward rejects 1-D input (ndim < 2).
+/// Activation::Softmax.forward rejects 1-D input (ndim < 2)
 #[test]
 fn activation_enum_softmax_rejects_1d() {
     let input = Array1::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
@@ -652,56 +599,47 @@ fn activation_enum_softmax_rejects_1d() {
     );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// From<Layer> → Activation conversions (ensures the enum round-trips)
-// ════════════════════════════════════════════════════════════════════════════
+// From<Layer> -> Activation conversions (ensures the enum round-trips)
 
-/// From<Linear> for Activation yields Activation::Linear.
+/// From<Linear> for Activation yields Activation::Linear
 #[test]
 fn from_linear_yields_activation_linear() {
     let act: Activation = Linear::new().into();
     assert_eq!(act, Activation::Linear);
 }
 
-/// From<ReLU> for Activation yields Activation::ReLU.
+/// From<ReLU> for Activation yields Activation::ReLU
 #[test]
 fn from_relu_yields_activation_relu() {
     let act: Activation = ReLU::new().into();
     assert_eq!(act, Activation::ReLU);
 }
 
-/// From<Sigmoid> for Activation yields Activation::Sigmoid.
+/// From<Sigmoid> for Activation yields Activation::Sigmoid
 #[test]
 fn from_sigmoid_yields_activation_sigmoid() {
     let act: Activation = Sigmoid::new().into();
     assert_eq!(act, Activation::Sigmoid);
 }
 
-/// From<Tanh> for Activation yields Activation::Tanh.
+/// From<Tanh> for Activation yields Activation::Tanh
 #[test]
 fn from_tanh_yields_activation_tanh() {
     let act: Activation = Tanh::new().into();
     assert_eq!(act, Activation::Tanh);
 }
 
-/// From<Softmax> for Activation yields Activation::Softmax.
+/// From<Softmax> for Activation yields Activation::Softmax
 #[test]
 fn from_softmax_yields_activation_softmax() {
     let act: Activation = Softmax::new().into();
     assert_eq!(act, Activation::Softmax);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// All five activation layers — 0-length input rejected in forward AND predict
-//
-// Every layer checks `input.is_empty()` first (before any shape/finite check),
-// so a zero-element tensor must yield Error::EmptyInput from both forward() and
-// predict(). A 2-D tensor with 0 rows has 0 elements and is therefore empty for
-// Softmax too (the empty check precedes Softmax's >=2-D requirement).
-// ════════════════════════════════════════════════════════════════════════════
+// All five activation layers reject 0-length input in forward and predict; the
+// empty check runs first, so a zero-element tensor yields Error::EmptyInput
 
-/// Fresh boxed instances of all five activation layers, in a stable order for
-/// readable failure messages.
+/// Fresh boxed instances of all five activation layers, in a stable order
 fn all_activation_layers() -> Vec<(&'static str, Box<dyn Layer>)> {
     vec![
         ("ReLU", Box::new(ReLU::new())),
@@ -712,10 +650,10 @@ fn all_activation_layers() -> Vec<(&'static str, Box<dyn Layer>)> {
     ]
 }
 
-/// forward() on a 0-length input → Error::EmptyInput for every layer.
+/// forward() on a 0-length input gives Error::EmptyInput for every layer
 #[test]
 fn all_layers_empty_input_forward_is_error() {
-    // 2-D tensor with 0 rows → 0 elements → empty.
+    // 2-D tensor with 0 rows has 0 elements, so it is empty
     let empty = Array2::<f32>::zeros((0, 3)).into_dyn();
     for (name, mut layer) in all_activation_layers() {
         let result = layer.forward(&empty);
@@ -727,7 +665,7 @@ fn all_layers_empty_input_forward_is_error() {
     }
 }
 
-/// predict() on a 0-length input → Error::EmptyInput for every layer.
+/// predict() on a 0-length input gives Error::EmptyInput for every layer
 #[test]
 fn all_layers_empty_input_predict_is_error() {
     let empty = Array2::<f32>::zeros((0, 3)).into_dyn();
@@ -741,21 +679,14 @@ fn all_layers_empty_input_predict_is_error() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// All five activation layers — backward validates grad_output
-//
-// After a valid forward (shape cached), backward must reject:
-//   - a wrong-shaped grad_output → Error::ShapeMismatch
-//   - a non-finite grad_output (correct shape) → Error::NonFinite("gradient output")
-// The shape check runs before the finite check, so the NonFinite case uses a
-// correctly-shaped tensor containing a NaN.
-// ════════════════════════════════════════════════════════════════════════════
+// All five activation layers validate grad_output in backward: wrong shape gives
+// ShapeMismatch and a non-finite value gives NonFinite; the shape check runs first
 
-/// Wrong-shaped grad_output after a valid forward → Error::ShapeMismatch.
+/// Wrong-shaped grad_output after a valid forward gives Error::ShapeMismatch
 #[test]
 fn all_layers_backward_wrong_shape_is_shape_mismatch() {
     let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]); // valid for all five (2-D)
-    // grad with a different shape (1x2 instead of the cached 1x3).
+    // grad with a different shape (1x2 instead of the cached 1x3)
     let bad_grad = tensor2(1, 2, vec![1.0, 1.0]);
     for (name, mut layer) in all_activation_layers() {
         layer.forward(&input).expect("valid forward should succeed");
@@ -768,8 +699,7 @@ fn all_layers_backward_wrong_shape_is_shape_mismatch() {
     }
 }
 
-/// Non-finite grad_output (correct shape) after a valid forward →
-/// Error::NonFinite with the payload "gradient output".
+/// Non-finite grad_output (correct shape) gives Error::NonFinite("gradient output")
 #[test]
 fn all_layers_backward_non_finite_grad_is_error() {
     let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]);
@@ -785,23 +715,10 @@ fn all_layers_backward_non_finite_grad_is_error() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ReLU derivative — direct from-definition check (never checked elsewhere)
-//
-// ReLU'(x) = 1 for x > 0, and 0 for x <= 0. The layer caches a = max(0, x) and
-// the backward multiplies grad_output element-wise by this mask. So the gradient
-// PASSES THROUGH where the input was > 0 and is BLOCKED (set to 0) where the
-// input was < 0 (and at x == 0, which is the <= 0 branch).
-// ════════════════════════════════════════════════════════════════════════════
+// ReLU derivative: ReLU'(x) = 1 for x > 0 and 0 for x <= 0, so backward passes
+// grad_output through where input was > 0 and zeroes it elsewhere
 
-/// Hand derivation for input [2.0, -3.0, 0.5, -1.0] and grad_output
-/// [0.1, 0.2, 0.3, 0.4]:
-///   x=2.0  (>0) → grad passes → 0.1
-///   x=-3.0 (<0) → blocked     → 0.0
-///   x=0.5  (>0) → grad passes → 0.3
-///   x=-1.0 (<0) → blocked     → 0.0
-/// Expected grad_input: [0.1, 0.0, 0.3, 0.0]. (Grad magnitudes are far below the
-/// 1e6 internal clip, so no clamping occurs.)
+/// ReLU backward passes the gradient through positive inputs and blocks the rest
 #[test]
 fn relu_backward_derivative_from_definition() {
     let mut layer = ReLU::new();
@@ -815,19 +732,10 @@ fn relu_backward_derivative_from_definition() {
     assert_allclose(&grad_in, &expected, 1e-6_f32);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Sigmoid derivative — direct from-definition check (never checked elsewhere)
-//
-// sigmoid'(x) = a * (1 - a) where a = sigmoid(x). The layer caches a and the
-// backward multiplies grad_output element-wise by a*(1-a).
-// ════════════════════════════════════════════════════════════════════════════
+// Sigmoid derivative: sigmoid'(x) = a * (1 - a) where a = sigmoid(x), so backward
+// multiplies grad_output element-wise by a*(1-a)
 
-/// Hand derivation for input [0.0, 2.0, -2.0] with grad_output [1, 1, 1]:
-///   a(0)  = 0.5            → a*(1-a) = 0.5  * 0.5      = 0.25
-///   a(2)  ≈ 0.8807971      → a*(1-a) ≈ 0.8807971 * 0.1192029 ≈ 0.1049936
-///   a(-2) ≈ 0.1192029      → a*(1-a) ≈ 0.1192029 * 0.8807971 ≈ 0.1049936
-/// (a*(1-a) is symmetric about a = 0.5, so x = 2 and x = -2 give the same value.)
-/// With grad_output all ones, grad_input == a*(1-a) element-wise.
+/// Sigmoid backward with all-ones grad_output equals a*(1-a) element-wise
 #[test]
 fn sigmoid_backward_derivative_from_definition() {
     let mut layer = Sigmoid::new();

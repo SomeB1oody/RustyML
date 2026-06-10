@@ -1,12 +1,10 @@
-//! Integration tests for the `machine_learning` feature.
+//! Integration tests for the `machine_learning` feature
 //!
-//! This file is the crate root of the `machine_learning` test binary, declared
-//! explicitly as a `[[test]]` target in `Cargo.toml` (with `autotests = false`, which
-//! avoids the previous double-build). Each per-algorithm file in this directory is a
-//! submodule compiled exactly once.
+//! Crate root of the `machine_learning` test binary, declared as a `[[test]]` target
+//! in `Cargo.toml`. Each per-algorithm file in this directory is a submodule
+//! compiled once
 //!
-//! Shared helpers (seeded RNG, `assert_allclose`, dataset builders) live in [`common`].
-//! As each algorithm's tests are (re)written, add its `mod <name>;` line below.
+//! Shared helpers (seeded RNG, `assert_allclose`, dataset builders) live in [`common`]
 
 mod common;
 

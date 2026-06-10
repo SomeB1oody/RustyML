@@ -1,16 +1,11 @@
-//! Integration tests for Sequential model save/load round-trips.
+//! Integration tests for Sequential model save/load round-trips
 //!
-//! Each test:
-//!   1. Builds a model (with known injected weights, or trained a few steps so weights are
-//!      non-default / non-zero).
-//!   2. Calls `save_to_path` then `load_from_path` on a fresh model with the same architecture.
-//!   3. Asserts that `predict` output is element-wise identical (within ~1e-6) before and after
-//!      the round-trip.
-//!
-//! Error paths exercise: layer-count mismatch, layer-type mismatch, weight-shape mismatch
-//! (all → ModelStructureMismatch), nonexistent file → IoError::Std, invalid JSON → IoError::Json.
-//!
-//! No gradient checks are performed here; those live in gradient_check.rs.
+//! Each test builds a model (with known injected weights or trained a few steps),
+//! saves and reloads it into a fresh model of the same architecture, and asserts
+//! that predict output matches element-wise (within ~1e-6) across the round-trip;
+//! error paths cover layer-count, layer-type, and weight-shape mismatches (all
+//! ModelStructureMismatch), a nonexistent file (IoError::Std), and invalid JSON
+//! (IoError::Json)
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -40,11 +35,9 @@ use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
 use std::env;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// Temporary file that deletes itself when dropped.
+/// Temporary file that deletes itself when dropped
 struct TempFile(std::path::PathBuf);
 
 impl TempFile {
@@ -63,7 +56,7 @@ impl Drop for TempFile {
     }
 }
 
-/// Save `model` to `path`, load into a fresh model built by `make_fresh`, return it.
+/// Save `model` to `path`, load into a fresh model built by `make_fresh`, and return it
 fn round_trip(
     model: &Sequential,
     make_fresh: impl Fn() -> Sequential,
@@ -75,13 +68,7 @@ fn round_trip(
     fresh
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dense — known injected weights (identity map)
-//
-// W = I₂ (2×2 identity), b = [[0, 0]]
-// For input [[3.0, -5.0]]: output = input · I + 0 = [[3.0, -5.0]]
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Dense with identity weights (W = I, b = 0): output equals input, and survives a round-trip
 #[test]
 fn dense_identity_weights_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_identity");
@@ -98,7 +85,7 @@ fn dense_identity_weights_value_check_and_round_trip() {
         .unwrap()
         .into_dyn();
 
-    // Hand-derived: output == input when W = I, b = 0.
+    // Output == input when W = I, b = 0
     let expected: Tensor = Array::from_shape_vec((1, 2), vec![3.0f32, -5.0])
         .unwrap()
         .into_dyn();
@@ -120,13 +107,7 @@ fn dense_identity_weights_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dense — known weights: W = 2·I₂, b = [[1, 1]]
-//
-// For input [[0.0, 1.0]]:
-//   output = [[0*2 + 1*0, 0*0 + 1*2]] + [[1, 1]] = [[1.0, 3.0]]
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Dense with scaled-identity weights (W = 2*I, b = [1, 1]): value check and round-trip
 #[test]
 fn dense_scaled_identity_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_scaled");
@@ -143,7 +124,7 @@ fn dense_scaled_identity_value_check_and_round_trip() {
         .unwrap()
         .into_dyn();
 
-    // Hand-computed: [0*2+1*0+1, 0*0+1*2+1] = [1.0, 3.0]
+    // [0*2+1*0+1, 0*0+1*2+1] = [1.0, 3.0]
     let expected: Tensor = Array::from_shape_vec((1, 2), vec![1.0f32, 3.0])
         .unwrap()
         .into_dyn();
@@ -164,13 +145,7 @@ fn dense_scaled_identity_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dense — W = 0, b = [[0.5, -0.5, 1.0]]
-//
-// For ANY input: output = b (broadcast over batch).
-// Here batch=2, both rows → [[0.5, -0.5, 1.0], [0.5, -0.5, 1.0]].
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Dense with zero weights (W = 0): output is the bias broadcast over the batch, and survives a round-trip
 #[test]
 fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_zero_w");
@@ -187,7 +162,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
         .unwrap()
         .into_dyn();
 
-    // W=0 → any input maps to the bias.
+    // W=0 => any input maps to the bias
     let expected: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -0.5, 1.0, 0.5, -0.5, 1.0])
         .unwrap()
         .into_dyn();
@@ -208,10 +183,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     assert_allclose(&after, &expected, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Dense two-layer model trained a few steps (weights are non-default).
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Two-layer Dense model trained a few steps round-trips
 #[test]
 fn dense_two_layer_trained_round_trip() {
     let tmp = TempFile::new("dense2");
@@ -241,10 +213,7 @@ fn dense_two_layer_trained_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Conv1D round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn conv1d_round_trip() {
     let tmp = TempFile::new("conv1d");
@@ -278,10 +247,7 @@ fn conv1d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Conv2D round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn conv2d_round_trip() {
     let tmp = TempFile::new("conv2d");
@@ -318,10 +284,7 @@ fn conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Conv3D round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn conv3d_round_trip() {
     let tmp = TempFile::new("conv3d");
@@ -358,10 +321,7 @@ fn conv3d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // DepthwiseConv2D round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn depthwise_conv2d_round_trip() {
     let tmp = TempFile::new("depthwise_conv2d");
@@ -398,10 +358,7 @@ fn depthwise_conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SeparableConv2D round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn separable_conv2d_round_trip() {
     let tmp = TempFile::new("separable_conv2d");
@@ -439,10 +396,7 @@ fn separable_conv2d_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // SimpleRNN round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn simple_rnn_round_trip() {
     let tmp = TempFile::new("simple_rnn");
@@ -465,10 +419,7 @@ fn simple_rnn_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // LSTM round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn lstm_round_trip() {
     let tmp = TempFile::new("lstm");
@@ -491,10 +442,7 @@ fn lstm_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // GRU round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn gru_round_trip() {
     let tmp = TempFile::new("gru");
@@ -517,14 +465,8 @@ fn gru_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BatchNormalization round-trip — running stats must survive serialization.
-//
-// We train for a few steps so running_mean / running_var become non-trivial
-// (not their initialised zeros / ones). After the round-trip, predict() (which
-// uses running stats in eval mode) must return the identical tensor.
-// ─────────────────────────────────────────────────────────────────────────────
-
+// BatchNormalization round-trip: trained running_mean/running_var must survive serialization,
+// so eval-mode predict returns the identical tensor afterward
 #[test]
 fn batch_normalization_trained_round_trip_preserves_running_stats() {
     let tmp = TempFile::new("batchnorm");
@@ -544,15 +486,15 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
         m
     };
 
-    // Build a trainable copy and train it to move running stats away from defaults.
+    // Train a copy to move running stats away from their defaults
     let mut trainable_model = make_arch();
     trainable_model.compile(SGD::new(0.001).unwrap(), MeanSquaredError::new());
     trainable_model.fit(&x_train, &x_train, 8).unwrap();
 
-    // Capture the eval-mode prediction (uses running_mean / running_var).
+    // Eval-mode prediction uses running_mean / running_var
     let before = trainable_model.predict(&x_train).unwrap();
 
-    // Save and restore into a fresh (untrained) model.
+    // Save and restore into a fresh (untrained) model
     trainable_model.save_to_path(tmp.path()).unwrap();
     let mut fresh = make_arch();
     fresh.load_from_path(tmp.path()).unwrap();
@@ -561,8 +503,7 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-/// predict() must be deterministic: calling it twice on the same fresh (eval-mode) model
-/// must return the same tensor.
+/// predict() is deterministic: two calls on the same fresh eval-mode model return the same tensor
 #[test]
 fn batch_normalization_predict_is_deterministic_after_round_trip() {
     let tmp = TempFile::new("batchnorm_det");
@@ -590,16 +531,13 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     let mut fresh = make_arch();
     fresh.load_from_path(tmp.path()).unwrap();
 
-    // Two calls to predict must agree element-wise.
+    // Two calls to predict must agree element-wise
     let p1 = fresh.predict(&x).unwrap();
     let p2 = fresh.predict(&x).unwrap();
     assert_allclose(&p2, &p1, 1e-7_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // LayerNormalization round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn layer_normalization_round_trip() {
     let tmp = TempFile::new("layer_norm");
@@ -625,10 +563,7 @@ fn layer_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // GroupNormalization round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn group_normalization_round_trip() {
     let tmp = TempFile::new("group_norm");
@@ -654,10 +589,7 @@ fn group_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // InstanceNormalization round-trip
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn instance_normalization_round_trip() {
     let tmp = TempFile::new("instance_norm");
@@ -683,17 +615,8 @@ fn instance_normalization_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mixed model: Dense → Dropout → Dense
-//
-// Dropout serializes as an Empty weight variant (no parameters).  predict()
-// runs in eval mode, so Dropout passes the tensor through unchanged; this is
-// also a round-trip correctness check for parameterless layers.
-//
-// We pass an empty Vec for Dropout's input_shape: the validation code skips
-// the check when expected_shape is empty, so the batch size is not baked in.
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Mixed model Dense -> Dropout -> Dense: round-trips a parameterless layer (Dropout is
+// transparent in eval mode); empty input_shape skips shape validation, so batch size is not baked in
 #[test]
 fn mixed_model_with_dropout_round_trip() {
     let tmp = TempFile::new("mixed_dropout");
@@ -701,7 +624,7 @@ fn mixed_model_with_dropout_round_trip() {
     let make_arch = || {
         let mut m = Sequential::new();
         m.add(Dense::new(3, 4, Linear::new(), None).unwrap())
-            // empty input_shape → Dropout's shape validator is skipped at runtime.
+            // empty input_shape => Dropout's shape validator is skipped at runtime
             .add(Dropout::new(0.3, vec![], None).unwrap())
             .add(Dense::new(4, 2, Linear::new(), None).unwrap());
         m
@@ -709,22 +632,19 @@ fn mixed_model_with_dropout_round_trip() {
 
     let model = make_arch();
 
-    // A single sample.
+    // A single sample
     let x: Tensor = Array::from_shape_vec((1, 3), vec![0.5f32, -1.0, 1.5])
         .unwrap()
         .into_dyn();
 
-    // predict() uses eval mode → Dropout is transparent.
+    // predict() uses eval mode => Dropout is transparent
     let before = model.predict(&x).unwrap();
     let fresh = round_trip(&model, make_arch, tmp.path());
     let after = fresh.predict(&x).unwrap();
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mixed model trained a few steps (Dense → Dropout → Dense with real weights).
-// ─────────────────────────────────────────────────────────────────────────────
-
+// Mixed model Dense -> Dropout -> Dense trained a few steps round-trips
 #[test]
 fn mixed_model_trained_round_trip() {
     let tmp = TempFile::new("mixed_trained");
@@ -740,7 +660,7 @@ fn mixed_model_trained_round_trip() {
     let mut model = make_arch();
     model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
 
-    // Use a consistent batch size; Dropout shape validation is off (empty vec).
+    // Consistent batch size; Dropout shape validation is off (empty vec)
     let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])
         .unwrap()
         .into_dyn();
@@ -755,11 +675,9 @@ fn mixed_model_trained_round_trip() {
     assert_allclose(&after, &before, 1e-6_f32);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Error paths
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// Nonexistent file → Error::Io(IoError::Std)
+/// Nonexistent file gives Error::Io(IoError::Std)
 #[test]
 fn load_from_nonexistent_file_gives_io_error() {
     let mut model = Sequential::new();
@@ -773,7 +691,7 @@ fn load_from_nonexistent_file_gives_io_error() {
     }
 }
 
-/// Invalid JSON → Error::Io(IoError::Json)
+/// Invalid JSON gives Error::Io(IoError::Json)
 #[test]
 fn load_from_invalid_json_gives_json_error() {
     let tmp = TempFile::new("invalid_json");
@@ -789,17 +707,17 @@ fn load_from_invalid_json_gives_json_error() {
     }
 }
 
-/// Layer-count mismatch → Error::Io(IoError::ModelStructureMismatch)
+/// Layer-count mismatch gives Error::Io(IoError::ModelStructureMismatch)
 #[test]
 fn load_layer_count_mismatch_gives_structure_error() {
     let tmp = TempFile::new("count_mismatch");
 
-    // Save a 1-layer model.
+    // Save a 1-layer model
     let mut model_1 = Sequential::new();
     model_1.add(Dense::new(2, 2, Linear::new(), None).unwrap());
     model_1.save_to_path(tmp.path()).unwrap();
 
-    // Try to load into a 2-layer model.
+    // Try to load into a 2-layer model
     let mut model_2 = Sequential::new();
     model_2
         .add(Dense::new(2, 2, Linear::new(), None).unwrap())
@@ -812,11 +730,7 @@ fn load_layer_count_mismatch_gives_structure_error() {
     }
 }
 
-/// Layer-type mismatch → Error::Io(IoError::ModelStructureMismatch)
-///
-/// A Dense layer's weights are saved; the target model has Conv1D at position 0.
-/// The layer-type string ("Dense" vs "Conv1D") differs, so load must fail before
-/// even trying to apply weights.
+/// Layer-type mismatch (Dense saved, Conv1D target) gives Error::Io(IoError::ModelStructureMismatch)
 #[test]
 fn load_layer_type_mismatch_gives_structure_error() {
     let tmp = TempFile::new("type_mismatch");
@@ -846,10 +760,7 @@ fn load_layer_type_mismatch_gives_structure_error() {
     }
 }
 
-/// Weight-shape mismatch → Error::Io(IoError::ModelStructureMismatch)
-///
-/// Dense(2→2) is saved; target model has Dense(3→3). Both are "Dense"
-/// (type check passes) but the weight matrices are incompatible in shape.
+/// Weight-shape mismatch (Dense 2->2 saved, Dense 3->3 target) gives Error::Io(IoError::ModelStructureMismatch)
 #[test]
 fn load_weight_shape_mismatch_gives_structure_error() {
     let tmp = TempFile::new("shape_mismatch");

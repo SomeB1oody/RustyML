@@ -1,7 +1,6 @@
-//! Integration tests for `utils::kernel_pca`.
-//!
-//! All expected values are derived from mathematical definitions or closed-form
-//! calculations, never from running the code and recording its output.
+//! Integration tests for `utils::kernel_pca`: constructor validation, fit/transform
+//! error paths, per-kernel happy paths, eigensolver agreement, and closed-form kernel
+//! value checks. Expected values come from mathematical definitions, not recorded output
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -11,11 +10,9 @@ use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
 
 use crate::common::assert_allclose;
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Local helpers
-// ─────────────────────────────────────────────────────────────────────────────
 
-/// Small deterministic dataset for general fitting tests (8 samples × 2 features).
+/// Small deterministic dataset for general fitting tests (8 samples x 2 features)
 fn make_small_dataset() -> Array2<f64> {
     array![
         [1.0, 0.0],
@@ -29,49 +26,31 @@ fn make_small_dataset() -> Array2<f64> {
     ]
 }
 
-/// Dataset for the RBF vs Linear separation test.
+/// Build two concentric clusters that are radially but not linearly separable: an inner
+/// ring at radius 0.5 (label -1) and an outer ring at radius 3.0 (label +1)
 ///
-/// This generates two non-concentric clusters that are RADIALLY separable
-/// in 2D but not linearly separable.  The inner cluster (label -1) is placed
-/// near the origin, the outer cluster (label +1) is placed on a ring far from
-/// the origin.  Importantly, the outer ring samples are NOT placed at angles
-/// that are symmetric with the inner cluster, so the angular eigenvectors do
-/// NOT dominate the kernel PCA spectrum.
+/// # Parameters
 ///
-/// Mathematical derivation for why RBF separates this better than Linear:
+/// - `n_inner` - number of inner-ring samples
+/// - `n_outer` - number of outer-ring samples
 ///
-/// For the RBF kernel K(x,y) = exp(-γ||x-y||²):
-///   - Within inner cluster: small ||x-y||² → K close to 1
-///   - Within outer ring:    ||x-y||² depends on ring arc → K varies but has high average
-///   - Between inner/outer:  ||x-y||² = (r_in - r_out)² = large → K ≈ exp(-γ * 9) ≈ 0.11
+/// # Returns
 ///
-/// For the Linear kernel K(x,y) = x·y:
-///   - Inner cluster (near origin): small dot products ≈ 0
-///   - Outer ring: large dot products ∝ r_out²
-///   - The cross term (inner · outer) ∝ r_in * r_out * cos(θ) averages near 0
-///
-/// Under RBF KPCA, the "cluster identity" is the dominant eigenvector direction.
-/// Under Linear KPCA, the angular variation in the outer ring dominates.
-///
-/// Separability is measured by the MAX centroid distance across all components.
+/// - `(Array2<f64>, Vec<i32>)` - the (n_inner + n_outer) x 2 points and their labels
 fn make_radial_clusters(n_inner: usize, n_outer: usize) -> (Array2<f64>, Vec<i32>) {
     use std::f64::consts::PI;
-    // Inner cluster: points near (0.5, 0.5) with small spread.
-    // These are at radius ≈ 0.71, all in the first quadrant.
     let mut rows: Vec<f64> = Vec::new();
     let mut labels: Vec<i32> = Vec::new();
 
-    // Inner cluster: fixed small-radius points in a grid-like pattern
     for i in 0..n_inner {
         let angle = 2.0 * PI * (i as f64) / (n_inner as f64);
-        rows.push(0.5 * angle.cos()); // inner, radius 0.5
+        rows.push(0.5 * angle.cos());
         rows.push(0.5 * angle.sin());
         labels.push(-1);
     }
-    // Outer ring: points at radius 3.0
     for i in 0..n_outer {
         let angle = 2.0 * PI * (i as f64) / (n_outer as f64);
-        rows.push(3.0 * angle.cos()); // outer, radius 3
+        rows.push(3.0 * angle.cos());
         rows.push(3.0 * angle.sin());
         labels.push(1);
     }
@@ -80,15 +59,17 @@ fn make_radial_clusters(n_inner: usize, n_outer: usize) -> (Array2<f64>, Vec<i32
     (Array2::from_shape_vec((n, 2), rows).unwrap(), labels)
 }
 
-/// Computes the between-class to within-class variance ratio across all
-/// projection components.
+/// Fisher-like discriminability: sum over components of (mean_pos - mean_neg)^2 divided by
+/// (var_pos + var_neg + epsilon); higher means classes are more separable in the projection
 ///
-/// For each component, we compute:
-///   between_var = (mean_pos - mean_neg)^2
-///   within_var  = var(proj[pos]) + var(proj[neg]) + epsilon
+/// # Parameters
 ///
-/// The sum over components is a Fisher-like discriminability measure.
-/// Higher means the classes are more linearly separable in the projected space.
+/// - `projections` - projected samples, one row per sample
+/// - `labels` - class labels, negative for one class and non-negative for the other
+///
+/// # Returns
+///
+/// - `f64` - the summed between-class to within-class variance ratio
 fn class_separability(projections: &Array2<f64>, labels: &[i32]) -> f64 {
     let n_comp = projections.ncols();
     let mut total = 0.0;
@@ -130,17 +111,15 @@ fn class_separability(projections: &Array2<f64>, labels: &[i32]) -> f64 {
     total
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 1. Constructor + getter tests
-// ─────────────────────────────────────────────────────────────────────────────
+// Constructor + getter tests
 
 #[test]
 fn test_new_default_values() {
     let kpca = KernelPCA::default();
-    // Default is RBF gamma=0.1, n_components=2, Dense solver.
+    // Default is RBF gamma=0.1, n_components=2, Dense solver
     assert_eq!(kpca.get_n_components(), 2);
     assert_eq!(kpca.get_eigen_solver(), EigenSolver::Dense);
-    // Pre-fit getters must return None.
+    // Pre-fit getters must return None
     assert!(kpca.get_eigenvalues().is_none());
     assert!(kpca.get_eigenvectors().is_none());
     assert!(kpca.get_n_samples().is_none());
@@ -196,8 +175,7 @@ fn test_new_cosine_kernel() {
     assert_eq!(kpca.get_n_components(), 2);
 }
 
-/// Sigmoid with gamma=0 is intentionally allowed (validate_kernel only rejects
-/// non-finite values for Sigmoid, not zero).
+/// Sigmoid with gamma=0 is accepted, since validation rejects only non-finite values
 #[test]
 fn test_new_sigmoid_gamma_zero_accepted() {
     assert!(
@@ -214,9 +192,7 @@ fn test_new_sigmoid_gamma_zero_accepted() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 2. Constructor validation / error paths
-// ─────────────────────────────────────────────────────────────────────────────
+// Constructor validation / error paths
 
 #[test]
 fn test_new_n_components_zero_returns_invalid_parameter() {
@@ -362,9 +338,7 @@ fn test_new_sigmoid_coef0_infinity_returns_invalid_parameter() {
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 3. fit error paths
-// ─────────────────────────────────────────────────────────────────────────────
+// fit error paths
 
 #[test]
 fn test_fit_empty_input_returns_empty_input() {
@@ -379,7 +353,7 @@ fn test_fit_empty_input_returns_empty_input() {
 
 #[test]
 fn test_fit_one_sample_returns_invalid_input() {
-    // KernelPCA requires at least 2 samples.
+    // KernelPCA requires at least 2 samples
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1, EigenSolver::Dense).unwrap();
     let x = array![[1.0, 2.0]];
     let err = kpca.fit(&x).unwrap_err();
@@ -391,7 +365,7 @@ fn test_fit_one_sample_returns_invalid_input() {
 
 #[test]
 fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
-    // 3 samples, but n_components=5 — should fail during fit, not construction.
+    // 3 samples, but n_components=5 - should fail during fit, not construction
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 5, EigenSolver::Dense).unwrap();
     let x = array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]];
     let err = kpca.fit(&x).unwrap_err();
@@ -399,7 +373,7 @@ fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
     );
-    // Model must not be partially mutated: fitted state still None.
+    // Model must not be partially mutated: fitted state still None
     assert!(
         kpca.get_n_samples().is_none(),
         "n_samples should still be None after failed fit"
@@ -428,9 +402,7 @@ fn test_fit_inf_in_input_returns_non_finite() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. transform error paths
-// ─────────────────────────────────────────────────────────────────────────────
+// transform error paths
 
 #[test]
 fn test_transform_before_fit_returns_not_fitted() {
@@ -445,11 +417,11 @@ fn test_transform_before_fit_returns_not_fitted() {
 
 #[test]
 fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
-    let x_train = make_small_dataset(); // 8 × 2
+    let x_train = make_small_dataset(); // 8 x 2
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2, EigenSolver::Dense).unwrap();
     kpca.fit(&x_train).unwrap();
 
-    // Wrong: 3 features instead of 2.
+    // Wrong: 3 features instead of 2
     let x_bad = array![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
     let err = kpca.transform(&x_bad).unwrap_err();
     assert!(
@@ -466,7 +438,7 @@ fn test_transform_nan_in_input_returns_error() {
 
     let x_bad = array![[f64::NAN, 0.0], [0.0, 1.0]];
     let err = kpca.transform(&x_bad).unwrap_err();
-    // validate_transform_matrix catches NonFinite; kernel validation catches NonFinite too.
+    // Both transform-matrix and kernel validation catch NonFinite
     assert!(
         matches!(err, Error::NonFinite(_) | Error::DimensionMismatch { .. }),
         "expected NonFinite (or DimensionMismatch), got {err:?}"
@@ -487,22 +459,20 @@ fn test_transform_empty_input_returns_empty_input() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. Happy-path fit + transform with each kernel
-// ─────────────────────────────────────────────────────────────────────────────
+// Happy-path fit + transform with each kernel
 
 fn run_fit_transform_shape_check(kernel: KernelType, n_components: usize) {
-    let x = make_small_dataset(); // 8 × 2
+    let x = make_small_dataset(); // 8 x 2
     let mut kpca = KernelPCA::new(kernel, n_components, EigenSolver::Dense).unwrap();
     kpca.fit(&x).unwrap();
 
-    // Post-fit getters must be populated.
+    // Post-fit getters must be populated
     assert_eq!(kpca.get_n_samples(), Some(8));
     assert_eq!(kpca.get_n_features(), Some(2));
     assert!(kpca.get_eigenvalues().is_some());
     assert!(kpca.get_eigenvectors().is_some());
 
-    // Eigenvalues must all be strictly positive (KernelPCA invariant).
+    // Eigenvalues must all be strictly positive (KernelPCA invariant)
     let evs = kpca.get_eigenvalues().unwrap();
     for &v in evs.iter() {
         assert!(
@@ -542,8 +512,7 @@ fn test_fit_transform_poly_kernel() {
 
 #[test]
 fn test_fit_transform_sigmoid_kernel() {
-    // Sigmoid kernel: K(x,y) = tanh(gamma * x·y + coef0).
-    // Small gamma keeps values in a regime where centering remains well-conditioned.
+    // K(x,y) = tanh(gamma * x.y + coef0); small gamma keeps centering well-conditioned
     run_fit_transform_shape_check(
         KernelType::Sigmoid {
             gamma: 0.1,
@@ -558,52 +527,43 @@ fn test_fit_transform_cosine_kernel() {
     run_fit_transform_shape_check(KernelType::Cosine, 2);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. fit_transform(x) == fit(x); transform(x) — determinism invariant
-// ─────────────────────────────────────────────────────────────────────────────
+// fit_transform(x) equals fit(x) then transform(x): determinism invariant
 
 #[test]
 fn test_fit_transform_equals_fit_then_transform() {
     let x = make_small_dataset();
     let kernel = KernelType::RBF { gamma: 0.5 };
 
-    // Path A: fit_transform in one call.
+    // Path A: fit_transform in one call
     let mut kpca_a = KernelPCA::new(kernel, 2, EigenSolver::Dense).unwrap();
     let proj_a = kpca_a.fit_transform(&x).unwrap();
 
-    // Path B: fit then transform separately.
+    // Path B: fit then transform separately
     let mut kpca_b = KernelPCA::new(kernel, 2, EigenSolver::Dense).unwrap();
     kpca_b.fit(&x).unwrap();
     let proj_b = kpca_b.transform(&x).unwrap();
 
-    // Both must be numerically identical (same deterministic algorithm, same seed).
+    // Both must be numerically identical (same deterministic algorithm, same seed)
     assert_allclose(&proj_a, &proj_b, 1e-10);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 7. Centering invariant: column means of training projection ≈ 0
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Proof: after double-centering the kernel matrix K_c = H K H (where
-// H = I - 1/n * 11^T), the row-sum of K_c is zero, so the column mean of
-// K_c V / sqrt(lambda) is zero.
+// Centering invariant: column means of training projection are ~= 0, since double-centering
+// K_c = H K H with H = I - 1/n * 11^T zeroes each row sum, hence each projected column mean
 
 #[test]
 fn test_centering_training_output_has_near_zero_column_means() {
-    let x = make_small_dataset(); // 8 × 2
+    let x = make_small_dataset(); // 8 x 2
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2, EigenSolver::Dense).unwrap();
     let proj = kpca.fit_transform(&x).unwrap();
 
-    // n_samples = 8, check both components.
+    // n_samples = 8, check both components
     for col in 0..proj.ncols() {
         let mean: f64 = proj.column(col).sum() / proj.nrows() as f64;
         assert_abs_diff_eq!(mean, 0.0, epsilon = 1e-9);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 8. Eigenvalues are non-negative
-// ─────────────────────────────────────────────────────────────────────────────
+// Eigenvalues are positive and sorted descending after fit
 
 #[test]
 fn test_eigenvalues_are_positive_after_fit() {
@@ -613,7 +573,7 @@ fn test_eigenvalues_are_positive_after_fit() {
 
     let evs = kpca.get_eigenvalues().unwrap();
     assert_eq!(evs.len(), 4);
-    // Eigenvalues must be sorted descending and strictly positive.
+    // Eigenvalues must be sorted descending and strictly positive
     let mut prev = f64::INFINITY;
     for &v in evs.iter() {
         assert!(
@@ -628,12 +588,8 @@ fn test_eigenvalues_are_positive_after_fit() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 9. EigenSolver variants agree
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Dense, Lanczos, and PowerIteration should all produce the same dominant
-// eigenvalue and projections (up to a global sign flip on each column).
+// EigenSolver variants agree: Dense, Lanczos, and PowerIteration yield the same dominant
+// eigenvalue and projections, up to a global sign flip on each column
 
 fn abs_col_norms(m: &Array2<f64>) -> Array1<f64> {
     Array1::from_iter((0..m.ncols()).map(|j| m.column(j).mapv(|v| v * v).sum().sqrt()))
@@ -654,12 +610,12 @@ fn test_eigensolver_dense_vs_lanczos_agree() {
     kpca_lanczos.fit(&x).unwrap();
     let proj_lanczos = kpca_lanczos.transform(&x).unwrap();
 
-    // Column norms must match (sign-agnostic check).
+    // Column norms must match (sign-agnostic check)
     let norms_d = abs_col_norms(&proj_dense);
     let norms_l = abs_col_norms(&proj_lanczos);
     assert_allclose(&norms_d, &norms_l, 1e-5);
 
-    // Leading eigenvalues must agree.
+    // Leading eigenvalues must agree
     let ev_dense = kpca_dense.get_eigenvalues().unwrap();
     let ev_lanczos = kpca_lanczos.get_eigenvalues().unwrap();
     assert_abs_diff_eq!(ev_dense[0], ev_lanczos[0], epsilon = 1e-5);
@@ -712,9 +668,7 @@ fn test_all_three_solvers_produce_finite_shapes() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 10. Determinism: calling fit+transform twice gives bit-identical results
-// ─────────────────────────────────────────────────────────────────────────────
+// Determinism: calling fit+transform twice gives bit-identical results
 
 #[test]
 fn test_determinism_dense_solver() {
@@ -730,58 +684,22 @@ fn test_determinism_dense_solver() {
     assert_allclose(&proj1, &proj2, 0.0);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 11. RBF separates radial clusters better than Linear kernel
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// A small inner cluster (radius 0.5) and an outer ring (radius 3.0) are NOT
-// linearly separable in input space because both pass through the same angular
-// directions.
-//
-// Mathematical reasoning:
-//
-//   With n_inner = n_outer = 12 and the inner cluster at r=0.5:
-//
-//   For the RBF kernel (γ = 0.5):
-//     K(inner_i, inner_j):  ||x||² ≤ 1.0  → K ≥ exp(-0.5)  ≈ 0.607
-//     K(inner_i, outer_j):  ||x-y||² ≥ (3-0.5)² = 6.25 → K ≤ exp(-0.5*6.25) ≈ 0.044
-//     K(outer_i, outer_j):  ||x-y||² up to (2*3)²=36 → K in [exp(-18), 1]
-//     The within-inner cluster average is much larger than the cross-cluster average,
-//     creating a strong "inner vs outer" eigenvector in the centered kernel matrix.
-//
-//   For the Linear kernel:
-//     K(inner_i, inner_j) = x·y: since inner points are at r=0.5, K ≤ 0.25
-//     K(outer_i, outer_j) = x·y: outer points at r=3, K ≤ 9
-//     K(inner, outer): ≤ 0.5*3 = 1.5 — small compared to outer-outer
-//     The outer ring dominates the linear kernel spectrum (large-variance outer points),
-//     so the first linear KPCA component separates WITHIN the outer ring (angular),
-//     not inner from outer.
-//
-//   The maximum centroid distance across n_components=2 components is the metric:
-//   for RBF, the inner cluster projects uniformly to one location and the outer
-//   ring to another, yielding large centroid distance in at least one component.
-//   For linear, the outer ring dominates both components, producing small centroid
-//   distance (inner points project near zero in both components because r_inner ≈ 0).
+// RBF separates radial clusters better than Linear: an inner ring (r=0.5) and outer ring
+// (r=3.0) are radially but not linearly separable, so RBF separability must exceed Linear
 
 #[test]
 fn test_rbf_separates_radial_clusters_better_than_linear() {
     // 24 samples: 12 inner (r=0.5, label=-1) + 12 outer (r=3.0, label=1)
     let (x, labels) = make_radial_clusters(12, 12);
 
-    // RBF with γ=0.5: K(inner,outer) = exp(-0.5 * 6.25) ≈ 0.044, much smaller
-    // than K(inner,inner) which ranges from exp(-0.5) ≈ 0.61 to 1.0.
     let mut kpca_rbf =
         KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2, EigenSolver::Dense).unwrap();
     let proj_rbf = kpca_rbf.fit_transform(&x).unwrap();
 
-    // Linear kernel: outer ring (r=3) has much larger kernel values than inner (r=0.5),
-    // so the outer ring angular modes dominate and inner points project near 0.
     let mut kpca_lin = KernelPCA::new(KernelType::Linear, 2, EigenSolver::Dense).unwrap();
     let proj_lin = kpca_lin.fit_transform(&x).unwrap();
 
-    // Metric: max centroid distance across all n_components components.
-    // For RBF: the first component should clearly separate inner from outer.
-    // For Linear: both class centroids may be near 0 for the inner cluster.
+    // Metric: Fisher-like separability summed across both components
     let sep_rbf = class_separability(&proj_rbf, &labels);
     let sep_lin = class_separability(&proj_lin, &labels);
 
@@ -793,9 +711,7 @@ fn test_rbf_separates_radial_clusters_better_than_linear() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 12. Save / load round-trip
-// ─────────────────────────────────────────────────────────────────────────────
+// Save / load round-trip
 
 #[test]
 fn test_save_load_round_trip() {
@@ -809,10 +725,10 @@ fn test_save_load_round_trip() {
     let kpca_loaded = KernelPCA::load_from_path(path).unwrap();
     let proj_after = kpca_loaded.transform(&x).unwrap();
 
-    // After deserialization, identical transform output is required.
+    // After deserialization, identical transform output is required
     assert_allclose(&proj_before, &proj_after, 1e-12);
 
-    // Clean up.
+    // Clean up
     let _ = std::fs::remove_file(path);
 }
 
@@ -826,13 +742,11 @@ fn test_load_from_nonexistent_path_returns_io_error() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 13. Single-feature (1-D) data
-// ─────────────────────────────────────────────────────────────────────────────
+// Single-feature (1-D) data
 
 #[test]
 fn test_single_feature_data_fits_and_transforms() {
-    // Four 1-D points; the kernel matrix is 4×4 and the centering still applies.
+    // Four 1-D points; the kernel matrix is 4x4 and centering still applies
     let x = array![[1.0], [2.0], [3.0], [4.0]];
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1, EigenSolver::Dense).unwrap();
     let proj = kpca.fit_transform(&x).unwrap();
@@ -842,13 +756,11 @@ fn test_single_feature_data_fits_and_transforms() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 14. Parallel path (n_samples >= 200)
-// ─────────────────────────────────────────────────────────────────────────────
+// Parallel path (n_samples >= 200)
 
 #[test]
 fn test_parallel_path_n_samples_200() {
-    // KERNEL_PCA_PARALLEL_THRESHOLD = 200; use exactly 200 rows.
+    // KERNEL_PCA_PARALLEL_THRESHOLD = 200; use exactly 200 rows
     let n = 200;
     let mut data = Vec::with_capacity(n * 2);
     for i in 0..n {
@@ -865,29 +777,22 @@ fn test_parallel_path_n_samples_200() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 15. Numerical spot-checks: closed-form kernel values
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// These tests verify the kernel formulas independently from KernelPCA, using
-// the public `KernelType::compute` method.
+// Numerical spot-checks: closed-form kernel values via the public KernelType::compute
 
 #[test]
 fn test_rbf_kernel_known_value() {
-    // K(x,y) = exp(-gamma * ||x-y||^2)
-    // x=[3.0,0.0], y=[0.0,4.0], ||x-y||^2 = 9+16 = 25, gamma=0.1
-    // K = exp(-0.1 * 25) = exp(-2.5)
+    // K(x,y) = exp(-gamma * ||x-y||^2); ||x-y||^2 = 25, gamma=0.1, so K = exp(-2.5)
     let x1 = array![3.0, 0.0];
     let x2 = array![0.0, 4.0];
     let k = KernelType::RBF { gamma: 0.1 };
-    let expected = (-2.5f64).exp(); // exp(-2.5) ≈ 0.082085
+    let expected = (-2.5f64).exp();
     let actual = k.compute(x1.view(), x2.view());
     assert_abs_diff_eq!(actual, expected, epsilon = 1e-12);
 }
 
 #[test]
 fn test_linear_kernel_known_value() {
-    // K(x,y) = x·y = 3*1 + 4*2 = 11
+    // K(x,y) = x.y = 3*1 + 4*2 = 11
     let x1 = array![3.0, 4.0];
     let x2 = array![1.0, 2.0];
     let k = KernelType::Linear;
@@ -897,9 +802,7 @@ fn test_linear_kernel_known_value() {
 
 #[test]
 fn test_cosine_kernel_known_value() {
-    // K(x,y) = (x·y) / (||x|| * ||y||)
-    // x=[3.0,4.0] ||x||=5, y=[1.0,0.0] ||y||=1
-    // dot = 3, K = 3 / (5 * 1) = 0.6
+    // K(x,y) = (x.y) / (||x|| * ||y||); dot=3, ||x||=5, ||y||=1, so K = 3/5 = 0.6
     let x1 = array![3.0, 4.0];
     let x2 = array![1.0, 0.0];
     let k = KernelType::Cosine;
@@ -909,9 +812,7 @@ fn test_cosine_kernel_known_value() {
 
 #[test]
 fn test_poly_kernel_known_value() {
-    // K(x,y) = (gamma * x·y + coef0)^degree
-    // x=[1.0,2.0], y=[3.0,4.0], dot=1*3+2*4=11
-    // gamma=1, coef0=1, degree=2: (1*11+1)^2 = 144
+    // K(x,y) = (gamma * x.y + coef0)^degree; dot=11, so (1*11+1)^2 = 144
     let x1 = array![1.0, 2.0];
     let x2 = array![3.0, 4.0];
     let k = KernelType::Poly {
@@ -925,39 +826,33 @@ fn test_poly_kernel_known_value() {
 
 #[test]
 fn test_sigmoid_kernel_known_value() {
-    // K(x,y) = tanh(gamma * x·y + coef0)
-    // x=[1.0,0.0], y=[1.0,0.0], dot=1
-    // gamma=1.0, coef0=0.0: tanh(1.0)
+    // K(x,y) = tanh(gamma * x.y + coef0); dot=1, gamma=1, coef0=0, so K = tanh(1.0)
     let x1 = array![1.0, 0.0];
     let x2 = array![1.0, 0.0];
     let k = KernelType::Sigmoid {
         gamma: 1.0,
         coef0: 0.0,
     };
-    let expected = 1.0f64.tanh(); // ≈ 0.7615941559557649
+    let expected = 1.0f64.tanh();
     let actual = k.compute(x1.view(), x2.view());
     assert_abs_diff_eq!(actual, expected, epsilon = 1e-12);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 16. n_components = n_samples (boundary: exactly equal should succeed)
-// ─────────────────────────────────────────────────────────────────────────────
+// n_components == n_samples boundary: exactly equal should succeed
 
 #[test]
 fn test_n_components_equals_n_samples_boundary() {
-    // 4 samples; n_components=4 should be accepted (n_components <= n_samples).
-    // The kernel matrix is 4×4 and all 4 components are requested.
+    // 4 samples; n_components=4 is accepted (n_components <= n_samples)
     let x = array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0],];
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 4, EigenSolver::Dense).unwrap();
-    // This may succeed or fail with Computation (all-eigenvalue edge case), but
-    // it must NOT return InvalidParameter (the count constraint is satisfied).
+    // May succeed or fail with Computation, but must not return InvalidParameter
     match kpca.fit(&x) {
         Ok(_) => {
             let proj = kpca.transform(&x).unwrap();
             assert_eq!(proj.shape(), [4, 4]);
         }
         Err(Error::Computation { .. }) => {
-            // Acceptable: near-zero eigenvalues for this small symmetric dataset.
+            // Acceptable: near-zero eigenvalues for this small symmetric dataset
         }
         Err(e) => {
             panic!("unexpected error for n_components==n_samples: {e:?}");
@@ -965,9 +860,7 @@ fn test_n_components_equals_n_samples_boundary() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 17. Two-sample minimum boundary (exactly 2 samples is valid)
-// ─────────────────────────────────────────────────────────────────────────────
+// Two-sample minimum boundary: exactly 2 samples is valid
 
 #[test]
 fn test_two_samples_is_valid() {
@@ -975,39 +868,15 @@ fn test_two_samples_is_valid() {
     let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1, EigenSolver::Dense).unwrap();
     let result = kpca.fit(&x);
     // May succeed or return Computation (rank-1 kernel), but must not panic
-    // and must not return InvalidInput (2 >= minimum of 2).
+    // and must not return InvalidInput (2 >= minimum of 2)
     match result {
         Ok(_) => {}
         Err(Error::Computation { .. }) => {}
         Err(e) => panic!("unexpected error for 2-sample fit: {e:?}"),
     }
 }
-// ──────────────────────────────────────────────────────────────────────────────
-// 18. Non-positive eigenvalue -> Error::Computation (validate_eigenvalues path)
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// KernelPCA requires every selected eigenvalue of the centered kernel matrix to be
-// strictly positive and finite (src/utils/kernel_pca.rs, `validate_eigenvalues`).
-// To force a rejection DETERMINISTICALLY we use the Sigmoid (tanh) kernel, which is
-// NOT positive-semidefinite, so its centered Gram matrix can have a genuinely
-// negative eigenvalue (bounded well away from machine epsilon).
-//
-// Closed-form derivation for n = 2 samples x0 = [1], x1 = [4], Sigmoid(gamma=1, coef0=0):
-//   K(x,y) = tanh(gamma * x·y + coef0) = tanh(x·y)
-//   K00 = tanh(1)  = 0.7615941559557649
-//   K11 = tanh(16) ≈ 1.0   (1.0 to full f64 precision)
-//   K01 = tanh(4)  = 0.999329299739067
-//
-//   Double-centering (K[i,j] - rowmean[i] - rowmean[j] + overallmean) on a 2×2 matrix
-//   forces each row sum to 0, so the centered matrix is [[a, -a], [-a, a]] with
-//   a = (K00 - 2·K01 + K11)/4. Its eigenvalues are exactly {0, 2a} (trace = 2a, det = 0).
-//   Nonzero eigenvalue 2a = (K00 - 2·K01 + K11)/2
-//                        = (0.7615941559557649 - 2·0.999329299739067 + 1.0)/2
-//                        ≈ -0.118532  (robustly < 0).
-//
-// With n_components = 2 (= n_samples) the descending-sorted top-2 eigenvalues are ALL
-// the eigenvalues, so this negative value is necessarily selected and
-// `validate_eigenvalues` MUST reject with Error::Computation.
+// Indefinite Sigmoid kernel yields a negative eigenvalue in its centered Gram matrix,
+// which validate_eigenvalues must reject with Error::Computation
 #[test]
 fn test_fit_indefinite_kernel_negative_eigenvalue_returns_computation() {
     let x = array![[1.0], [4.0]]; // 2 samples, 1 feature
@@ -1027,7 +896,7 @@ fn test_fit_indefinite_kernel_negative_eigenvalue_returns_computation() {
         "expected Computation (negative eigenvalue from indefinite Sigmoid kernel), got {err:?}"
     );
 
-    // The fit must fail before persisting any state: fitted getters stay None.
+    // The fit must fail before persisting any state: fitted getters stay None
     assert!(
         kpca.get_eigenvalues().is_none(),
         "eigenvalues must remain None after a failed fit"
