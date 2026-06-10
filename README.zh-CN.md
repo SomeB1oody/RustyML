@@ -4,17 +4,16 @@
 
 一个用**纯 Rust** 编写的高性能机器学习与深度学习库。
 
-[![Rust Version](https://img.shields.io/badge/rustc-1.89%2B-brown)](https://www.rust-lang.org/)
-[![Edition](https://img.shields.io/badge/edition-2024-orange)](https://doc.rust-lang.org/edition-guide/)
-[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
-[![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
-[![docs.rs](https://img.shields.io/docsrs/rustyml)](https://docs.rs/rustyml)
-
 <p align="center">
-  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml"><img alt="fmt" src="https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml/badge.svg?branch=master"></a>
-  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml"><img alt="clippy" src="https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml/badge.svg?branch=master"></a>
-  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml"><img alt="test" src="https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml/badge.svg?branch=master"></a>
-  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml"><img alt="doc" src="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml/badge.svg?branch=master"></a>
+  <a href="https://www.rust-lang.org/"><img alt="rustc" src="https://img.shields.io/badge/rustc-1.89%2B-brown"></a>
+  <a href="https://doc.rust-lang.org/edition-guide/"><img alt="edition" src="https://img.shields.io/badge/edition-2024-orange"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green"></a>
+  <a href="https://crates.io/crates/rustyml"><img alt="crates.io" src="https://img.shields.io/crates/v/rustyml.svg"></a>
+  <br>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml"><img alt="fmt" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/fmt.yml?branch=master&label=fmt"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml"><img alt="clippy" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/clippy.yml?branch=master&label=clippy"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml"><img alt="test" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/test.yml?branch=master&label=test"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml"><img alt="doc" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/doc.yml?branch=master&label=doc"></a>
 </p>
 
 ## 概述
