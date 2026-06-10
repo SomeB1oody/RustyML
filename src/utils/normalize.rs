@@ -1,73 +1,86 @@
+//! Data normalization along configurable axes and norm orders
+//!
+//! Provides [`normalize()`] to scale arrays so the chosen norm equals 1 along each
+//! row, column, or globally, with [`NormalizationAxis`] and [`NormalizationOrder`]
+//! selecting the axis and norm (L1, L2, Max, or Lp)
+
 use crate::error::Error;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-/// Tolerance for considering a norm as effectively zero
+/// Tolerance for treating a norm as effectively zero
 const NORM_ZERO_THRESHOLD: f64 = 1e-15;
 
-/// Element-count threshold above which the global-axis path divides in parallel.
+/// Element-count threshold above which the global-axis path divides in parallel
 const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
 
-/// Lane-count threshold above which row/column normalization runs across lanes in parallel.
+/// Lane-count threshold above which row/column normalization runs across lanes in parallel
 const NORMALIZE_PARALLEL_LANES: usize = 100;
 
 /// Defines the axis along which the normalization is applied
 ///
-/// # Variants
-///
-/// - `Row` - Normalize across rows (each row is normalized independently)
-///     - For 2D arrays: normalizes each row (samples) independently
-///     - For N-D arrays (N>2): normalizes along the last axis (features dimension)
-///     - Example: For shape (batch, height, width), normalizes along width axis
-/// - `Column` - Normalize across columns (each column is normalized independently)
-///     - For 2D arrays: normalizes each column (features) independently
-///     - For N-D arrays (N>2): normalizes along the second-to-last axis
-///     - Example: For shape (batch, height, width), normalizes along height axis
-/// - `Global` - Normalize the entire array globally (treats all elements as a single vector)
-///
-/// # Note on High-Dimensional Arrays
-///
-/// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two axes:
-/// - `Row`: normalizes along axis N-1 (last axis)
-/// - `Column`: normalizes along axis N-2 (second-to-last axis)
-///
-/// This convention follows common machine learning practices where the last axis represents features.
+/// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two
+/// axes: `Row` normalizes along axis N-1 (last axis) and `Column` along axis N-2
+/// (second-to-last). This follows the common convention where the last axis is features
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationAxis {
+    /// Normalize each row independently
+    ///
+    /// For 2D arrays normalizes each row (samples); for N-D arrays (N>2) normalizes
+    /// along the last axis (features). For shape (batch, height, width), along width
     Row,
+    /// Normalize each column independently
+    ///
+    /// For 2D arrays normalizes each column (features); for N-D arrays (N>2) normalizes
+    /// along the second-to-last axis. For shape (batch, height, width), along height
     Column,
+    /// Normalize the entire array as a single vector
     Global,
 }
 
 /// Defines the order of the norm used for normalization
-///
-/// # Variants
-///
-/// - `L1` - L1 norm (Manhattan norm): sum of absolute values
-/// - `L2` - L2 norm (Euclidean norm): square root of sum of squares  
-/// - `Max` - Max norm (infinity norm): maximum absolute value
-/// - `Lp(f64)` - Lp norm with custom p value: (sum of |x|^p)^(1/p)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NormalizationOrder {
+    /// L1 norm (Manhattan norm): sum of absolute values
     L1,
+    /// L2 norm (Euclidean norm): square root of sum of squares
     L2,
+    /// Max norm (infinity norm): maximum absolute value
     Max,
+    /// Lp norm with custom p value: (sum of |x|^p)^(1/p)
     Lp(f64),
 }
 
-/// Normalize data along specified axis using the given norm order
+/// Normalize data along the specified axis using the given norm order
 ///
-/// This function normalizes input data by dividing each element by the norm
-/// computed along the specified axis. The normalization ensures that the
-/// norm of the data along the chosen axis equals 1.
+/// Divides each element by the norm computed along the chosen axis, so the norm of the
+/// data along that axis equals 1. Lanes whose norm is effectively zero are set to zero
 ///
 /// # Parameters
 ///
-/// - `data` - Input array data with arbitrary dimensions and f64 elements
-/// - `axis` - The axis along which to perform normalization (Row/Column/Global)
-/// - `order` - The norm order to use for normalization (L1/L2/Max/Lp)
+/// - `data` - Input array with arbitrary dimensions and f64 elements
+/// - `axis` - The axis along which to normalize (Row/Column/Global)
+/// - `order` - The norm order to use (L1/L2/Max/Lp)
+///
+/// # Returns
+///
+/// - `Result<Array<f64, D>, Error>` - Normalized array with the same dimensions as the input
+///
+/// # Errors
+///
+/// - [`Error::EmptyInput`] if the input array is empty
+/// - [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf)
+/// - [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive and finite
+/// - [`Error::NonFinite`] if the normalization computation produces non-finite values
+///
+/// # Performance
+///
+/// Row/column normalization runs across lanes in parallel once there are at least
+/// `NORMALIZE_PARALLEL_LANES` (100) lanes; global normalization divides in parallel once
+/// the array has at least `NORMALIZE_PARALLEL_THRESHOLD` (10,000) elements
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::utils::normalize::{normalize, NormalizationAxis, NormalizationOrder};
@@ -76,31 +89,6 @@ pub enum NormalizationOrder {
 /// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
 /// // Each row will have L2 norm = 1
 /// ```
-///
-/// # Returns
-///
-/// - `Result<Array<f64, D>, Error>` - Normalized array with same dimensions as input
-///
-/// # Errors
-///
-/// - Returns [`Error::EmptyInput`] if the input array is empty.
-/// - Returns [`Error::NonFinite`] if the input contains non-finite values (NaN/Inf).
-/// - Returns [`Error::InvalidParameter`] if the Lp norm parameter `p` is not positive/finite.
-/// - Returns [`Error::NonFinite`] if the normalization computation results in non-finite values.
-///
-/// # Performance
-///
-/// - Row/column normalization runs across lanes in parallel once there are at least
-///   `NORMALIZE_PARALLEL_LANES` (100) lanes; global normalization divides in parallel once the
-///   array has at least `NORMALIZE_PARALLEL_THRESHOLD` (10,000) elements.
-///
-/// # Implementation Details
-///
-/// - For Row axis: Each row is normalized independently
-/// - For Column axis: Each column is normalized independently  
-/// - For Global axis: The entire array is normalized as a single vector
-/// - Zero norms are handled by setting the corresponding elements to zero
-/// - NaN and infinite values in input will result in an error
 pub fn normalize<S, D>(
     data: &ArrayBase<S, D>,
     axis: NormalizationAxis,
@@ -110,17 +98,14 @@ where
     S: Data<Elem = f64>,
     D: Dimension,
 {
-    // Input validation
     if data.is_empty() {
         return Err(Error::empty_input("Cannot normalize empty array"));
     }
 
-    // Check for NaN or infinite values
     if data.iter().any(|&x| !x.is_finite()) {
         return Err(Error::non_finite("input data"));
     }
 
-    // Validate Lp norm parameter
     if matches!(order, NormalizationOrder::Lp(p) if p <= 0.0 || !p.is_finite()) {
         return Err(Error::invalid_parameter(
             "p",
@@ -134,7 +119,7 @@ where
 }
 
 /// Divides a single lane by its norm in place, or zeros it when the norm is
-/// effectively zero (the lane is all near-zero, so it has no direction to keep).
+/// effectively zero (an all-near-zero lane has no direction to keep)
 fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
     if norm > NORM_ZERO_THRESHOLD {
         lane.mapv_inplace(|x| x / norm);
@@ -143,7 +128,7 @@ fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
     }
 }
 
-/// Normalizes the entire array as a single flat vector.
+/// Normalizes the entire array as a single flat vector
 fn normalize_global<D>(data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), Error>
 where
     D: Dimension,
@@ -162,10 +147,10 @@ where
 }
 
 /// Normalizes each lane along the axis `axis_from_end` positions from the end
-/// (`1` = last axis → rows, `2` = second-to-last → columns).
+/// (`1` = last axis, rows; `2` = second-to-last, columns)
 ///
 /// Parallelizes across lanes once there are enough of them; each lane is then
-/// processed sequentially, so the two levels never nest.
+/// processed sequentially, so the two levels never nest
 fn normalize_lanes<D>(
     data: &mut Array<f64, D>,
     axis_from_end: usize,
@@ -182,8 +167,7 @@ where
             operation_name
         )));
     }
-    // `ndim >= 2` is guaranteed above, so `ndim - axis_from_end` cannot underflow for
-    // `axis_from_end` in {1, 2}.
+    // ndim >= 2 is guaranteed above, so ndim - axis_from_end cannot underflow for axis_from_end in {1, 2}
     let axis = Axis(ndim - axis_from_end);
 
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
@@ -201,10 +185,10 @@ where
 }
 
 impl NormalizationOrder {
-    /// Computes this norm over a sequence of values.
+    /// Computes this norm over a sequence of values
     ///
-    /// This is the single source of truth for each variant's norm formula, shared by
-    /// the global and per-lane normalization paths.
+    /// Single source of truth for each variant's norm formula, shared by the global
+    /// and per-lane normalization paths
     ///
     /// # Errors
     ///
@@ -236,11 +220,10 @@ impl NormalizationOrder {
             }
             NormalizationOrder::Max => {
                 let norm = values.map(|x| x.abs()).fold(f64::NEG_INFINITY, f64::max);
-                // Handle the case where the iterator was empty or all values were zero
                 if norm.is_finite() && norm >= 0.0 {
                     Ok(norm)
                 } else if norm == f64::NEG_INFINITY {
-                    // Empty iterator case
+                    // empty iterator
                     Ok(0.0)
                 } else {
                     Err(Error::non_finite(
@@ -264,10 +247,10 @@ impl NormalizationOrder {
 }
 
 impl NormalizationAxis {
-    /// Normalizes `data` in place along this axis under the given norm order.
+    /// Normalizes `data` in place along this axis under the given norm order
     ///
     /// Routes to whole-array normalization for [`NormalizationAxis::Global`] or to the
-    /// per-lane path for [`NormalizationAxis::Row`] / [`NormalizationAxis::Column`].
+    /// per-lane path for [`NormalizationAxis::Row`] / [`NormalizationAxis::Column`]
     ///
     /// # Errors
     ///

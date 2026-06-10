@@ -1,3 +1,5 @@
+//! Shared parameter and shape validation helpers for regularization layers
+
 use crate::error::Error;
 
 /// Validates that a rate parameter is between 0.0 and 1.0 (inclusive)

@@ -1,3 +1,5 @@
+//! Global average pooling layer for 1D inputs
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,18 +10,14 @@ use crate::neural_network::layers::pooling::pooling_engine::{
 };
 use crate::neural_network::traits::Layer;
 
-/// Global average pooling layer for 1D inputs.
+/// Global average pooling layer for 1D inputs
 ///
-/// Computes the mean value across the length dimension.
+/// Computes the mean value across the length dimension
 /// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
-/// `[batch_size, channels]`.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input tensor cached during the forward pass
-///   (global average pooling only needs the shape, not the input values, in backward)
+/// `[batch_size, channels]`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -53,14 +51,16 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling1D {
+    /// Shape of the input tensor cached during the forward pass (backward needs
+    /// only the shape, not the input values)
     input_shape: Vec<usize>,
 }
 
 impl GlobalAveragePooling1D {
-    /// Creates a new global average pooling 1D layer.
+    /// Creates a new global average pooling 1D layer
     ///
     /// # Returns
     ///
@@ -85,14 +85,14 @@ impl Layer for GlobalAveragePooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Store input shape for backpropagation (only the shape is needed)
+        // Cache input shape for backpropagation
         self.input_shape = input.shape().to_vec();
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {

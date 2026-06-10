@@ -1,3 +1,9 @@
+//! Logistic regression for binary classification
+//!
+//! Provides the [`LogisticRegression`] model, trained with gradient descent and
+//! optional L1/L2 regularization, plus the [`generate_polynomial_features`]
+//! helper for building polynomial feature expansions
+
 pub use super::RegularizationType;
 use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
@@ -9,27 +15,19 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Threshold for enabling parallel computation in logistic regression.
-/// When the number of samples exceeds this value, parallel processing is used
-/// to improve performance. For smaller datasets, sequential processing is used
-/// to avoid parallelization overhead.
+/// Sample-count threshold for enabling parallel computation
+///
+/// When the number of samples reaches this value, parallel processing is used
+/// to improve performance; smaller datasets stay sequential to avoid
+/// parallelization overhead
 const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 
-/// Logistic Regression model implementation
+/// Logistic regression model for binary classification
 ///
-/// This model uses gradient descent to train a binary classification logistic regression model.
-///
-/// # Fields
-///
-/// - `weights` - Model weights vector, None before training
-/// - `fit_intercept` - Whether to use intercept term (bias)
-/// - `learning_rate` - Controls gradient descent step size
-/// - `max_iter` - Maximum number of iterations for gradient descent
-/// - `tol` - Convergence tolerance, stops iteration when loss change is smaller than this value
-/// - `n_iter` - Actual number of iterations the algorithm ran for after fitting, None before training
-/// - `regularization_type` - Regularization type and strength
+/// Trained with gradient descent to minimize the logistic loss
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::logistic_regression::LogisticRegression;
 /// use ndarray::{Array1, Array2};
@@ -63,31 +61,33 @@ const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogisticRegression {
+    /// Model weights vector, `None` before training
     weights: Option<Array1<f64>>,
+    /// Whether to use an intercept term (bias)
     fit_intercept: bool,
+    /// Gradient descent step size
     learning_rate: f64,
+    /// Maximum number of gradient descent iterations
     max_iter: usize,
+    /// Convergence tolerance; iteration stops when the loss change is smaller than this value
     tol: f64,
+    /// Number of iterations actually run after fitting, `None` before training
     n_iter: Option<usize>,
+    /// Regularization type and strength
     regularization_type: Option<RegularizationType>,
 }
 
 impl Default for LogisticRegression {
-    /// Creates a logistic regression model with default parameters.
+    /// Creates a logistic regression model with default parameters
     ///
-    /// This implementation provides sensible default values that work well for most binary
-    /// classification problems as a starting point for experimentation and training.
+    /// These defaults work well as a starting point for most binary classification problems
     ///
     /// # Default Values
     ///
-    /// - `fit_intercept`: `true` - Include a bias/intercept term in the model, which is generally recommended for most datasets
-    /// - `learning_rate`: `0.01` - A moderate learning rate that provides stable convergence for most problems without being too slow
-    /// - `max_iter`: `100` - Maximum number of gradient descent iterations, sufficient for many simple to moderately complex problems
-    /// - `tol`: `1e-4` - Convergence tolerance (0.0001), stops training when the loss change between iterations is smaller than this value
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - A new `LogisticRegression` instance with default configuration
+    /// - `fit_intercept`: `true` - include a bias/intercept term, generally recommended
+    /// - `learning_rate`: `0.01` - a moderate rate giving stable convergence for most problems
+    /// - `max_iter`: `100` - maximum number of gradient descent iterations
+    /// - `tol`: `1e-4` - convergence tolerance; training stops when the loss change between iterations is smaller than this value
     fn default() -> Self {
         LogisticRegression {
             weights: None,
@@ -126,7 +126,6 @@ impl LogisticRegression {
         tolerance: f64,
         regularization_type: Option<RegularizationType>,
     ) -> Result<Self, Error> {
-        // Input validation
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
         validate_tolerance(tolerance)?;
@@ -158,7 +157,7 @@ impl LogisticRegression {
 
     /// Trains the logistic regression model
     ///
-    /// Uses gradient descent to minimize the logistic loss function.
+    /// Uses gradient descent to minimize the logistic loss function
     ///
     /// # Parameters
     ///
@@ -176,7 +175,7 @@ impl LogisticRegression {
     ///
     /// # Performance
     ///
-    /// Parallel processing is automatically enabled when the number of samples exceeds 1000.
+    /// Parallel processing is automatically enabled when the number of samples reaches 1000
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -199,7 +198,7 @@ impl LogisticRegression {
 
         let (n_samples, mut n_features) = x.dim();
 
-        // Decide the source of x_train based on whether to use intercept
+        // Source of the training matrix depends on whether an intercept is used
         let x_train_view: ArrayView2<f64>;
         let _x_train_owned: Option<Array2<f64>>;
 
@@ -214,7 +213,6 @@ impl LogisticRegression {
             x_train_view = x.view();
         }
 
-        // Initialize weight vector
         let mut weights = Array1::zeros(n_features);
         let mut prev_cost = f64::INFINITY;
         #[cfg(feature = "show_progress")]
@@ -239,23 +237,19 @@ impl LogisticRegression {
             // Compute linear predictions (reuse for both gradient and loss calculation)
             let predictions = x_train_view.dot(&weights);
 
-            // Compute sigmoid activation with conditional parallelization
+            // Apply sigmoid, in parallel for large datasets
             let sigmoid_preds = if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
-                // Parallel computation for large datasets
                 let sigmoid_vec = (0..n_samples)
                     .into_par_iter()
                     .map(|i| sigmoid(predictions[i]))
                     .collect::<Vec<f64>>();
                 Array1::from(sigmoid_vec)
             } else {
-                // Sequential computation for small datasets
                 predictions.mapv(sigmoid)
             };
 
-            // Calculate prediction errors
             let errors = &sigmoid_preds - y;
 
-            // Calculate gradients
             let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
 
             // Check for numerical issues in gradients
@@ -289,7 +283,6 @@ impl LogisticRegression {
                 }
             }
 
-            // Update weights
             weights = &weights - self.learning_rate * &gradients;
 
             // Check for numerical issues in updated weights
@@ -365,7 +358,7 @@ impl LogisticRegression {
 
     /// Predicts class labels for samples
     ///
-    /// Performs classification by applying a 0.5 threshold to probability values.
+    /// Performs classification by applying a 0.5 threshold to probability values
     ///
     /// # Parameters
     ///
@@ -389,10 +382,10 @@ impl LogisticRegression {
         Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
     }
 
-    /// Predicts the positive-class probability for each sample.
+    /// Predicts the positive-class probability for each sample
     ///
     /// Applies the sigmoid function to the linear decision values to produce
-    /// probabilities in the range (0, 1).
+    /// probabilities in the range (0, 1)
     ///
     /// # Parameters
     ///
@@ -417,8 +410,7 @@ impl LogisticRegression {
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LogisticRegression"))?;
 
-        // Validate input against the feature count the model was trained on
-        // (excluding the implicit bias column when an intercept was fitted)
+        // Validate against trained feature count, excluding the implicit bias column when an intercept was fitted
         let expected_features = if self.fit_intercept {
             weights.len() - 1
         } else {
@@ -444,10 +436,10 @@ impl LogisticRegression {
         Ok(probs)
     }
 
-    /// Applies the sigmoid to the raw linear decision values `x · weights`.
+    /// Applies the sigmoid to the raw linear decision values `x.dot(weights)`
     ///
     /// `x` must already include the bias column when an intercept was fitted; this
-    /// is an internal helper used by [`Self::predict_proba`].
+    /// is an internal helper used by [`Self::predict_proba`]
     fn sigmoid_decision<S>(&self, x: &ArrayBase<S, Ix2>) -> Array1<f64>
     where
         S: Data<Elem = f64>,
@@ -465,9 +457,9 @@ impl LogisticRegression {
         predictions
     }
 
-    /// Fits the logistic regression model to the training data and then makes predictions.
+    /// Fits the logistic regression model to the training data and then makes predictions
     ///
-    /// This is a convenience method that combines `fit` and `predict` operations in a single call.
+    /// Convenience method that combines `fit` and `predict` in a single call
     ///
     /// # Parameters
     ///
@@ -497,10 +489,10 @@ impl LogisticRegression {
     model_save_and_load_methods!(LogisticRegression);
 }
 
-/// Generates polynomial features from input features.
+/// Generates polynomial features from input features
 ///
-/// This function transforms the input feature matrix into a new feature matrix containing
-/// polynomial combinations of the input features up to the specified degree.
+/// Transforms the input feature matrix into a new feature matrix containing
+/// polynomial combinations of the input features up to the specified degree
 ///
 /// # Parameters
 ///
@@ -512,6 +504,7 @@ impl LogisticRegression {
 /// - `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::machine_learning::logistic_regression::{generate_polynomial_features, LogisticRegression};
@@ -534,10 +527,9 @@ where
 {
     let (n_samples, n_features) = x.dim();
 
-    // Calculate the number of output features (excluding constant term)
-    // Formula: C(n+d,d) = (n+d)!/(n!*d!) where n is feature count and d is degree
+    // Output feature count excludes the constant term: each degree d adds C(n+d-1, d) monomials
     let n_output_features = {
-        let mut count = 0; // No constant term
+        let mut count = 0;
         for d in 1..=degree {
             let mut term = 1;
             for i in 0..d {
@@ -548,28 +540,25 @@ where
         count
     };
 
-    // Initialize result matrix (without the constant term column)
+    // Result matrix, without a constant-term column
     let mut result = Array2::<f64>::zeros((n_samples, n_output_features));
 
-    // Add first-order features (original features)
-    // Process samples in parallel using Rayon
+    // Copy the original (first-order) features, processing samples in parallel
     result
         .axis_iter_mut(Axis(0))
         .into_par_iter()
         .enumerate()
         .for_each(|(i, mut row)| {
             for j in 0..n_features {
-                row[j] = x[[i, j]]; // Index starts from 0, no +1 offset
+                row[j] = x[[i, j]];
             }
         });
 
-    // If degree >= 2, add higher-order features
+    // For degree >= 2, add the higher-order features
     if degree >= 2 {
-        let mut col_idx = n_features; // Start from n_features, no +1 offset
+        let mut col_idx = n_features;
 
-        // Define an inner recursive function to generate combinations.
-        // The argument count is inherent to the recursion (shared mutable state plus
-        // the current position), so the lint is allowed here for clarity.
+        // Recursive combination helper: the argument count is inherent to the recursion, so the lint is allowed
         #[allow(clippy::too_many_arguments)]
         fn add_combinations<S>(
             x: &ArrayBase<S, Ix2>,
@@ -583,9 +572,9 @@ where
         ) where
             S: Data<Elem = f64> + Send + Sync,
         {
-            // If we've reached the target degree, compute the feature value
+            // At the target degree, compute the feature value
             if current_degree == degree {
-                // Store current column index and increment to avoid race conditions
+                // Capture the current column index, then increment for the next call
                 let current_col = *col_idx;
                 *col_idx += 1;
 
@@ -604,7 +593,7 @@ where
                 return;
             }
 
-            // Recursively build combinations (sequential since it modifies shared state)
+            // Build combinations recursively, sequentially since shared state is mutated
             for j in start_feature..n_features {
                 combination.push(j);
                 add_combinations(

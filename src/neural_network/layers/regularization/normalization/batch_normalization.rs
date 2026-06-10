@@ -1,3 +1,5 @@
+//! Batch normalization layer that normalizes each mini-batch over the batch dimension
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -15,33 +17,16 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// Threshold for switching between sequential and parallel batch normalization computation.
-/// Based on batch_size * feature_size (total elements in batch).
+/// Total-element count above which forward/backward switch from sequential to parallel
 const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Batch Normalization layer for neural networks.
+/// Batch Normalization layer for neural networks
 ///
 /// Normalizes each mini-batch to keep activations centered and scaled, improving
-/// training stability and speed.
-///
-/// # Fields
-///
-/// - `epsilon` - Small constant for numerical stability in normalization
-/// - `momentum` - Momentum for the moving average of mean and variance
-/// - `input_shape` - Shape of the input tensor
-/// - `gamma` - Scale parameter (trainable)
-/// - `beta` - Shift parameter (trainable)
-/// - `running_mean` - Running mean for inference
-/// - `running_var` - Running variance for inference
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `batch_mean` - Mean computed during forward pass (used in backward pass)
-/// - `batch_var` - Variance computed during forward pass (used in backward pass)
-/// - `x_normalized` - Normalized input (used in backward pass)
-/// - `x_centered` - Centered input (used in backward pass)
-/// - `grad_gamma` - Gradient for gamma parameter
-/// - `grad_beta` - Gradient for beta parameter
+/// training stability and speed
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -58,34 +43,46 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
 /// ```
 #[derive(Debug)]
 pub struct BatchNormalization {
+    /// Small constant for numerical stability in normalization
     epsilon: f32,
+    /// Momentum for the moving average of mean and variance
     momentum: f32,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Scale parameter (trainable)
     gamma: Tensor,
+    /// Shift parameter (trainable)
     beta: Tensor,
+    /// Running mean for inference
     running_mean: Tensor,
+    /// Running variance for inference
     running_var: Tensor,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
-    // Cache for backward pass
+    /// Mean computed during forward pass (used in backward pass)
     batch_mean: Option<Tensor>,
+    /// Variance computed during forward pass (used in backward pass)
     batch_var: Option<Tensor>,
+    /// Normalized input (used in backward pass)
     x_normalized: Option<Tensor>,
+    /// Centered input (used in backward pass)
     x_centered: Option<Tensor>,
-    // Gradients
+    /// Gradient for gamma parameter
     grad_gamma: Option<Tensor>,
+    /// Gradient for beta parameter
     grad_beta: Option<Tensor>,
 }
 
 impl BatchNormalization {
-    /// Creates a new BatchNormalization layer.
+    /// Creates a new BatchNormalization layer
     ///
     /// # Parameters
     ///
     /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0. The
     ///   trainable `gamma`/`beta` (and the running mean/variance) are shaped from
-    ///   `input_shape[1..]` — the per-feature dimensions. A 1-D `input_shape` (e.g. `vec![4]`)
+    ///   `input_shape[1..]` - the per-feature dimensions. A 1-D `input_shape` (e.g. `vec![4]`)
     ///   therefore has *no* feature dimensions and yields scalar (length-1) parameters broadcast
-    ///   over the whole input; pass `vec![batch, 4]` if you mean "4 features".
+    ///   over the whole input; pass `vec![batch, 4]` if you mean "4 features"
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
@@ -103,8 +100,7 @@ impl BatchNormalization {
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
 
-        // For batch normalization, we normalize across the batch dimension (first dimension)
-        // So the parameters should have the shape of the feature dimensions
+        // Normalize across the batch dimension (dim 0), so parameters take the feature shape
         let param_shape = if input_shape.len() > 1 {
             input_shape[1..].to_vec()
         } else {
@@ -133,7 +129,7 @@ impl BatchNormalization {
 
     mode_dependent_layer_set_training!();
 
-    /// Sets the weights for the BatchNormalization layer.
+    /// Sets the weights for the BatchNormalization layer
     ///
     /// # Parameters
     ///
@@ -141,6 +137,11 @@ impl BatchNormalization {
     /// - `beta` - Shift parameter (trainable)
     /// - `running_mean` - Running mean for inference
     /// - `running_var` - Running variance for inference
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
+    ///   layer's expected shape
     pub fn set_weights(
         &mut self,
         gamma: Tensor,
@@ -170,12 +171,12 @@ impl Layer for BatchNormalization {
 
         if self.training {
             let total_elements = input.len();
-            // Compute mean across batch dimension (axis 0)
+            // Mean across the batch dimension (axis 0)
             let batch_mean = input.mean_axis(Axis(0)).unwrap();
 
             // Center the data and compute variance
             let (x_centered, batch_var) = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
-                // Parallel centering and variance computation
+                // Parallel centering and variance
                 let mut x_centered = Tensor::zeros(input.raw_dim());
                 let mut squared_diff = Tensor::zeros(input.raw_dim());
 
@@ -277,7 +278,7 @@ impl Layer for BatchNormalization {
         }
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 

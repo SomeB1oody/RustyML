@@ -1,20 +1,19 @@
+//! Serializable container for `SeparableConv2D` layer weights and the logic to apply them back
+
 use crate::error::Error;
 use crate::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use crate::neural_network::traits::ApplyWeights;
 use ndarray::{Array2, Array4};
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of SeparableConv2D layer weights.
-///
-/// # Fields
-///
-/// - `depthwise_weight` - 4D depthwise convolution kernel
-/// - `pointwise_weight` - 4D pointwise convolution kernel
-/// - `bias` - Bias matrix (1, filters)
+/// Serializable representation of SeparableConv2D layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSeparableConv2DWeight {
+    /// 4D depthwise kernel with shape (depth_multiplier, channels, kernel_height, kernel_width)
     pub depthwise_weight: Array4<f32>,
+    /// 4D pointwise kernel with shape (filters, channels * depth_multiplier, 1, 1)
     pub pointwise_weight: Array4<f32>,
+    /// Bias matrix with shape (1, filters)
     pub bias: Array2<f32>,
 }
 

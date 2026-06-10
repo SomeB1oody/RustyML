@@ -1,3 +1,5 @@
+//! 1D convolutional layer for sequential data such as time series, audio, or text
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,33 +15,19 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// A 1D convolutional layer for neural networks.
+/// A 1D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to sequential data such as time series, audio signals,
 /// or text. Input shape is \[batch_size, channels, length\] and output shape is
 /// \[batch_size, filters, output_length\], where output_length depends on input length,
-/// kernel size, stride, and padding.
+/// kernel size, stride, and padding
 ///
 /// The dimension-generic convolution math lives in
 /// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it.
-///
-/// # Fields
-///
-/// - `filters` - Number of convolution filters (output channels).
-/// - `kernel_size` - Size of the convolution kernel.
-/// - `stride` - Stride value for the convolution operation.
-/// - `padding` - Type of padding to apply (`Valid` or `Same`).
-/// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\].
-/// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Activation applied to the convolution output.
-/// - `output_cache` - Cached activated output, used by the activation backward pass.
-/// - `input_cache` - Cached input from the forward pass, used during backpropagation.
-/// - `input_shape` - Shape of the input tensor.
-/// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
-/// - `bias_gradients` - Gradients for the biases, computed during backpropagation.
+/// weights, activation, and caches, and delegates the forward/backward numerics to it
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -83,22 +71,34 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// ```
 #[derive(Debug)]
 pub struct Conv1D {
+    /// Number of convolution filters (output channels)
     filters: usize,
+    /// Size of the convolution kernel
     kernel_size: usize,
+    /// Stride value for the convolution operation
     stride: usize,
+    /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
+    /// 3D array of filter weights with shape \[filters, channels, kernel_size\]
     weights: Array3<f32>,
+    /// 2D array of bias values with shape \[1, filters\]
     bias: Array2<f32>,
+    /// Activation applied to the convolution output
     activation: Activation,
+    /// Cached activated output, used by the activation backward pass
     output_cache: Option<Tensor>,
+    /// Cached input from the forward pass, used during backpropagation
     input_cache: Option<Tensor>,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Gradients for the weights, computed during backpropagation
     weight_gradients: Option<Array3<f32>>,
+    /// Gradients for the biases, computed during backpropagation
     bias_gradients: Option<Array2<f32>>,
 }
 
 impl Conv1D {
-    /// Creates a new Conv1D layer with the specified parameters.
+    /// Creates a new Conv1D layer with the specified parameters
     ///
     /// # Parameters
     ///
@@ -106,9 +106,10 @@ impl Conv1D {
     /// - `kernel_size` - Size of the convolution kernel
     /// - `input_shape` - Shape of input tensor \[batch_size, channels, length\]
     /// - `stride` - Stride for the convolution operation
-    /// - `padding` - Padding type (Valid or Same)
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `padding` - Padding type (`Valid` or `Same`)
+    /// - `activation` - Activation function (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global
+    ///   seed or entropy. See `crate::random`
     ///
     /// # Returns
     ///
@@ -117,8 +118,8 @@ impl Conv1D {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `filters`, `kernel_size`, or `stride` is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 3D or has 0 channels
-    /// - `Error::InvalidInput` - If input length is less than kernel size
+    /// - `Error::InvalidInput` - If `input_shape` is not 3D, has 0 channels, or input length is
+    ///   less than kernel size
     pub fn new(
         filters: usize,
         kernel_size: usize,
@@ -128,7 +129,6 @@ impl Conv1D {
         activation: impl Into<Activation>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Validate input parameters
         validate_filters(filters)?;
         validate_kernel_size_1d(kernel_size)?;
         validate_strides_1d(stride)?;
@@ -136,8 +136,7 @@ impl Conv1D {
 
         let input_channels = input_shape[1];
 
-        // Initialize weights using Xavier initialization for convolutional layers
-        // Formula: sqrt(6 / (input_channels * kernel_size + filters * kernel_size))
+        // Xavier initialization: weight_bound = sqrt(6 / (fan_in + fan_out))
         let fan_in = input_channels * kernel_size;
         let fan_out = filters * kernel_size;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
@@ -149,7 +148,6 @@ impl Conv1D {
             &mut rng,
         );
 
-        // Initialize bias to zero
         let bias = Array2::zeros((1, filters));
 
         Ok(Self {
@@ -168,7 +166,7 @@ impl Conv1D {
         })
     }
 
-    /// Calculates the output length after convolution.
+    /// Calculates the output length after convolution
     ///
     /// # Parameters
     ///
@@ -184,12 +182,17 @@ impl Conv1D {
         }
     }
 
-    /// Sets the weights and bias for this layer.
+    /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
     /// - `weights` - 3D array of filter weights with shape \[filters, channels, kernel_size\]
     /// - `bias` - 2D array of bias values with shape \[1, filters\]
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the
+    ///   layer's expected shape
     pub fn set_weights(&mut self, weights: Array3<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
@@ -201,7 +204,6 @@ impl Conv1D {
 
 impl Layer for Conv1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
@@ -223,9 +225,8 @@ impl Layer for Conv1D {
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }

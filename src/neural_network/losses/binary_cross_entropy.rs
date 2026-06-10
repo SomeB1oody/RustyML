@@ -1,9 +1,11 @@
+//! Binary cross-entropy loss for binary classification
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::{clip_probabilities, validate_same_shape};
 use crate::neural_network::traits::Loss;
 
-/// Binary Cross Entropy loss function for binary classification
+/// Binary cross-entropy loss for binary classification
 ///
 /// # Examples
 ///
@@ -33,11 +35,11 @@ use crate::neural_network::traits::Loss;
 pub struct BinaryCrossEntropy;
 
 impl BinaryCrossEntropy {
-    /// Creates a new instance of BinaryCrossEntropy
+    /// Creates a new `BinaryCrossEntropy`
     ///
     /// # Returns
     ///
-    /// - `BinaryCrossEntropy` - Returns a unit-like struct `BinaryCrossEntropy`
+    /// - `BinaryCrossEntropy` - a unit-like struct carrying no state
     pub fn new() -> Self {
         Self {}
     }
@@ -53,15 +55,14 @@ impl Loss for BinaryCrossEntropy {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_same_shape(y_true, y_pred)?;
 
-        // Ensure predictions are in range (0,1) to avoid numerical issues
+        // Clip into (0, 1) to avoid log(0)
         let y_pred_clipped = clip_probabilities(y_pred);
 
-        // Binary cross entropy formula: -1/n * Σ[y_true * log(y_pred) + (1 - y_true) * log(1 - y_pred)]
+        // -1/n * sum[y_true * log(y_pred) + (1 - y_true) * log(1 - y_pred)]
         let log_pred = y_pred_clipped.mapv(|y_p| y_p.ln());
         let log_one_minus_pred = (1.0 - &y_pred_clipped).mapv(|y_p| y_p.ln());
         let losses = y_true * &log_pred + (1.0 - y_true) * &log_one_minus_pred;
 
-        // Calculate average loss (with negative sign)
         let n = losses.len() as f32;
         Ok(-losses.sum() / n)
     }
@@ -69,13 +70,13 @@ impl Loss for BinaryCrossEntropy {
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
 
-        // Ensure predictions are in range (0,1) to avoid numerical issues
+        // Clip into (0, 1) to avoid division by zero
         let y_pred_clipped = clip_probabilities(y_pred);
 
-        // Binary cross entropy gradient: -y_true/y_pred + (1-y_true)/(1-y_pred)
+        // gradient: -y_true/y_pred + (1 - y_true)/(1 - y_pred)
         let grad = -y_true / &y_pred_clipped + (1.0 - y_true) / (1.0 - &y_pred_clipped);
 
-        // Divide by element count to get average gradient
+        // Average over element count
         let n = grad.len() as f32;
         Ok(grad / n)
     }

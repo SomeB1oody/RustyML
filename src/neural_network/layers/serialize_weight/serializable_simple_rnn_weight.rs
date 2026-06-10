@@ -1,20 +1,19 @@
+//! Serializable representation of [`SimpleRNN`] layer weights
+
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
 use crate::neural_network::traits::ApplyWeights;
 use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of SimpleRNN layer weights.
-///
-/// # Fields
-///
-/// - `kernel` - Input kernel matrix (input_dim, units)
-/// - `recurrent_kernel` - Recurrent kernel matrix (units, units)
-/// - `bias` - Bias matrix (1, units)
+/// Serializable representation of SimpleRNN layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSimpleRNNWeight {
+    /// Input kernel matrix of shape (input_dim, units)
     pub kernel: Array2<f32>,
+    /// Recurrent kernel matrix of shape (units, units)
     pub recurrent_kernel: Array2<f32>,
+    /// Bias matrix of shape (1, units)
     pub bias: Array2<f32>,
 }
 

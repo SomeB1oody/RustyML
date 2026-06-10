@@ -1,6 +1,6 @@
 //! Crate-wide control of pseudo-random number generation for reproducibility.
 //!
-//! Every randomized component in the crate draws its RNG through [`make_rng`], so a single
+//! Every randomized component in the crate draws its RNG through `make_rng`, so a single
 //! [`set_global_seed`] call can make the whole library reproducible. This routes the
 //! neural-network components (weight initialization, dropout/noise masks, and the
 //! [`Sequential`](crate::neural_network::sequential::Sequential) minibatch shuffle), the
@@ -9,7 +9,7 @@
 //!
 //! # Seed resolution
 //!
-//! [`make_rng`] resolves a per-consumer `random_state: Option<u64>` against the process-global
+//! `make_rng` resolves a per-consumer `random_state: Option<u64>` against the process-global
 //! (thread-local) seed as follows:
 //!
 //! - `Some(seed)` — use that seed; the global is **ignored and left untouched**.

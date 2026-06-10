@@ -1,3 +1,9 @@
+//! Mean Shift clustering
+//!
+//! Provides the [`MeanShift`] estimator, which finds clusters by iteratively shifting
+//! points toward higher-density regions without requiring the number of clusters up front,
+//! plus the [`estimate_bandwidth`] helper for choosing a bandwidth from the data
+
 use super::KernelType;
 use super::parallel::map_collect;
 use super::validation::{
@@ -13,31 +19,18 @@ use rayon::prelude::{
     IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
 };
 
-/// Threshold for determining when to use parallel processing.
-/// Parallel processing is used only when the number of samples exceeds this threshold.
+/// Sample-count threshold above which processing switches to parallel
 const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 
-/// Mean Shift clustering algorithm implementation.
+/// Mean Shift clustering algorithm
 ///
 /// Mean Shift is a centroid-based clustering algorithm that works by iteratively shifting
 /// data points towards areas of higher density. Each data point moves in the direction of
 /// the mean of points within its current window until convergence. The algorithm does not
-/// require specifying the number of clusters in advance.
-///
-/// # Fields
-///
-/// - `bandwidth` - The kernel bandwidth parameter that determines the search radius. Larger values lead to fewer clusters.
-/// - `max_iter` - Maximum number of iterations to prevent infinite loops.
-/// - `tol` - Convergence tolerance threshold. Points are considered converged when they move less than this value.
-/// - `bin_seeding` - Whether to use bin seeding strategy for faster algorithm execution.
-/// - `cluster_all` - Whether to assign all points to clusters, including potential noise.
-/// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled, enabling reproducible fitting.
-/// - `n_samples_per_center` - Number of samples assigned to each cluster center.
-/// - `cluster_centers` - The final cluster centers found by the algorithm.
-/// - `labels` - Cluster labels assigned to each input sample.
-/// - `n_iter` - The actual number of iterations performed during fitting.
+/// require specifying the number of clusters in advance
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::mean_shift::MeanShift;
 /// use ndarray::Array2;
@@ -59,61 +52,73 @@ const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 /// ```
 ///
 /// # Notes
-/// - If unsure about an appropriate bandwidth value, use the `estimate_bandwidth` function.
-/// - The bandwidth parameter significantly affects algorithm performance and should be chosen carefully based on data characteristics.
-/// - For large datasets, setting `bin_seeding = true` can improve performance.
+///
+/// - If unsure about an appropriate bandwidth value, use the `estimate_bandwidth` function
+/// - The bandwidth parameter significantly affects algorithm performance and should be chosen carefully based on data characteristics
+/// - For large datasets, setting `bin_seeding = true` can improve performance
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MeanShift {
+    /// Kernel bandwidth that sets the search radius; larger values lead to fewer clusters
     bandwidth: f64,
+    /// Maximum number of iterations to prevent infinite loops
     max_iter: usize,
+    /// Convergence tolerance; a point is converged when it moves less than this value
     tol: f64,
+    /// Whether to use the bin-seeding strategy for faster execution
     bin_seeding: bool,
+    /// Whether to assign all points to clusters, including potential noise
     cluster_all: bool,
+    /// Optional seed for the random seed-point selection used when `bin_seeding` is disabled, enabling reproducible fitting
     random_state: Option<u64>,
+    /// Number of samples assigned to each cluster center
     n_samples_per_center: Option<Array1<usize>>,
+    /// Final cluster centers found by the algorithm
     cluster_centers: Option<Array2<f64>>,
+    /// Cluster labels assigned to each input sample
     labels: Option<Array1<usize>>,
+    /// Actual number of iterations performed during fitting
     n_iter: Option<usize>,
 }
 
 impl Default for MeanShift {
-    /// Creates a new MeanShift instance with default parameter values.
+    /// Creates a new MeanShift instance with default parameter values
     ///
     /// # Default Values
     ///
-    /// - `bandwidth` - `1.0`. The kernel bandwidth parameter. A larger value will result in fewer clusters.
-    /// - `max_iter` - `300`. Maximum number of iterations to prevent infinite loops.
-    /// - `tol` - `1e-3`. Convergence tolerance threshold.
-    /// - `bin_seeding` - `false`. Bin seeding is disabled by default.
-    /// - `cluster_all` - `true`. All data points will be assigned to clusters by default.
-    /// - `random_state` - `None`. Non-deterministic seed-point selection.
+    /// - `bandwidth` - `1.0`; a larger value results in fewer clusters
+    /// - `max_iter` - `300`; maximum number of iterations to prevent infinite loops
+    /// - `tol` - `1e-3`; convergence tolerance threshold
+    /// - `bin_seeding` - `false`; bin seeding is disabled by default
+    /// - `cluster_all` - `true`; all data points are assigned to clusters by default
+    /// - `random_state` - `None`; non-deterministic seed-point selection
     ///
     /// # Returns
     ///
-    /// - `Self` - A new MeanShift instance with default parameters.
+    /// - `Self` - A new MeanShift instance with default parameters
     fn default() -> Self {
         Self::new(1.0, None, None, None, None, None).expect("Default parameters should be valid")
     }
 }
 
 impl MeanShift {
-    /// Creates a new MeanShift instance with the specified parameters.
+    /// Creates a new MeanShift instance with the specified parameters
     ///
     /// # Parameters
     ///
-    /// - `bandwidth` - The bandwidth parameter that determines the size of the kernel. Must be positive and finite.
-    /// - `max_iter` - The maximum number of iterations for the mean shift algorithm. Must be greater than 0.
-    /// - `tol` - The convergence threshold for the algorithm. Must be positive and finite.
-    /// - `bin_seeding` - Whether to use bin seeding for initialization.
-    /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid.
-    /// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled. Pass `Some(seed)` for reproducible fitting, or `None` for non-deterministic behavior.
+    /// - `bandwidth` - Bandwidth that determines the size of the kernel; must be positive and finite
+    /// - `max_iter` - Maximum number of iterations for the mean shift algorithm; must be greater than 0
+    /// - `tol` - Convergence threshold for the algorithm; must be positive and finite
+    /// - `bin_seeding` - Whether to use bin seeding for initialization
+    /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid
+    /// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled; pass `Some(seed)` for reproducible fitting, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A Result containing a new MeanShift instance or an Error.
+    /// - `Result<Self, Error>` - A new MeanShift instance, or an Error
     ///
     /// # Errors
-    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g., non-positive bandwidth).
+    ///
+    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g. non-positive bandwidth)
     pub fn new(
         bandwidth: f64,
         max_iter: Option<usize>,
@@ -122,7 +127,6 @@ impl MeanShift {
         cluster_all: Option<bool>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Validate bandwidth
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
             return Err(Error::invalid_parameter(
                 "bandwidth",
@@ -133,10 +137,7 @@ impl MeanShift {
         let max_iter_val = max_iter.unwrap_or(300);
         let tol_val = tol.unwrap_or(1e-3);
 
-        // Validate max_iter
         validate_max_iterations(max_iter_val)?;
-
-        // Validate tolerance
         validate_tolerance(tol_val)?;
 
         Ok(MeanShift {
@@ -169,23 +170,23 @@ impl MeanShift {
     get_field!(get_cluster_all, cluster_all, bool);
     get_field!(get_random_state, random_state, Option<u64>);
 
-    /// Fits the MeanShift clustering model to the input data.
+    /// Fits the MeanShift clustering model to the input data
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+    /// - `x` - The input data where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, Error>` - A Result containing a mutable reference to the fitted model or an Error.
+    /// - `Result<&mut Self, Error>` - A mutable reference to the fitted model, or an Error
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If input data fails preliminary checks.
+    /// - `Error::InvalidInput` - If input data fails preliminary checks
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
+    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -199,31 +200,25 @@ impl MeanShift {
         let seeds: Vec<usize> = if self.bin_seeding {
             self.get_bin_seeds(x)
         } else {
-            // Randomly select points as initial seeds. Seeding the RNG from `random_state`
-            // makes the seed-point selection reproducible.
+            // Randomly select seeds; seeding the RNG from `random_state` makes selection reproducible
             let mut indices: Vec<usize> = (0..n_samples).collect();
             let mut rng = crate::random::make_rng(self.random_state);
             indices.shuffle(&mut rng);
-            // Limit number of seeds to avoid excessive computation
+            // Limit the number of seeds to avoid excessive computation
             let max_seeds = n_samples.min(100);
             indices[..max_seeds].to_vec()
         };
 
-        // Pre-compute the RBF kernel used to weight neighbours (gamma folds in the bandwidth).
-        // Shares the single kernel-dispatch implementation in `types` instead of a hand-rolled exp.
+        // Pre-compute the RBF kernel used to weight neighbours; gamma folds in the bandwidth
         let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
         let kernel = KernelType::RBF { gamma };
         let tol_squared = self.tol * self.tol;
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
-        // Determine whether to use parallel processing
         let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
 
-        // Helper function for mean shift iteration on a single seed.
-        // Seeds are independent and processed in parallel below, so this inner loop
-        // stays sequential to avoid nesting Rayon pools. The weight computation and the
-        // weighted-sum accumulation are fused into one pass to avoid allocating a
-        // per-iteration weight buffer.
+        // Mean shift on a single seed; kept sequential since seeds run in parallel below (no nested
+        // Rayon pools), with weighting and weighted-sum fused into one pass to skip a weight buffer
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
             let mut center = x.row(seed_idx).to_owned();
             let mut completed_iterations = 0;
@@ -243,7 +238,6 @@ impl MeanShift {
                     }
                 }
 
-                // Normalize
                 if weight_sum > 0.0 {
                     new_center.mapv_inplace(|x| x / weight_sum);
                 }
@@ -262,7 +256,6 @@ impl MeanShift {
             (center, completed_iterations)
         };
 
-        // Create progress bar for seed processing
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -273,8 +266,7 @@ impl MeanShift {
             pb
         };
 
-        // Process mean shift for each seed point. Seeds are independent, so this is the
-        // single level at which parallelism is applied.
+        // Seeds are independent, so this is the single level at which parallelism is applied
         let results: Vec<(Array1<f64>, usize)> = if use_parallel {
             seeds
                 .par_iter()
@@ -304,7 +296,7 @@ impl MeanShift {
         let max_actual_iter = results.iter().map(|(_, i)| *i).max().unwrap_or(0);
         self.n_iter = Some(max_actual_iter);
 
-        // Merge similar centers with optimized clustering
+        // Merge centers that lie within one bandwidth of each other
         let mut unique_centers: Vec<Array1<f64>> = Vec::with_capacity(centers.len());
         let mut center_counts: Vec<usize> = Vec::with_capacity(centers.len());
 
@@ -322,7 +314,7 @@ impl MeanShift {
                     let weight_old = count as f64 / new_count as f64;
                     let weight_new = 1.0 / new_count as f64;
 
-                    // Use parallel update for the center coordinates
+                    // Update the center coordinates in place
                     unique_center.zip_mut_with(&center, |old, &new| {
                         *old = *old * weight_old + new * weight_new;
                     });
@@ -346,7 +338,7 @@ impl MeanShift {
             cluster_centers.row_mut(i).assign(center);
         }
 
-        // Helper function for finding nearest cluster label
+        // Find the nearest cluster label for one sample
         let find_label = |i: usize| -> usize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
@@ -360,9 +352,9 @@ impl MeanShift {
                 }
             }
 
-            // If not cluster_all and distance is too far, mark as outlier
+            // When cluster_all is off and the point is too far, mark it as an outlier
             if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                n_clusters // Use n_clusters as outlier label
+                n_clusters // outlier label
             } else {
                 label
             }
@@ -378,29 +370,28 @@ impl MeanShift {
         Ok(self)
     }
 
-    /// Predicts cluster labels for the input data.
+    /// Predicts cluster labels for the input data
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a 2D array where each row is a sample.
+    /// - `x` - The input data where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - A Result containing the predicted cluster labels or an Error.
+    /// - `Result<Array1<usize>, Error>` - The predicted cluster labels, or an Error
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted yet.
-    /// - `Error::InvalidInput` - If input data is invalid or dimensions don't match training data.
+    /// - `Error::NotFitted` - If the model has not been fitted yet
+    /// - `Error::InvalidInput` - If input data is invalid or dimensions don't match the training data
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000).
+    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64> + Sync,
     {
-        // Check if model has been fitted
         let centers = self
             .cluster_centers
             .as_ref()
@@ -413,9 +404,8 @@ impl MeanShift {
         let n_clusters = centers.nrows();
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
-        // Finds the nearest cluster center for one sample, or the outlier label
-        // (`n_clusters`) when `cluster_all` is disabled and the point lies farther
-        // than the bandwidth from every center.
+        // Nearest cluster center for one sample, or the outlier label (`n_clusters`) when
+        // `cluster_all` is off and the point lies farther than the bandwidth from every center
         let find_nearest = |i: usize| -> usize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
@@ -437,26 +427,24 @@ impl MeanShift {
             }
         };
 
-        // Process all samples with optional parallelization
         let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_nearest);
 
         Ok(Array1::from(labels))
     }
 
-    /// Fits the model to the input data and predicts cluster labels.
+    /// Fits the model to the input data and predicts cluster labels
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a ndarray `Array2<f64>` where each row is a sample.
+    /// - `x` - The input data where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - A Result containing the predicted cluster labels or an Error.
+    /// - `Result<Array1<usize>, Error>` - The predicted cluster labels, or an Error
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If input data fails preliminary checks.
-    /// - `Error::NotFitted` - If fitting succeeded but labels were not set correctly.
+    /// - `Error::InvalidInput` - If input data fails preliminary checks
     pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64> + Sync + Send,
@@ -465,19 +453,19 @@ impl MeanShift {
         Ok(self.labels.clone().unwrap())
     }
 
-    /// Computes seed points by binning the feature space onto a grid.
+    /// Computes seed points by binning the feature space onto a grid
     ///
     /// Each sample is mapped to a grid cell of side length `bandwidth`, and one
     /// representative point per non-empty cell is returned. This reduces the number
-    /// of seeds the mean-shift iterations have to process on dense datasets.
+    /// of seeds the mean-shift iterations have to process on dense datasets
     ///
     /// # Parameters
     ///
-    /// - `x` - The input data as a 2D array where each row is a sample.
+    /// - `x` - The input data where each row is a sample
     ///
     /// # Returns
     ///
-    /// - `Vec<usize>` - Indices of the selected seed points (one per occupied grid cell).
+    /// - `Vec<usize>` - Indices of the selected seed points (one per occupied grid cell)
     fn get_bin_seeds<S>(&self, x: &ArrayBase<S, Ix2>) -> Vec<usize>
     where
         S: Data<Elem = f64> + Sync + Send,
@@ -494,10 +482,9 @@ impl MeanShift {
             })
             .collect();
 
-        // Create grid - this part is harder to parallelize due to shared HashMap
+        // The grid is built under a shared HashMap, so this part is harder to parallelize
         let bin_size = self.bandwidth;
 
-        // Create thread-safe structures for parallel processing
         let bins_mutex = std::sync::Mutex::new(AHashMap::<Vec<i64>, Vec<usize>>::new());
 
         // Assign points to bins in parallel
@@ -515,16 +502,10 @@ impl MeanShift {
             bins.entry(bin_index).or_default().push(i);
         });
 
-        // Get the final HashMap
         let bins = bins_mutex.into_inner().unwrap();
 
-        // Select one representative point from each grid cell as a seed. Two sources of
-        // non-determinism have to be pinned down to make `bin_seeding` reproducible:
-        //   1. Within a cell the points are pushed in parallel, so their order is
-        //      non-deterministic — pick the smallest index as the representative.
-        //   2. `AHashMap` iteration order is non-deterministic (its hasher is randomly
-        //      seeded per run) and the downstream center-merging step is order-sensitive
-        //      — sort the resulting seeds so the merge always sees the same order.
+        // One seed per cell; for reproducible `bin_seeding` take the min index per cell (parallel push
+        // order) and sort seeds (AHashMap order is randomly seeded; the downstream merge is order-sensitive)
         let mut seeds = Vec::new();
         for (_, indices) in bins {
             if let Some(&min_idx) = indices.iter().min() {
@@ -539,21 +520,24 @@ impl MeanShift {
     model_save_and_load_methods!(MeanShift);
 }
 
-/// Estimates the bandwidth to use with the MeanShift algorithm.
+/// Estimates a bandwidth to use with the MeanShift algorithm
 ///
-/// The bandwidth is estimated based on the pairwise distances between a subset of points.
+/// The bandwidth is estimated from the pairwise distances between a subset of points
 ///
 /// # Parameters
 ///
-/// - `x` - The input data as a ndarray `ArrayView2<f64>` where each row is a sample.
-/// - `quantile` - The quantile of the pairwise distances to use as the bandwidth.
-/// - `n_samples` - The number of samples to use for the distance calculation.
-/// - `random_state` - Seed for random number generation.
+/// - `x` - The input data where each row is a sample
+/// - `quantile` - The quantile of the pairwise distances to use as the bandwidth; defaults to `0.3`
+/// - `n_samples` - The number of samples to use for the distance calculation; clamped to the dataset size, defaults to all rows
+/// - `random_state` - Seed for random number generation
 ///
 /// # Returns
 ///
-/// - `Ok(f64)` - The estimated bandwidth
-/// - `Err(Error::InvalidParameter)` - quantile is not in range \[0, 1\]
+/// - `Result<f64, Error>` - The estimated bandwidth, or an Error
+///
+/// # Errors
+///
+/// - `Error::InvalidParameter` - If `quantile` is not in the open range (0, 1)
 pub fn estimate_bandwidth<S>(
     x: &ArrayBase<S, Ix2>,
     quantile: Option<f64>,
@@ -572,18 +556,16 @@ where
     }
 
     let (n_samples_total, _) = x.dim();
-    // Clamp the requested sample count to the dataset size. Requesting more samples than there are
-    // rows must fall back to using every row; without the clamp the pair indices below run up to
-    // `n_samples` while `x_samples` only has `n_samples_total` rows, causing an out-of-bounds panic.
+    // Clamp the requested sample count to the dataset size; without the clamp the pair indices below
+    // run past `x_samples` (only `n_samples_total` rows), causing an out-of-bounds panic
     let n_samples = n_samples.unwrap_or(n_samples_total).min(n_samples_total);
 
     let mut rng = crate::random::make_rng(random_state);
 
-    // If we have fewer samples than requested, use all samples
+    // When the requested count covers every row, use all samples; otherwise sample at random
     let x_samples = if n_samples >= n_samples_total {
         x.to_owned()
     } else {
-        // Random sampling
         let mut indices: Vec<usize> = (0..n_samples_total).collect();
         indices.shuffle(&mut rng);
         let indices = &indices[..n_samples];
@@ -621,8 +603,7 @@ where
     let mut distances = distances;
     distances.par_sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Clamp the quantile index to the last valid position so a quantile close to
-    // 1.0 (or a tiny sample) cannot index past the end and fall back to 0.0.
+    // Clamp the quantile index to the last valid position so a near-1.0 quantile (or tiny sample) cannot index past the end
     let k = ((distances.len() as f64 * quantile) as usize).min(distances.len().saturating_sub(1));
     Ok(distances.get(k).copied().unwrap_or(0.0))
 }

@@ -1,3 +1,8 @@
+//! 2D convolutional layer for grid-like data such as images
+//!
+//! Holds the layer weights, activation, and caches, and delegates the forward/backward
+//! numerics to the dimension-generic convolution engine
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,33 +18,19 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array4};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// A 2D convolutional layer for neural networks.
+/// A 2D convolutional layer for neural networks
 ///
 /// Applies a convolution operation to grid-like data such as images. Input shape is
 /// \[batch_size, channels, height, width\] and output shape is
 /// \[batch_size, filters, output_height, output_width\], where output dimensions depend on
-/// input size, kernel size, strides, and padding.
+/// input size, kernel size, strides, and padding
 ///
 /// The dimension-generic convolution math lives in
 /// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
-/// weights, activation, and caches, and delegates the forward/backward numerics to it.
-///
-/// # Fields
-///
-/// - `filters` - Number of convolution filters (output channels).
-/// - `kernel_size` - Size of the convolution kernel as (height, width).
-/// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
-/// - `padding` - Type of padding to apply (`Valid` or `Same`).
-/// - `weights` - 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\].
-/// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Activation applied to the convolution output.
-/// - `output_cache` - Cached activated output, used by the activation backward pass.
-/// - `input_cache` - Cached input from the forward pass, used during backpropagation.
-/// - `input_shape` - Shape of the input tensor.
-/// - `weight_gradients` - Gradients for the weights, computed during backpropagation.
-/// - `bias_gradients` - Gradients for the biases, computed during backpropagation.
+/// weights, activation, and caches, and delegates the forward/backward numerics to it
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -83,35 +74,47 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// ```
 #[derive(Debug)]
 pub struct Conv2D {
+    /// Number of convolution filters (output channels)
     filters: usize,
+    /// Size of the convolution kernel as (height, width)
     kernel_size: (usize, usize),
+    /// Stride values for the convolution operation as (vertical, horizontal)
     strides: (usize, usize),
+    /// Type of padding to apply (`Valid` or `Same`)
     padding: PaddingType,
+    /// 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\]
     weights: Array4<f32>,
+    /// 2D array of bias values with shape \[1, filters\]
     bias: Array2<f32>,
+    /// Activation applied to the convolution output
     activation: Activation,
+    /// Cached activated output, used by the activation backward pass
     output_cache: Option<Tensor>,
+    /// Cached input from the forward pass, used during backpropagation
     input_cache: Option<Tensor>,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Gradients for the weights, computed during backpropagation
     weight_gradients: Option<Array4<f32>>,
+    /// Gradients for the biases, computed during backpropagation
     bias_gradients: Option<Array2<f32>>,
 }
 
 impl Conv2D {
-    /// Creates a new 2D convolutional layer with the specified parameters.
+    /// Creates a new 2D convolutional layer with the specified parameters
     ///
-    /// Weights are initialized using Xavier (Glorot) uniform initialization.
-    /// Biases are initialized to zeros.
+    /// Weights are initialized using Xavier (Glorot) uniform initialization
+    /// Biases are initialized to zeros
     ///
     /// # Parameters
     ///
-    /// - `filters` - Number of convolution filters (output channels).
-    /// - `kernel_size` - Size of the convolution kernel as (height, width).
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\].
-    /// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
-    /// - `padding` - Type of padding to apply (`Valid` or `Same`).
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `filters` - Number of convolution filters (output channels)
+    /// - `kernel_size` - Size of the convolution kernel as (height, width)
+    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
+    /// - `strides` - Stride values for the convolution operation as (vertical, horizontal)
+    /// - `padding` - Type of padding to apply (`Valid` or `Same`)
+    /// - `activation` - Activation layer (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -140,8 +143,7 @@ impl Conv2D {
         // Shape is [batch_size, channels, height, width]
         let channels = input_shape[1];
 
-        // Initialize weights using Xavier initialization for convolutional layers
-        // Formula: sqrt(6 / (input_channels * kernel_area + filters * kernel_area))
+        // Xavier init: bound = sqrt(6 / (fan_in + fan_out))
         let fan_in = channels * kernel_size.0 * kernel_size.1;
         let fan_out = filters * kernel_size.0 * kernel_size.1;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
@@ -153,7 +155,6 @@ impl Conv2D {
             &mut rng,
         );
 
-        // Initialize biases to zero
         let bias = Array2::zeros((1, filters));
 
         Ok(Conv2D {
@@ -172,7 +173,7 @@ impl Conv2D {
         })
     }
 
-    /// Calculates the output shape of the convolutional layer based on input dimensions.
+    /// Calculates the output shape of the convolutional layer based on input dimensions
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let input_height = input_shape[2];
@@ -194,12 +195,16 @@ impl Conv2D {
         vec![batch_size, self.filters, output_height, output_width]
     }
 
-    /// Sets the weights and bias for this layer.
+    /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
     /// - `weights` - 4D array of filter weights with shape \[filters, channels, kernel_height, kernel_width\]
     /// - `bias` - 2D array of bias values with shape \[1, filters\]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `weights` or `bias` do not match the existing weight or bias shapes
     pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
@@ -211,12 +216,11 @@ impl Conv2D {
 
 impl Layer for Conv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Save input for backpropagation
+        // Cache input for backpropagation
         self.input_cache = Some(input.clone());
 
         // Convolution (dimension-generic engine), then activation
@@ -233,9 +237,8 @@ impl Layer for Conv2D {
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
@@ -254,7 +257,7 @@ impl Layer for Conv2D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Apply activation backward pass
+        // Activation backward pass first
         let activated = self
             .output_cache
             .take()

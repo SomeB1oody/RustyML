@@ -1,3 +1,5 @@
+//! Spatial dropout layer for 2D feature maps, dropping whole channels at once
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -16,24 +18,17 @@ use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Threshold for using parallel computation in SpatialDropout2D layer.
-/// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.
+/// Mask expansion runs in parallel once batch_size * channels reaches this threshold
 const SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD: usize = 64;
 
-/// Spatial Dropout layer for 2D data.
+/// Spatial Dropout layer for 2D data
 ///
 /// Drops entire channels instead of individual elements, which is effective for
 /// convolutional layers where adjacent pixels are correlated. Input shape is
-/// `(batch_size, channels, height, width)`.
-///
-/// # Fields
-///
-/// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
-/// - `input_shape` - Expected shape of the input tensor
-/// - `mask` - Binary mask used during training to determine which channels to drop
-/// - `training` - Whether the layer is in training mode or inference mode
+/// `(batch_size, channels, height, width)`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -50,21 +45,26 @@ const SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD: usize = 64;
 /// ```
 #[derive(Debug)]
 pub struct SpatialDropout2D {
+    /// Dropout rate, fraction of channels to drop (between 0 and 1)
     rate: f32,
+    /// Expected shape of the input tensor
     input_shape: Vec<usize>,
+    /// Binary mask used during training to determine which channels to drop
     mask: Option<Tensor>,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
+    /// Random number generator backing mask sampling
     rng: StdRng,
 }
 
 impl SpatialDropout2D {
-    /// Creates a new SpatialDropout2D layer.
+    /// Creates a new SpatialDropout2D layer
     ///
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor `(batch_size, channels, height, width)`
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -94,7 +94,7 @@ impl SpatialDropout2D {
 
 impl Layer for SpatialDropout2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` is already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -112,7 +112,7 @@ impl Layer for SpatialDropout2D {
         }
 
         if self.rate == 1.0 {
-            // If dropout rate is 1.0, return zeros
+            // Dropping every channel yields all zeros
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
@@ -122,26 +122,23 @@ impl Layer for SpatialDropout2D {
         let height = shape[2];
         let width = shape[3];
 
-        // Generate mask for channels: shape (batch_size, channels)
-        // Each channel is either fully kept or fully dropped
+        // Per-channel mask of shape (batch_size, channels); each channel is fully kept or fully dropped
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
             &mut self.rng,
         );
 
-        // Apply threshold to create binary mask with parallel or sequential computation
+        // Threshold the samples into a binary mask
         apply_spatial_dropout_threshold(
             &mut mask_2d,
             self.rate,
             SPATIAL_DROPOUT_2D_PARALLEL_THRESHOLD,
         );
 
-        // Expand mask to match input shape (batch_size, channels, height, width)
-        // by broadcasting the mask across the spatial dimensions
+        // Broadcast the 2D mask across spatial dimensions to (batch_size, channels, height, width)
         let mut mask = Tensor::zeros(IxDyn(&[batch_size, channels, height, width]));
 
-        // Broadcast the 2D mask to 4D mask efficiently
         for b in 0..batch_size {
             for c in 0..channels {
                 let mask_value = mask_2d[[b, c]];
@@ -153,8 +150,7 @@ impl Layer for SpatialDropout2D {
             }
         }
 
-        // Apply mask and scale by (1 - rate) to maintain expected value
-        // This is "inverted dropout" technique
+        // Inverted dropout: scale by 1 / (1 - rate) so the expected value is preserved
         let scale = 1.0 / (1.0 - self.rate);
         let output = input * &mask * scale;
 
@@ -164,9 +160,9 @@ impl Layer for SpatialDropout2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` is already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -174,7 +170,7 @@ impl Layer for SpatialDropout2D {
             "SpatialDropout2D (batch_size, channels, height, width)",
         )?;
 
-        // During inference, pass input through unchanged (no mask, no scaling).
+        // During inference, pass input through unchanged (no mask, no scaling)
         Ok(input.clone())
     }
 

@@ -1,22 +1,21 @@
+//! Serializable representation of [`BatchNormalization`] layer weights
+
 use crate::error::Error;
 use crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use crate::neural_network::traits::ApplyWeights;
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of BatchNormalization layer weights.
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter
-/// - `beta` - Shift parameter
-/// - `running_mean` - Running mean used at inference
-/// - `running_var` - Running variance used at inference
+/// Serializable representation of BatchNormalization layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableBatchNormalizationWeight {
+    /// Scale parameter
     pub gamma: ArrayD<f32>,
+    /// Shift parameter
     pub beta: ArrayD<f32>,
+    /// Running mean used at inference
     pub running_mean: ArrayD<f32>,
+    /// Running variance used at inference
     pub running_var: ArrayD<f32>,
 }
 

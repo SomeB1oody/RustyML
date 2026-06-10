@@ -1,3 +1,8 @@
+//! DBSCAN density-based clustering
+//!
+//! Provides the [`DBSCAN`] estimator for density-based clustering of arbitrary-shaped
+//! clusters, including `fit`, `predict`, and `fit_predict`
+
 pub use super::DistanceCalculationMetric;
 use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_predict_input};
@@ -8,21 +13,16 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::collections::VecDeque;
 
-/// Threshold for parallelization: only use parallel processing for larger datasets
+/// Sample count at or above which region queries run in parallel
 const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
-/// DBSCAN is a popular density-based clustering algorithm that can discover clusters of arbitrary shapes
-/// without requiring the number of clusters to be specified beforehand.
-///
-/// # Fields
-///
-/// - `eps` - Neighborhood radius used to find neighbors
-/// - `min_samples` - Minimum number of neighbors required to form a core point
-/// - `metric` - Distance metric, options: Euclidean, Manhattan, Minkowski(p=3)
+/// DBSCAN is a density-based clustering algorithm that discovers clusters of arbitrary shapes
+/// without requiring the number of clusters to be specified beforehand
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::dbscan::DBSCAN;
 /// use ndarray::Array2;
@@ -41,25 +41,31 @@ const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DBSCAN {
+    /// Neighborhood radius used to find neighbors
     eps: f64,
+    /// Minimum number of neighbors required to form a core point
     min_samples: usize,
+    /// Distance metric: Euclidean, Manhattan, or Minkowski
     metric: DistanceCalculationMetric,
+    /// Cluster label of each training sample after `fit` (`-1` for noise)
     labels: Option<Array1<isize>>,
+    /// Indices of the training samples identified as core points
     core_sample_indices: Option<Array1<usize>>,
     /// Core-point coordinates, stored so `predict` needs only the new data rather
-    /// than the original training set.
+    /// than the original training set
     core_points: Option<Array2<f64>>,
-    /// Cluster label of each stored core point (parallel to `core_points`).
+    /// Cluster label of each stored core point (parallel to `core_points`)
     core_point_labels: Option<Array1<isize>>,
 }
 
 impl Default for DBSCAN {
-    /// Default parameters for DBSCAN model
+    /// Default parameters for the DBSCAN model
     ///
     /// # Default Values
-    /// - eps = 0.5
-    /// - min_samples = 5
-    /// - metric = Euclidean
+    ///
+    /// - `eps` = 0.5
+    /// - `min_samples` = 5
+    /// - `metric` = Euclidean
     fn default() -> Self {
         DBSCAN {
             eps: 0.5,
@@ -74,7 +80,7 @@ impl Default for DBSCAN {
 }
 
 impl DBSCAN {
-    /// Creates a new DBSCAN instance with specified parameters
+    /// Creates a new DBSCAN instance with the specified parameters
     ///
     /// # Parameters
     ///
@@ -84,19 +90,17 @@ impl DBSCAN {
     ///
     /// # Returns
     ///
-    /// - `Ok(DBSCAN)` - A new DBSCAN instance with the specified parameters
-    /// - `Err(Error::InvalidParameter)` - If parameters are invalid (e.g., eps <= 0)
+    /// - `Ok(DBSCAN)` - A new instance with the specified parameters
     ///
     /// # Errors
     ///
     /// Returns `Error::InvalidParameter` if `eps` is non-positive or not finite,
-    /// if `min_samples` is 0, or if Minkowski `p` is non-positive or not finite.
+    /// if `min_samples` is 0, or if Minkowski `p` is non-positive or not finite
     pub fn new(
         eps: f64,
         min_samples: usize,
         metric: DistanceCalculationMetric,
     ) -> Result<Self, Error> {
-        // Validate eps parameter
         if eps <= 0.0 || !eps.is_finite() {
             return Err(Error::invalid_parameter(
                 "eps",
@@ -104,7 +108,6 @@ impl DBSCAN {
             ));
         }
 
-        // Validate min_samples parameter
         if min_samples == 0 {
             return Err(Error::invalid_parameter(
                 "min_samples",
@@ -112,7 +115,6 @@ impl DBSCAN {
             ));
         }
 
-        // Validate metric parameter
         match metric {
             DistanceCalculationMetric::Minkowski(p) if (p <= 0.0 || !p.is_finite()) => {
                 return Err(Error::invalid_parameter(
@@ -120,7 +122,7 @@ impl DBSCAN {
                     format!("Minkowski p must be positive and finite, got {}", p),
                 ));
             }
-            _ => {} // Euclidean and Manhattan don't need additional validation
+            _ => {} // Euclidean and Manhattan need no extra validation
         }
 
         Ok(DBSCAN {
@@ -145,9 +147,9 @@ impl DBSCAN {
         Option<&Array1<usize>>
     );
 
-    /// Find all neighbors of point `p` (points within eps distance)
+    /// Find all neighbors of point `p` (points within `eps` distance)
     ///
-    /// Uses parallelization for datasets larger than a threshold to improve performance
+    /// Runs in parallel for datasets at or above `DBSCAN_PARALLEL_THRESHOLD` samples
     fn region_query<S>(&self, data: &ArrayBase<S, Ix2>, p: usize) -> Result<Vec<usize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -161,13 +163,13 @@ impl DBSCAN {
             )));
         }
 
-        // Pre-compute row p (read-only view) to avoid fetching it repeatedly in each iteration
+        // Fetch row p once instead of inside every iteration
         let p_row = data.row(p);
         let eps = self.eps;
         let n_samples = data.nrows();
 
         let neighbors: Vec<usize> = if n_samples >= DBSCAN_PARALLEL_THRESHOLD {
-            // Parallel iteration through all rows, calculating distances and filtering points that satisfy the eps condition
+            // Filter rows within eps in parallel
             (0..n_samples)
                 .into_par_iter()
                 .filter(|&q| {
@@ -177,7 +179,7 @@ impl DBSCAN {
                 })
                 .collect()
         } else {
-            // Sequential iteration for smaller datasets
+            // Sequential filter for smaller datasets
             (0..n_samples)
                 .filter(|&q| {
                     let q_row = data.row(q);
@@ -193,33 +195,34 @@ impl DBSCAN {
     /// Performs DBSCAN clustering on the input data
     ///
     /// # Parameters
-    /// - `data` - Input data as a reference 2D array in ndarray where each row is a sample
+    ///
+    /// - `data` - Input data as a 2D array where each row is a sample
     ///
     /// # Returns
-    /// - `Ok(&mut Self)` - The trained instance containing cluster labels and core sample indices
-    /// - `Err(Error::EmptyInput)` - If the dataset is empty
-    /// - `Err(Error::InvalidInput)` - If the dataset fails validation
-    /// - `Err(Error::Computation)` - If numerical issues occur or cluster ID overflows
+    ///
+    /// - `Ok(&mut Self)` - The trained instance holding cluster labels and core sample indices
     ///
     /// # Errors
-    /// - `Error::Computation` - If the number of discovered clusters exceeds `isize::MAX`
+    ///
+    /// - `Error::EmptyInput` - If the dataset is empty
+    /// - `Error::InvalidInput` - If the dataset fails validation
+    /// - `Error::Computation` - If the number of discovered clusters reaches `isize::MAX`
     ///
     /// # Performance
-    /// Uses parallel processing for region queries if the number of samples is greater than or equal to 1000.
+    ///
+    /// Region queries run in parallel when the number of samples is at least 1000
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
         preliminary_check(data, None)?;
 
-        // Check if dataset is empty
         let n_samples = data.nrows();
 
-        let mut labels = Array1::from(vec![-1isize; n_samples]); // -1 represents unclassified or noise
-        let mut core_samples = AHashSet::with_capacity(n_samples / 4); // Estimate 25% core samples
+        let mut labels = Array1::from(vec![-1isize; n_samples]); // -1 marks unclassified or noise
+        let mut core_samples = AHashSet::with_capacity(n_samples / 4); // assume ~25% core samples
         let mut cluster_id = 0isize;
 
-        // Initialize progress bar for tracking clustering progress
         #[cfg(feature = "show_progress")]
         let pb = {
             let progress = crate::create_progress_bar(
@@ -230,7 +233,7 @@ impl DBSCAN {
             progress
         };
 
-        // Main loop processes each point sequentially, the algorithm as a whole remains sequential
+        // Process each point sequentially; the overall algorithm stays sequential
         for p in 0..n_samples {
             #[cfg(feature = "show_progress")]
             pb.inc(1);
@@ -250,14 +253,14 @@ impl DBSCAN {
             core_samples.insert(p);
             let mut seeds: VecDeque<usize> = neighbors.into_iter().collect();
 
-            // Expand cluster (the expansion process is still sequential)
+            // Expand the cluster (still sequential)
             while let Some(q) = seeds.pop_front() {
-                // If already processed in this cluster, skip
+                // Already in this cluster, skip
                 if labels[q] == cluster_id {
                     continue;
                 }
 
-                // Assign to current cluster (could be noise or unvisited)
+                // Assign to the current cluster (could be noise or unvisited)
                 labels[q] = cluster_id;
 
                 let q_neighbors = self
@@ -276,7 +279,6 @@ impl DBSCAN {
 
             cluster_id += 1;
 
-            // Update progress bar message with current statistics
             #[cfg(feature = "show_progress")]
             pb.set_message(format!(
                 "{} | Core points: {}",
@@ -292,7 +294,6 @@ impl DBSCAN {
             }
         }
 
-        // Finish progress bar with final statistics
         #[cfg(feature = "show_progress")]
         pb.finish_with_message(format!(
             "{} | Core points: {} | Noise points: {}",
@@ -301,12 +302,11 @@ impl DBSCAN {
             labels.iter().filter(|&&x| x == -1).count()
         ));
 
-        // Convert HashSet to sorted Vec for consistent ordering
+        // Sort the core indices for consistent ordering
         let mut core_indices: Vec<usize> = core_samples.into_iter().collect();
         core_indices.sort_unstable();
 
-        // Store core-point coordinates and their labels so `predict` only needs the
-        // new data; the original training set is not retained.
+        // Store core-point coords and labels so `predict` needs only new data, not the training set
         let n_features = data.ncols();
         let mut core_points = Array2::<f64>::zeros((core_indices.len(), n_features));
         let mut core_point_labels = Array1::<isize>::zeros(core_indices.len());
@@ -323,12 +323,12 @@ impl DBSCAN {
         Ok(self)
     }
 
-    /// Predicts cluster labels for new data points based on the trained model.
+    /// Predicts cluster labels for new data points based on the trained model
     ///
     /// Each new point is assigned to the cluster of its nearest core point when that
     /// core point is within `eps`; otherwise it is labeled as noise (`-1`). Only the
     /// core points found during `fit` are needed, so the original training set does
-    /// not have to be passed in.
+    /// not have to be passed in
     ///
     /// # Parameters
     ///
@@ -342,16 +342,16 @@ impl DBSCAN {
     ///
     /// - `Error::NotFitted` - If the model has not been fitted yet
     /// - `Error::DimensionMismatch` - If feature dimensions don't match
-    /// - `Error::NonFinite` - If data contains non-finite values
+    /// - `Error::NonFinite` - If the data contains non-finite values
     ///
     /// # Performance
     ///
-    /// New points are scored in parallel when the number of samples is large.
+    /// New points are scored in parallel when the number of samples is large
     pub fn predict<S>(&self, new_data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Ensure the model has been trained
+        // Require a fitted model
         let core_points = self
             .core_points
             .as_ref()
@@ -398,11 +398,14 @@ impl DBSCAN {
     /// # Returns
     ///
     /// - `Ok(Array1<isize>)` - Array of cluster labels for each sample
-    /// - `Err(Error)` - If fitting fails due to validation or processing errors
+    ///
+    /// # Errors
+    ///
+    /// - `Error` - If fitting fails due to validation or processing errors
     ///
     /// # Performance
     ///
-    /// Inherits parallelization behavior from the `fit` method.
+    /// Inherits parallelization behavior from the `fit` method
     pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -419,20 +422,7 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-    /// Calling the private `region_query` with a point index >= data.nrows()
-    /// must return Error::Computation (the defensive bounds-check arm).
-    ///
-    /// Derivation: the guard at the top of region_query is `if p >= data.nrows()`.
-    /// With a 3-row matrix, passing p = 3 makes `3 >= 3` true, so the code returns
-    /// Err(Error::computation(...)), whose discriminant is the Computation variant.
-    /// This arm is unreachable through the public fit/predict API (which only ever
-    /// feeds indices drawn from 0..n_samples), so it is exercised here by calling
-    /// the private method directly from an in-module test. The index 3 == nrows is
-    /// chosen because the message formats `data.nrows() - 1`, which would underflow
-    /// if nrows were 0; a non-empty matrix keeps the message well-formed.
-    ///
-    /// Note: Error::Computation is a STRUCT variant (`{ context, source }`), so it
-    /// is matched with `{ .. }`, not as a tuple.
+    /// region_query with an out-of-bounds point index returns Error::Computation
     #[test]
     fn region_query_out_of_bounds_index_gives_computation() {
         let data = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]; // 3 rows

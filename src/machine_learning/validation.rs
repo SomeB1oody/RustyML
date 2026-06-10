@@ -1,10 +1,16 @@
+//! Internal input-validation helpers shared across machine-learning estimators
+//!
+//! Provides checks for feature/target matrices and common hyperparameters
+//! (learning rate, max iterations, tolerance, regularization) plus a fitted-state
+//! guard, each returning a consistent [`Error`] on failure
+
 use super::RegularizationType;
 use crate::error::Error;
 use ndarray::{ArrayBase, Data, Ix1, Ix2};
 
-/// Performs validation checks on the input data matrices.
+/// Performs validation checks on the input data matrices
 ///
-/// This function validates that:
+/// Validates that:
 /// - The input data matrix is not empty
 /// - The input data does not contain NaN or infinite values
 /// - When a target vector is provided:
@@ -14,11 +20,11 @@ use ndarray::{ArrayBase, Data, Ix1, Ix2};
 /// # Parameters
 ///
 /// - `x` - A 2D array of feature values where rows represent samples and columns represent features
-/// - `y` - An optional 1D array representing the target variables or labels corresponding to each sample
+/// - `y` - An optional 1D array of target variables or labels corresponding to each sample
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if all validation checks pass, otherwise an `Error`
+/// - `Ok(())` if all validation checks pass, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -59,10 +65,10 @@ where
     Ok(())
 }
 
-/// Validates that the learning rate parameter is positive and finite.
+/// Validates that the learning rate parameter is positive and finite
 ///
-/// The learning rate controls the step size in gradient descent optimization.
-/// It must be a positive, finite value to ensure proper convergence behavior.
+/// The learning rate controls the step size in gradient descent optimization,
+/// and must be a positive, finite value to ensure proper convergence behavior
 ///
 /// # Parameters
 ///
@@ -70,7 +76,7 @@ where
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the learning rate is valid, otherwise an `Error`
+/// - `Ok(())` if the learning rate is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -86,10 +92,10 @@ pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates that the maximum iterations parameter is greater than zero.
+/// Validates that the maximum iterations parameter is greater than zero
 ///
 /// The maximum iterations parameter determines the upper bound on the number
-/// of training iterations. It must be at least 1 to allow the algorithm to run.
+/// of training iterations. It must be at least 1 to allow the algorithm to run
 ///
 /// # Parameters
 ///
@@ -97,7 +103,7 @@ pub(super) fn validate_learning_rate(learning_rate: f64) -> Result<(), Error> {
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the maximum iterations value is valid, otherwise an `Error`
+/// - `Ok(())` if the maximum iterations value is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -113,11 +119,11 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
     Ok(())
 }
 
-/// Validates that the tolerance parameter is positive and finite.
+/// Validates that the tolerance parameter is positive and finite
 ///
-/// The tolerance parameter defines the convergence criterion for iterative algorithms.
-/// Training stops when the change in loss between iterations falls below this threshold.
-/// It must be a positive, finite value to ensure meaningful convergence detection.
+/// The tolerance parameter defines the convergence criterion for iterative algorithms:
+/// training stops when the change in loss between iterations falls below this threshold,
+/// and it must be a positive, finite value to ensure meaningful convergence detection
 ///
 /// # Parameters
 ///
@@ -125,7 +131,7 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the tolerance is valid, otherwise an `Error`
+/// - `Ok(())` if the tolerance is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -141,9 +147,9 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates the regularization type and its associated parameters.
+/// Validates the regularization type and its associated parameters
 ///
-/// This function checks that regularization parameters are properly configured:
+/// Checks that regularization parameters are properly configured:
 /// - For L1 and L2 regularization, the alpha (regularization strength) parameter
 ///   must be non-negative and finite
 /// - None (no regularization) is always valid
@@ -154,7 +160,7 @@ pub(super) fn validate_tolerance(tolerance: f64) -> Result<(), Error> {
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the regularization configuration is valid, otherwise an `Error`
+/// - `Ok(())` if the regularization configuration is valid, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -178,10 +184,10 @@ pub(super) fn validate_regularization_type(
     Ok(())
 }
 
-/// Returns [`Error::NotFitted`] when a model has not been fitted yet.
+/// Returns [`Error::NotFitted`] when a model has not been fitted yet
 ///
 /// Centralizes the "is this model fitted?" guard so every estimator emits the
-/// same error instead of hand-rolling the check at each call site.
+/// same error instead of hand-rolling the check at each call site
 ///
 /// # Parameters
 ///
@@ -190,7 +196,7 @@ pub(super) fn validate_regularization_type(
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if the model is fitted, otherwise [`Error::NotFitted`]
+/// - `Ok(())` if the model is fitted, otherwise [`Error::NotFitted`]
 ///
 /// # Errors
 ///
@@ -207,7 +213,7 @@ pub(super) fn check_is_fitted(
     }
 }
 
-/// Validates a feature matrix passed to a `predict`-style method.
+/// Validates a feature matrix passed to a `predict`-style method
 ///
 /// Performs the three checks every estimator needs before predicting, with a
 /// single consistent error message for each failure mode:
@@ -222,7 +228,7 @@ pub(super) fn check_is_fitted(
 ///
 /// # Returns
 ///
-/// - `result` - `Ok(())` if all checks pass, otherwise an `Error`
+/// - `Ok(())` if all checks pass, otherwise an `Error`
 ///
 /// # Errors
 ///
@@ -257,11 +263,9 @@ mod tests {
     use crate::error::Error;
     use ndarray::{Array1, Array2};
 
-    // --- preliminary_check ---
+    // preliminary_check
 
-    /// An empty x (0 rows) must produce EmptyInput.
-    /// Derivation: x.nrows() == 0 triggers the first guard; code returns
-    /// Err(Error::empty_input("input data")) → Error::EmptyInput variant.
+    /// preliminary_check with an empty x (0 rows) returns Error::EmptyInput
     #[test]
     fn preliminary_check_empty_x_gives_empty_input() {
         let x: Array2<f64> = Array2::zeros((0, 3));
@@ -272,9 +276,7 @@ mod tests {
         }
     }
 
-    /// An x with NaN values must produce NonFinite.
-    /// Derivation: x.nrows() > 0 passes the first guard; the nested loop finds
-    /// NaN via is_nan() and returns Err(Error::non_finite(...)) → NonFinite variant.
+    /// preliminary_check with NaN in x returns Error::NonFinite
     #[test]
     fn preliminary_check_x_with_nan_gives_non_finite() {
         let x = ndarray::array![[1.0, f64::NAN], [2.0, 3.0]];
@@ -285,9 +287,7 @@ mod tests {
         }
     }
 
-    /// An x with infinity must produce NonFinite.
-    /// Derivation: is_infinite() is true for f64::INFINITY; the inner loop
-    /// catches it and returns NonFinite.
+    /// preliminary_check with infinity in x returns Error::NonFinite
     #[test]
     fn preliminary_check_x_with_inf_gives_non_finite() {
         let x = ndarray::array![[1.0, f64::INFINITY]];
@@ -298,9 +298,7 @@ mod tests {
         }
     }
 
-    /// When y.len() != x.nrows() a DimensionMismatch error must be returned.
-    /// Derivation: x has 3 rows; y has len 2; 2 != 3 triggers
-    /// Err(Error::dimension_mismatch(3, 2)) → DimensionMismatch{ expected:3, found:2 }.
+    /// preliminary_check with y.len() != x.nrows() returns Error::DimensionMismatch
     #[test]
     fn preliminary_check_y_len_mismatch_gives_dimension_mismatch() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
@@ -315,17 +313,14 @@ mod tests {
         }
     }
 
-    /// y=None with a valid finite x must return Ok(()).
-    /// Derivation: x.nrows() > 0, all finite, y is None so the y-check is
-    /// skipped; function reaches Ok(()) unconditionally.
+    /// preliminary_check with a valid finite x and no y returns Ok
     #[test]
     fn preliminary_check_valid_x_no_y_gives_ok() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0]];
         assert!(preliminary_check(&x, None).is_ok());
     }
 
-    /// y with matching length and valid x must return Ok(()).
-    /// Derivation: 2 rows == y.len()==2; all values finite; Ok(()) is returned.
+    /// preliminary_check with a valid x and matching-length y returns Ok
     #[test]
     fn preliminary_check_valid_x_and_y_gives_ok() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0]];
@@ -333,10 +328,9 @@ mod tests {
         assert!(preliminary_check(&x, Some(&y)).is_ok());
     }
 
-    // --- validate_predict_input ---
+    // validate_predict_input
 
-    /// An empty x (0 elements) must produce EmptyInput.
-    /// Derivation: x.is_empty() is true for shape (0,3); first guard fires.
+    /// validate_predict_input with an empty x returns Error::EmptyInput
     #[test]
     fn validate_predict_input_empty_gives_empty_input() {
         let x: Array2<f64> = Array2::zeros((0, 3));
@@ -347,9 +341,7 @@ mod tests {
         }
     }
 
-    /// A feature-count mismatch must produce DimensionMismatch.
-    /// Derivation: x has ncols=2; expected_features=3; 2 != 3 triggers
-    /// Err(Error::dimension_mismatch(3, 2)) → DimensionMismatch{expected:3, found:2}.
+    /// validate_predict_input with a feature-count mismatch returns Error::DimensionMismatch
     #[test]
     fn validate_predict_input_ncols_mismatch_gives_dimension_mismatch() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0]]; // ncols = 2
@@ -363,9 +355,7 @@ mod tests {
         }
     }
 
-    /// An x with NaN (correct col count) must produce NonFinite.
-    /// Derivation: empty guard passes (non-empty), col guard passes (ncols=2==2),
-    /// then the iter check finds NaN and returns NonFinite.
+    /// validate_predict_input with NaN in x returns Error::NonFinite
     #[test]
     fn validate_predict_input_nan_gives_non_finite() {
         let x = ndarray::array![[1.0, f64::NAN], [2.0, 3.0]];
@@ -376,26 +366,22 @@ mod tests {
         }
     }
 
-    /// A valid x (non-empty, correct col count, finite) must return Ok(()).
-    /// Derivation: all three guards pass; Ok(()) is returned.
+    /// validate_predict_input with a valid x returns Ok
     #[test]
     fn validate_predict_input_valid_gives_ok() {
         let x = ndarray::array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
         assert!(validate_predict_input(&x, 3).is_ok());
     }
-    // --- validate_learning_rate ---
 
-    /// A positive finite learning rate must return Ok(()).
-    /// Derivation: 0.1 > 0.0 and is_finite() is true, so neither half of the
-    /// guard (`<= 0.0 || !is_finite()`) holds; function reaches Ok(()).
+    // validate_learning_rate
+
+    /// validate_learning_rate with a positive finite value returns Ok
     #[test]
     fn validate_learning_rate_positive_gives_ok() {
         assert!(validate_learning_rate(0.1).is_ok());
     }
 
-    /// learning_rate == 0.0 must be rejected as InvalidParameter.
-    /// Derivation: 0.0 <= 0.0 is true, so the guard fires and the code returns
-    /// Err(Error::invalid_parameter("learning_rate", ...)) -> InvalidParameter.
+    /// validate_learning_rate with 0.0 returns Error::InvalidParameter
     #[test]
     fn validate_learning_rate_zero_gives_invalid_parameter() {
         let err = validate_learning_rate(0.0).unwrap_err();
@@ -407,8 +393,7 @@ mod tests {
         }
     }
 
-    /// A negative learning rate must be rejected as InvalidParameter.
-    /// Derivation: -1.0 <= 0.0 is true -> guard fires -> InvalidParameter.
+    /// validate_learning_rate with a negative value returns Error::InvalidParameter
     #[test]
     fn validate_learning_rate_negative_gives_invalid_parameter() {
         let err = validate_learning_rate(-1.0).unwrap_err();
@@ -418,9 +403,7 @@ mod tests {
         }
     }
 
-    /// A NaN learning rate must be rejected as InvalidParameter.
-    /// Derivation: NaN <= 0.0 is false, but !NaN.is_finite() is true, so the
-    /// second half of the guard fires -> InvalidParameter.
+    /// validate_learning_rate with NaN returns Error::InvalidParameter
     #[test]
     fn validate_learning_rate_nan_gives_invalid_parameter() {
         let err = validate_learning_rate(f64::NAN).unwrap_err();
@@ -430,9 +413,7 @@ mod tests {
         }
     }
 
-    /// An infinite learning rate must be rejected as InvalidParameter.
-    /// Derivation: INFINITY <= 0.0 is false, but !INFINITY.is_finite() is true,
-    /// so the second half of the guard fires -> InvalidParameter.
+    /// validate_learning_rate with infinity returns Error::InvalidParameter
     #[test]
     fn validate_learning_rate_inf_gives_invalid_parameter() {
         let err = validate_learning_rate(f64::INFINITY).unwrap_err();
@@ -442,18 +423,15 @@ mod tests {
         }
     }
 
-    // --- validate_max_iterations ---
+    // validate_max_iterations
 
-    /// max_iterations >= 1 must return Ok(()).
-    /// Derivation: 1 == 0 is false, so the guard does not fire; Ok(()) is returned.
+    /// validate_max_iterations with a value >= 1 returns Ok
     #[test]
     fn validate_max_iterations_one_gives_ok() {
         assert!(validate_max_iterations(1).is_ok());
     }
 
-    /// max_iterations == 0 must be rejected as InvalidParameter.
-    /// Derivation: 0 == 0 is true -> guard fires -> Err(Error::invalid_parameter(
-    /// "max_iterations", ...)) -> InvalidParameter.
+    /// validate_max_iterations with 0 returns Error::InvalidParameter
     #[test]
     fn validate_max_iterations_zero_gives_invalid_parameter() {
         let err = validate_max_iterations(0).unwrap_err();
@@ -465,18 +443,15 @@ mod tests {
         }
     }
 
-    // --- validate_tolerance ---
+    // validate_tolerance
 
-    /// A positive finite tolerance must return Ok(()).
-    /// Derivation: 1e-4 > 0.0 and finite, so the guard (`<= 0.0 || !is_finite()`)
-    /// does not fire; Ok(()) is returned.
+    /// validate_tolerance with a positive finite value returns Ok
     #[test]
     fn validate_tolerance_positive_gives_ok() {
         assert!(validate_tolerance(1e-4).is_ok());
     }
 
-    /// tolerance == 0.0 must be rejected as InvalidParameter.
-    /// Derivation: 0.0 <= 0.0 is true -> guard fires -> InvalidParameter.
+    /// validate_tolerance with 0.0 returns Error::InvalidParameter
     #[test]
     fn validate_tolerance_zero_gives_invalid_parameter() {
         let err = validate_tolerance(0.0).unwrap_err();
@@ -486,8 +461,7 @@ mod tests {
         }
     }
 
-    /// A negative tolerance must be rejected as InvalidParameter.
-    /// Derivation: -0.5 <= 0.0 is true -> guard fires -> InvalidParameter.
+    /// validate_tolerance with a negative value returns Error::InvalidParameter
     #[test]
     fn validate_tolerance_negative_gives_invalid_parameter() {
         let err = validate_tolerance(-0.5).unwrap_err();
@@ -497,8 +471,7 @@ mod tests {
         }
     }
 
-    /// A NaN tolerance must be rejected as InvalidParameter.
-    /// Derivation: NaN <= 0.0 is false, but !NaN.is_finite() is true -> guard fires.
+    /// validate_tolerance with NaN returns Error::InvalidParameter
     #[test]
     fn validate_tolerance_nan_gives_invalid_parameter() {
         let err = validate_tolerance(f64::NAN).unwrap_err();
@@ -508,9 +481,7 @@ mod tests {
         }
     }
 
-    /// An infinite tolerance must be rejected as InvalidParameter.
-    /// Derivation: INFINITY <= 0.0 is false, but !INFINITY.is_finite() is true ->
-    /// guard fires -> InvalidParameter.
+    /// validate_tolerance with infinity returns Error::InvalidParameter
     #[test]
     fn validate_tolerance_inf_gives_invalid_parameter() {
         let err = validate_tolerance(f64::INFINITY).unwrap_err();
@@ -520,35 +491,27 @@ mod tests {
         }
     }
 
-    // --- validate_regularization_type ---
+    // validate_regularization_type
 
-    /// None (no regularization) must always return Ok(()).
-    /// Derivation: the `if let Some(reg)` block is skipped when reg_type is None;
-    /// function falls through to Ok(()).
+    /// validate_regularization_type with None returns Ok
     #[test]
     fn validate_regularization_type_none_gives_ok() {
         assert!(validate_regularization_type(None).is_ok());
     }
 
-    /// A non-negative finite L1 alpha must return Ok(()).
-    /// Derivation: 0.0 < 0.0 is false and 0.0 is finite, so the inner guard does
-    /// not fire for the L1 arm; Ok(()) is returned.
+    /// validate_regularization_type with a zero L1 alpha returns Ok
     #[test]
     fn validate_regularization_type_l1_zero_gives_ok() {
         assert!(validate_regularization_type(Some(RegularizationType::L1(0.0))).is_ok());
     }
 
-    /// A positive finite L2 alpha must return Ok(()).
-    /// Derivation: 0.5 < 0.0 is false and 0.5 is finite, so the inner guard does
-    /// not fire for the L2 arm; Ok(()) is returned.
+    /// validate_regularization_type with a positive L2 alpha returns Ok
     #[test]
     fn validate_regularization_type_l2_positive_gives_ok() {
         assert!(validate_regularization_type(Some(RegularizationType::L2(0.5))).is_ok());
     }
 
-    /// A negative L1 alpha must be rejected as InvalidParameter.
-    /// Derivation: for the L1 arm, -1.0 < 0.0 is true -> inner guard fires ->
-    /// Err(Error::invalid_parameter("alpha", ...)) -> InvalidParameter.
+    /// validate_regularization_type with a negative L1 alpha returns Error::InvalidParameter
     #[test]
     fn validate_regularization_type_l1_negative_gives_invalid_parameter() {
         let err = validate_regularization_type(Some(RegularizationType::L1(-1.0))).unwrap_err();
@@ -558,9 +521,7 @@ mod tests {
         }
     }
 
-    /// A NaN L1 alpha must be rejected as InvalidParameter.
-    /// Derivation: for the L1 arm specifically, NaN < 0.0 is false, but
-    /// !NaN.is_finite() is true -> inner guard fires -> InvalidParameter.
+    /// validate_regularization_type with a NaN L1 alpha returns Error::InvalidParameter
     #[test]
     fn validate_regularization_type_l1_nan_gives_invalid_parameter() {
         let err = validate_regularization_type(Some(RegularizationType::L1(f64::NAN))).unwrap_err();
@@ -570,9 +531,7 @@ mod tests {
         }
     }
 
-    /// An infinite L1 alpha must be rejected as InvalidParameter.
-    /// Derivation: for the L1 arm, INFINITY < 0.0 is false, but
-    /// !INFINITY.is_finite() is true -> inner guard fires -> InvalidParameter.
+    /// validate_regularization_type with an infinite L1 alpha returns Error::InvalidParameter
     #[test]
     fn validate_regularization_type_l1_inf_gives_invalid_parameter() {
         let err =
@@ -583,18 +542,15 @@ mod tests {
         }
     }
 
-    // --- check_is_fitted ---
+    // check_is_fitted
 
-    /// is_fitted == true must return Ok(()).
-    /// Derivation: the `if is_fitted` branch is taken, returning Ok(()).
+    /// check_is_fitted with is_fitted == true returns Ok
     #[test]
     fn check_is_fitted_true_gives_ok() {
         assert!(check_is_fitted(true, "SomeModel").is_ok());
     }
 
-    /// is_fitted == false must return NotFitted carrying the model name.
-    /// Derivation: the else branch returns Err(Error::not_fitted("SomeModel"))
-    /// -> Error::NotFitted("SomeModel").
+    /// check_is_fitted with is_fitted == false returns Error::NotFitted carrying the model name
     #[test]
     fn check_is_fitted_false_gives_not_fitted() {
         let err = check_is_fitted(false, "SomeModel").unwrap_err();

@@ -1,3 +1,5 @@
+//! Spatial dropout layer for 5D (3D convolutional) data, dropping entire channels
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -16,24 +18,17 @@ use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Threshold for using parallel computation in SpatialDropout3D layer.
-/// When batch_size * channels >= this threshold, parallel computation is used for mask expansion.
+/// Threshold of `batch_size * channels` at or above which mask expansion runs in parallel
 const SPATIAL_DROPOUT_3D_PARALLEL_THRESHOLD: usize = 64;
 
-/// Spatial Dropout layer for 3D data.
+/// Spatial dropout layer for 3D data
 ///
 /// Drops entire channels instead of individual elements, which is effective for
 /// 3D convolutional layers where adjacent voxels are correlated. Input shape is
-/// `(batch_size, channels, depth, height, width)`.
-///
-/// # Fields
-///
-/// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
-/// - `input_shape` - Expected shape of the input tensor
-/// - `mask` - Binary mask used during training to determine which channels to drop
-/// - `training` - Whether the layer is in training mode or inference mode
+/// `(batch_size, channels, depth, height, width)`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -50,21 +45,26 @@ const SPATIAL_DROPOUT_3D_PARALLEL_THRESHOLD: usize = 64;
 /// ```
 #[derive(Debug)]
 pub struct SpatialDropout3D {
+    /// Dropout rate, fraction of channels to drop (between 0 and 1)
     rate: f32,
+    /// Expected shape of the input tensor
     input_shape: Vec<usize>,
+    /// Binary mask used during training to determine which channels to drop
     mask: Option<Tensor>,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
+    /// Random number generator backing mask sampling
     rng: StdRng,
 }
 
 impl SpatialDropout3D {
-    /// Creates a new SpatialDropout3D layer.
+    /// Creates a new SpatialDropout3D layer
     ///
     /// # Parameters
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor `(batch_size, channels, depth, height, width)`
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see [`crate::random`])
     ///
     /// # Returns
     ///
@@ -94,7 +94,7 @@ impl SpatialDropout3D {
 
 impl Layer for SpatialDropout3D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` was validated in `new()`; only the runtime input needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -103,7 +103,7 @@ impl Layer for SpatialDropout3D {
         )?;
 
         if !self.training {
-            // During inference, pass input through unchanged
+            // Inference passes input through unchanged
             return Ok(input.clone());
         }
 
@@ -112,7 +112,7 @@ impl Layer for SpatialDropout3D {
         }
 
         if self.rate == 1.0 {
-            // If dropout rate is 1.0, return zeros
+            // Rate of 1.0 drops everything
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
@@ -123,26 +123,23 @@ impl Layer for SpatialDropout3D {
         let height = shape[3];
         let width = shape[4];
 
-        // Generate mask for channels: shape (batch_size, channels)
-        // Each channel is either fully kept or fully dropped
+        // Per-channel mask of shape (batch_size, channels): each channel is fully kept or fully dropped
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
             &mut self.rng,
         );
 
-        // Apply threshold to create binary mask with parallel or sequential computation
+        // Threshold into a binary mask (parallel above the threshold, sequential otherwise)
         apply_spatial_dropout_threshold(
             &mut mask_2d,
             self.rate,
             SPATIAL_DROPOUT_3D_PARALLEL_THRESHOLD,
         );
 
-        // Expand mask to match input shape (batch_size, channels, depth, height, width)
-        // by broadcasting the mask across the spatial dimensions
+        // Broadcast the 2D mask across the spatial dimensions to the 5D input shape
         let mut mask = Tensor::zeros(IxDyn(&[batch_size, channels, depth, height, width]));
 
-        // Broadcast the 2D mask to 5D mask efficiently
         for b in 0..batch_size {
             for c in 0..channels {
                 let mask_value = mask_2d[[b, c]];
@@ -156,8 +153,7 @@ impl Layer for SpatialDropout3D {
             }
         }
 
-        // Apply mask and scale by (1 - rate) to maintain expected value
-        // This is "inverted dropout" technique
+        // Inverted dropout: scale by 1 / (1 - rate) to preserve the expected value
         let scale = 1.0 / (1.0 - self.rate);
         let output = input * &mask * scale;
 
@@ -167,9 +163,9 @@ impl Layer for SpatialDropout3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches); see [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` was validated in `new()`; only the runtime input needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -177,7 +173,7 @@ impl Layer for SpatialDropout3D {
             "SpatialDropout3D (batch_size, channels, depth, height, width)",
         )?;
 
-        // During inference, pass input through unchanged
+        // Inference passes input through unchanged
         Ok(input.clone())
     }
 

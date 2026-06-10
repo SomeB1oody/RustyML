@@ -1,3 +1,5 @@
+//! Softmax activation layer that converts logits into per-row probability distributions
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -6,17 +8,13 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// Softmax activation layer.
+/// Softmax activation layer
 ///
 /// Applies softmax along the last axis, converting logits into a probability distribution
-/// that sums to 1 for each row while preserving the input shape.
+/// that sums to 1 for each row while preserving the input shape
 ///
 /// The activation math is provided by [`Activation::Softmax`]; this layer only adds
-/// boundary validation and the caching required for backpropagation.
-///
-/// # Fields
-///
-/// - `output_cache` - Cached output tensor from the forward pass, used during backpropagation
+/// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -45,11 +43,12 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct Softmax {
+    /// Cached output tensor from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
 }
 
 impl Softmax {
-    /// Creates a new Softmax activation layer.
+    /// Creates a new Softmax activation layer
     ///
     /// # Returns
     ///
@@ -67,12 +66,10 @@ impl Default for Softmax {
 
 impl Layer for Softmax {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
@@ -86,14 +83,12 @@ impl Layer for Softmax {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
@@ -105,12 +100,11 @@ impl Layer for Softmax {
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         match &self.output_cache {
             Some(output) => {
-                // Validate gradient output shape (softmax preserves shape)
+                // Softmax preserves shape, so the gradient must match the cached output
                 if grad_output.shape() != output.shape() {
                     return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
                 }
 
-                // Check for NaN or infinite values in gradient output
                 if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
                     return Err(Error::non_finite("gradient output"));
                 }

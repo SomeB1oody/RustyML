@@ -1,9 +1,14 @@
+//! Train/test split utility
+//!
+//! Provides the [`TrainTestSplit`] type alias and the [`train_test_split()`] function for
+//! partitioning a feature matrix and label vector into training and test subsets
+
 use crate::error::Error;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::seq::SliceRandom;
 
 /// The four arrays produced by [`train_test_split`], in order:
-/// `(x_train, x_test, y_train, y_test)`.
+/// `(x_train, x_test, y_train, y_test)`
 pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 
 /// Splits a dataset into training and test sets
@@ -22,7 +27,7 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 ///
 /// # Returns
 ///
-/// - `Result<TrainTestSplit<A>, Error>` - Returns `(x_train, x_test, y_train, y_test)` if processing successfully
+/// - `Result<TrainTestSplit<A>, Error>` - `(x_train, x_test, y_train, y_test)` on success
 ///
 /// # Errors
 ///
@@ -31,7 +36,8 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 /// - [`Error::InvalidParameter`] if `test_size` is not between 0 and 1
 /// - [`Error::InvalidInput`] if the dataset is too small to split
 ///
-/// # Example
+/// # Examples
+///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::utils::train_test_split::train_test_split;
@@ -52,17 +58,14 @@ where
 {
     let n_samples = x.nrows();
 
-    // Early return for edge cases
     if n_samples == 0 {
         return Err(Error::empty_input("dataset"));
     }
 
-    // Ensure x and y have the same number of samples
     if n_samples != y.len() {
         return Err(Error::dimension_mismatch(n_samples, y.len()));
     }
 
-    // Set test size, default is 0.3
     let test_size = test_size.unwrap_or(0.3);
     if test_size <= 0.0 || test_size >= 1.0 {
         return Err(Error::invalid_parameter(
@@ -74,31 +77,26 @@ where
         ));
     }
 
-    // Calculate the number of test samples
-    // For small datasets, ensure at least one sample in both train and test sets
+    // Clamp so both train and test always keep at least one sample
     let n_test = if n_samples == 1 {
         return Err(Error::invalid_input(
             "Cannot split a dataset with only 1 sample into train and test sets",
         ));
     } else if n_samples == 2 {
-        1 // Special case: with 2 samples, always put 1 in test set regardless of test_size
+        1 // with 2 samples, always put 1 in test regardless of test_size
     } else {
-        // For larger datasets, use rounding to get closest to the expected proportion
         let calculated = (n_samples as f64 * test_size).round() as usize;
-        calculated.max(1).min(n_samples - 1) // Ensure both train and test have at least 1 sample
+        calculated.max(1).min(n_samples - 1)
     };
 
-    // Create random indices
     let mut indices: Vec<usize> = (0..n_samples).collect();
 
-    // Shuffle indices based on random state
     let mut rng = crate::random::make_rng(random_state);
     indices.shuffle(&mut rng);
 
-    // Split indices into train and test sets
     let (test_indices, train_indices) = indices.split_at(n_test);
 
-    // Create train and test datasets using ndarray's select method for better performance
+    // select gathers rows by index in one pass
     let x_train = x.select(Axis(0), train_indices);
     let x_test = x.select(Axis(0), test_indices);
     let y_train = y.select(Axis(0), train_indices);

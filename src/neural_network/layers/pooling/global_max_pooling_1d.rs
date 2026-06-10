@@ -1,3 +1,5 @@
+//! Global max pooling layer for 1D inputs, reducing the length dimension to a per-channel maximum
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,18 +10,14 @@ use crate::neural_network::layers::pooling::pooling_engine::{
 };
 use crate::neural_network::traits::Layer;
 
-/// Global max pooling layer for 1D inputs.
+/// Global max pooling layer for 1D inputs
 ///
-/// Selects the maximum value across the length dimension.
+/// Selects the maximum value across the length dimension
 /// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
-/// `[batch_size, channels]`.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input tensor cached during the forward pass
-/// - `argmax` - Cached flat per-channel arg-max indices for backpropagation
+/// `[batch_size, channels]`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -53,15 +51,17 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalMaxPooling1D {
+    /// Shape of the input tensor cached during the forward pass
     input_shape: Vec<usize>,
+    /// Cached flat per-channel arg-max indices for backpropagation
     argmax: Option<Vec<usize>>,
 }
 
 impl GlobalMaxPooling1D {
-    /// Creates a new global max pooling 1D layer.
+    /// Creates a new global max pooling 1D layer
     ///
     /// # Returns
     ///
@@ -95,7 +95,7 @@ impl Layer for GlobalMaxPooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {

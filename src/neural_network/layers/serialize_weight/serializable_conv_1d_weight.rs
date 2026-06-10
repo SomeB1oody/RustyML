@@ -1,18 +1,17 @@
+//! Serializable container for `Conv1D` layer weights and the logic to apply them back
+
 use crate::error::Error;
 use crate::neural_network::layers::convolution::conv_1d::Conv1D;
 use crate::neural_network::traits::ApplyWeights;
 use ndarray::{Array2, Array3};
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of Conv1D layer weights.
-///
-/// # Fields
-///
-/// - `weight` - 3D convolution kernel (filters, channels, kernel_size)
-/// - `bias` - Bias matrix (1, filters)
+/// Serializable representation of Conv1D layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableConv1DWeight {
+    /// 3D convolution kernel with shape (filters, channels, kernel_size)
     pub weight: Array3<f32>,
+    /// Bias matrix with shape (1, filters)
     pub bias: Array2<f32>,
 }
 

@@ -1,3 +1,6 @@
+//! Layer Normalization layer and its axis configuration, including support for
+//! single-axis and multi-axis (merged) normalization
+
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -15,32 +18,28 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// Threshold for switching between sequential and parallel layer normalization computation.
-/// Based on total elements in the tensor.
+/// Total-element count above which layer normalization switches from sequential to parallel
 const LAYER_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Axis selection for layer normalization.
-///
-/// # Variants
-///
-/// - `Default` - Normalize along the last dimension (feature dimension)
-/// - `Custom(usize)` - Normalize along a single custom specified axis
-/// - `Multiple(Vec<usize>)` - Normalize *jointly* over several axes (Keras-style axis list); the
-///   statistics are computed over the combined elements of those axes, and `gamma`/`beta` are 1-D
-///   with length equal to the product of those axes' sizes
+/// Axis selection for layer normalization
 #[derive(Debug, Clone)]
 pub enum LayerNormalizationAxis {
+    /// Normalize along the last dimension (feature dimension)
     Default,
+    /// Normalize along a single custom specified axis
     Custom(usize),
+    /// Normalize jointly over several axes (Keras-style axis list); statistics are computed over
+    /// the combined elements of those axes, and `gamma`/`beta` are 1-D with length equal to the
+    /// product of those axes' sizes
     Multiple(Vec<usize>),
 }
 
 /// Permutes the `axes` to the trailing positions and merges them into a single axis, returning the
-/// transformed contiguous tensor plus the permutation and pre-merge shape needed to invert it.
+/// transformed contiguous tensor plus the permutation and pre-merge shape needed to invert it
 ///
 /// Multi-axis layer normalization reduces to single-axis normalization of this merged axis, so the
 /// public methods bracket the existing (single-axis) core with this transform and its inverse,
-/// [`unmerge_normalized_axes`].
+/// [`unmerge_normalized_axes`]
 fn merge_normalized_axes(
     input: &Tensor,
     axes: &[usize],
@@ -67,7 +66,7 @@ fn merge_normalized_axes(
         }
     }
 
-    // perm = non-normalized axes (original order) followed by the normalized axes (given order).
+    // perm = non-normalized axes (original order) followed by the normalized axes (given order)
     let mut perm: Vec<usize> = (0..ndim).filter(|ax| !axes.contains(ax)).collect();
     perm.extend_from_slice(axes);
     let permuted = input
@@ -88,7 +87,7 @@ fn merge_normalized_axes(
 }
 
 /// Inverts [`merge_normalized_axes`]: un-merges back to `permuted_shape`, then applies the inverse
-/// of `perm`, returning a contiguous tensor in the original layout.
+/// of `perm`, returning a contiguous tensor in the original layout
 fn unmerge_normalized_axes(
     output_merged: Tensor,
     perm: &[usize],
@@ -109,27 +108,13 @@ fn unmerge_normalized_axes(
         .to_owned()
 }
 
-/// Layer Normalization layer for neural networks.
+/// Layer Normalization layer for neural networks
 ///
-/// Normalizes across feature dimensions for each sample, which is effective
-/// when batch sizes are small or variable.
-///
-/// # Fields
-///
-/// - `epsilon` - Small constant for numerical stability in normalization
-/// - `normalized_axis` - Axis along which to normalize
-/// - `input_shape` - Shape of the input tensor
-/// - `gamma` - Scale parameter (trainable)
-/// - `beta` - Shift parameter (trainable)
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `x_normalized` - Normalized input (used in backward pass)
-/// - `x_centered` - Centered input (used in backward pass)
-/// - `mean` - Mean computed during forward pass (used in backward pass)
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
-/// - `grad_gamma` - Gradient for gamma parameter
-/// - `grad_beta` - Gradient for beta parameter
+/// Normalizes across feature dimensions for each sample, which is effective when batch sizes are
+/// small or variable
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -146,24 +131,34 @@ fn unmerge_normalized_axes(
 /// ```
 #[derive(Debug)]
 pub struct LayerNormalization {
+    /// Small constant for numerical stability in normalization
     epsilon: f32,
+    /// Axis along which to normalize
     normalized_axis: LayerNormalizationAxis,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Scale parameter (trainable)
     gamma: Tensor,
+    /// Shift parameter (trainable)
     beta: Tensor,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
-    // Cache for backward pass
+    /// Normalized input (cached for backward pass)
     x_normalized: Option<Tensor>,
+    /// Centered input (cached for backward pass)
     x_centered: Option<Tensor>,
+    /// Mean computed during forward pass (cached for backward pass)
     mean: Option<Tensor>,
+    /// Standard deviation computed during forward pass (cached for backward pass)
     std_dev: Option<Tensor>,
-    // Gradients
+    /// Gradient for the gamma parameter
     grad_gamma: Option<Tensor>,
+    /// Gradient for the beta parameter
     grad_beta: Option<Tensor>,
 }
 
 impl LayerNormalization {
-    /// Creates a new LayerNormalization layer.
+    /// Creates a new LayerNormalization layer
     ///
     /// # Parameters
     ///
@@ -177,7 +172,8 @@ impl LayerNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite
+    /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite, or if a
+    ///   `Multiple` axis list is empty, contains a duplicate, or has an out-of-bounds axis
     pub fn new(
         input_shape: Vec<usize>,
         normalized_axis: LayerNormalizationAxis,
@@ -185,9 +181,8 @@ impl LayerNormalization {
     ) -> Result<Self, Error> {
         validate_epsilon(epsilon)?;
 
-        // gamma/beta are 1-D over the normalized dimension(s). For a single axis that is the size of
-        // that axis; for Multiple it is the product of the listed axes' sizes (they are merged into
-        // one axis at runtime).
+        // gamma/beta are 1-D over the normalized dimension(s): the axis size for a single axis, or
+        // the product of the listed axes' sizes for Multiple (merged into one axis at runtime)
         let param_shape = match &normalized_axis {
             LayerNormalizationAxis::Default => {
                 if input_shape.is_empty() {
@@ -251,12 +246,16 @@ impl LayerNormalization {
 
     mode_dependent_layer_set_training!();
 
-    /// Sets the weights for the LayerNormalization layer.
+    /// Sets the weights for the LayerNormalization layer
     ///
     /// # Parameters
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if `gamma` or `beta` does not match the expected parameter shape
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
@@ -270,9 +269,8 @@ impl Layer for LayerNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Resolve the working layout and axis. Default/Custom normalize an existing axis in place;
-        // Multiple permutes the chosen axes to the trailing position and merges them into one axis,
-        // running the same single-axis core and inverting the transform on the result.
+        // Resolve the working layout and axis: Default/Custom normalize an existing axis in place,
+        // while Multiple merges the chosen axes into a trailing axis and inverts the transform after
         let merged = match &self.normalized_axis {
             LayerNormalizationAxis::Multiple(axes) => Some(merge_normalized_axes(input, axes)?),
             _ => None,
@@ -303,19 +301,15 @@ impl Layer for LayerNormalization {
 
         let total_elements = input.len();
 
-        // Compute mean along the specified axis
+        // Mean along the axis, then insert the axis back so broadcasting works
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
-
-        // Insert the axis back to make broadcasting work
         let mean = mean.insert_axis(Axis(axis_idx));
 
         // Center the data and compute variance
         let (x_centered, var) = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel centering and variance computation
             let mut x_centered = Tensor::zeros(input.raw_dim());
             let mut squared_diff = Tensor::zeros(input.raw_dim());
 
-            // Calculate strides for index mapping
             let input_shape = input.shape();
             let axis_size = input_shape[axis_idx];
             let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
@@ -343,7 +337,6 @@ impl Layer for LayerNormalization {
                 .insert_axis(Axis(axis_idx));
             (x_centered, var)
         } else {
-            // Sequential computation
             let x_centered = input - &mean;
             let var = (&x_centered * &x_centered)
                 .mean_axis(Axis(axis_idx))
@@ -355,7 +348,6 @@ impl Layer for LayerNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
 
             let input_shape = input.shape();
@@ -377,16 +369,13 @@ impl Layer for LayerNormalization {
 
             x_normalized
         } else {
-            // Sequential normalization
             &x_centered / &std_dev
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Scale and shift: reshape gamma/beta to broadcast over the input shape
         let mut gamma_shape = vec![1; input.ndim()];
         let mut beta_shape = vec![1; input.ndim()];
 
-        // Set the dimensions from axis_idx onwards to match gamma/beta shape
         for (i, &dim) in self.gamma.shape().iter().enumerate() {
             gamma_shape[axis_idx + i] = dim;
             beta_shape[axis_idx + i] = dim;
@@ -404,7 +393,6 @@ impl Layer for LayerNormalization {
             .unwrap();
 
         let output = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut output = Tensor::zeros(x_normalized.raw_dim());
 
             let input_shape = input.shape();
@@ -418,7 +406,7 @@ impl Layer for LayerNormalization {
                 .zip(x_normalized.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (out, &norm))| {
-                    // Index of this element along the normalized axis (gamma/beta are 1-D).
+                    // Index of this element along the normalized axis (gamma/beta are 1-D)
                     let param_idx = (i / after_axis_size) % axis_size;
                     let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
                     let beta_val = beta_broadcast.as_slice().unwrap()[param_idx];
@@ -427,7 +415,6 @@ impl Layer for LayerNormalization {
 
             output
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
@@ -446,13 +433,12 @@ impl Layer for LayerNormalization {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Resolve the working layout and axis. Default/Custom normalize an existing axis in place;
-        // Multiple permutes the chosen axes to the trailing position and merges them into one axis,
-        // running the same single-axis core and inverting the transform on the result.
+        // Resolve the working layout and axis: Default/Custom normalize an existing axis in place,
+        // while Multiple merges the chosen axes into a trailing axis and inverts the transform after
         let merged = match &self.normalized_axis {
             LayerNormalizationAxis::Multiple(axes) => Some(merge_normalized_axes(input, axes)?),
             _ => None,
@@ -483,19 +469,15 @@ impl Layer for LayerNormalization {
 
         let total_elements = input.len();
 
-        // Compute mean along the specified axis
+        // Mean along the axis, then insert the axis back so broadcasting works
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
-
-        // Insert the axis back to make broadcasting work
         let mean = mean.insert_axis(Axis(axis_idx));
 
         // Center the data and compute variance
         let (x_centered, var) = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel centering and variance computation
             let mut x_centered = Tensor::zeros(input.raw_dim());
             let mut squared_diff = Tensor::zeros(input.raw_dim());
 
-            // Calculate strides for index mapping
             let input_shape = input.shape();
             let axis_size = input_shape[axis_idx];
             let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
@@ -523,7 +505,6 @@ impl Layer for LayerNormalization {
                 .insert_axis(Axis(axis_idx));
             (x_centered, var)
         } else {
-            // Sequential computation
             let x_centered = input - &mean;
             let var = (&x_centered * &x_centered)
                 .mean_axis(Axis(axis_idx))
@@ -535,7 +516,6 @@ impl Layer for LayerNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
 
             let input_shape = input.shape();
@@ -557,16 +537,13 @@ impl Layer for LayerNormalization {
 
             x_normalized
         } else {
-            // Sequential normalization
             &x_centered / &std_dev
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Scale and shift: reshape gamma/beta to broadcast over the input shape
         let mut gamma_shape = vec![1; input.ndim()];
         let mut beta_shape = vec![1; input.ndim()];
 
-        // Set the dimensions from axis_idx onwards to match gamma/beta shape
         for (i, &dim) in self.gamma.shape().iter().enumerate() {
             gamma_shape[axis_idx + i] = dim;
             beta_shape[axis_idx + i] = dim;
@@ -584,7 +561,6 @@ impl Layer for LayerNormalization {
             .unwrap();
 
         let output = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut output = Tensor::zeros(x_normalized.raw_dim());
 
             let input_shape = input.shape();
@@ -598,7 +574,7 @@ impl Layer for LayerNormalization {
                 .zip(x_normalized.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (out, &norm))| {
-                    // Index of this element along the normalized axis (gamma/beta are 1-D).
+                    // Index of this element along the normalized axis (gamma/beta are 1-D)
                     let param_idx = (i / after_axis_size) % axis_size;
                     let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
                     let beta_val = beta_broadcast.as_slice().unwrap()[param_idx];
@@ -607,7 +583,6 @@ impl Layer for LayerNormalization {
 
             output
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
@@ -626,8 +601,8 @@ impl Layer for LayerNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Same layout handling as `forward` (see there); the cached intermediates are already in the
-        // merged layout, so we transform `grad_output` to match and invert on the input gradient.
+        // Same layout handling as `forward`; the cached intermediates are already in the merged
+        // layout, so transform `grad_output` to match and invert on the input gradient
         let merged = match &self.normalized_axis {
             LayerNormalizationAxis::Multiple(axes) => {
                 Some(merge_normalized_axes(grad_output, axes)?)
@@ -656,14 +631,14 @@ impl Layer for LayerNormalization {
             .as_ref()
             .ok_or_else(|| Error::forward_pass_not_run("LayerNormalization"))?;
 
-        // Compute gradients for gamma and beta. Since gamma/beta are 1-D over the normalized axis,
-        // reduce every other axis, leaving a gradient of shape `[axis_size]`.
+        // gamma/beta are 1-D over the normalized axis, so reduce every other axis to leave a
+        // gradient of shape `[axis_size]`
         let mut grad_gamma = grad_output * x_normalized;
         let mut grad_beta = grad_output.clone();
 
         let ndim = grad_gamma.ndim();
         // Sum the axes after the normalized axis (from the end so lower indices are unaffected),
-        // then the axes before it.
+        // then the axes before it
         for i in (axis_idx + 1..ndim).rev() {
             grad_gamma = grad_gamma.sum_axis(Axis(i));
             grad_beta = grad_beta.sum_axis(Axis(i));
@@ -678,8 +653,7 @@ impl Layer for LayerNormalization {
 
         let total_elements = grad_output.len();
 
-        // Compute gradient with respect to normalized input
-        // Reshape gamma for broadcasting
+        // Gradient with respect to normalized input: reshape gamma for broadcasting
         let mut gamma_shape = vec![1; grad_output.ndim()];
         for (i, &dim) in self.gamma.shape().iter().enumerate() {
             gamma_shape[axis_idx + i] = dim;
@@ -691,7 +665,6 @@ impl Layer for LayerNormalization {
             .unwrap();
 
         let grad_x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
 
             let output_shape = grad_output.shape();
@@ -705,29 +678,26 @@ impl Layer for LayerNormalization {
                 .zip(grad_output.as_slice().unwrap().par_iter())
                 .enumerate()
                 .for_each(|(i, (g_norm, &g_out))| {
-                    // Index of this element along the normalized axis (gamma is 1-D).
+                    // Index of this element along the normalized axis (gamma is 1-D)
                     let param_idx = (i / after_axis_size) % axis_size;
                     let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
                     *g_norm = g_out * gamma_val;
                 });
             grad_x_norm
         } else {
-            // Sequential computation
             grad_output * &gamma_broadcast
         };
 
-        // Compute inverse standard deviation
+        // Inverse standard deviation and size of the normalization dimension
         let inv_std = std_dev.mapv(|x| 1.0 / x);
-
-        // Get the size of the normalization dimension
         let norm_size = grad_output.shape()[axis_idx] as f32;
 
-        // Compute gradient with respect to variance
+        // Gradient with respect to variance
         let grad_var = (&grad_x_normalized * x_centered * -0.5).sum_axis(Axis(axis_idx));
         let grad_var = grad_var.insert_axis(Axis(axis_idx));
         let grad_var = &grad_var * &inv_std * &inv_std * &inv_std;
 
-        // Compute gradient with respect to mean
+        // Gradient with respect to mean
         let grad_mean_1 = (&grad_x_normalized * -1.0).sum_axis(Axis(axis_idx));
         let grad_mean_1 = grad_mean_1.insert_axis(Axis(axis_idx));
         let grad_mean_1 = &grad_mean_1 * &inv_std;
@@ -738,9 +708,8 @@ impl Layer for LayerNormalization {
         let grad_mean_2 = &grad_var * (&x_sum * -2.0 / norm_size);
         let grad_mean = grad_mean_1 + grad_mean_2;
 
-        // Compute gradient with respect to input
+        // Gradient with respect to input
         let grad_input = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
 
             let output_shape = grad_output.shape();
@@ -767,7 +736,6 @@ impl Layer for LayerNormalization {
                 });
             grad_inp
         } else {
-            // Sequential computation
             &grad_x_normalized * &inv_std
                 + &grad_var * (x_centered * 2.0 / norm_size)
                 + &grad_mean / norm_size
@@ -831,22 +799,14 @@ mod tests {
     use super::*;
     use ndarray::ArrayD;
 
-    // Helper: build a Tensor from a flat Vec and shape.
+    // Helper: build a Tensor from a flat Vec and shape
     fn make_tensor(data: Vec<f32>, shape: &[usize]) -> Tensor {
         ArrayD::from_shape_vec(shape, data).expect("shape/data mismatch in test helper")
     }
 
-    // ─── merge_normalized_axes: output shape ────────────────────────────────
+    // merge_normalized_axes: output shape
 
-    /// merge_normalized_axes on shape [3,4,5] with axes=[1,2] → merged shape [3,20].
-    ///
-    /// Derivation:
-    ///   ndim=3, axes=[1,2].
-    ///   Non-normalized axes: [0].  perm = [0, 1, 2].
-    ///   permuted shape = [3, 4, 5] (perm is identity here).
-    ///   outer = ndim - |axes| = 3 - 2 = 1.
-    ///   inner = shape[1] * shape[2] = 4 * 5 = 20.
-    ///   merged shape = [3, 20].
+    /// merge_normalized_axes on [3,4,5] with axes=[1,2] yields merged shape [3,20]
     #[test]
     fn test_merge_normalized_axes_shape() {
         let n = 3 * 4 * 5;
@@ -859,12 +819,7 @@ mod tests {
         assert_eq!(merged.shape(), &[3, 20]);
     }
 
-    /// merge_normalized_axes: perm returned for [3,4,5] with axes=[1,2].
-    ///
-    /// Derivation:
-    ///   Non-normalized axes (in order): 0.
-    ///   Normalized axes (in given order): 1, 2.
-    ///   perm = [0, 1, 2].
+    /// merge_normalized_axes returns perm [0,1,2] for [3,4,5] with axes=[1,2]
     #[test]
     fn test_merge_normalized_axes_perm() {
         let n = 3 * 4 * 5;
@@ -877,10 +832,7 @@ mod tests {
         assert_eq!(perm, vec![0usize, 1, 2]);
     }
 
-    /// merge_normalized_axes: permuted_shape for [3,4,5] with axes=[1,2].
-    ///
-    /// Derivation:
-    ///   perm = [0,1,2] (identity) → permuted shape = [3,4,5].
+    /// merge_normalized_axes returns permuted_shape [3,4,5] for [3,4,5] with axes=[1,2]
     #[test]
     fn test_merge_normalized_axes_permuted_shape() {
         let n = 3 * 4 * 5;
@@ -893,15 +845,9 @@ mod tests {
         assert_eq!(permuted_shape, vec![3usize, 4, 5]);
     }
 
-    // ─── merge + unmerge round-trip ─────────────────────────────────────────
+    // merge + unmerge round-trip
 
-    /// unmerge_normalized_axes(merge_normalized_axes(x)) == x element-wise,
-    /// for shape [3,4,5] with axes=[1,2].
-    ///
-    /// Derivation:
-    ///   merge: reshapes [3,4,5] → [3,20] via identity perm [0,1,2], permuted_shape=[3,4,5].
-    ///   unmerge: reshapes [3,20] → [3,4,5] then applies inverse of [0,1,2] = [0,1,2] (identity).
-    ///   Net effect is a reshape→reshape identity, so every element is preserved.
+    /// merge then unmerge recovers the original tensor elementwise for [3,4,5] with axes=[1,2]
     #[test]
     fn test_merge_unmerge_round_trip() {
         let n = 3 * 4 * 5;
@@ -924,13 +870,7 @@ mod tests {
         }
     }
 
-    /// Round-trip also holds when axes require a non-trivial permutation.
-    /// Shape [2,3,4], axes=[0,2]:
-    ///   Non-normalized axes: [1]. perm = [1, 0, 2].
-    ///   permuted shape = [3, 2, 4].
-    ///   merged shape = [3, 8].
-    ///   unmerge inverts: reshape [3,8]→[3,2,4], then inverse of [1,0,2] is [1,0,2].
-    ///   Result shape is [2,3,4] and elements match original.
+    /// merge then unmerge round-trip holds when axes require a non-trivial permutation ([2,3,4], axes=[0,2])
     #[test]
     fn test_merge_unmerge_round_trip_nontrivial_perm() {
         let n = 2 * 3 * 4;
@@ -940,7 +880,7 @@ mod tests {
         let (merged, perm, permuted_shape) =
             merge_normalized_axes(&x, &[0, 2]).expect("merge_normalized_axes failed");
 
-        // Verify intermediate merged shape: outer=1 (axis 1), inner=2*4=8 → [3,8].
+        // Verify intermediate merged shape: outer=1 (axis 1), inner=2*4=8 -> [3,8]
         assert_eq!(merged.shape(), &[3, 8]);
 
         let recovered = unmerge_normalized_axes(merged, &perm, &permuted_shape);
@@ -956,9 +896,9 @@ mod tests {
         }
     }
 
-    // ─── merge_normalized_axes: error cases ─────────────────────────────────
+    // merge_normalized_axes: error cases
 
-    /// merge_normalized_axes returns Err for an empty axes slice.
+    /// merge_normalized_axes returns Err for an empty axes slice
     #[test]
     fn test_merge_normalized_axes_empty_axes_error() {
         let x = make_tensor(vec![1.0f32, 2.0, 3.0], &[3]);
@@ -966,7 +906,7 @@ mod tests {
         assert!(result.is_err(), "expected Err for empty axes");
     }
 
-    /// merge_normalized_axes returns Err when an axis is out of bounds.
+    /// merge_normalized_axes returns Err when an axis is out of bounds
     #[test]
     fn test_merge_normalized_axes_out_of_bounds_error() {
         let x = make_tensor(vec![1.0f32; 6], &[2, 3]);
@@ -974,7 +914,7 @@ mod tests {
         assert!(result.is_err(), "expected Err for out-of-bounds axis");
     }
 
-    /// merge_normalized_axes returns Err for duplicate axes.
+    /// merge_normalized_axes returns Err for duplicate axes
     #[test]
     fn test_merge_normalized_axes_duplicate_axes_error() {
         let x = make_tensor(vec![1.0f32; 12], &[3, 4]);

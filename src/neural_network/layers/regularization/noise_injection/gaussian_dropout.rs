@@ -1,3 +1,5 @@
+//! Gaussian Dropout layer: multiplicative Gaussian noise applied during training
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,21 +15,15 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Normal;
 
-/// Gaussian Dropout layer for neural networks.
+/// Gaussian Dropout layer for neural networks
 ///
 /// Multiplies inputs with random samples drawn from a Gaussian distribution during
-/// training. Each input value x is transformed as: x' = x * N(1, stddev^2).
-/// The standard deviation is computed as sqrt(rate / (1 - rate)). During inference,
-/// inputs pass through unchanged.
-///
-/// # Fields
-///
-/// - `rate` - Dropout rate used to compute standard deviation
-/// - `input_shape` - Expected shape of the input tensor
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `rng` - Random number generator used to sample the multiplicative Gaussian noise
+/// training. Each input value x is transformed as x' = x * N(1, stddev^2), where the
+/// standard deviation is sqrt(rate / (1 - rate)). During inference, inputs pass through
+/// unchanged
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -44,20 +40,24 @@ use ndarray_rand::rand_distr::Normal;
 /// ```
 #[derive(Debug)]
 pub struct GaussianDropout {
+    /// Dropout rate used to compute the noise standard deviation
     rate: f32,
+    /// Expected shape of the input tensor
     input_shape: Vec<usize>,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
+    /// Random number generator used to sample the multiplicative Gaussian noise
     rng: StdRng,
 }
 
 impl GaussianDropout {
-    /// Creates a new GaussianDropout layer.
+    /// Creates a new GaussianDropout layer
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate, must be between 0 and 1 (exclusive)
+    /// - `rate` - Dropout rate, must be in range [0, 1)
     /// - `input_shape` - Shape of the input tensor
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -88,7 +88,7 @@ impl GaussianDropout {
 
 impl Layer for GaussianDropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when rate is 0, pass input through unchanged
@@ -96,31 +96,27 @@ impl Layer for GaussianDropout {
             return Ok(input.clone());
         }
 
-        // Compute standard deviation for Gaussian noise
-        // The formula stddev = sqrt(rate / (1 - rate)) ensures that:
-        // - When rate = 0, stddev = 0 (no noise)
-        // - As rate approaches 1, stddev increases (more noise)
+        // Noise stddev grows from 0 (rate = 0) toward inf as rate approaches 1
         let stddev = (self.rate / (1.0 - self.rate)).sqrt();
 
-        // Generate multiplicative Gaussian noise with mean=1 and computed stddev
+        // Multiplicative Gaussian noise with mean 1 and the computed stddev
         let noise = Tensor::random_using(
             input.raw_dim(),
             Normal::new(1.0, stddev).unwrap(),
             &mut self.rng,
         );
 
-        // Multiply input by noise
         let output = input * &noise;
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` is immutable and already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Inference is identity: pass input through unchanged (no noise sampling).
+        // Inference is identity: pass input through unchanged (no noise sampling)
         Ok(input.clone())
     }
 

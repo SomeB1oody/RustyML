@@ -1,3 +1,5 @@
+//! 2D max pooling layer that selects the maximum value within each window across height and width
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,23 +15,16 @@ use crate::neural_network::layers::pooling::validation::{
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d_pooling;
 use crate::neural_network::traits::Layer;
 
-/// 2D max pooling layer.
+/// 2D max pooling layer
 ///
-/// Selects the maximum value within each pooling window across height and width.
+/// Selects the maximum value within each pooling window across height and width
 /// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
 /// `[batch_size, channels, pooled_height, pooled_width]` where
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
-///
-/// # Fields
-///
-/// - `pool_size` - Size of the pooling window as (height, width)
-/// - `strides` - Step size of the pooling operation as (vertical stride, horizontal stride)
-/// - `input_shape` - Shape of the input tensor declared at construction time
-/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
-/// - `argmax` - Cached flat per-output arg-max indices used for backpropagation
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -84,20 +79,25 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct MaxPooling2D {
+    /// Size of the pooling window as (height, width)
     pool_size: (usize, usize),
+    /// Step size of the pooling operation as (vertical stride, horizontal stride)
     strides: (usize, usize),
+    /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
+    /// Cached flat per-output arg-max indices used for backpropagation
     argmax: Option<Vec<usize>>,
 }
 
 impl MaxPooling2D {
-    /// Creates a new 2D max pooling layer.
+    /// Creates a new 2D max pooling layer
     ///
-    /// If `strides` is None, it defaults to `pool_size`.
+    /// If `strides` is None, it defaults to `pool_size`
     ///
     /// # Parameters
     ///
@@ -156,7 +156,7 @@ impl Layer for MaxPooling2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 4D
         if input.ndim() != 4 {

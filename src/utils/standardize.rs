@@ -1,33 +1,35 @@
+//! Feature standardization (zero mean, unit variance) along row, column, or global axes
+//!
+//! Provides [`standardize()`] and the [`StandardizationAxis`] selector, with sequential
+//! and parallel paths chosen by data size
+
 use crate::error::Error;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rayon::prelude::IntoParallelRefMutIterator;
 
-/// Element-count threshold above which the global-axis path computes in parallel.
+/// Element-count threshold above which the global-axis path computes in parallel
 const STANDARDIZE_PARALLEL_THRESHOLD: usize = 10000;
 
-/// Lane-count threshold above which row/column standardization runs across lanes in parallel.
+/// Lane-count threshold above which row/column standardization runs across lanes in parallel
 const STANDARDIZE_PARALLEL_LANES: usize = 100;
 
-/// Defines the axis along which the standardization is applied
-///
-/// # Variants
-///
-/// - `Row` - Standardize across rows (each row is standardized independently)
-/// - `Column` - Standardize across columns (each column is standardized independently)
-/// - `Global` - Standardize the entire array globally
+/// Axis along which standardization is applied
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StandardizationAxis {
+    /// Standardize each row independently
     Row,
+    /// Standardize each column independently
     Column,
+    /// Standardize the entire array as one dataset
     Global,
 }
 
 impl StandardizationAxis {
-    /// Standardizes `data` in place along this axis.
+    /// Standardizes `data` in place along this axis
     ///
     /// Routes to whole-array standardization for [`StandardizationAxis::Global`] or to
-    /// the per-lane path for [`StandardizationAxis::Row`] / [`StandardizationAxis::Column`].
+    /// the per-lane path for [`StandardizationAxis::Row`] / [`StandardizationAxis::Column`]
     ///
     /// # Errors
     ///
@@ -49,22 +51,22 @@ impl StandardizationAxis {
 
 /// Standardizes data to have zero mean and unit variance
 ///
-/// This function transforms input data by subtracting the mean and dividing
-/// by the standard deviation for each feature, resulting in standardized data
-/// where each feature has a mean of 0 and a standard deviation of 1.
+/// Subtracts the mean and divides by the standard deviation per the chosen axis, so the
+/// standardized values have mean 0 and standard deviation 1
 ///
 /// # Parameters
 ///
-/// - `data` - Input array data as `ArrayBase` with arbitrary dimensions and f64 elements
-/// - `axis` - The axis along which to perform standardization (Row/Column/Global)
+/// - `data` - Input array as `ArrayBase` with arbitrary dimensions and f64 elements
+/// - `axis` - Axis along which to standardize (Row/Column/Global)
 /// - `epsilon` - Small value that floors the standard deviation, added in quadrature as
-///   `sqrt(variance + epsilon²)`, to prevent division by zero
+///   `sqrt(variance + epsilon^2)`, to prevent division by zero
 ///
 /// # Returns
 ///
-/// - `Result<Array<f64, D>, Error>` - Standardized array with same dimensions as input
+/// - `Result<Array<f64, D>, Error>` - Standardized array with the same dimensions as the input
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::utils::standardize::{standardize, StandardizationAxis};
@@ -75,23 +77,14 @@ impl StandardizationAxis {
 ///
 /// # Errors
 ///
-/// - [`Error::EmptyInput`] - If input array is empty
-/// - [`Error::NonFinite`] - If input contains NaN/Infinite values
+/// - [`Error::EmptyInput`] - If the input array is empty
+/// - [`Error::NonFinite`] - If the input contains NaN or infinite values
 /// - [`Error::InvalidParameter`] - If epsilon is non-positive or non-finite
-/// - [`Error::Computation`] - If standardization computation fails (e.g., zero values in global axis)
+/// - [`Error::Computation`] - If the global-axis path has no values to standardize
 ///
 /// # Performance
 ///
-/// - Parallel computation is enabled when the number of elements exceeds `STANDARDIZE_PARALLEL_THRESHOLD` (10,000)
-///
-/// # Implementation Details
-///
-/// - For Row axis: Each row is standardized independently
-/// - For Column axis: Each column is standardized independently
-/// - For Global axis: The entire array is standardized as a single dataset
-/// - The standard deviation is floored via `sqrt(variance + epsilon²)` to prevent division by zero
-/// - Uses parallel computation for improved performance on large datasets
-/// - NaN and infinite values in input will result in an error
+/// - The global-axis path computes in parallel once the element count reaches `STANDARDIZE_PARALLEL_THRESHOLD` (10,000)
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
@@ -101,17 +94,14 @@ where
     S: Data<Elem = f64>,
     D: Dimension,
 {
-    // Input validation
     if data.is_empty() {
         return Err(Error::empty_input("Cannot standardize empty array"));
     }
 
-    // Check for NaN or infinite values
     if data.iter().any(|&x| !x.is_finite()) {
         return Err(Error::non_finite("input data"));
     }
 
-    // Validate epsilon parameter
     if epsilon <= 0.0 || !epsilon.is_finite() {
         return Err(Error::invalid_parameter(
             "epsilon",
@@ -124,7 +114,7 @@ where
     Ok(result)
 }
 
-/// Helper function to standardize the entire array globally
+/// Standardizes the entire array as a single dataset
 fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
 where
     D: Dimension,
@@ -135,21 +125,13 @@ where
         return Err(Error::computation("No values to standardize"));
     }
 
-    // Use parallel computation for large datasets
     if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
-        // Calculate mean
         let mean = data.par_iter().sum::<f64>() / n;
-
-        // Calculate variance
         let variance = data.par_iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-
-        // Add epsilon to variance for numerical stability, then take sqrt
         let std_dev = (variance + epsilon * epsilon).sqrt();
-
-        // Apply standardization
         data.par_mapv_inplace(|x| (x - mean) / std_dev);
     } else {
-        // Same process as above, but sequential
+        // Same computation as the parallel branch, run sequentially
         let mean = data.iter().sum::<f64>() / n;
         let variance = data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
         let std_dev = (variance + epsilon * epsilon).sqrt();
@@ -159,10 +141,10 @@ where
     Ok(())
 }
 
-/// Computes the population mean and the epsilon-floored standard deviation of a lane.
+/// Computes the population mean and the epsilon-floored standard deviation of a lane
 ///
-/// The returned standard deviation is `sqrt(variance + epsilon²)`, which stays
-/// strictly positive so the subsequent division is always well defined.
+/// The returned standard deviation is `sqrt(variance + epsilon^2)`, which stays
+/// strictly positive so the subsequent division is always well defined
 fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
     let n = lane.len() as f64;
     let mean = lane.sum() / n;
@@ -172,10 +154,10 @@ fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
 }
 
 /// Standardizes each lane along the axis `axis_from_end` positions from the end
-/// (`1` = last axis → rows, `2` = second-to-last → columns).
+/// (`1` = last axis, rows; `2` = second-to-last, columns)
 ///
 /// Parallelizes across lanes once there are enough of them; each lane is then
-/// processed sequentially, so the two levels never nest.
+/// processed sequentially, so the two levels never nest
 fn standardize_lanes<D>(
     data: &mut Array<f64, D>,
     axis_from_end: usize,
@@ -192,8 +174,7 @@ where
             operation_name
         )));
     }
-    // `ndim >= 2` is guaranteed above, so `ndim - axis_from_end` cannot underflow for
-    // `axis_from_end` in {1, 2}.
+    // ndim >= 2 above and axis_from_end in {1, 2}, so the subtraction cannot underflow
     let axis = Axis(ndim - axis_from_end);
 
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();

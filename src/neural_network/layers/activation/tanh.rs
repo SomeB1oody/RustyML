@@ -1,3 +1,5 @@
+//! Tanh (hyperbolic tangent) activation layer
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -6,17 +8,13 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// Tanh (Hyperbolic Tangent) activation layer.
+/// Tanh (hyperbolic tangent) activation layer
 ///
 /// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
-/// preserving the input shape.
+/// preserving the input shape
 ///
 /// The activation math is provided by [`Activation::Tanh`]; this layer only adds
-/// boundary validation and the caching required for backpropagation.
-///
-/// # Fields
-///
-/// - `output_cache` - Cached activated output from the forward pass, used during backpropagation
+/// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -45,11 +43,12 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct Tanh {
+    /// Cached activated output from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
 }
 
 impl Tanh {
-    /// Creates a new Tanh activation layer.
+    /// Creates a new Tanh activation layer
     ///
     /// # Returns
     ///
@@ -67,54 +66,49 @@ impl Default for Tanh {
 
 impl Layer for Tanh {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply Tanh: tanh(x) with input clipping for numerical stability
+        // tanh(x), with input clamped for numerical stability
         let output = Activation::Tanh.forward(input)?;
 
-        // Save activated output for backpropagation
+        // Cache the activated output for backpropagation
         self.output_cache = Some(output.clone());
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply Tanh: tanh(x) with input clipping for numerical stability
+        // tanh(x), with input clamped for numerical stability
         Activation::Tanh.forward(input)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(output) = &self.output_cache {
-            // Validate gradient output shape (tanh preserves shape)
+            // tanh preserves shape, so the gradient must match the cached output
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
             }
 
-            // Check for NaN or infinite values in gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
                 return Err(Error::non_finite("gradient output"));
             }
 
-            // Tanh derivative is: d/dx tanh(x) = 1 - tanh^2(x)
+            // Derivative: d/dx tanh(x) = 1 - tanh^2(x)
             Activation::Tanh.backward(output, grad_output)
         } else {
             Err(Error::forward_pass_not_run("Tanh"))

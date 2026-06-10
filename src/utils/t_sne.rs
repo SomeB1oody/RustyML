@@ -1,3 +1,8 @@
+//! t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
+//!
+//! Provides the [`TSNE`] model with early-exaggeration, momentum-based gradient descent,
+//! and a per-point sigma solver that calibrates conditional probabilities to a target perplexity
+
 use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
@@ -5,11 +10,11 @@ use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zi
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Finds the sigma matching a target perplexity for one point's distances, via binary search.
+/// Finds the sigma matching a target perplexity for one point's distances, via binary search
 ///
 /// Returns the resulting probability distribution together with the sigma that achieves the
-/// target perplexity. This is t-SNE's per-point precision calibration — an algorithm-specific
-/// solver, so it lives with the model rather than in `crate::math`.
+/// target perplexity. This is t-SNE's per-point precision calibration, an algorithm-specific
+/// solver, so it lives with the model rather than in `crate::math`
 fn binary_search_sigma<S>(
     distances: &ArrayBase<S, Ix1>,
     target_perplexity: f64,
@@ -18,9 +23,8 @@ where
     S: Data<Elem = f64>,
 {
     let tol = 1e-5;
-    // sigma_max starts unbounded: while no finite upper bound is known, the search grows sigma
-    // geometrically (the `sigma *= 2.0` path below) until the perplexity overshoots and brackets
-    // it, then bisects. sigma_min is a small positive floor (sigma must stay > 0).
+    // While no finite upper bound is known, sigma grows geometrically (the `sigma *= 2.0` path)
+    // until the perplexity overshoots and brackets it, then bisects; sigma_min floors sigma > 0
     let mut sigma_min: f64 = 1e-20;
     let mut sigma_max: f64 = f64::INFINITY;
     let mut sigma: f64 = 1.0;
@@ -40,7 +44,7 @@ where
         let epsilon = 1e-12;
 
         if sum_p < epsilon {
-            // If sum is too small, use uniform distribution
+            // Sum too small: fall back to a uniform distribution
             p.fill(1.0 / n as f64);
         } else {
             p.mapv_inplace(|v| v / sum_p);
@@ -55,19 +59,14 @@ where
         if diff.abs() < tol {
             break;
         }
-        // Perplexity increases monotonically with sigma (larger sigma → flatter distribution →
-        // higher entropy → higher perplexity). So when the current perplexity is too HIGH we must
-        // SHRINK sigma, and when it is too LOW we must GROW it. NOTE: the canonical t-SNE search is
-        // written in terms of the precision beta = 1/(2·sigma²), which has the OPPOSITE monotonicity
-        // to sigma — these two branches are the mirror image of that reference update rule, because
-        // the search variable here is sigma itself. (Swapping them is what broke neighborhood
-        // preservation: sigma ran away to its bound and every P(j|i) collapsed to uniform.)
+        // Perplexity grows with sigma, so shrink sigma when it is too high and grow it when too low
+        // (mirror of the canonical search over precision beta = 1/(2*sigma^2), which is opposite)
         if diff > 0.0 {
-            // Perplexity too high → sigma too large → tighten the upper bound and shrink.
+            // Perplexity too high, sigma too large: tighten the upper bound and shrink
             sigma_max = sigma;
             sigma = (sigma + sigma_min) / 2.0;
         } else {
-            // Perplexity too low → sigma too small → raise the lower bound and grow.
+            // Perplexity too low, sigma too small: raise the lower bound and grow
             sigma_min = sigma;
             if sigma_max.is_infinite() {
                 sigma *= 2.0;
@@ -79,35 +78,27 @@ where
     (p, sigma)
 }
 
-/// Early exaggeration factor applied to joint probabilities.
+/// Early exaggeration factor applied to joint probabilities
 const EARLY_EXAGGERATION: f64 = 12.0;
-/// Number of iterations to apply early exaggeration.
+/// Number of iterations to apply early exaggeration
 const EARLY_EXAGGERATION_ITER: usize = 250;
-/// Initial momentum used at the start of optimization.
+/// Initial momentum used at the start of optimization
 const INITIAL_MOMENTUM: f64 = 0.5;
-/// Momentum used after early exaggeration phase.
+/// Momentum used after the early exaggeration phase
 const FINAL_MOMENTUM: f64 = 0.8;
-/// Scale for random initialization of the embedding.
+/// Scale for random initialization of the embedding
 const INIT_SCALE: f64 = 1e-4;
-/// Lower bound for q_ij to avoid numerical instability.
+/// Lower bound for q_ij to avoid numerical instability
 const MIN_Q: f64 = 1e-12;
-/// Threshold for switching to parallel computation in t-SNE.
+/// Sample-count threshold for switching to parallel computation
 const TSNE_PARALLEL_THRESHOLD: usize = 2000;
 
-/// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction.
+/// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
 ///
-/// This implementation performs t-SNE optimization with early exaggeration and
-/// momentum-based gradient descent.
-///
-/// # Fields
-///
-/// - `n_components` - Output embedding dimensions
-/// - `perplexity` - Effective neighborhood size
-/// - `learning_rate` - Gradient descent learning rate
-/// - `n_iter` - Number of optimization iterations
-/// - `random_state` - Optional random seed for reproducibility
+/// Performs t-SNE optimization with early exaggeration and momentum-based gradient descent
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::utils::t_sne::TSNE;
 /// use ndarray::array;
@@ -119,15 +110,20 @@ const TSNE_PARALLEL_THRESHOLD: usize = 2000;
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TSNE {
+    /// Output embedding dimensions
     n_components: usize,
+    /// Effective neighborhood size
     perplexity: f64,
+    /// Gradient descent learning rate
     learning_rate: f64,
+    /// Number of optimization iterations
     n_iter: usize,
+    /// Optional random seed for reproducibility
     random_state: Option<u64>,
 }
 
 impl Default for TSNE {
-    /// Creates a TSNE instance with common default parameters.
+    /// Creates a TSNE instance with common default parameters
     ///
     /// # Default Values
     ///
@@ -142,7 +138,7 @@ impl Default for TSNE {
 }
 
 impl TSNE {
-    /// Creates a new TSNE instance with validation.
+    /// Creates a new TSNE instance with validation
     ///
     /// # Parameters
     ///
@@ -200,14 +196,13 @@ impl TSNE {
         })
     }
 
-    // Getters
     get_field!(get_n_components, n_components, usize);
     get_field!(get_perplexity, perplexity, f64);
     get_field!(get_learning_rate, learning_rate, f64);
     get_field!(get_n_iter, n_iter, usize);
     get_field!(get_random_state, random_state, Option<u64>);
 
-    /// Performs t-SNE dimensionality reduction on input data.
+    /// Performs t-SNE dimensionality reduction on input data
     ///
     /// # Parameters
     ///
@@ -219,11 +214,14 @@ impl TSNE {
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::NonFinite` / `Error::InvalidParameter` - If the input matrix is empty, too small, or contains non-finite values
+    /// - `Error::EmptyInput` - If the input matrix is empty
+    /// - `Error::NonFinite` - If the input contains non-finite values
+    /// - `Error::InvalidInput` - If there are fewer than 2 samples
+    /// - `Error::InvalidParameter` - If `perplexity` is not less than the number of samples
     ///
     /// # Performance
     ///
-    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PARALLEL_THRESHOLD` (2000).
+    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PARALLEL_THRESHOLD` (2000)
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -280,8 +278,7 @@ impl TSNE {
                 FINAL_MOMENTUM
             };
 
-            // Apply momentum SGD update to the embedding:
-            // y_incs ← momentum · y_incs − learning_rate · grad, then y ← y + y_incs.
+            // Momentum SGD update: y_incs = momentum*y_incs - learning_rate*grad, then y += y_incs
             Zip::from(&mut y_incs).and(&grad).for_each(|inc, &g| {
                 *inc = momentum * *inc - self.learning_rate * g;
             });
@@ -309,14 +306,12 @@ impl TSNE {
     where
         S: Data<Elem = f64>,
     {
-        // Shared shape/finiteness checks: non-empty, at least one feature, all finite,
-        // and the common minimum-sample guard.
+        // Shared shape/finiteness checks plus the common minimum-sample guard
         super::validation::validate_fit_matrix(x)?;
         super::validation::check_min_samples(x, 2, "t-SNE")?;
 
-        // The perplexity bound is t-SNE-specific and stays here.
+        // The perplexity bound is t-SNE-specific and stays here
         if self.perplexity >= x.nrows() as f64 {
-            // Perplexity must be less than the number of samples
             return Err(Error::invalid_parameter(
                 "perplexity",
                 format!(
@@ -350,8 +345,8 @@ impl TSNE {
 
         let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
         if parallel {
-            // Fill every row in parallel, writing directly into the matrix. The diagonal
-            // evaluates to exactly 0.0, matching the symmetric sequential path below.
+            // Fill every row in parallel; the diagonal evaluates to exactly 0.0, matching the
+            // symmetric sequential path below
             Zip::from(distances.outer_iter_mut())
                 .and(x.outer_iter())
                 .par_for_each(|mut out_row, row_i| {
@@ -363,7 +358,7 @@ impl TSNE {
             for i in 0..n_samples {
                 let row_i = x.row(i);
                 for j in (i + 1)..n_samples {
-                    // Exploit symmetry: compute each pair once.
+                    // Exploit symmetry: compute each pair once
                     let dist = squared_euclidean_distance_row(&row_i, &x.row(j));
                     distances[[i, j]] = dist;
                     distances[[j, i]] = dist;
@@ -425,8 +420,8 @@ impl TSNE {
         let mut num = Array2::<f64>::zeros((n_samples, n_samples));
 
         if parallel {
-            // Fill each row in parallel. The diagonal stays 0 (self-affinity is excluded),
-            // so — unlike the distance matrix — the `i == j` term must be skipped explicitly.
+            // Fill each row in parallel; the diagonal stays 0 (self-affinity excluded), so the
+            // `i == j` term must be skipped explicitly, unlike in the distance matrix
             num.outer_iter_mut()
                 .into_par_iter()
                 .enumerate()
@@ -452,7 +447,7 @@ impl TSNE {
             }
         }
 
-        // The diagonal is zero in both paths, so this sums only off-diagonal affinities.
+        // The diagonal is zero in both paths, so this sums only off-diagonal affinities
         let sum_num = num.sum();
         (num, sum_num)
     }
@@ -469,8 +464,8 @@ impl TSNE {
         let n_components = y.ncols();
         let mut grad = Array2::<f64>::zeros((n_samples, n_components));
 
-        // Fills gradient row `i` in place from the attractive/repulsive forces between
-        // point i and every other point. The t-SNE factor of 4 is folded into `mult`.
+        // Fills gradient row `i` from the attractive/repulsive forces between point i and every
+        // other point; the t-SNE factor of 4 is folded into `mult`
         let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
             let y_i = y.row(i);
             for j in 0..n_samples {
@@ -558,16 +553,8 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
 
-    /// `binary_search_sigma` on a hand-built distance vector whose first entry is the
-    /// self/zero distance.
-    ///
-    /// Distances = [0.0, 1.0, 1.0, 4.0, 9.0, 16.0] with target perplexity 2.0.
-    /// The solver calibrates sigma so the conditional distribution P(j|i) achieves the
-    /// target perplexity. Independent of the exact sigma found, the contract is:
-    ///   * P sums to 1 (it is normalized each iteration),
-    ///   * the achieved perplexity exp(-Σ p ln p) is within the solver's tolerance of
-    ///     the target (the loop breaks once |perplexity - target| < 1e-5),
-    ///   * the self/zero-distance entry maps to exactly p = 0 (the `d == 0.0` branch).
+    /// `binary_search_sigma` returns a normalized P that hits the target perplexity, with the
+    /// zero-distance entry mapped to exactly 0
     #[test]
     fn binary_search_sigma_distribution_and_perplexity() {
         let distances = array![0.0_f64, 1.0, 1.0, 4.0, 9.0, 16.0];
@@ -575,15 +562,14 @@ mod tests {
 
         let (p, _sigma) = binary_search_sigma(&distances, target_perplexity);
 
-        // P is a probability distribution: sums to 1.
+        // P is a probability distribution: sums to 1
         assert_abs_diff_eq!(p.sum(), 1.0_f64, epsilon = 1e-9);
 
-        // Self / zero-distance entry must be exactly 0 (the `d == 0.0` branch).
+        // Self / zero-distance entry must be exactly 0 (the `d == 0.0` branch)
         assert_abs_diff_eq!(p[0], 0.0_f64, epsilon = 1e-12);
 
-        // Achieved perplexity = exp(-Σ p ln p) (entropy uses the same >1e-10 guard as the
-        // solver) must be within tolerance of the target. The loop exits on |diff| < 1e-5;
-        // allow a slightly looser bound for accumulated float error.
+        // Achieved perplexity = exp(-sum p ln p) must be within tolerance of the target
+        // (looser than the solver's 1e-5 exit bound to absorb accumulated float error)
         let h: f64 = p
             .iter()
             .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })
@@ -591,7 +577,7 @@ mod tests {
         let achieved_perplexity = h.exp();
         assert_abs_diff_eq!(achieved_perplexity, target_perplexity, epsilon = 1e-4);
 
-        // All probabilities are non-negative.
+        // All probabilities are non-negative
         for &v in p.iter() {
             assert!(v >= 0.0, "probability must be non-negative, got {v}");
         }

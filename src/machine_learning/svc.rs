@@ -1,3 +1,8 @@
+//! Support Vector Classifier (SVC)
+//!
+//! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
+//! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`]
+
 use super::parallel::{map_collect, try_map_collect};
 use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 pub use crate::KernelType;
@@ -11,29 +16,17 @@ use rayon::prelude::{
     ParallelIterator,
 };
 
-/// Threshold for using parallel computation in SVC operations.
-/// When the number of samples is below this threshold, sequential computation is used.
-/// This avoids the overhead of thread spawning for small datasets.
+/// Sample-count threshold for switching SVC operations to parallel computation
+///
+/// Below this threshold, sequential computation is used to avoid thread-spawn overhead
 const SVC_PARALLEL_THRESHOLD: usize = 100;
 
 /// Support Vector Machine Classifier
 ///
-/// Support Vector Machines (SVM) are a set of supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm.
-///
-/// # Fields
-///
-/// - `kernel` - Kernel function type that transforms input data to higher dimensions
-/// - `regularization_param` - Regularization parameter C, controls the trade-off between maximizing the margin and minimizing the classification error
-/// - `alphas` - Lagrange multipliers for the dual optimization problem
-/// - `support_vectors` - Training samples that define the decision boundary
-/// - `support_vector_labels` - Class labels corresponding to the support vectors
-/// - `bias` - Intercept term in the decision function
-/// - `tol` - Tolerance for stopping criterion
-/// - `max_iter` - Maximum number of iterations for the optimization algorithm
-/// - `eps` - Small value for numerical stability in calculations
-/// - `random_state` - Optional seed for the SMO working-set selection, enabling reproducible training
+/// Support Vector Machines (SVM) are supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::svc::{SVC, KernelType};
 /// use ndarray::{Array2, Array1};
@@ -61,16 +54,27 @@ const SVC_PARALLEL_THRESHOLD: usize = 100;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SVC {
+    /// Kernel function type that transforms input data to higher dimensions
     kernel: KernelType,
+    /// Regularization parameter C, trading off margin width against classification error
     regularization_param: f64,
+    /// Lagrange multipliers for the dual optimization problem
     alphas: Option<Array1<f64>>,
+    /// Training samples that define the decision boundary
     support_vectors: Option<Array2<f64>>,
+    /// Class labels corresponding to the support vectors
     support_vector_labels: Option<Array1<f64>>,
+    /// Intercept term in the decision function
     bias: Option<f64>,
+    /// Tolerance for the stopping criterion
     tol: f64,
+    /// Maximum number of iterations for the optimization algorithm
     max_iter: usize,
+    /// Small value for numerical stability in calculations
     eps: f64,
+    /// Number of SMO iterations actually performed during the last fit
     n_iter: Option<usize>,
+    /// Optional seed for the SMO working-set selection, enabling reproducible training
     random_state: Option<u64>,
 }
 
@@ -135,10 +139,7 @@ impl SVC {
             ));
         }
 
-        // Validate tolerance
         validate_tolerance(tol)?;
-
-        // Validate maximum iterations
         validate_max_iterations(max_iter)?;
 
         Ok(SVC {
@@ -177,11 +178,11 @@ impl SVC {
     ///
     /// # Parameters
     ///
-    /// * `x` - Input data matrix where each row is a sample
+    /// - `x` - Input data matrix where each row is a sample
     ///
     /// # Returns
     ///
-    /// * `Array2<f64>` - The computed kernel matrix
+    /// - `Array2<f64>` - The computed kernel matrix
     fn compute_kernel_matrix<S>(&self, x: &ArrayBase<S, Ix2>) -> Array2<f64>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -189,7 +190,7 @@ impl SVC {
         let n_samples = x.nrows();
         let mut kernel_matrix = Array2::<f64>::zeros((n_samples, n_samples));
 
-        // Generate all (i,j) pairs where i <= j to compute only upper triangle + diagonal
+        // (i, j) pairs with i <= j, covering only the upper triangle plus diagonal
         let pairs: Vec<(usize, usize)> = (0..n_samples)
             .flat_map(|i| (i..n_samples).map(move |j| (i, j)))
             .collect();
@@ -213,18 +214,18 @@ impl SVC {
                 .collect()
         };
 
-        // Fill the matrix (including symmetric values)
+        // Fill the matrix, mirroring across the diagonal
         for ((i, j), val) in kernel_values {
             kernel_matrix[[i, j]] = val;
             if i != j {
-                kernel_matrix[[j, i]] = val; // Symmetric
+                kernel_matrix[[j, i]] = val;
             }
         }
 
         kernel_matrix
     }
 
-    /// Helper function to compute decision value for a single sample
+    /// Computes the decision value for a single sample
     ///
     /// # Parameters
     ///
@@ -237,7 +238,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `f64` - The computed decision value
+    /// - `f64` - The computed decision value
     fn compute_decision_value<F>(
         x_row: ArrayView1<f64>,
         support_vectors: &Array2<f64>,
@@ -260,7 +261,7 @@ impl SVC {
 
     /// Fits the SVC model to the training data
     ///
-    /// Uses the Sequential Minimal Optimization (SMO) algorithm to find the optimal hyperplane.
+    /// Uses the Sequential Minimal Optimization (SMO) algorithm to find the optimal hyperplane
     ///
     /// # Parameters
     ///
@@ -280,7 +281,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is automatically enabled for various internal operations (kernel matrix calculation, error cache updates, etc.) when the number of samples exceeds 100.
+    /// Parallel computation is automatically enabled for various internal operations (kernel matrix calculation, error cache updates, etc.) when the number of samples exceeds 100
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -289,13 +290,12 @@ impl SVC {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Use preliminary_check for basic input validation
+        // Basic input validation
         preliminary_check(x, Some(y))?;
 
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
-        // Validate labels (SVC-specific requirement). This is a cheap O(n) scan,
-        // so it runs sequentially without cloning the label vector.
+        // Validate labels (SVC-specific): cheap O(n) scan, kept sequential to avoid cloning
         if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
             return Err(Error::invalid_input(
                 "All labels must be either 1.0 or -1.0",
@@ -306,10 +306,8 @@ impl SVC {
         let mut alphas = Array1::<f64>::zeros(n_samples);
         let mut b = 0.0;
 
-        // Compute kernel matrix with error handling
         let kernel_matrix = self.compute_kernel_matrix(x);
 
-        // Validate kernel matrix
         if kernel_matrix.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("kernel matrix"));
         }
@@ -320,16 +318,15 @@ impl SVC {
         });
         let mut error_cache = Array1::from(error_cache);
 
-        // SMO main loop with improved convergence tracking
+        // SMO main loop
         let mut num_changed_alphas;
         let mut examine_all = true;
         let mut iteration_count = 0;
 
-        // RNG for SMO working-set selection. Seeding it from `random_state` makes
-        // training fully reproducible; otherwise fall back to a non-deterministic seed.
+        // RNG for SMO working-set selection; seeding from `random_state` makes training reproducible
         let mut rng = crate::random::make_rng(self.random_state);
 
-        // Create progress bar for SMO iterations
+        // Progress bar for SMO iterations
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -374,7 +371,6 @@ impl SVC {
                 );
             }
 
-            // Update progress bar with current status
             #[cfg(feature = "show_progress")]
             progress_bar.set_message(format!(
                 "Alpha changes: {} | Examine: {}",
@@ -382,20 +378,18 @@ impl SVC {
                 if examine_all { "All" } else { "Non-bound" }
             ));
 
-            // Update examination strategy
+            // Alternate between examining all examples and only the non-bound ones
             if examine_all {
                 examine_all = false;
             } else if num_changed_alphas == 0 {
                 examine_all = true;
             }
 
-            // Early termination check
             if !examine_all && num_changed_alphas == 0 {
                 break;
             }
         }
 
-        // Finish progress bar with convergence status
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!("Converged at iteration {}", iteration_count));
 
@@ -415,7 +409,6 @@ impl SVC {
             ));
         }
 
-        // Validate bias term
         if !b.is_finite() {
             return Err(Error::non_finite("bias term"));
         }
@@ -425,14 +418,13 @@ impl SVC {
         let mut support_vector_labels = Array1::<f64>::zeros(n_support_vectors);
         let mut support_vector_alphas = Array1::<f64>::zeros(n_support_vectors);
 
-        // Efficiently copy support vector data
+        // Copy support vector data
         for (i, &idx) in support_indices.iter().enumerate() {
             support_vectors.row_mut(i).assign(&x.row(idx));
             support_vector_labels[i] = y[idx];
             support_vector_alphas[i] = alphas[idx];
         }
 
-        // Final validation of extracted values
         if support_vector_alphas.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("support vector alphas"));
         }
@@ -466,12 +458,12 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is used for batch prediction when the number of samples exceeds 100.
+    /// Parallel computation is used for batch prediction when the number of samples exceeds 100
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Check model fitting status
+        // Ensure the model has been fitted
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
             &self.support_vector_labels,
@@ -487,7 +479,6 @@ impl SVC {
 
         let n_features = x.ncols();
 
-        // Check feature dimension match
         if n_features != support_vectors.ncols() {
             return Err(Error::dimension_mismatch(
                 support_vectors.ncols(),
@@ -497,7 +488,6 @@ impl SVC {
 
         let n_samples = x.nrows();
 
-        // Compute predictions with improved error handling
         let compute_prediction = |i: usize| {
             let decision_value = Self::compute_decision_value(
                 x.row(i),
@@ -508,7 +498,6 @@ impl SVC {
                 |x1, x2| self.kernel.compute(x1, x2),
             );
 
-            // Handle numerical issues more robustly
             if !decision_value.is_finite() {
                 Err(Error::non_finite("decision function during prediction"))
             } else {
@@ -539,12 +528,12 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is used when the number of samples exceeds 100.
+    /// Parallel computation is used when the number of samples exceeds 100
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Check model fitting status
+        // Ensure the model has been fitted
         let (support_vectors, support_vector_labels, alphas, bias) = match (
             &self.support_vectors,
             &self.support_vector_labels,
@@ -560,7 +549,6 @@ impl SVC {
 
         let n_features = x.ncols();
 
-        // Check feature dimension match
         if n_features != support_vectors.ncols() {
             return Err(Error::dimension_mismatch(
                 support_vectors.ncols(),
@@ -572,7 +560,7 @@ impl SVC {
 
         let mut decision_values = Array1::<f64>::zeros(n_samples);
 
-        // Computation on each element of decision_values
+        // Fill each element of decision_values
         let compute_fn = |(i, mut val): (usize, ArrayViewMut0<f64>)| {
             let decision_val = Self::compute_decision_value(
                 x.row(i),
@@ -615,9 +603,8 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `usize` - Number of alpha values changed (0 or 1)
-    // SMO threads the full optimization state (alphas, kernel matrix, bias, error
-    // cache, RNG) through this routine; bundling it would obscure the algorithm.
+    /// - `usize` - Number of alpha values changed (0 or 1)
+    // SMO threads the full optimization state (alphas, kernel, bias, error cache, RNG); bundling it would obscure the algorithm
     #[allow(clippy::too_many_arguments)]
     fn examine_example<S>(
         &self,
@@ -640,14 +627,13 @@ impl SVC {
         // Check KKT conditions
         if (r2 < -self.tol && alpha2 < self.regularization_param) || (r2 > self.tol && alpha2 > 0.0)
         {
-            // Find second alpha
-            // First try the one that maximally violates KKT conditions
+            // First try the second alpha that maximally violates the KKT conditions
             let mut i1 = self.select_second_alpha(i2, e2, alphas, error_cache);
             if i1 != i2 && self.take_step(i1, i2, alphas, kernel_matrix, y, b, error_cache) {
                 return 1;
             }
 
-            // Try non-bound alphas randomly
+            // Try non-bound alphas, starting from a random offset
             let n_samples = alphas.len();
             let mut start = rng.random_range(0..n_samples);
 
@@ -663,7 +649,7 @@ impl SVC {
                 start = (start + 1) % n_samples;
             }
 
-            // Try all alphas randomly
+            // Try all alphas, starting from a random offset
             start = rng.random_range(0..n_samples);
             for _ in 0..n_samples {
                 i1 = start;
@@ -688,7 +674,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `usize` - Index of the selected second alpha
+    /// - `usize` - Index of the selected second alpha
     fn select_second_alpha(
         &self,
         i2: usize,
@@ -741,9 +727,8 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `bool` - `true` if the alpha values were changed, `false` otherwise
-    // SMO threads the full optimization state (alphas, kernel matrix, bias, error
-    // cache) through this routine; bundling it would obscure the algorithm.
+    /// - `bool` - `true` if the alpha values were changed, `false` otherwise
+    // SMO threads the full optimization state (alphas, kernel, bias, error cache); bundling it would obscure the algorithm
     #[allow(clippy::too_many_arguments)]
     fn take_step<S>(
         &self,
@@ -770,7 +755,7 @@ impl SVC {
         let e2 = error_cache[i2];
         let s = y1 * y2;
 
-        // Calculate alpha boundaries
+        // Compute the lower and upper bounds for alpha2
         let (l, h) = if y1 != y2 {
             (
                 0.0f64.max(alpha2_old - alpha1_old),
@@ -788,26 +773,24 @@ impl SVC {
             return false;
         }
 
-        // Calculate kernel values
         let k11 = kernel_matrix[[i1, i1]];
         let k12 = kernel_matrix[[i1, i2]];
         let k22 = kernel_matrix[[i2, i2]];
 
-        // Calculate eta
+        // Second derivative of the objective along the constraint line
         let eta = k11 + k22 - 2.0 * k12;
 
         let mut alpha2_new;
         if eta > 0.0 {
-            // Standard case
+            // Standard case: unconstrained optimum, then clip to [l, h]
             alpha2_new = alpha2_old + y2 * (e1 - e2) / eta;
-            // Clip to boundaries
             if alpha2_new < l {
                 alpha2_new = l;
             } else if alpha2_new > h {
                 alpha2_new = h;
             }
         } else {
-            // For eta <= 0 case, need to calculate objective function values at endpoints
+            // For eta <= 0, evaluate the objective at both endpoints and pick the larger
             let f1 = y1 * (e1 + *b) - alpha1_old * k11 - s * alpha2_old * k12;
             let f2 = y2 * (e2 + *b) - s * alpha1_old * k12 - alpha2_old * k22;
             let l1 = alpha1_old + s * (alpha2_old - l);
@@ -826,23 +809,15 @@ impl SVC {
             }
         }
 
-        // Check for significant change
+        // Skip when the change in alpha2 is negligible
         if (alpha2_new - alpha2_old).abs() < self.eps * (alpha2_new + alpha2_old + self.eps) {
             return false;
         }
 
-        // Calculate new value for alpha1
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
-        // Update bias.
-        //
-        // The decision function is `u(x) = Σ αⱼ yⱼ K(xⱼ, x) + b` (see `compute_error` /
-        // `compute_decision_value`, both of which add `+ b`). Requiring a now-unbound support
-        // vector to sit on the margin, `u(x₁) = y₁`, and substituting `Eᵢ = u_old(xᵢ) - yᵢ`, gives
-        //   b_new = b_old − Eᵢ − y₁·Δα₁·K(x₁,xᵢ) − y₂·Δα₂·K(x₂,xᵢ).
-        // (Platt's textbook formula has the opposite signs because it uses the `u = Σ − b`
-        // convention; using it here drove the bias the wrong way, so the classifier only worked
-        // when the optimal bias happened to be ≈ 0.)
+        // Update bias under the u = sum + b convention (compute_error / compute_decision_value add + b)
+        // WARNING: signs are flipped vs Platt's u = sum - b formula; using his drives the bias the wrong way
         let b_old = *b;
         let b1 =
             *b - e1 - y1 * (alpha1_new - alpha1_old) * k11 - y2 * (alpha2_new - alpha2_old) * k12;
@@ -861,10 +836,8 @@ impl SVC {
         alphas[i1] = alpha1_new;
         alphas[i2] = alpha2_new;
 
-        // Incrementally update the error cache in O(n). Only the two changed alphas
-        // and the bias shift affect each cached error E_i = f(x_i) - y_i, so there is
-        // no need to recompute the full decision function for every sample (which would
-        // make each SMO step O(n^2)). Uses kernel symmetry: K[i1, i] == K[i, i1].
+        // Incremental O(n) error-cache update: only the two changed alphas and the bias shift affect
+        // each E_i, avoiding an O(n^2) full recompute per SMO step; uses kernel symmetry K[i1, i] == K[i, i1]
         let coeff1 = y1 * (alpha1_new - alpha1_old);
         let coeff2 = y2 * (alpha2_new - alpha2_old);
         let delta_b = *b - b_old;
@@ -885,10 +858,10 @@ impl SVC {
         true
     }
 
-    /// Computes the prediction error `E_i = f(x_i) - y_i` for a training example.
+    /// Computes the prediction error `E_i = f(x_i) - y_i` for a training example
     ///
-    /// This is the quantity cached in the SMO error cache (not the raw decision
-    /// function `f(x_i)`, which omits the `- y_i` term).
+    /// This is the quantity cached in the SMO error cache, not the raw decision
+    /// function `f(x_i)`, which omits the `- y_i` term
     ///
     /// # Parameters
     ///
@@ -900,7 +873,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// * `f64` - The prediction error for example `i`
+    /// - `f64` - The prediction error for example `i`
     fn compute_error<S>(
         &self,
         i: usize,
@@ -914,16 +887,16 @@ impl SVC {
     {
         let n_samples = alphas.len();
 
-        // Compute the decision-function sum over non-zero alphas
+        // Decision-function sum over the non-zero alphas
         let sum: f64 = if n_samples >= SVC_PARALLEL_THRESHOLD {
             (0..n_samples)
                 .into_par_iter()
-                .filter(|&j| alphas[j] > 0.0) // Only consider non-zero alphas
+                .filter(|&j| alphas[j] > 0.0)
                 .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
                 .sum()
         } else {
             (0..n_samples)
-                .filter(|&j| alphas[j] > 0.0) // Only consider non-zero alphas
+                .filter(|&j| alphas[j] > 0.0)
                 .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
                 .sum()
         };
@@ -931,9 +904,9 @@ impl SVC {
         sum - y[i] + b
     }
 
-    /// Fits the model to the training data and then predicts labels for the same data.
+    /// Fits the model to the training data and then predicts labels for the same data
     ///
-    /// A convenience method that sequentially executes `fit` and then `predict`.
+    /// A convenience method that runs `fit` followed by `predict`
     ///
     /// # Parameters
     ///
@@ -967,22 +940,7 @@ mod tests {
     use super::*;
     use crate::error::Error;
 
-    /// predict() must return Error::NonFinite (svc.rs:512-514) when a fitted, fully
-    /// FINITE model produces a non-finite decision value from FINITE input.
-    ///
-    /// This branch is unreachable through the normal fit->predict flow (a model fitted
-    /// from finite data has finite support vectors/alphas/bias, and `preliminary_check`
-    /// only rejects non-finite *input*, not large-magnitude input), so the malformed-but-
-    /// legal state is built directly via the private fields in this same-module test.
-    ///
-    /// Trigger: a high-degree polynomial kernel. The decision value over the single
-    /// support vector [1,1] for the finite test point [40,40] is
-    ///   alpha*label*(gamma*(x·sv)+coef0)^degree + bias
-    ///     = 1.0*1.0*(1*80 + 1)^400 + 0.0 = 81^400.
-    /// 81^400 overflows f64 (log10(81)*400 ≈ 763 >> 308.25) to +inf, so the decision
-    /// value is non-finite and predict() must surface Error::NonFinite. Everything fed in
-    /// (kernel params, support vector, alpha, label, bias, input) is finite — the non-
-    /// finiteness is produced purely by the (finite-input) kernel evaluation.
+    /// predict() returns Error::NonFinite when finite input yields a non-finite decision value
     #[test]
     fn predict_non_finite_decision_value_returns_non_finite() {
         let svc = SVC {
@@ -1003,7 +961,7 @@ mod tests {
             random_state: None,
         };
 
-        // Finite input whose Poly-kernel value against the support vector overflows to +inf.
+        // Finite input whose Poly-kernel value against the support vector overflows to +inf
         let x = Array2::from_shape_vec((1, 2), vec![40.0, 40.0]).unwrap();
         let result = svc.predict(&x);
         assert!(

@@ -1,3 +1,9 @@
+//! Kernel Principal Component Analysis (Kernel PCA)
+//!
+//! Provides the `KernelPCA` estimator for nonlinear dimensionality reduction, the
+//! `EigenSolver` strategy enum, and the supporting kernel, centering, and projection
+//! routines
+
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2, Zip};
@@ -6,42 +12,34 @@ use rayon::prelude::{
 };
 use std::cmp::Ordering;
 
-// Re-exported from the canonical `crate::types` home (not the crate-root back-compat
-// alias) so the source of `KernelType` is unambiguous.
+// Re-exported from the canonical `crate::types` home so the source of `KernelType` is unambiguous
 pub use crate::types::KernelType;
 
-/// Threshold for using parallel computation in Kernel PCA.
-/// When the number of samples is below this threshold, sequential computation is used.
+/// Sample-count threshold at or above which Kernel PCA switches to parallel computation
 const KERNEL_PCA_PARALLEL_THRESHOLD: usize = 200;
 
-/// Eigen solver options for Kernel PCA.
-///
-/// Selects the strategy used to compute eigenvalues and eigenvectors of the
-/// centered kernel matrix.
-///
-/// # Variants
-///
-/// - `Dense` - Exact dense symmetric eigendecomposition via nalgebra; best for small
-///   to mid-sized kernel matrices
-/// - `Lanczos` - Krylov-subspace iterative solver (the pure-Rust counterpart of the
-///   symmetric solver behind ARPACK); fast and accurate for a few leading components
-///   of a large kernel matrix
-/// - `PowerIteration` - Power iteration with Hotelling deflation, extracting one
-///   component at a time; simplest iterative option
+/// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum EigenSolver {
+    /// Exact dense symmetric eigendecomposition via nalgebra; best for small to
+    /// mid-sized kernel matrices
     Dense,
+    /// Krylov-subspace iterative solver (the pure-Rust counterpart of the symmetric
+    /// solver behind ARPACK); fast and accurate for a few leading components of a
+    /// large kernel matrix
     Lanczos,
+    /// Power iteration with Hotelling deflation, extracting one component at a time;
+    /// simplest iterative option
     PowerIteration,
 }
 
 impl EigenSolver {
     /// Computes the top `n_components` eigenpairs of the symmetric centered kernel
-    /// matrix, returning the eigenvalues alongside the eigenvectors stored as columns
-    /// (the layout the projection step expects).
+    /// matrix, returning eigenvalues alongside eigenvectors stored as columns (the
+    /// layout the projection step expects)
     ///
-    /// This is the single dispatch point over the solver strategies; the eigenvalue
-    /// positivity check that Kernel PCA additionally requires is applied by the caller.
+    /// Single dispatch point over the solver strategies; the eigenvalue positivity
+    /// check Kernel PCA additionally requires is applied by the caller
     fn decompose(
         &self,
         kernel_centered: &Array2<f64>,
@@ -68,7 +66,7 @@ impl EigenSolver {
         }
     }
 
-    /// Exact path: dense symmetric eigendecomposition, then take the leading components.
+    /// Exact path: dense symmetric eigendecomposition, then take the leading components
     fn dense(
         kernel_centered: &Array2<f64>,
         n_components: usize,
@@ -80,7 +78,7 @@ impl EigenSolver {
         let matrix = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, kernel_slice);
         let eigen = nalgebra::linalg::SymmetricEigen::new(matrix);
 
-        // Sort eigenpairs by descending eigenvalue.
+        // Sort eigenpairs by descending eigenvalue
         let mut pairs: Vec<(f64, usize)> = eigen
             .eigenvalues
             .iter()
@@ -103,7 +101,7 @@ impl EigenSolver {
     }
 
     /// Iterative path shared by Lanczos and power iteration: arrange the returned
-    /// eigenvectors as the columns of an `(n_samples × n_components)` matrix.
+    /// eigenvectors as the columns of an `(n_samples x n_components)` matrix
     fn columns_from_pairs(
         pairs: (Vec<f64>, Vec<Array1<f64>>),
         n_samples: usize,
@@ -123,27 +121,13 @@ impl EigenSolver {
     }
 }
 
-/// Kernel Principal Component Analysis (Kernel PCA).
+/// Kernel Principal Component Analysis (Kernel PCA)
 ///
-/// Projects data into a lower-dimensional space using a nonlinear kernel.
-///
-/// Stores the fitted training data and kernel statistics needed to transform
-/// new samples.
-///
-/// # Fields
-///
-/// - `kernel` - Kernel function configuration
-/// - `n_components` - Number of components to keep
-/// - `eigen_solver` - Eigen solver strategy
-/// - `x_fit` - Training data used for fitting
-/// - `eigenvalues` - Eigenvalues of the centered kernel matrix
-/// - `eigenvectors` - Eigenvectors of the centered kernel matrix
-/// - `kernel_row_means` - Per-row means of the training kernel matrix
-/// - `kernel_all_mean` - Overall mean of the training kernel matrix
-/// - `n_samples` - Number of samples seen during fitting
-/// - `n_features` - Number of features seen during fitting
+/// Projects data into a lower-dimensional space using a nonlinear kernel. Stores the
+/// fitted training data and kernel statistics needed to transform new samples
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA, KernelType};
 /// use ndarray::array;
@@ -156,20 +140,30 @@ impl EigenSolver {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelPCA {
+    /// Kernel function configuration
     kernel: KernelType,
+    /// Number of components to keep
     n_components: usize,
+    /// Eigen solver strategy
     eigen_solver: EigenSolver,
+    /// Training data used for fitting
     x_fit: Option<Array2<f64>>,
+    /// Eigenvalues of the centered kernel matrix
     eigenvalues: Option<Array1<f64>>,
+    /// Eigenvectors of the centered kernel matrix
     eigenvectors: Option<Array2<f64>>,
+    /// Per-row means of the training kernel matrix
     kernel_row_means: Option<Array1<f64>>,
+    /// Overall mean of the training kernel matrix
     kernel_all_mean: Option<f64>,
+    /// Number of samples seen during fitting
     n_samples: Option<usize>,
+    /// Number of features seen during fitting
     n_features: Option<usize>,
 }
 
 impl Default for KernelPCA {
-    /// Creates a default KernelPCA instance.
+    /// Creates a default KernelPCA instance
     ///
     /// # Default Values
     ///
@@ -183,9 +177,9 @@ impl Default for KernelPCA {
 }
 
 impl KernelPCA {
-    /// Creates a new KernelPCA instance with validated hyperparameters.
+    /// Creates a new KernelPCA instance with validated hyperparameters
     ///
-    /// Validates kernel configuration and component count before initialization.
+    /// Validates kernel configuration and component count before initialization
     ///
     /// # Parameters
     ///
@@ -236,13 +230,12 @@ impl KernelPCA {
     get_field!(get_n_features, n_features, Option<usize>);
     get_field_as_ref!(get_eigenvalues, eigenvalues, Option<&Array1<f64>>);
     get_field_as_ref!(get_eigenvectors, eigenvectors, Option<&Array2<f64>>);
-    // `kernel_row_means` / `kernel_all_mean` are internal centering statistics used only
-    // to center the cross-kernel matrix during `transform`; they are intentionally not
-    // exposed via getters.
+    // `kernel_row_means` / `kernel_all_mean` are internal centering statistics for
+    // `transform` and are intentionally not exposed via getters
 
-    /// Fits the KernelPCA model to the input data.
+    /// Fits the KernelPCA model to the input data
     ///
-    /// Computes the kernel matrix, centers it, and extracts eigen components.
+    /// Computes the kernel matrix, centers it, and extracts eigen components
     ///
     /// # Parameters
     ///
@@ -261,7 +254,7 @@ impl KernelPCA {
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least
-    /// `KERNEL_PCA_PARALLEL_THRESHOLD` (200).
+    /// `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -269,10 +262,10 @@ impl KernelPCA {
         self.fit_internal(x)
     }
 
-    /// Transforms data using the fitted KernelPCA model.
+    /// Transforms data using the fitted KernelPCA model
     ///
-    /// Centers the cross-kernel matrix against the training statistics and
-    /// projects it into component space.
+    /// Centers the cross-kernel matrix against the training statistics and projects
+    /// it into component space
     ///
     /// # Parameters
     ///
@@ -298,9 +291,9 @@ impl KernelPCA {
         self.transform_internal(x)
     }
 
-    /// Fits the model to the data and then transforms it.
+    /// Fits the model to the data and then transforms it
     ///
-    /// Computes eigen components and returns the projected data in one step.
+    /// Computes eigen components and returns the projected data in one step
     ///
     /// # Parameters
     ///
@@ -343,7 +336,7 @@ impl KernelPCA {
         Ok(transformed)
     }
 
-    /// Fits the model and updates internal state without exposing progress logic
+    /// Fits the model and updates internal state without progress reporting
     fn fit_internal<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -399,8 +392,7 @@ impl KernelPCA {
             progress_bar.set_message("Computing eigen decomposition");
         }
 
-        // Extract eigenvalues and eigenvectors for projection, then apply Kernel PCA's
-        // positivity requirement on the resulting eigenvalues.
+        // Extract eigenpairs, then enforce Kernel PCA's eigenvalue positivity requirement
         let (eigenvalues, eigenvectors) = self
             .eigen_solver
             .decompose(&kernel_matrix, self.n_components)?;
@@ -430,7 +422,7 @@ impl KernelPCA {
         Ok(self)
     }
 
-    /// Transforms input data using the fitted model state
+    /// Transforms input data using the fitted model state without progress reporting
     fn transform_internal<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -530,7 +522,7 @@ impl KernelPCA {
         Ok(projected)
     }
 
-    /// Validates kernel hyperparameters for correctness
+    /// Validates kernel hyperparameters for finiteness and valid ranges
     fn validate_kernel(kernel: &KernelType) -> Result<(), Error> {
         match *kernel {
             KernelType::Linear => Ok(()),
@@ -611,11 +603,11 @@ impl KernelPCA {
         Ok(())
     }
 
-    /// Computes the kernel matrix `K[i, j] = kernel(x_i, y_j)` directly into an
-    /// `Array2`, in parallel over rows when requested.
+    /// Computes the kernel matrix `K[i, j] = kernel(x_i, y_j)` into an `Array2`, in
+    /// parallel over rows when requested
     ///
     /// Used both for the training Gram matrix (called with `y == x`) and for the
-    /// cross-kernel matrix against the fitted data during `transform`.
+    /// cross-kernel matrix against the fitted data during `transform`
     fn compute_kernel_matrix<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -644,7 +636,7 @@ impl KernelPCA {
         matrix
     }
 
-    /// Computes row means and overall mean for a kernel matrix
+    /// Computes per-row means and the overall mean of a kernel matrix
     fn kernel_means(
         kernel_matrix: &Array2<f64>,
         use_parallel: bool,
@@ -787,8 +779,8 @@ impl KernelPCA {
         Ok(scales)
     }
 
-    /// Projects the centered kernel matrix onto the eigenvectors (scaled by the
-    /// inverse square root of the eigenvalues), one output row per thread.
+    /// Projects the centered kernel matrix onto the eigenvectors, scaled by the inverse
+    /// square root of the eigenvalues, in parallel over output rows
     fn project_parallel(
         kernel_centered: &Array2<f64>,
         eigenvectors: &Array2<f64>,

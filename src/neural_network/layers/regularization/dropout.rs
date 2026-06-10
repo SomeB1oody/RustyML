@@ -1,15 +1,18 @@
+//! Regularization layers (Dropout and SpatialDropout1D/2D/3D) plus the shared
+//! backward, output-shape, and masking helpers they share
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 
-/// Common backward pass implementation for all dropout layers.
+/// Common backward pass shared by all dropout layers
 ///
-/// This function implements the backward pass logic that is shared across
-/// all dropout variants (Dropout, SpatialDropout1D/2D/3D).
+/// Implements the backward logic used by every dropout variant (Dropout and
+/// SpatialDropout1D/2D/3D)
 ///
 /// # Parameters
 ///
 /// - `grad_output` - Gradient from the next layer
-/// - `mask` - The dropout mask applied during forward pass
+/// - `mask` - The dropout mask applied during the forward pass
 /// - `training` - Whether the layer is in training mode
 /// - `rate` - The dropout rate
 /// - `layer_name` - Concrete layer name, used in the "forward pass not run" error message so the
@@ -17,7 +20,11 @@ use crate::neural_network::Tensor;
 ///
 /// # Returns
 ///
-/// * `Result<Tensor, Error>` - Gradient to pass to previous layer
+/// - `Result<Tensor, Error>` - Gradient to pass to the previous layer
+///
+/// # Errors
+///
+/// Returns an error when the forward pass has not been run and no mask is available
 fn dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
@@ -26,12 +33,12 @@ fn dropout_backward(
     layer_name: &'static str,
 ) -> Result<Tensor, Error> {
     if !training || rate == 0.0 {
-        // During inference or if rate is 0, pass gradient through unchanged
+        // During inference or zero rate, pass the gradient through unchanged
         return Ok(grad_output.clone());
     }
 
     if rate == 1.0 {
-        // If dropout rate is 1.0, return zero gradients
+        // Rate of 1.0 drops everything, so the gradient is zero
         return Ok(Tensor::zeros(grad_output.raw_dim()));
     }
 
@@ -45,10 +52,10 @@ fn dropout_backward(
     }
 }
 
-/// Common output shape implementation for all dropout layers.
+/// Common output-shape formatting shared by all dropout layers
 ///
-/// This function formats the input shape into a string representation
-/// that is shared across all dropout variants.
+/// Formats the input shape into a string representation, as the output shape
+/// equals the input shape for every dropout variant
 ///
 /// # Parameters
 ///
@@ -56,7 +63,7 @@ fn dropout_backward(
 ///
 /// # Returns
 ///
-/// * `String` - Formatted output shape string
+/// - `String` - Formatted output shape string
 fn dropout_output_shape(input_shape: &[usize]) -> String {
     if !input_shape.is_empty() {
         format!(
@@ -72,21 +79,20 @@ fn dropout_output_shape(input_shape: &[usize]) -> String {
     }
 }
 
-/// Applies threshold to create binary mask with parallel or sequential computation.
+/// Thresholds a random mask into a binary mask, in parallel or sequentially
 ///
-/// This function is used by all spatial dropout layers to convert a random mask
-/// into a binary mask based on the dropout rate. For larger masks, parallel computation
-/// is used for better performance.
+/// Used by all spatial dropout layers to convert a random mask into a binary
+/// mask based on the dropout rate. Larger masks use parallel computation
 ///
 /// # Parameters
 ///
 /// - `mask_2d` - The random mask to convert to binary (modified in place)
 /// - `rate` - The dropout rate threshold
-/// - `parallel_threshold` - The threshold for using parallel computation
+/// - `parallel_threshold` - Element count at or above which parallel computation is used
 fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_threshold: usize) {
     let total_elements = mask_2d.len();
 
-    // Apply threshold to create binary mask with parallel or sequential computation
+    // Use parallel computation for large masks, sequential otherwise
     if total_elements >= parallel_threshold {
         mask_2d.par_mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
     } else {
@@ -95,8 +101,8 @@ fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_thr
 }
 
 /// Dropout layer for neural networks
-// The `Dropout` struct lives in a `dropout` submodule alongside the sibling spatial-dropout
-// modules; the repeated name is the file layout, not an accident.
+// `Dropout` lives in a `dropout` submodule beside the sibling spatial-dropout modules; the
+// repeated name is the intended file layout
 #[allow(clippy::module_inception)]
 pub mod dropout;
 /// Spatial Dropout layer for 1D data

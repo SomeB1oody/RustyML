@@ -1,3 +1,5 @@
+//! Global average pooling layer for 2D inputs
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,18 +10,14 @@ use crate::neural_network::layers::pooling::pooling_engine::{
 };
 use crate::neural_network::traits::Layer;
 
-/// Global average pooling layer for 2D inputs.
+/// Global average pooling layer for 2D inputs
 ///
-/// Computes the mean value across the height and width dimensions.
+/// Computes the mean value across the height and width dimensions
 /// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
-/// `[batch_size, channels]`.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input tensor cached during the forward pass
-///   (global average pooling only needs the shape, not the input values, in backward)
+/// `[batch_size, channels]`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -53,14 +51,16 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling2D {
+    /// Shape of the input tensor cached during the forward pass (only the shape is
+    /// needed in backward, not the input values)
     input_shape: Vec<usize>,
 }
 
 impl GlobalAveragePooling2D {
-    /// Creates a new global average pooling 2D layer.
+    /// Creates a new global average pooling 2D layer
     ///
     /// # Returns
     ///
@@ -80,21 +80,19 @@ impl Default for GlobalAveragePooling2D {
 
 impl Layer for GlobalAveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Store input shape for backpropagation (only the shape is needed)
+        // Cache only the shape; backward needs nothing else
         self.input_shape = input.shape().to_vec();
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
@@ -104,7 +102,7 @@ impl Layer for GlobalAveragePooling2D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Check that the forward pass has populated the input shape
+        // Empty shape means forward was never run
         if self.input_shape.is_empty() {
             return Err(Error::forward_pass_not_run("GlobalAveragePooling2D"));
         }

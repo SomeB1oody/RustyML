@@ -1,22 +1,21 @@
+//! Serializable weights for an LSTM layer
+
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::lstm::LSTM;
 use crate::neural_network::layers::serialize_weight::SerializableGateWeight;
 use crate::neural_network::traits::ApplyWeights;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of LSTM layer weights.
-///
-/// # Fields
-///
-/// - `input` - Weights for the input gate
-/// - `forget` - Weights for the forget gate
-/// - `cell` - Weights for the cell gate
-/// - `output` - Weights for the output gate
+/// Serializable representation of LSTM layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLSTMWeight {
+    /// Weights for the input gate
     pub input: SerializableGateWeight,
+    /// Weights for the forget gate
     pub forget: SerializableGateWeight,
+    /// Weights for the cell gate
     pub cell: SerializableGateWeight,
+    /// Weights for the output gate
     pub output: SerializableGateWeight,
 }
 

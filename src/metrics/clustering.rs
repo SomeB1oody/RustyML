@@ -1,3 +1,9 @@
+//! Clustering evaluation metrics
+//!
+//! Provides extrinsic metrics that compare a clustering against ground-truth labels (NMI, AMI, ARI,
+//! homogeneity, completeness, V-measure, Fowlkes-Mallows) and intrinsic metrics that score a
+//! clustering from the feature geometry alone (silhouette, Davies-Bouldin, Calinski-Harabasz)
+
 use ahash::AHashMap;
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
@@ -5,10 +11,10 @@ use super::validate_pair;
 use crate::math::squared_euclidean_distance_row;
 
 /// Denominator magnitude below which an AMI/ARI normaliser is treated as a degenerate (perfect)
-/// clustering and the score is defined to be `1.0`.
+/// clustering and the score is defined to be `1.0`
 const DEGENERATE_DENOM: f64 = 1e-10;
 
-/// Maps each distinct label to a dense index in `0..k` in order of first appearance.
+/// Maps each distinct label to a dense index in `0..k` in order of first appearance
 fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
     let mut index = AHashMap::new();
     for &label in labels {
@@ -19,7 +25,7 @@ fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
 }
 
 /// Builds the contingency matrix of two label assignments together with its row and column sums
-/// (the cluster sizes in `labels_true` and `labels_pred` respectively).
+/// (the cluster sizes in `labels_true` and `labels_pred` respectively)
 fn contingency_matrix(
     labels_true: &[usize],
     labels_pred: &[usize],
@@ -37,7 +43,7 @@ fn contingency_matrix(
     (matrix, row_sums, col_sums)
 }
 
-/// Computes the mutual information (in nats): `MI = Σ_ij (n_ij/n) · ln(n·n_ij / (a_i·b_j))`.
+/// Computes the mutual information (in nats): `MI = sum_ij (n_ij/n) * ln(n*n_ij / (a_i*b_j))`
 fn mutual_information(
     contingency: &Array2<usize>,
     n: usize,
@@ -57,7 +63,7 @@ fn mutual_information(
     mi
 }
 
-/// Computes the entropy (in nats) of a partition from its cluster sizes: `H = -Σ_i p_i · ln(p_i)`.
+/// Computes the entropy (in nats) of a partition from its cluster sizes: `H = -sum_i p_i * ln(p_i)`
 fn entropy_nats(counts: &[usize], n: usize) -> f64 {
     let n_f = n as f64;
     let mut h = 0.0;
@@ -70,10 +76,10 @@ fn entropy_nats(counts: &[usize], n: usize) -> f64 {
     h
 }
 
-/// Builds a table of natural log-factorials, `table[i] = ln(i!)`, for `i` in `0..=n_max`.
+/// Builds a table of natural log-factorials, `table[i] = ln(i!)`, for `i` in `0..=n_max`
 ///
 /// Computed by cumulative summation so that each log-binomial coefficient needed by the expected
-/// mutual information becomes an `O(1)` lookup rather than an `O(k)` sum.
+/// mutual information becomes an `O(1)` lookup rather than an `O(k)` sum
 fn ln_factorial_table(n_max: usize) -> Vec<f64> {
     let mut table = Vec::with_capacity(n_max + 1);
     table.push(0.0); // ln(0!) = ln(1) = 0
@@ -86,27 +92,27 @@ fn ln_factorial_table(n_max: usize) -> Vec<f64> {
 }
 
 /// Computes the expected mutual information (EMI) under the hypergeometric model of random
-/// clusterings with the given cluster sizes.
+/// clusterings with the given cluster sizes
 ///
 /// For each pair of clusters `(a_i, b_j)` the overlap `n_ij` follows a hypergeometric distribution;
-/// EMI sums `P(n_ij = k) · (k/n) · ln(n·k / (a_i·b_j))` over its support. All binomial coefficients
+/// EMI sums `P(n_ij = k) * (k/n) * ln(n*k / (a_i*b_j))` over its support. All binomial coefficients
 /// are evaluated in log space from a shared log-factorial table, so the whole computation is
-/// `O(R·C·range)` with `O(1)` inner work.
+/// `O(R*C*range)` with `O(1)` inner work
 fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize) -> f64 {
     let n_f = n as f64;
     let ln_fact = ln_factorial_table(n);
-    // log C(a, b) = ln(a!) - ln(b!) - ln((a-b)!); valid for 0 <= b <= a <= n.
+    // log C(a, b) = ln(a!) - ln(b!) - ln((a-b)!); valid for 0 <= b <= a <= n
     let log_binom = |a: usize, b: usize| ln_fact[a] - ln_fact[b] - ln_fact[a - b];
 
     let mut emi = 0.0;
     for &a_i in row_sums {
         for &b_j in col_sums {
-            // Hypergeometric support: max(0, a_i + b_j - n) <= k <= min(a_i, b_j). k = 0 adds
-            // nothing to MI, so start from 1.
+            // Hypergeometric support max(0, a_i + b_j - n) <= k <= min(a_i, b_j); k = 0 adds nothing
+            // to MI, so start from 1
             let lower = (a_i + b_j).saturating_sub(n).max(1);
             let upper = a_i.min(b_j);
 
-            // log C(n, b_j) is constant across k for this pair; hoist it out of the loop.
+            // log C(n, b_j) is constant across k for this pair; hoist it out of the loop
             let log_c_n_bj = log_binom(n, b_j);
             for k in lower..=upper {
                 // ln P(k) = log C(a_i, k) + log C(n - a_i, b_j - k) - log C(n, b_j)
@@ -119,7 +125,7 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
     emi
 }
 
-/// Collects a `usize` label array into a contiguous `Vec`, tolerating non-contiguous views.
+/// Collects a `usize` label array into a contiguous `Vec`, tolerating non-contiguous views
 fn to_label_vec<S>(labels: &ArrayBase<S, Ix1>) -> Vec<usize>
 where
     S: Data<Elem = usize>,
@@ -127,11 +133,11 @@ where
     labels.iter().copied().collect()
 }
 
-/// Calculates the Normalized Mutual Information (NMI) between two cluster assignments.
+/// Calculates the Normalized Mutual Information (NMI) between two cluster assignments
 ///
 /// NMI normalizes the mutual information by the geometric mean of the two clusterings' entropies,
 /// giving `0.0` for independent assignments and `1.0` for identical ones. If either clustering has
-/// zero entropy (a single cluster), NMI is defined as `0.0`.
+/// zero entropy (a single cluster), NMI is defined as `0.0`
 ///
 /// # Parameters
 ///
@@ -148,6 +154,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::normalized_mutual_info;
@@ -187,12 +194,12 @@ where
     }
 }
 
-/// Calculates the Adjusted Mutual Information (AMI) between two cluster assignments.
+/// Calculates the Adjusted Mutual Information (AMI) between two cluster assignments
 ///
 /// AMI corrects the mutual information for the agreement expected by chance, scoring `1.0` for
 /// identical clusterings and about `0.0` for independent ones (it can be slightly negative). When
 /// the normaliser is degenerate (e.g. both clusterings put every sample in one cluster) the score
-/// is defined as `1.0`.
+/// is defined as `1.0`
 ///
 /// # Parameters
 ///
@@ -209,6 +216,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::adjusted_mutual_info;
@@ -249,13 +257,13 @@ where
     }
 }
 
-/// Calculates the Adjusted Rand Index (ARI) between two cluster assignments.
+/// Calculates the Adjusted Rand Index (ARI) between two cluster assignments
 ///
 /// ARI is the Rand index (the fraction of sample pairs that two clusterings agree on, whether by
 /// grouping them together or apart) corrected for chance: `1.0` for identical clusterings, about
 /// `0.0` for independent ones, and possibly negative for worse-than-random agreement. When the
 /// normaliser is degenerate (e.g. fewer than two samples, or both clusterings trivial) the score
-/// is defined as `1.0`.
+/// is defined as `1.0`
 ///
 /// # Parameters
 ///
@@ -272,6 +280,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::adjusted_rand_index;
@@ -300,7 +309,7 @@ where
 
     let (contingency, row_sums, col_sums) = contingency_matrix(&labels_true, &labels_pred);
 
-    // Number of unordered pairs within a group of `size` elements: C(size, 2).
+    // Number of unordered pairs within a group of `size` elements: C(size, 2)
     let comb2 = |size: usize| {
         let size = size as f64;
         size * (size - 1.0) / 2.0
@@ -326,19 +335,19 @@ where
     }
 }
 
-/// Calculates the mean Silhouette Coefficient over all samples using Euclidean distance.
+/// Calculates the mean Silhouette Coefficient over all samples using Euclidean distance
 ///
 /// For each sample, the silhouette `s = (b - a) / max(a, b)` compares the mean intra-cluster
 /// distance `a` with the mean distance `b` to the nearest other cluster; it ranges from `-1`
 /// (likely misassigned) through `0` (on a cluster boundary) to `+1` (well clustered). Samples that
 /// are the sole member of their cluster contribute `0`. The returned score is the mean over all
-/// samples.
+/// samples
 ///
-/// This is an `O(n²·d)` computation in the number of samples `n` and features `d`.
+/// This is an `O(n^2*d)` computation in the number of samples `n` and features `d`
 ///
 /// # Parameters
 ///
-/// - `x` - Feature matrix with one sample per row (`n_samples × n_features`)
+/// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
 /// - `labels` - Cluster assignment for each sample
 ///
 /// # Returns
@@ -352,6 +361,7 @@ where
 /// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::silhouette_score;
@@ -376,7 +386,7 @@ where
     }
 
     // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in
-    // cluster c. Filled once using the symmetry of the distance metric.
+    // cluster c, filled once using the symmetry of the distance metric
     let mut dist_to_cluster = Array2::<f64>::zeros((n, k));
     for i in 0..n {
         for j in (i + 1)..n {
@@ -415,7 +425,7 @@ where
 
 /// Densifies labels to `0..k` and validates them against an `x` of `n_rows` rows for an internal
 /// clustering metric: equal length, non-empty, and `2..=n_rows - 1` distinct clusters. Returns the
-/// dense cluster index of each sample and the cluster count `k`.
+/// dense cluster index of each sample and the cluster count `k`
 fn validate_clustering_inputs(n_rows: usize, labels: &[usize]) -> (Vec<usize>, usize) {
     if n_rows != labels.len() {
         panic!(
@@ -438,7 +448,7 @@ fn validate_clustering_inputs(n_rows: usize, labels: &[usize]) -> (Vec<usize>, u
     (cluster, k)
 }
 
-/// Computes each cluster's centroid (mean of its points) and size, given dense cluster indices.
+/// Computes each cluster's centroid (mean of its points) and size, given dense cluster indices
 fn cluster_centroids<S>(
     x: &ArrayBase<S, Ix2>,
     cluster: &[usize],
@@ -462,11 +472,11 @@ where
     (centroids, sizes)
 }
 
-/// Returns `(homogeneity, completeness)` for two label assignments.
+/// Returns `(homogeneity, completeness)` for two label assignments
 ///
 /// Both reuse the mutual information and entropies already defined above: with `C` the classes
 /// (`labels_true`) and `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and
-/// completeness is `MI / H(K)`. A zero entropy (single cluster) makes its score 1.0.
+/// completeness is `MI / H(K)`. A zero entropy (single cluster) makes its score 1.0
 fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usize) -> (f64, f64) {
     let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
@@ -487,9 +497,9 @@ fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usi
 }
 
 /// Calculates the homogeneity of a clustering: the degree to which each cluster contains only
-/// members of a single ground-truth class.
+/// members of a single ground-truth class
 ///
-/// Scores range from 0.0 to 1.0, with 1.0 for perfectly homogeneous clusters.
+/// Scores range from 0.0 to 1.0, with 1.0 for perfectly homogeneous clusters
 ///
 /// # Parameters
 ///
@@ -506,6 +516,7 @@ fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usi
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::homogeneity_score;
@@ -528,10 +539,10 @@ where
 }
 
 /// Calculates the completeness of a clustering: the degree to which all members of a given
-/// ground-truth class are assigned to the same cluster.
+/// ground-truth class are assigned to the same cluster
 ///
 /// Scores range from 0.0 to 1.0, with 1.0 for perfectly complete clusters. Completeness is the
-/// dual of [`homogeneity_score`] (swapping the roles of the two labelings).
+/// dual of [`homogeneity_score`] (swapping the roles of the two labelings)
 ///
 /// # Parameters
 ///
@@ -548,6 +559,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::completeness_score;
@@ -572,10 +584,10 @@ where
     homogeneity_completeness(&to_label_vec(labels_true), &to_label_vec(labels_pred), n).1
 }
 
-/// Calculates the V-measure: the harmonic mean of [`homogeneity_score`] and [`completeness_score`].
+/// Calculates the V-measure: the harmonic mean of [`homogeneity_score`] and [`completeness_score`]
 ///
 /// V-measure is symmetric in the two labelings and equals the [`normalized_mutual_info`] computed
-/// with arithmetic-mean normalization. Scores range from 0.0 to 1.0.
+/// with arithmetic-mean normalization. Scores range from 0.0 to 1.0
 ///
 /// # Parameters
 ///
@@ -592,6 +604,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::v_measure_score;
@@ -620,11 +633,11 @@ where
     }
 }
 
-/// Calculates the Fowlkes-Mallows index (FMI) between two cluster assignments.
+/// Calculates the Fowlkes-Mallows index (FMI) between two cluster assignments
 ///
 /// FMI is the geometric mean of the pairwise precision and recall over sample pairs:
 /// `TP / sqrt((TP + FP) * (TP + FN))`, where the counts are over pairs grouped together by each
-/// clustering. Scores range from 0.0 to 1.0, with 1.0 for identical clusterings.
+/// clustering. Scores range from 0.0 to 1.0, with 1.0 for identical clusterings
 ///
 /// # Parameters
 ///
@@ -641,6 +654,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::fowlkes_mallows_score;
@@ -682,12 +696,12 @@ where
     }
 }
 
-/// Calculates the Davies-Bouldin index of a clustering using Euclidean distance.
+/// Calculates the Davies-Bouldin index of a clustering using Euclidean distance
 ///
 /// Each cluster's worst-case similarity to another is `(s_i + s_j) / d(c_i, c_j)`, where `s` is the
 /// mean distance of a cluster's points to its centroid `c` and `d` is the centroid distance; the
 /// index is the average of these maxima. **Lower is better** (0.0 is ideal), making it a cheaper
-/// `O(n * k)` complement to [`silhouette_score`] for evaluating a clustering without ground truth.
+/// `O(n * k)` complement to [`silhouette_score`] for evaluating a clustering without ground truth
 ///
 /// # Parameters
 ///
@@ -705,6 +719,7 @@ where
 /// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::davies_bouldin_score;
@@ -722,7 +737,7 @@ where
     let (cluster, k) = validate_clustering_inputs(x.nrows(), &labels);
     let (centroids, sizes) = cluster_centroids(x, &cluster, k);
 
-    // s[c] = mean distance from cluster c's points to its centroid.
+    // s[c] = mean distance from cluster c's points to its centroid
     let mut s = vec![0.0_f64; k];
     for (i, &c) in cluster.iter().enumerate() {
         s[c] += squared_euclidean_distance_row(&x.row(i), &centroids.row(c)).sqrt();
@@ -750,12 +765,12 @@ where
     db / k as f64
 }
 
-/// Calculates the Calinski-Harabasz index (variance ratio criterion) of a clustering.
+/// Calculates the Calinski-Harabasz index (variance ratio criterion) of a clustering
 ///
 /// The ratio of between-cluster dispersion to within-cluster dispersion, scaled by
 /// `(n - k) / (k - 1)`. **Higher is better**: well-separated, compact clusters score high. Returns
 /// 1.0 in the degenerate case where every point coincides with its centroid (zero within-cluster
-/// dispersion).
+/// dispersion)
 ///
 /// # Parameters
 ///
@@ -773,6 +788,7 @@ where
 /// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::calinski_harabasz_score;
@@ -813,10 +829,9 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::array;
 
-    // ── label_index ──────────────────────────────────────────────────────────
+    // label_index
 
-    /// First-appearance dense remap: distinct labels [5,5,3,3,10] -> {5:0, 3:1, 10:2}.
-    /// Verifies length and that each label maps to its first-seen ordinal position.
+    /// First-appearance dense remap of distinct labels to first-seen ordinal positions
     #[test]
     fn test_label_index_first_appearance_order() {
         let idx = label_index(&[5, 5, 3, 3, 10]);
@@ -826,7 +841,7 @@ mod tests {
         assert_eq!(idx[&10], 2, "10 appears third, should map to 2");
     }
 
-    /// A single repeated label maps to index 0 only.
+    /// A single repeated label maps to index 0 only
     #[test]
     fn test_label_index_single_label() {
         let idx = label_index(&[7, 7, 7]);
@@ -834,21 +849,20 @@ mod tests {
         assert_eq!(idx[&7], 0);
     }
 
-    /// All distinct labels each get a unique index in [0, n).
+    /// All distinct labels each get a unique index in [0, n)
     #[test]
     fn test_label_index_all_distinct() {
         let idx = label_index(&[10, 20, 30]);
         assert_eq!(idx.len(), 3);
-        // Each appears once in first-seen order: 10->0, 20->1, 30->2.
+        // each appears once in first-seen order: 10->0, 20->1, 30->2
         assert_eq!(idx[&10], 0);
         assert_eq!(idx[&20], 1);
         assert_eq!(idx[&30], 2);
     }
 
-    // ── contingency_matrix ───────────────────────────────────────────────────
+    // contingency_matrix
 
-    /// true=[0,0,1,1], pred=[0,1,0,1]: every pairing appears exactly once,
-    /// producing the all-ones 2x2 matrix with row_sums=col_sums=[2,2].
+    /// Every pairing appearing once produces the all-ones 2x2 matrix with row_sums=col_sums=[2,2]
     #[test]
     fn test_contingency_matrix_uniform() {
         let (mat, row_sums, col_sums) = contingency_matrix(&[0, 0, 1, 1], &[0, 1, 0, 1]);
@@ -861,7 +875,7 @@ mod tests {
         assert_eq!(col_sums, vec![2, 2]);
     }
 
-    /// Identical labels [0,0,1,1]: contingency is diagonal [[2,0],[0,2]].
+    /// Identical labels give a diagonal contingency matrix
     #[test]
     fn test_contingency_matrix_identical_labels() {
         let (mat, row_sums, col_sums) = contingency_matrix(&[0, 0, 1, 1], &[0, 0, 1, 1]);
@@ -874,45 +888,40 @@ mod tests {
         assert_eq!(col_sums, vec![2, 2]);
     }
 
-    // ── entropy_nats ─────────────────────────────────────────────────────────
+    // entropy_nats
 
-    /// Two equal clusters: H = -2*(0.5*ln 0.5) = ln 2 ≈ 0.693147.
+    /// Two equal clusters give H = ln(2)
     #[test]
     fn test_entropy_nats_two_equal_clusters() {
-        // H = -2 * (0.5 * ln(0.5)) = ln(2)
         let h = entropy_nats(&[2, 2], 4);
         assert_abs_diff_eq!(h, std::f64::consts::LN_2, epsilon = 1e-10);
     }
 
-    /// A single cluster covering all samples: H = 0 (no uncertainty).
+    /// A single cluster covering all samples gives H = 0
     #[test]
     fn test_entropy_nats_single_cluster() {
         let h = entropy_nats(&[4], 4);
         assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
     }
 
-    /// Four equal singleton clusters: H = -4*(0.25*ln 0.25) = ln 4 ≈ 1.386294.
+    /// Four equal singleton clusters give H = ln(4)
     #[test]
     fn test_entropy_nats_four_equal_clusters() {
-        // H = -4 * (0.25 * ln(0.25)) = ln(4) = 2*ln(2)
         let h = entropy_nats(&[1, 1, 1, 1], 4);
         let expected = (4.0_f64).ln(); // ln(4)
         assert_abs_diff_eq!(h, expected, epsilon = 1e-10);
     }
 
-    /// Zero-count entry contributes nothing: (&[0, 4], 4) → 0.0.
-    /// The only non-zero cluster covers all samples: p=1, -p*ln(p)=0.
+    /// A zero-count entry contributes nothing to the entropy
     #[test]
     fn test_entropy_nats_zero_count_skipped() {
         let h = entropy_nats(&[0, 4], 4);
         assert_abs_diff_eq!(h, 0.0, epsilon = 1e-10);
     }
 
-    // ── mutual_information ───────────────────────────────────────────────────
+    // mutual_information
 
-    /// Independent uniform assignment: MI should be 0.
-    /// Contingency = [[1,1],[1,1]], n=4, row=col=[2,2].
-    /// MI = 4 * (1/4) * ln(4*1 / (2*2)) = 4*(1/4)*ln(1) = 0.
+    /// Independent uniform assignment gives MI = 0
     #[test]
     fn test_mutual_information_independent() {
         let mat = array![[1usize, 1], [1, 1]];
@@ -920,9 +929,7 @@ mod tests {
         assert_abs_diff_eq!(mi, 0.0, epsilon = 1e-10);
     }
 
-    /// Perfect assignment: MI = H(true) = ln 2.
-    /// Contingency = [[2,0],[0,2]], n=4, row=col=[2,2].
-    /// MI = (2/4)*ln(4*2/(2*2)) + (2/4)*ln(4*2/(2*2)) = 2*(0.5*ln2) = ln(2).
+    /// Perfect assignment gives MI = H(true) = ln(2)
     #[test]
     fn test_mutual_information_identical() {
         let mat = array![[2usize, 0], [0, 2]];
@@ -930,20 +937,10 @@ mod tests {
         assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
     }
 
-    // ── homogeneity_completeness ──────────────────────────────────────────────
+    // homogeneity_completeness
 
-    /// Asymmetric case: true=[0,0,1,1] (2 classes), pred=[0,1,2,3] (4 pure clusters).
-    ///
-    /// Math derivation:
-    ///   Contingency = [[1,1,0,0],[0,0,1,1]], row_sums=[2,2], col_sums=[1,1,1,1]
-    ///   MI = 4*(1/4)*ln(4*1/(2*1)) = ln(2)
-    ///   H(classes)  = entropy_nats([2,2], 4) = ln(2)
-    ///   H(clusters) = entropy_nats([1,1,1,1], 4) = ln(4) = 2*ln(2)
-    ///   homogeneity = MI / H(classes)  = ln(2)/ln(2)        = 1.0
-    ///   completeness= MI / H(clusters) = ln(2)/(2*ln(2))    = 0.5
-    ///
-    /// This case also pins the tuple ordering: first element is homogeneity,
-    /// second is completeness.
+    /// Pure clusters (more clusters than classes) give homogeneity 1.0, completeness 0.5, and pin
+    /// the tuple ordering (homogeneity first)
     #[test]
     fn test_homogeneity_completeness_pure_clusters() {
         let labels_true = [0usize, 0, 1, 1];
@@ -953,7 +950,7 @@ mod tests {
         assert_abs_diff_eq!(c, 0.5, epsilon = 1e-10);
     }
 
-    /// Identical labels: both homogeneity and completeness should be 1.0.
+    /// Identical labels give homogeneity and completeness both 1.0
     #[test]
     fn test_homogeneity_completeness_identical() {
         let labels = [0usize, 0, 1, 1];
@@ -962,16 +959,7 @@ mod tests {
         assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
     }
 
-    /// Swapping roles: true=[0,1,2,3] (4 pure classes), pred=[0,0,1,1] (2 clusters).
-    /// By symmetry with the test above (roles swapped), homogeneity=0.5, completeness=1.0.
-    ///
-    /// Math:
-    ///   Contingency = [[1,0],[1,0],[0,1],[0,1]], row_sums=[1,1,1,1], col_sums=[2,2]
-    ///   MI = 4*(1/4)*ln(4*1/(1*2)) = ln(2)
-    ///   H(classes)  = entropy_nats([1,1,1,1],4) = ln(4)
-    ///   H(clusters) = entropy_nats([2,2],4)      = ln(2)
-    ///   homogeneity = ln(2)/ln(4) = 0.5
-    ///   completeness= ln(2)/ln(2) = 1.0
+    /// Swapping the roles of the pure-clusters case swaps the scores: homogeneity 0.5, completeness 1.0
     #[test]
     fn test_homogeneity_completeness_swapped_roles() {
         let labels_true = [0usize, 1, 2, 3];
@@ -981,11 +969,9 @@ mod tests {
         assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
     }
 
-    // ── entropy_nats: additional edge cases ───────────────────────────────────
+    // entropy_nats: additional edge cases
 
-    /// Unequal clusters [1,3]: H = -(1/4)*ln(1/4) - (3/4)*ln(3/4).
-    /// = (1/4)*ln(4) + (3/4)*ln(4/3)
-    /// = 0.25*1.386294 + 0.75*0.287682 = 0.346574 + 0.215762 = 0.562335
+    /// Unequal clusters [1,3] match the closed-form entropy
     #[test]
     fn test_entropy_nats_unequal_clusters() {
         let h = entropy_nats(&[1, 3], 4);
@@ -995,41 +981,28 @@ mod tests {
         assert_abs_diff_eq!(h, expected, epsilon = 1e-10);
     }
 
-    // ── mutual_information: non-trivial case ─────────────────────────────────
+    // mutual_information: non-trivial case
 
-    /// true=[0,0,1,1], pred=[0,1,2,3]: 4 pure clusters.
-    /// Contingency = [[1,1,0,0],[0,0,1,1]], n=4, row=[2,2], col=[1,1,1,1].
-    /// MI = 4*(1/4)*ln(4*1/(2*1)) = ln(2).
+    /// Four pure clusters over two true classes give MI = ln(2)
     #[test]
     fn test_mutual_information_pure_clusters() {
-        // Build contingency directly to avoid dependency on contingency_matrix correctness
+        // build contingency directly to avoid depending on contingency_matrix correctness
         let mat = array![[1usize, 1, 0, 0], [0, 0, 1, 1]];
         let mi = mutual_information(&mat, 4, &[2, 2], &[1, 1, 1, 1]);
         assert_abs_diff_eq!(mi, std::f64::consts::LN_2, epsilon = 1e-10);
     }
-    // ── expected_mutual_information (EMI hypergeometric kernel) ──────────────────
+    // expected_mutual_information (EMI hypergeometric kernel)
 
-    /// EMI for the symmetric 2x2 case row_sums=[2,2], col_sums=[2,2], n=4.
-    ///
-    /// EMI = Σ_{i,j} Σ_k P(k) · (k/n) · ln(n·k / (a_i·b_j)), with P(k) the hypergeometric
-    /// pmf P(k) = C(a_i,k)·C(n-a_i, b_j-k) / C(n, b_j).
-    ///
-    /// For every pair (a_i=2, b_j=2), n=4: support is k ∈ {1,2} (C(4,2)=6).
-    ///   k=1: P = C(2,1)·C(2,1)/6 = 4/6;  term = (1/4)·ln(4·1/(2·2)) = (1/4)·ln(1) = 0
-    ///   k=2: P = C(2,2)·C(2,0)/6 = 1/6;  term = (2/4)·ln(4·2/(2·2)) = 0.5·ln(2)
-    /// per-pair contribution = (1/6)·0.5·ln(2) = ln(2)/12.
-    /// There are 2·2 = 4 identical pairs ⇒ EMI = 4·ln(2)/12 = ln(2)/3 ≈ 0.231049060.
+    /// EMI for the symmetric 2x2 case (row_sums=[2,2], col_sums=[2,2], n=4) equals ln(2)/3
     #[test]
     fn test_expected_mutual_information_symmetric_2x2() {
         let emi = expected_mutual_information(&[2, 2], &[2, 2], 4);
         let expected = std::f64::consts::LN_2 / 3.0;
         assert_abs_diff_eq!(emi, expected, epsilon = 1e-12);
     }
-    // ── ln_factorial_table ───────────────────────────────────────────
+    // ln_factorial_table
 
-    /// table[i] = ln(i!), built by cumulative summation.
-    /// ln(0!) = ln(1) = 0; ln(1!) = ln(1) = 0; ln(5!) = ln(120).
-    /// The table also has length n_max + 1.
+    /// table[i] = ln(i!) with length n_max + 1
     #[test]
     fn test_ln_factorial_table_known_values() {
         let table = ln_factorial_table(5);
@@ -1039,12 +1012,9 @@ mod tests {
         assert_abs_diff_eq!(table[5], (120.0_f64).ln(), epsilon = 1e-10); // ln(5!) = ln(120)
     }
 
-    // ── cluster_centroids ───────────────────────────────────────────
+    // cluster_centroids
 
-    /// Per-cluster mean and size from dense cluster indices.
-    /// Points (0,0),(2,0) -> cluster 0, point (10,10) -> cluster 1, k = 2.
-    ///   centroid[0] = mean of (0,0),(2,0) = (1.0, 0.0), size 2
-    ///   centroid[1] = mean of (10,10)     = (10.0, 10.0), size 1
+    /// Per-cluster mean and size are computed from dense cluster indices
     #[test]
     fn test_cluster_centroids_known_means_and_sizes() {
         let x = array![[0.0, 0.0], [2.0, 0.0], [10.0, 10.0]];

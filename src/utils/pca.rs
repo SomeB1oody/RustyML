@@ -1,3 +1,9 @@
+//! Principal Component Analysis (PCA)
+//!
+//! Provides the `PCA` model for linear dimensionality reduction and the `SVDSolver`
+//! enum selecting the underlying decomposition strategy (full, randomized, or power
+//! iteration)
+
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
@@ -6,33 +12,30 @@ use ndarray_rand::rand::{Rng, SeedableRng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rayon::prelude::IntoParallelRefIterator;
 
-/// SVD solver options for Principal Component Analysis.
+/// SVD solver options for Principal Component Analysis
 ///
-/// Selects the decomposition strategy used to compute principal components.
+/// Selects the decomposition strategy used to compute principal components
 /// For small to mid-sized datasets (typically fewer than 10,000 samples or features),
 /// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
 /// `Randomized` is recommended for speed with good accuracy. `PowerIteration` is recommended
-/// when you need only a few components from very large or memory-constrained problems.
-///
-/// # Variants
-///
-/// - `Full` - Full SVD using deterministic decomposition
-/// - `Randomized` - Randomized SVD with a fixed RNG seed
-/// - `PowerIteration` - Power-iteration approximation with Hotelling deflation, extracting
-///   one component at a time (best when only a few components are needed)
+/// when you need only a few components from very large or memory-constrained problems
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum SVDSolver {
+    /// Full SVD using deterministic decomposition
     Full,
+    /// Randomized SVD with a fixed RNG seed
     Randomized(u64),
+    /// Power-iteration approximation with Hotelling deflation, extracting one component
+    /// at a time (best when only a few components are needed)
     PowerIteration,
 }
 
 impl SVDSolver {
     /// Computes the top `n_components` principal axes and their singular values from
-    /// the centered data, dispatching over the configured solver strategy.
+    /// the centered data, dispatching over the configured solver strategy
     ///
     /// Returns `(components, singular_values)`, where the principal axes are the rows
-    /// of `components`.
+    /// of `components`
     fn compute_components(
         &self,
         x_centered: &Array2<f64>,
@@ -45,7 +48,7 @@ impl SVDSolver {
         }
     }
 
-    /// Exact, deterministic full SVD via nalgebra.
+    /// Exact, deterministic full SVD via nalgebra
     fn full_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
@@ -67,14 +70,14 @@ impl SVDSolver {
             .take(n_components)
             .cloned()
             .collect();
-        // Copy the top components from V^T into ndarray layout.
+        // Copy the top components from V^T into ndarray layout
         let components =
             Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
 
         Ok((components, Array1::from_vec(singular_values)))
     }
 
-    /// Randomized SVD with oversampling and a couple of power iterations.
+    /// Randomized SVD with oversampling and a couple of power iterations
     fn randomized_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
@@ -84,7 +87,7 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let max_rank = n_samples.min(n_features);
         let oversampling = 5usize;
-        // Oversample to improve the randomized subspace.
+        // Oversample to improve the randomized subspace
         let k = (n_components + oversampling).min(max_rank);
 
         let mut rng = StdRng::seed_from_u64(seed);
@@ -93,7 +96,7 @@ impl SVDSolver {
             omega.push(rng.random_range(-1.0..1.0));
         }
 
-        // Build a random projection matrix and sketch X.
+        // Build a random projection matrix and sketch X
         let x_slice = x_centered
             .as_slice()
             .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
@@ -101,14 +104,14 @@ impl SVDSolver {
         let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
         let mut y_mat = &x_mat * &omega_mat;
 
-        // A few power iterations sharpen the spectral separation.
+        // A few power iterations sharpen the spectral separation
         let n_iter = 2usize;
         for _ in 0..n_iter {
             let y_t = x_mat.transpose() * &y_mat;
             y_mat = &x_mat * y_t;
         }
 
-        // Orthonormalize the sketch and compute SVD in the reduced space.
+        // Orthonormalize the sketch and compute SVD in the reduced space
         let qr = nalgebra::linalg::QR::new(y_mat);
         let q = qr.q();
         let b = q.transpose() * x_mat;
@@ -124,14 +127,14 @@ impl SVDSolver {
             .take(n_components)
             .cloned()
             .collect();
-        // Expand V^T back to full feature-space components.
+        // Expand V^T back to full feature-space components
         let components =
             Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
 
         Ok((components, Array1::from_vec(singular_values)))
     }
 
-    /// Power iteration with Hotelling deflation on the covariance matrix.
+    /// Power iteration with Hotelling deflation on the covariance matrix
     fn power_iteration_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
@@ -139,18 +142,18 @@ impl SVDSolver {
         let n_samples = x_centered.nrows();
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
-        // Extract the leading eigenpairs of the covariance matrix.
+        // Extract the leading eigenpairs of the covariance matrix
         let cov = x_centered.t().dot(x_centered) / denom;
         let (eigenvalues, eigenvectors) =
             super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
 
-        // Principal axes are the covariance eigenvectors, stored as rows.
+        // Principal axes are the covariance eigenvectors, stored as rows
         let mut components = Array2::<f64>::zeros((n_components, n_features));
         for (idx, eigenvector) in eigenvectors.iter().enumerate() {
             components.row_mut(idx).assign(eigenvector);
         }
 
-        // Convert covariance eigenvalues into the corresponding singular values.
+        // Convert covariance eigenvalues into the corresponding singular values
         let singular_values: Vec<f64> = eigenvalues
             .into_iter()
             .map(|lambda| {
@@ -167,28 +170,16 @@ impl SVDSolver {
     }
 }
 
-/// Threshold for using parallel computation in PCA.
-/// When the number of samples is below this threshold, sequential computation is used.
+/// Sample-count threshold at or above which PCA switches from sequential to parallel computation
 const PCA_PARALLEL_THRESHOLD: usize = 200;
 
-/// Principal Component Analysis (PCA) model.
+/// Principal Component Analysis (PCA) model
 ///
 /// Reduces dimensionality by projecting data onto orthogonal components that capture the highest
-/// variance.
-///
-/// # Fields
-///
-/// - `n_components` - Number of components to keep
-/// - `svd_solver` - SVD solver strategy
-/// - `mean` - Per-feature mean used for centering
-/// - `components` - Principal axes in feature space
-/// - `explained_variance` - Variance explained by each selected component
-/// - `explained_variance_ratio` - Ratio of variance explained by each selected component
-/// - `singular_values` - Singular values corresponding to each component
-/// - `n_samples` - Number of samples seen during fitting
-/// - `n_features` - Number of features seen during fitting
+/// variance
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::utils::*;
 /// use ndarray::array;
@@ -205,19 +196,28 @@ const PCA_PARALLEL_THRESHOLD: usize = 200;
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PCA {
+    /// Number of components to keep
     n_components: usize,
+    /// SVD solver strategy
     svd_solver: SVDSolver,
+    /// Per-feature mean used for centering
     mean: Option<Array1<f64>>,
+    /// Principal axes in feature space
     components: Option<Array2<f64>>,
+    /// Variance explained by each selected component
     explained_variance: Option<Array1<f64>>,
+    /// Ratio of variance explained by each selected component
     explained_variance_ratio: Option<Array1<f64>>,
+    /// Singular values corresponding to each component
     singular_values: Option<Array1<f64>>,
+    /// Number of samples seen during fitting
     n_samples: Option<usize>,
+    /// Number of features seen during fitting
     n_features: Option<usize>,
 }
 
 impl Default for PCA {
-    /// Creates a default PCA instance.
+    /// Creates a default PCA instance
     ///
     /// # Default Values
     ///
@@ -229,12 +229,12 @@ impl Default for PCA {
 }
 
 impl PCA {
-    /// Creates a new PCA instance with validated hyperparameters.
+    /// Creates a new PCA instance with validated hyperparameters
     ///
     /// Solver guidance: choose `SVDSolver::Full` for small to mid-sized datasets (typically fewer
     /// than 10,000 samples or features), `SVDSolver::Randomized` for large datasets (10,000+ samples
     /// or features) when speed matters, and `SVDSolver::PowerIteration` when extracting only a few
-    /// components from very large or memory-constrained problems.
+    /// components from very large or memory-constrained problems
     ///
     /// # Parameters
     ///
@@ -256,7 +256,7 @@ impl PCA {
             ));
         }
 
-        // Initialize model state with unset learned parameters
+        // Learned parameters stay unset until fit
         Ok(Self {
             n_components,
             svd_solver,
@@ -289,9 +289,9 @@ impl PCA {
     );
     get_field_as_ref!(get_singular_values, singular_values, Option<&Array1<f64>>);
 
-    /// Fits the PCA model.
+    /// Fits the PCA model
     ///
-    /// Computes the mean, principal components, and variance statistics for the input data.
+    /// Computes the mean, principal components, and variance statistics for the input data
     ///
     /// # Parameters
     ///
@@ -308,7 +308,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
+    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -316,9 +316,9 @@ impl PCA {
         self.fit_internal(x)
     }
 
-    /// Transforms data into principal component space.
+    /// Transforms data into principal component space
     ///
-    /// Projects centered data onto the fitted principal components.
+    /// Projects centered data onto the fitted principal components
     ///
     /// # Parameters
     ///
@@ -336,7 +336,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel projection when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
+    /// Uses parallel projection when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -344,9 +344,9 @@ impl PCA {
         self.transform_internal(x)
     }
 
-    /// Fits the model and transforms the data.
+    /// Fits the model and transforms the data
     ///
-    /// Computes components and returns the projected data in a single step.
+    /// Computes components and returns the projected data in a single step
     ///
     /// # Parameters
     ///
@@ -363,7 +363,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
+    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -392,9 +392,9 @@ impl PCA {
         Ok(transformed)
     }
 
-    /// Transforms data from principal component space back to original feature space.
+    /// Transforms data from principal component space back to original feature space
     ///
-    /// Reconstructs approximate original data using the fitted components and mean.
+    /// Reconstructs approximate original data using the fitted components and mean
     ///
     /// # Parameters
     ///
@@ -412,7 +412,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel reconstruction when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200).
+    /// Uses parallel reconstruction when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -475,7 +475,7 @@ impl PCA {
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        // Enforce component count against data rank limits
+        // n_components cannot exceed the data rank min(n_samples, n_features)
         let max_components = n_samples.min(n_features);
         if self.n_components > max_components {
             return Err(Error::invalid_parameter(
@@ -613,13 +613,12 @@ impl PCA {
     /// Computes the per-feature mean for centering
     fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
         // `mean_axis` sums each column in row-major (cache-friendly) order; that beats a
-        // hand-rolled parallel column-sum, whose strided column access dominates its runtime.
+        // hand-rolled parallel column-sum, whose strided column access dominates its runtime
         x.mean_axis(Axis(0)).expect("Input data must be non-empty")
     }
 
     /// Centers data in place by subtracting the mean
     fn center_data(x: &mut Array2<f64>, mean: &Array1<f64>) {
-        // Subtract mean from each row in place
         if x.nrows() >= PCA_PARALLEL_THRESHOLD {
             let mean = mean.to_owned();
             x.axis_iter_mut(Axis(0))
@@ -658,7 +657,7 @@ impl PCA {
     }
 
     /// Projects centered data onto the principal components, one output row per
-    /// thread, writing directly into the result matrix (no per-row allocation).
+    /// thread, writing directly into the result matrix (no per-row allocation)
     fn project_parallel(x_centered: &Array2<f64>, components: &Array2<f64>) -> Array2<f64> {
         let n_components = components.nrows();
         let mut projected = Array2::<f64>::zeros((x_centered.nrows(), n_components));
@@ -673,7 +672,7 @@ impl PCA {
     }
 
     /// Reconstructs data from component space in parallel, computing
-    /// `x · components + mean` one output row per thread.
+    /// `x * components + mean` one output row per thread
     fn reconstruct_parallel(
         x: &Array2<f64>,
         components: &Array2<f64>,

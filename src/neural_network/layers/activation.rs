@@ -1,10 +1,16 @@
+//! Element-wise activation functions and the standalone activation layers
+//!
+//! Defines the [`Activation`] enum (the single source of truth for each
+//! activation's forward transform and derivative) along with the thin
+//! [`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`], and [`Softmax`] layer wrappers
+
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-/// Helper function to format a shape slice as a parenthesized tuple, e.g. `"(2, 3)"`.
+/// Formats a shape slice as a parenthesized tuple, e.g. `"(2, 3)"`
 fn format_shape(shape: &[usize]) -> String {
     format!(
         "({})",
@@ -16,10 +22,10 @@ fn format_shape(shape: &[usize]) -> String {
     )
 }
 
-/// Helper function to format the output shape for activation layers.
+/// Formats the cached output shape for activation layers
 ///
-/// Returns a formatted string representing the shape of the cached tensor,
-/// or "Unknown" if no tensor has been cached yet.
+/// Returns the shape of the cached tensor, or "Unknown" if nothing has been
+/// cached yet
 fn format_output_shape(cached_tensor: &Option<Tensor>) -> String {
     match cached_tensor {
         Some(tensor) => format_shape(tensor.shape()),
@@ -27,7 +33,7 @@ fn format_output_shape(cached_tensor: &Option<Tensor>) -> String {
     }
 }
 
-/// Linear (Identity) activation layer.
+/// Linear (Identity) activation layer
 pub mod linear;
 /// ReLU (Rectified Linear Unit) activation layer
 pub mod relu;
@@ -44,24 +50,24 @@ pub use sigmoid::Sigmoid;
 pub use softmax::Softmax;
 pub use tanh::Tanh;
 
-/// Gradient clipping bound shared by the differentiable activations to curb exploding gradients.
+/// Gradient clipping bound shared by the differentiable activations to curb exploding gradients
 const GRAD_CLIP_VALUE: f32 = 1e6;
-/// Lower input clamp for sigmoid/tanh to keep `exp` from overflowing.
+/// Lower input clamp for sigmoid/tanh to keep `exp` from overflowing
 const INPUT_CLIP_MIN: f32 = -500.0;
-/// Upper input clamp for sigmoid/tanh to keep `exp` from overflowing.
+/// Upper input clamp for sigmoid/tanh to keep `exp` from overflowing
 const INPUT_CLIP_MAX: f32 = 500.0;
-/// Epsilon guarding the softmax normalizer against division by zero.
+/// Epsilon guarding the softmax normalizer against division by zero
 const SOFTMAX_EPSILON: f32 = 1e-8;
-/// Element threshold above which ReLU switches to parallel evaluation.
+/// Element threshold above which ReLU switches to parallel evaluation
 const RELU_PARALLEL_THRESHOLD: usize = 10_000;
-/// Element threshold above which Sigmoid switches to parallel evaluation.
+/// Element threshold above which Sigmoid switches to parallel evaluation
 const SIGMOID_PARALLEL_THRESHOLD: usize = 1000;
-/// Element threshold above which Tanh switches to parallel evaluation.
+/// Element threshold above which Tanh switches to parallel evaluation
 const TANH_PARALLEL_THRESHOLD: usize = 2048;
-/// Row threshold above which Softmax switches to parallel evaluation.
+/// Row threshold above which Softmax switches to parallel evaluation
 const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 
-/// Clamps a differentiable activation's gradient, zeroing non-finite values.
+/// Clamps a differentiable activation's gradient, zeroing non-finite values
 fn clip_grad(g: &mut f32) {
     if g.is_nan() || g.is_infinite() {
         *g = 0.0;
@@ -70,51 +76,51 @@ fn clip_grad(g: &mut f32) {
     }
 }
 
-/// The element-wise activation functions that trainable layers can embed.
+/// The element-wise activation functions that trainable layers can embed
 ///
 /// Dense, the convolutional layers and the recurrent layers each carry an
 /// `Activation` value instead of a generic activation type parameter. Keeping
 /// the activation as a runtime enum makes the host layers non-generic, which
 /// removes monomorphization bloat and lets weight deserialization downcast every
-/// layer to a single concrete type rather than probing each `Layer<Act>` pairing.
+/// layer to a single concrete type rather than probing each `Layer<Act>` pairing
 ///
 /// The standalone activation *layers* ([`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`],
 /// [`Softmax`]) delegate their math here, so this enum is the single source of
-/// truth for both the forward transform and its derivative.
+/// truth for both the forward transform and its derivative
 ///
 /// # Adding a new activation
 ///
 /// Implement the math **here on the enum**, not in a layer:
-/// 1. Add a variant to this enum.
+/// 1. Add a variant to this enum
 /// 2. Handle it in [`Activation::forward`] (the transform) and [`Activation::backward`] (the
-///    derivative, expressed in terms of the *activated output* `a`, not the pre-activation `z`).
-/// 3. Add a thin standalone layer struct mirroring [`ReLU`] — a `{ output_cache }` field whose
-///    `Layer` impl validates, caches the output, and delegates to this enum — plus a
-///    `From<NewLayer> for Activation` impl so it works as an `impl Into<Activation>` argument.
+///    derivative, expressed in terms of the *activated output* `a`, not the pre-activation `z`)
+/// 3. Add a thin standalone layer struct mirroring [`ReLU`] - a `{ output_cache }` field whose
+///    `Layer` impl validates, caches the output, and delegates to this enum - plus a
+///    `From<NewLayer> for Activation` impl so it works as an `impl Into<Activation>` argument
 ///
 /// The algorithm must live on the enum (not in the layer `impl`s) because the trainable layers
 /// (Dense, the convolutional layers, the recurrent layers) store an `Activation` *value* and call
 /// these **pure, stateless** methods inside their own forward/backward. A stateful `Layer` impl
 /// (which caches `output` and takes `&mut self`) cannot serve that embedded, value-typed use
-/// without reintroducing a generic activation type parameter or `Box<dyn Layer>` — both removed in the
-/// Step-1 refactor — and would duplicate the algorithm. The standalone structs are therefore thin
-/// wrappers, never the source of truth.
+/// without reintroducing a generic activation type parameter or `Box<dyn Layer>` - both removed in the
+/// Step-1 refactor - and would duplicate the algorithm. The standalone structs are therefore thin
+/// wrappers, never the source of truth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Activation {
-    /// Identity activation, `f(x) = x`.
+    /// Identity activation, `f(x) = x`
     Linear,
-    /// Rectified linear unit, `max(0, x)`.
+    /// Rectified linear unit, `max(0, x)`
     ReLU,
-    /// Logistic sigmoid, `1 / (1 + e^-x)`.
+    /// Logistic sigmoid, `1 / (1 + e^-x)`
     Sigmoid,
-    /// Hyperbolic tangent, `tanh(x)`.
+    /// Hyperbolic tangent, `tanh(x)`
     Tanh,
-    /// Softmax over the last axis (input must be at least 2D).
+    /// Softmax over the last axis (input must be at least 2D)
     Softmax,
 }
 
 impl Activation {
-    /// Applies the activation to a pre-activation tensor `z`, returning the activated output.
+    /// Applies the activation to a pre-activation tensor `z`, returning the activated output
     ///
     /// # Parameters
     ///
@@ -169,10 +175,10 @@ impl Activation {
         }
     }
 
-    /// Computes the gradient with respect to the pre-activation input.
+    /// Computes the gradient with respect to the pre-activation input
     ///
     /// Every supported activation's derivative is expressible in terms of its own
-    /// output, so this takes the cached activated tensor rather than the original input.
+    /// output, so this takes the cached activated tensor rather than the original input
     ///
     /// # Parameters
     ///
@@ -188,10 +194,10 @@ impl Activation {
     /// - `Error::Computation` - Softmax failed to reshape the tensors
     pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
         match self {
-            // Derivative is 1, so the gradient passes through unchanged.
+            // Derivative is 1, so the gradient passes through unchanged
             Activation::Linear => Ok(grad_output.clone()),
             Activation::ReLU => {
-                // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`.
+                // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`
                 let mut grad = grad_output.clone();
                 let relu_grad = |g: &mut f32, &a: &f32| {
                     if a <= 0.0 {
@@ -208,7 +214,7 @@ impl Activation {
                 Ok(grad)
             }
             Activation::Sigmoid => {
-                // sigmoid'(z) = a * (1 - a).
+                // sigmoid'(z) = a * (1 - a)
                 let mut grad = grad_output.clone();
                 let sigmoid_grad = |g: &mut f32, &a: &f32| {
                     *g *= a * (1.0 - a);
@@ -224,7 +230,7 @@ impl Activation {
                 Ok(grad)
             }
             Activation::Tanh => {
-                // tanh'(z) = 1 - a^2.
+                // tanh'(z) = 1 - a^2
                 let mut grad = grad_output.clone();
                 let tanh_grad = |g: &mut f32, &a: &f32| {
                     *g *= 1.0 - a * a;
@@ -268,7 +274,7 @@ impl From<Softmax> for Activation {
     }
 }
 
-/// Softmax forward over the last axis, with the row-max shift for numerical stability.
+/// Softmax forward over the last axis, with the row-max shift for numerical stability
 fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
     let shape = input.shape();
     let ndim = shape.len();
@@ -280,7 +286,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         )));
     }
 
-    // Flatten to [batch, features]; softmax runs over the last axis.
+    // Flatten to [batch, features]; softmax runs over the last axis
     let batch_size: usize = shape[..ndim - 1].iter().product();
     let num_features = shape[ndim - 1];
 
@@ -290,7 +296,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         .context("Failed to reshape for softmax computation")?;
 
     let apply_softmax = |mut row: ArrayViewMut1<f32>| {
-        // Subtract the row max so every exp argument is <= 0 (no overflow).
+        // Subtract the row max so every exp argument is <= 0 (no overflow)
         let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         row.map_inplace(|x| *x = (*x - max_val).exp());
         let sum = row.sum().max(SOFTMAX_EPSILON);
@@ -312,7 +318,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         .into_dyn())
 }
 
-/// Softmax backward using the Jacobian-vector product expressed via the cached output.
+/// Softmax backward using the Jacobian-vector product expressed via the cached output
 fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
     let shape = output.shape();
     let ndim = shape.len();
@@ -371,16 +377,16 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::Array2;
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // Helpers
 
-    /// Build a 2-D Tensor (ArrayD<f32>) from a row-major `data` vec with shape `(rows, cols)`.
+    /// Build a 2-D Tensor (ArrayD<f32>) from a row-major `data` vec with shape `(rows, cols)`
     fn tensor2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
         Array2::from_shape_vec((rows, cols), data)
             .expect("shape/data mismatch")
             .into_dyn()
     }
 
-    // ── clip_grad ────────────────────────────────────────────────────────────
+    // clip_grad
 
     #[test]
     fn clip_grad_nan_becomes_zero() {
@@ -405,7 +411,7 @@ mod tests {
 
     #[test]
     fn clip_grad_normal_value_unchanged() {
-        // -5.0 is well within [-1e6, 1e6], so it must pass through untouched.
+        // -5.0 is well within [-1e6, 1e6], so it must pass through untouched
         let mut g = -5.0_f32;
         clip_grad(&mut g);
         assert_abs_diff_eq!(g, -5.0_f32, epsilon = 1e-6);
@@ -413,7 +419,7 @@ mod tests {
 
     #[test]
     fn clip_grad_above_max_clamped() {
-        // 2e6 > GRAD_CLIP_VALUE (1e6) → should be clamped to GRAD_CLIP_VALUE.
+        // 2e6 > GRAD_CLIP_VALUE (1e6) => should be clamped to GRAD_CLIP_VALUE
         let mut g = 2.0e6_f32;
         clip_grad(&mut g);
         assert_abs_diff_eq!(g, GRAD_CLIP_VALUE, epsilon = 1.0);
@@ -421,18 +427,15 @@ mod tests {
 
     #[test]
     fn clip_grad_below_min_clamped() {
-        // -2e6 < -GRAD_CLIP_VALUE → should be clamped to -GRAD_CLIP_VALUE.
+        // -2e6 < -GRAD_CLIP_VALUE => should be clamped to -GRAD_CLIP_VALUE
         let mut g = -2.0e6_f32;
         clip_grad(&mut g);
         assert_abs_diff_eq!(g, -GRAD_CLIP_VALUE, epsilon = 1.0);
     }
 
-    // ── softmax_forward ──────────────────────────────────────────────────────
+    // softmax_forward
 
-    /// Hand derivation for [[0.0, 1.0, 2.0]]:
-    ///   e^0 = 1.0, e^1 ≈ 2.71828, e^2 ≈ 7.38906  sum ≈ 11.10734
-    ///   [1/11.10734, 2.71828/11.10734, 7.38906/11.10734]
-    ///   ≈ [0.09003, 0.24473, 0.66524]
+    /// Softmax of a single row matches the hand-computed distribution
     #[test]
     fn softmax_forward_basic_row() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
@@ -443,7 +446,7 @@ mod tests {
         assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
     }
 
-    /// Probabilities must sum to 1.0.
+    /// Softmax outputs sum to 1.0
     #[test]
     fn softmax_forward_sums_to_one() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
@@ -452,8 +455,7 @@ mod tests {
         assert_abs_diff_eq!(sum, 1.0_f32, epsilon = 1e-6);
     }
 
-    /// Numerical-stability test: a row of all 1000.0 should produce [1/3, 1/3, 1/3]
-    /// because the max-shift makes every argument exp(0) = 1, sum = 3.
+    /// A row of equal large values stays numerically stable, yielding a uniform distribution
     #[test]
     fn softmax_forward_large_equal_values_stable() {
         let input = tensor2(1, 3, vec![1000.0, 1000.0, 1000.0]);
@@ -465,7 +467,7 @@ mod tests {
         assert_abs_diff_eq!(vals[2], third, epsilon = 1e-6);
     }
 
-    /// A single-element row must map to 1.0:  e^5 / e^5 = 1.
+    /// A single-element row maps to 1.0
     #[test]
     fn softmax_forward_single_element_row() {
         let input = tensor2(1, 1, vec![5.0]);
@@ -474,7 +476,7 @@ mod tests {
         assert_abs_diff_eq!(vals[0], 1.0_f32, epsilon = 1e-6);
     }
 
-    /// A 1-D input (ndim < 2) must return an error.
+    /// A 1-D input (ndim < 2) returns an error
     #[test]
     fn softmax_forward_rejects_1d_input() {
         use ndarray::Array1;
@@ -485,14 +487,9 @@ mod tests {
         );
     }
 
-    // ── softmax_backward ─────────────────────────────────────────────────────
+    // softmax_backward
 
-    /// Hand derivation for a=[0.25, 0.25, 0.5], g=[1.0, 0.0, 0.0]:
-    ///   dot = Σ a_j g_j = 0.25*1 + 0.25*0 + 0.5*0 = 0.25
-    ///   grad[0] = 0.25 * (1.0 - 0.25) =  0.1875
-    ///   grad[1] = 0.25 * (0.0 - 0.25) = -0.0625
-    ///   grad[2] = 0.5  * (0.0 - 0.25) = -0.125
-    ///   sum = 0.1875 - 0.0625 - 0.125 = 0  (Jacobian rows sum to zero)
+    /// Backward gradient matches the hand-computed Jacobian-vector product
     #[test]
     fn softmax_backward_jacobian_vector_product() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
@@ -504,8 +501,7 @@ mod tests {
         assert_abs_diff_eq!(vals[2], -0.125_f32, epsilon = 1e-6);
     }
 
-    /// The gradient row must sum to (approximately) zero for any input,
-    /// because the softmax Jacobian rows sum to zero.
+    /// The gradient row sums to (approximately) zero, since softmax Jacobian rows sum to zero
     #[test]
     fn softmax_backward_row_sums_to_zero() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);
@@ -515,9 +511,9 @@ mod tests {
         assert_abs_diff_eq!(row_sum, 0.0_f32, epsilon = 1e-6);
     }
 
-    // ── Activation enum — round-trip through the public API ──────────────────
+    // Activation enum - round-trip through the public API
 
-    /// Verify that Activation::Softmax::forward delegates correctly to softmax_forward.
+    /// Activation::Softmax forward delegates to softmax_forward
     #[test]
     fn activation_softmax_forward_via_enum() {
         let input = tensor2(1, 3, vec![0.0, 1.0, 2.0]);
@@ -525,13 +521,13 @@ mod tests {
             .forward(&input)
             .expect("Activation::Softmax forward failed");
         let vals = output.as_slice().expect("not contiguous");
-        // Same expected values as softmax_forward_basic_row.
+        // Same expected values as softmax_forward_basic_row
         assert_abs_diff_eq!(vals[0], 0.09003_f32, epsilon = 1e-4);
         assert_abs_diff_eq!(vals[1], 0.24473_f32, epsilon = 1e-4);
         assert_abs_diff_eq!(vals[2], 0.66524_f32, epsilon = 1e-4);
     }
 
-    /// Verify that Activation::Softmax::backward delegates correctly to softmax_backward.
+    /// Activation::Softmax backward delegates to softmax_backward
     #[test]
     fn activation_softmax_backward_via_enum() {
         let output = tensor2(1, 3, vec![0.25, 0.25, 0.5]);

@@ -1,3 +1,6 @@
+//! Neural network primitives: layers, loss functions, optimizers, the sequential
+//! model, and the traits that tie them together
+
 use ndarray::ArrayD;
 
 /// Type alias for n-dimensional arrays used as tensors in the neural network
@@ -11,5 +14,5 @@ pub mod losses;
 pub mod optimizers;
 /// Module that contains implementations for sequential model architecture
 pub mod sequential;
-/// Module containing trait definitions for machine neural network model interfaces
+/// Module that defines the trait interfaces for neural network models
 pub mod traits;

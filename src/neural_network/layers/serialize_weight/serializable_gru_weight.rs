@@ -1,20 +1,19 @@
+//! Serializable representation of GRU layer weights and its weight-application logic
+
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::gru::GRU;
 use crate::neural_network::layers::serialize_weight::SerializableGateWeight;
 use crate::neural_network::traits::ApplyWeights;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of GRU layer weights.
-///
-/// # Fields
-///
-/// - `reset` - Weights for the reset gate
-/// - `update` - Weights for the update gate
-/// - `candidate` - Weights for the candidate state
+/// Serializable representation of GRU layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableGRUWeight {
+    /// Weights for the reset gate
     pub reset: SerializableGateWeight,
+    /// Weights for the update gate
     pub update: SerializableGateWeight,
+    /// Weights for the candidate state
     pub candidate: SerializableGateWeight,
 }
 

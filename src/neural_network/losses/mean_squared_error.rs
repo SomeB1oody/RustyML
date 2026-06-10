@@ -1,3 +1,5 @@
+//! Mean Squared Error loss function and its gradient
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::validate_same_shape;
@@ -37,11 +39,11 @@ use crate::neural_network::traits::Loss;
 pub struct MeanSquaredError;
 
 impl MeanSquaredError {
-    /// Creates a new instance of MeanSquaredError
+    /// Creates a new `MeanSquaredError` instance
     ///
     /// # Returns
     ///
-    /// - `MeanSquaredError` - Returns a unit-like struct `MeanSquaredError`
+    /// - `MeanSquaredError` - A unit-like loss-function struct
     pub fn new() -> Self {
         Self {}
     }
@@ -57,10 +59,9 @@ impl Loss for MeanSquaredError {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_same_shape(y_true, y_pred)?;
 
-        // Calculate the squared difference
         let squared_diff = (y_pred - y_true).mapv(|x| x * x);
 
-        // Calculate the mean (sum divided by number of elements)
+        // Mean over all elements
         let n = squared_diff.len() as f32;
         Ok(squared_diff.sum() / n)
     }
@@ -68,10 +69,9 @@ impl Loss for MeanSquaredError {
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_same_shape(y_true, y_pred)?;
 
-        // Calculate the difference between predictions and ground truth
         let diff = y_pred - y_true;
 
-        // Gradient is 2 times the difference divided by element count
+        // Gradient is 2 * diff / element count
         let n = diff.len() as f32;
 
         let mut result = diff.clone();

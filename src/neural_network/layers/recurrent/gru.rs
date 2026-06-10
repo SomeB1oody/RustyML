@@ -1,3 +1,5 @@
+//! Gated Recurrent Unit (GRU) layer with reset, update, and candidate gates
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -14,36 +16,20 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3, Axis};
 
-/// Threshold for using parallel computation in GRU layer.
-/// When batch_size * units < this value, sequential execution is used.
-/// When batch_size * units >= this value, parallel execution is used.
+/// Threshold for switching the GRU layer to parallel computation
 ///
-/// Value is chosen based on empirical benchmarks where rayon's thread pool
-/// overhead is amortized by computational gains from parallelization.
+/// Parallel execution kicks in once `batch_size * units >= this value`, below which
+/// sequential execution avoids rayon's thread-pool overhead. Tuned from benchmarks
 const GRU_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Gated Recurrent Unit (GRU) neural network layer.
+/// Gated Recurrent Unit (GRU) neural network layer
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). Uses reset, update, and candidate
-/// gates to control information flow and mitigate vanishing gradients.
-///
-/// # Fields
-///
-/// - `input_dim` - Dimensionality of input features
-/// - `units` - Number of GRU units (neurons) in the layer
-/// - `reset_gate` - Gate controlling what information to forget from previous hidden state
-/// - `update_gate` - Gate controlling how much to update the hidden state
-/// - `candidate_gate` - Gate proposing new candidate values for hidden state
-/// - `input_cache` - Cached input tensor for backward propagation
-/// - `hidden_cache` - Cached hidden states h_t for each timestep
-/// - `r_cache` - Cached reset gate activations for each timestep
-/// - `z_cache` - Cached update gate activations for each timestep
-/// - `h_candidate_cache` - Cached candidate hidden states for each timestep
-/// - `rh_cache` - Cached r_t ⊙ h_{t-1} values for each timestep
-/// - `activation` - Activation applied to the candidate hidden state each timestep (Keras-style)
+/// gates to control information flow and mitigate vanishing gradients
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -70,36 +56,45 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 /// ```
 #[derive(Debug)]
 pub struct GRU {
+    /// Dimensionality of input features
     input_dim: usize,
+    /// Number of GRU units (neurons) in the layer
     units: usize,
 
-    // Three gates: reset, update, candidate
+    /// Gate controlling what information to forget from the previous hidden state
     reset_gate: Gate,
+    /// Gate controlling how much to update the hidden state
     update_gate: Gate,
+    /// Gate proposing new candidate values for the hidden state
     candidate_gate: Gate,
 
-    // Caches for forward pass
+    /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
-    hidden_cache: Option<Vec<Array2<f32>>>, // hidden states h_t
+    /// Cached hidden states h_t for each timestep
+    hidden_cache: Option<Vec<Array2<f32>>>,
 
-    // Intermediate gate values cache
-    r_cache: Option<Vec<Array2<f32>>>, // reset gate values (sigmoid applied)
-    z_cache: Option<Vec<Array2<f32>>>, // update gate values (sigmoid applied)
-    h_candidate_cache: Option<Vec<Array2<f32>>>, // candidate hidden state values (activation applied)
-    rh_cache: Option<Vec<Array2<f32>>>,          // r_t * h_{t-1}
+    /// Cached reset gate activations (sigmoid applied) for each timestep
+    r_cache: Option<Vec<Array2<f32>>>,
+    /// Cached update gate activations (sigmoid applied) for each timestep
+    z_cache: Option<Vec<Array2<f32>>>,
+    /// Cached candidate hidden states (activation applied) for each timestep
+    h_candidate_cache: Option<Vec<Array2<f32>>>,
+    /// Cached r_t .* h_{t-1} values for each timestep
+    rh_cache: Option<Vec<Array2<f32>>>,
 
+    /// Activation applied to the candidate hidden state each timestep (Keras-style)
     activation: Activation,
 }
 
 impl GRU {
-    /// Creates a GRU layer with the specified dimensions and activation.
+    /// Creates a GRU layer with the specified dimensions and activation
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation layer from activation module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `activation` - Activation layer from the activation module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -114,11 +109,10 @@ impl GRU {
         activation: impl Into<Activation>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Validate that dimensions are greater than 0
         validate_recurrent_dimensions(input_dim, units)?;
 
-        // One RNG threaded through all three gates so the whole layer shares a single
-        // reproducible initialization stream.
+        // One RNG threaded through all three gates so the layer shares a single
+        // reproducible initialization stream
         let mut rng = crate::random::make_rng(random_state);
 
         Ok(Self {
@@ -137,7 +131,7 @@ impl GRU {
         })
     }
 
-    /// Sets the weights for all three gates in this GRU layer.
+    /// Sets the weights for all three gates in this GRU layer
     ///
     /// # Parameters
     ///
@@ -150,7 +144,11 @@ impl GRU {
     /// - `candidate_kernel` - Input kernel for the candidate gate with shape (input_dim, units)
     /// - `candidate_recurrent_kernel` - Recurrent kernel for the candidate gate with shape (units, units)
     /// - `candidate_bias` - Bias for the candidate gate with shape (1, units)
-    #[allow(clippy::too_many_arguments)] // three gates × (kernel, recurrent_kernel, bias)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied weight shape does not match the gate
+    #[allow(clippy::too_many_arguments)] // three gates x (kernel, recurrent_kernel, bias)
     pub fn set_weights(
         &mut self,
         reset_kernel: Array2<f32>,
@@ -227,7 +225,6 @@ impl GRU {
 
 impl Layer for GRU {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
@@ -236,10 +233,9 @@ impl Layer for GRU {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
-        // Initialize hidden state
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
 
-        // Storage for all timesteps
+        // Per-timestep storage for the backward pass
         let mut hs = Vec::with_capacity(timesteps + 1);
         let mut r_vals = Vec::with_capacity(timesteps);
         let mut z_vals = Vec::with_capacity(timesteps);
@@ -248,17 +244,16 @@ impl Layer for GRU {
 
         hs.push(h_prev.clone());
 
-        // Determine whether to use parallel execution based on computational load
+        // Use parallel execution once the computational load clears the threshold
         let use_parallel = batch * self.units >= GRU_PARALLEL_THRESHOLD;
 
-        // The configurable activation (Copy), applied to the candidate hidden state.
+        // Configurable activation (Copy) applied to the candidate hidden state
         let act = self.activation;
 
-        // Process each timestep
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
-            // Compute reset and update gate values (parallel or sequential)
+            // Reset and update gate values (parallel or sequential)
             let (r_raw, z_raw) = if use_parallel {
                 rayon::join(
                     || compute_gate_value(&self.reset_gate, &x_t, &h_prev),
@@ -271,17 +266,17 @@ impl Layer for GRU {
                 )
             };
 
-            // Apply sigmoid activation to gates (parallel or sequential)
+            // Sigmoid on the gate values (parallel or sequential)
             let (r_t, z_t) = if use_parallel {
                 rayon::join(|| apply_sigmoid(r_raw), || apply_sigmoid(z_raw))
             } else {
                 (apply_sigmoid(r_raw), apply_sigmoid(z_raw))
             };
 
-            // Compute r_t * h_{t-1}
+            // r_t .* h_{t-1}
             let r_h = &r_t * &h_prev;
 
-            // Compute candidate hidden state: activation(W_h · [r_t * h_{t-1}, x_t] + b_h)
+            // Candidate hidden state: activation(W_h^T [r_t .* h_{t-1}, x_t] + b_h)
             let h_candidate_raw = x_t.dot(&self.candidate_gate.kernel)
                 + r_h.dot(&self.candidate_gate.recurrent_kernel)
                 + &self.candidate_gate.bias;
@@ -290,10 +285,9 @@ impl Layer for GRU {
                 .into_dimensionality::<ndarray::Ix2>()
                 .unwrap();
 
-            // Update hidden state: h_t = (1 - z_t) * h_{t-1} + z_t * h̃_t
+            // Hidden state update: h_t = (1 - z_t) .* h_{t-1} + z_t .* h_candidate
             let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
 
-            // Cache values
             r_vals.push(r_t);
             z_vals.push(z_t);
             h_candidate_vals.push(h_candidate);
@@ -303,21 +297,19 @@ impl Layer for GRU {
             h_prev = h_t;
         }
 
-        // Store caches
         self.hidden_cache = Some(hs);
         self.r_cache = Some(r_vals);
         self.z_cache = Some(z_vals);
         self.h_candidate_cache = Some(h_candidate_vals);
         self.rh_cache = Some(rh_vals);
 
-        // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so return the last hidden state directly.
+        // The hidden state already went through the configurable activation at each timestep
+        // (Keras-style), so return the last hidden state directly
         Ok(h_prev.into_dyn())
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
@@ -325,20 +317,18 @@ impl Layer for GRU {
         // Input shape: (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
-        // Initialize hidden state
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
 
-        // Determine whether to use parallel execution based on computational load
+        // Use parallel execution once the computational load clears the threshold
         let use_parallel = batch * self.units >= GRU_PARALLEL_THRESHOLD;
 
-        // The configurable activation (Copy), applied to the candidate hidden state.
+        // Configurable activation (Copy) applied to the candidate hidden state
         let act = self.activation;
 
-        // Process each timestep
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
-            // Compute reset and update gate values (parallel or sequential)
+            // Reset and update gate values (parallel or sequential)
             let (r_raw, z_raw) = if use_parallel {
                 rayon::join(
                     || compute_gate_value(&self.reset_gate, &x_t, &h_prev),
@@ -351,17 +341,17 @@ impl Layer for GRU {
                 )
             };
 
-            // Apply sigmoid activation to gates (parallel or sequential)
+            // Sigmoid on the gate values (parallel or sequential)
             let (r_t, z_t) = if use_parallel {
                 rayon::join(|| apply_sigmoid(r_raw), || apply_sigmoid(z_raw))
             } else {
                 (apply_sigmoid(r_raw), apply_sigmoid(z_raw))
             };
 
-            // Compute r_t * h_{t-1}
+            // r_t .* h_{t-1}
             let r_h = &r_t * &h_prev;
 
-            // Compute candidate hidden state: activation(W_h · [r_t * h_{t-1}, x_t] + b_h)
+            // Candidate hidden state: activation(W_h^T [r_t .* h_{t-1}, x_t] + b_h)
             let h_candidate_raw = x_t.dot(&self.candidate_gate.kernel)
                 + r_h.dot(&self.candidate_gate.recurrent_kernel)
                 + &self.candidate_gate.bias;
@@ -370,25 +360,25 @@ impl Layer for GRU {
                 .into_dimensionality::<ndarray::Ix2>()
                 .unwrap();
 
-            // Update hidden state: h_t = (1 - z_t) * h_{t-1} + z_t * h̃_t
+            // Hidden state update: h_t = (1 - z_t) .* h_{t-1} + z_t .* h_candidate
             let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
 
             h_prev = h_t;
         }
 
-        // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so return the last hidden state directly.
+        // The hidden state already went through the configurable activation at each timestep
+        // (Keras-style), so return the last hidden state directly
         Ok(h_prev.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // The upstream gradient is dL/dh_T directly (no extra output activation).
+        // The upstream gradient is dL/dh_T directly (no extra output activation)
         let grad_h_t = grad_output
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
             .unwrap();
 
-        // The configurable activation (Copy), used for the candidate derivative.
+        // Configurable activation (Copy) used for the candidate derivative
         let act = self.activation;
 
         let x3 = take_cache(&mut self.input_cache, "GRU")?;
@@ -419,7 +409,7 @@ impl Layer for GRU {
 
         let mut grad_h = grad_h_t;
 
-        // Determine whether to use parallel execution based on computational load
+        // Use parallel execution once the computational load clears the threshold
         let use_parallel = batch * self.units >= GRU_PARALLEL_THRESHOLD;
 
         // Backpropagation through time
@@ -430,12 +420,12 @@ impl Layer for GRU {
             let h_candidate = &h_candidate_vals[t];
             let r_h = &rh_vals[t];
 
-            // Gradient through h_t = (1 - z_t) * h_{t-1} + z_t * h̃_t
+            // Gradient through h_t = (1 - z_t) .* h_{t-1} + z_t .* h_candidate
             let grad_z_t = &grad_h * (h_candidate - h_prev);
             let grad_h_candidate = &grad_h * z_t;
             let grad_h_prev_from_update = &grad_h * &(1.0 - z_t);
 
-            // Gradient through h̃_t = activation(...), via the activation backward.
+            // Gradient through h_candidate = activation(...), via the activation backward
             let grad_h_candidate_raw = act
                 .backward(
                     &h_candidate.clone().into_dyn(),
@@ -444,7 +434,7 @@ impl Layer for GRU {
                 .into_dimensionality::<ndarray::Ix2>()
                 .unwrap();
 
-            // Gradient through candidate gate computation
+            // Gradient through the candidate gate computation
             let x_t = x3.index_axis(Axis(1), t).to_owned();
             let x_t_t = x_t.t();
             let h_prev_t = h_prev.t();
@@ -454,13 +444,13 @@ impl Layer for GRU {
             grad_h_recurrent += &rh_t.dot(&grad_h_candidate_raw);
             grad_h_bias += &grad_h_candidate_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-            // Gradient through r_h = r_t * h_{t-1}. Both terms share the same recurrent matmul, so
-            // compute it once instead of twice per timestep.
+            // Gradient through r_h = r_t .* h_{t-1}. Both terms share the recurrent matmul, so
+            // compute it once instead of twice per timestep
             let grad_rh = grad_h_candidate_raw.dot(&self.candidate_gate.recurrent_kernel.t());
             let grad_r_t = &grad_rh * h_prev;
             let grad_h_prev_from_reset = &grad_rh * r_t;
 
-            // Gradient through gates (parallel or sequential)
+            // Gradient through the gates (parallel or sequential)
             let (grad_z_raw, grad_r_raw) = if use_parallel {
                 rayon::join(
                     || &grad_z_t * z_t * &(1.0 - z_t), // sigmoid derivative
@@ -473,7 +463,7 @@ impl Layer for GRU {
                 )
             };
 
-            // Compute gradient updates for gates
+            // Gradient updates for the gates
             grad_z_kernel += &x_t_t.dot(&grad_z_raw);
             grad_z_recurrent += &h_prev_t.dot(&grad_z_raw);
             grad_z_bias += &grad_z_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -482,7 +472,7 @@ impl Layer for GRU {
             grad_r_recurrent += &h_prev_t.dot(&grad_r_raw);
             grad_r_bias += &grad_r_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-            // Compute gradient with respect to input (parallel or sequential)
+            // Gradient with respect to the input (parallel or sequential)
             let dx = if use_parallel {
                 let (dx1, dx2) = rayon::join(
                     || grad_r_raw.dot(&self.reset_gate.kernel.t()),
@@ -500,7 +490,7 @@ impl Layer for GRU {
                     + grad_h_candidate_raw.dot(&self.candidate_gate.kernel.t())
             };
 
-            // Compute gradient with respect to previous hidden state (parallel or sequential)
+            // Gradient with respect to the previous hidden state (parallel or sequential)
             let grad_h_next = if use_parallel {
                 let (dh1, dh2) = rayon::join(
                     || grad_r_raw.dot(&self.reset_gate.recurrent_kernel.t()),
@@ -523,7 +513,6 @@ impl Layer for GRU {
             grad_h = grad_h_next;
         }
 
-        // Store gradients
         store_gate_gradients(
             &mut self.reset_gate,
             grad_r_kernel,

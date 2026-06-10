@@ -1,3 +1,5 @@
+//! 2D depthwise separable convolution layer (depthwise stage followed by a pointwise 1x1 stage)
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -18,42 +20,23 @@ use ndarray::{Array2, Array3, Array4, ArrayD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Threshold for deciding between parallel and sequential execution.
-/// When `batch_size * output_channels * output_height * output_width >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD`,
-/// parallel processing is used for better performance.
+/// Workload size at or above which the convolution stages run in parallel rather than sequentially
 const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 
-/// A 2D separable convolutional layer for neural networks.
+/// A 2D separable convolutional layer
 ///
-/// Implements depthwise separable convolution with a depthwise step followed by a pointwise step.
+/// Implements depthwise separable convolution with a depthwise step followed by a pointwise step
 /// This reduces parameters and computation compared to standard convolution while maintaining
 /// similar performance. Input shape is \[batch_size, channels, height, width\], intermediate
 /// depthwise output shape is \[batch_size, channels * depth_multiplier, height', width'\], and
-/// final output shape is \[batch_size, filters, height', width'\].
+/// final output shape is \[batch_size, filters, height', width'\]
 ///
 /// The separable convolution consists of:
-/// 1. **Depthwise Convolution**: Each input channel is convolved with its own set of filters
-/// 2. **Pointwise Convolution**: A 1x1 convolution that combines the outputs from the depthwise step
-///
-/// # Fields
-///
-/// - `filters` - Number of output channels from the pointwise convolution.
-/// - `kernel_size` - Size of the depthwise convolution kernel as (height, width).
-/// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
-/// - `padding` - Type of padding to apply (`Valid` or `Same`).
-/// - `depth_multiplier` - Number of depthwise convolution filters per input channel.
-/// - `depthwise_weights` - 4D array for depthwise filters with shape \[depth_multiplier, channels, kernel_height, kernel_width\].
-/// - `pointwise_weights` - 4D array for pointwise filters with shape \[filters, channels * depth_multiplier, 1, 1\].
-/// - `bias` - 2D array of bias values with shape \[1, filters\].
-/// - `activation` - Activation layer from activation_layer module.
-/// - `input_cache` - Cached input from the forward pass, used during backpropagation.
-/// - `depthwise_output_cache` - Cached depthwise output, used during backpropagation.
-/// - `input_shape` - Shape of the input tensor.
-/// - `depthwise_weight_gradients` - Gradients for the depthwise weights.
-/// - `pointwise_weight_gradients` - Gradients for the pointwise weights.
-/// - `bias_gradients` - Gradients for the biases.
+/// 1. Depthwise convolution: each input channel is convolved with its own set of filters
+/// 2. Pointwise convolution: a 1x1 convolution that combines the outputs from the depthwise step
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -87,40 +70,55 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 /// ```
 #[derive(Debug)]
 pub struct SeparableConv2D {
+    /// Number of output channels from the pointwise convolution
     filters: usize,
+    /// Depthwise convolution kernel size as (height, width)
     kernel_size: (usize, usize),
+    /// Stride values for the convolution as (vertical, horizontal)
     strides: (usize, usize),
+    /// Padding applied to the spatial dimensions (`Valid` or `Same`)
     padding: PaddingType,
+    /// Number of depthwise filters per input channel
     depth_multiplier: usize,
+    /// Depthwise filters with shape \[depth_multiplier, channels, kernel_height, kernel_width\]
     depthwise_weights: Array4<f32>,
+    /// Pointwise filters with shape \[filters, channels * depth_multiplier, 1, 1\]
     pointwise_weights: Array4<f32>,
+    /// Bias values with shape \[1, filters\]
     bias: Array2<f32>,
+    /// Activation applied to the layer output
     activation: Activation,
+    /// Cached activated output from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
+    /// Cached input from the forward pass, used during backpropagation
     input_cache: Option<Tensor>,
+    /// Cached depthwise output, used during backpropagation
     depthwise_output_cache: Option<Tensor>,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Gradients for the depthwise weights
     depthwise_weight_gradients: Option<Array4<f32>>,
+    /// Gradients for the pointwise weights
     pointwise_weight_gradients: Option<Array4<f32>>,
+    /// Gradients for the biases
     bias_gradients: Option<Array2<f32>>,
 }
 
 impl SeparableConv2D {
-    /// Creates a new 2D separable convolutional layer with the specified parameters.
+    /// Creates a new 2D separable convolutional layer
     ///
-    /// Weights are initialized using Xavier (Glorot) uniform initialization.
-    /// Biases are initialized to zeros.
+    /// Weights are initialized using Xavier (Glorot) uniform initialization; biases are zeros
     ///
     /// # Parameters
     ///
-    /// - `filters` - Number of output channels from the pointwise convolution.
-    /// - `kernel_size` - Size of the depthwise convolution kernel as (height, width).
-    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\].
-    /// - `strides` - Stride values for the convolution operation as (vertical, horizontal).
-    /// - `padding` - Type of padding to apply (`Valid` or `Same`).
-    /// - `depth_multiplier` - Number of depthwise convolution filters per input channel.
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax).
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `filters` - Number of output channels from the pointwise convolution
+    /// - `kernel_size` - Size of the depthwise convolution kernel as (height, width)
+    /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
+    /// - `strides` - Stride values for the convolution as (vertical, horizontal)
+    /// - `padding` - Type of padding to apply (`Valid` or `Same`)
+    /// - `depth_multiplier` - Number of depthwise convolution filters per input channel
+    /// - `activation` - Activation applied to the output (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see crate::random)
     ///
     /// # Returns
     ///
@@ -133,9 +131,8 @@ impl SeparableConv2D {
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
-    // Eight positional parameters mirror the other convolution constructors (a config struct would be
-    // inconsistent with the crate's layer API); the trailing `random_state` pushes this past clippy's
-    // 7-argument threshold.
+    // Eight positional parameters mirror the other convolution constructors; the trailing
+    // `random_state` pushes this past clippy's 7-argument threshold
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         filters: usize,
@@ -147,7 +144,6 @@ impl SeparableConv2D {
         activation: impl Into<Activation>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Validate input parameters
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
@@ -156,8 +152,7 @@ impl SeparableConv2D {
 
         let channels = input_shape[1];
 
-        // Initialize depthwise weights using Xavier initialization
-        // For depthwise convolution, each filter only operates on one channel
+        // Xavier init for the depthwise weights; each filter operates on a single channel
         let depthwise_fan_in = kernel_size.0 * kernel_size.1;
         let depthwise_fan_out = depth_multiplier * kernel_size.0 * kernel_size.1;
         let depthwise_bound = (6.0 / (depthwise_fan_in + depthwise_fan_out) as f32).sqrt();
@@ -169,8 +164,7 @@ impl SeparableConv2D {
             &mut rng,
         );
 
-        // Initialize pointwise weights using Xavier initialization
-        // For pointwise convolution (1x1), the kernel area is 1
+        // Xavier init for the pointwise weights; the 1x1 kernel area is 1
         let pointwise_fan_in = channels * depth_multiplier;
         let pointwise_fan_out = filters;
         let pointwise_bound = (6.0 / (pointwise_fan_in + pointwise_fan_out) as f32).sqrt();
@@ -181,7 +175,6 @@ impl SeparableConv2D {
             &mut rng,
         );
 
-        // Initialize biases to zero
         let bias = Array2::zeros((1, filters));
 
         Ok(SeparableConv2D {
@@ -204,7 +197,7 @@ impl SeparableConv2D {
         })
     }
 
-    /// Calculates the output shape of the separable convolutional layer.
+    /// Calculates the output shape of the separable convolutional layer
     fn calculate_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let input_height = input_shape[2];
@@ -221,17 +214,15 @@ impl SeparableConv2D {
         vec![batch_size, self.filters, output_height, output_width]
     }
 
-    /// Performs depthwise convolution operation.
+    /// Performs the depthwise convolution stage
     fn depthwise_convolve(&self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let channels = input_shape[1];
         let output_shape = self.calculate_depthwise_output_shape(input_shape);
 
-        // Zero-pad the spatial dims for `Same` so the depthwise stage convolves over a padded
-        // tensor. Without this, `compute_depthwise_batch`'s boundary clipping silently degrades
-        // `Same` into a `Valid`-style, top-left-aligned result at the borders. `DepthwiseConv2D`
-        // and the convolution engine pad identically; `Valid` is a no-op (`None`, no copy).
+        // Zero-pad the spatial dims for `Same`; without it, `compute_depthwise_batch`'s boundary
+        // clipping degrades `Same` into a top-left `Valid` at the borders. `Valid` is a no-op
         let (pad_h, pad_w) = self.calculate_padding(
             input_shape[2],
             input_shape[3],
@@ -245,29 +236,25 @@ impl SeparableConv2D {
         };
         let conv_input: &Tensor = padded_storage.as_ref().unwrap_or(input);
 
-        // Calculate workload size to decide between parallel and sequential execution
+        // Run per-batch in parallel above the threshold, sequentially below it
         let workload_size =
             batch_size * channels * self.depth_multiplier * output_shape[2] * output_shape[3];
 
-        // Compute batch convolution results (parallel or sequential based on workload)
         let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
-            // Use parallel processing for large workloads
             (0..batch_size)
                 .into_par_iter()
                 .map(|b| self.compute_depthwise_batch(b, conv_input, &output_shape, channels))
                 .collect()
         } else {
-            // Use sequential processing for small workloads
             (0..batch_size)
                 .map(|b| self.compute_depthwise_batch(b, conv_input, &output_shape, channels))
                 .collect()
         };
 
-        // Use merge_results function to combine batch results
         merge_results(output_shape, results)
     }
 
-    /// Computes depthwise convolution for a single batch.
+    /// Computes the depthwise convolution for a single batch element
     fn compute_depthwise_batch(
         &self,
         b: usize,
@@ -318,34 +305,30 @@ impl SeparableConv2D {
         (b, batch_output)
     }
 
-    /// Performs pointwise convolution (1x1 convolution).
+    /// Performs the pointwise (1x1) convolution stage
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
         let input_shape = input.shape();
         let batch_size = input_shape[0];
         let output_shape = vec![batch_size, self.filters, input_shape[2], input_shape[3]];
 
-        // Calculate workload size to decide between parallel and sequential execution
+        // Run per-batch in parallel above the threshold, sequentially below it
         let workload_size = batch_size * self.filters * input_shape[2] * input_shape[3];
 
-        // Compute batch convolution results (parallel or sequential based on workload)
         let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
-            // Use parallel processing for large workloads
             (0..batch_size)
                 .into_par_iter()
                 .map(|b| self.compute_pointwise_batch(b, input, input_shape))
                 .collect()
         } else {
-            // Use sequential processing for small workloads
             (0..batch_size)
                 .map(|b| self.compute_pointwise_batch(b, input, input_shape))
                 .collect()
         };
 
-        // Use merge_results function to combine batch results
         merge_results(output_shape, results)
     }
 
-    /// Computes pointwise convolution for a single batch.
+    /// Computes the pointwise convolution for a single batch element
     fn compute_pointwise_batch(
         &self,
         b: usize,
@@ -372,7 +355,7 @@ impl SeparableConv2D {
         (b, batch_output)
     }
 
-    /// Calculates the output shape after depthwise convolution.
+    /// Calculates the output shape after the depthwise convolution stage
     fn calculate_depthwise_output_shape(&self, input_shape: &[usize]) -> Vec<usize> {
         let batch_size = input_shape[0];
         let channels = input_shape[1];
@@ -395,11 +378,11 @@ impl SeparableConv2D {
         ]
     }
 
-    /// Calculates the symmetric zero-padding (total height/width pad) for the depthwise stage.
+    /// Calculates the symmetric zero-padding (total height/width pad) for the depthwise stage
     ///
     /// Returns `(0, 0)` for `Valid` padding. For `Same`, returns the total padding along each
     /// spatial axis required so a stride-`s` convolution yields the given output size; the
-    /// padding is split with `pad / 2` on the leading edge (see [`pad_tensor_4d_spatial`]).
+    /// padding is split with `pad / 2` on the leading edge (see [`pad_tensor_4d_spatial`])
     fn calculate_padding(
         &self,
         input_height: usize,
@@ -419,13 +402,17 @@ impl SeparableConv2D {
         }
     }
 
-    /// Sets the weights and bias for this layer.
+    /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
     /// - `depthwise_weights` - 4D array for depthwise filters with shape \[depth_multiplier, channels, kernel_height, kernel_width\]
     /// - `pointwise_weights` - 4D array for pointwise filters with shape \[filters, channels * depth_multiplier, 1, 1\]
     /// - `bias` - 2D array of bias values with shape \[1, filters\]
+    ///
+    /// # Errors
+    ///
+    /// - `Error` - If any supplied array shape does not match the existing layer weights
     pub fn set_weights(
         &mut self,
         depthwise_weights: Array4<f32>,
@@ -452,50 +439,41 @@ impl SeparableConv2D {
 
 impl Layer for SeparableConv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D tensor
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Save input for backpropagation
+        // Cache input for backpropagation
         self.input_cache = Some(input.clone());
 
-        // Step 1: Depthwise convolution - each input channel convolved independently
+        // Depthwise convolution (each channel independently), then pointwise (1x1) to combine
         let depthwise_output = self.depthwise_convolve(input);
-
-        // Step 2: Pointwise convolution (1x1) - combines depthwise outputs
         let output = self.pointwise_convolve(&depthwise_output);
 
-        // Cache depthwise output after pointwise conv to save memory if no activation
-        // (activation derivative doesn't need depthwise output, only backward does)
+        // Cache the depthwise output; only backward needs it
         self.depthwise_output_cache = Some(depthwise_output);
 
-        // Apply activation
         let activated = self.activation.forward(&output.into_dyn())?;
         self.output_cache = Some(activated.clone());
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches); see [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D tensor
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Step 1: Depthwise convolution - each input channel convolved independently
+        // Depthwise convolution (each channel independently), then pointwise (1x1) to combine
         let depthwise_output = self.depthwise_convolve(input);
-
-        // Step 2: Pointwise convolution (1x1) - combines depthwise outputs
         let output = self.pointwise_convolve(&depthwise_output);
 
-        // Apply activation
         let activated = self.activation.forward(&output.into_dyn())?;
         Ok(activated)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Apply activation backward pass
+        // Backward through the activation first
         let activated = self
             .output_cache
             .take()
@@ -511,9 +489,8 @@ impl Layer for SeparableConv2D {
             let depthwise_shape = depthwise_output.shape();
             let grad_shape = grad_output.shape();
 
-            // Re-create the zero-padded input the forward pass convolved over (see
-            // `depthwise_convolve`) so the depthwise weight and input gradients are accumulated in
-            // padded coordinates. The padding is stripped from the input gradient before returning.
+            // Re-create the zero-padded input from `depthwise_convolve` so gradients accumulate in
+            // padded coordinates; the padding is stripped from the input gradient before returning
             let (pad_h, pad_w) = self.calculate_padding(
                 input_shape[2],
                 input_shape[3],
@@ -530,17 +507,14 @@ impl Layer for SeparableConv2D {
 
             let gradient = grad_upstream;
 
-            // Initialize gradients
             let mut pointwise_weight_grads = Array4::zeros(self.pointwise_weights.dim());
             let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());
             let mut bias_grads = Array2::zeros((1, self.filters));
 
             // Each gradient below is parallelized over an axis whose entries are written
-            // independently (disjoint mutable sub-views), so the parallel result is identical to
-            // the sequential one. The forward pass is already parallel; this stops the backward
-            // pass from being a serial bottleneck.
+            // independently (disjoint mutable sub-views), so the result matches the sequential one
 
-            // Bias gradients: one independent sum per output filter.
+            // Bias gradients: one independent sum per output filter
             bias_grads
                 .axis_iter_mut(Axis(1))
                 .into_par_iter()
@@ -557,7 +531,7 @@ impl Layer for SeparableConv2D {
                     *bias.first_mut().unwrap() = sum;
                 });
 
-            // Pointwise weight gradients: parallel over output filters.
+            // Pointwise weight gradients: parallel over output filters
             pointwise_weight_grads
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -576,7 +550,7 @@ impl Layer for SeparableConv2D {
                     }
                 });
 
-            // Gradient w.r.t. the depthwise output: parallel over the batch axis.
+            // Gradient w.r.t. the depthwise output: parallel over the batch axis
             let mut depthwise_grad = ArrayD::zeros(depthwise_output.dim());
             depthwise_grad
                 .axis_iter_mut(Axis(0))
@@ -597,7 +571,7 @@ impl Layer for SeparableConv2D {
                     }
                 });
 
-            // Depthwise weight gradients: parallel over the depth-multiplier axis.
+            // Depthwise weight gradients: parallel over the depth-multiplier axis
             depthwise_weight_grads
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -634,8 +608,8 @@ impl Layer for SeparableConv2D {
                     }
                 });
 
-            // Input gradients: parallel over the batch axis. Accumulated in PADDED coordinates
-            // (matching the padded forward pass), then sliced back to the original shape below.
+            // Input gradients: parallel over the batch axis, accumulated in padded coordinates
+            // (matching the padded forward pass) then sliced back to the original shape below
             let mut input_gradients = ArrayD::zeros(padded_input.dim());
             input_gradients
                 .axis_iter_mut(Axis(0))
@@ -673,7 +647,7 @@ impl Layer for SeparableConv2D {
                 });
 
             // Strip the symmetric padding so the returned gradient matches the original input
-            // shape (no-op for `Valid`, where no padding was added).
+            // shape (no-op for `Valid`, where no padding was added)
             let input_gradients = if pad_h == 0 && pad_w == 0 {
                 input_gradients
             } else {
@@ -690,7 +664,6 @@ impl Layer for SeparableConv2D {
                     .into_dyn()
             };
 
-            // Store gradients
             self.depthwise_weight_gradients = Some(depthwise_weight_grads);
             self.pointwise_weight_gradients = Some(pointwise_weight_grads);
             self.bias_gradients = Some(bias_grads);

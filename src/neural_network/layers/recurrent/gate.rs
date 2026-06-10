@@ -1,3 +1,8 @@
+//! Gate parameters and shared helpers for GRU/LSTM recurrent cells
+//!
+//! Defines the [`Gate`](crate::neural_network::layers::recurrent::gate::Gate) weight/gradient container plus the gate-value, cache, and
+//! gradient-storage helpers reused across recurrent layers
+
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::validation::validate_dimension_greater_than_zero;
 use crate::neural_network::layers::recurrent::{GRADIENT_CLIP_VALUE, orthogonal_init};
@@ -6,34 +11,31 @@ use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Gate parameters and gradients for recurrent cells.
+/// Gate parameters and gradients for recurrent cells
 ///
 /// Stores weights and gradients for a single GRU/LSTM gate. Optimizer state is held by the
-/// optimizer, not the gate (see [`Gate::parameters`]).
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input connections with shape (input_dim, units)
-/// - `recurrent_kernel` - Weight matrix for recurrent connections with shape (units, units)
-/// - `bias` - Bias vector with shape (1, units)
-/// - `grad_kernel` - Optional gradient for input weights, accumulated during backpropagation
-/// - `grad_recurrent_kernel` - Optional gradient for recurrent weights, accumulated during backpropagation
-/// - `grad_bias` - Optional gradient for bias terms, accumulated during backpropagation
+/// optimizer, not the gate (see [`Gate::parameters`])
 #[derive(Debug)]
 pub struct Gate {
+    /// Weight matrix for input connections with shape (input_dim, units)
     pub kernel: Array2<f32>,
+    /// Weight matrix for recurrent connections with shape (units, units)
     pub recurrent_kernel: Array2<f32>,
+    /// Bias vector with shape (1, units)
     pub bias: Array2<f32>,
+    /// Optional gradient for input weights, accumulated during backpropagation
     pub grad_kernel: Option<Array2<f32>>,
+    /// Optional gradient for recurrent weights, accumulated during backpropagation
     pub grad_recurrent_kernel: Option<Array2<f32>>,
+    /// Optional gradient for bias terms, accumulated during backpropagation
     pub grad_bias: Option<Array2<f32>>,
 }
 
 impl Gate {
-    /// Creates a gate with randomly initialized weights.
+    /// Creates a gate with randomly initialized weights
     ///
     /// Uses Xavier/Glorot initialization for the input kernel, Gram-Schmidt orthogonal
-    /// initialization for the recurrent kernel, and a constant bias value.
+    /// initialization for the recurrent kernel, and a constant bias value
     ///
     /// # Parameters
     ///
@@ -41,7 +43,7 @@ impl Gate {
     /// - `units` - Number of units (neurons) in this gate
     /// - `bias_init_value` - Initial value for bias (0.0 for most gates, 1.0 for LSTM forget gate)
     /// - `rng` - RNG threaded in by the owning layer so all of its gates share one reproducible
-    ///   stream. See [`crate::random`].
+    ///   stream. See [`crate::random`]
     ///
     /// # Returns
     ///
@@ -56,7 +58,6 @@ impl Gate {
         bias_init_value: f32,
         rng: &mut StdRng,
     ) -> Result<Self, Error> {
-        // Validate dimensions
         validate_dimension_greater_than_zero(input_dim, "input_dim")?;
         validate_dimension_greater_than_zero(units, "units")?;
 
@@ -68,11 +69,10 @@ impl Gate {
             rng,
         );
 
-        // Orthogonal initialization for the recurrent kernel (true Gram-Schmidt, shared with
-        // SimpleRNN), which keeps the recurrence norm-preserving across time steps.
+        // Gram-Schmidt orthogonal init (shared with SimpleRNN) keeps the recurrence
+        // norm-preserving across time steps
         let recurrent_kernel = orthogonal_init(units, rng);
 
-        // Bias initialization
         let bias = Array::from_elem((1, units), bias_init_value);
 
         Ok(Self {
@@ -87,7 +87,7 @@ impl Gate {
 
     /// Exposes this gate's three trainable tensors (kernel, recurrent kernel, bias) and their
     /// gradients as flat [`ParamGrad`] slices, for the optimizer to update. Returns an empty
-    /// vector if gradients have not been computed yet.
+    /// vector if gradients have not been computed yet
     pub fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
         let Self {
             kernel,
@@ -133,7 +133,7 @@ impl Gate {
 
 /// Computes gate value: x_t @ kernel + h_prev @ recurrent_kernel + bias
 ///
-/// This is the standard computation used by all gates in GRU and LSTM.
+/// Standard computation used by all gates in GRU and LSTM
 ///
 /// # Parameters
 ///
@@ -153,9 +153,9 @@ pub fn compute_gate_value(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) 
     x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
 }
 
-/// Helper function to extract cache and return error if not available
+/// Extracts the cached value, erroring if it is absent
 ///
-/// This is used during backward pass to ensure forward pass has been run.
+/// Used during the backward pass to ensure the forward pass has been run
 ///
 /// # Parameters
 ///
@@ -176,10 +176,9 @@ pub fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> crate::error
         .ok_or_else(|| Error::forward_pass_not_run(layer))
 }
 
-/// Stores gradients for a gate
+/// Stores clipped gradients into a gate
 ///
-/// This is a helper function to reduce code duplication when storing gradients
-/// during backpropagation.
+/// Reduces duplication when storing gradients during backpropagation
 ///
 /// # Parameters
 ///
@@ -194,8 +193,8 @@ pub fn store_gate_gradients(
     grad_recurrent: Array2<f32>,
     grad_bias: Array2<f32>,
 ) {
-    // Clip gradients to curb exploding gradients in recurrent layers (matches SimpleRNN). Clipping
-    // here, at gradient storage, keeps the optimizer update uniform across all layer types.
+    // Clip at storage time to curb exploding gradients (matches SimpleRNN) and keep the
+    // optimizer update uniform across layer types
     let clip = |g: Array2<f32>| g.mapv(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
     gate.grad_kernel = Some(clip(grad_kernel));
     gate.grad_recurrent_kernel = Some(clip(grad_recurrent));
@@ -209,16 +208,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use ndarray::{Array2, array};
 
-    /// Builds a Gate manually with known weights so the test is fully deterministic:
-    ///   kernel          = I_2  (2×2 identity)
-    ///   recurrent_kernel = 0_2  (2×2 zeros)
-    ///   bias            = [[1.0, 1.0]]
-    ///
-    /// With x_t = [[2.0, 3.0]] and h_prev = [[0.0, 0.0]] the formula
-    ///   out = x_t @ kernel + h_prev @ recurrent_kernel + bias
-    ///       = [[2,3]] @ I + [[0,0]] @ 0 + [[1,1]]
-    ///       = [[2,3]] + [[0,0]] + [[1,1]]
-    ///       = [[3, 4]]
+    /// Gate value with identity kernel and zero recurrent kernel returns x_t + bias
     #[test]
     fn compute_gate_value_identity_kernel_zero_recurrent() {
         let gate = Gate {
@@ -241,11 +231,7 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 1]], 4.0_f32, epsilon = 1e-6);
     }
 
-    /// When the recurrent kernel is non-zero, the h_prev contribution must also
-    /// be included.  With kernel = I, recurrent_kernel = I, bias = 0:
-    ///   out = [[2,3]] @ I + [[1,1]] @ I + [[0,0]]
-    ///       = [[2,3]] + [[1,1]] + [[0,0]]
-    ///       = [[3, 4]]
+    /// Gate value with a non-zero recurrent kernel adds the h_prev contribution
     #[test]
     fn compute_gate_value_identity_recurrent_kernel_adds_h_prev() {
         let gate = Gate {
@@ -267,13 +253,9 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 3.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(output[[0, 1]], 4.0_f32, epsilon = 1e-6);
     }
-    // ── Gate::parameters (empty branch) ─────────────────────────────────────────
+    // Gate::parameters (empty branch)
 
-    /// A freshly-constructed Gate has all three gradients set to `None`, so
-    /// `parameters()` must return an EMPTY vector (documented contract: "Returns an
-    /// empty vector if gradients have not been computed yet").  The implementation
-    /// only pushes ParamGrad entries inside `if let (Some, Some, Some) = (..grads..)`,
-    /// which cannot fire when every gradient is `None`.
+    /// A freshly-constructed Gate has all gradients `None`, so `parameters()` returns an empty vector
     #[test]
     fn parameters_empty_when_gradients_none() {
         let mut gate = Gate {
@@ -293,13 +275,10 @@ mod tests {
         );
     }
 
-    // ── store_gate_gradients (clipping) ─────────────────────────────────────────
+    // store_gate_gradients (clipping)
 
-    /// `store_gate_gradients` clamps every stored gradient to
-    /// [-GRADIENT_CLIP_VALUE, +GRADIENT_CLIP_VALUE] = [-5.0, 5.0].  By definition of
-    /// `f32::clamp`:  10 -> 5, -7 -> -5, 3 -> 3 (in range, unchanged), -100 -> -5,
-    /// 5 -> 5 (boundary), -5 -> -5 (boundary).  This proves both that out-of-range
-    /// magnitudes are pulled to the ±5 bounds and that in-range values pass through.
+    /// `store_gate_gradients` clamps every stored gradient to [-GRADIENT_CLIP_VALUE, +GRADIENT_CLIP_VALUE]
+    /// (=[-5.0, 5.0]), pulling out-of-range magnitudes to the bounds and passing in-range values through
     #[test]
     fn store_gate_gradients_clips_to_pm_five() {
         let mut gate = Gate {
@@ -339,7 +318,7 @@ mod tests {
         assert_abs_diff_eq!(gb[[0, 0]], 5.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(gb[[0, 1]], -5.0_f32, epsilon = 1e-6);
 
-        // Every stored gradient must lie within the clip bounds.
+        // Every stored gradient must lie within the clip bounds
         for g in [gk, grk, gb] {
             for &v in g.iter() {
                 assert!(
@@ -350,12 +329,9 @@ mod tests {
         }
     }
 
-    // ── take_cache (None -> ForwardPassNotRun) ──────────────────────────────────
+    // take_cache (None -> ForwardPassNotRun)
 
-    /// `take_cache` is the guard used on the backward path: when the forward pass has
-    /// not run, the cache is `None` and `take_cache` must map that `None` to
-    /// `Error::NeuralNetwork(NnError::ForwardPassNotRun(layer))` carrying the layer
-    /// name verbatim (per `Error::forward_pass_not_run`).
+    /// `take_cache` maps a `None` cache to `ForwardPassNotRun` carrying the layer name verbatim
     #[test]
     fn take_cache_none_returns_forward_pass_not_run() {
         let mut cache: Option<Array2<f32>> = None;
@@ -369,9 +345,7 @@ mod tests {
         );
     }
 
-    /// When the cache is populated, `take_cache` returns the inner value and leaves
-    /// `None` behind (it takes ownership), so a subsequent call would error.  This
-    /// pins the success/`take` semantics that the None-branch test complements.
+    /// When the cache is populated, `take_cache` returns the inner value and leaves `None` behind
     #[test]
     fn take_cache_some_returns_value_and_empties() {
         let mut cache: Option<Array2<f32>> = Some(array![[7.0_f32, 8.0]]);

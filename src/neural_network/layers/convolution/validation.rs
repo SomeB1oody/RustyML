@@ -1,10 +1,12 @@
+//! Shared parameter and input-shape validators for the convolution layers
+
 use crate::error::Error;
 
-/// Validates the filters parameter.
+/// Validates the filters parameter
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if filters is 0.
+/// Returns `Error::InvalidParameter` if filters is 0
 pub(super) fn validate_filters(filters: usize) -> Result<(), Error> {
     if filters == 0 {
         return Err(Error::invalid_parameter(
@@ -15,11 +17,11 @@ pub(super) fn validate_filters(filters: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates kernel size for 1D convolution.
+/// Validates kernel size for 1D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if kernel_size is 0.
+/// Returns `Error::InvalidParameter` if kernel_size is 0
 pub(super) fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), Error> {
     if kernel_size == 0 {
         return Err(Error::invalid_parameter(
@@ -30,11 +32,11 @@ pub(super) fn validate_kernel_size_1d(kernel_size: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates kernel size for 2D convolution.
+/// Validates kernel size for 2D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any dimension is 0.
+/// Returns `Error::InvalidParameter` if any dimension is 0
 pub(super) fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(), Error> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 {
         return Err(Error::invalid_parameter(
@@ -45,11 +47,11 @@ pub(super) fn validate_kernel_size_2d(kernel_size: (usize, usize)) -> Result<(),
     Ok(())
 }
 
-/// Validates kernel size for 3D convolution.
+/// Validates kernel size for 3D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any dimension is 0.
+/// Returns `Error::InvalidParameter` if any dimension is 0
 pub(super) fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Result<(), Error> {
     if kernel_size.0 == 0 || kernel_size.1 == 0 || kernel_size.2 == 0 {
         return Err(Error::invalid_parameter(
@@ -60,11 +62,11 @@ pub(super) fn validate_kernel_size_3d(kernel_size: (usize, usize, usize)) -> Res
     Ok(())
 }
 
-/// Validates strides for 1D convolution.
+/// Validates strides for 1D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if stride is 0.
+/// Returns `Error::InvalidParameter` if stride is 0
 pub(super) fn validate_strides_1d(stride: usize) -> Result<(), Error> {
     if stride == 0 {
         return Err(Error::invalid_parameter(
@@ -75,11 +77,11 @@ pub(super) fn validate_strides_1d(stride: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates strides for 2D convolution.
+/// Validates strides for 2D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any stride is 0.
+/// Returns `Error::InvalidParameter` if any stride is 0
 pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 {
         return Err(Error::invalid_parameter(
@@ -90,11 +92,11 @@ pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> 
     Ok(())
 }
 
-/// Validates strides for 3D convolution.
+/// Validates strides for 3D convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if any stride is 0.
+/// Returns `Error::InvalidParameter` if any stride is 0
 pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 || strides.2 == 0 {
         return Err(Error::invalid_parameter(
@@ -105,7 +107,7 @@ pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), 
     Ok(())
 }
 
-/// Validates input shape for 1D convolution.
+/// Validates input shape for 1D convolution
 ///
 /// # Errors
 ///
@@ -135,7 +137,7 @@ pub(super) fn validate_input_shape_1d(
     Ok(())
 }
 
-/// Validates input shape for 2D convolution.
+/// Validates input shape for 2D convolution
 ///
 /// # Errors
 ///
@@ -165,7 +167,7 @@ pub(super) fn validate_input_shape_2d(
     Ok(())
 }
 
-/// Validates input shape for 3D convolution.
+/// Validates input shape for 3D convolution
 ///
 /// # Errors
 ///
@@ -186,11 +188,11 @@ pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error
     Ok(())
 }
 
-/// Validates depth multiplier for depthwise separable convolution.
+/// Validates depth multiplier for depthwise separable convolution
 ///
 /// # Errors
 ///
-/// Returns `Error::InvalidParameter` if depth_multiplier is 0.
+/// Returns `Error::InvalidParameter` if depth_multiplier is 0
 pub(super) fn validate_depth_multiplier(depth_multiplier: usize) -> Result<(), Error> {
     if depth_multiplier == 0 {
         return Err(Error::invalid_parameter(

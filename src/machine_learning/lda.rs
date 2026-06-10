@@ -1,28 +1,31 @@
+//! Linear Discriminant Analysis (LDA) for supervised dimensionality reduction and
+//! classification
+//!
+//! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration
+//! enums
+
 use crate::error::{Context, Error};
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-/// Solver options for Linear Discriminant Analysis.
+/// Solver options for Linear Discriminant Analysis
 ///
 /// Selects the numerical method used to compute the inverse covariance or
-/// discriminant matrix during fitting.
-///
-/// # Variants
-///
-/// - `SVD` - Uses singular value decomposition for stable pseudo-inverse computation
-/// - `Eigen` - Uses symmetric eigen decomposition for covariance inversion
-/// - `LSQR` - Solves linear systems with SVD-based least-squares
+/// discriminant matrix during fitting
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Solver {
+    /// Singular value decomposition for stable pseudo-inverse computation
     SVD,
+    /// Symmetric eigen decomposition for covariance inversion
     Eigen,
+    /// SVD-based least-squares solution of linear systems
     LSQR,
 }
 
 impl Solver {
-    /// Inverts the (regularized) shared covariance matrix under this solver strategy.
+    /// Inverts the (regularized) shared covariance matrix under this solver strategy
     fn invert_covariance(&self, cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_features = cov.ncols();
         let cov_slice = cov
@@ -69,7 +72,7 @@ impl Solver {
             .context("Failed to build inverse covariance")
     }
 
-    /// Builds the discriminant matrix `cov⁻¹·S_b` (or solves `cov·M = S_b` for `LSQR`).
+    /// Builds the discriminant matrix `cov^-1 * S_b` (or solves `cov * M = S_b` for `LSQR`)
     fn discriminant_matrix(
         &self,
         cov: &Array2<f64>,
@@ -104,7 +107,7 @@ impl Solver {
     }
 
     /// Derives the projection matrix from the discriminant matrix by taking its
-    /// leading `n_components` directions (via eigendecomposition or SVD).
+    /// leading `n_components` directions (via eigendecomposition or SVD)
     fn project(
         &self,
         solver_matrix: &Array2<f64>,
@@ -172,41 +175,29 @@ impl Solver {
     }
 }
 
-/// Shrinkage strategy for covariance estimation.
+/// Shrinkage strategy for covariance estimation
 ///
-/// Controls how the covariance matrix is regularized to improve numerical stability.
-///
-/// # Variants
-///
-/// - `Auto` - Uses an automatic shrinkage factor based on sample and feature counts
-/// - `Manual` - Uses an explicit shrinkage factor in the range [0, 1]
+/// Controls how the covariance matrix is regularized to improve numerical stability
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Shrinkage {
+    /// Automatic shrinkage factor based on sample and feature counts
     Auto,
+    /// Explicit shrinkage factor in the range [0, 1]
     Manual(f64),
 }
 
-/// Threshold for switching to parallel computation in LDA.
-/// Uses sequential computation at or below this sample count.
+/// Sample-count threshold for switching to parallel computation in LDA
+///
+/// Computation runs sequentially at or below this sample count
 const LDA_PARALLEL_THRESHOLD: usize = 500;
 
-/// Linear Discriminant Analysis (LDA) model.
+/// Linear Discriminant Analysis (LDA) model
 ///
 /// Provides supervised dimensionality reduction and classification by projecting
-/// samples onto a lower-dimensional space that maximizes class separability.
-///
-/// # Fields
-///
-/// - `n_components` - Number of components to keep after dimensionality reduction
-/// - `solver` - Solver strategy for LDA computations
-/// - `shrinkage` - Optional shrinkage strategy for covariance estimation
-/// - `classes` - Array of unique class labels from training data
-/// - `priors` - Prior probabilities for each class
-/// - `means` - Mean vectors for each class
-/// - `cov_inv` - Inverse of the common covariance matrix
-/// - `projection` - Projection matrix for dimensionality reduction
+/// samples onto a lower-dimensional space that maximizes class separability
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::lda::{LDA, Shrinkage, Solver};
@@ -224,19 +215,27 @@ const LDA_PARALLEL_THRESHOLD: usize = 500;
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LDA {
+    /// Number of components to keep after dimensionality reduction
     n_components: usize,
+    /// Solver strategy for LDA computations
     solver: Solver,
+    /// Optional shrinkage strategy for covariance estimation
     shrinkage: Option<Shrinkage>,
+    /// Unique class labels from training data
     classes: Option<Array1<i32>>,
+    /// Prior probabilities for each class
     priors: Option<Array1<f64>>,
+    /// Mean vectors for each class
     means: Option<Array2<f64>>,
+    /// Inverse of the common covariance matrix
     cov_inv: Option<Array2<f64>>,
+    /// Projection matrix for dimensionality reduction
     projection: Option<Array2<f64>>,
 }
 
-/// Default LDA configuration.
+/// Default LDA configuration
 ///
-/// Provides a reasonable starting point for most datasets.
+/// Provides a reasonable starting point for most datasets
 ///
 /// # Default Values
 ///
@@ -250,7 +249,7 @@ impl Default for LDA {
 }
 
 impl LDA {
-    /// Creates a new LDA instance with validated hyperparameters.
+    /// Creates a new LDA instance with validated hyperparameters
     ///
     /// # Parameters
     ///
@@ -305,13 +304,12 @@ impl LDA {
     get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
     get_field_as_ref!(get_priors, priors, Option<&Array1<f64>>);
     get_field_as_ref!(get_means, means, Option<&Array2<f64>>);
-    // `cov_inv` (the inverse shared covariance) is an internal scoring artifact and is
-    // intentionally not exposed via a getter.
+    // `cov_inv` is an internal scoring artifact, intentionally not exposed via a getter
     get_field_as_ref!(get_projection, projection, Option<&Array2<f64>>);
 
-    /// Fits the LDA model using training data.
+    /// Fits the LDA model using training data
     ///
-    /// Estimates class statistics, covariance, and projection matrices from labeled samples.
+    /// Estimates class statistics, covariance, and projection matrices from labeled samples
     ///
     /// # Parameters
     ///
@@ -329,8 +327,8 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`.
-    /// Uses Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`.
+    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`. Uses
+    /// Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -340,9 +338,8 @@ impl LDA {
         S1: Data<Elem = f64>,
         S2: Data<Elem = i32>,
     {
-        // Shared non-empty + finiteness checks on the feature matrix. The label vector
-        // is `i32` (not `f64`), so it is validated separately below rather than through
-        // `preliminary_check`'s target argument.
+        // Non-empty + finiteness checks on `x`; the `i32` label vector is validated
+        // separately below (not via `preliminary_check`'s f64 target argument)
         super::validation::preliminary_check(x, None)?;
 
         if x.nrows() != y.len() {
@@ -516,9 +513,9 @@ impl LDA {
         Ok(self)
     }
 
-    /// Predicts class labels for new samples using the trained model.
+    /// Predicts class labels for new samples using the trained model
     ///
-    /// Applies the learned class means and shared covariance to compute linear scores.
+    /// Applies the learned class means and shared covariance to compute linear scores
     ///
     /// # Parameters
     ///
@@ -535,7 +532,7 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Uses parallel prediction when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD` (500).
+    /// Uses parallel prediction when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD` (500)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
@@ -633,9 +630,9 @@ impl LDA {
         Ok(Array1::from(predictions))
     }
 
-    /// Transforms data using the trained projection matrix.
+    /// Transforms data using the trained projection matrix
     ///
-    /// Projects samples onto the learned discriminant components.
+    /// Projects samples onto the learned discriminant components
     ///
     /// # Parameters
     ///
@@ -656,9 +653,9 @@ impl LDA {
         self.transform_internal(x)
     }
 
-    /// Fits the model and transforms the data in one step.
+    /// Fits the model and transforms the data in one step
     ///
-    /// Convenience method that trains the model and returns the projected data.
+    /// Convenience method that trains the model and returns the projected data
     ///
     /// # Parameters
     ///
@@ -676,8 +673,8 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`.
-    /// Uses Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`.
+    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`. Uses
+    /// Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`
     pub fn fit_transform<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -687,9 +684,7 @@ impl LDA {
         S1: Data<Elem = f64>,
         S2: Data<Elem = i32>,
     {
-        // Fit the model with adaptive parallelism
         self.fit(x, y)?;
-        // Project the input using the fitted components
         self.transform_internal(x)
     }
 
@@ -750,8 +745,8 @@ impl LDA {
             .mean_axis(Axis(0))
             .expect("Error computing class mean");
 
-        // Within-class scatter as a single GEMM: Sᵂ = Cᵀ·C, where C is the class data
-        // centered on its mean. Replaces an O(n·d²) loop of per-row rank-1 updates.
+        // Within-class scatter as a single GEMM S_W = C^T * C (C is the mean-centered
+        // class data), avoiding a per-row rank-1 update loop
         let centered = &class_data - &class_mean;
         let class_sw = centered.t().dot(&centered);
 

@@ -1,3 +1,5 @@
+//! Adam (Adaptive Moment Estimation) optimizer
+
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
@@ -5,41 +7,38 @@ use crate::neural_network::optimizers::validation::{
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
-/// Adam's per-parameter first/second moment buffers, sized lazily on first use.
+/// Adam's per-parameter first/second moment buffers, sized lazily on first use
 #[derive(Debug, Clone, Default)]
 struct AdamParamState {
     m: Vec<f32>,
     v: Vec<f32>,
 }
 
-/// Adam (Adaptive Moment Estimation) optimizer.
+/// Adam (Adaptive Moment Estimation) optimizer
 ///
-/// Computes adaptive learning rates using estimates of first and second moments of gradients.
-///
-/// # Fields
-///
-/// - `learning_rate` - Learning rate controlling the size of parameter updates
-/// - `beta1` - Exponential decay rate for the first moment estimates
-/// - `beta2` - Exponential decay rate for the second moment estimates
-/// - `epsilon` - Small constant added for numerical stability
-/// - `t` - Current timestep, incremented with each update
+/// Computes adaptive learning rates using estimates of first and second moments of gradients
 #[derive(Debug)]
 pub struct Adam {
+    /// Learning rate controlling the size of parameter updates
     learning_rate: f32,
+    /// Exponential decay rate for the first moment estimates
     beta1: f32,
+    /// Exponential decay rate for the second moment estimates
     beta2: f32,
+    /// Small constant added for numerical stability
     epsilon: f32,
+    /// Current timestep, incremented with each update
     t: u64,
-    /// Per-parameter moment buffers, indexed by the order layers yield parameters each step.
+    /// Per-parameter moment buffers, indexed by the order layers yield parameters each step
     states: Vec<AdamParamState>,
-    /// Position within `states` for the parameter currently being updated; reset each `step`.
+    /// Position within `states` for the parameter currently being updated; reset each `step`
     cursor: usize,
 }
 
 impl Adam {
-    /// Creates a new Adam optimizer with the specified parameters.
+    /// Creates a new Adam optimizer with the specified hyperparameters
     ///
-    /// Validates hyperparameters and initializes internal timestep tracking.
+    /// Validates hyperparameters and initializes internal timestep tracking
     ///
     /// # Parameters
     ///
@@ -56,7 +55,6 @@ impl Adam {
     ///
     /// - `Error::InvalidParameter` - If any hyperparameter is out of range
     pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Result<Self, Error> {
-        // input validation
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(beta1, "beta1")?;
         validate_decay_rate(beta2, "beta2")?;
@@ -76,11 +74,10 @@ impl Adam {
 
 impl Optimizer for Adam {
     fn step(&mut self) {
-        // Advance the global timestep once per batch. Saturating at `i32::MAX` keeps the later
-        // `t as i32` casts (used in bias correction) from wrapping to a negative exponent; by then
-        // the bias-correction terms have long since converged to 1.
+        // Advance the timestep once per batch; saturating at i32::MAX keeps the later `t as i32`
+        // casts in bias correction from wrapping to a negative exponent
         self.t = self.t.saturating_add(1).min(i32::MAX as u64);
-        // Rewind to the first parameter; layers yield parameters in the same order every step.
+        // Rewind to the first parameter; layers yield parameters in the same order every step
         self.cursor = 0;
     }
 

@@ -1,20 +1,19 @@
-//! Shared input-validation helpers for the `utility` module.
+//! Shared input-validation helpers for the `utils` module
 //!
-//! Every transformer (PCA, Kernel PCA, t-SNE) and preprocessing function
-//! (`normalize`, `standardize`) needs the same handful of checks — non-empty
-//! input, no NaN/infinite values, matching feature counts. These helpers are
-//! the single source of truth for those checks so the error messages stay
-//! consistent across the module.
+//! Transformers (PCA, Kernel PCA, t-SNE) and preprocessing functions
+//! (`normalize`, `standardize`) share the same checks: non-empty input,
+//! no NaN/infinite values, matching feature counts. These helpers keep
+//! the error messages consistent across the module
 //!
-//! This mirrors the role of [`machine_learning::validation`](crate::machine_learning)
-//! but is intentionally a separate, `utility`-local copy: the `utility` feature
-//! does not depend on `machine_learning`, so the two cannot share one module
-//! without coupling the features.
+//! Intentionally a separate, `utils`-local copy of the role played by
+//! [`machine_learning::validation`](crate::machine_learning): the `utils`
+//! feature does not depend on `machine_learning`, so the two cannot share
+//! one module without coupling the features
 
 use crate::error::Error;
 use ndarray::{ArrayBase, Data, Dimension, Ix2};
 
-/// Returns an error if `x` contains no elements.
+/// Returns an error if `x` contains no elements
 ///
 /// # Errors
 ///
@@ -30,7 +29,7 @@ where
     Ok(())
 }
 
-/// Returns an error if `x` contains any NaN or infinite value.
+/// Returns an error if `x` contains any NaN or infinite value
 ///
 /// # Errors
 ///
@@ -46,11 +45,10 @@ where
     Ok(())
 }
 
-/// Returns an error if `x` has fewer than `min_samples` rows.
+/// Returns an error if `x` has fewer than `min_samples` rows
 ///
-/// `model` names the estimator so the message reads naturally (e.g. `"PCA requires
-/// at least 2 samples"`). Several transformers share the same minimum-sample guard,
-/// differing only in that name.
+/// `model` names the estimator so the message reads naturally (e.g. `"PCA
+/// requires at least 2 samples"`)
 ///
 /// # Errors
 ///
@@ -72,10 +70,10 @@ where
     Ok(())
 }
 
-/// Validates a feature matrix passed to a `fit`-style method.
+/// Validates a feature matrix passed to a `fit`-style method
 ///
 /// Checks, in order, that the matrix is non-empty, has at least one feature
-/// column, and contains only finite values.
+/// column, and contains only finite values
 ///
 /// # Parameters
 ///
@@ -96,10 +94,10 @@ where
     check_finite(x)
 }
 
-/// Validates a feature matrix passed to a `transform`-style method.
+/// Validates a feature matrix passed to a `transform`-style method
 ///
 /// Checks that the matrix is non-empty, that its feature count matches the
-/// fitted model, and that it contains only finite values.
+/// fitted model, and that it contains only finite values
 ///
 /// # Parameters
 ///
@@ -131,11 +129,9 @@ mod tests {
     use crate::error::Error;
     use ndarray::Array2;
 
-    // --- check_non_empty ---
+    // check_non_empty
 
-    /// An empty Array2 (0 rows, 0 cols) must produce EmptyInput.
-    /// Derivation: x.is_empty() is true when the total number of elements is 0;
-    /// the code returns Err(Error::empty_input(...)) in that case.
+    /// An empty array produces EmptyInput
     #[test]
     fn check_non_empty_empty_array_gives_empty_input() {
         let empty: Array2<f64> = Array2::zeros((0, 3));
@@ -146,19 +142,16 @@ mod tests {
         }
     }
 
-    /// A non-empty Array2 must return Ok(()).
-    /// Derivation: x.is_empty() is false for shape (2, 3); no error is raised.
+    /// A non-empty array returns Ok
     #[test]
     fn check_non_empty_non_empty_array_gives_ok() {
         let a: Array2<f64> = Array2::zeros((2, 3));
         assert!(check_non_empty(&a).is_ok());
     }
 
-    // --- check_finite ---
+    // check_finite
 
-    /// An array containing NaN must produce NonFinite.
-    /// Derivation: f64::NAN.is_finite() is false; the iterator finds it and
-    /// returns Err(Error::non_finite(...)).
+    /// An array containing NaN produces NonFinite
     #[test]
     fn check_finite_nan_gives_non_finite() {
         let a = ndarray::array![[1.0, f64::NAN], [2.0, 3.0]];
@@ -169,8 +162,7 @@ mod tests {
         }
     }
 
-    /// An array containing positive infinity must produce NonFinite.
-    /// Derivation: f64::INFINITY.is_finite() is false.
+    /// An array containing positive infinity produces NonFinite
     #[test]
     fn check_finite_inf_gives_non_finite() {
         let a = ndarray::array![[f64::INFINITY, 2.0]];
@@ -181,8 +173,7 @@ mod tests {
         }
     }
 
-    /// An array containing negative infinity must also produce NonFinite.
-    /// Derivation: f64::NEG_INFINITY.is_finite() is false.
+    /// An array containing negative infinity produces NonFinite
     #[test]
     fn check_finite_neg_inf_gives_non_finite() {
         let a = ndarray::array![[1.0, f64::NEG_INFINITY]];
@@ -193,19 +184,16 @@ mod tests {
         }
     }
 
-    /// An array of finite values must return Ok(()).
-    /// Derivation: every element passes is_finite(); no error is raised.
+    /// An array of finite values returns Ok
     #[test]
     fn check_finite_all_finite_gives_ok() {
         let a = ndarray::array![[0.0, -1.5, 1e10], [f64::MIN, f64::MAX, 0.0]];
         assert!(check_finite(&a).is_ok());
     }
 
-    // --- check_min_samples ---
+    // check_min_samples
 
-    /// When nrows < min_samples the function must return an InvalidInput error.
-    /// Derivation: 1 < 2 triggers the error branch; the code calls
-    /// Error::invalid_input(...) which produces Error::InvalidInput.
+    /// Too few rows produces InvalidInput
     #[test]
     fn check_min_samples_too_few_gives_invalid_input() {
         let a: Array2<f64> = Array2::zeros((1, 3));
@@ -216,16 +204,14 @@ mod tests {
         }
     }
 
-    /// When nrows == min_samples the function must return Ok(()).
-    /// Derivation: 2 < 2 is false; no error branch is taken.
+    /// Rows equal to min_samples returns Ok
     #[test]
     fn check_min_samples_exactly_min_gives_ok() {
         let a: Array2<f64> = Array2::zeros((2, 3));
         assert!(check_min_samples(&a, 2, "TestModel").is_ok());
     }
 
-    /// When nrows > min_samples the function must also return Ok(()).
-    /// Derivation: 5 < 2 is false; the guard is not triggered.
+    /// More rows than min_samples returns Ok
     #[test]
     fn check_min_samples_more_than_min_gives_ok() {
         let a: Array2<f64> = Array2::zeros((5, 3));

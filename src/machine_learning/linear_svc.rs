@@ -1,3 +1,9 @@
+//! Linear Support Vector Classifier
+//!
+//! Provides [`LinearSVC`], a hinge-loss classifier trained with stochastic gradient
+//! descent and L1 or L2 regularization, along with the [`RegularizationType`] enum
+//! that selects the penalty
+
 pub use super::RegularizationType;
 use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
@@ -10,27 +16,16 @@ use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-/// Threshold for batch size above which parallel processing is used
+/// Batch size at or above which parallel gradient processing is used
 const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
-/// Implements a classifier similar to sklearn's LinearSVC, trained using the hinge loss function.
-/// Supports L1 and L2 regularization for preventing overfitting.
+/// A classifier similar to sklearn's LinearSVC, trained using the hinge loss function,
+/// with L1 and L2 regularization for preventing overfitting
 ///
-/// # Fields
+/// # Examples
 ///
-/// - `weights` - Weight coefficients for each feature
-/// - `bias` - Bias term (intercept) of the model
-/// - `max_iter` - Maximum number of iterations for the optimizer
-/// - `learning_rate` - Learning rate (step size) for gradient descent
-/// - `penalty` - Regularization type (L1 or L2) with strength parameter
-/// - `fit_intercept` - Whether to calculate and use an intercept/bias term
-/// - `tol` - Training convergence tolerance
-/// - `random_state` - Optional seed for the per-epoch minibatch shuffling, enabling reproducible training
-/// - `n_iter` - Number of iterations that were actually performed during training
-///
-/// # Example
 /// ```rust
 /// use ndarray::{Array1, Array2};
 /// use rustyml::machine_learning::linear_svc::*;
@@ -65,21 +60,30 @@ const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearSVC {
+    /// Weight coefficients for each feature
     weights: Option<Array1<f64>>,
+    /// Bias term (intercept) of the model
     bias: Option<f64>,
+    /// Maximum number of iterations for the optimizer
     max_iter: usize,
+    /// Learning rate (step size) for gradient descent
     learning_rate: f64,
+    /// Regularization type (L1 or L2) with strength parameter
     penalty: RegularizationType,
+    /// Whether to calculate and use an intercept/bias term
     fit_intercept: bool,
+    /// Training convergence tolerance
     tol: f64,
+    /// Optional seed for the per-epoch minibatch shuffling, enabling reproducible training
     random_state: Option<u64>,
+    /// Number of iterations that were actually performed during training
     n_iter: Option<usize>,
 }
 
 impl Default for LinearSVC {
     /// Creates a new LinearSVC with default parameters
     ///
-    /// # Default values
+    /// # Default Values
     ///
     /// - `max_iter`: 1000
     /// - `learning_rate`: 0.001
@@ -107,7 +111,7 @@ impl Default for LinearSVC {
 }
 
 impl LinearSVC {
-    /// Creates a new LinearSVC instance with custom parameters.
+    /// Creates a new LinearSVC instance with custom parameters
     ///
     /// # Parameters
     ///
@@ -197,11 +201,11 @@ impl LinearSVC {
     get_field!(get_penalty, penalty, RegularizationType);
     get_field!(get_random_state, random_state, Option<u64>);
 
-    /// Trains the model on the provided data.
+    /// Trains the model on the provided data
     ///
-    /// Uses stochastic gradient descent to optimize the hinge loss function.
-    /// The model will continue training until either maximum iterations are reached
-    /// or convergence is detected based on tolerance.
+    /// Uses stochastic gradient descent to optimize the hinge loss function,
+    /// continuing until either the maximum iterations are reached or convergence
+    /// is detected based on tolerance
     ///
     /// # Parameters
     ///
@@ -219,7 +223,7 @@ impl LinearSVC {
     ///
     /// # Performance
     ///
-    /// Parallel processing is automatically enabled when the batch size exceeds `LINEAR_SVC_PARALLEL_THRESHOLD` (200).
+    /// Parallel processing is automatically enabled when the batch size reaches `LINEAR_SVC_PARALLEL_THRESHOLD` (200) or more
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -228,7 +232,7 @@ impl LinearSVC {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Use preliminary_check for input validation
+        // Validate inputs
         preliminary_check(x, Some(y))?;
 
         let n_samples = x.nrows();
@@ -241,8 +245,7 @@ impl LinearSVC {
         // Convert labels to -1 and 1
         let y_binary = y.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
 
-        // Create index array for random sampling. Seeding the RNG from `random_state`
-        // makes the per-epoch minibatch shuffling reproducible.
+        // Index array for shuffling; seeding from `random_state` makes the per-epoch minibatch shuffle reproducible
         let mut indices: Vec<usize> = (0..n_samples).collect();
         let mut rng = crate::random::make_rng(self.random_state);
 
@@ -262,7 +265,7 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            // Hinge loss via the shared math primitive (margins = w·xᵢ + b)
+            // Hinge loss via the shared math primitive (margins = w . x_i + b)
             let margins: Array1<f64> = x.outer_iter().map(|xi| xi.dot(weights) + bias).collect();
             let hinge = hinge_loss(&margins, y);
 
@@ -295,14 +298,11 @@ impl LinearSVC {
             #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
-            // Randomly shuffle indices
             indices.shuffle(&mut rng);
 
-            // Split data into batches
             for batch_indices in indices.chunks(batch_size) {
                 let batch_len = batch_indices.len() as f64;
 
-                // Gradient computation closure
                 let compute_gradient = |&idx: &usize| {
                     let xi = x.slice(s![idx, ..]);
                     let yi = y_binary[idx];
@@ -424,7 +424,7 @@ impl LinearSVC {
         Ok(self)
     }
 
-    /// Predicts the class for each sample in the provided data.
+    /// Predicts the class for each sample in the provided data
     ///
     /// # Parameters
     ///
@@ -447,10 +447,10 @@ impl LinearSVC {
         Ok(decision.mapv(|v| if v > 0.0 { 1.0 } else { 0.0 }))
     }
 
-    /// Calculates the decision function values for each sample.
+    /// Calculates the decision function values for each sample
     ///
-    /// This method provides raw scores representing the distance to the decision hyperplane.
-    /// Positive values indicate class 1, negative values indicate class 0.
+    /// Provides raw scores representing the distance to the decision hyperplane,
+    /// where positive values indicate class 1 and negative values indicate class 0
     ///
     /// # Parameters
     ///
@@ -488,9 +488,9 @@ impl LinearSVC {
         Ok(decision)
     }
 
-    /// Fits the model to the training data and then predicts labels for the same data.
+    /// Fits the model to the training data and then predicts labels for the same data
     ///
-    /// A convenience method that sequentially executes `fit` and then `predict`.
+    /// A convenience method that sequentially executes `fit` and then `predict`
     ///
     /// # Parameters
     ///

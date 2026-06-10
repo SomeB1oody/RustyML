@@ -1,3 +1,5 @@
+//! Long Short-Term Memory (LSTM) recurrent layer with input, forget, cell, and output gates
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -14,39 +16,21 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3, Axis, Ix2, Ix3};
 
-/// Threshold for using parallel computation in LSTM layer.
-/// When batch_size * units < this value, sequential execution is used.
-/// When batch_size * units >= this value, parallel execution is used.
+/// Threshold for switching LSTM computation to parallel execution
 ///
-/// Value is chosen based on empirical benchmarks where rayon's thread pool
-/// overhead is amortized by computational gains from parallelization.
+/// When `batch_size * units` is below this value, execution is sequential; at or above it,
+/// execution is parallel. Chosen from empirical benchmarks where rayon's thread-pool overhead
+/// is amortized by the gains from parallelization
 const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Long Short-Term Memory (LSTM) neural network layer.
+/// Long Short-Term Memory (LSTM) neural network layer
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). Uses input, forget, cell, and
-/// output gates to control memory flow and mitigate vanishing gradients.
-///
-/// # Fields
-///
-/// - `input_dim` - Dimensionality of input features
-/// - `units` - Number of LSTM units (neurons) in the layer
-/// - `input_gate` - Gate controlling what new information to store in cell state
-/// - `forget_gate` - Gate controlling what information to discard from cell state
-/// - `cell_gate` - Gate proposing new candidate values for cell state
-/// - `output_gate` - Gate controlling what to output from cell state
-/// - `input_cache` - Cached input tensor for backward propagation
-/// - `hidden_cache` - Cached hidden states h_t for each timestep
-/// - `cell_cache` - Cached cell states C_t for each timestep
-/// - `cell_activated_cache` - Cached activation(C_t) values for each timestep
-/// - `i_cache` - Cached input gate activations for each timestep
-/// - `f_cache` - Cached forget gate activations for each timestep
-/// - `g_cache` - Cached candidate (cell gate) activations for each timestep
-/// - `o_cache` - Cached output gate activations for each timestep
-/// - `activation` - Activation applied to the candidate and to the cell state each timestep (Keras-style)
+/// output gates to control memory flow and mitigate vanishing gradients
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -73,39 +57,51 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// ```
 #[derive(Debug)]
 pub struct LSTM {
+    /// Dimensionality of input features
     input_dim: usize,
+    /// Number of LSTM units (neurons) in the layer
     units: usize,
 
-    // Four gates: input, forget, cell, output
+    /// Gate controlling what new information to store in cell state
     input_gate: Gate,
+    /// Gate controlling what information to discard from cell state
     forget_gate: Gate,
+    /// Gate proposing new candidate values for cell state
     cell_gate: Gate,
+    /// Gate controlling what to output from cell state
     output_gate: Gate,
 
-    // Caches for forward pass
+    /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
-    hidden_cache: Option<Vec<Array2<f32>>>, // hidden states h_t
-    cell_cache: Option<Vec<Array2<f32>>>,   // cell states c_t
-    cell_activated_cache: Option<Vec<Array2<f32>>>, // activation(c_t)
+    /// Cached hidden states h_t for each timestep
+    hidden_cache: Option<Vec<Array2<f32>>>,
+    /// Cached cell states c_t for each timestep
+    cell_cache: Option<Vec<Array2<f32>>>,
+    /// Cached activation(c_t) values for each timestep
+    cell_activated_cache: Option<Vec<Array2<f32>>>,
 
-    // Intermediate gate values cache
-    i_cache: Option<Vec<Array2<f32>>>, // input gate values (sigmoid applied)
-    f_cache: Option<Vec<Array2<f32>>>, // forget gate values (sigmoid applied)
-    g_cache: Option<Vec<Array2<f32>>>, // candidate values (activation applied)
-    o_cache: Option<Vec<Array2<f32>>>, // output gate values (sigmoid applied)
+    /// Cached input gate activations (sigmoid applied) for each timestep
+    i_cache: Option<Vec<Array2<f32>>>,
+    /// Cached forget gate activations (sigmoid applied) for each timestep
+    f_cache: Option<Vec<Array2<f32>>>,
+    /// Cached candidate (cell gate) activations for each timestep
+    g_cache: Option<Vec<Array2<f32>>>,
+    /// Cached output gate activations (sigmoid applied) for each timestep
+    o_cache: Option<Vec<Array2<f32>>>,
 
+    /// Activation applied to the candidate and to the cell state each timestep (Keras-style)
     activation: Activation,
 }
 
 impl LSTM {
-    /// Creates an LSTM layer with the specified dimensions and activation.
+    /// Creates an LSTM layer with the specified dimensions and activation
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of LSTM units/neurons in the layer (determines output dimensionality)
-    /// - `activation` - Activation layer from activation module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `activation` - Activation from the activation module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -120,11 +116,10 @@ impl LSTM {
         activation: impl Into<Activation>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Validate input dimensions and units
         validate_recurrent_dimensions(input_dim, units)?;
 
-        // One RNG threaded through all four gates so the whole layer shares a single
-        // reproducible initialization stream.
+        // One RNG threaded through all four gates so the layer shares a single
+        // reproducible initialization stream
         let mut rng = crate::random::make_rng(random_state);
 
         Ok(Self {
@@ -146,7 +141,7 @@ impl LSTM {
         })
     }
 
-    /// Sets the weights for all four gates in this LSTM layer.
+    /// Sets the weights for all four gates in this LSTM layer
     ///
     /// # Parameters
     ///
@@ -162,7 +157,11 @@ impl LSTM {
     /// - `output_kernel` - Input kernel for the output gate with shape (input_dim, units)
     /// - `output_recurrent_kernel` - Recurrent kernel for the output gate with shape (units, units)
     /// - `output_bias` - Bias for the output gate with shape (1, units)
-    #[allow(clippy::too_many_arguments)] // four gates × (kernel, recurrent_kernel, bias)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the expected shape
+    #[allow(clippy::too_many_arguments)] // four gates x (kernel, recurrent_kernel, bias)
     pub fn set_weights(
         &mut self,
         input_kernel: Array2<f32>,
@@ -257,7 +256,6 @@ impl LSTM {
 
 impl Layer for LSTM {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
@@ -266,7 +264,6 @@ impl Layer for LSTM {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
-        // Initialize hidden state and cell state
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut c_prev = Array2::<f32>::zeros((batch, self.units));
 
@@ -282,13 +279,12 @@ impl Layer for LSTM {
         hs.push(h_prev.clone());
         cs.push(c_prev.clone());
 
-        // Determine whether to use parallel execution based on computational load
+        // Parallelize once the computational load clears the threshold
         let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
 
-        // The configurable activation (Copy), applied to the candidate and the cell state.
+        // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Process each timestep
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
@@ -319,7 +315,7 @@ impl Layer for LSTM {
             };
 
             // Gates use the recurrent activation (sigmoid); the candidate uses the
-            // configurable activation (Keras-style, default tanh).
+            // configurable activation (Keras-style, default tanh)
             let i_t = apply_sigmoid(i_raw);
             let f_t = apply_sigmoid(f_raw);
             let o_t = apply_sigmoid(o_raw);
@@ -363,13 +359,12 @@ impl Layer for LSTM {
         self.o_cache = Some(o_vals);
 
         // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so return the last hidden state directly.
+        // timestep (Keras-style), so the last hidden state is returned directly
         Ok(h_prev.into_dyn())
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
@@ -377,17 +372,15 @@ impl Layer for LSTM {
         // Input shape: (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
-        // Initialize hidden state and cell state
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut c_prev = Array2::<f32>::zeros((batch, self.units));
 
-        // Determine whether to use parallel execution based on computational load
+        // Parallelize once the computational load clears the threshold
         let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
 
-        // The configurable activation (Copy), applied to the candidate and the cell state.
+        // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Process each timestep
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
 
@@ -418,7 +411,7 @@ impl Layer for LSTM {
             };
 
             // Gates use the recurrent activation (sigmoid); the candidate uses the
-            // configurable activation (Keras-style, default tanh).
+            // configurable activation (Keras-style, default tanh)
             let i_t = apply_sigmoid(i_raw);
             let f_t = apply_sigmoid(f_raw);
             let o_t = apply_sigmoid(o_raw);
@@ -444,15 +437,15 @@ impl Layer for LSTM {
         }
 
         // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so return the last hidden state directly.
+        // timestep (Keras-style), so the last hidden state is returned directly
         Ok(h_prev.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // The upstream gradient is dL/dh_T directly (no extra output activation).
+        // The upstream gradient is dL/dh_T directly (no extra output activation)
         let grad_h_t = grad_output.clone().into_dimensionality::<Ix2>().unwrap();
 
-        // The configurable activation (Copy), used for the candidate and cell-state derivatives.
+        // Configurable activation, used for the candidate and cell-state derivatives
         let act = self.activation;
 
         let x3 = take_cache(&mut self.input_cache, "LSTM")?;
@@ -490,7 +483,7 @@ impl Layer for LSTM {
         let mut grad_h = grad_h_t;
         let mut grad_c = Array2::<f32>::zeros((batch, self.units));
 
-        // Determine whether to use parallel execution based on computational load
+        // Parallelize once the computational load clears the threshold
         let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
 
         // Backpropagation through time
@@ -505,7 +498,7 @@ impl Layer for LSTM {
 
             // Gradient through h_t = o_t * activation(c_t)
             let grad_o_t = &grad_h * c_t_activated;
-            // dL/dc_t += activation'(c_t) * (grad_h * o_t), via the activation backward.
+            // dL/dc_t += activation'(c_t) * (grad_h * o_t), via the activation backward
             let grad_cell_act = act
                 .backward(
                     &c_t_activated.clone().into_dyn(),
@@ -522,8 +515,7 @@ impl Layer for LSTM {
             let grad_c_prev = &grad_c * f_t;
 
             // Gates use the sigmoid (recurrent activation) derivative; the candidate uses
-            // the configurable activation derivative. These are cheap element-wise ops, so
-            // they run sequentially — the heavy matmuls below remain parallel.
+            // the configurable activation derivative
             let grad_o_raw = &grad_o_t * o_t * &(1.0 - o_t);
             let grad_f_raw = &grad_f_t * f_t * &(1.0 - f_t);
             let grad_i_raw = &grad_i_t * i_t * &(1.0 - i_t);
@@ -537,7 +529,7 @@ impl Layer for LSTM {
             let x_t_t = x_t.t();
             let h_prev_t = h_prev.t();
 
-            // Closure to compute gradient updates for a single gate
+            // Gradient updates for a single gate
             let compute_gate_gradients = |grad_raw: &Array2<f32>| {
                 let kernel_update = x_t_t.dot(grad_raw);
                 let recurrent_update = h_prev_t.dot(grad_raw);
@@ -571,7 +563,6 @@ impl Layer for LSTM {
                 )
             };
 
-            // Apply gradient updates
             grad_o_kernel += &o_updates.0;
             grad_o_recurrent += &o_updates.1;
             grad_o_bias += &o_updates.2;
@@ -624,7 +615,6 @@ impl Layer for LSTM {
             grad_c = grad_c_prev;
         }
 
-        // Store gradients
         store_gate_gradients(
             &mut self.input_gate,
             grad_i_kernel,

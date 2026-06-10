@@ -1,3 +1,5 @@
+//! ReLU activation layer applying `max(0, x)` elementwise while caching output for backpropagation
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -6,17 +8,13 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// ReLU (Rectified Linear Unit) activation layer.
+/// ReLU (Rectified Linear Unit) activation layer
 ///
-/// Applies `max(0, x)` element-wise to the input tensor, keeping the original shape.
-/// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers.
+/// Applies `max(0, x)` elementwise to the input tensor, keeping the original shape
+/// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
 /// The activation math is provided by [`Activation::ReLU`]; this layer only adds
-/// boundary validation and the caching required for backpropagation.
-///
-/// # Fields
-///
-/// - `output_cache` - Cached activated output from the forward pass, used during backpropagation
+/// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -45,11 +43,12 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct ReLU {
+    /// Cached activated output from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
 }
 
 impl ReLU {
-    /// Creates a new ReLU activation layer.
+    /// Creates a new ReLU activation layer
     ///
     /// # Returns
     ///
@@ -67,49 +66,42 @@ impl Default for ReLU {
 
 impl Layer for ReLU {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply ReLU: max(0, x)
         let output = Activation::ReLU.forward(input)?;
 
-        // Save activated output for backpropagation
+        // Cache activated output for backpropagation
         self.output_cache = Some(output.clone());
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply ReLU: max(0, x)
         Activation::ReLU.forward(input)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(output) = &self.output_cache {
-            // Validate gradient output shape (ReLU preserves shape)
+            // ReLU preserves shape, so gradient must match the cached output
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
             }
 
-            // Check for NaN or infinite values in gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
                 return Err(Error::non_finite("gradient output"));
             }

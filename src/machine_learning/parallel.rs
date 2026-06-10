@@ -1,10 +1,15 @@
+//! Index-mapping helpers that pick parallel or sequential execution based on a size threshold
+//!
+//! Provides [`map_collect`] and its fallible counterpart [`try_map_collect`], the shared
+//! "parallelize only for large inputs" dispatch used across the machine-learning models
+
 use crate::error::Error;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-/// Maps `f` over `0..n`, choosing parallel or sequential execution by `threshold`.
+/// Maps `f` over `0..n`, choosing parallel or sequential execution by `threshold`
 ///
 /// Centralizes the "parallelize only for large inputs" dispatch that every model
-/// re-implements, so the rule lives in one place instead of being copy-pasted.
+/// re-implements, so the rule lives in one place instead of being copy-pasted
 ///
 /// # Parameters
 ///
@@ -28,7 +33,7 @@ where
     }
 }
 
-/// Fallible counterpart to [`map_collect`]: short-circuits on the first `Err`.
+/// Fallible counterpart to [`map_collect`]: short-circuits on the first `Err`
 ///
 /// # Parameters
 ///
@@ -60,16 +65,12 @@ where
 mod tests {
     use super::*;
 
-    /// `map_collect` must return identical, index-ordered output regardless of whether
-    /// the sequential (n < threshold) or parallel (n >= threshold) branch runs.
-    ///
-    /// With threshold = 4: n=3 takes the sequential branch, n=8 the parallel branch.
-    /// Mapping i -> i*i yields the squares in index order in both cases.
+    /// map_collect returns identical index-ordered output on both the sequential and parallel branches
     #[test]
     fn map_collect_seq_and_par_match_index_order() {
         let threshold = 4_usize;
 
-        // n below threshold -> sequential branch.
+        // n below threshold -> sequential branch
         let seq: Vec<usize> = map_collect(3, threshold, |i| i * i);
         assert_eq!(
             seq,
@@ -77,7 +78,7 @@ mod tests {
             "sequential branch must be index-ordered"
         );
 
-        // n at/above threshold -> parallel branch; results still in index order.
+        // n at/above threshold -> parallel branch
         let par: Vec<usize> = map_collect(8, threshold, |i| i * i);
         assert_eq!(
             par,
@@ -85,7 +86,7 @@ mod tests {
             "parallel branch must preserve index order"
         );
 
-        // The common prefix produced by both branches must agree element-for-element.
+        // Both branches must agree on the shared prefix
         assert_eq!(
             &par[..3],
             &seq[..],
@@ -93,18 +94,14 @@ mod tests {
         );
     }
 
-    /// `map_collect` on an empty range returns an empty Vec (sequential branch, n=0).
+    /// `map_collect` on an empty range returns an empty Vec
     #[test]
     fn map_collect_empty() {
         let out: Vec<usize> = map_collect(0, 4, |i| i * 2);
         assert!(out.is_empty(), "empty range must produce empty output");
     }
 
-    /// `try_map_collect` short-circuits on the FIRST `Err` (in index order) when collecting
-    /// into `Result`. Using the sequential branch (n < threshold) makes "first" deterministic.
-    ///
-    /// Indices 2 and 4 both fail; collect into `Result` must surface index 2's error message
-    /// (the earlier failure), and the success branch returns all values in index order.
+    /// try_map_collect surfaces the first (lowest-index) Err when multiple mappings fail
     #[test]
     fn try_map_collect_propagates_first_err() {
         let threshold = 100_usize; // keep n=5 on the sequential, deterministic-order branch
@@ -128,8 +125,7 @@ mod tests {
         }
     }
 
-    /// `try_map_collect` returns `Ok` with all values in index order when every mapping
-    /// succeeds.
+    /// `try_map_collect` returns `Ok` with all values in index order when every mapping succeeds
     #[test]
     fn try_map_collect_all_ok_index_order() {
         let result: Result<Vec<usize>, Error> =

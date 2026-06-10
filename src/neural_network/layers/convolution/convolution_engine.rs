@@ -1,43 +1,42 @@
-//! Dimension-generic convolution engine shared by `Conv1D`, `Conv2D`, and `Conv3D`.
+//! Dimension-generic convolution engine shared by `Conv1D`, `Conv2D`, and `Conv3D`
 //!
-//! A plain convolution is the same operation at every rank — only the number of spatial axes
-//! changes — so one implementation, generic over the spatial rank `R = ndim - 2`, serves all
+//! A plain convolution is the same operation at every rank - only the number of spatial axes
+//! changes - so one implementation, generic over the spatial rank `R = ndim - 2`, serves all
 //! three layers. The layer wrappers keep their public API, weight storage, activation, and caches;
-//! they delegate just the numeric forward/backward to [`conv_forward`] and [`conv_backward`].
+//! they delegate just the numeric forward/backward to [`conv_forward`] and [`conv_backward`]
 //!
-//! # Conventions (match the previous per-rank code exactly)
+//! # Conventions
 //!
-//! - `Valid` output: `(in - k) / stride + 1`; `Same` output: `ceil(in / stride)`.
+//! - `Valid` output: `(in - k) / stride + 1`; `Same` output: `ceil(in / stride)`
 //! - `Same` padding splits the total evenly with the extra cell on the trailing edge
-//!   (`pad_before = pad_total / 2`).
-//! - Cross-correlation (no kernel flip); the bias is added last so results are bit-compatible with
-//!   the previous implementations.
+//!   (`pad_before = pad_total / 2`)
+//! - Cross-correlation (no kernel flip); the bias is added last
 //!
 //! # Layout
 //!
 //! Tensors are `[batch, channels, spatial...]`; weights are flat row-major `[F, Cin, k...]`. Work is
 //! parallelized over `batch * filters` (forward), `filters` (weight/bias gradients), and
-//! `batch * channels` (input gradient) — each task writes a disjoint output region.
+//! `batch * channels` (input gradient) - each task writes a disjoint output region
 
 use super::PaddingType;
 use crate::neural_network::Tensor;
 use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
-/// Workload (output-element count) at or above which an engine pass runs in parallel.
+/// Workload (output-element count) at or above which an engine pass runs in parallel
 const CONV_PARALLEL_THRESHOLD: usize = 10_000;
 
-/// Analytic gradients returned by [`conv_backward`].
+/// Analytic gradients returned by [`conv_backward`]
 pub(super) struct ConvGradients {
-    /// Weight gradient, flat row-major `[F, Cin, k...]` (reshape to the layer's weight array).
+    /// Weight gradient, flat row-major `[F, Cin, k...]` (reshape to the layer's weight array)
     pub weight_grad: Vec<f32>,
-    /// Bias gradient, one value per filter `[F]`.
+    /// Bias gradient, one value per filter `[F]`
     pub bias_grad: Vec<f32>,
-    /// Input gradient, shape `[batch, Cin, spatial...]`.
+    /// Input gradient, shape `[batch, Cin, spatial...]`
     pub input_grad: Tensor,
 }
 
-/// Row-major (C-order) strides for `shape`.
+/// Row-major (C-order) strides for `shape`
 fn row_major_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![1usize; shape.len()];
     for k in (0..shape.len().saturating_sub(1)).rev() {
@@ -46,7 +45,7 @@ fn row_major_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
-/// Advances a multi-index `idx` (row-major, last axis fastest) within `dims`; `false` when it wraps.
+/// Advances a multi-index `idx` (row-major, last axis fastest) within `dims`; `false` when it wraps
 #[inline]
 fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     for k in (0..idx.len()).rev() {
@@ -59,7 +58,7 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     false
 }
 
-/// Runs `f` over `0..n`, in parallel when `parallel`, preserving index order.
+/// Runs `f` over `0..n`, in parallel when `parallel`, preserving index order
 fn map_indexed<R, F>(n: usize, parallel: bool, f: F) -> Vec<R>
 where
     R: Send,
@@ -72,7 +71,7 @@ where
     }
 }
 
-/// Per-spatial-axis output size, leading padding, and padded size for the given padding mode.
+/// Per-spatial-axis output size, leading padding, and padded size for the given padding mode
 fn conv_geometry(
     sp: &[usize],
     k_dims: &[usize],
@@ -100,7 +99,7 @@ fn conv_geometry(
     }
 }
 
-/// Builds a zero-padded copy of the flat `[bc, sp...]` channel-plane data.
+/// Builds a zero-padded copy of the flat `[bc, sp...]` channel-plane data
 fn build_padded(
     in_flat: &[f32],
     bc: usize,
@@ -134,7 +133,7 @@ fn build_padded(
     out
 }
 
-/// Forward convolution. `weight_shape` is `[F, Cin, k...]`; `bias` is `[F]`; `strides` has length `R`.
+/// Forward convolution; `weight_shape` is `[F, Cin, k...]`, `bias` is `[F]`, `strides` has length `R`
 pub(super) fn conv_forward(
     input: &Tensor,
     weights: &[f32],
@@ -173,7 +172,7 @@ pub(super) fn conv_forward(
     };
     let padded: &[f32] = padded_storage.as_deref().unwrap_or(in_flat);
 
-    // One [out_plane] tile per (batch, filter) pair.
+    // One [out_plane] tile per (batch, filter) pair
     let process_bf = |bf: usize| -> Vec<f32> {
         let b = bf / filters;
         let f = bf % filters;
@@ -200,7 +199,7 @@ pub(super) fn conv_forward(
                     }
                 }
             }
-            // Bias added last to match the previous per-rank accumulation order.
+            // Bias added last to fix the accumulation order
             tile[o_flat] = sum + bias[f];
             o_flat += 1;
             if !increment_index(&mut o, &out_sp) {
@@ -224,8 +223,8 @@ pub(super) fn conv_forward(
     ArrayD::from_shape_vec(IxDyn(&out_shape), out_flat).expect("conv output length matches shape")
 }
 
-/// Backward convolution. `input` is the original (unpadded) forward input; `grad_output` is the
-/// gradient w.r.t. the convolution output (i.e. after the activation backward).
+/// Backward convolution; `input` is the original (unpadded) forward input, `grad_output` is the
+/// gradient w.r.t. the convolution output (i.e. after the activation backward)
 pub(super) fn conv_backward(
     grad_output: &Tensor,
     input: &Tensor,
@@ -270,7 +269,7 @@ pub(super) fn conv_backward(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // --- weight and bias gradients: one filter per task (reduces over batch and output). ---
+    // weight and bias gradients: one filter per task (reduces over batch and output)
     let per_f = |f: usize| -> (Vec<f32>, f32) {
         let mut wg = vec![0.0f32; cin * k_plane];
         let mut bias_sum = 0.0f32;
@@ -318,7 +317,7 @@ pub(super) fn conv_backward(
         bias_grad.push(b);
     }
 
-    // --- input gradient: one channel-plane per (batch, channel), gathered per original position. ---
+    // input gradient: one channel-plane per (batch, channel), gathered per original position
     let process_bc = |bc: usize| -> Vec<f32> {
         let b = bc / cin;
         let c = bc % cin;
@@ -334,7 +333,7 @@ pub(super) fn conv_backward(
                 kk.iter_mut().for_each(|x| *x = 0);
                 let mut kk_flat = 0usize;
                 loop {
-                    // Map padded position (si + pad_before) back to the output position it came from.
+                    // Map padded position (si + pad_before) back to the output position it came from
                     let mut valid = true;
                     let mut o_flat = 0usize;
                     for d in 0..r {
@@ -397,73 +396,63 @@ pub(super) fn conv_backward(
 mod tests {
     use super::*;
 
-    // -----------------------------------------------------------------------
     // row_major_strides
-    // -----------------------------------------------------------------------
 
-    /// 3-D shape [2, 3, 4]:
-    ///   strides[2] = 1
-    ///   strides[1] = 1 * 4 = 4
-    ///   strides[0] = 4 * 3 = 12
-    /// Expected: [12, 4, 1]
+    /// Row-major strides of a 3-D shape are the products of trailing dimensions
     #[test]
     fn test_row_major_strides_3d() {
         let got = row_major_strides(&[2, 3, 4]);
         assert_eq!(got, vec![12, 4, 1]);
     }
 
-    /// 1-D shape [5]: only one element so strides[0] = 1. Expected: [1]
+    /// A 1-D shape has a single unit stride
     #[test]
     fn test_row_major_strides_1d() {
         let got = row_major_strides(&[5]);
         assert_eq!(got, vec![1]);
     }
 
-    /// Empty shape: no dimensions, no strides. Expected: []
+    /// An empty shape yields no strides
     #[test]
     fn test_row_major_strides_empty() {
         let got = row_major_strides(&[]);
         assert_eq!(got, Vec::<usize>::new());
     }
 
-    // -----------------------------------------------------------------------
     // increment_index
-    // -----------------------------------------------------------------------
 
-    /// dims = [2, 3] (last axis fastest).
-    /// Walk: [0,0] -> [0,1] -> [0,2] -> [1,0] -> [1,1] -> [1,2] -> false (wraps to [0,0]).
+    /// A 2-D index walks last axis first and wraps to the origin after the last cell
     #[test]
     fn test_increment_index_2d() {
         let dims = [2usize, 3];
         let mut idx = vec![0usize, 0];
 
-        // Step 1: [0,0] -> [0,1], returns true
+        // [0,0] -> [0,1]
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![0, 1]);
 
-        // Step 2: [0,1] -> [0,2], returns true
+        // [0,1] -> [0,2]
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![0, 2]);
 
-        // Step 3: [0,2] -> [1,0] (last-axis overflow carries), returns true
+        // [0,2] -> [1,0] (last-axis overflow carries)
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![1, 0]);
 
-        // Step 4: [1,0] -> [1,1], returns true
+        // [1,0] -> [1,1]
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![1, 1]);
 
-        // Step 5: [1,1] -> [1,2], returns true
+        // [1,1] -> [1,2]
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![1, 2]);
 
-        // Step 6: [1,2] -> overflow on both axes, returns false; index wraps to [0,0]
+        // [1,2] -> overflow on both axes, wraps to [0,0]
         assert!(!increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![0, 0]);
     }
 
-    /// dims = [3] (single axis).
-    /// Walk: 0 -> 1 -> 2 -> false.
+    /// A single-axis index advances then returns false on overflow
     #[test]
     fn test_increment_index_1d() {
         let dims = [3usize];
@@ -477,18 +466,13 @@ mod tests {
         assert!(increment_index(&mut idx, &dims));
         assert_eq!(idx, vec![2]);
 
-        // 2 -> overflow, returns false
+        // 2 -> overflow
         assert!(!increment_index(&mut idx, &dims));
     }
 
-    // -----------------------------------------------------------------------
-    // conv_geometry – Valid padding
-    // -----------------------------------------------------------------------
+    // conv_geometry - Valid padding
 
-    /// sp=[5], k=[3], stride=[1], Valid:
-    ///   out = (5 - 3) / 1 + 1 = 3
-    ///   pad_before = [0]
-    ///   padded_sp = [5]  (same as input, no padding needed)
+    /// Valid 1-D geometry shrinks the output and adds no padding
     #[test]
     fn test_conv_geometry_valid_1d() {
         let (out_sp, pad_before, padded_sp) = conv_geometry(&[5], &[3], &[1], PaddingType::Valid);
@@ -497,15 +481,9 @@ mod tests {
         assert_eq!(padded_sp, vec![5]);
     }
 
-    // -----------------------------------------------------------------------
-    // conv_geometry – Same padding, 1-D
-    // -----------------------------------------------------------------------
+    // conv_geometry - Same padding, 1-D
 
-    /// sp=[7], k=[3], stride=[2], Same:
-    ///   out = ceil(7 / 2) = 4
-    ///   total_pad = (out-1)*stride + k - sp = (4-1)*2 + 3 - 7 = 6 + 3 - 7 = 2
-    ///   pad_before = 2 / 2 = 1
-    ///   padded_sp = max((4-1)*2 + 3, 7) = max(9, 7) = 9
+    /// Same 1-D geometry rounds the output up and pads to preserve coverage
     #[test]
     fn test_conv_geometry_same_1d() {
         let (out_sp, pad_before, padded_sp) = conv_geometry(&[7], &[3], &[2], PaddingType::Same);
@@ -514,16 +492,9 @@ mod tests {
         assert_eq!(padded_sp, vec![9]);
     }
 
-    // -----------------------------------------------------------------------
-    // conv_geometry – Same padding, 2-D
-    // -----------------------------------------------------------------------
+    // conv_geometry - Same padding, 2-D
 
-    /// sp=[4,4], k=[3,3], stride=[1,1], Same:
-    ///   Per axis (identical for both):
-    ///     out_d = ceil(4 / 1) = 4
-    ///     total_pad = (4-1)*1 + 3 - 4 = 3 + 3 - 4 = 2
-    ///     pad_before_d = 2 / 2 = 1
-    ///     padded_d = max((4-1)*1 + 3, 4) = max(6, 4) = 6
+    /// Same 2-D geometry applies the per-axis padding rule independently on each axis
     #[test]
     fn test_conv_geometry_same_2d() {
         let (out_sp, pad_before, padded_sp) =
@@ -533,19 +504,9 @@ mod tests {
         assert_eq!(padded_sp, vec![6, 6]);
     }
 
-    // -----------------------------------------------------------------------
     // build_padded
-    // -----------------------------------------------------------------------
 
-    /// bc=1, sp=[2,2], in_flat=[1,2,3,4] (row-major), padded_sp=[4,4], pad_before=[1,1].
-    ///
-    /// padded_strides for [4,4] = [4, 1].
-    /// The 2×2 block is placed at (row+1, col+1) in the 4×4 padded grid:
-    ///   in[0,0]=1 -> padded[1*4 + 1] = padded[5]  = 1.0
-    ///   in[0,1]=2 -> padded[1*4 + 2] = padded[6]  = 2.0
-    ///   in[1,0]=3 -> padded[2*4 + 1] = padded[9]  = 3.0
-    ///   in[1,1]=4 -> padded[2*4 + 2] = padded[10] = 4.0
-    /// All other 12 positions must be 0.0.
+    /// A 2x2 block lands at the padded offset and the border stays zero
     #[test]
     fn test_build_padded_2x2_into_4x4() {
         let in_flat = [1.0f32, 2.0, 3.0, 4.0];
@@ -568,9 +529,7 @@ mod tests {
         }
     }
 
-    /// Two batch-channels (bc=2), same 2×2 content in each channel, placed at
-    /// pad_before=[1,1] inside a 4×4 padded plane.  Each channel occupies a
-    /// disjoint 16-element slice.
+    /// Two batch-channels each pad into a disjoint 16-element slice
     #[test]
     fn test_build_padded_two_channels() {
         let in_flat = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
@@ -591,11 +550,7 @@ mod tests {
         assert_eq!(got[16 + 10], 8.0);
     }
 
-    /// 1-D case: bc=1, sp=[3], in_flat=[10,20,30], padded_sp=[5], pad_before=[1].
-    ///
-    /// padded_strides for [5] = [1].
-    /// Placements: in[0]=10 -> padded[0+1]=padded[1]; in[1]=20 -> padded[2]; in[2]=30 -> padded[3].
-    /// padded[0] and padded[4] must be 0.
+    /// 1-D padding shifts the data by pad_before and zeros the ends
     #[test]
     fn test_build_padded_1d() {
         let in_flat = [10.0f32, 20.0, 30.0];
@@ -609,7 +564,7 @@ mod tests {
         assert_eq!(got[4], 0.0, "trailing pad must be 0");
     }
 
-    /// Zero padding (pad_before all zeros): output must be identical to input.
+    /// Zero padding returns the input unchanged
     #[test]
     fn test_build_padded_no_padding() {
         let in_flat = [5.0f32, 6.0, 7.0, 8.0];

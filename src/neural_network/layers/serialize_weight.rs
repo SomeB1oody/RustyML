@@ -1,3 +1,5 @@
+//! Serializable weight containers and (de)serialization helpers for all supported layer types
+
 use crate::error::{Error, IoError};
 use crate::neural_network::layers::convolution::{
     conv_1d::Conv1D, conv_2d::Conv2D, conv_3d::Conv3D, depthwise_conv_2d::DepthwiseConv2D,
@@ -14,48 +16,45 @@ use crate::neural_network::traits::ApplyWeights;
 use crate::neural_network::traits::Layer;
 use crate::{Deserialize, Serialize};
 
-/// Serializable weight container for all supported layer types.
-///
-/// # Variants
-///
-/// - `Dense` - Weights for a Dense layer
-/// - `SimpleRNN` - Weights for a SimpleRNN layer
-/// - `LSTM` - Weights for an LSTM layer
-/// - `GRU` - Weights for a GRU layer
-/// - `Conv1D` - Weights for a Conv1D layer
-/// - `Conv2D` - Weights for a Conv2D layer
-/// - `Conv3D` - Weights for a Conv3D layer
-/// - `SeparableConv2D` - Weights for a SeparableConv2D layer
-/// - `DepthwiseConv2D` - Weights for a DepthwiseConv2D layer
-/// - `BatchNormalization` - Weights for a BatchNormalization layer
-/// - `LayerNormalization` - Weights for a LayerNormalization layer
-/// - `InstanceNormalization` - Weights for an InstanceNormalization layer
-/// - `GroupNormalization` - Weights for a GroupNormalization layer
-/// - `Empty` - No weights for layers without parameters
+/// Serializable weight container for all supported layer types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SerializableLayerWeight {
+    /// Weights for a Dense layer
     Dense(SerializableDenseWeight),
+    /// Weights for a SimpleRNN layer
     SimpleRNN(SerializableSimpleRNNWeight),
+    /// Weights for an LSTM layer
     LSTM(SerializableLSTMWeight),
+    /// Weights for a GRU layer
     GRU(SerializableGRUWeight),
+    /// Weights for a Conv1D layer
     Conv1D(SerializableConv1DWeight),
+    /// Weights for a Conv2D layer
     Conv2D(SerializableConv2DWeight),
+    /// Weights for a Conv3D layer
     Conv3D(SerializableConv3DWeight),
+    /// Weights for a SeparableConv2D layer
     SeparableConv2D(SerializableSeparableConv2DWeight),
+    /// Weights for a DepthwiseConv2D layer
     DepthwiseConv2D(SerializableDepthwiseConv2DWeight),
+    /// Weights for a BatchNormalization layer
     BatchNormalization(SerializableBatchNormalizationWeight),
+    /// Weights for a LayerNormalization layer
     LayerNormalization(SerializableLayerNormalizationWeight),
+    /// Weights for an InstanceNormalization layer
     InstanceNormalization(SerializableInstanceNormalizationWeight),
+    /// Weights for a GroupNormalization layer
     GroupNormalization(SerializableGroupNormalizationWeight),
+    /// No weights for layers without parameters
     Empty,
 }
 
 impl SerializableLayerWeight {
-    /// Converts a `LayerWeight` reference into an owned serializable weight.
+    /// Converts a `LayerWeight` reference into an owned serializable weight
     ///
     /// All weight arrays are cloned directly; serde (via ndarray's `serde` feature)
-    /// encodes each array compactly as its shape plus a flat data buffer.
+    /// encodes each array compactly as its shape plus a flat data buffer
     ///
     /// # Parameters
     ///
@@ -174,58 +173,46 @@ impl SerializableLayerWeight {
     }
 }
 
-/// Serializable layer metadata.
-///
-/// # Fields
-///
-/// - `layer_type` - Layer type name
-/// - `output_shape` - Layer output shape description
+/// Serializable layer metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerInfo {
+    /// Layer type name
     pub layer_type: String,
+    /// Layer output shape description
     pub output_shape: String,
 }
 
-/// Serializable layer with metadata and weights.
-///
-/// # Fields
-///
-/// - `info` - Layer metadata describing type and output shape
-/// - `weights` - Layer weights in a serializable format
+/// Serializable layer with metadata and weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLayer {
+    /// Layer metadata describing type and output shape
     pub info: LayerInfo,
+    /// Layer weights in a serializable format
     pub weights: SerializableLayerWeight,
 }
 
-/// Serializable representation of a Sequential model.
-///
-/// # Fields
-///
-/// - `layers` - Ordered list of layers with metadata and weights
+/// Serializable representation of a Sequential model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSequential {
+    /// Ordered list of layers with metadata and weights
     pub layers: Vec<SerializableLayer>,
 }
 
-/// A macro that applies weights to a layer and handles type mismatch errors.
-///
-/// This macro attempts to downcast the layer to the specified type and applies weights.
-/// Returns an error if the downcast fails.
+/// Downcasts a layer to the given type and applies weights, surfacing a structural
+/// mismatch error if the downcast fails
 ///
 /// # Parameters
 ///
-/// - `$layer_any` - A mutable reference to the layer as `&mut dyn Any`
-/// - `$weight` - The weight structure to apply to the layer
-/// - `$layer_type` - The specific layer type (e.g., BatchNormalization, LayerNormalization)
-/// - `$layer_name` - String literal of the layer name (for error messages)
-/// - `$expected_type` - String describing the expected layer type (for error messages)
+/// - `$layer_any` - Mutable reference to the layer as `&mut dyn Any`
+/// - `$weight` - Weight structure to apply to the layer
+/// - `$layer_type` - Concrete layer type (e.g. BatchNormalization, LayerNormalization)
+/// - `$layer_name` - String literal of the layer name, used in error messages
+/// - `$expected_type` - Expected layer type label, used in error messages
 macro_rules! apply_weights_simple {
     ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
         if let Some(layer) = $layer_any.downcast_mut::<$layer_type>() {
-            // At the load boundary a weight-shape error from the layer is a structural
-            // incompatibility between the saved file and the target model, so surface it
-            // uniformly as `ModelStructureMismatch` (its message keeps the shape detail).
+            // A weight-shape error here means the saved file does not match the target
+            // model, so surface it uniformly as `ModelStructureMismatch` (keeps shape detail)
             $weight
                 .apply_to_layer(layer)
                 .map_err(|e| Error::Io(IoError::ModelStructureMismatch(e.to_string())))?;
@@ -238,7 +225,7 @@ macro_rules! apply_weights_simple {
     }};
 }
 
-/// Applies serializable weights to a layer instance.
+/// Applies serializable weights to a layer instance
 ///
 /// # Parameters
 ///

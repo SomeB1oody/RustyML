@@ -1,3 +1,5 @@
+//! SimpleRNN layer: a basic recurrent layer that returns the last hidden state
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -12,27 +14,14 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Simple Recurrent Neural Network (SimpleRNN) layer implementation.
+/// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). The activation is provided by
-/// the activation_layer module.
-///
-/// # Fields
-///
-/// - `input_dim` - Number of input features
-/// - `units` - Number of output units (neurons)
-/// - `kernel` - Weight matrix connecting inputs to the layer with shape (input_dim, units)
-/// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
-/// - `bias` - Bias vector for the layer with shape (1, units)
-/// - `input_cache` - Cached input tensor from the forward pass
-/// - `hidden_state_cache` - Cached hidden states from the forward pass
-/// - `grad_kernel` - Gradient of the kernel weights
-/// - `grad_recurrent_kernel` - Gradient of the recurrent kernel weights
-/// - `grad_bias` - Gradient of the bias
-/// - `activation` - Activation function applied at each timestep of the recurrence
+/// the activation module
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -63,28 +52,39 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// ```
 #[derive(Debug)]
 pub struct SimpleRNN {
+    /// Number of input features
     input_dim: usize,
+    /// Number of output units (neurons)
     units: usize,
+    /// Weight matrix connecting inputs to the layer with shape (input_dim, units)
     kernel: Array2<f32>,
+    /// Weight matrix connecting previous hidden states with shape (units, units)
     recurrent_kernel: Array2<f32>,
+    /// Bias vector for the layer with shape (1, units)
     bias: Array2<f32>,
+    /// Cached input tensor from the forward pass
     input_cache: Option<Array3<f32>>,
+    /// Cached hidden states from the forward pass
     hidden_state_cache: Option<Vec<Array2<f32>>>,
+    /// Gradient of the kernel weights
     grad_kernel: Option<Array2<f32>>,
+    /// Gradient of the recurrent kernel weights
     grad_recurrent_kernel: Option<Array2<f32>>,
+    /// Gradient of the bias
     grad_bias: Option<Array2<f32>>,
+    /// Activation function applied at each timestep of the recurrence
     activation: Activation,
 }
 
 impl SimpleRNN {
-    /// Creates a SimpleRNN layer with the specified dimensions and activation.
+    /// Creates a SimpleRNN layer with the specified dimensions and activation
     ///
     /// # Parameters
     ///
     /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `activation` - Activation function from the activation module (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -130,13 +130,17 @@ impl SimpleRNN {
         })
     }
 
-    /// Sets the weights for this layer.
+    /// Sets the weights for this layer
     ///
     /// # Parameters
     ///
     /// - `kernel` - Weight matrix connecting inputs to the layer with shape (input_dim, units)
     /// - `recurrent_kernel` - Weight matrix connecting previous hidden states with shape (units, units)
     /// - `bias` - Bias vector with shape (1, units)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any supplied matrix does not match the layer's existing shape
     pub fn set_weights(
         &mut self,
         kernel: Array2<f32>,
@@ -159,12 +163,11 @@ impl SimpleRNN {
 
 impl Layer for SimpleRNN {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 
-        // Input shape=(batch, timesteps, input_dim)
+        // input shape (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
@@ -172,14 +175,13 @@ impl Layer for SimpleRNN {
         let mut hs = Vec::with_capacity(timesteps + 1);
         hs.push(h_prev.clone());
 
-        // Sequential timestep processing (required for RNN)
+        // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
 
-            // Compute: z = x_t @ W + h_{t-1} @ U + b
+            // z = x_t @ W + h_{t-1} @ U + b
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
 
-            // Apply activation
             let h_t = self
                 .activation
                 .forward(&z.into_dyn())?
@@ -190,29 +192,27 @@ impl Layer for SimpleRNN {
             hs.push(h_prev.clone());
         }
         self.hidden_state_cache = Some(hs);
-        Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
+        Ok(h_prev.into_dyn()) // last timestep's hidden state
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         validate_input_3d(input)?;
 
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
 
-        // Input shape=(batch, timesteps, input_dim)
+        // input shape (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
 
-        // Sequential timestep processing (required for RNN)
+        // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
 
-            // Compute: z = x_t @ W + h_{t-1} @ U + b
+            // z = x_t @ W + h_{t-1} @ U + b
             let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
 
-            // Apply activation
             let h_t = self
                 .activation
                 .forward(&z.into_dyn())?
@@ -221,7 +221,7 @@ impl Layer for SimpleRNN {
 
             h_prev = h_t;
         }
-        Ok(h_prev.into_dyn()) // Return hidden state of the last timestep
+        Ok(h_prev.into_dyn()) // last timestep's hidden state
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -243,7 +243,7 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Initialize or reuse existing gradients for accumulation
+        // reuse existing gradient buffers so accumulation persists across calls
         let mut grad_k = self
             .grad_kernel
             .take()
@@ -259,12 +259,12 @@ impl Layer for SimpleRNN {
         let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
 
         let mut grad_h = grad_h_t;
-        // Backpropagation Through Time (BPTT)
+        // backpropagation through time (BPTT)
         for t in (0..timesteps).rev() {
             let h_tm1 = &hs[t];
 
-            // Backprop through the activation using THIS timestep's cached output `h_t`
-            // (`hs[t + 1]`); every supported activation's derivative is a function of its output.
+            // backprop through activation using this timestep's cached output `hs[t + 1]`;
+            // every supported activation's derivative is a function of its output
             let d_z = {
                 let h_t = hs[t + 1].clone().into_dyn();
                 let grad_h_dyn = grad_h.clone().into_dyn();
@@ -272,22 +272,22 @@ impl Layer for SimpleRNN {
                 grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
             };
 
-            // Accumulate gradients for weights
+            // accumulate weight gradients
             let x_t = x3.index_axis(Axis(1), t);
             grad_k += &x_t.t().dot(&d_z);
             grad_rk += &h_tm1.t().dot(&d_z);
             grad_b += &d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-            // Gradient w.r.t. input at timestep t
+            // gradient w.r.t. input at timestep t
             grad_x3
                 .index_axis_mut(Axis(1), t)
                 .assign(&d_z.dot(&self.kernel.t()));
 
-            // Gradient w.r.t. previous hidden state (for next iteration)
+            // gradient w.r.t. previous hidden state, used by the next iteration
             grad_h = d_z.dot(&self.recurrent_kernel.t());
         }
 
-        // Apply gradient clipping to prevent exploding gradients
+        // gradient clipping to prevent exploding gradients
         grad_k.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
         grad_rk.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
         grad_b.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));

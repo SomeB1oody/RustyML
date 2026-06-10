@@ -1,3 +1,5 @@
+//! RMSprop (Root Mean Square Propagation) optimizer
+
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
@@ -5,30 +7,25 @@ use crate::neural_network::optimizers::validation::{
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
-/// RMSprop (Root Mean Square Propagation) optimizer.
+/// RMSprop (Root Mean Square Propagation) optimizer
 ///
-/// Adapts per-parameter learning rates using a moving average of squared gradients.
-///
-/// # Fields
-///
-/// - `learning_rate` - Learning rate controlling the size of parameter updates
-/// - `rho` - Decay rate for the moving average of squared gradients
-/// - `epsilon` - Small constant added for numerical stability
+/// Adapts per-parameter learning rates using a moving average of squared gradients
 #[derive(Debug)]
 pub struct RMSprop {
+    /// Learning rate controlling the size of parameter updates
     learning_rate: f32,
+    /// Decay rate for the moving average of squared gradients
     rho: f32,
+    /// Small constant added for numerical stability
     epsilon: f32,
-    /// Per-parameter squared-gradient running averages, indexed by parameter order each step.
+    /// Per-parameter squared-gradient running averages, indexed by parameter order each step
     caches: Vec<Vec<f32>>,
-    /// Position within `caches` for the parameter currently being updated; reset each `step`.
+    /// Position within `caches` for the parameter currently being updated; reset each `step`
     cursor: usize,
 }
 
 impl RMSprop {
-    /// Creates a new RMSprop optimizer with the specified parameters.
-    ///
-    /// Validates hyperparameters and initializes the optimizer.
+    /// Creates a new RMSprop optimizer with the specified hyperparameters
     ///
     /// # Parameters
     ///
@@ -42,9 +39,8 @@ impl RMSprop {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any hyperparameter is out of range
+    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite, or `rho` is outside [0, 1)
     pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, Error> {
-        // input validation
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(rho, "rho")?;
         validate_epsilon(epsilon)?;
@@ -61,7 +57,7 @@ impl RMSprop {
 
 impl Optimizer for RMSprop {
     fn step(&mut self) {
-        // Rewind to the first parameter; layers yield parameters in the same order every step.
+        // Rewind to the first parameter; layers yield parameters in the same order every step
         self.cursor = 0;
     }
 

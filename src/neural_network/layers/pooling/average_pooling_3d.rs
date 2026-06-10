@@ -1,3 +1,5 @@
+//! 3D average pooling layer that averages over each window across depth, height, and width
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,23 +15,17 @@ use crate::neural_network::layers::pooling::validation::{
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_3d_pooling;
 use crate::neural_network::traits::Layer;
 
-/// 3D average pooling layer.
+/// 3D average pooling layer
 ///
-/// Computes the mean value over each pooling window across depth, height, and width.
+/// Computes the mean value over each pooling window across depth, height, and width
 /// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
 /// `[batch_size, channels, pooled_depth, pooled_height, pooled_width]` where
 /// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
 /// `pooled_height = (height - pool_size_h) / stride_h + 1`, and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
-///
-/// # Fields
-///
-/// - `pool_size` - Size of the pooling window as (depth, height, width)
-/// - `strides` - Step size of the pooling operation as (depth_stride, height_stride, width_stride)
-/// - `input_shape` - Shape of the input tensor declared at construction time
-/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -42,7 +38,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Add an AveragePooling3D layer to the model
 /// model.add(AveragePooling3D::new(
-///     (2, 2, 2),                    // Pooling window size: 2×2×2
+///     (2, 2, 2),                    // Pooling window size: 2x2x2
 ///     vec![1, 16, 32, 32, 32],      // Input shape: [batch, channels, depth, height, width]
 ///     Some((2, 2, 2)),              // Strides: move by 2 in each dimension
 /// ).unwrap());
@@ -54,7 +50,7 @@ use crate::neural_network::traits::Layer;
 /// );
 ///
 /// // Create example 3D input data (e.g., 3D medical imaging or volume data)
-/// // Input: [1 batch, 16 channels, 32×32×32 3D volume]
+/// // Input: [1 batch, 16 channels, 32x32x32 3D volume]
 /// let input_data = Array5::from_shape_fn((1, 16, 32, 32, 32), |(b, c, d, h, w)| {
 ///     // Generate example data with spatial patterns
 ///     ((d + h + w) as f32 * 0.1) + (c as f32 * 0.01)
@@ -77,19 +73,23 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct AveragePooling3D {
+    /// Size of the pooling window as (depth, height, width)
     pool_size: (usize, usize, usize),
+    /// Step size of the pooling operation as (depth_stride, height_stride, width_stride)
     strides: (usize, usize, usize),
+    /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling3D {
-    /// Creates a new 3D average pooling layer.
+    /// Creates a new 3D average pooling layer
     ///
-    /// If `strides` is None, it defaults to `pool_size`.
+    /// If `strides` is None, it defaults to `pool_size`
     ///
     /// # Parameters
     ///
@@ -104,6 +104,7 @@ impl AveragePooling3D {
     /// # Errors
     ///
     /// - [`Error::DimensionMismatch`] if `input_shape` is not 5D
+    /// - [`Error::InvalidInput`] if any `input_shape` dimension is zero
     /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
     ///   spatial size, or any stride is zero
     pub fn new(
@@ -147,7 +148,7 @@ impl Layer for AveragePooling3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 5D
         if input.ndim() != 5 {

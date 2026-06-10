@@ -1,3 +1,5 @@
+//! Instance Normalization layer that normalizes each sample and channel independently
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -20,31 +22,16 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// Threshold for switching between sequential and parallel instance normalization computation.
-/// Based on total elements in the tensor.
+/// Total-element count above which instance normalization switches from sequential to parallel
 const INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
-/// Instance Normalization layer for neural networks.
+/// Instance Normalization layer for neural networks
 ///
 /// Normalizes each sample and channel independently, which is useful for
-/// style transfer and generative models.
-///
-/// # Fields
-///
-/// - `epsilon` - Small constant for numerical stability in normalization
-/// - `channel_axis` - Axis representing channels (typically 1 for \[batch, channels, spatial...\])
-/// - `input_shape` - Shape of the input tensor
-/// - `gamma` - Scale parameter (trainable)
-/// - `beta` - Shift parameter (trainable)
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `x_normalized` - Normalized input (used in backward pass)
-/// - `x_centered` - Centered input (used in backward pass)
-/// - `mean` - Mean computed during forward pass (used in backward pass)
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
-/// - `grad_gamma` - Gradient for gamma parameter
-/// - `grad_beta` - Gradient for beta parameter
+/// style transfer and generative models
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -62,23 +49,33 @@ const INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 /// ```
 #[derive(Debug)]
 pub struct InstanceNormalization {
+    /// Small constant for numerical stability in normalization
     epsilon: f32,
+    /// Axis representing channels (typically 1 for \[batch, channels, spatial...\])
     channel_axis: usize,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Scale parameter (trainable)
     gamma: Tensor,
+    /// Shift parameter (trainable)
     beta: Tensor,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
-    // Cache for backward pass (backward uses x_centered + std_dev, so the raw mean is not stored)
+    /// Normalized input cached for the backward pass
     x_normalized: Option<Tensor>,
+    /// Centered input cached for the backward pass
     x_centered: Option<Tensor>,
+    /// Standard deviation from the forward pass cached for the backward pass (backward uses
+    /// x_centered + std_dev, so the raw mean is not stored)
     std_dev: Option<Tensor>,
-    // Gradients
+    /// Gradient for the gamma parameter
     grad_gamma: Option<Tensor>,
+    /// Gradient for the beta parameter
     grad_beta: Option<Tensor>,
 }
 
 impl InstanceNormalization {
-    /// Creates a new InstanceNormalization layer.
+    /// Creates a new InstanceNormalization layer
     ///
     /// # Parameters
     ///
@@ -100,10 +97,10 @@ impl InstanceNormalization {
         validate_channel_axis(channel_axis, input_shape.len())?;
         validate_epsilon(epsilon)?;
 
-        // Any channel position is supported: forward/backward permute the channel axis to position 1
-        // and run a channels-first core, so both channels-first (NCHW) and channels-last (NHWC) work.
+        // forward/backward permute the channel axis to position 1 and run a channels-first core,
+        // so both channels-first (NCHW) and channels-last (NHWC) work
 
-        // For instance normalization, parameters have the shape of the channel dimension
+        // Parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > channel_axis {
             vec![input_shape[channel_axis]]
         } else {
@@ -129,12 +126,17 @@ impl InstanceNormalization {
 
     mode_dependent_layer_set_training!();
 
-    /// Sets the weights for the InstanceNormalization layer.
+    /// Sets the weights for the InstanceNormalization layer
     ///
     /// # Parameters
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the
+    ///   existing weight shape
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
@@ -150,8 +152,8 @@ impl Layer for InstanceNormalization {
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
 
-        // Work in channels-first layout so the core below (which assumes channel at axis 1) supports
-        // any channel position. Borrows for channel_axis == 1; the output is permuted back at the end.
+        // Permute the channel to axis 1 so the channels-first core supports any channel position;
+        // borrows when channel_axis == 1, and the output is permuted back at the end
         let cf_input = to_channels_first(input, self.channel_axis);
         let input = cf_input.as_ref();
 
@@ -159,7 +161,7 @@ impl Layer for InstanceNormalization {
         let batch_size = input_shape[0];
         let num_channels = input_shape[1];
 
-        // Calculate spatial size (all dimensions except batch and channel)
+        // Spatial size: all dimensions except batch and channel
         let spatial_size: usize = input_shape
             .iter()
             .enumerate()
@@ -169,13 +171,12 @@ impl Layer for InstanceNormalization {
 
         let total_elements = input.len();
 
-        // Build mean shape: keep batch and channel dimensions, set others to 1
+        // Mean shape: keep batch and channel dimensions, set others to 1
         let mut mean_shape = vec![1; input.ndim()];
         mean_shape[0] = batch_size;
         mean_shape[1] = num_channels;
 
         let mean = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut mean_flat = vec![0.0f32; batch_size * num_channels];
 
             mean_flat
@@ -194,7 +195,6 @@ impl Layer for InstanceNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
         } else {
-            // Sequential computation
             let mut mean_flat = vec![0.0f32; batch_size * num_channels];
 
             for batch_idx in 0..batch_size {
@@ -212,7 +212,6 @@ impl Layer for InstanceNormalization {
 
         // Center the data and compute variance
         let (x_centered, var) = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel centering and variance computation
             let mut x_centered = Tensor::zeros(input.raw_dim());
             let mut squared_diff = Tensor::zeros(input.raw_dim());
 
@@ -231,7 +230,7 @@ impl Layer for InstanceNormalization {
                     *sq_diff = diff * diff;
                 });
 
-            // Compute variance for each (batch, channel) pair
+            // Variance for each (batch, channel) pair
             let mut var_flat = vec![0.0f32; batch_size * num_channels];
 
             var_flat
@@ -248,7 +247,6 @@ impl Layer for InstanceNormalization {
             let var = Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap();
             (x_centered, var)
         } else {
-            // Sequential computation
             let x_centered = input - &mean;
 
             let mut var_flat = vec![0.0f32; batch_size * num_channels];
@@ -273,7 +271,6 @@ impl Layer for InstanceNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
 
             x_normalized
@@ -290,12 +287,10 @@ impl Layer for InstanceNormalization {
 
             x_normalized
         } else {
-            // Sequential normalization
             &x_centered / &std_dev
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Reshape gamma and beta to match the input shape for broadcasting, then scale and shift
         let mut gamma_shape = vec![1; input.ndim()];
         gamma_shape[1] = num_channels;
         let mut beta_shape = vec![1; input.ndim()];
@@ -313,7 +308,6 @@ impl Layer for InstanceNormalization {
             .unwrap();
 
         let output = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut output = Tensor::zeros(x_normalized.raw_dim());
 
             output
@@ -331,11 +325,10 @@ impl Layer for InstanceNormalization {
 
             output
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
-        // Cache the normalization intermediates the backward pass needs.
+        // Cache the normalization intermediates the backward pass needs
         self.x_normalized = Some(x_normalized);
         self.x_centered = Some(x_centered);
         self.std_dev = Some(std_dev);
@@ -343,13 +336,13 @@ impl Layer for InstanceNormalization {
         Ok(from_channels_first(output, self.channel_axis))
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
 
-        // See `forward`: permute channel to axis 1, run the channels-first core, permute back.
+        // See `forward`: permute channel to axis 1, run the channels-first core, permute back
         let cf_input = to_channels_first(input, self.channel_axis);
         let input = cf_input.as_ref();
 
@@ -357,7 +350,7 @@ impl Layer for InstanceNormalization {
         let batch_size = input_shape[0];
         let num_channels = input_shape[1];
 
-        // Calculate spatial size (all dimensions except batch and channel)
+        // Spatial size: all dimensions except batch and channel
         let spatial_size: usize = input_shape
             .iter()
             .enumerate()
@@ -367,13 +360,12 @@ impl Layer for InstanceNormalization {
 
         let total_elements = input.len();
 
-        // Build mean shape: keep batch and channel dimensions, set others to 1
+        // Mean shape: keep batch and channel dimensions, set others to 1
         let mut mean_shape = vec![1; input.ndim()];
         mean_shape[0] = batch_size;
         mean_shape[1] = num_channels;
 
         let mean = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut mean_flat = vec![0.0f32; batch_size * num_channels];
 
             mean_flat
@@ -392,7 +384,6 @@ impl Layer for InstanceNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
         } else {
-            // Sequential computation
             let mut mean_flat = vec![0.0f32; batch_size * num_channels];
 
             for batch_idx in 0..batch_size {
@@ -410,7 +401,6 @@ impl Layer for InstanceNormalization {
 
         // Center the data and compute variance
         let (x_centered, var) = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel centering and variance computation
             let mut x_centered = Tensor::zeros(input.raw_dim());
             let mut squared_diff = Tensor::zeros(input.raw_dim());
 
@@ -429,7 +419,7 @@ impl Layer for InstanceNormalization {
                     *sq_diff = diff * diff;
                 });
 
-            // Compute variance for each (batch, channel) pair
+            // Variance for each (batch, channel) pair
             let mut var_flat = vec![0.0f32; batch_size * num_channels];
 
             var_flat
@@ -446,7 +436,6 @@ impl Layer for InstanceNormalization {
             let var = Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap();
             (x_centered, var)
         } else {
-            // Sequential computation
             let x_centered = input - &mean;
 
             let mut var_flat = vec![0.0f32; batch_size * num_channels];
@@ -471,7 +460,6 @@ impl Layer for InstanceNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
 
             x_normalized
@@ -488,12 +476,10 @@ impl Layer for InstanceNormalization {
 
             x_normalized
         } else {
-            // Sequential normalization
             &x_centered / &std_dev
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Reshape gamma and beta to match the input shape for broadcasting, then scale and shift
         let mut gamma_shape = vec![1; input.ndim()];
         gamma_shape[1] = num_channels;
         let mut beta_shape = vec![1; input.ndim()];
@@ -511,7 +497,6 @@ impl Layer for InstanceNormalization {
             .unwrap();
 
         let output = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut output = Tensor::zeros(x_normalized.raw_dim());
 
             output
@@ -529,7 +514,6 @@ impl Layer for InstanceNormalization {
 
             output
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
@@ -538,12 +522,12 @@ impl Layer for InstanceNormalization {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if !self.training {
-            // During inference, pass gradient through unchanged
+            // During inference, pass the gradient through unchanged
             return Ok(grad_output.clone());
         }
 
-        // Work in channels-first layout (matches the cached channels-first intermediates from the
-        // forward pass); the resulting input-gradient is permuted back at the end.
+        // Channels-first layout matches the cached forward intermediates; the input-gradient is
+        // permuted back at the end
         let cf_grad = to_channels_first(grad_output, self.channel_axis);
         let grad_output = cf_grad.as_ref();
 
@@ -576,8 +560,7 @@ impl Layer for InstanceNormalization {
 
         let total_elements = grad_output.len();
 
-        // Compute gradients for gamma and beta
-        // Sum over all spatial dimensions and batch dimension for each channel
+        // Gradients for gamma and beta: sum over all spatial and batch dimensions per channel
         let mut grad_gamma = Tensor::zeros(self.gamma.raw_dim());
         let mut grad_beta = Tensor::zeros(self.beta.raw_dim());
 
@@ -596,9 +579,8 @@ impl Layer for InstanceNormalization {
         self.grad_gamma = Some(grad_gamma);
         self.grad_beta = Some(grad_beta);
 
-        // Compute gradient with respect to normalized input
+        // Gradient with respect to the normalized input
         let grad_x_normalized = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
 
             grad_x_norm
@@ -615,7 +597,6 @@ impl Layer for InstanceNormalization {
 
             grad_x_norm
         } else {
-            // Sequential computation
             let mut gamma_shape = vec![1; grad_output.ndim()];
             gamma_shape[1] = num_channels;
             let gamma_broadcast = self
@@ -626,16 +607,15 @@ impl Layer for InstanceNormalization {
             grad_output * &gamma_broadcast
         };
 
-        // Compute inverse standard deviation
+        // Inverse standard deviation
         let inv_std = std_dev.mapv(|x| 1.0 / x);
 
-        // Compute gradient with respect to variance and mean for each (batch, channel) instance
+        // Gradient with respect to variance and mean for each (batch, channel) instance
         let grad_input = if total_elements >= INSTANCE_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut grad_var_flat = vec![0.0f32; batch_size * num_channels];
             let mut grad_mean_flat = vec![0.0f32; batch_size * num_channels];
 
-            // Compute grad_var and grad_mean for each instance
+            // grad_var and grad_mean for each instance
             grad_var_flat
                 .par_iter_mut()
                 .zip(grad_mean_flat.par_iter_mut())
@@ -664,7 +644,7 @@ impl Layer for InstanceNormalization {
                     *g_mean = grad_mean_1 * inv_std_val + grad_mean_2;
                 });
 
-            // Compute gradient with respect to input
+            // Gradient with respect to input
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
 
             grad_inp
@@ -687,7 +667,6 @@ impl Layer for InstanceNormalization {
 
             grad_inp
         } else {
-            // Sequential computation
             let mut mean_shape = vec![1; grad_output.ndim()];
             mean_shape[0] = batch_size;
             mean_shape[1] = num_channels;

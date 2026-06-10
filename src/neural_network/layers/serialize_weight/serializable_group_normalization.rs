@@ -1,18 +1,17 @@
+//! Serializable representation of GroupNormalization layer weights
+
 use crate::error::Error;
 use crate::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use crate::neural_network::traits::ApplyWeights;
 use ndarray::ArrayD;
 use serde::{Deserialize, Serialize};
 
-/// Serializable representation of GroupNormalization layer weights.
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter
-/// - `beta` - Shift parameter
+/// Serializable representation of GroupNormalization layer weights
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableGroupNormalizationWeight {
+    /// Scale parameter
     pub gamma: ArrayD<f32>,
+    /// Shift parameter
     pub beta: ArrayD<f32>,
 }
 

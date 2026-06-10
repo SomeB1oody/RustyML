@@ -1,3 +1,5 @@
+//! 2D average pooling layer that downsamples spatial dimensions by averaging over each window
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,22 +15,16 @@ use crate::neural_network::layers::pooling::validation::{
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d_pooling;
 use crate::neural_network::traits::Layer;
 
-/// 2D average pooling layer.
+/// 2D average pooling layer
 ///
-/// Computes the mean value over each pooling window along the height and width dimensions.
+/// Computes the mean value over each pooling window along the height and width dimensions
 /// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
 /// `[batch_size, channels, pooled_height, pooled_width]` where
 /// `pooled_height = (height - pool_size_h) / stride_h + 1` and
-/// `pooled_width = (width - pool_size_w) / stride_w + 1`.
-///
-/// # Fields
-///
-/// - `pool_size` - Size of the pooling window as (height, width)
-/// - `strides` - Step size of the pooling operation as (height, width)
-/// - `input_shape` - Shape of the input tensor declared at construction time
-/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
+/// `pooled_width = (width - pool_size_w) / stride_w + 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -86,19 +82,23 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct AveragePooling2D {
+    /// Size of the pooling window as (height, width)
     pool_size: (usize, usize),
+    /// Step size of the pooling operation as (height, width)
     strides: (usize, usize),
+    /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling2D {
-    /// Creates a new 2D average pooling layer.
+    /// Creates a new 2D average pooling layer
     ///
-    /// If `strides` is None, it defaults to `pool_size`.
+    /// If `strides` is None, it defaults to `pool_size`
     ///
     /// # Parameters
     ///
@@ -113,6 +113,7 @@ impl AveragePooling2D {
     /// # Errors
     ///
     /// - [`Error::DimensionMismatch`] if `input_shape` is not 4D
+    /// - [`Error::InvalidInput`] if any `input_shape` dimension is zero
     /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
     ///   spatial size, or any stride is zero
     pub fn new(
@@ -139,12 +140,11 @@ impl AveragePooling2D {
 
 impl Layer for AveragePooling2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Cache the actual input shape for backward (only the shape is needed for averaging)
+        // cache the input shape for backward (averaging only needs the shape)
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -156,9 +156,8 @@ impl Layer for AveragePooling2D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }

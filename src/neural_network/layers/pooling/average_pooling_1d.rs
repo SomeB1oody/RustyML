@@ -1,3 +1,5 @@
+//! 1D average pooling layer that computes the mean over each window along the length dimension
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,21 +15,15 @@ use crate::neural_network::layers::pooling::validation::{
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::traits::Layer;
 
-/// 1D average pooling layer.
+/// 1D average pooling layer
 ///
-/// Computes the mean value over each pooling window along the length dimension.
+/// Computes the mean value over each pooling window along the length dimension
 /// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
 /// `[batch_size, channels, pooled_length]` where
-/// `pooled_length = (length - pool_size) / stride + 1`.
-///
-/// # Fields
-///
-/// - `pool_size` - Size of the pooling window
-/// - `stride` - Step size of the pooling operation
-/// - `input_shape` - Shape of the input tensor declared at construction time
-/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
+/// `pooled_length = (length - pool_size) / stride + 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -82,16 +78,20 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct AveragePooling1D {
+    /// Size of the pooling window
     pool_size: usize,
+    /// Step size of the pooling operation
     stride: usize,
+    /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
 }
 
 impl AveragePooling1D {
-    /// Creates a new 1D average pooling layer.
+    /// Creates a new 1D average pooling layer
     ///
-    /// If `stride` is None, it defaults to `pool_size`.
+    /// If `stride` is None, it defaults to `pool_size`
     ///
     /// # Parameters
     ///
@@ -146,7 +146,7 @@ impl Layer for AveragePooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {

@@ -1,3 +1,5 @@
+//! Gaussian noise regularization layer that injects zero-mean normal noise during training
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,19 +15,13 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Normal;
 
-/// Gaussian Noise layer for neural networks.
+/// Gaussian noise layer for neural networks
 ///
 /// Adds random noise sampled from a normal distribution with mean 0 during training
-/// to improve robustness and reduce overfitting.
-///
-/// # Fields
-///
-/// - `stddev` - Standard deviation of the Gaussian noise to add
-/// - `input_shape` - Expected shape of the input tensor
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `rng` - Random number generator used to sample the Gaussian noise
+/// to improve robustness and reduce overfitting
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -42,20 +38,24 @@ use ndarray_rand::rand_distr::Normal;
 /// ```
 #[derive(Debug)]
 pub struct GaussianNoise {
+    /// Standard deviation of the Gaussian noise to add
     stddev: f32,
+    /// Expected shape of the input tensor
     input_shape: Vec<usize>,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
+    /// Random number generator used to sample the Gaussian noise
     rng: StdRng,
 }
 
 impl GaussianNoise {
-    /// Creates a new GaussianNoise layer.
+    /// Creates a new GaussianNoise layer
     ///
     /// # Parameters
     ///
     /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
     /// - `input_shape` - Shape of the input tensor
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see crate::random)
     ///
     /// # Returns
     ///
@@ -86,7 +86,7 @@ impl GaussianNoise {
 
 impl Layer for GaussianNoise {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` is immutable and already validated in `new()`; only validate the runtime input.
+        // `stddev` is immutable and already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when stddev is 0, pass input through unchanged
@@ -94,31 +94,28 @@ impl Layer for GaussianNoise {
             return Ok(input.clone());
         }
 
-        // Generate random Gaussian noise with mean=0 and stddev=self.stddev
+        // Sample mean-0, stddev=self.stddev Gaussian noise and add it to the input
         let noise = Tensor::random_using(
             input.raw_dim(),
             Normal::new(0.0, self.stddev).unwrap(),
             &mut self.rng,
         );
-
-        // Add noise to input
         let output = input + &noise;
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` is immutable and already validated in `new()`; only validate the runtime input.
+        // `stddev` is immutable and already validated in `new()`; only validate the runtime input
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Inference is identity: pass input through unchanged without sampling noise.
+        // Inference is identity: pass input through unchanged without sampling noise
         Ok(input.clone())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Gradient passes through unchanged since d/dx(x + noise) = 1
-        // The noise is not a function of the input during backpropagation
+        // Gradient passes through unchanged since d/dx(x + noise) = 1 (noise is independent of the input)
         Ok(grad_output.clone())
     }
 

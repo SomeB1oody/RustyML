@@ -1,15 +1,19 @@
+//! Regression metrics comparing ground-truth and predicted values
+//!
+//! Provides MSE, RMSE, MAE, R-squared, explained variance, median absolute error, and MAPE
+
 use ndarray::{Array1, ArrayBase, Data, Ix1};
 
 use super::validate_pair;
 use crate::math::{sum_of_square_total, sum_of_squared_errors, variance};
 
-/// Variance below which the total sum of squares is treated as zero (all `y_true` identical).
+/// Variance below which the total sum of squares is treated as zero (all `y_true` identical)
 const SST_EPSILON: f64 = 1e-10;
 
-/// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values.
+/// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values
 ///
 /// MSE is the average of the squared differences between predictions and ground truth. Because the
-/// per-sample error is squared, the order of the two arguments does not affect the result.
+/// per-sample error is squared, the order of the two arguments does not affect the result
 ///
 /// # Parameters
 ///
@@ -26,6 +30,7 @@ const SST_EPSILON: f64 = 1e-10;
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::mean_squared_error;
@@ -43,7 +48,6 @@ where
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
-    // Single pass over both arrays, accumulating the squared error.
     let sum_squared_error = y_true.iter().zip(y_pred.iter()).fold(0.0, |acc, (&t, &p)| {
         let error = t - p;
         acc + error * error
@@ -52,10 +56,10 @@ where
     sum_squared_error / y_true.len() as f64
 }
 
-/// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values.
+/// Calculates the Root Mean Squared Error (RMSE) between ground-truth and predicted values
 ///
 /// RMSE is the square root of the [`mean_squared_error`], giving an error in the same units as the
-/// original data. As MSE is non-negative, the square root is always well-defined.
+/// original data. As MSE is non-negative, the square root is always well-defined
 ///
 /// # Parameters
 ///
@@ -72,6 +76,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::root_mean_squared_error;
@@ -89,10 +94,10 @@ where
     mean_squared_error(y_true, y_pred).sqrt()
 }
 
-/// Calculates the Mean Absolute Error (MAE) between ground-truth and predicted values.
+/// Calculates the Mean Absolute Error (MAE) between ground-truth and predicted values
 ///
 /// MAE is the average absolute difference between predictions and ground truth, ignoring the
-/// direction of the error. The order of the two arguments does not affect the result.
+/// direction of the error. The order of the two arguments does not affect the result
 ///
 /// # Parameters
 ///
@@ -109,6 +114,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::mean_absolute_error;
@@ -133,14 +139,14 @@ where
     sum_absolute_error / y_true.len() as f64
 }
 
-/// Calculates the R-squared (coefficient of determination) score.
+/// Calculates the R-squared (coefficient of determination) score
 ///
-/// R² measures how well predictions explain the variance in the ground truth, using
-/// `R² = 1 - SSE / SST` where `SSE = Σ(y_pred - y_true)²` and `SST = Σ(y_true - mean(y_true))²`.
-/// Because SST is computed from `y_true` alone, the argument order is significant.
+/// R^2 measures how well predictions explain the variance in the ground truth, using
+/// `R^2 = 1 - SSE / SST` where `SSE = sum(y_pred - y_true)^2` and `SST = sum(y_true - mean(y_true))^2`.
+/// Because SST is computed from `y_true` alone, the argument order is significant
 ///
 /// When `y_true` has (near-)zero variance the score is undefined; following scikit-learn, this
-/// returns `1.0` for a perfect fit (`SSE ≈ 0`) and `0.0` otherwise.
+/// returns `1.0` for a perfect fit (`SSE ~= 0`) and `0.0` otherwise
 ///
 /// # Parameters
 ///
@@ -149,7 +155,7 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - R-squared value (typically in `(-∞, 1.0]`)
+/// - `f64` - R-squared value (typically in `(-inf, 1.0]`)
 ///
 /// # Panics
 ///
@@ -157,6 +163,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::r2_score;
@@ -164,7 +171,7 @@ where
 /// let y_true = array![1.0, 3.0, 5.0];
 /// let y_pred = array![2.0, 3.0, 4.0];
 /// let r2 = r2_score(&y_true, &y_pred);
-/// // mean(y_true) = 3, SST = 4 + 0 + 4 = 8, SSE = 1 + 0 + 1 = 2, so R² = 1 - 2/8 = 0.75
+/// // mean(y_true) = 3, SST = 4 + 0 + 4 = 8, SSE = 1 + 0 + 1 = 2, so R^2 = 1 - 2/8 = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
 pub fn r2_score<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
@@ -173,12 +180,11 @@ where
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
-    // Reuse the shared primitives. SSE is symmetric; SST depends only on y_true.
+    // SSE is symmetric; SST depends only on y_true
     let sse = sum_of_squared_errors(y_pred, y_true);
     let sst = sum_of_square_total(y_true);
 
-    // When all y_true are identical SST is zero and R² is undefined: a perfect fit scores 1.0,
-    // anything else 0.0.
+    // When all y_true are identical SST is zero and R^2 is undefined: perfect fit scores 1.0, else 0.0
     if sst < SST_EPSILON {
         return if sse < SST_EPSILON { 1.0 } else { 0.0 };
     }
@@ -186,12 +192,12 @@ where
     1.0 - sse / sst
 }
 
-/// Calculates the explained variance score.
+/// Calculates the explained variance score
 ///
 /// `1 - Var(y_true - y_pred) / Var(y_true)`. Unlike [`r2_score`], the numerator is the variance of
 /// the residuals rather than their mean square, so a constant prediction bias does not lower the
 /// score. The best possible value is 1.0; when `y_true` has zero variance the score is undefined
-/// and returns 1.0 for residuals of zero variance, otherwise 0.0.
+/// and returns 1.0 for residuals of zero variance, otherwise 0.0
 ///
 /// # Parameters
 ///
@@ -208,6 +214,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::explained_variance_score;
@@ -243,10 +250,10 @@ where
     1.0 - residual_variance / true_variance
 }
 
-/// Calculates the median absolute error between ground-truth and predicted values.
+/// Calculates the median absolute error between ground-truth and predicted values
 ///
 /// The median of the absolute errors is robust to outliers, so a few large mistakes do not
-/// dominate it the way they do [`mean_absolute_error`].
+/// dominate it the way they do [`mean_absolute_error`]
 ///
 /// # Parameters
 ///
@@ -263,6 +270,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::median_absolute_error;
@@ -293,11 +301,11 @@ where
     }
 }
 
-/// Calculates the mean absolute percentage error (MAPE) between ground-truth and predicted values.
+/// Calculates the mean absolute percentage error (MAPE) between ground-truth and predicted values
 ///
 /// `mean(|y_true - y_pred| / max(|y_true|, eps))`. The result is a fraction (multiply by 100 for a
 /// percentage). Each denominator is floored at a tiny epsilon, so samples whose true value is zero
-/// do not cause a division by zero but can still inflate the score.
+/// do not cause a division by zero but can still inflate the score
 ///
 /// # Parameters
 ///
@@ -314,6 +322,7 @@ where
 /// - Panics if the inputs are empty
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::mean_absolute_percentage_error;
@@ -332,7 +341,7 @@ where
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
-    // Floor on |y_true| to keep the division finite when a true value is zero.
+    // Floor on |y_true| to keep the division finite when a true value is zero
     const EPS: f64 = 1e-15;
     let sum: f64 = y_true
         .iter()

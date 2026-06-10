@@ -1,30 +1,27 @@
+//! AdaGrad optimizer that adapts per-parameter learning rates using accumulated squared gradients
+
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::validate_positive_finite;
 use crate::neural_network::traits::{Layer, Optimizer};
 
-/// AdaGrad (Adaptive Gradient Algorithm) optimizer.
+/// AdaGrad (Adaptive Gradient Algorithm) optimizer
 ///
-/// Adapts learning rates per parameter using accumulated squared gradients.
-///
-/// # Fields
-///
-/// - `learning_rate` - Initial learning rate controlling the size of parameter updates
-/// - `epsilon` - Small constant added for numerical stability
+/// Adapts learning rates per parameter using accumulated squared gradients
 #[derive(Debug)]
 pub struct AdaGrad {
+    /// Initial learning rate controlling the size of parameter updates
     learning_rate: f32,
+    /// Small constant added for numerical stability
     epsilon: f32,
-    /// Per-parameter accumulated squared gradients, indexed by parameter order each step.
+    /// Per-parameter accumulated squared gradients, indexed by parameter order each step
     accumulators: Vec<Vec<f32>>,
-    /// Position within `accumulators` for the parameter currently being updated; reset each `step`.
+    /// Position within `accumulators` for the parameter currently being updated; reset each `step`
     cursor: usize,
 }
 
 impl AdaGrad {
-    /// Creates a new AdaGrad optimizer with the specified parameters.
-    ///
-    /// Validates hyperparameters and initializes the optimizer.
+    /// Creates a new AdaGrad optimizer with the specified hyperparameters
     ///
     /// # Parameters
     ///
@@ -39,7 +36,6 @@ impl AdaGrad {
     ///
     /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite
     pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, Error> {
-        // input validation
         validate_positive_finite(learning_rate, "learning_rate")?;
         validate_positive_finite(epsilon, "epsilon")?;
 
@@ -54,7 +50,7 @@ impl AdaGrad {
 
 impl Optimizer for AdaGrad {
     fn step(&mut self) {
-        // Rewind to the first parameter; layers yield parameters in the same order every step.
+        // Rewind to the first parameter; layers yield parameters in the same order every step
         self.cursor = 0;
     }
 

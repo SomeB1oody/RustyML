@@ -1,13 +1,18 @@
+//! Normalization layers (batch, group, instance, layer) and shared layout/gradient helpers
+//!
+//! Provides channels-first permutation utilities and macros reused across the
+//! normalization layer implementations
+
 use crate::neural_network::Tensor;
 use std::borrow::Cow;
 
 /// Returns the axis permutation that moves `channel_axis` to position 1 (channels-first), keeping
-/// the batch axis at 0 and the spatial axes in their original relative order.
+/// the batch axis at 0 and the spatial axes in their original relative order
 ///
 /// Instance/Group normalization is layout-equivariant: normalizing a tensor with the channel at
 /// `channel_axis` is identical to permuting it channels-first, normalizing, and permuting back. The
 /// channels-first numeric cores assume contiguous `[batch, channel, spatial...]` layout, so the
-/// public methods bracket them with [`to_channels_first`] / [`from_channels_first`].
+/// public methods bracket them with [`to_channels_first`] / [`from_channels_first`]
 fn channels_first_perm(ndim: usize, channel_axis: usize) -> Vec<usize> {
     let mut perm = Vec::with_capacity(ndim);
     perm.push(0);
@@ -16,8 +21,9 @@ fn channels_first_perm(ndim: usize, channel_axis: usize) -> Vec<usize> {
     perm
 }
 
-/// Permutes `input` so the channel axis sits at position 1, returning a contiguous owned array.
-/// For `channel_axis == 1` the input is borrowed unchanged (no copy — the common fast path).
+/// Permutes `input` so the channel axis sits at position 1, returning a contiguous owned array
+///
+/// For `channel_axis == 1` the input is borrowed unchanged (no copy - the common fast path)
 pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, Tensor> {
     if channel_axis == 1 {
         Cow::Borrowed(input)
@@ -34,15 +40,17 @@ pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, 
 }
 
 /// Inverse of [`to_channels_first`]: moves the channel axis from position 1 back to `channel_axis`,
-/// returning a contiguous owned array. A no-op for `channel_axis == 1`.
+/// returning a contiguous owned array
+///
+/// A no-op for `channel_axis == 1`
 pub(super) fn from_channels_first(output_cf: Tensor, channel_axis: usize) -> Tensor {
     if channel_axis == 1 {
         return output_cf;
     }
     let ndim = output_cf.ndim();
     let fwd = channels_first_perm(ndim, channel_axis);
-    // Invert the forward permutation: position `new_pos` in the channels-first array came from
-    // original axis `old_ax`, so the original axis `old_ax` must read from `new_pos`.
+    // Invert the forward permutation: channels-first position `new_pos` came from original axis
+    // `old_ax`, so original axis `old_ax` reads from `new_pos`
     let mut inv = vec![0usize; ndim];
     for (new_pos, &old_ax) in fwd.iter().enumerate() {
         inv[old_ax] = new_pos;
@@ -68,8 +76,8 @@ pub use group_normalization::GroupNormalization;
 pub use instance_normalization::InstanceNormalization;
 pub use layer_normalization::{LayerNormalization, LayerNormalizationAxis};
 
-// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
-// so callers import them explicitly rather than relying on textual macro ordering.
+// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use`
+// re-export, so callers import them explicitly rather than relying on textual macro ordering
 /// Common implementation for `output_shape` method in normalization layers
 macro_rules! normalization_layer_output_shape {
     ($self:expr) => {
@@ -91,21 +99,20 @@ macro_rules! normalization_layer_output_shape {
 
 /// Common implementation for computing gamma and beta gradients in normalization layers
 ///
-/// This macro computes the gradients for gamma and beta parameters by summing over
-/// all spatial dimensions and batch dimensions for each channel. It handles both
-/// parallel and sequential computation based on the total number of elements.
+/// Sums grad_output (for beta) and grad_output * x_normalized (for gamma) over all batch and
+/// spatial positions per channel, choosing parallel or sequential based on total element count
 ///
 /// # Parameters
 ///
-/// - `$grad_gamma:expr` - Mutable tensor to store gamma gradients
-/// - `$grad_beta:expr` - Mutable tensor to store beta gradients
-/// - `$grad_output:expr` - Gradient from the next layer
-/// - `$x_normalized:expr` - Normalized input from forward pass
-/// - `$batch_size:expr` - Number of samples in the batch
-/// - `$num_channels:expr` - Number of channels
-/// - `$spatial_size:expr` - Size of spatial dimensions (product of all spatial dims)
-/// - `$total_elements:expr` - Total number of elements in the tensor
-/// - `$parallel_threshold:expr` - Threshold for switching to parallel computation
+/// - `$grad_gamma:expr` - mutable tensor to store gamma gradients
+/// - `$grad_beta:expr` - mutable tensor to store beta gradients
+/// - `$grad_output:expr` - gradient from the next layer
+/// - `$x_normalized:expr` - normalized input from the forward pass
+/// - `$batch_size:expr` - number of samples in the batch
+/// - `$num_channels:expr` - number of channels
+/// - `$spatial_size:expr` - product of all spatial dimensions
+/// - `$total_elements:expr` - total number of elements in the tensor
+/// - `$parallel_threshold:expr` - element count at which parallel computation kicks in
 macro_rules! compute_normalization_layer_parameter_gradients {
     (
         $grad_gamma:expr,
@@ -119,8 +126,7 @@ macro_rules! compute_normalization_layer_parameter_gradients {
         $parallel_threshold:expr
     ) => {{
         if $total_elements >= $parallel_threshold {
-            // Parallel computation of parameter gradients
-            // Compute both gamma and beta gradients in a single pass
+            // Parallel: compute both gamma and beta gradients in a single pass
             let (grad_gamma_vec, grad_beta_vec): (Vec<f32>, Vec<f32>) = (0..$num_channels)
                 .into_par_iter()
                 .map(|channel_idx| {
@@ -181,60 +187,40 @@ mod tests {
     use super::*;
     use ndarray::ArrayD;
 
-    // Helper: build a Tensor from a flat Vec and shape.
+    // Helper: build a Tensor from a flat Vec and shape
     fn make_tensor(data: Vec<f32>, shape: &[usize]) -> Tensor {
         ArrayD::from_shape_vec(shape, data).expect("shape/data mismatch in test helper")
     }
 
-    // ─── channels_first_perm ────────────────────────────────────────────────
+    // channels_first_perm
 
-    /// (ndim=4, channel_axis=3) → [0,3,1,2]
-    ///
-    /// Derivation: batch stays at 0, channel_axis=3 moves to position 1,
-    /// then the spatial axes from 1..4 excluding 3, i.e. [1,2], follow in order.
-    /// Expected: [0, 3, 1, 2].
+    /// channels_first_perm(4, 3) puts channel axis 3 at position 1, yielding [0, 3, 1, 2]
     #[test]
     fn test_channels_first_perm_4_3() {
         let perm = channels_first_perm(4, 3);
         assert_eq!(perm, vec![0usize, 3, 1, 2]);
     }
 
-    /// (ndim=4, channel_axis=1) → identity [0,1,2,3]
-    ///
-    /// Derivation: batch stays at 0, channel_axis=1 is already position 1,
-    /// spatial axes from 1..4 excluding 1 are [2,3].
-    /// Expected: [0, 1, 2, 3].
+    /// channels_first_perm(4, 1) is the identity [0, 1, 2, 3] since the channel is already at position 1
     #[test]
     fn test_channels_first_perm_4_1_identity() {
         let perm = channels_first_perm(4, 1);
         assert_eq!(perm, vec![0usize, 1, 2, 3]);
     }
 
-    /// (ndim=3, channel_axis=2) → [0,2,1]
-    ///
-    /// Derivation: batch stays at 0, channel_axis=2 moves to position 1,
-    /// spatial axes from 1..3 excluding 2, i.e. [1], follow.
-    /// Expected: [0, 2, 1].
+    /// channels_first_perm(3, 2) puts channel axis 2 at position 1, yielding [0, 2, 1]
     #[test]
     fn test_channels_first_perm_3_2() {
         let perm = channels_first_perm(3, 2);
         assert_eq!(perm, vec![0usize, 2, 1]);
     }
 
-    // ─── to_channels_first + from_channels_first round-trip ─────────────────
+    // to_channels_first + from_channels_first round-trip
 
-    /// Round-trip identity: from_channels_first(to_channels_first(x), ca) == x,
-    /// for shape [2,4,3,3] with channel_axis=3.
-    ///
-    /// Derivation:
-    ///   forward perm for (ndim=4, ca=3) = [0,3,1,2]   (tested above)
-    ///   inverse perm: inv[0]=0, inv[3]=1, inv[1]=2, inv[2]=3 → [0,2,3,1]
-    ///   Composing [0,3,1,2] then [0,2,3,1] yields the identity permutation,
-    ///   so every element returns to its original position.
+    /// from_channels_first(to_channels_first(x), ca) recovers x for shape [2,4,3,3] with channel_axis=3
     #[test]
     fn test_to_from_channels_first_roundtrip() {
-        // Build a recognisably non-constant tensor so any element swap would
-        // be caught.
+        // Non-constant tensor so any element swap is caught
         let n: usize = 2 * 4 * 3 * 3;
         let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
         let x = make_tensor(data, &[2, 4, 3, 3]);
@@ -243,7 +229,7 @@ mod tests {
         let cf = to_channels_first(&x, channel_axis);
         let recovered = from_channels_first(cf.into_owned(), channel_axis);
 
-        // Element-wise equality: every element must return to its original slot.
+        // Elementwise equality: every element must return to its original slot
         let x_flat: &[f32] = x.as_slice().unwrap();
         let r_flat: &[f32] = recovered.as_slice().unwrap();
         for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
@@ -254,8 +240,7 @@ mod tests {
         }
     }
 
-    /// When channel_axis==1, to_channels_first is a no-op borrow and
-    /// from_channels_first returns the same data — round-trip still holds.
+    /// When channel_axis==1, to_channels_first borrows without copying and the round-trip still holds
     #[test]
     fn test_to_from_channels_first_channel_axis_1_noop() {
         let data: Vec<f32> = (0..24usize).map(|i| i as f32 * 0.5).collect();
@@ -263,7 +248,7 @@ mod tests {
         let channel_axis = 1usize;
 
         let cf = to_channels_first(&x, channel_axis);
-        // Must be a Borrow (no copy).
+        // Must be a Borrow (no copy)
         assert!(matches!(cf, std::borrow::Cow::Borrowed(_)));
         let recovered = from_channels_first(cf.into_owned(), channel_axis);
 

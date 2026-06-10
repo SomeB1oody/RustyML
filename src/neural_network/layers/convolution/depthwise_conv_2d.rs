@@ -1,3 +1,5 @@
+//! 2D depthwise convolution layer that applies one filter per input channel
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -15,31 +17,18 @@ use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
-/// Threshold for using parallel computation in forward pass.
-/// If batch_size * channels * output_height * output_width < threshold, use sequential computation.
+/// Element-count threshold above which the forward pass runs in parallel;
+/// below it (batch_size * channels * output_height * output_width) runs sequentially
 const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 
-/// A 2D depthwise convolutional layer for neural networks.
+/// A 2D depthwise convolutional layer for neural networks
 ///
 /// Applies one convolutional filter per input channel, reducing parameter count and
 /// computation while preserving spatial feature extraction. Input shape is
-/// \[batch_size, channels, height, width\], and each channel is convolved independently.
-///
-/// # Fields
-///
-/// - `filters` - Number of output channels (must equal input channels for pure depthwise convolution)
-/// - `kernel_size` - Size of the convolution kernel as (height, width)
-/// - `strides` - Stride of the convolution as (height_stride, width_stride)
-/// - `padding` - Padding strategy (Valid or Same)
-/// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
-/// - `bias` - 1D bias vector with shape \[filters\]
-/// - `activation` - Activation layer from activation_layer module
-/// - `input` - Cached input tensor for backward pass
-/// - `input_shape` - Shape of the input tensor
-/// - `weight_gradients` - Gradients with respect to weights
-/// - `bias_gradients` - Gradients with respect to bias
+/// \[batch_size, channels, height, width\], and each channel is convolved independently
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -103,22 +92,34 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// ```
 #[derive(Debug)]
 pub struct DepthwiseConv2D {
+    /// Number of output channels (must equal input channels for pure depthwise convolution)
     filters: usize,
+    /// Size of the convolution kernel as (height, width)
     kernel_size: (usize, usize),
+    /// Stride of the convolution as (height_stride, width_stride)
     strides: (usize, usize),
+    /// Padding strategy (Valid or Same)
     padding: PaddingType,
+    /// 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
     weights: Array4<f32>,
+    /// 1D bias vector with shape \[filters\]
     bias: Array1<f32>,
+    /// Activation applied to the convolution output
     activation: Activation,
+    /// Cached post-activation output for the backward pass
     output_cache: Option<Tensor>,
+    /// Cached input tensor for the backward pass
     input: Option<Tensor>,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Gradients with respect to weights
     weight_gradients: Option<Array4<f32>>,
+    /// Gradients with respect to bias
     bias_gradients: Option<Array1<f32>>,
 }
 
 impl DepthwiseConv2D {
-    /// Creates a new DepthwiseConv2D layer.
+    /// Creates a new DepthwiseConv2D layer
     ///
     /// # Parameters
     ///
@@ -127,8 +128,8 @@ impl DepthwiseConv2D {
     /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
     /// - `padding` - Padding strategy (Valid or Same)
-    /// - `activation` - Activation layer from activation_layer module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `activation` - Activation function applied to the output (ReLU, Sigmoid, Tanh, Softmax)
+    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
     ///
     /// # Returns
     ///
@@ -138,7 +139,7 @@ impl DepthwiseConv2D {
     ///
     /// - `Error::InvalidParameter` - If `filters` is 0
     /// - `Error::InvalidParameter` - If any kernel dimension or stride is 0
-    /// - `Error::InvalidInput` - If `input_shape` is not 4D or smaller than the kernel
+    /// - `Error::InvalidInput` - If `input_shape` is not 4D, has 0 channels, or is smaller than the kernel
     /// - `Error::InvalidParameter` - If `filters` does not equal the input channels
     pub fn new(
         filters: usize,
@@ -149,15 +150,13 @@ impl DepthwiseConv2D {
         activation: impl Into<Activation>,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Input validation
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
         validate_strides_2d(strides)?;
         validate_input_shape_2d(&input_shape, kernel_size)?;
 
-        // For pure depthwise convolution every input channel is convolved by exactly one filter,
-        // so the filter count is fixed by the input channels. Enforcing it here turns a silent
-        // shape mismatch at the first `forward` into an explicit construction-time error.
+        // Pure depthwise convolution fixes the filter count to the input channels; enforce it
+        // here so a shape mismatch is an explicit construction error, not a silent first-forward one
         let channels = input_shape[1];
         if channels != filters {
             return Err(Error::invalid_parameter(
@@ -168,9 +167,8 @@ impl DepthwiseConv2D {
 
         let (kernel_height, kernel_width) = kernel_size;
 
-        // Xavier (Glorot) uniform initialization. Each depthwise filter maps one input channel to
-        // one output channel, so fan_in == fan_out == kernel_area. Weight shape is
-        // [filters, 1, kernel_height, kernel_width]; biases start at zero.
+        // Xavier (Glorot) uniform init: each filter maps one channel, so fan_in == fan_out ==
+        // kernel_area. Weight shape is [filters, 1, kernel_height, kernel_width]; biases start at zero
         let fan = kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
@@ -197,7 +195,7 @@ impl DepthwiseConv2D {
         })
     }
 
-    /// Calculates padding dimensions for Same padding mode.
+    /// Calculates padding dimensions for Same padding mode
     fn calculate_padding(
         &self,
         input_height: usize,
@@ -217,12 +215,16 @@ impl DepthwiseConv2D {
         }
     }
 
-    /// Sets the weights and bias for this layer.
+    /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
     /// - `weights` - 4D weight tensor with shape \[filters, 1, kernel_height, kernel_width\]
     /// - `bias` - 1D bias vector with shape \[filters\]
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `weights` or `bias` does not match the existing shape
     pub fn set_weights(&mut self, weights: Array4<f32>, bias: Array1<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
@@ -231,7 +233,7 @@ impl DepthwiseConv2D {
         Ok(())
     }
 
-    /// Performs depthwise convolution for a single channel.
+    /// Performs depthwise convolution for a single channel
     #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/kernel/padding) are all needed
     fn convolve_channel(
         input_channel: &ArrayView2<f32>,
@@ -244,7 +246,6 @@ impl DepthwiseConv2D {
         pad_h: usize,
         pad_w: usize,
     ) -> Array2<f32> {
-        // Apply padding if needed
         let padded_input = if *padding == PaddingType::Same {
             pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
         } else {
@@ -272,7 +273,7 @@ impl DepthwiseConv2D {
         channel_output
     }
 
-    /// Computes weight and input gradients for a single batch.
+    /// Computes weight and input gradients for a single batch
     #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/padding) are all needed
     fn compute_batch_gradients(
         &self,
@@ -288,10 +289,8 @@ impl DepthwiseConv2D {
         pad_w: usize,
     ) -> (Array4<f32>, Array4<f32>) {
         let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
-        // Accumulate input gradients in PADDED coordinates (matching the symmetric padding used in
-        // the forward pass via `pad_tensor_2d`), then strip the padding before returning. The
-        // previous code reused the padded coordinate `oh*stride+kh` directly as an unpadded index,
-        // which dropped/offset contributions under `Same` padding.
+        // Accumulate input gradients in PADDED coordinates (matching `pad_tensor_2d` in the forward
+        // pass), then strip the padding; using padded indices unpadded would misplace contributions
         let padded_height = input_height + pad_h;
         let padded_width = input_width + pad_w;
         let mut batch_input_grads_padded =
@@ -301,14 +300,13 @@ impl DepthwiseConv2D {
             let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
             let grad_channel = grad_upstream.slice(s![batch_idx, c, .., ..]);
 
-            // Apply padding to input if needed
             let padded_input = if self.padding == PaddingType::Same {
                 pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
             } else {
                 input_channel.to_owned()
             };
 
-            // Calculate weight gradients
+            // Weight gradients
             for kh in 0..self.kernel_size.0 {
                 for kw in 0..self.kernel_size.1 {
                     let mut weight_grad = 0.0;
@@ -326,7 +324,7 @@ impl DepthwiseConv2D {
                 }
             }
 
-            // Calculate input gradients
+            // Input gradients
             for oh in 0..output_height {
                 for ow in 0..output_width {
                     let grad_val = grad_channel[[oh, ow]];
@@ -346,7 +344,7 @@ impl DepthwiseConv2D {
             }
         }
 
-        // Strip the symmetric padding so the input gradient matches the original input shape.
+        // Strip the symmetric padding so the input gradient matches the original input shape
         let pad_top = pad_h / 2;
         let pad_left = pad_w / 2;
         let batch_input_grads = batch_input_grads_padded
@@ -364,7 +362,6 @@ impl DepthwiseConv2D {
 
 impl Layer for DepthwiseConv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
@@ -386,7 +383,6 @@ impl Layer for DepthwiseConv2D {
             "Input channels must equal number of filters for depthwise convolution"
         );
 
-        // Calculate output dimensions
         let output_shape = calculate_output_shape_2d(
             &self.input_shape,
             self.kernel_size,
@@ -400,16 +396,14 @@ impl Layer for DepthwiseConv2D {
             output_shape[3],
         );
 
-        // Calculate padding dimensions once if needed
         let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
 
         let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
 
-        // Determine whether to use parallel or sequential execution
         let total_elements = batch_size * channels * output_height * output_width;
 
         if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
-            // Parallel execution for large workloads
+            // Parallel path
             output
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -437,7 +431,7 @@ impl Layer for DepthwiseConv2D {
                         });
                 });
         } else {
-            // Sequential execution for small workloads
+            // Sequential path
             for b in 0..batch_size {
                 for c in 0..channels {
                     let input_channel = input_array.slice(s![b, c, .., ..]);
@@ -460,15 +454,13 @@ impl Layer for DepthwiseConv2D {
 
         let output = output.into_dyn();
 
-        // Apply activation
         let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
         Ok(activated)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
@@ -489,7 +481,6 @@ impl Layer for DepthwiseConv2D {
             "Input channels must equal number of filters for depthwise convolution"
         );
 
-        // Calculate output dimensions
         let output_shape =
             calculate_output_shape_2d(&input_shape, self.kernel_size, self.strides, &self.padding);
         let (_, _, output_height, output_width) = (
@@ -499,16 +490,14 @@ impl Layer for DepthwiseConv2D {
             output_shape[3],
         );
 
-        // Calculate padding dimensions once if needed
         let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
 
         let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
 
-        // Determine whether to use parallel or sequential execution
         let total_elements = batch_size * channels * output_height * output_width;
 
         if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
-            // Parallel execution for large workloads
+            // Parallel path
             output
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -536,7 +525,7 @@ impl Layer for DepthwiseConv2D {
                         });
                 });
         } else {
-            // Sequential execution for small workloads
+            // Sequential path
             for b in 0..batch_size {
                 for c in 0..channels {
                     let input_channel = input_array.slice(s![b, c, .., ..]);
@@ -559,7 +548,6 @@ impl Layer for DepthwiseConv2D {
 
         let output = output.into_dyn();
 
-        // Apply activation
         let activated = self.activation.forward(&output)?;
         Ok(activated)
     }
@@ -607,15 +595,13 @@ impl Layer for DepthwiseConv2D {
             bias_grads[c] = channel_sum;
         }
 
-        // Calculate padding dimensions once if needed
         let (pad_h, pad_w) =
             self.calculate_padding(input_height, input_width, output_height, output_width);
 
-        // Determine whether to use parallel or sequential execution
         let total_elements = batch_size * channels * output_height * output_width;
 
         if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
-            // Parallel computation of weight gradients and input gradients per batch
+            // Parallel path: per-batch weight and input gradients
             let batch_results: Vec<(Array4<f32>, Array4<f32>)> = (0..batch_size)
                 .into_par_iter()
                 .map(|b| {
@@ -644,7 +630,7 @@ impl Layer for DepthwiseConv2D {
                     .assign(&batch_input_grads.slice(s![0, .., .., ..]));
             }
         } else {
-            // Sequential computation for small workloads
+            // Sequential path
             for b in 0..batch_size {
                 let (batch_weight_grads, batch_input_grads) = self.compute_batch_gradients(
                     &input_array,

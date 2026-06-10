@@ -1,3 +1,5 @@
+//! Dense (fully connected) layer: a linear transform followed by an optional activation
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,29 +10,18 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Dense (Fully Connected) layer implementation for neural networks.
+/// Dense (fully connected) layer for neural networks
 ///
-/// This layer performs a linear transformation using a weight matrix and bias vector, optionally
+/// Performs a linear transformation using a weight matrix and bias vector, optionally
 /// followed by an activation function: output = activation(input * weights + bias). Input shape
-/// is (batch_size, input_dim) and output shape is (batch_size, output_dim).
+/// is (batch_size, input_dim) and output shape is (batch_size, output_dim)
 ///
 /// Weights are initialized with Xavier/Glorot initialization and biases start at zeros. During
 /// training, the layer stores intermediate values for backpropagation and supports multiple
-/// optimization algorithms including SGD, Adam, and RMSprop.
-///
-/// # Fields
-///
-/// - `input_dim` - Input dimension size
-/// - `output_dim` - Output dimension size
-/// - `weights` - Weight matrix with shape (input_dim, output_dim)
-/// - `bias` - Bias vector with shape (1, output_dim)
-/// - `input_cache` - Cache of the input from forward pass for use in backward pass
-/// - `output_cache` - Cache of the activated output, used to backprop through the activation
-/// - `grad_weights` - Stored weight gradients
-/// - `grad_bias` - Stored bias gradients
-/// - `activation` - Activation function applied to the linear output
+/// optimization algorithms including SGD, Adam, and RMSprop
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::Array;
 /// use rustyml::neural_network::sequential::Sequential;
@@ -60,19 +51,28 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// ```
 #[derive(Debug)]
 pub struct Dense {
+    /// Input dimension size
     input_dim: usize,
+    /// Output dimension size
     output_dim: usize,
+    /// Weight matrix with shape (input_dim, output_dim)
     weights: Array2<f32>,
+    /// Bias vector with shape (1, output_dim)
     bias: Array2<f32>,
+    /// Cache of the input from the forward pass for use in the backward pass
     input_cache: Option<Array2<f32>>,
+    /// Cache of the activated output, used to backprop through the activation
     output_cache: Option<Tensor>,
+    /// Stored weight gradients
     grad_weights: Option<Array2<f32>>,
+    /// Stored bias gradients
     grad_bias: Option<Array2<f32>>,
+    /// Activation function applied to the linear output
     activation: Activation,
 }
 
 impl Dense {
-    /// Creates a new dense layer with an activation function.
+    /// Creates a new dense layer with an activation function
     ///
     /// # Parameters
     ///
@@ -81,7 +81,7 @@ impl Dense {
     /// - `activation` - Activation applied to the linear output (any value convertible into
     ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
     /// - `random_state` - Optional seed for reproducible initialization; falls back to the global
-    ///   seed or entropy. See [`crate::random`].
+    ///   seed or entropy. See [`crate::random`]
     ///
     /// # Returns
     ///
@@ -128,7 +128,7 @@ impl Dense {
         })
     }
 
-    /// Sets the weights and bias for this layer.
+    /// Sets the weights and bias for this layer
     ///
     /// # Parameters
     ///
@@ -142,9 +142,8 @@ impl Dense {
     pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
-        // Force a contiguous standard layout: `parameters()` exposes the weights as a flat
-        // mutable slice (`as_slice_mut().expect(..)`), which panics on a non-contiguous array.
-        // A caller could pass e.g. a transposed/sliced view materialized in non-standard order.
+        // Force standard layout: `parameters()` exposes the weights as a flat mutable slice via
+        // `as_slice_mut().expect(..)`, which panics on a non-contiguous array
         self.weights = weights.as_standard_layout().into_owned();
         self.bias = bias.as_standard_layout().into_owned();
         Ok(())
@@ -163,8 +162,8 @@ impl Layer for Dense {
         // Input shape is [batch_size, input_dim]
         self.input_cache = Some(input_2d.to_owned());
 
-        // Linear transform. ndarray's `dot` dispatches to the cache-blocked, SIMD `matrixmultiply`
-        // kernel, which beats a hand-rolled parallel triple loop across all sizes.
+        // Linear transform. ndarray's `dot` dispatches to the cache-blocked SIMD `matrixmultiply`
+        // kernel, which beats a hand-rolled parallel triple loop across all sizes
         let z = input_2d.dot(&self.weights) + &self.bias;
 
         // Apply activation and cache the activated output for backpropagation
@@ -173,7 +172,7 @@ impl Layer for Dense {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 2D
         if input.ndim() != 2 {
@@ -182,7 +181,7 @@ impl Layer for Dense {
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Linear transform (see `forward` for why `dot` rather than a hand-rolled loop).
+        // Linear transform (see `forward` for why `dot` rather than a hand-rolled loop)
         let z = input_2d.dot(&self.weights) + &self.bias;
 
         // Apply activation (no cache writes during inference)
@@ -197,26 +196,25 @@ impl Layer for Dense {
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
-        // Convert gradient to 2D array with shape [batch_size, output_dim]
+        // Gradient as a 2D array with shape [batch_size, output_dim]
         let grad_upstream_2d = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Get input cache
         let input = self
             .input_cache
             .take()
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
-        // Weight gradients: grad_w = input^T · grad_upstream (matmul via `dot`).
+        // Weight gradients: grad_w = input^T * grad_upstream (matmul via `dot`)
         let grad_w = input.t().dot(&grad_upstream_2d);
 
         // Calculate bias gradients by summing over batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-        // Ensure arrays are contiguous before storing (as_standard_layout() ensures contiguous memory layout)
+        // Store gradients in a contiguous layout for `parameters()`
         self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
-        // Gradient w.r.t. the input: grad_input = grad_upstream · weights^T.
+        // Gradient w.r.t. the input: grad_input = grad_upstream * weights^T
         let grad_input = grad_upstream_2d.dot(&self.weights.t());
 
         Ok(grad_input.into_dyn())
@@ -227,12 +225,10 @@ impl Layer for Dense {
     }
 
     fn output_shape(&self) -> String {
-        // Returns only (None, output_dim)
         format!("(None, {})", self.output_dim)
     }
 
     fn param_count(&self) -> TrainingParameters {
-        // Parameter count = number of weight parameters + number of bias parameters
         TrainingParameters::Trainable(self.input_dim * self.output_dim + self.output_dim)
     }
 

@@ -1,3 +1,6 @@
+//! Sequential model for stacking layers into a feedforward network, with training,
+//! prediction, summary, and JSON save/load support
+
 use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Context, Error, IoError, NnError};
 use crate::neural_network::Tensor;
@@ -14,21 +17,15 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-/// A Sequential neural network model for building and training feedforward networks.
+/// A Sequential neural network model for building and training feedforward networks
 ///
-/// The Sequential model allows you to build neural networks by stacking layers in a linear fashion.
-/// Each layer feeds its output to the next layer in sequence. This model is suitable for
+/// The Sequential model lets you build neural networks by stacking layers in a linear fashion
+/// Each layer feeds its output to the next layer in sequence. The model is suitable for
 /// most feedforward neural network architectures where data flows from input to output
-/// through a series of transformations.
-///
-/// # Fields
-///
-/// - `layers` - A vector containing all layers in the model
-/// - `optimizer` - Optimizer used for updating parameters during training
-/// - `loss` - Loss function used to compute training loss
-/// - `seed` - Optional seed governing the fit-time batch shuffle; falls back to the global seed or entropy. See crate::random.
+/// through a series of transformations
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::{
 ///     sequential::Sequential,
@@ -80,9 +77,13 @@ use std::io::{BufWriter, Write};
 /// std::fs::remove_file("model.json").unwrap();
 /// ```
 pub struct Sequential {
+    /// All layers in the model
     layers: Vec<Box<dyn Layer>>,
+    /// Optimizer used for updating parameters during training
     optimizer: Option<Box<dyn Optimizer>>,
+    /// Loss function used to compute training loss
     loss: Option<Box<dyn Loss>>,
+    /// Optional seed governing the fit-time batch shuffle; falls back to the global seed or entropy. See crate::random
     seed: Option<u64>,
 }
 
@@ -93,7 +94,7 @@ impl Default for Sequential {
 }
 
 impl Sequential {
-    /// Creates a new empty Sequential model.
+    /// Creates a new empty Sequential model
     ///
     /// # Returns
     ///
@@ -107,15 +108,15 @@ impl Sequential {
         }
     }
 
-    /// Sets the seed governing the fit-time batch shuffle.
+    /// Sets the seed governing the fit-time batch shuffle
     ///
     /// This is a pure setter that only controls the data shuffling order used by
-    /// `fit_with_batches`; it does not reinitialize or otherwise touch the model's layers.
-    /// Setting a fixed seed makes the per-epoch shuffle reproducible.
+    /// `fit_with_batches`; it does not reinitialize or otherwise touch the model's layers
+    /// Setting a fixed seed makes the per-epoch shuffle reproducible
     ///
     /// # Parameters
     ///
-    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random.
+    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random
     ///
     /// # Returns
     ///
@@ -125,14 +126,14 @@ impl Sequential {
         self
     }
 
-    /// Creates a new empty Sequential model with the fit-time shuffle seed preset.
+    /// Creates a new empty Sequential model with the fit-time shuffle seed preset
     ///
     /// Equivalent to `Sequential::new()` followed by `set_seed(seed)`. The seed only governs
-    /// the per-epoch batch shuffle used by `fit_with_batches`; see crate::random.
+    /// the per-epoch batch shuffle used by `fit_with_batches`; see crate::random
     ///
     /// # Parameters
     ///
-    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random.
+    /// - `seed` - Seed for the reproducible fit-time shuffle. See crate::random
     ///
     /// # Returns
     ///
@@ -143,9 +144,9 @@ impl Sequential {
         model
     }
 
-    /// Adds a layer to the model.
+    /// Adds a layer to the model
     ///
-    /// Supports method chaining pattern.
+    /// Supports method chaining
     ///
     /// # Parameters
     ///
@@ -159,7 +160,7 @@ impl Sequential {
         self
     }
 
-    /// Configures the optimizer and loss function for the model.
+    /// Configures the optimizer and loss function for the model
     ///
     /// # Parameters
     ///
@@ -208,9 +209,8 @@ impl Sequential {
             return Err(Error::empty_input("input tensors"));
         }
 
-        // Verify batch size match. `dimension_mismatch(expected, found)` takes the input batch
-        // as the reference (`expected`) and the target batch as `found` — the same `(x, y)`
-        // ordering used crate-wide (e.g. knn, lda, machine_learning::validation).
+        // Verify batch size match. `dimension_mismatch(expected, found)` takes x's batch as the
+        // reference (`expected`) and y's as `found`, matching the crate-wide `(x, y)` ordering
         if x.shape()[0] != y.shape()[0] {
             return Err(Error::dimension_mismatch(x.shape()[0], y.shape()[0]));
         }
@@ -250,7 +250,7 @@ impl Sequential {
         let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output)?;
 
         // Advance the optimizer's global step once per batch, before the per-layer updates, so
-        // step-dependent optimizers (Adam) use a single consistent timestep across all layers.
+        // step-dependent optimizers (Adam) use a single consistent timestep across all layers
         if let Some(ref mut optimizer) = self.optimizer {
             optimizer.step();
         }
@@ -266,9 +266,9 @@ impl Sequential {
         Ok(loss_value)
     }
 
-    /// Trains the model on the provided data.
+    /// Trains the model on the provided data
     ///
-    /// Executes the forward pass, loss calculation, backward pass, and parameter updates.
+    /// Executes the forward pass, loss calculation, backward pass, and parameter updates
     ///
     /// # Parameters
     ///
@@ -319,10 +319,10 @@ impl Sequential {
         Ok(self)
     }
 
-    /// Trains the model using batch processing.
+    /// Trains the model using batch processing
     ///
-    /// Splits data into batches of specified size for training, automatically prints
-    /// detailed information for each batch by default.
+    /// Splits data into batches of the specified size for training, automatically printing
+    /// detailed information for each batch by default
     ///
     /// # Parameters
     ///
@@ -389,7 +389,7 @@ impl Sequential {
                 let mut y_batch_data = Vec::new();
 
                 // Extract data for selected indices. Index along axis 0 so this works for any
-                // input rank (Dense=2D, Conv1D/RNN=3D, Conv2D=4D, Conv3D=5D), not just 2D.
+                // input rank (Dense=2D, Conv1D/RNN=3D, Conv2D=4D, Conv3D=5D), not just 2D
                 for &idx in indices {
                     // Extract sample from x
                     let x_sample = x.index_axis(Axis(0), idx);
@@ -413,7 +413,7 @@ impl Sequential {
         // Create sample indices for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
 
-        // Seed the per-epoch shuffle once; `None` consults the thread-local global seed.
+        // Seed the per-epoch shuffle once; `None` consults the thread-local global seed
         let mut shuffle_rng = crate::random::make_rng(self.seed);
 
         #[cfg(feature = "show_progress")]
@@ -482,9 +482,9 @@ impl Sequential {
         Ok(self)
     }
 
-    /// Generates predictions for the input data.
+    /// Generates predictions for the input data
     ///
-    /// Only performs forward pass without any training.
+    /// Only performs a forward pass without any training
     ///
     /// # Parameters
     ///
@@ -506,7 +506,7 @@ impl Sequential {
         }
 
         // Inference path: each layer's `predict` runs in eval mode and writes no caches, so this
-        // only needs `&self` (the model can be shared across threads for concurrent inference).
+        // only needs `&self` (the model can be shared across threads for concurrent inference)
         let mut layers_iter = self.layers.iter();
         let first_layer = layers_iter
             .next()
@@ -519,9 +519,9 @@ impl Sequential {
         Ok(output)
     }
 
-    /// Prints a summary of the model's structure.
+    /// Prints a summary of the model's structure
     ///
-    /// Displays each layer's information and parameter statistics in a tabular format to stdout.
+    /// Displays each layer's information and parameter statistics in a tabular format to stdout
     pub fn summary(&self) {
         let col1_width = 33;
         let col2_width = 24;
@@ -557,7 +557,7 @@ impl Sequential {
         for layer in self.layers.iter() {
             let layer_type = layer.layer_type();
 
-            // Generate name from the layer type with a per-type index.
+            // Generate name from the layer type with a per-type index
             let count = type_counts.entry(layer_type).or_insert(0);
             let layer_name = if *count == 0 {
                 layer_type.to_lowercase()
@@ -569,7 +569,7 @@ impl Sequential {
             let out_shape = layer.output_shape();
 
             // Exhaustive match so adding a TrainingParameters variant forces a compile error
-            // instead of silently being counted as zero.
+            // instead of silently being counted as zero
             let param_count_num = match layer.param_count() {
                 TrainingParameters::Trainable(count) => {
                     trainable_param_count += count;
@@ -617,11 +617,11 @@ impl Sequential {
         println!("{}", output);
     }
 
-    /// Returns all the weights from each layer in the model.
+    /// Returns all the weights from each layer in the model
     ///
-    /// This method collects the weights from all layers in the sequential model and returns them
-    /// as a vector of `LayerWeight` enums. Each `LayerWeight` contains references to the weight
-    /// matrices and bias vectors of its corresponding layer.
+    /// Collects the weights from all layers in the sequential model and returns them
+    /// as a vector of `LayerWeight` enums. Each `LayerWeight` holds references to the weight
+    /// matrices and bias vectors of its corresponding layer
     ///
     /// # Returns
     ///
@@ -634,16 +634,16 @@ impl Sequential {
         weights
     }
 
-    /// Saves the model architecture and weights to a JSON file at the specified path.
+    /// Saves the model architecture and weights to a JSON file at the specified path
     ///
-    /// This method serializes the model structure including layer types, configurations,
+    /// Serializes the model structure including layer types, configurations,
     /// and all trainable parameters (weights and biases) to JSON format. Note that the
-    /// optimizer and loss function are not saved and must be reconfigured after loading.
+    /// optimizer and loss function are not saved and must be reconfigured after loading
     ///
     /// # Parameters
     ///
     /// - `path` - File path where the model will be saved (e.g., "stored_model.json"). Accepts
-    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...).
+    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
     ///
@@ -692,19 +692,19 @@ impl Sequential {
         Ok(())
     }
 
-    /// Loads model weights from a JSON file and applies them to the current model.
+    /// Loads model weights from a JSON file and applies them to the current model
     ///
-    /// This method deserializes weights from a previously saved model file and applies them
+    /// Deserializes weights from a previously saved model file and applies them
     /// to the current model's layers. The current model must have the same architecture
-    /// (same number and types of layers) as the saved model.
+    /// (same number and types of layers) as the saved model
     ///
-    /// Note: You must build the model structure first and then call this method to load weights.
-    /// After loading, you should call `compile()` to set the optimizer and loss function.
+    /// Note: build the model structure first, then call this method to load weights
+    /// After loading, call `compile()` to set the optimizer and loss function
     ///
     /// # Parameters
     ///
     /// - `path` - File path from which to load the weights (e.g., "stored_model.json"). Accepts
-    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...).
+    ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
     ///
@@ -735,9 +735,8 @@ impl Sequential {
             ))));
         }
 
-        // Apply weights to each layer, verifying the layer type at each position first.
-        // This catches architecture drift (e.g. a pooling layer where a Dense was saved, or
-        // two parameter-less layers swapped) that weight application alone cannot detect.
+        // Apply weights to each layer, verifying the layer type at each position first to catch
+        // architecture drift that weight application alone cannot detect (e.g. swapped layers)
         for (i, serializable_layer) in serializable_model.layers.iter().enumerate() {
             let expected_type = self.layers[i].layer_type();
             let saved_type = serializable_layer.info.layer_type.as_str();

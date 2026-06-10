@@ -1,3 +1,5 @@
+//! Linear (identity) activation layer
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -6,14 +8,9 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// Linear (Identity) activation layer.
+/// Linear (identity) activation layer
 ///
-/// Applies the identity function `f(x) = x` element-wise, preserving the input shape.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input from the forward pass, used to validate the gradient
-///   during backpropagation (Linear's derivative is 1, so the input values themselves are not needed)
+/// Applies the identity function `f(x) = x` elementwise, preserving the input shape
 ///
 /// # Examples
 ///
@@ -42,11 +39,13 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct Linear {
+    /// Shape of the input from the forward pass, used to validate the gradient during
+    /// backpropagation (Linear's derivative is 1, so the input values themselves are not needed)
     input_shape: Option<Vec<usize>>,
 }
 
 impl Linear {
-    /// Creates a new Linear activation layer.
+    /// Creates a new Linear activation layer
     ///
     /// # Returns
     ///
@@ -64,36 +63,34 @@ impl Default for Linear {
 
 impl Layer for Linear {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
+        // Reject NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Save the input shape for backpropagation (validation only)
+        // Save the input shape for backward-pass validation only
         self.input_shape = Some(input.shape().to_vec());
 
-        // Linear activation: f(x) = x (identity function)
+        // Identity: f(x) = x
         Ok(input.clone())
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
+        // Reject NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Linear activation: f(x) = x (identity function)
+        // Identity: f(x) = x
         Ok(input.clone())
     }
 
@@ -107,12 +104,12 @@ impl Layer for Linear {
                 ));
             }
 
-            // Check for NaN or infinite values in gradient output
+            // Reject NaN or infinite values in the gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
                 return Err(Error::non_finite("gradient output"));
             }
 
-            // Linear derivative is 1, so gradient passes through unchanged
+            // Derivative is 1, so the gradient passes through unchanged
             Ok(grad_output.clone())
         } else {
             Err(Error::forward_pass_not_run("Linear"))

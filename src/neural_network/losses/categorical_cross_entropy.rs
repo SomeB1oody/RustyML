@@ -1,9 +1,11 @@
+//! Categorical cross entropy loss for multi-class classification with one-hot targets
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::{clip_probabilities, validate_same_shape};
 use crate::neural_network::traits::Loss;
 
-/// Categorical Cross Entropy loss function for multi-class classification
+/// Categorical cross entropy loss function for multi-class classification
 ///
 /// # Examples
 ///
@@ -41,11 +43,11 @@ use crate::neural_network::traits::Loss;
 pub struct CategoricalCrossEntropy;
 
 impl CategoricalCrossEntropy {
-    /// Creates a new instance of CategoricalCrossEntropy
+    /// Creates a new `CategoricalCrossEntropy` instance
     ///
     /// # Returns
     ///
-    /// - `CategoricalCrossEntropy` - Returns a unit-like struct `CategoricalCrossEntropy`
+    /// - `CategoricalCrossEntropy` - a unit-like struct
     pub fn new() -> Self {
         Self {}
     }
@@ -57,10 +59,10 @@ impl Default for CategoricalCrossEntropy {
     }
 }
 
-/// Validates that one-hot targets and predictions are non-empty and shape-compatible.
+/// Validates that one-hot targets and predictions are non-empty and shape-compatible
 ///
-/// Categorical cross entropy is an element-wise product reduced over the batch, so the two
-/// tensors must share the same shape, and the batch axis must be non-empty (it is the divisor).
+/// Categorical cross entropy is an elementwise product reduced over the batch, so the two
+/// tensors must share the same shape, and the batch axis must be non-empty (it is the divisor)
 fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.is_empty() {
         return Err(Error::empty_input(
@@ -74,29 +76,28 @@ impl Loss for CategoricalCrossEntropy {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_shapes(y_true, y_pred)?;
 
-        // Ensure predictions are in a numerically stable range to avoid log(0) issues
+        // Clip to a numerically stable range to avoid log(0)
         let y_pred_clipped = clip_probabilities(y_pred);
 
-        // Calculate multi-class cross entropy: -Σ[y_true * log(y_pred)]
-        // Here y_true must be one-hot encoded
+        // Multi-class cross entropy: -sum[y_true * log(y_pred)], y_true one-hot encoded
         let losses = y_true * &y_pred_clipped.mapv(|y_p| y_p.ln());
 
-        // Calculate average loss (with negative sign)
-        let n = y_true.shape()[0] as f32; // Assume first dimension is sample count
+        // Average over the batch (first dimension), negated
+        let n = y_true.shape()[0] as f32;
         Ok(-losses.sum() / n)
     }
 
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_shapes(y_true, y_pred)?;
 
-        // Ensure predictions are in a numerically stable range
+        // Clip to a numerically stable range
         let y_pred_clipped = clip_probabilities(y_pred);
 
-        // Multi-class cross entropy gradient is -y_true / y_pred
+        // Multi-class cross entropy gradient: -y_true / y_pred
         let grad = -y_true / &y_pred_clipped;
 
-        // Divide by sample count to get average gradient
-        let n = y_true.shape()[0] as f32; // Assume first dimension is sample count
+        // Average over the batch (first dimension)
+        let n = y_true.shape()[0] as f32;
         Ok(grad / n)
     }
 }

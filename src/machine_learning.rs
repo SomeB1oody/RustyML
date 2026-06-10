@@ -1,28 +1,35 @@
+//! Machine learning models for clustering, classification, regression, and anomaly detection
+//!
+//! Provides DBSCAN, K-means, and Mean Shift clustering; K-Nearest Neighbors, decision trees,
+//! Linear SVC, SVC, logistic regression, and Linear Discriminant Analysis for classification;
+//! linear regression for regression; Isolation Forest for anomaly detection; and the shared
+//! [`Fit`](crate::machine_learning::traits::Fit) / [`Predict`](crate::machine_learning::traits::Predict) traits implemented by every estimator
+
 pub use crate::types::{DistanceCalculationMetric, KernelType, RegularizationType};
 
-/// Density-Based Spatial Clustering of Applications with Noise (DBSCAN) algorithm implementation
+/// Density-Based Spatial Clustering of Applications with Noise (DBSCAN) clustering
 pub mod dbscan;
-/// Decision Tree implementation for classification and regression task
+/// Decision tree for classification and regression
 pub mod decision_tree;
-/// Isolation Forest algorithm implementation for anomaly detection
+/// Isolation Forest for anomaly detection
 pub mod isolation_forest;
-/// K-means clustering implementation for unsupervised learning
+/// K-means clustering for unsupervised learning
 pub mod kmeans;
-/// K-Nearest Neighbors (KNN) implementation for classification and regression
+/// K-Nearest Neighbors (KNN) classification
 pub mod knn;
 /// Linear Discriminant Analysis for classification and supervised dimensionality reduction
 pub mod lda;
-/// Linear regression module implementing the ordinary least squares method
+/// Linear regression via gradient descent
 pub mod linear_regression;
-/// This module contains the implementation of Linear Support Vector Classification (Linear SVC)
+/// Linear Support Vector Classification (Linear SVC)
 pub mod linear_svc;
-/// Logistic regression module for binary classification problems
+/// Logistic regression for binary classification
 pub mod logistic_regression;
-/// Mean Shift clustering algorithm implementation
+/// Mean Shift clustering
 pub mod mean_shift;
 /// Internal shared helpers for parallel/sequential dispatch across models
 mod parallel;
-/// This module provides an implementation of Support Vector Classification
+/// Support Vector Classification (SVC)
 pub mod svc;
 /// Common `Fit` / `Predict` traits implemented by every estimator
 pub mod traits;

@@ -1,3 +1,8 @@
+//! K-Nearest Neighbors (KNN) classification
+//!
+//! Provides the [`KNN`] classifier and the [`WeightingStrategy`] enum that controls how
+//! neighbor votes are weighted
+
 pub use super::DistanceCalculationMetric;
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
@@ -6,33 +11,22 @@ use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-/// Represents the strategy used for weighting neighbors in KNN algorithm.
-///
-/// # Variants
-///
-/// - `Uniform` - Each neighbor is weighted equally
-/// - `Distance` - Neighbors are weighted by the inverse of their distance (closer neighbors have greater influence)
+/// Strategy used for weighting neighbors in the KNN algorithm
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum WeightingStrategy {
+    /// Each neighbor is weighted equally
     Uniform,
+    /// Neighbors are weighted by the inverse of their distance, so closer neighbors have greater influence
     Distance,
 }
 
-/// K-Nearest Neighbors (KNN) Classifier
+/// K-Nearest Neighbors (KNN) classifier
 ///
 /// A non-parametric classification algorithm that classifies new data points
-/// based on the majority class of its k nearest neighbors.
-///
-/// # Fields
-///
-/// - `k` - Number of neighbors to consider for classification
-/// - `x_train` - Training data features as a 2D array
-/// - `y_train_encoded` - Encoded training labels as indices for efficient parallel computation
-/// - `label_map` - Bidirectional mapping between original labels and their encoded indices
-/// - `weighting_strategy` - Weight function for neighbor votes. Options: Uniform, Distance
-/// - `metric` - Distance metric used for finding neighbors. Options: Euclidean, Manhattan, Minkowski(user can specify p)
+/// based on the majority class of their k nearest neighbors
 ///
 /// # Examples
+///
 /// ```rust
 /// use ndarray::{array, Array1, Array2};
 /// use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
@@ -67,22 +61,28 @@ pub enum WeightingStrategy {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KNN<T> {
+    /// Number of neighbors to consider for classification
     k: usize,
+    /// Training data features as a 2D array
     x_train: Option<Array2<f64>>,
+    /// Encoded training labels as indices for efficient parallel computation
     y_train_encoded: Option<Array1<usize>>,
 
+    /// Bidirectional mapping between original labels and their encoded indices: (label -> index, index -> label)
     #[serde(bound(
         serialize = "T: Serialize + Eq + std::hash::Hash",
         deserialize = "T: Deserialize<'de> + Eq + std::hash::Hash"
     ))]
-    label_map: Option<(AHashMap<T, usize>, Vec<T>)>, // (label -> index, index -> label)
+    label_map: Option<(AHashMap<T, usize>, Vec<T>)>,
 
+    /// Weight function for neighbor votes
     weighting_strategy: WeightingStrategy,
+    /// Distance metric used for finding neighbors
     metric: DistanceCalculationMetric,
 }
 
 impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
-    /// Creates a new KNN classifier with default parameters.
+    /// Creates a new KNN classifier with default parameters
     ///
     /// # Default Values
     ///
@@ -102,7 +102,7 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
-    /// Creates a new KNN classifier with the specified parameters.
+    /// Creates a new KNN classifier with the specified parameters
     ///
     /// # Parameters
     ///
@@ -122,7 +122,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         weighting_strategy: WeightingStrategy,
         metric: DistanceCalculationMetric,
     ) -> Result<Self, Error> {
-        // Validate k parameter
         if k == 0 {
             return Err(Error::invalid_parameter("k", "must be greater than 0"));
         }
@@ -147,14 +146,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     get_field!(get_metric, metric, DistanceCalculationMetric);
     get_field_as_ref!(get_x_train, x_train, Option<&Array2<f64>>);
 
-    /// Fits the KNN classifier to the training data.
+    /// Fits the KNN classifier to the training data
     ///
-    /// KNN is a lazy learning algorithm, and the actual calculation is done in the prediction phase.
-    /// Labels are internally encoded as indices for efficient parallel computation.
+    /// KNN is a lazy learning algorithm, and the actual calculation is done in the prediction phase;
+    /// labels are internally encoded as indices for efficient parallel computation
     ///
     /// # Parameters
     ///
-    /// - `x` - Training features as a 2D array (samples × features)
+    /// - `x` - Training features as a 2D array (samples x features)
     /// - `y` - Training targets/labels as a 1D array
     ///
     /// # Returns
@@ -163,7 +162,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the number of samples is less than k or input validation fails
+    /// - `Error::EmptyInput` - If `x` has no rows
+    /// - `Error::NonFinite` - If `x` contains NaN or infinite values
+    /// - `Error::DimensionMismatch` - If the number of labels in `y` differs from the number of rows in `x`
+    /// - `Error::InvalidInput` - If the number of samples is less than k
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -175,9 +177,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     {
         preliminary_check(x, None)?;
 
-        // KNN labels are a generic type `T` (not `f64`), so `preliminary_check` cannot validate
-        // them; check the row counts here. Without this, a mismatched `y` is silently stored and
-        // later panics with an out-of-bounds index at predict time instead of failing cleanly.
+        // `preliminary_check` cannot validate generic labels `T`, so check row counts here:
+        // a mismatched `y` is otherwise silently stored and panics out-of-bounds at predict time
         if y.len() != x.nrows() {
             return Err(Error::dimension_mismatch(x.nrows(), y.len()));
         }
@@ -213,15 +214,15 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         Ok(self)
     }
 
-    /// Predicts class labels for input samples (sequential version).
+    /// Predicts class labels for input samples (sequential version)
     ///
-    /// This method works with any type `T` without requiring `Sync + Send` bounds.
-    /// For large datasets with types that implement `Sync + Send`, consider using
-    /// `predict_parallel` for better performance.
+    /// This method works with any type `T` without requiring `Sync + Send` bounds;
+    /// for large datasets with types that implement `Sync + Send`, consider using
+    /// `predict_parallel` for better performance
     ///
     /// # Parameters
     ///
-    /// - `x` - Test features as a 2D array (samples × features)
+    /// - `x` - Test features as a 2D array (samples x features)
     ///
     /// # Returns
     ///
@@ -230,7 +231,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been trained using `fit`
-    /// - `Error::InvalidInput` - If input dimension mismatch or input is empty
+    /// - `Error::EmptyInput` - If `x` has no elements
+    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the training data
+    /// - `Error::NonFinite` - If `x` contains NaN or infinite values
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64>,
@@ -267,14 +270,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
-    /// Predicts class labels for input samples (parallel version).
+    /// Predicts class labels for input samples (parallel version)
     ///
-    /// This method uses parallel computation for faster prediction on large datasets.
-    /// Requires `T` to implement `Sync + Send` for thread safety.
+    /// This method uses parallel computation for faster prediction on large datasets;
+    /// requires `T` to implement `Sync + Send` for thread safety
     ///
     /// # Parameters
     ///
-    /// - `x` - Test features as a 2D array (samples × features)
+    /// - `x` - Test features as a 2D array (samples x features)
     ///
     /// # Returns
     ///
@@ -283,7 +286,9 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been trained
-    /// - `Error::InvalidInput` - If input dimension mismatch or input is empty
+    /// - `Error::EmptyInput` - If `x` has no elements
+    /// - `Error::DimensionMismatch` - If the number of features in `x` differs from the training data
+    /// - `Error::NonFinite` - If `x` contains NaN or infinite values
     pub fn predict_parallel<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<T>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -331,10 +336,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        // Calculate distances to all training samples.
-        // This per-query search stays sequential on purpose: callers parallelize
-        // across query samples (see `predict_parallel`), so parallelizing the inner
-        // loop as well would only nest Rayon pools without a real speedup.
+        // Distances to all training samples; kept sequential because callers parallelize across
+        // query samples (see `predict_parallel`), and nesting Rayon pools gives no real speedup
         let mut distances: Vec<(f64, usize)> = (0..n_samples)
             .map(|i| (self.metric.distance(x, x_train.row(i)), i))
             .collect();
@@ -467,9 +470,9 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         Ok(result)
     }
 
-    /// Fits the model with the training data and immediately predicts on the given training data.
+    /// Fits the model with the training data and immediately predicts on the given training data
     ///
-    /// This is a convenience method that combines the `fit` and `predict` steps into one operation.
+    /// This is a convenience method that combines the `fit` and `predict` steps into one operation
     ///
     /// # Parameters
     ///
@@ -482,7 +485,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If training data is invalid or samples < k
+    /// Returns any error produced by [`fit`](Self::fit) or [`predict`](Self::predict)
     pub fn fit_predict<S1, S2>(
         &mut self,
         x_train: &ArrayBase<S1, Ix2>,

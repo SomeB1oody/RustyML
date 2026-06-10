@@ -1,3 +1,8 @@
+//! Optimizers for neural network training
+//!
+//! Re-exports the optimizer types and declares the submodules holding each algorithm
+//! (SGD, AdaGrad, RMSprop, Adam), the shared flat-slice update kernels, and parameter validation
+
 pub use ada_grad::AdaGrad;
 pub use adam::Adam;
 pub use rms_prop::RMSprop;

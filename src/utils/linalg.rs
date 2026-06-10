@@ -1,9 +1,8 @@
-//! Small shared linear-algebra routines for the `utility` transformers.
+//! Shared linear-algebra routines for the `utils` transformers
 //!
-//! Both PCA's and Kernel PCA's iterative solvers extract the leading
-//! eigenpairs of a symmetric matrix by power iteration with Hotelling
-//! deflation. That routine lives here so the two solvers share one
-//! implementation instead of carrying near-identical copies.
+//! Provides power-iteration and Lanczos solvers that extract the leading
+//! eigenpairs of a symmetric matrix, so PCA and Kernel PCA share one
+//! implementation instead of carrying near-identical copies
 
 use crate::error::Error;
 use ndarray::{Array1, Array2, Axis};
@@ -11,7 +10,7 @@ use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
 
 /// Builds a random unit vector of length `n`, falling back to a uniform unit
-/// vector if the random draw happens to be (numerically) zero.
+/// vector if the random draw is numerically zero
 fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
     let mut v = Array1::<f64>::from_shape_fn(n, |_| rng.random_range(-1.0..1.0));
     let norm = v.dot(&v).sqrt();
@@ -23,10 +22,10 @@ fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
     v
 }
 
-/// Computes the dominant eigenpair of a symmetric matrix via power iteration.
+/// Computes the dominant eigenpair of a symmetric matrix via power iteration
 ///
 /// Returns the unit eigenvector together with its eigenvalue, estimated as the
-/// Rayleigh quotient `vᵀ M v`.
+/// Rayleigh quotient `v^T M v`
 ///
 /// # Errors
 ///
@@ -44,7 +43,7 @@ fn dominant_eigenpair(
 
     let mut prev_lambda = 0.0;
     for _ in 0..max_iter {
-        // Iterate toward the dominant eigenvector.
+        // Iterate toward the dominant eigenvector
         let w = matrix.dot(&v);
         let w_norm = w.dot(&w).sqrt();
         if w_norm <= f64::EPSILON || !w_norm.is_finite() {
@@ -70,13 +69,13 @@ fn dominant_eigenpair(
 }
 
 /// Extracts the top-`k` eigenpairs of a symmetric matrix using power iteration
-/// with Hotelling deflation.
+/// with Hotelling deflation
 ///
 /// The matrix is taken by value because each extracted component is deflated
 /// out of it in place. Eigenpairs come back in descending eigenvalue order as
 /// parallel vectors: `eigenvectors[i]` is the unit eigenvector for
 /// `eigenvalues[i]`. Callers arrange those eigenvectors into rows or columns as
-/// their own layout requires.
+/// their own layout requires
 ///
 /// # Parameters
 ///
@@ -103,8 +102,7 @@ pub(super) fn top_eigenpairs_power_iteration(
 
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
-        // Deflate the extracted component so the next iteration surfaces the next one:
-        // M ← M - λ vvᵀ.
+        // Deflate the extracted component so the next iteration surfaces the next: M = M - lambda v v^T
         let outer = vector
             .view()
             .insert_axis(Axis(1))
@@ -118,17 +116,17 @@ pub(super) fn top_eigenpairs_power_iteration(
 }
 
 /// Extracts the top-`k` eigenpairs of a symmetric matrix using the Lanczos
-/// algorithm with full reorthogonalization.
+/// algorithm with full reorthogonalization
 ///
 /// Lanczos builds a Krylov subspace, reduces the problem to a small symmetric
 /// tridiagonal eigenproblem, and maps the leading Ritz pairs back. For the
 /// dominant eigenpairs of a symmetric matrix (such as a centered kernel matrix)
-/// it converges far faster and more stably than deflated power iteration — it is
+/// it converges far faster and more stably than deflated power iteration - it is
 /// the pure-Rust counterpart of the symmetric solver ARPACK is built on (a
-/// single Lanczos pass, without implicit restarts).
+/// single Lanczos pass, without implicit restarts)
 ///
 /// Eigenpairs come back in descending eigenvalue order as parallel vectors:
-/// `eigenvectors[i]` is the unit eigenvector for `eigenvalues[i]`.
+/// `eigenvectors[i]` is the unit eigenvector for `eigenvalues[i]`
 ///
 /// # Parameters
 ///
@@ -145,8 +143,7 @@ pub(super) fn top_eigenpairs_lanczos(
     seed: u64,
 ) -> Result<(Vec<f64>, Vec<Array1<f64>>), Error> {
     let n = matrix.ncols();
-    // Krylov dimension: comfortably larger than k for accurate leading Ritz pairs,
-    // capped at the matrix size.
+    // Krylov dimension: larger than k for accurate leading Ritz pairs, capped at the matrix size
     let m = (2 * k + 20).min(n);
 
     let mut rng = StdRng::seed_from_u64(seed);
@@ -159,7 +156,7 @@ pub(super) fn top_eigenpairs_lanczos(
     let mut beta_prev = 0.0;
 
     for _ in 0..m {
-        // Three-term recurrence: w = A·v - alpha·v - beta_prev·v_prev.
+        // Three-term recurrence: w = A v - alpha v - beta_prev v_prev
         let mut w = matrix.dot(&v);
         let alpha = v.dot(&w);
         w.scaled_add(-alpha, &v);
@@ -167,8 +164,8 @@ pub(super) fn top_eigenpairs_lanczos(
             w.scaled_add(-beta_prev, vp);
         }
 
-        // Full reorthogonalization (repeated once for stability) against every
-        // Lanczos vector generated so far, keeping the basis numerically orthogonal.
+        // Full reorthogonalization (repeated once for stability) against every prior
+        // Lanczos vector, keeping the basis numerically orthogonal
         for _ in 0..2 {
             for u in lanczos_vectors.iter() {
                 let proj = w.dot(u);
@@ -183,7 +180,7 @@ pub(super) fn top_eigenpairs_lanczos(
 
         let beta = w.dot(&w).sqrt();
         if beta <= 1e-12 || !beta.is_finite() {
-            // Reached an invariant subspace; no further directions to explore.
+            // Reached an invariant subspace; no further directions to explore
             break;
         }
         betas.push(beta);
@@ -199,7 +196,7 @@ pub(super) fn top_eigenpairs_lanczos(
         ));
     }
 
-    // Reduced symmetric tridiagonal problem: diag = alphas, off-diag = betas.
+    // Reduced symmetric tridiagonal problem: diag = alphas, off-diag = betas
     let mut tri = nalgebra::DMatrix::<f64>::zeros(dim, dim);
     for i in 0..dim {
         tri[(i, i)] = alphas[i];
@@ -210,7 +207,7 @@ pub(super) fn top_eigenpairs_lanczos(
     }
     let eigen = nalgebra::linalg::SymmetricEigen::new(tri);
 
-    // Order Ritz values descending and keep the leading min(k, dim).
+    // Order Ritz values descending and keep the leading min(k, dim)
     let mut order: Vec<usize> = (0..dim).collect();
     order.sort_by(|&a, &b| {
         eigen.eigenvalues[b]
@@ -223,7 +220,7 @@ pub(super) fn top_eigenpairs_lanczos(
     let mut eigenvectors = Vec::with_capacity(take);
     for &idx in order.iter().take(take) {
         eigenvalues.push(eigen.eigenvalues[idx]);
-        // Ritz vector = Σ_j T_eigenvector[j, idx] · lanczos_vectors[j].
+        // Ritz vector = sum_j T_eigenvector[j, idx] * lanczos_vectors[j]
         let mut ritz = Array1::<f64>::zeros(n);
         for (j, lv) in lanczos_vectors.iter().enumerate() {
             ritz.scaled_add(eigen.eigenvectors[(j, idx)], lv);
@@ -243,7 +240,7 @@ mod tests {
     use super::*;
     use ndarray::array;
 
-    /// A fixed symmetric matrix with well-separated eigenvalues.
+    /// A fixed symmetric matrix with well-separated eigenvalues
     fn symmetric_test_matrix() -> Array2<f64> {
         array![
             [4.0, 1.0, 0.0, 0.5],
@@ -253,7 +250,7 @@ mod tests {
         ]
     }
 
-    /// Reference eigenvalues (descending) from nalgebra's dense symmetric solver.
+    /// Reference eigenvalues (descending) from nalgebra's dense symmetric solver
     fn reference_eigenvalues_desc(a: &Array2<f64>) -> Vec<f64> {
         let n = a.nrows();
         let m = nalgebra::DMatrix::from_row_slice(n, n, a.as_slice().unwrap());
@@ -263,7 +260,7 @@ mod tests {
         vals
     }
 
-    /// Asserts that (value, vector) is an eigenpair of `a`: A·v ≈ λ·v, ‖v‖ ≈ 1.
+    /// Asserts that (value, vector) is an eigenpair of `a`: A v ~= lambda v, ||v|| ~= 1
     fn assert_eigenpair(a: &Array2<f64>, value: f64, vector: &Array1<f64>, tol: f64) {
         let av = a.dot(vector);
         let lv = vector * value;
@@ -314,11 +311,9 @@ mod tests {
         }
     }
 
-    // --- edge-case tests added for top_eigenpairs_power_iteration ---
+    // edge-case tests for top_eigenpairs_power_iteration
 
-    /// k=0 must return two empty vecs without error.
-    /// Derivation: the extraction loop runs 0 times (loop body skipped when k=0),
-    /// so both Vecs remain empty.
+    /// k=0 returns two empty vecs without error
     #[test]
     fn power_iteration_k_zero_returns_empty() {
         let a = symmetric_test_matrix();
@@ -327,10 +322,7 @@ mod tests {
         assert_eq!(vecs.len(), 0, "eigenvectors should be empty for k=0");
     }
 
-    /// Eigenvalues returned for k>1 must be in strictly descending order.
-    /// Derivation: eigenvalues of symmetric_test_matrix (verified by nalgebra
-    /// reference in reference_eigenvalues_desc) satisfy λ_0 > λ_1 > λ_2 > λ_3.
-    /// Power iteration with Hotelling deflation extracts them largest-first.
+    /// Eigenvalues returned for k>1 are in strictly descending order
     #[test]
     fn power_iteration_eigenvalues_descending_order() {
         let a = symmetric_test_matrix();
@@ -350,14 +342,7 @@ mod tests {
         );
     }
 
-    /// Eigenvectors for k>=2 must be mutually orthogonal.
-    /// Derivation: by the spectral theorem, eigenvectors of a symmetric matrix
-    /// with distinct eigenvalues are orthogonal.  After Hotelling deflation the
-    /// extracted vectors span orthogonal directions, so |v_i · v_j| ≈ 0. The
-    /// tolerance is 1e-5: power iteration + deflation is an iterative method whose
-    /// orthogonality error is of the same order as its eigenvalue error (the
-    /// reference-value tests in this file likewise use a 1e-4 power-iteration tolerance,
-    /// versus 1e-8 for Lanczos).
+    /// Eigenvectors for k>=2 are mutually orthogonal
     #[test]
     fn power_iteration_eigenvectors_mutually_orthogonal() {
         let a = symmetric_test_matrix();
@@ -371,11 +356,9 @@ mod tests {
         }
     }
 
-    // --- edge-case tests added for top_eigenpairs_lanczos ---
+    // edge-case tests for top_eigenpairs_lanczos
 
-    /// k=0 must return two empty vecs without error.
-    /// Derivation: take = k.min(dim) = 0.min(dim) = 0, so the eigenpair loop
-    /// is skipped regardless of how many Lanczos steps were taken.
+    /// k=0 returns two empty vecs without error
     #[test]
     fn lanczos_k_zero_returns_empty() {
         let a = symmetric_test_matrix();
@@ -384,28 +367,16 @@ mod tests {
         assert_eq!(vecs.len(), 0, "eigenvectors should be empty for k=0");
     }
 
-    /// On a rank-1 matrix the Lanczos algorithm reaches an invariant subspace
-    /// after at most 2 steps, so at most 1 non-trivial eigenpair is returned.
-    ///
-    /// Derivation: M = aᵀa for a = [1, 0, 0] (3×3).  The image of M is
-    /// 1-dimensional (span of a), so the Krylov subspace K_2(M, q_0) is
-    /// contained in span{a, q_0}.  After the second Lanczos step the residual w
-    /// lies in span{a, q_0} ∩ {q_0, q_1}⊥ = {0}, giving beta ≈ 0.  Hence the
-    /// loop breaks with dim ≤ 2.  The tridiagonal eigenvalues of a dim×dim
-    /// problem where M has rank 1 contain at most one non-trivially large
-    /// eigenvalue (≈ 1.0 = ‖a‖²), so at most 1 returned eigenvalue exceeds
-    /// 1e-3.
+    /// On a rank-1 matrix Lanczos reaches an invariant subspace early, so at most 1 non-trivial eigenpair is returned
     #[test]
     fn lanczos_rank_one_invariant_subspace_early_exit() {
-        // 3×3 rank-1 matrix: outer product of [1, 0, 0] with itself.
-        // Only eigenvalue is 1 (with eigenvector [1,0,0]); the other two are 0.
+        // 3x3 rank-1 matrix: outer product of [1, 0, 0] with itself; only eigenvalue is 1
         let a: Array2<f64> = ndarray::array![[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],];
 
-        // Request k=5 to ensure we'd get more pairs if the matrix weren't rank-1.
+        // Request k=5 to confirm fewer pairs come back only because the matrix is rank-1
         let (vals, vecs) = top_eigenpairs_lanczos(&a, 5, 7).unwrap();
 
-        // The invariant subspace is reached early: at most 2 Lanczos vectors
-        // are produced (dim ≤ 2), so the return length is at most 2.
+        // Invariant subspace reached early (dim <= 2), so the return length is at most 2
         assert!(
             vals.len() <= 2,
             "expected at most 2 eigenpairs from a rank-1 matrix, got {}",
@@ -417,8 +388,7 @@ mod tests {
             "eigenvalues and eigenvectors must have equal length"
         );
 
-        // At most 1 eigenvalue should be non-trivially large (≥ 1e-3).
-        // Mathematically: rank-1 matrix has exactly 1 non-zero eigenvalue = 1.0.
+        // A rank-1 matrix has exactly 1 non-zero eigenvalue, so at most 1 value is >= 1e-3
         let n_large = vals.iter().filter(|&&v| v.abs() >= 1e-3).count();
         assert!(
             n_large <= 1,

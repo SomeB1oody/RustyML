@@ -1,26 +1,31 @@
-/// 1D Average Pooling Layer
+//! Pooling layers and the shared helpers that build them
+//!
+//! Re-exports every pooling layer (average, max, and their global variants in 1D/2D/3D)
+//! and defines the macros that generate the common `Layer` implementations for them
+
+/// 1D average pooling layer
 pub mod average_pooling_1d;
-/// 2D Average Pooling Layer
+/// 2D average pooling layer
 pub mod average_pooling_2d;
-/// 3D Average Pooling Layer
+/// 3D average pooling layer
 pub mod average_pooling_3d;
-/// Global Average Pooling 1D Layer
+/// 1D global average pooling layer
 pub mod global_average_pooling_1d;
-/// Global Average Pooling 2D Layer
+/// 2D global average pooling layer
 pub mod global_average_pooling_2d;
-/// Global Average Pooling 3D Layer
+/// 3D global average pooling layer
 pub mod global_average_pooling_3d;
-/// Global Max Pooling layer 1D Layer
+/// 1D global max pooling layer
 pub mod global_max_pooling_1d;
-/// Global Max Pooling layer 2D Layer
+/// 2D global max pooling layer
 pub mod global_max_pooling_2d;
-/// Global Max Pooling layer 3D Layer
+/// 3D global max pooling layer
 pub mod global_max_pooling_3d;
-/// Max Pooling layer 1D Layer
+/// 1D max pooling layer
 pub mod max_pooling_1d;
-/// Max Pooling layer 2D Layer
+/// 2D max pooling layer
 pub mod max_pooling_2d;
-/// Max Pooling layer 3D Layer
+/// 3D max pooling layer
 pub mod max_pooling_3d;
 /// Dimension-generic pooling engine shared by every pooling layer
 mod pooling_engine;
@@ -40,29 +45,28 @@ pub use max_pooling_1d::MaxPooling1D;
 pub use max_pooling_2d::MaxPooling2D;
 pub use max_pooling_3d::MaxPooling3D;
 
-// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
-// so callers import them explicitly rather than relying on textual macro ordering.
-/// A macro that generates standard function implementations for global pooling layers.
+// Macros are path-exported via `pub(in ...) use`, so callers import them explicitly
+/// Generate the standard `Layer` function implementations for global pooling layers
 ///
-/// This macro expands to implementations of:
-/// - `output_shape`: Returns the output shape after global pooling operations
-/// - Standard layer functions for layers without trainable parameters
+/// Expands to implementations of:
+/// - `output_shape`: returns the output shape after global pooling
+/// - the standard functions for layers without trainable parameters
 ///
-/// Global pooling operations reduce the spatial dimensions of the input tensor to a single value
-/// per channel by applying a pooling operation (such as max or average) across all spatial
-/// dimensions. The output shape preserves only the batch size and channel dimensions.
+/// Global pooling reduces the spatial dimensions of the input to a single value per channel
+/// by applying a pooling operation (max or average) across all spatial dimensions, so the
+/// output shape keeps only the batch size and channel dimensions
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()`: Returns a formatted string representation of the output dimensions.
-///   If the input shape is available, it returns the batch size and number of channels
-///   as `"(batch_size, channels)"`. Otherwise, returns "Unknown".
-/// - All functions from `no_trainable_parameters_layer_functions!()` macro
+/// - `output_shape()`: returns a formatted string of the output dimensions; if the input
+///   shape is available it returns the batch size and channel count as
+///   `"(batch_size, channels)"`, otherwise `"Unknown"`
+/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
-/// The implementing struct must have the following field:
-/// - `input_shape: Vec<usize>` - The shape of the input tensor
+/// The implementing struct must have the field:
+/// - `input_shape: Vec<usize>` - shape of the input tensor
 macro_rules! layer_functions_global_pooling {
     () => {
         fn output_shape(&self) -> String {
@@ -77,29 +81,29 @@ macro_rules! layer_functions_global_pooling {
     };
 }
 
-/// A macro that generates standard function implementations for 1D pooling layers.
+/// Generate the standard `Layer` function implementations for 1D pooling layers
 ///
-/// This macro expands to implementations of:
-/// - `output_shape`: Calculates and returns the output shape after 1D pooling operations
-/// - Standard layer functions for layers without trainable parameters
+/// Expands to implementations of:
+/// - `output_shape`: computes and returns the output shape after 1D pooling
+/// - the standard functions for layers without trainable parameters
 ///
-/// The macro is designed for pooling layers that operate on 3D tensors with shape
+/// Designed for pooling layers that operate on 3D tensors with shape
 /// `[batch_size, channels, length]` and produce outputs with shape
-/// `[batch_size, channels, output_length]`.
+/// `[batch_size, channels, output_length]`
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()`: Returns a formatted string representation of the output dimensions.
-///   If the input shape is available, it calculates the actual output dimensions using
-///   the pooling parameters. Otherwise, returns "Unknown".
-/// - All functions from `no_trainable_parameters_layer_functions!()` macro
+/// - `output_shape()`: returns a formatted string of the output dimensions; if the input
+///   shape is available it computes the dimensions from the pooling parameters, otherwise
+///   returns `"Unknown"`
+/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
-/// The implementing struct must have the following fields:
-/// - `input_shape: Vec<usize>` - The shape of the input tensor
-/// - `pool_size: usize` - Size of the pooling window
-/// - `stride: usize` - Step size for the pooling operation
+/// The implementing struct must have the fields:
+/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `pool_size: usize` - size of the pooling window
+/// - `stride: usize` - step size for the pooling operation
 macro_rules! layer_functions_1d_pooling {
     () => {
         fn output_shape(&self) -> String {
@@ -122,29 +126,29 @@ macro_rules! layer_functions_1d_pooling {
     };
 }
 
-/// A macro that generates standard function implementations for 2D pooling layers.
+/// Generate the standard `Layer` function implementations for 2D pooling layers
 ///
-/// This macro expands to implementations of:
-/// - `output_shape`: Calculates and returns the output shape after 2D pooling operations
-/// - Standard layer functions for layers without trainable parameters
+/// Expands to implementations of:
+/// - `output_shape`: computes and returns the output shape after 2D pooling
+/// - the standard functions for layers without trainable parameters
 ///
-/// The macro is designed for pooling layers that operate on 4D tensors with shape
+/// Designed for pooling layers that operate on 4D tensors with shape
 /// `[batch_size, channels, height, width]` and produce outputs with shape
-/// `[batch_size, channels, output_height, output_width]`.
+/// `[batch_size, channels, output_height, output_width]`
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()`: Returns a formatted string representation of the output dimensions.
-///   If the input shape is available, it calculates the actual output dimensions using
-///   the pooling parameters. Otherwise, returns "Unknown".
-/// - All functions from `no_trainable_parameters_layer_functions!()` macro
+/// - `output_shape()`: returns a formatted string of the output dimensions; if the input
+///   shape is available it computes the dimensions from the pooling parameters, otherwise
+///   returns `"Unknown"`
+/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
-/// The implementing struct must have the following fields:
-/// - `input_shape: Vec<usize>` - The shape of the input tensor
-/// - `pool_size: (usize, usize)` - Size of the pooling window as (height, width)
-/// - `strides: (usize, usize)` - Step size for the pooling operation as (height_step, width_step)
+/// The implementing struct must have the fields:
+/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `pool_size: (usize, usize)` - size of the pooling window as (height, width)
+/// - `strides: (usize, usize)` - step size for the pooling operation as (height_step, width_step)
 macro_rules! layer_functions_2d_pooling {
     () => {
         fn output_shape(&self) -> String {
@@ -167,29 +171,29 @@ macro_rules! layer_functions_2d_pooling {
     };
 }
 
-/// A macro that generates standard function implementations for 3D pooling layers.
+/// Generate the standard `Layer` function implementations for 3D pooling layers
 ///
-/// This macro expands to implementations of:
-/// - `output_shape`: Calculates and returns the output shape after 3D pooling operations
-/// - Standard layer functions for layers without trainable parameters
+/// Expands to implementations of:
+/// - `output_shape`: computes and returns the output shape after 3D pooling
+/// - the standard functions for layers without trainable parameters
 ///
-/// The macro is designed for pooling layers that operate on 5D tensors with shape
+/// Designed for pooling layers that operate on 5D tensors with shape
 /// `[batch_size, channels, depth, height, width]` and produce outputs with shape
-/// `[batch_size, channels, output_depth, output_height, output_width]`.
+/// `[batch_size, channels, output_depth, output_height, output_width]`
 ///
 /// # Generated Functions
 ///
-/// - `output_shape()`: Returns a formatted string representation of the output dimensions.
-///   If the input shape is available, it calculates the actual output dimensions using
-///   the pooling parameters. Otherwise, returns "Unknown".
-/// - All functions from `no_trainable_parameters_layer_functions!()` macro
+/// - `output_shape()`: returns a formatted string of the output dimensions; if the input
+///   shape is available it computes the dimensions from the pooling parameters, otherwise
+///   returns `"Unknown"`
+/// - all functions from the `no_trainable_parameters_layer_functions!()` macro
 ///
 /// # Requirements
 ///
-/// The implementing struct must have the following fields:
-/// - `input_shape: Vec<usize>` - The shape of the input tensor
-/// - `pool_size: (usize, usize, usize)` - Size of the pooling window as (depth, height, width)
-/// - `strides: (usize, usize, usize)` - Step size for the pooling operation as (depth_step, height_step, width_step)
+/// The implementing struct must have the fields:
+/// - `input_shape: Vec<usize>` - shape of the input tensor
+/// - `pool_size: (usize, usize, usize)` - size of the pooling window as (depth, height, width)
+/// - `strides: (usize, usize, usize)` - step size for the pooling operation as (depth_step, height_step, width_step)
 macro_rules! layer_functions_3d_pooling {
     () => {
         fn output_shape(&self) -> String {

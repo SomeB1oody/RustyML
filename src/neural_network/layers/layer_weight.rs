@@ -1,226 +1,185 @@
+//! Weight container types for neural network layers
+//!
+//! Defines the [`LayerWeight`](crate::neural_network::layers::layer_weight::LayerWeight) enum and the per-layer weight structs it wraps,
+//! each holding borrowed references to a layer's trainable parameters
+
 use ndarray::{Array1, Array2, Array3, Array4, Array5, ArrayD};
 
-/// Container for different types of neural network layer weights
+/// Polymorphic container for the weights of different neural network layer types
 ///
-/// This enum serves as a polymorphic container for the weights of various
-/// neural network layer types. Each variant corresponds to a specific layer
-/// type and contains the appropriate weight structure for that layer.
-///
-/// # Variants
-///
-/// - `Dense` - Contains weights for dense (fully connected) layers
-/// - `SimpleRNN` - Contains weights for simple recurrent neural network layers
-/// - `LSTM` - Contains weights for long short-term memory layers
-/// - `Conv1D` - Contains weights for 1D convolutional layers
-/// - `Conv2D` - Contains weights for 2D convolutional layers
-/// - `Conv3D` - Contains weights for 3D convolutional layers
-/// - `BatchNormalization` - Contains weights for batch normalization layers
-/// - `LayerNormalizationLayer` - Contains weights for layer normalization layers
-/// - `InstanceNormalizationLayer` - Contains weights for instance normalization layers
-/// - `GroupNormalizationLayer` - Contains weights for group normalization layers
-/// - `Empty` - Represents a layer with no trainable parameters
+/// Each variant corresponds to a specific layer type and holds the matching
+/// weight structure for that layer
 pub enum LayerWeight<'a> {
+    /// Weights for dense (fully connected) layers
     Dense(DenseLayerWeight<'a>),
+    /// Weights for simple recurrent neural network layers
     SimpleRNN(SimpleRNNLayerWeight<'a>),
+    /// Weights for long short-term memory layers
     LSTM(LSTMLayerWeight<'a>),
+    /// Weights for gated recurrent unit layers
     GRU(GRULayerWeight<'a>),
+    /// Weights for 1D convolutional layers
     Conv1D(Conv1DLayerWeight<'a>),
+    /// Weights for 2D convolutional layers
     Conv2D(Conv2DLayerWeight<'a>),
+    /// Weights for 2D separable convolutional layers
     SeparableConv2DLayer(SeparableConv2DLayerWeight<'a>),
+    /// Weights for 2D depthwise convolutional layers
     DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight<'a>),
+    /// Weights for 3D convolutional layers
     Conv3D(Conv3DLayerWeight<'a>),
+    /// Weights for batch normalization layers
     BatchNormalization(BatchNormalizationLayerWeight<'a>),
+    /// Weights for layer normalization layers
     LayerNormalizationLayer(LayerNormalizationLayerWeight<'a>),
+    /// Weights for instance normalization layers
     InstanceNormalizationLayer(InstanceNormalizationLayerWeight<'a>),
+    /// Weights for group normalization layers
     GroupNormalizationLayer(GroupNormalizationLayerWeight<'a>),
+    /// Layer with no trainable parameters
     Empty,
 }
 
 /// Weights for a dense (fully connected) neural network layer
-///
-/// # Fields
-///
-/// - `weight` - Weight matrix with shape (input_features, output_features)
-/// - `bias` - Bias vector with shape (1, output_features)
 pub struct DenseLayerWeight<'a> {
+    /// Weight matrix with shape (input_features, output_features)
     pub weight: &'a Array2<f32>,
+    /// Bias vector with shape (1, output_features)
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a simple recurrent neural network layer
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input features
-/// - `recurrent_kernel` - Weight matrix for recurrent connections
-/// - `bias` - Bias vector
 pub struct SimpleRNNLayerWeight<'a> {
+    /// Weight matrix for input features
     pub kernel: &'a Array2<f32>,
+    /// Weight matrix for recurrent connections
     pub recurrent_kernel: &'a Array2<f32>,
+    /// Bias vector
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a single gate in an LSTM layer
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input features
-/// - `recurrent_kernel` - Weight matrix for recurrent connections
-/// - `bias` - Bias vector for the gate
 pub struct LSTMGateWeight<'a> {
+    /// Weight matrix for input features
     pub kernel: &'a Array2<f32>,
+    /// Weight matrix for recurrent connections
     pub recurrent_kernel: &'a Array2<f32>,
+    /// Bias vector for the gate
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a Long Short-Term Memory (LSTM) layer
 ///
-/// Contains weights for the four gates that control information flow in an LSTM cell:
-/// input gate, forget gate, cell gate, and output gate.
-///
-/// # Fields
-///
-/// - `input` - Weights for the input gate, which controls what new information to store
-/// - `forget` - Weights for the forget gate, which controls what information to discard
-/// - `cell` - Weights for the cell gate, which proposes new cell state values
-/// - `output` - Weights for the output gate, which controls what to output
+/// Holds the weights for the four gates that control information flow in an LSTM
+/// cell: input gate, forget gate, cell gate, and output gate
 pub struct LSTMLayerWeight<'a> {
+    /// Input gate weights, which control what new information to store
     pub input: LSTMGateWeight<'a>,
+    /// Forget gate weights, which control what information to discard
     pub forget: LSTMGateWeight<'a>,
+    /// Cell gate weights, which propose new cell state values
     pub cell: LSTMGateWeight<'a>,
+    /// Output gate weights, which control what to output
     pub output: LSTMGateWeight<'a>,
 }
 
 /// Weights for a single gate in a GRU layer
-///
-/// # Fields
-///
-/// - `kernel` - Weight matrix for input features
-/// - `recurrent_kernel` - Weight matrix for recurrent connections
-/// - `bias` - Bias vector for the gate
 pub struct GRUGateWeight<'a> {
+    /// Weight matrix for input features
     pub kernel: &'a Array2<f32>,
+    /// Weight matrix for recurrent connections
     pub recurrent_kernel: &'a Array2<f32>,
+    /// Bias vector for the gate
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a Gated Recurrent Unit (GRU) layer
 ///
-/// Contains weights for the three gates that control information flow in a GRU cell:
-/// reset gate, update gate, and candidate gate.
-///
-/// # Fields
-///
-/// - `reset` - Weights for the reset gate, which controls what information to forget
-/// - `update` - Weights for the update gate, which controls how much to update the hidden state
-/// - `candidate` - Weights for the candidate gate, which proposes new hidden state values
+/// Holds the weights for the three gates that control information flow in a GRU
+/// cell: reset gate, update gate, and candidate gate
 pub struct GRULayerWeight<'a> {
+    /// Reset gate weights, which control what information to forget
     pub reset: GRUGateWeight<'a>,
+    /// Update gate weights, which control how much to update the hidden state
     pub update: GRUGateWeight<'a>,
+    /// Candidate gate weights, which propose new hidden state values
     pub candidate: GRUGateWeight<'a>,
 }
 
 /// Weights for a 1D convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
-/// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv1DLayerWeight<'a> {
+    /// 3D convolution kernel with shape (output_channels, input_channels, kernel_size)
     pub weight: &'a Array3<f32>,
+    /// Bias vector with shape (1, output_channels)
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
-/// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv2DLayerWeight<'a> {
+    /// 4D convolution kernel with shape (output_channels, input_channels, kernel_height, kernel_width)
     pub weight: &'a Array4<f32>,
+    /// Bias vector with shape (1, output_channels)
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 3D convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 5D convolution kernel with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
-/// - `bias` - Bias vector with shape (1, output_channels)
 pub struct Conv3DLayerWeight<'a> {
+    /// 5D convolution kernel with shape (output_channels, input_channels, kernel_depth, kernel_height, kernel_width)
     pub weight: &'a Array5<f32>,
+    /// Bias vector with shape (1, output_channels)
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D separable convolutional layer
-///
-/// # Fields
-///
-/// - `depthwise_weight` - 4D weight tensor for depthwise convolution filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
-/// - `pointwise_weight` - 4D weight tensor for pointwise (1x1) convolution filters with shape (output_filters, input_channels * depth_multiplier, 1, 1)
-/// - `bias` - Bias vector with shape (1, output_filters)
 pub struct SeparableConv2DLayerWeight<'a> {
+    /// 4D weight tensor for depthwise convolution filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
     pub depthwise_weight: &'a Array4<f32>,
+    /// 4D weight tensor for pointwise (1x1) convolution filters with shape (output_filters, input_channels * depth_multiplier, 1, 1)
     pub pointwise_weight: &'a Array4<f32>,
+    /// Bias vector with shape (1, output_filters)
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 2D depthwise convolutional layer
-///
-/// # Fields
-///
-/// - `weight` - 4D weight tensor for depthwise filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
-/// - `bias` - Bias vector with shape (one bias per input channel)
 pub struct DepthwiseConv2DLayerWeight<'a> {
+    /// 4D weight tensor for depthwise filters with shape (depth_multiplier, input_channels, kernel_height, kernel_width)
     pub weight: &'a Array4<f32>,
+    /// Bias vector with one bias per input channel
     pub bias: &'a Array1<f32>,
 }
 
 /// Weights for a batch normalization layer
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
-/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
-/// - `running_mean` - Exponentially weighted moving average of batch means (updated during training, used during inference)
-/// - `running_var` - Exponentially weighted moving average of batch variances (updated during training, used during inference)
 pub struct BatchNormalizationLayerWeight<'a> {
+    /// Learned scale parameter that controls the variance of normalized values
     pub gamma: &'a ArrayD<f32>,
+    /// Learned shift parameter that controls the mean of normalized values
     pub beta: &'a ArrayD<f32>,
+    /// Exponentially weighted moving average of batch means, updated during training and used during inference
     pub running_mean: &'a ArrayD<f32>,
+    /// Exponentially weighted moving average of batch variances, updated during training and used during inference
     pub running_var: &'a ArrayD<f32>,
 }
 
 /// Weights for a layer normalization layer
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
-/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
 pub struct LayerNormalizationLayerWeight<'a> {
+    /// Learned scale parameter that controls the variance of normalized values
     pub gamma: &'a ArrayD<f32>,
+    /// Learned shift parameter that controls the mean of normalized values
     pub beta: &'a ArrayD<f32>,
 }
 
 /// Weights for an instance normalization layer
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
-/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
 pub struct InstanceNormalizationLayerWeight<'a> {
+    /// Learned scale parameter that controls the variance of normalized values
     pub gamma: &'a ArrayD<f32>,
+    /// Learned shift parameter that controls the mean of normalized values
     pub beta: &'a ArrayD<f32>,
 }
 
 /// Weights for a group normalization layer
-///
-/// # Fields
-///
-/// - `gamma` - Scale parameter (learned during training) that controls the variance of normalized values
-/// - `beta` - Shift parameter (learned during training) that controls the mean of normalized values
 pub struct GroupNormalizationLayerWeight<'a> {
+    /// Learned scale parameter that controls the variance of normalized values
     pub gamma: &'a ArrayD<f32>,
+    /// Learned shift parameter that controls the mean of normalized values
     pub beta: &'a ArrayD<f32>,
 }

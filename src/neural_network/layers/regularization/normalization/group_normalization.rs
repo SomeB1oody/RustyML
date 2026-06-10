@@ -1,3 +1,6 @@
+//! Group Normalization layer: divides channels into groups and normalizes within each
+//! group per sample, independent of batch size
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -20,8 +23,7 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// Threshold for switching between sequential and parallel group normalization computation.
-/// Based on total elements in the tensor.
+/// Total-element count above which group normalization switches from sequential to parallel
 const GROUP_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
 /// Macro to compute start and end indices for a specific channel within a batch
@@ -33,29 +35,14 @@ macro_rules! channel_range {
     }};
 }
 
-/// Group Normalization layer for neural networks.
+/// Group Normalization layer for neural networks
 ///
 /// Divides channels into groups and normalizes within each group per sample,
 /// reducing dependence on batch size. Channel divisibility is validated during
-/// the forward pass.
-///
-/// # Fields
-///
-/// - `num_groups` - Number of groups to divide channels into
-/// - `epsilon` - Small constant for numerical stability in normalization
-/// - `channel_axis` - Axis representing channels (typically 1 for \[batch, channels, spatial...\])
-/// - `input_shape` - Shape of the input tensor
-/// - `gamma` - Scale parameter (trainable)
-/// - `beta` - Shift parameter (trainable)
-/// - `training` - Whether the layer is in training mode or inference mode
-/// - `x_normalized` - Normalized input (used in backward pass)
-/// - `x_centered` - Centered input (used in backward pass)
-/// - `mean` - Mean computed during forward pass (used in backward pass)
-/// - `std_dev` - Standard deviation computed during forward pass (used in backward pass)
-/// - `grad_gamma` - Gradient for gamma parameter
-/// - `grad_beta` - Gradient for beta parameter
+/// the forward pass
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -73,31 +60,42 @@ macro_rules! channel_range {
 /// ```
 #[derive(Debug)]
 pub struct GroupNormalization {
+    /// Number of groups to divide channels into
     num_groups: usize,
+    /// Small constant for numerical stability in normalization
     epsilon: f32,
+    /// Axis representing channels (typically 1 for [batch, channels, spatial...])
     channel_axis: usize,
+    /// Shape of the input tensor
     input_shape: Vec<usize>,
+    /// Scale parameter (trainable)
     gamma: Tensor,
+    /// Shift parameter (trainable)
     beta: Tensor,
+    /// Whether the layer is in training mode or inference mode
     training: bool,
-    // Cache for backward pass
+    /// Normalized input, cached for the backward pass
     x_normalized: Option<Tensor>,
+    /// Centered input, cached for the backward pass
     x_centered: Option<Tensor>,
+    /// Per-group mean from the forward pass, cached for the backward pass
     mean: Option<Tensor>,
+    /// Per-group standard deviation from the forward pass, cached for the backward pass
     std_dev: Option<Tensor>,
-    // Gradients
+    /// Gradient for the gamma parameter
     grad_gamma: Option<Tensor>,
+    /// Gradient for the beta parameter
     grad_beta: Option<Tensor>,
 }
 
 impl GroupNormalization {
-    /// Creates a new GroupNormalization layer.
+    /// Creates a new GroupNormalization layer
     ///
     /// # Parameters
     ///
     /// - `input_shape` - Shape of the input tensor
     /// - `num_groups` - Number of groups to divide channels into
-    /// - `channel_axis` - Axis representing channels for inputs like \[batch, channels, ...\]
+    /// - `channel_axis` - Axis representing channels for inputs like [batch, channels, ...]
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
     /// # Returns
@@ -121,15 +119,13 @@ impl GroupNormalization {
         validate_epsilon(epsilon)?;
         validate_channel_axis(channel_axis, input_shape.len())?;
 
-        // Any channel position is supported: forward/backward permute the channel axis to position 1
-        // and run a channels-first core (the grouping over the channel axis is layout-equivariant),
-        // so both channels-first (NCHW) and channels-last (NHWC) work.
+        // Any channel position works: forward/backward permute the channel axis to position 1 and run
+        // a layout-equivariant channels-first core, so both NCHW and NHWC are supported
 
-        // For group normalization, parameters have the shape of the channel dimension
+        // Parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > channel_axis {
             let num_channels = input_shape[channel_axis];
-            // Note: We don't validate divisibility here to allow the layer to be created.
-            // Validation happens in forward() to match the error handling pattern of other layers.
+            // Divisibility is checked in forward() instead, matching the other layers' error pattern
             vec![num_channels]
         } else {
             vec![1]
@@ -156,12 +152,16 @@ impl GroupNormalization {
 
     mode_dependent_layer_set_training!();
 
-    /// Sets the weights for the GroupNormalization layer.
+    /// Sets the weights for the GroupNormalization layer
     ///
     /// # Parameters
     ///
     /// - `gamma` - Scale parameter (trainable)
     /// - `beta` - Shift parameter (trainable)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If `gamma` or `beta` does not match the stored parameter shape
     pub fn set_weights(&mut self, gamma: Tensor, beta: Tensor) -> Result<(), Error> {
         validate_weight_shape("gamma", self.gamma.shape(), gamma.shape())?;
         validate_weight_shape("beta", self.beta.shape(), beta.shape())?;
@@ -177,8 +177,8 @@ impl Layer for GroupNormalization {
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
 
-        // Work in channels-first layout so the channels-first core supports any channel position
-        // (grouping over the channel axis is layout-equivariant). Borrows for channel_axis == 1.
+        // Permute to channels-first so the layout-equivariant core handles any channel position
+        // (borrows when channel_axis == 1)
         let cf_input = to_channels_first(input, self.channel_axis);
         let input = cf_input.as_ref();
 
@@ -190,7 +190,7 @@ impl Layer for GroupNormalization {
 
         let channels_per_group = num_channels / self.num_groups;
 
-        // Calculate spatial size (all dimensions except batch and channel)
+        // Spatial size: all dimensions except batch and channel
         let spatial_size: usize = input_shape
             .iter()
             .enumerate()
@@ -221,7 +221,6 @@ impl Layer for GroupNormalization {
 
         // Compute mean for each (batch, group) pair
         let mean = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mean_flat: Vec<f32> = (0..num_instances)
                 .into_par_iter()
                 .map(|idx| {
@@ -233,7 +232,6 @@ impl Layer for GroupNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
         } else {
-            // Sequential computation
             let mut mean_flat = vec![0.0f32; num_instances];
 
             for batch_idx in 0..batch_size {
@@ -252,7 +250,6 @@ impl Layer for GroupNormalization {
 
         // Map each channel to its group mean
         let x_centered = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut x_cent = Tensor::zeros(input.raw_dim());
 
             x_cent
@@ -273,7 +270,6 @@ impl Layer for GroupNormalization {
 
             x_cent
         } else {
-            // Sequential computation
             let mut x_cent = Tensor::zeros(input.raw_dim());
 
             for i in 0..total_elements {
@@ -307,7 +303,6 @@ impl Layer for GroupNormalization {
 
         // Compute variance for each (batch, group) pair
         let var = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let var_flat: Vec<f32> = (0..num_instances)
                 .into_par_iter()
                 .map(|idx| {
@@ -319,7 +314,6 @@ impl Layer for GroupNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
         } else {
-            // Sequential computation
             let mut var_flat = vec![0.0f32; num_instances];
 
             for batch_idx in 0..batch_size {
@@ -335,7 +329,6 @@ impl Layer for GroupNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_norm = Tensor::zeros(x_centered.raw_dim());
 
             x_norm
@@ -356,7 +349,6 @@ impl Layer for GroupNormalization {
 
             x_norm
         } else {
-            // Sequential normalization
             let mut x_norm = Tensor::zeros(x_centered.raw_dim());
 
             for i in 0..total_elements {
@@ -372,8 +364,7 @@ impl Layer for GroupNormalization {
             x_norm
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Scale and shift: reshape gamma and beta for broadcasting over the input
         let mut gamma_shape = vec![1; input.ndim()];
         gamma_shape[1] = num_channels;
         let mut beta_shape = vec![1; input.ndim()];
@@ -391,7 +382,6 @@ impl Layer for GroupNormalization {
             .unwrap();
 
         let output = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut out = Tensor::zeros(x_normalized.raw_dim());
 
             out.as_slice_mut()
@@ -409,7 +399,6 @@ impl Layer for GroupNormalization {
 
             out
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
@@ -422,13 +411,13 @@ impl Layer for GroupNormalization {
         Ok(from_channels_first(output, self.channel_axis))
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Group normalization")?;
         validate_channel_axis(self.channel_axis, input.ndim())?;
 
-        // See `forward`: permute channel to axis 1, run the channels-first core, permute back.
+        // See `forward`: permute channel to axis 1, run the channels-first core, permute back
         let cf_input = to_channels_first(input, self.channel_axis);
         let input = cf_input.as_ref();
 
@@ -471,7 +460,6 @@ impl Layer for GroupNormalization {
 
         // Compute mean for each (batch, group) pair
         let mean = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mean_flat: Vec<f32> = (0..num_instances)
                 .into_par_iter()
                 .map(|idx| {
@@ -483,7 +471,6 @@ impl Layer for GroupNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
         } else {
-            // Sequential computation
             let mut mean_flat = vec![0.0f32; num_instances];
 
             for batch_idx in 0..batch_size {
@@ -502,7 +489,6 @@ impl Layer for GroupNormalization {
 
         // Map each channel to its group mean
         let x_centered = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut x_cent = Tensor::zeros(input.raw_dim());
 
             x_cent
@@ -523,7 +509,6 @@ impl Layer for GroupNormalization {
 
             x_cent
         } else {
-            // Sequential computation
             let mut x_cent = Tensor::zeros(input.raw_dim());
 
             for i in 0..total_elements {
@@ -557,7 +542,6 @@ impl Layer for GroupNormalization {
 
         // Compute variance for each (batch, group) pair
         let var = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let var_flat: Vec<f32> = (0..num_instances)
                 .into_par_iter()
                 .map(|idx| {
@@ -569,7 +553,6 @@ impl Layer for GroupNormalization {
 
             Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
         } else {
-            // Sequential computation
             let mut var_flat = vec![0.0f32; num_instances];
 
             for batch_idx in 0..batch_size {
@@ -585,7 +568,6 @@ impl Layer for GroupNormalization {
         // Normalize
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
         let x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel normalization
             let mut x_norm = Tensor::zeros(x_centered.raw_dim());
 
             x_norm
@@ -606,7 +588,6 @@ impl Layer for GroupNormalization {
 
             x_norm
         } else {
-            // Sequential normalization
             let mut x_norm = Tensor::zeros(x_centered.raw_dim());
 
             for i in 0..total_elements {
@@ -622,8 +603,7 @@ impl Layer for GroupNormalization {
             x_norm
         };
 
-        // Scale and shift
-        // Reshape gamma and beta to match the input shape for broadcasting
+        // Scale and shift: reshape gamma and beta for broadcasting over the input
         let mut gamma_shape = vec![1; input.ndim()];
         gamma_shape[1] = num_channels;
         let mut beta_shape = vec![1; input.ndim()];
@@ -641,7 +621,6 @@ impl Layer for GroupNormalization {
             .unwrap();
 
         let output = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel scale and shift
             let mut out = Tensor::zeros(x_normalized.raw_dim());
 
             out.as_slice_mut()
@@ -659,7 +638,6 @@ impl Layer for GroupNormalization {
 
             out
         } else {
-            // Sequential scale and shift
             &x_normalized * &gamma_broadcast + &beta_broadcast
         };
 
@@ -672,8 +650,7 @@ impl Layer for GroupNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Work in channels-first layout (matches the cached channels-first intermediates); the
-        // resulting input-gradient is permuted back at the end.
+        // Channels-first matches the cached intermediates; the input-gradient is permuted back at the end
         let cf_grad = to_channels_first(grad_output, self.channel_axis);
         let grad_output = cf_grad.as_ref();
 
@@ -730,7 +707,6 @@ impl Layer for GroupNormalization {
 
         // Compute gradient with respect to normalized input
         let grad_x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
 
             grad_x_norm
@@ -748,7 +724,6 @@ impl Layer for GroupNormalization {
 
             grad_x_norm
         } else {
-            // Sequential computation
             let mut gamma_shape = vec![1; grad_output.ndim()];
             gamma_shape[1] = num_channels;
             let gamma_broadcast = self
@@ -791,7 +766,6 @@ impl Layer for GroupNormalization {
 
         // Compute gradient with respect to variance and mean for each (batch, group) instance
         let grad_input = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            // Parallel computation
             let (grad_var_flat, grad_mean_flat): (Vec<f32>, Vec<f32>) = (0..num_instances)
                 .into_par_iter()
                 .map(|idx| {
@@ -830,7 +804,6 @@ impl Layer for GroupNormalization {
 
             grad_inp
         } else {
-            // Sequential computation
             let mut grad_var_flat = vec![0.0f32; num_instances];
             let mut grad_mean_flat = vec![0.0f32; num_instances];
 

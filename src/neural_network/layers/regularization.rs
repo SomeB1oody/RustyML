@@ -1,3 +1,6 @@
+//! Regularization layers for neural networks: dropout, noise injection, and normalization,
+//! plus macros for the shared training-mode methods
+
 /// Dropout layers for neural networks
 pub mod dropout;
 /// Noise injection layers for neural networks
@@ -11,29 +14,20 @@ pub use dropout::*;
 pub use noise_injection::*;
 pub use normalization::*;
 
-// Macros are defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export, so callers
-// import them explicitly rather than relying on textual macro ordering.
+// Macros are path-exported via `pub(in ...) use`, so callers import them explicitly rather than
+// relying on textual macro ordering
 
-/// A macro to define a layer-specific method for setting the training mode.
+/// Defines a layer-specific `set_training` method for toggling the training mode
 ///
-/// This macro generates a `set_training` method within the implementing object
-/// to allow toggling the training mode between training (`true`) and inference (`false`).
-///
-/// The generated method is used to manage the state of `training` within the object,
-/// which can be critical for operations like forward and backward passes in machine learning models.
+/// The generated method sets the `training` field to `true` (training) or `false` (inference),
+/// which drives behavior in the forward and backward passes
 macro_rules! mode_dependent_layer_set_training {
     () => {
-        /// Sets the training mode for the object.
+        /// Sets the training mode for the layer, updating its `training` field
         ///
-        /// # Arguments
+        /// # Parameters
         ///
-        /// * `is_training` - A boolean value indicating whether the object should be
-        ///   in training mode (`true`) or not (`false`).
-        ///
-        /// # Effects
-        ///
-        /// This method modifies the `training` field of the object to reflect the provided value.
-        /// It is commonly used to toggle the state of an object between training and inference modes.
+        /// - `is_training` - whether the layer should be in training mode (`true`) or inference mode (`false`)
         pub fn set_training(&mut self, is_training: bool) {
             self.training = is_training;
         }
@@ -41,8 +35,8 @@ macro_rules! mode_dependent_layer_set_training {
 }
 pub(in crate::neural_network::layers::regularization) use mode_dependent_layer_set_training;
 
-/// A macro that defines a method `set_training_if_mode_dependent` for a layer that may have
-/// behavior dependent on whether it is in training or inference mode.
+/// Defines the trait method `set_training_if_mode_dependent` for a layer whose behavior
+/// depends on training versus inference mode
 macro_rules! mode_dependent_layer_trait {
     () => {
         fn set_training_if_mode_dependent(&mut self, is_training: bool) {

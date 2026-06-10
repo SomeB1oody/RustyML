@@ -1,3 +1,8 @@
+//! Linear regression via gradient descent
+//!
+//! Provides the [`LinearRegression`] model supporting multivariate regression, an
+//! optional intercept term, and L1/L2 regularization
+
 pub use super::RegularizationType;
 use super::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
@@ -11,28 +16,17 @@ use rayon::prelude::{
     ParallelIterator,
 };
 
-/// Threshold for using parallel computation in Linear Regression.
-/// When the number of samples or features is below this threshold, sequential computation is used.
+/// Feature/sample count at or above which parallel computation is used; below it computation is sequential
 const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 
-/// Linear Regression model implementation
+/// Linear regression model implementation
 ///
-/// Trains a simple linear regression model using gradient descent algorithm. This implementation
-/// supports multivariate regression, optional intercept term, and allows adjustment of learning rate,
-/// maximum iterations, and convergence tolerance.
-///
-/// # Fields
-///
-/// - `coefficients` - Model coefficients (slopes), None before training
-/// - `intercept` - Model intercept, None before training
-/// - `fit_intercept` - Whether to include an intercept term in the model
-/// - `learning_rate` - Learning rate for gradient descent
-/// - `max_iter` - Maximum number of iterations for gradient descent
-/// - `tol` - Convergence tolerance
-/// - `n_iter` - Number of iterations the algorithm ran for after fitting
-/// - `regularization_type` - Regularization type and strength
+/// Trains a linear regression model using gradient descent. Supports multivariate regression, an
+/// optional intercept term, and adjustment of the learning rate, maximum iterations, and convergence
+/// tolerance
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::linear_regression::*;
 /// use ndarray::{Array1, Array2};
@@ -75,33 +69,41 @@ const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearRegression {
+    /// Model coefficients (slopes), `None` before training
     coefficients: Option<Array1<f64>>,
+    /// Model intercept, `None` before training
     intercept: Option<f64>,
+    /// Whether to include an intercept term in the model
     fit_intercept: bool,
+    /// Learning rate for gradient descent
     learning_rate: f64,
+    /// Maximum number of iterations for gradient descent
     max_iter: usize,
+    /// Convergence tolerance
     tol: f64,
+    /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
+    /// Regularization type and strength
     regularization_type: Option<RegularizationType>,
 }
 
 impl Default for LinearRegression {
-    /// Creates a new LinearRegression instance with default parameter values.
+    /// Creates a new LinearRegression instance with default parameter values
     ///
     /// # Default Values
     ///
-    /// - `coefficients` - `None` - Model coefficients are not initialized until training
-    /// - `intercept` - `None` - Model intercept is not initialized until training
-    /// - `fit_intercept` - `true` - Include an intercept term in the linear model
-    /// - `learning_rate` - `0.01` - Learning rate for gradient descent optimization
-    /// - `max_iter` - `1000` - Maximum number of iterations for gradient descent
-    /// - `tol` - `1e-5` - Convergence tolerance (0.00001) for stopping criteria
-    /// - `n_iter` - `None` - Number of actual iterations performed (set after training)
-    /// - `regularization_type` - `None` - No regularization applied by default
+    /// - `coefficients` - `None` - model coefficients are not initialized until training
+    /// - `intercept` - `None` - model intercept is not initialized until training
+    /// - `fit_intercept` - `true` - include an intercept term in the linear model
+    /// - `learning_rate` - `0.01` - learning rate for gradient descent optimization
+    /// - `max_iter` - `1000` - maximum number of iterations for gradient descent
+    /// - `tol` - `1e-5` - convergence tolerance (0.00001) for stopping criteria
+    /// - `n_iter` - `None` - number of actual iterations performed (set after training)
+    /// - `regularization_type` - `None` - no regularization applied by default
     ///
     /// # Returns
     ///
-    /// - `LinearRegression` - A new instance with sensible default parameters for most use cases
+    /// - `LinearRegression` - a new instance with default parameters
     fn default() -> Self {
         Self {
             coefficients: None,
@@ -117,26 +119,26 @@ impl Default for LinearRegression {
 }
 
 impl LinearRegression {
-    /// Creates a new linear regression model with custom parameters.
+    /// Creates a new linear regression model with custom parameters
     ///
-    /// This constructor validates all input parameters to ensure they are within
-    /// acceptable numerical ranges before returning the model instance.
+    /// Validates all input parameters to ensure they are within acceptable numerical ranges
+    /// before returning the model instance
     ///
     /// # Parameters
     ///
-    /// - `fit_intercept` - Whether to calculate the intercept for this model
-    /// - `learning_rate` - The learning rate for gradient descent optimization
-    /// - `max_iterations` - Maximum number of iterations for gradient descent
-    /// - `tolerance` - The tolerance for stopping criteria
-    /// - `regularization_type` - Optional regularization to prevent overfitting (L1, L2, or None)
+    /// - `fit_intercept` - whether to calculate the intercept for this model
+    /// - `learning_rate` - the learning rate for gradient descent optimization
+    /// - `max_iterations` - maximum number of iterations for gradient descent
+    /// - `tolerance` - the tolerance for stopping criteria
+    /// - `regularization_type` - optional regularization to prevent overfitting (L1, L2, or None)
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new instance of LinearRegression, or an error if parameters are invalid
+    /// - `Result<Self, Error>` - a new instance of LinearRegression, or an error if parameters are invalid
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If learning_rate, max_iterations or tolerance is invalid
+    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, tolerance, or the regularization alpha is invalid
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -162,7 +164,6 @@ impl LinearRegression {
         })
     }
 
-    // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
     get_field!(get_tolerance, tol, f64);
@@ -176,29 +177,29 @@ impl LinearRegression {
     get_field_as_ref!(get_coefficients, coefficients, Option<&Array1<f64>>);
     get_field!(get_intercept, intercept, Option<f64>);
 
-    /// Fits the linear regression model using gradient descent.
+    /// Fits the linear regression model using gradient descent
     ///
-    /// Iteratively updates the model's coefficients and intercept to minimize the cost function.
-    /// The process includes real-time progress tracking and early stopping if convergence is reached.
+    /// Iteratively updates the model's coefficients and intercept to minimize the cost function,
+    /// with early stopping once convergence is reached
     ///
     /// # Parameters
     ///
-    /// - `x` - Feature matrix, each row is a sample, each column is a feature
-    /// - `y` - Target variable vector
+    /// - `x` - feature matrix, each row is a sample, each column is a feature
+    /// - `y` - target variable vector
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, Error>` - Returns mutable reference to self for method chaining
+    /// - `Result<&mut Self, Error>` - a mutable reference to self for method chaining
     ///
     /// # Errors
     ///
-    /// - `Error::NonFinite` - If numerical issues like NaN or infinity occur during training
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input dimensions are inconsistent
+    /// - `Error::NonFinite` - if numerical issues like NaN or infinity occur during training
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if input dimensions are inconsistent
     ///
     /// # Performance
     ///
-    /// Parallel computation is automatically used for L1 regularization and gradient updates
-    /// when the number of features exceeds `LINEAR_REGRESSION_PARALLEL_THRESHOLD` (200).
+    /// Parallel computation is used for L1 regularization and gradient updates when the number of
+    /// features is at least `LINEAR_REGRESSION_PARALLEL_THRESHOLD` (200)
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -207,19 +208,18 @@ impl LinearRegression {
     where
         S: Data<Elem = f64>,
     {
-        // Use preliminary_check for input validation
         preliminary_check(x, Some(y))?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        // Initialize parameters
-        let mut weights = Array1::<f64>::zeros(n_features); // Initialize weights to zero
-        let mut intercept = 0.0; // Initialize intercept to zero
+        let mut weights = Array1::<f64>::zeros(n_features);
+        let mut intercept = 0.0;
 
         let mut prev_cost = f64::INFINITY;
-        let mut convergence_count = 0; // Track consecutive convergences for stability
-        const CONVERGENCE_THRESHOLD: usize = 3; // Require 3 consecutive convergences
+        // Track consecutive convergences for stability
+        let mut convergence_count = 0;
+        const CONVERGENCE_THRESHOLD: usize = 3;
 
         let mut n_iter = 0;
 
@@ -227,7 +227,6 @@ impl LinearRegression {
         let mut predictions = Array1::<f64>::zeros(n_samples);
         let mut error_vec = Array1::<f64>::zeros(n_samples);
 
-        // Create progress bar for training iterations
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -246,22 +245,21 @@ impl LinearRegression {
         while n_iter < self.max_iter {
             n_iter += 1;
 
-            // Calculate predictions - vectorized operation
+            // Vectorized prediction
             predictions.assign(&x.dot(&weights));
             if self.fit_intercept {
                 predictions += intercept;
             }
 
-            // Calculate errors once; the same vector feeds both the cost and the gradient.
+            // Calculate errors once; the same vector feeds both the cost and the gradient
             error_vec.assign(&(&predictions - y));
 
-            // Cost (sum of squared errors) reuses the error vector: SSE = e·e
+            // Cost (sum of squared errors) reuses the error vector: SSE = e dot e
             let sse = error_vec.dot(&error_vec);
 
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
                 Some(RegularizationType::L1(alpha)) => {
-                    // Use parallel computation for L1 regularization when feature count is large
                     if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
                         alpha * weights.iter().par_bridge().map(|w| w.abs()).sum::<f64>()
                     } else {
@@ -273,7 +271,6 @@ impl LinearRegression {
 
             let cost = sse / (2.0 * n_samples as f64) + regularization_term;
 
-            // Update progress bar with current cost and convergence status
             #[cfg(feature = "show_progress")]
             progress_bar.set_message(format!(
                 "{:.6} | Convergence: {}/{}",
@@ -282,14 +279,13 @@ impl LinearRegression {
             #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
-            // Check for numerical issues in cost
             if !cost.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite cost");
                 return Err(Error::non_finite("cost calculation"));
             }
 
-            // Calculate gradients using matrix operations
+            // Gradients via matrix operations
             let mut weight_gradients = x.t().dot(&error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
                 error_vec.sum() / (n_samples as f64)
@@ -297,7 +293,6 @@ impl LinearRegression {
                 0.0
             };
 
-            // Check for numerical issues in gradients
             if weight_gradients.iter().any(|&val| !val.is_finite())
                 || !intercept_gradient.is_finite()
             {
@@ -310,7 +305,6 @@ impl LinearRegression {
             match &self.regularization_type {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
-                    // Use parallel computation for L1 gradient when feature count is large
                     let alpha_val = *alpha;
                     if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
                         let weights_slice = weights.as_slice().unwrap();
@@ -342,14 +336,13 @@ impl LinearRegression {
                 intercept -= self.learning_rate * intercept_gradient;
             }
 
-            // Check for numerical issues in updated parameters
             if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
                 #[cfg(feature = "show_progress")]
                 progress_bar.finish_with_message("Error: NaN or infinite parameters");
                 return Err(Error::non_finite("parameter update"));
             }
 
-            // Enhanced convergence check with stability requirement
+            // Require several consecutive small cost changes before declaring convergence
             let cost_change = (prev_cost - cost).abs();
             if cost_change < self.tol {
                 convergence_count += 1;
@@ -357,13 +350,12 @@ impl LinearRegression {
                     break;
                 }
             } else {
-                convergence_count = 0; // Reset if not converged
+                convergence_count = 0;
             }
 
             prev_cost = cost;
         }
 
-        // Finish progress bar with final statistics
         #[cfg(feature = "show_progress")]
         let convergence_status = if n_iter < self.max_iter {
             "Converged"
@@ -384,23 +376,24 @@ impl LinearRegression {
         Ok(self)
     }
 
-    /// Makes predictions using the trained model.
+    /// Makes predictions using the trained model
     ///
-    /// Applies the learned coefficients and intercept to the provided feature matrix.
+    /// Applies the learned coefficients and intercept to the provided feature matrix
     ///
     /// # Parameters
     ///
-    /// - `x` - Prediction data, each row is a sample, each column is a feature
+    /// - `x` - prediction data, each row is a sample, each column is a feature
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - A vector of predictions
+    /// - `Result<Array1<f64>, Error>` - a vector of predictions
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been trained yet
-    /// - `Error::DimensionMismatch` - If features count doesn't match or data contains invalid values
-    /// - `Error::NonFinite` - If prediction results in non-finite values
+    /// - `Error::NotFitted` - if the model has not been trained yet
+    /// - `Error::EmptyInput` - if the feature matrix has no rows
+    /// - `Error::DimensionMismatch` - if the feature count does not match the trained model
+    /// - `Error::NonFinite` - if the input data or the predictions contain non-finite values
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -414,13 +407,11 @@ impl LinearRegression {
 
         validate_predict_input(x, coeffs.len())?;
 
-        // Calculate predictions using matrix operations
         let mut predictions = x.dot(coeffs);
         if self.fit_intercept {
             predictions += intercept;
         }
 
-        // Check if predictions contain invalid values
         if predictions.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("prediction calculation"));
         }
@@ -428,23 +419,23 @@ impl LinearRegression {
         Ok(predictions)
     }
 
-    /// Fits the model to the training data and then makes predictions on the same data.
+    /// Fits the model to the training data and then makes predictions on the same data
     ///
-    /// A convenience method that sequentially executes `fit` and then `predict`.
+    /// A convenience method that runs `fit` followed by `predict`
     ///
     /// # Parameters
     ///
-    /// - `x` - The input features matrix
-    /// - `y` - The target values corresponding to each training example
+    /// - `x` - the input features matrix
+    /// - `y` - the target values corresponding to each training example
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - The predicted values for the input data
+    /// - `Result<Array1<f64>, Error>` - the predicted values for the input data
     ///
     /// # Errors
     ///
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid
-    /// - `Error::NonFinite` - If an error occurs during fitting or prediction
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if input data is invalid
+    /// - `Error::NonFinite` - if an error occurs during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,

@@ -1,3 +1,5 @@
+//! Global max pooling layer for 3D inputs, reducing each channel to its maximum value
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,18 +10,14 @@ use crate::neural_network::layers::pooling::pooling_engine::{
 };
 use crate::neural_network::traits::Layer;
 
-/// Global max pooling layer for 3D inputs.
+/// Global max pooling layer for 3D inputs
 ///
-/// Selects the maximum value across the depth, height, and width dimensions.
-/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
-/// `[batch_size, channels]`.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input tensor cached during the forward pass
-/// - `argmax` - Cached flat per-channel arg-max indices for backpropagation
+/// Selects the maximum value across the depth, height, and width dimensions. Input
+/// tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
+/// `[batch_size, channels]`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -53,15 +51,17 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalMaxPooling3D {
+    /// Shape of the input tensor cached during the forward pass
     input_shape: Vec<usize>,
+    /// Cached flat per-channel arg-max indices for backpropagation
     argmax: Option<Vec<usize>>,
 }
 
 impl GlobalMaxPooling3D {
-    /// Creates a new global max pooling 3D layer.
+    /// Creates a new global max pooling 3D layer
     ///
     /// # Returns
     ///
@@ -82,12 +82,11 @@ impl Default for GlobalMaxPooling3D {
 
 impl Layer for GlobalMaxPooling3D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Store the input shape and arg-max positions for backpropagation
+        // Cache the input shape and arg-max positions for backpropagation
         self.input_shape = input.shape().to_vec();
 
         let (output, argmax) = global_pool_forward(input, PoolKind::Max);
@@ -95,9 +94,8 @@ impl Layer for GlobalMaxPooling3D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }

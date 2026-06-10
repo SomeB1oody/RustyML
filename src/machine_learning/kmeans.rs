@@ -1,3 +1,8 @@
+//! K-Means clustering
+//!
+//! Provides the [`KMeans`] estimator, which partitions samples into k clusters
+//! using k-means++ initialization and Lloyd's iteration
+
 use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
@@ -9,29 +14,16 @@ use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
 
-/// Threshold for parallelization in KMeans clustering.
-/// When the number of samples is below this threshold, sequential processing is used.
-/// When the number of samples is at or above this threshold, parallel processing is used.
+/// Sample-count threshold at or above which clustering switches to parallel processing
 const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 
-/// KMeans clustering algorithm implementation.
+/// KMeans clustering algorithm implementation
 ///
-/// This struct implements the K-Means clustering algorithm, which partitions
-/// n observations into k clusters where each observation belongs to the cluster
-/// with the nearest mean (centroid).
-///
-/// # Fields
-///
-/// - `n_clusters` - Number of clusters to form
-/// - `max_iter` - Maximum number of iterations for a single run
-/// - `tol` - Tolerance for declaring convergence
-/// - `random_state` - Optional seed for random number generation
-/// - `centroids` - Computed cluster centers after fitting
-/// - `labels` - Cluster labels for training data after fitting
-/// - `inertia` - Sum of squared distances to the closest centroid after fitting
-/// - `n_iter` - Number of iterations the algorithm ran for after fitting
+/// Partitions n observations into k clusters where each observation belongs to
+/// the cluster with the nearest mean (centroid)
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::machine_learning::kmeans::KMeans;
 /// use ndarray::Array2;
@@ -105,18 +97,26 @@ const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KMeans {
+    /// Number of clusters to form
     n_clusters: usize,
+    /// Maximum number of iterations for a single run
     max_iter: usize,
+    /// Tolerance for declaring convergence
     tol: f64,
+    /// Optional seed for random number generation
     random_state: Option<u64>,
+    /// Computed cluster centers after fitting
     centroids: Option<Array2<f64>>,
+    /// Cluster labels for training data after fitting
     labels: Option<Array1<usize>>,
+    /// Sum of squared distances to the closest centroid after fitting
     inertia: Option<f64>,
+    /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
 }
 
 impl Default for KMeans {
-    /// implement Default for KMeans
+    /// Creates a `KMeans` instance with default parameters
     ///
     /// # Default Values
     ///
@@ -127,15 +127,15 @@ impl Default for KMeans {
     ///
     /// # Returns
     ///
-    /// * `KMeans` - a new `KMeans` instance with default values
+    /// - `KMeans` - a new `KMeans` instance with default values
     fn default() -> Self {
-        // Default values are guaranteed to be valid, so unwrap is safe here
+        // Default parameters are always valid
         KMeans::new(8, 300, 1e-4, None).expect("Default KMeans parameters should be valid")
     }
 }
 
 impl KMeans {
-    /// Creates a new KMeans instance with the specified parameters.
+    /// Creates a new KMeans instance with the specified parameters
     ///
     /// # Parameters
     ///
@@ -157,7 +157,6 @@ impl KMeans {
         tolerance: f64,
         random_state: Option<u64>,
     ) -> Result<Self, Error> {
-        // Input validation
         if n_clusters == 0 {
             return Err(Error::invalid_parameter(
                 "n_clusters",
@@ -190,15 +189,15 @@ impl KMeans {
     get_field!(get_inertia, inertia, Option<f64>);
     get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
-    /// Finds the closest centroid to a given data point and returns its index and distance.
+    /// Finds the closest centroid to a given data point and returns its index and distance
     ///
     /// # Parameters
     ///
-    /// * `sample` - Data point as a 1D array view
+    /// - `sample` - Data point as a 1D array view
     ///
     /// # Returns
     ///
-    /// * `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
+    /// - `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
     fn closest_centroid(&self, sample: ArrayView1<f64>) -> (usize, f64) {
         let centroids = self.centroids.as_ref().unwrap();
 
@@ -216,14 +215,14 @@ impl KMeans {
         (min_idx, min_dist)
     }
 
-    /// Initializes cluster centroids using K-means++ algorithm.
+    /// Initializes cluster centroids using the k-means++ algorithm
     ///
     /// K-means++ provides better initialization than random selection by choosing
-    /// initial centers that are spread out from each other, leading to better convergence.
+    /// initial centers that are spread out from each other, leading to better convergence
     ///
     /// # Parameters
     ///
-    /// * `data` - Training data as a 2D array
+    /// - `data` - Training data as a 2D array
     fn init_centroids<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<(), Error>
     where
         S: Data<Elem = f64>,
@@ -236,20 +235,17 @@ impl KMeans {
 
         let mut rng = crate::random::make_rng(self.random_state);
 
-        // K-means++ initialization method
-
-        // Randomly select the first center point
+        // Randomly select the first center
         let first_center_idx = rng.random_range(0..n_samples);
         centroids.row_mut(0).assign(&data.row(first_center_idx));
 
-        // Select the remaining center points
+        // Select the remaining centers
         for k in 1..self.n_clusters {
-            // Calculate the distance from each point to the nearest center
+            // Distance from each point to its nearest selected center
             let distances: Vec<f64> = data
                 .outer_iter()
                 .into_par_iter()
                 .map(|sample| {
-                    // Find the closest already selected center point
                     centroids
                         .rows()
                         .into_iter()
@@ -263,15 +259,14 @@ impl KMeans {
 
             let total_dist: f64 = distances.iter().sum();
 
-            // Handle edge case where all distances are zero
+            // All distances zero: fall back to random selection
             if total_dist == 0.0 {
-                // Fallback to random selection
                 let random_idx = rng.random_range(0..n_samples);
                 centroids.row_mut(k).assign(&data.row(random_idx));
                 continue;
             }
 
-            // Use roulette wheel selection to choose the next center point
+            // Roulette wheel selection of the next center
             let mut cumulative_dist = 0.0;
             let choice = rng.random::<f64>() * total_dist;
 
@@ -289,9 +284,9 @@ impl KMeans {
         Ok(())
     }
 
-    /// Fits the KMeans model to the training data.
+    /// Fits the KMeans model to the training data
     ///
-    /// This method computes cluster centroids and assigns each data point to its closest centroid.
+    /// Computes cluster centroids and assigns each data point to its closest centroid
     ///
     /// # Parameters
     ///
@@ -303,11 +298,13 @@ impl KMeans {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the number of samples is less than `n_clusters` or data contains invalid values
+    /// - `Error::InvalidInput` - If the number of samples is less than `n_clusters`
+    /// - `Error::EmptyInput` - If the data has no rows
+    /// - `Error::NonFinite` - If the data contains NaN or infinite values
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples is greater than or equal to 1000.
+    /// Parallel processing is used when the number of samples is >= 1000
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -323,18 +320,16 @@ impl KMeans {
             ));
         }
 
-        // Initialize cluster centers
         self.init_centroids(data)?;
 
         let mut labels = Array1::<usize>::zeros(n_samples);
         let mut prev_inertia: Option<f64> = None;
         let mut iter_count = 0;
 
-        // Pre-allocate arrays for cluster updates to avoid repeated allocations
+        // Pre-allocate the cluster-update buffers to avoid repeated allocations
         let mut new_centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
         let mut counts = vec![0usize; self.n_clusters];
 
-        // Create progress bar for clustering iterations
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -347,16 +342,14 @@ impl KMeans {
 
         // Main iteration loop
         for i in 0..self.max_iter {
-            // Reset for this iteration
             new_centroids.fill(0.0);
             counts.fill(0);
 
-            // Find the closest cluster center and distance for each sample
+            // Closest cluster center and distance for a single sample
             let compute_assignments = |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
                 let mut min_dist = f64::MAX;
                 let mut min_cluster = 0;
 
-                // Find closest centroid for this sample
                 for (cluster_idx, centroid) in
                     self.centroids.as_ref().unwrap().outer_iter().enumerate()
                 {
@@ -372,13 +365,11 @@ impl KMeans {
 
             let results: Result<Vec<(usize, f64)>, Error> =
                 if n_samples >= KMEANS_PARALLEL_THRESHOLD {
-                    // Parallel computation for large datasets
                     data.outer_iter()
                         .into_par_iter()
                         .map(compute_assignments)
                         .collect()
                 } else {
-                    // Sequential computation for small datasets
                     data.outer_iter().map(compute_assignments).collect()
                 };
 
@@ -390,13 +381,12 @@ impl KMeans {
                 labels[sample_idx] = cluster_idx;
                 inertia += dist;
 
-                // Accumulate sample contributions to new centroids
+                // Accumulate sample contributions to the new centroids
                 let sample = data.row(sample_idx);
                 new_centroids.row_mut(cluster_idx).add_assign(&sample);
                 counts[cluster_idx] += 1;
             }
 
-            // Update progress bar with current inertia
             #[cfg(feature = "show_progress")]
             {
                 progress_bar.set_message(format!("{:.6}", inertia));
@@ -414,7 +404,7 @@ impl KMeans {
             prev_inertia = Some(inertia);
             iter_count = i + 1;
 
-            // Calculate the mean for each cluster center using parallel processing
+            // Average each cluster center in parallel
             new_centroids
                 .outer_iter_mut()
                 .into_par_iter()
@@ -426,10 +416,9 @@ impl KMeans {
                     }
                 });
 
-            // Handle empty clusters: for empty clusters, select the point furthest from its assigned centroid
+            // For each empty cluster, seed it with the point furthest from its assigned centroid
             for (cluster_idx, &count) in counts.iter().enumerate() {
                 if count == 0 {
-                    // Find the sample with maximum distance to its assigned centroid
                     let result: Result<Option<usize>, Error> = results
                         .iter()
                         .enumerate()
@@ -453,7 +442,7 @@ impl KMeans {
                             .row_mut(cluster_idx)
                             .assign(&data.row(farthest_idx));
                     } else {
-                        // Fallback: if no samples exist (shouldn't happen), keep the old centroid
+                        // No samples exist (should not happen): keep the old centroid
                         new_centroids
                             .row_mut(cluster_idx)
                             .assign(&self.centroids.as_ref().unwrap().row(cluster_idx));
@@ -461,14 +450,11 @@ impl KMeans {
                 }
             }
 
-            // Install the freshly computed centroids and recycle the previous buffer
-            // for the next iteration (it gets zeroed at the top of the loop), avoiding
-            // a centroid-matrix allocation on every iteration.
+            // Install the new centroids and recycle the previous buffer for the next iteration
             let previous = self.centroids.replace(new_centroids);
             new_centroids = previous.expect("centroids are initialized before the loop starts");
         }
 
-        // Finish progress bar with final statistics
         #[cfg(feature = "show_progress")]
         {
             let final_inertia = self.inertia.unwrap_or_else(|| prev_inertia.unwrap_or(0.0));
@@ -484,7 +470,7 @@ impl KMeans {
         }
 
         self.labels = Some(labels);
-        // Set inertia if not already set (i.e., if max_iter was reached without convergence)
+        // Set inertia if max_iter was reached without convergence
         if self.inertia.is_none() {
             self.inertia = prev_inertia;
         }
@@ -493,7 +479,7 @@ impl KMeans {
         Ok(self)
     }
 
-    /// Predicts the closest cluster for each sample in the input data.
+    /// Predicts the closest cluster for each sample in the input data
     ///
     /// # Parameters
     ///
@@ -506,7 +492,9 @@ impl KMeans {
     /// # Errors
     ///
     /// - `Error::NotFitted` - If the model has not been fitted yet
-    /// - `Error::InvalidInput` - If input data is empty, contains invalid values, or has incorrect feature dimensions
+    /// - `Error::EmptyInput` - If the input data is empty
+    /// - `Error::DimensionMismatch` - If the feature count does not match the fitted data
+    /// - `Error::NonFinite` - If the input data contains NaN or infinite values
     pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64>,
@@ -526,9 +514,9 @@ impl KMeans {
         Ok(Array1::from(labels))
     }
 
-    /// Fits the model and predicts cluster indices for the input data.
+    /// Fits the model and predicts cluster indices for the input data
     ///
-    /// This is equivalent to calling `fit` followed by `predict`.
+    /// Equivalent to calling `fit` followed by `predict`
     ///
     /// # Parameters
     ///
@@ -540,7 +528,9 @@ impl KMeans {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If input data is invalid or smaller than the number of clusters
+    /// - `Error::InvalidInput` - If the number of samples is less than `n_clusters`
+    /// - `Error::EmptyInput` - If the data has no rows
+    /// - `Error::NonFinite` - If the data contains NaN or infinite values
     pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64>,

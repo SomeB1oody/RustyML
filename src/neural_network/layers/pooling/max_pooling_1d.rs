@@ -1,3 +1,5 @@
+//! 1D max pooling layer that selects the maximum value within each window along the length dimension
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -13,22 +15,15 @@ use crate::neural_network::layers::pooling::validation::{
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_1d_pooling;
 use crate::neural_network::traits::Layer;
 
-/// 1D max pooling layer.
+/// 1D max pooling layer
 ///
-/// Selects the maximum value within each pooling window along the length dimension.
-/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
+/// Selects the maximum value within each pooling window along the length dimension. Input
+/// tensor shape `[batch_size, channels, length]`, output tensor shape
 /// `[batch_size, channels, pooled_length]` where
-/// `pooled_length = (length - pool_size) / stride + 1`.
-///
-/// # Fields
-///
-/// - `pool_size` - Size of the pooling window
-/// - `stride` - Step size of the pooling operation
-/// - `input_shape` - Shape of the input tensor declared at construction time
-/// - `forward_input_shape` - Shape of the most recent forward input, cached for backpropagation
-/// - `argmax` - Cached flat per-output arg-max indices used for backpropagation
+/// `pooled_length = (length - pool_size) / stride + 1`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -67,7 +62,7 @@ use crate::neural_network::traits::Layer;
 /// assert_eq!(output.shape(), &[2, 3, 4]);
 ///
 /// // Verify correctness of pooling results
-/// // For window size 2 and stride 2, we expect the maximum element in each window
+/// // For window size 2 and stride 2, the maximum element in each window is selected
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         // First window (0,1) -> max value should be 1.0
@@ -84,20 +79,25 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct MaxPooling1D {
+    /// Size of the pooling window
     pool_size: usize,
+    /// Step size of the pooling operation
     stride: usize,
+    /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
+    /// Cached flat per-output arg-max indices used for backpropagation
     argmax: Option<Vec<usize>>,
 }
 
 impl MaxPooling1D {
-    /// Creates a new 1D max pooling layer.
+    /// Creates a new 1D max pooling layer
     ///
-    /// If `stride` is None, it defaults to `pool_size`.
+    /// If `stride` is None, it defaults to `pool_size`
     ///
     /// # Parameters
     ///
@@ -111,7 +111,8 @@ impl MaxPooling1D {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If `input_shape` is not 3D or contains non-positive dimensions
+    /// - `Error::DimensionMismatch` - If `input_shape` is not 3D
+    /// - `Error::InvalidInput` - If `input_shape` contains a zero dimension
     /// - `Error::InvalidParameter` - If `pool_size` is zero or larger than the input length, or
     ///   `stride` is zero
     pub fn new(
@@ -153,7 +154,7 @@ impl Layer for MaxPooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         // Validate input is 3D
         if input.ndim() != 3 {

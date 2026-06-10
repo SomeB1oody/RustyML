@@ -1,3 +1,5 @@
+//! Noise injection layers: Gaussian dropout and Gaussian noise
+
 /// Gaussian Dropout layer for neural networks
 pub mod gaussian_dropout;
 /// Gaussian Noise layer for neural networks

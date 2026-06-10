@@ -1,24 +1,18 @@
-/// Enumeration representing different types of training parameters for neural network layers.
+//! Neural network layer module: submodule declarations, the shared
+//! [`TrainingParameters`](crate::neural_network::layers::TrainingParameters) classification, and helpers for parameter-free layers
+
+/// Classifies a layer by its parameter training capability
 ///
-/// This enum categorizes layers based on their parameter training capabilities:
-/// - Layers with trainable parameters (e.g., Dense, Convolutional layers)
-/// - Layers without trainable parameters (e.g., Pooling, Activation layers)
-/// - Special layers that have no parameters at all
-///
-/// # Variants
-///
-/// - `Trainable(usize)` - The layer has trainable parameters, with the count specified by the `usize` value
-/// - `NonTrainable(usize)` - The layer has parameters but they are not trainable (e.g., frozen layers)
-/// - `NoTrainable` - The layer has no trainable parameters (e.g., pooling layers, activation functions)
+/// Layers fall into three groups: those with trainable parameters (e.g. Dense,
+/// convolutional layers), those whose parameters are frozen, and those with no
+/// parameters at all (e.g. pooling, activation layers)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrainingParameters {
-    /// The layer contains trainable parameters that will be updated during optimization.
-    /// The `usize` value indicates the total number of trainable parameters.
+    /// Layer has trainable parameters updated during optimization; the `usize` is the count
     Trainable(usize),
-    /// The layer contains parameters but they are not trainable (frozen).
-    /// The `usize` value indicates the total number of non-trainable parameters.
+    /// Layer has parameters but they are frozen; the `usize` is the count of non-trainable parameters
     NonTrainable(usize),
-    /// The layer has no trainable parameters whatsoever.
+    /// Layer has no trainable parameters whatsoever
     NoTrainable,
 }
 
@@ -55,30 +49,24 @@ pub use pooling::*;
 pub use recurrent::*;
 pub use regularization::*;
 
-/// A macro that generates standard trait method implementations for neural network layers
-/// without trainable parameters.
+/// Generates the trait method stubs for layers without trainable parameters
 ///
-/// Layers with no trainable parameters rely on the default [`Layer::parameters`] (which returns
-/// an empty list, so the optimizer skips them); this macro only supplies the remaining required
-/// methods.
+/// Such layers rely on the default [`Layer::parameters`] (an empty list, so the optimizer
+/// skips them); this macro supplies the remaining required `param_count` and `get_weights`
 ///
-/// Defined *after* the `mod` declarations and path-exported via a `pub(in ...) use` re-export, so callers import
-/// it explicitly (`use crate::neural_network::layers::no_trainable_parameters_layer_functions;`)
-/// rather than relying on textual macro ordering.
+/// Defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
+/// so callers import it explicitly rather than relying on textual macro ordering:
+/// `use crate::neural_network::layers::no_trainable_parameters_layer_functions;`
 ///
-/// # Parameters
-///
-/// - `param_count`: Returns `TrainingParameters::NoTrainable` as the layer has no trainable parameters
-/// - `get_weights`: Returns `LayerWeight::Empty` as the layer has no weights
+/// The generated `param_count` returns `TrainingParameters::NoTrainable` and `get_weights`
+/// returns `LayerWeight::Empty`
 macro_rules! no_trainable_parameters_layer_functions {
     () => {
         fn param_count(&self) -> TrainingParameters {
-            // This layer has no trainable parameters
             TrainingParameters::NoTrainable
         }
 
         fn get_weights(&self) -> LayerWeight<'_> {
-            // This layer has no weights
             LayerWeight::Empty
         }
     };

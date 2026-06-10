@@ -1,18 +1,23 @@
+//! Label encoding utilities for converting between sparse integer labels and
+//! one-hot (categorical) representations
+//!
+//! Provides `to_categorical` and `to_categorical_with_mapping` for one-hot encoding,
+//! and `to_sparse_categorical` for the inverse via per-row argmax
+
 use crate::error::Error;
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 
-/// Converts sparse categorical labels to categorical (one-hot encoded) format
+/// Converts sparse categorical labels to one-hot encoded format
 ///
-/// This function takes a 1D array of integer labels and converts them to a 2D
-/// one-hot encoded matrix where each row represents a sample and each column
-/// represents a class. The value is 1.0 for the corresponding class and 0.0
-/// for all other classes.
+/// Takes a 1D array of integer labels and produces a 2D one-hot encoded matrix
+/// where each row is a sample and each column is a class. The value is 1.0 for
+/// the corresponding class and 0.0 for all other classes
 ///
 /// # Parameters
 ///
-/// - `labels` - A 1D array of integer labels (e.g., \[0, 1, 2, 1, 0\])
-/// - `num_classes` - Optional number of classes. If None, it will be inferred from the maximum label value + 1
+/// - `labels` - A 1D array of integer labels (e.g. \[0, 1, 2, 1, 0\])
+/// - `num_classes` - Optional class count; if None, inferred from the maximum label value + 1
 ///
 /// # Returns
 ///
@@ -51,7 +56,7 @@ where
 {
     let n_samples = labels.len();
 
-    // Reject negative labels: they cannot index a one-hot column.
+    // Reject negative labels: they cannot index a one-hot column
     if let Some(&label) = labels.iter().find(|&&label| label < 0) {
         return Err(Error::invalid_input(format!(
             "Labels must be non-negative, found: {}",
@@ -59,7 +64,6 @@ where
         )));
     }
 
-    // Determine number of classes
     let max_label = labels.iter().max().copied().unwrap_or(0) as usize;
     let n_classes = match num_classes {
         Some(n) => {
@@ -84,7 +88,6 @@ where
         }
     };
 
-    // Create one-hot encoded matrix
     let mut categorical = Array2::<f64>::zeros((n_samples, n_classes));
 
     for (i, &label) in labels.iter().enumerate() {
@@ -94,23 +97,19 @@ where
     Ok(categorical)
 }
 
-/// Converts sparse categorical labels to categorical format with custom mapping
+/// Converts sparse categorical labels to one-hot format with a custom label mapping
 ///
-/// This function is useful when you have non-consecutive integer labels or
-/// string labels that need to be mapped to consecutive integers first.
+/// Useful when labels are non-consecutive integers or strings that need to be
+/// mapped to consecutive integers first. Classes are indexed in first-seen order
 ///
 /// # Parameters
 ///
 /// - `labels` - A slice of labels that can be compared and hashed
-/// - `num_classes` - Optional number of classes. If None, it will be inferred from the number of unique labels
+/// - `num_classes` - Optional class count; if None, inferred from the number of unique labels
 ///
 /// # Returns
 ///
-/// - `Result<(Array2<f64>, AHashMap<T, usize>), Error>` - A tuple containing the one-hot encoded matrix and the mapping from original labels to class indices
-///
-/// # Errors
-///
-/// - [`Error::InvalidParameter`] - If `num_classes` is smaller than the number of unique labels
+/// - `Result<(Array2<f64>, AHashMap<T, usize>), Error>` - The one-hot encoded matrix paired with the mapping from original labels to class indices
 ///
 /// # Examples
 ///
@@ -126,6 +125,10 @@ where
 /// // "cat" -> column 0, so the first row is one-hot at index 0.
 /// assert_eq!(categorical.row(0).to_vec(), vec![1.0, 0.0, 0.0]);
 /// ```
+///
+/// # Errors
+///
+/// - [`Error::InvalidParameter`] - If `num_classes` is smaller than the number of unique labels
 pub fn to_categorical_with_mapping<T>(
     labels: &[T],
     num_classes: Option<usize>,
@@ -135,7 +138,7 @@ where
 {
     let n_samples = labels.len();
 
-    // Create mapping from unique labels to indices using AHashMap
+    // Map unique labels to indices in first-seen order
     let mut label_to_index = AHashMap::new();
 
     for label in labels.iter() {
@@ -143,7 +146,6 @@ where
         label_to_index.entry(label.clone()).or_insert(len);
     }
 
-    // Determine number of classes
     let unique_classes = label_to_index.len();
     let n_classes = match num_classes {
         Some(n) => {
@@ -161,7 +163,6 @@ where
         None => unique_classes,
     };
 
-    // Create one-hot encoded matrix
     let mut categorical = Array2::<f64>::zeros((n_samples, n_classes));
 
     for (i, label) in labels.iter().enumerate() {
@@ -172,14 +173,15 @@ where
     Ok((categorical, label_to_index))
 }
 
-/// Converts categorical (one-hot encoded) format to sparse categorical labels
+/// Converts one-hot encoded format back to sparse categorical labels
 ///
-/// This function performs the inverse operation of `to_categorical`, converting
-/// a one-hot encoded matrix back to integer labels (sparse categorical format).
+/// Inverse of `to_categorical`: each row is reduced to the index of its highest
+/// value, making it suitable for turning model predictions back into class labels;
+/// ties resolve to the first (lowest) index, matching numpy/sklearn/keras `argmax`
 ///
 /// # Parameters
 ///
-/// - `categorical` - A 2D one-hot encoded matrix where each row represents a sample
+/// - `categorical` - A 2D one-hot encoded matrix where each row is a sample
 ///
 /// # Returns
 ///
@@ -201,26 +203,19 @@ where
 /// # Errors
 ///
 /// - [`Error::NonFinite`] - If the input contains NaN or infinite values
-///
-/// # Note
-///
-/// This function finds the class with the highest probability for each sample,
-/// making it suitable for converting model predictions back to class labels.
-/// Ties resolve to the first (lowest) index, matching numpy/sklearn/keras `argmax`.
 pub fn to_sparse_categorical<S>(categorical: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
 where
     S: Data<Elem = f64>,
 {
-    // Reject non-finite values up front so the per-row argmax comparison is total.
+    // Reject non-finite values up front so the per-row argmax comparison is total
     super::validation::check_finite(categorical)?;
 
     let labels = categorical
         .rows()
         .into_iter()
         .map(|row| {
-            // First-index argmax: ties resolve to the earliest column, matching
-            // numpy/sklearn/keras `argmax`. (`Iterator::max_by` would take the LAST element on
-            // ties, so `reduce` with a strict `>` is used to keep the first instead.)
+            // First-index argmax: strict `>` in `reduce` keeps the earliest column on
+            // ties (unlike `max_by`, which would keep the last), matching `argmax`
             row.iter()
                 .enumerate()
                 .reduce(|best, cur| if cur.1 > best.1 { cur } else { best })

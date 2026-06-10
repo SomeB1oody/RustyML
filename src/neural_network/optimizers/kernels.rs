@@ -1,17 +1,17 @@
-//! Flat-slice optimizer update kernels.
+//! Flat-slice optimizer update kernels
 //!
 //! Each optimizer's per-parameter math lives here as a single function operating on `&mut [f32]`
 //! parameter data plus `&[f32]` gradients (and any optimizer state slices). Because every layer
 //! exposes its parameters as flat slices via [`Layer::parameters`](crate::neural_network::traits::Layer::parameters),
-//! these kernels work for any parameter shape — replacing the previous per-shape, per-optimizer
-//! state structs and update implementations.
+//! these kernels work for any parameter shape, replacing the previous per-shape, per-optimizer
+//! state structs and update implementations
 
 use rayon::prelude::*;
 
-/// Element-count threshold above which a kernel switches to parallel evaluation.
+/// Element-count threshold above which a kernel switches to parallel evaluation
 const PARALLEL_THRESHOLD: usize = 1024;
 
-/// SGD update: `param -= lr * grad`.
+/// SGD update: `param -= lr * grad`
 pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
     if param.len() >= PARALLEL_THRESHOLD {
         param
@@ -25,9 +25,9 @@ pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
     }
 }
 
-/// Adam update with bias correction at timestep `t`.
+/// Adam update with bias correction at timestep `t`
 ///
-/// `m`/`v` are the first/second moment buffers for this parameter (same length as `param`).
+/// `m`/`v` are the first/second moment buffers for this parameter (same length as `param`)
 ///
 /// ```text
 /// m = beta1*m + (1-beta1)*g
@@ -76,9 +76,9 @@ pub fn adam_step(
     }
 }
 
-/// RMSprop update.
+/// RMSprop update
 ///
-/// `cache` is the running average of squared gradients for this parameter.
+/// `cache` is the running average of squared gradients for this parameter
 ///
 /// ```text
 /// cache = rho*cache + (1-rho)*g^2
@@ -110,9 +110,9 @@ pub fn rmsprop_step(
     }
 }
 
-/// AdaGrad update.
+/// AdaGrad update
 ///
-/// `accumulator` is the running sum of squared gradients for this parameter.
+/// `accumulator` is the running sum of squared gradients for this parameter
 ///
 /// ```text
 /// accumulator += g^2
@@ -148,12 +148,9 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
 
-    // ── SGD ─────────────────────────────────────────────────────────────────
+    // SGD
 
-    /// SGD small path: param -= lr * grad
-    /// param=[1.0, 2.0], grad=[0.5, -1.0], lr=0.1
-    /// elem 0: 1.0 - 0.1*0.5 = 0.95
-    /// elem 1: 2.0 - 0.1*(-1.0) = 2.1
+    /// SGD small path applies `param -= lr * grad`
     #[test]
     fn sgd_step_small_path() {
         let mut param = vec![1.0_f32, 2.0_f32];
@@ -163,9 +160,7 @@ mod tests {
         assert_abs_diff_eq!(param[1], 2.1_f32, epsilon = 1e-6);
     }
 
-    /// SGD parallel path (>=1024 elements): same formula, exercises rayon branch.
-    /// param=vec![1.0; 1024], grad=vec![0.5; 1024], lr=0.1
-    /// every element: 1.0 - 0.1*0.5 = 0.95
+    /// SGD parallel path (>=1024 elements) applies the same update via the rayon branch
     #[test]
     fn sgd_step_parallel_path() {
         let n = 1024_usize;
@@ -180,7 +175,7 @@ mod tests {
         }
     }
 
-    /// SGD with lr=0.0 leaves params unchanged.
+    /// SGD with lr=0.0 leaves params unchanged
     #[test]
     fn sgd_step_zero_lr() {
         let mut param = vec![3.0_f32, -1.5_f32];
@@ -190,21 +185,9 @@ mod tests {
         assert_abs_diff_eq!(param[1], -1.5_f32, epsilon = 1e-6);
     }
 
-    // ── Adam ─────────────────────────────────────────────────────────────────
+    // Adam
 
-    /// Adam step t=1 from zero moments (standard canonical example).
-    ///
-    /// Inputs: param=0.0, grad=1.0, m=0.0, v=0.0, lr=0.1, beta1=0.9, beta2=0.999, eps=1e-8
-    ///
-    /// Step-by-step (from the docstring formula):
-    ///   m  = 0.9*0 + 0.1*1     = 0.1
-    ///   v  = 0.999*0 + 0.001*1 = 0.001
-    ///   bc1 = 1 - 0.9^1        = 0.1
-    ///   bc2 = 1 - 0.999^1      = 0.001
-    ///   m_hat = 0.1 / 0.1      = 1.0
-    ///   v_hat = 0.001 / 0.001  = 1.0
-    ///   update = 0.1 * 1.0 / (sqrt(1.0) + 1e-8) ≈ 0.09999999
-    ///   param  = 0.0 - 0.09999999 ≈ -0.09999999
+    /// Adam step t=1 from zero moments produces the canonical first update
     #[test]
     fn adam_step_t1_from_zero() {
         let mut param = vec![0.0_f32];
@@ -214,25 +197,16 @@ mod tests {
 
         adam_step(&mut param, &grad, &mut m, &mut v, 0.1, 0.9, 0.999, 1e-8, 1);
 
-        // m and v should be updated first
+        // m and v are updated first
         assert_abs_diff_eq!(m[0], 0.1_f32, epsilon = 1e-7);
         assert_abs_diff_eq!(v[0], 0.001_f32, epsilon = 1e-7);
 
-        // param update: 0.0 - 0.1*(1.0/(1.0 + 1e-8)) ≈ -0.09999999
+        // param update: 0.0 - 0.1*(1.0/(1.0 + 1e-8)) ~= -0.09999999
         let expected_param = -0.1_f32 / (1.0_f32 + 1e-8_f32);
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// Adam step t=2: moments accumulate correctly over two sequential calls.
-    ///
-    /// After t=1 (same as above), for t=2 with same grad=1.0:
-    ///   m  = 0.9*0.1 + 0.1*1      = 0.19
-    ///   v  = 0.999*0.001 + 0.001*1 = 0.001999
-    ///   bc1 = 1 - 0.9^2            = 0.19
-    ///   bc2 = 1 - 0.999^2          = 0.001999
-    ///   m_hat = 0.19/0.19           = 1.0
-    ///   v_hat = 0.001999/0.001999   = 1.0
-    ///   update ≈ 0.1 * 1.0 / (1.0 + 1e-8) ≈ 0.09999999 again
+    /// Adam moments accumulate correctly across two sequential t=1, t=2 calls
     #[test]
     fn adam_step_t2_moment_accumulation() {
         let mut param = vec![0.0_f32];
@@ -248,13 +222,13 @@ mod tests {
         // After t=2: v = 0.999*0.001 + 0.001 = 0.001999
         assert_abs_diff_eq!(v[0], 0.001999_f32, epsilon = 1e-6);
 
-        // Both steps apply ~ -0.09999999, total ≈ -0.19999998
+        // Both steps apply ~ -0.09999999, total ~= -0.19999998
         let single_update = 0.1_f32 / (1.0_f32 + 1e-8_f32);
         let expected = -2.0_f32 * single_update;
         assert_abs_diff_eq!(param[0], expected, epsilon = 1e-5);
     }
 
-    /// Adam step with zero gradient leaves moments at zero and param unchanged.
+    /// Adam step with zero gradient leaves moments at zero and param unchanged
     #[test]
     fn adam_step_zero_gradient() {
         let mut param = vec![5.0_f32];
@@ -270,16 +244,9 @@ mod tests {
         assert_abs_diff_eq!(param[0], 5.0_f32, epsilon = 1e-9);
     }
 
-    // ── RMSprop ───────────────────────────────────────────────────────────────
+    // RMSprop
 
-    /// RMSprop one step from zero cache.
-    ///
-    /// Inputs: param=2.0, grad=1.0, cache=0.0, rho=0.9, lr=0.01, epsilon=1e-8
-    ///
-    /// cache = 0.9*0 + (1-0.9)*1^2 = 0.1
-    /// param -= 0.01*1.0 / (sqrt(0.1) + 1e-8)
-    ///        = 0.01 / 0.31622776601... ≈ 0.031622776601
-    /// param ≈ 2.0 - 0.031622776601 ≈ 1.968377224
+    /// RMSprop one step from zero cache produces the expected single-element update
     #[test]
     fn rmsprop_step_single_element() {
         let mut param = vec![2.0_f32];
@@ -295,13 +262,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// RMSprop with two elements to verify independent per-element state.
-    ///
-    /// param=[2.0, 3.0], grad=[1.0, -0.5], cache=[0.0, 0.0], rho=0.9, lr=0.01, eps=1e-8
-    ///
-    /// elem 0: cache = 0.1, param -= 0.01/(sqrt(0.1)+1e-8)
-    /// elem 1: cache = 0.9*0 + 0.1*0.25 = 0.025,
-    ///         param -= 0.01*(-0.5)/(sqrt(0.025)+1e-8) = +0.005/sqrt(0.025)
+    /// RMSprop keeps independent per-element cache state across two elements
     #[test]
     fn rmsprop_step_two_elements() {
         let mut param = vec![2.0_f32, 3.0_f32];
@@ -324,11 +285,7 @@ mod tests {
         assert_abs_diff_eq!(param[1], expected_p1, epsilon = 1e-6);
     }
 
-    /// RMSprop with non-zero initial cache carries state forward.
-    ///
-    /// cache_0 = 0.5, grad = 2.0, rho=0.9, lr=0.01, eps=1e-8
-    /// cache = 0.9*0.5 + 0.1*4 = 0.45 + 0.4 = 0.85
-    /// param -= 0.01*2 / (sqrt(0.85)+1e-8)
+    /// RMSprop with a non-zero initial cache carries state forward
     #[test]
     fn rmsprop_step_nonzero_initial_cache() {
         let mut param = vec![1.0_f32];
@@ -344,16 +301,9 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    // ── AdaGrad ───────────────────────────────────────────────────────────────
+    // AdaGrad
 
-    /// AdaGrad one step from zero accumulator.
-    ///
-    /// Inputs: param=3.0, grad=2.0, accumulator=0.0, lr=0.01, epsilon=1e-8
-    ///
-    /// accumulator += 2^2 = 4.0
-    /// param -= 0.01*2.0 / (sqrt(4.0) + 1e-8)
-    ///        = 0.02 / (2.0 + 1e-8) ≈ 0.009999999950
-    /// param ≈ 3.0 - 0.009999999950 ≈ 2.990000005
+    /// AdaGrad one step from zero accumulator produces the expected single-element update
     #[test]
     fn adagrad_step_single_element() {
         let mut param = vec![3.0_f32];
@@ -369,10 +319,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// AdaGrad accumulates squared gradients across two steps (grows monotonically).
-    ///
-    /// Step 1: acc = 0 + 2^2 = 4.0, param -= 0.01*2/(2+1e-8)
-    /// Step 2: acc = 4 + 2^2 = 8.0, param -= 0.01*2/(sqrt(8)+1e-8)
+    /// AdaGrad accumulator grows monotonically as squared gradients accumulate across steps
     #[test]
     fn adagrad_step_accumulation_across_steps() {
         let mut param = vec![3.0_f32];
@@ -392,12 +339,7 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
-    /// AdaGrad with negative gradient: accumulator still grows (g^2 is always positive),
-    /// and param moves in the positive direction.
-    ///
-    /// param=1.0, grad=-0.5, acc=0.0, lr=0.01, eps=1e-8
-    /// acc = 0.25
-    /// param -= 0.01*(-0.5)/(sqrt(0.25)+1e-8) = +0.005/(0.5+1e-8)
+    /// AdaGrad with a negative gradient still grows the accumulator and moves param positive
     #[test]
     fn adagrad_step_negative_gradient() {
         let mut param = vec![1.0_f32];
@@ -413,18 +355,10 @@ mod tests {
         let expected_param = 1.0_f32 - 0.01_f32 * (-0.5_f32) / (0.25_f32.sqrt() + 1e-8_f32);
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
-    // ── Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad ───────
-    //
-    // Each of these mirrors the existing `sgd_step_parallel_path` test: with uniform
-    // inputs of length PARALLEL_THRESHOLD the rayon branch must produce exactly the
-    // documented element-wise update. Expected values are derived from the docstring
-    // formula (NOT by running the impl), reusing the per-element hand calculations
-    // already verified in the small-path tests above.
+    // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: uniform inputs
+    // of length PARALLEL_THRESHOLD must make the rayon branch produce the documented update
 
-    /// Adam parallel path (1024 elements): same canonical t=1-from-zero update on every
-    /// element. param=0.0, grad=1.0, m=0.0, v=0.0, lr=0.1, beta1=0.9, beta2=0.999, eps=1e-8.
-    ///   m=0.1, v=0.001, bc1=0.1, bc2=0.001, m_hat=1.0, v_hat=1.0
-    ///   param = 0.0 - 0.1*(1.0/(1.0+1e-8)) ≈ -0.09999999
+    /// Adam parallel path (1024 elements) applies the canonical t=1-from-zero update everywhere
     #[test]
     fn adam_step_parallel_path() {
         let n = 1024_usize; // == PARALLEL_THRESHOLD, forces the rayon branch
@@ -455,10 +389,7 @@ mod tests {
         }
     }
 
-    /// RMSprop parallel path (1024 elements): same single-step update on every element.
-    /// param=2.0, grad=1.0, cache=0.0, rho=0.9, lr=0.01, eps=1e-8.
-    ///   cache = 0.9*0 + 0.1*1^2 = 0.1
-    ///   param = 2.0 - 0.01/(sqrt(0.1)+1e-8) ≈ 1.96837722
+    /// RMSprop parallel path (1024 elements) applies the same single-step update everywhere
     #[test]
     fn rmsprop_step_parallel_path() {
         let n = 1024_usize;
@@ -483,10 +414,7 @@ mod tests {
         }
     }
 
-    /// AdaGrad parallel path (1024 elements): same single-step update on every element.
-    /// param=3.0, grad=2.0, accumulator=0.0, lr=0.01, eps=1e-8.
-    ///   accumulator = 0 + 2^2 = 4.0
-    ///   param = 3.0 - 0.01*2.0/(sqrt(4.0)+1e-8) ≈ 2.99000000
+    /// AdaGrad parallel path (1024 elements) applies the same single-step update everywhere
     #[test]
     fn adagrad_step_parallel_path() {
         let n = 1024_usize;

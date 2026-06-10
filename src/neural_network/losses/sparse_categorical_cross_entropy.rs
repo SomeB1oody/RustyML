@@ -1,3 +1,5 @@
+//! Sparse Categorical Cross Entropy loss for multi-class classification with integer labels
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::clip_probabilities;
@@ -60,11 +62,25 @@ impl Default for SparseCategoricalCrossEntropy {
     }
 }
 
-/// Validates the inputs and extracts the integer class index for every sample.
+/// Validates the inputs and extracts the integer class index for every sample
 ///
 /// Predictions must be 2D `[batch, num_classes]` and labels must be 2D `[batch, 1]` with
 /// non-negative integer values strictly less than `num_classes`. Without these checks an
-/// out-of-range label would cause an opaque index-out-of-bounds panic inside a Rayon worker.
+/// out-of-range label would cause an opaque index-out-of-bounds panic inside a Rayon worker
+///
+/// # Parameters
+///
+/// - `y_true` - integer class labels of shape `[batch, 1]`
+/// - `y_pred` - predicted probabilities of shape `[batch, num_classes]`
+///
+/// # Returns
+///
+/// - `Vec<usize>` - the class index selected for each sample
+///
+/// # Errors
+///
+/// Returns `Error::invalid_input` for malformed shapes or out-of-range labels, and
+/// `Error::dimension_mismatch` when the batch sizes of the two tensors differ
 fn validate_and_extract_labels(y_true: &Tensor, y_pred: &Tensor) -> Result<Vec<usize>, Error> {
     if y_pred.ndim() != 2 {
         return Err(Error::invalid_input(format!(
@@ -133,9 +149,8 @@ impl Loss for SparseCategoricalCrossEntropy {
         let class_indices = validate_and_extract_labels(y_true, y_pred)?;
         let batch_size = class_indices.len();
 
-        // Create a gradient tensor with the same shape as y_pred, initialized to 0.
-        // Each sample writes a single distinct entry, so a plain sequential pass is both
-        // correct and faster than collecting updates in parallel and re-applying them.
+        // Each sample writes a single distinct entry, so a sequential pass is both
+        // correct and faster than collecting parallel updates and re-applying them
         let mut grad = Tensor::zeros(y_pred.raw_dim());
         for (i, &class_idx) in class_indices.iter().enumerate() {
             grad[[i, class_idx]] = -1.0 / y_pred_clipped[[i, class_idx]];

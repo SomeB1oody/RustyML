@@ -1,10 +1,12 @@
+//! Shape and parameter validation helpers shared by the pooling layers
+
 use crate::error::Error;
 
-/// Validates that the input shape has the expected number of dimensions.
+/// Validates that the input shape has the expected number of dimensions
 ///
 /// # Errors
 ///
-/// Returns [`Error::DimensionMismatch`] if the shape length doesn't match expected_dims.
+/// Returns [`Error::DimensionMismatch`] if the shape length doesn't match expected_dims
 pub(super) fn validate_input_shape_dims(
     input_shape: &[usize],
     expected_dims: usize,
@@ -16,11 +18,11 @@ pub(super) fn validate_input_shape_dims(
     Ok(())
 }
 
-/// Validates that all dimensions in input_shape are greater than zero.
+/// Validates that all dimensions in input_shape are greater than zero
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidInput`] if any dimension is 0.
+/// Returns [`Error::InvalidInput`] if any dimension is 0
 pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Error> {
     if !input_shape.iter().all(|&dim| dim > 0) {
         return Err(Error::invalid_input(format!(
@@ -31,7 +33,7 @@ pub(super) fn validate_all_dims_positive(input_shape: &[usize]) -> Result<(), Er
     Ok(())
 }
 
-/// Validates pool size for 1D pooling.
+/// Validates pool size for 1D pooling
 ///
 /// # Errors
 ///
@@ -54,13 +56,13 @@ pub(super) fn validate_pool_size_1d(pool_size: usize, input_length: usize) -> Re
     Ok(())
 }
 
-/// Validates pool size for 2D pooling.
+/// Validates pool size for 2D pooling
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
 /// greater than the corresponding input dimension (which would underflow the output-shape
-/// calculation).
+/// calculation)
 pub(super) fn validate_pool_size_2d(
     pool_size: (usize, usize),
     input_height: usize,
@@ -81,13 +83,13 @@ pub(super) fn validate_pool_size_2d(
     Ok(())
 }
 
-/// Validates pool size for 3D pooling.
+/// Validates pool size for 3D pooling
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
 /// greater than the corresponding input dimension (which would underflow the output-shape
-/// calculation).
+/// calculation)
 pub(super) fn validate_pool_size_3d(
     pool_size: (usize, usize, usize),
     input_depth: usize,
@@ -109,11 +111,11 @@ pub(super) fn validate_pool_size_3d(
     Ok(())
 }
 
-/// Validates stride for 1D pooling.
+/// Validates stride for 1D pooling
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if stride is 0.
+/// Returns [`Error::InvalidParameter`] if stride is 0
 pub(super) fn validate_stride_1d(stride: usize) -> Result<(), Error> {
     if stride == 0 {
         return Err(Error::invalid_parameter(
@@ -124,11 +126,11 @@ pub(super) fn validate_stride_1d(stride: usize) -> Result<(), Error> {
     Ok(())
 }
 
-/// Validates strides for 2D pooling.
+/// Validates strides for 2D pooling
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if any stride is 0.
+/// Returns [`Error::InvalidParameter`] if any stride is 0
 pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 {
         return Err(Error::invalid_parameter(
@@ -139,11 +141,11 @@ pub(super) fn validate_strides_2d(strides: (usize, usize)) -> Result<(), Error> 
     Ok(())
 }
 
-/// Validates strides for 3D pooling.
+/// Validates strides for 3D pooling
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if any stride is 0.
+/// Returns [`Error::InvalidParameter`] if any stride is 0
 pub(super) fn validate_strides_3d(strides: (usize, usize, usize)) -> Result<(), Error> {
     if strides.0 == 0 || strides.1 == 0 || strides.2 == 0 {
         return Err(Error::invalid_parameter(
@@ -159,13 +161,7 @@ mod tests {
     use super::*;
     use crate::error::Error;
 
-    /// validate_pool_size_3d HEIGHT over-size branch.
-    ///
-    /// Input spatial dims depth=4, height=4, width=4; pool_size = (depth=2, height=5, width=2).
-    /// Depth 2 ≤ 4 and width 2 ≤ 4 both pass; only `pool_size.1 > input_height` (5 > 4) is true,
-    /// so the `cannot exceed the corresponding input dimension` guard must fire on the HEIGHT axis.
-    /// (Depth-axis over-size is already covered elsewhere.) The zero-check is skipped because no
-    /// dimension is 0. Expected: Err(Error::InvalidParameter { name: "pool_size", .. }).
+    /// A 3D pool whose height alone exceeds the input height yields InvalidParameter(pool_size)
     #[test]
     fn test_validate_pool_size_3d_oversized_height() {
         let result = validate_pool_size_3d((2, 5, 2), 4, 4, 4);
@@ -176,12 +172,7 @@ mod tests {
         );
     }
 
-    /// validate_pool_size_3d WIDTH over-size branch.
-    ///
-    /// Input spatial dims depth=4, height=4, width=4; pool_size = (depth=2, height=2, width=5).
-    /// Depth 2 ≤ 4 and height 2 ≤ 4 both pass; only `pool_size.2 > input_width` (5 > 4) is true,
-    /// so the `cannot exceed the corresponding input dimension` guard must fire on the WIDTH axis.
-    /// Expected: Err(Error::InvalidParameter { name: "pool_size", .. }).
+    /// A 3D pool whose width alone exceeds the input width yields InvalidParameter(pool_size)
     #[test]
     fn test_validate_pool_size_3d_oversized_width() {
         let result = validate_pool_size_3d((2, 2, 5), 4, 4, 4);
@@ -192,9 +183,7 @@ mod tests {
         );
     }
 
-    /// Control: an all-fitting 3D pool (every axis ≤ its input dim, none zero) must succeed,
-    /// confirming the two failing tests above trip specifically on the over-size comparison and
-    /// not on some unrelated guard.
+    /// A 3D pool that fits on every axis succeeds
     #[test]
     fn test_validate_pool_size_3d_all_fitting_ok() {
         assert!(validate_pool_size_3d((2, 2, 2), 4, 4, 4).is_ok());

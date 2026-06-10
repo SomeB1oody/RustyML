@@ -1,3 +1,5 @@
+//! Dropout layer that randomly zeroes input units during training to reduce overfitting
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -15,23 +17,16 @@ use crate::neural_network::traits::Layer;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Threshold for using parallel computation in Dropout layer.
-/// When the total number of elements >= this threshold, parallel computation is used.
+/// Element count at or above which the mask threshold runs in parallel
 const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 
-/// Dropout layer for neural networks.
+/// Dropout layer for neural networks
 ///
 /// Randomly drops a fraction of input units during training to reduce overfitting and
-/// improve generalization.
-///
-/// # Fields
-///
-/// - `rate` - Dropout rate, fraction of input units to drop (between 0 and 1)
-/// - `input_shape` - Expected shape of the input tensor
-/// - `mask` - Binary mask used during training to determine which units to drop
-/// - `training` - Whether the layer is in training mode or inference mode
+/// improve generalization
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::layers::*;
 /// use rustyml::neural_network::traits::Layer;
@@ -48,25 +43,30 @@ const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 /// ```
 #[derive(Debug)]
 pub struct Dropout {
+    /// Fraction of input units to drop (between 0 and 1)
     rate: f32,
+    /// Expected shape of the input tensor
     input_shape: Vec<usize>,
+    /// Binary mask from the last training forward pass, reused in backward
     mask: Option<Tensor>,
+    /// Whether the layer is in training mode (true) or inference mode (false)
     training: bool,
+    /// Random number generator used to sample the dropout mask
     rng: StdRng,
 }
 
 impl Dropout {
-    /// Creates a new Dropout layer.
+    /// Creates a new Dropout layer
     ///
     /// # Parameters
     ///
-    /// - `rate` - Dropout rate, fraction of the input units to drop (between 0 and 1)
+    /// - `rate` - Fraction of the input units to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random.
+    /// - `random_state` - Optional seed for reproducible masks; falls back to the global seed or entropy. See `crate::random`
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - New Dropout layer instance or a validation error
+    /// - `Result<Self, Error>` - New Dropout layer instance, or a validation error
     ///
     /// # Errors
     ///
@@ -92,11 +92,11 @@ impl Dropout {
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` was validated in `new()`; only the runtime input shape needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         if !self.training {
-            // During inference, pass input through unchanged
+            // Inference passes the input through unchanged
             return Ok(input.clone());
         }
 
@@ -105,41 +105,40 @@ impl Layer for Dropout {
         }
 
         if self.rate == 1.0 {
-            // If dropout rate is 1.0, return zeros
+            // Dropping every unit yields all zeros
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
-        // Generate random mask: 1 with probability (1 - rate), 0 with probability rate
+        // Sample a uniform value per element: kept with probability (1 - rate)
         let mut mask = Tensor::random_using(
             input.raw_dim(),
             Uniform::new(0.0, 1.0).unwrap(),
             &mut self.rng,
         );
 
-        // Apply threshold to create binary mask with parallel or sequential computation
+        // Threshold into a binary mask, in parallel for large inputs
         if input.len() >= DROPOUT_PARALLEL_THRESHOLD {
             mask.par_mapv_inplace(|x| if x >= self.rate { 1.0 } else { 0.0 });
         } else {
             mask.mapv_inplace(|x| if x >= self.rate { 1.0 } else { 0.0 });
         }
 
-        // Apply mask and scale by (1 - rate) to maintain expected value
-        // This is "inverted dropout" technique
+        // Inverted dropout: scale kept units by 1 / (1 - rate) to preserve the expected value
         let scale = 1.0 / (1.0 - self.rate);
         let output = input * &mask * scale;
 
-        // Store mask for backpropagation
+        // Cache the mask for backpropagation
         self.mask = Some(mask);
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is immutable and already validated in `new()`; only validate the runtime input.
+        // `rate` was validated in `new()`; only the runtime input shape needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Inverted dropout passes the input through unchanged during inference.
+        // Inverted dropout passes the input through unchanged during inference
         Ok(input.clone())
     }
 

@@ -1,3 +1,5 @@
+//! Sigmoid activation layer for neural networks
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -6,17 +8,13 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::traits::Layer;
 
-/// Sigmoid activation layer.
+/// Sigmoid activation layer
 ///
-/// Applies `1 / (1 + e^(-x))` element-wise to the input tensor, squashing values to (0, 1)
-/// while preserving the input shape.
+/// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1)
+/// while preserving the input shape
 ///
 /// The activation math is provided by [`Activation::Sigmoid`]; this layer only adds
-/// boundary validation and the caching required for backpropagation.
-///
-/// # Fields
-///
-/// - `output_cache` - Cached output tensor from the forward pass, used during backpropagation
+/// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
 ///
@@ -45,11 +43,12 @@ use crate::neural_network::traits::Layer;
 /// ```
 #[derive(Debug)]
 pub struct Sigmoid {
+    /// Cached output tensor from the forward pass, used during backpropagation
     output_cache: Option<Tensor>,
 }
 
 impl Sigmoid {
-    /// Creates a new Sigmoid activation layer.
+    /// Creates a new Sigmoid activation layer
     ///
     /// # Returns
     ///
@@ -67,54 +66,48 @@ impl Default for Sigmoid {
 
 impl Layer for Sigmoid {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply Sigmoid: 1 / (1 + e^(-x)) with input clipping for numerical stability
+        // Sigmoid clips the input internally for numerical stability
         let output = Activation::Sigmoid.forward(input)?;
 
-        // Save output for backpropagation
+        // Cache the output for backpropagation
         self.output_cache = Some(output.clone());
 
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Check if tensor is empty
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Check for NaN or infinite values
         if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
             return Err(Error::non_finite("input tensor"));
         }
 
-        // Apply Sigmoid: 1 / (1 + e^(-x)) with input clipping for numerical stability
+        // Sigmoid clips the input internally for numerical stability
         Activation::Sigmoid.forward(input)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(output) = &self.output_cache {
-            // Validate gradient output shape
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
             }
 
-            // Check for NaN or infinite values in gradient output
             if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
                 return Err(Error::non_finite("gradient output"));
             }
 
-            // Sigmoid derivative is: f'(x) = f(x) * (1 - f(x))
+            // Sigmoid derivative: f'(x) = f(x) * (1 - f(x))
             Activation::Sigmoid.backward(output, grad_output)
         } else {
             Err(Error::forward_pass_not_run("Sigmoid"))

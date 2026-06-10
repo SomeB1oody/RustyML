@@ -1,3 +1,5 @@
+//! Global average pooling layer for 3D inputs
+
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
@@ -8,18 +10,14 @@ use crate::neural_network::layers::pooling::pooling_engine::{
 };
 use crate::neural_network::traits::Layer;
 
-/// Global average pooling layer for 3D inputs.
+/// Global average pooling layer for 3D inputs
 ///
-/// Computes the mean value across the depth, height, and width dimensions.
-/// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
-/// `[batch_size, channels]`.
-///
-/// # Fields
-///
-/// - `input_shape` - Shape of the input tensor cached during the forward pass
-///   (global average pooling only needs the shape, not the input values, in backward)
+/// Computes the mean value across the depth, height, and width dimensions. Input tensor
+/// shape: `[batch_size, channels, depth, height, width]`, output tensor shape:
+/// `[batch_size, channels]`
 ///
 /// # Examples
+///
 /// ```rust
 /// use rustyml::neural_network::sequential::Sequential;
 /// use rustyml::neural_network::layers::*;
@@ -53,14 +51,16 @@ use crate::neural_network::traits::Layer;
 ///
 /// # Performance
 ///
-/// Parallel execution is used when `batch_size * channels >= 32`.
+/// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling3D {
+    /// Shape of the input tensor cached during the forward pass (backward only needs
+    /// the shape, not the input values)
     input_shape: Vec<usize>,
 }
 
 impl GlobalAveragePooling3D {
-    /// Creates a new global average pooling 3D layer.
+    /// Creates a new global average pooling 3D layer
     ///
     /// # Returns
     ///
@@ -80,21 +80,19 @@ impl Default for GlobalAveragePooling3D {
 
 impl Layer for GlobalAveragePooling3D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Store input shape for backpropagation (only the shape is needed)
+        // Cache the shape for backward (only the shape is needed)
         self.input_shape = input.shape().to_vec();
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`].
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
@@ -104,7 +102,7 @@ impl Layer for GlobalAveragePooling3D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Check that the forward pass has populated the input shape
+        // Forward must have run to populate the input shape
         if self.input_shape.is_empty() {
             return Err(Error::forward_pass_not_run("GlobalAveragePooling3D"));
         }
