@@ -1,277 +1,259 @@
-<div style="text-align: right;">
-
 [简体中文](https://github.com/SomeB1oody/RustyML/blob/master/README.zh-CN.md) | [English](https://github.com/SomeB1oody/RustyML/blob/master/README.md)
-</div>
 
-# RustyML 
-一个用纯Rust编写的全面机器学习和深度学习库。
+# RustyML
 
-[![Rust Version](https://img.shields.io/badge/Rust-v.1.85-brown)](https://www.rust-lang.org/)
+一个用**纯 Rust** 编写的高性能机器学习与深度学习库。
+
+[![Rust Version](https://img.shields.io/badge/rustc-1.89%2B-brown)](https://www.rust-lang.org/)
+[![Edition](https://img.shields.io/badge/edition-2024-orange)](https://doc.rust-lang.org/edition-guide/)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)
 [![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
+[![docs.rs](https://img.shields.io/docsrs/rustyml)](https://docs.rs/rustyml)
 
 ## 概述
-旨在成为一个功能丰富的机器学习和深度学习框架，充分利用Rust的性能、内存安全性和并发特性。虽然目前处于早期开发阶段，但项目的长期愿景是提供一个完整的机器学习、深度学习和基于transformer架构的模型生态系统。
 
-## 核心特性
-- **纯Rust实现**: 无需外部C/C++依赖，确保内存安全性和可移植性
-- **并行处理**: 利用Rayon进行高效多线程计算
-- **丰富的算法集合**: 监督学习、无监督学习和神经网络
-- **全面的评估指标**: 回归、分类和聚类的评估工具
-- **模型持久化**: 通过JSON序列化保存和加载训练好的模型
+RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端到端实现，不依赖任何 C/C++ 代码。
+它覆盖从数据预处理、特征工程，到模型训练、评估的全流程，同时充分利用 Rust 的内存安全、无畏并发
+和零成本抽象。
 
-## 架构
+整个库被划分为六个由 feature 控制的模块，你只需编译用得上的部分：
+`machine_learning`、`neural_network`、`utils`、`metrics`、`math`，以及共享的 `prelude`。
 
-### 机器学习 (`features = ["machine_learning"]`)
-经典机器学习算法，用于监督和无监督学习：
+## 核心亮点
 
-- **回归**:
-    - 带L1/L2正则化的线性回归
+- **纯 Rust，无 FFI**——内存安全、可移植，无需链接任何外部库。
+- **默认并行**——计算密集的内核使用 [Rayon](https://github.com/rayon-rs/rayon) 进行多线程计算。
+- **算法覆盖广**——经典的监督/无监督学习、异常检测，以及完整的神经网络框架。
+- **统一的结构化错误处理**——所有可能失败的调用都返回 `RustymlResult<T>`；错误被归类为清晰的类别变体，而非难以解析的字符串。
+- **可复现性**——一次 `set_global_seed` 调用即可让所有随机化组件变得确定。
+- **模型持久化**——通过 [Serde](https://serde.rs/) 将训练好的模型和网络权重以 JSON 形式保存与加载。
+- **丰富的评估指标**——回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
+- **模块化 feature**——可以只引入 `metrics`、只引入 `math`、引入 `default` 学习栈，或引入 `full` 全量。
 
-- **分类**:
-    - 逻辑回归
-    - KNN
-    - 决策树（ID3、C4.5、CART）
-    - SVC (支持向量分类)
-    - Linear SVC (线性支持向量分类)
-    - LDA (Linear Discriminant Analysis) 线性判别分析
+## 安装
 
-- **聚类**:
-    - KMeans: K均值（带K-means++初始化）
-    - DBSCAN: (基于密度的聚类）
-    - MeanShift: 均值漂移
+在 `Cargo.toml` 中添加 RustyML：
 
-- **异常检测**:
-    - Isolation Forest 隔离森林
-
-### 神经网络 (`features = ["neural_network"]`)
-完整的神经网络框架，具有灵活的架构设计：
-
-- **层**:
-    - Dense: 全连接层，可自定义激活函数
-    - Activation: 独立激活函数（ReLU, Sigmoid, Tanh, Softmax等）
-    - Pooling Layers: 对1D、2D和3D数据进行最大池化和平均池化操作
-    - Global Pooling: 对1D、2D和3D张量进行全局最大池化和全局平均池化
-    - Recurrent Layers: 序列建模层，如RNN, LSTM和GRU
-    - Dropout: 正则化层，防止训练过程中的过拟合
-
-- **优化器**:
-    - SGD: 随机梯度下降
-    - Adam: Adam优化器
-    - RMSProp: RMSProp优化器
-    - AdaGrad: AdaGrad优化器
-
-- **损失函数**:
-    - MSE: 均方误差
-    - MAE: 平均绝对误差
-    - Binary Cross-Entropy: 二元交叉熵
-    - Categorical Cross-Entropy: 分类交叉熵
-    - Sparse Categorical Cross-Entropy: 稀疏分类交叉熵
-
-- **模型**:
-    - Sequential architecture for feed-forward networks 用于前馈网络的顺序架构
-
-- **激活层**:
-    - ReLU, Tanh, Sigmoid, Softmax
-
-### 工具 (`features = ["utils"]`)
-数据预处理和降维工具：
-
-- **降维**:
-    - PCA (Principal Component Analysis): 主成分分析
-    - Kernel PCA (with RBF, Linear, Polynomial, Sigmoid kernels): 核主成分分析（支持RBF、线性、多项式、Sigmoid核）
-    - LDA (Linear Discriminant Analysis): 线性判别分析
-    - t-SNE (t-Distributed Stochastic Neighbor Embedding): t-分布随机邻域嵌入
-
-- **预处理**:
-    - Standardization (z-score normalization): 标准化（z分数归一化）
-    - Train-test splitting: 训练测试集分割
-
-- **核函数**:
-    - RBF, Linear, Polynomial, Sigmoid: RBF、线性、多项式、Sigmoid
-
-### 评估指标 (`features = ["metrics"]`)
-用于模型性能评估的全面评估指标：
-
-- **回归指标**:
-    - MSE (Mean Squared Error): 均方误差
-    - RMSE (Root Mean Squared Error): 均方根误差
-    - MAE (Mean Absolute Error): 平均绝对误差
-    - R² score: R²分数
-
-- **分类指标**:
-    - Accuracy: 准确率
-    - Confusion Matrix (with TP, FP, TN, FN, precision, recall, F1-score): 混淆矩阵（包含TP、FP、TN、FN、精确率、召回率、F1分数）
-    - AUC-ROC: AUC-ROC曲线下面积
-
-- **聚类指标**:
-    - Adjusted Rand Index (ARI): 调整兰德指数
-    - Normalized Mutual Information (NMI): 标准化互信息
-    - Adjusted Mutual Information (AMI): 调整互信息
-    - Silhouette Score: 轮廓系数
-
-### 数学工具 (`features = ["math"]`)
-数学工具和统计函数：
-
-- **距离度量**:
-    - Euclidean distance: 欧几里得距离
-    - Manhattan distance: 曼哈顿距离
-    - Minkowski distance: 闵可夫斯基距离
-
-- **不纯度度量**:
-    - Entropy: 熵
-    - Gini impurity: 基尼不纯度
-    - Information Gain: 信息增益
-    - Gain Ratio: 增益率
-
-- **统计函数**:
-    - Variance: 方差
-    - Standard deviation: 标准差
-    - SST (Sum of Squares Total): 总平方和
-    - SSE (Sum of Squared Errors): 误差平方和
-
-- **激活函数**:
-    - Sigmoid函数
-    - Logistic loss: 逻辑损失
-
-## 开始使用
-
-### 机器学习示例
- 
-将库添加到您的`Cargo.toml`文件中:
 ```toml
 [dependencies]
-rustyml = {version = "*", features = ["machine_learning"]} 
-# or use `features = ["full"]` to enable all features
-# Or use features = ["default"] to enable default modules (`machine_learning` and `neural_network`)
-# Add `"show_progress"` in `features` to show progress bars when training
+rustyml = { version = "0.12", features = ["full"] }
+ndarray = "0.17"
 ```
 
-在你的Rust代码里写：
-``` rust
-use rustyml::machine_learning::linear_regression::*;
-use ndarray::{Array1, Array2};
-    
-// Create a linear regression model
+按需选择 feature 组合：
+
+```toml
+# 默认：经典机器学习 + 神经网络
+rustyml = "0.12"
+
+# 仅神经网络框架
+rustyml = { version = "0.12", features = ["neural_network"] }
+
+# 全部模块（ml、nn、utils、metrics、math）
+rustyml = { version = "0.12", features = ["full"] }
+
+# 训练时在终端显示进度条
+rustyml = { version = "0.12", features = ["full", "show_progress"] }
+```
+
+> **最低支持 Rust 版本（MSRV）：** Rust 1.89+（edition 2024）。
+
+## 快速上手
+
+### 经典机器学习
+
+```rust
+use rustyml::prelude::machine_learning::*;
+use ndarray::array;
+
+// 训练一个不带正则化的线性回归模型
 let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
 
-// Prepare training data
-let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
-let raw_y = vec![6.0, 9.0, 12.0];
+let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
+let y = array![6.0, 9.0, 12.0];
 
-// Convert Vec to ndarray types
-let x = Array2::from_shape_vec((3, 2), raw_x.into_iter().flatten().collect()).unwrap();
-let y = Array1::from_vec(raw_y);
+model.fit(&x, &y).unwrap();
+let predictions = model.predict(&x).unwrap();
+println!("{:?}", predictions);
 
-// Train the model
-model.fit(&x.view(), &y.view()).unwrap();
-
-// Make predictions
-let new_data = Array2::from_shape_vec((1, 2), vec![4.0, 5.0]).unwrap();
-let _predictions = model.predict(&new_data.view());
-
-// Save the trained model to a file
-model.save_to_path("linear_regression_model.json").unwrap();
-
-// Load the model from the file
-let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
-
-// Use the loaded model for predictions
-let _loaded_predictions = loaded_model.predict(&new_data.view());
-
-// Since Clone is implemented, the model can be easily cloned
-let _model_copy = model.clone();
-
-// Since Debug is implemented, detailed model information can be printed
-println!("{:?}", model);
+// 保存并重新加载训练好的模型
+model.save_to_path("linear_regression.json").unwrap();
+let restored = LinearRegression::load_from_path("linear_regression.json").unwrap();
 ```
 
-### 神经网络示例
+### 神经网络
 
-将库添加到您的`Cargo.toml`文件中：
-```toml
-[dependencies]
-rustyml = {version = "*", features = ["neural_network"]} 
-# or use `features = ["full"]` to enable all features
-# Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
-# Add `"show_progress"` in `features` to show progress bars when training
+```rust
+use rustyml::neural_network::sequential::Sequential;
+use rustyml::prelude::neural_network::*;
+use ndarray::Array;
+
+// 32 个样本，784 个输入特征，10 个输出类别
+let x = Array::ones((32, 784)).into_dyn();
+let y = Array::ones((32, 10)).into_dyn();
+
+let mut model = Sequential::new();
+model
+    .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
+    .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
+    .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
+    .compile(
+        Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(),
+        CategoricalCrossEntropy::new(),
+    );
+
+model.summary(); // 打印网络结构
+model.fit(&x, &y, 10).unwrap();
+
+let predictions = model.predict(&x).unwrap();
+println!("预测结果形状: {:?}", predictions.shape());
+
+// 保存训练好的权重，之后可加载到新模型中
+model.save_to_path("model.json").unwrap();
 ```
 
-在你的Rust代码里写：
-``` rust
-use rustyml::neural_network::{
-    sequential::Sequential,
-    layers::{Dense, ReLU, Softmax},
-    optimizers::Adam,
-    losses::CategoricalCrossEntropy,
-}; 
-use ndarray::Array;  
-  
-// Create training data   
-let x = Array::ones((32, 784)).into_dyn(); // 32 samples, 784 features 
-let y = Array::ones((32, 10)).into_dyn();  // 32 samples, 10 classes
-  
-// Build a neural network   
-let mut model = Sequential::new();  
-model  
-    .add(Dense::new(784, 128, ReLU::new()).unwrap())    
-    .add(Dense::new(128, 64, ReLU::new()).unwrap())    
-    .add(Dense::new(64, 10, Softmax::new()).unwrap())    
-    .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());  
-// Display model structure   
-model.summary();  
-  
-// Train the model  
-model.fit(&x, &y, 10).unwrap();  
-  
-// Save model weights to file  
-model.save_to_path("model.json").unwrap();  
-  
-// Create a new model with the same architecture  
-let mut new_model = Sequential::new();
-new_model  
-    .add(Dense::new(784, 128, ReLU::new()).unwrap())    
-    .add(Dense::new(128, 64, ReLU::new()).unwrap())    
-    .add(Dense::new(64, 10, Softmax::new()).unwrap());
-  
-// Load weights from file  
-new_model.load_from_path("model.json").unwrap();  
-  
-// Compile before using (required for training, optional for prediction)    
-new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());  
-  
-// Make predictions with loaded model  
-let predictions = new_model.predict(&x).unwrap();  
-println!("Predictions shape: {:?}", predictions.shape());  
+### 评估模型
+
+```rust
+use rustyml::metrics::*;
+use ndarray::array;
+
+// 参数顺序始终是 (y_true, y_pred)，与 scikit-learn 一致
+let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
+let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
+
+let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
+println!("准确率: {:.3}", cm.accuracy());
+println!("F1 分数: {:.3}", cm.f1_score());
 ```
 
-## 特性标志
+## 模块
 
-该crate使用特性标志进行模块化编译：
+### `machine_learning`
 
-| Feature            | 说明                                      |  
-|--------------------|-----------------------------------------|
-| `machine_learning` | 经典机器学习算法（依赖于`math`）                     |  
-| `neural_network`   | 神经网络框架                                  |  
-| `utils`            | 数据预处理和降维                                |  
-| `metrics`          | 评估指标                                    |  
-| `math`             | 数学工具                                    |  
-| `default`          | 开启`machine_learning`和`neural_network`功能 |
-| `full`             | 启用所有功能                                  |
-| `show_progress`    | 训练时显示进度条                                |
+经典的监督与无监督学习算法，均带有并行优化、输入校验和 JSON 持久化能力。
+
+| 类别 | 算法 |
+|------|------|
+| **回归** | 线性回归（可选 L1/L2 正则化） |
+| **分类** | 逻辑回归、K 近邻、决策树（ID3 / C4.5 / CART）、SVC（核 SMO）、Linear SVC、线性判别分析（LDA） |
+| **聚类** | KMeans（K-means++ 初始化）、DBSCAN、MeanShift |
+| **异常检测** | 隔离森林（Isolation Forest） |
+
+共享的配置类型位于 [`types`](https://docs.rs/rustyml/latest/rustyml/types/index.html) 模块：
+`DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）、`RegularizationType`（L1 / L2）、
+以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。所有模型都实现统一的 `Fit` 与
+`Predict` trait。
+
+### `neural_network`
+
+一个完整的框架，通过 Keras 风格的 `Sequential` API 构建、训练并序列化前馈、卷积及循环网络。
+
+- **核心层** - `Dense`、`Flatten`
+- **激活** - `ReLU`、`Sigmoid`、`Tanh`、`Softmax`、`Linear`（可用 `Activation` 枚举或独立的激活层）
+- **卷积** - `Conv1D`、`Conv2D`、`Conv3D`、`DepthwiseConv2D`、`SeparableConv2D`
+- **池化** - 1D / 2D / 3D 的最大池化与平均池化，以及它们对应的全局变体
+- **循环** - `SimpleRNN`、`LSTM`、`GRU`
+- **正则化** - `Dropout`、`SpatialDropout{1,2,3}D`、`GaussianNoise`、`GaussianDropout`
+- **归一化** - `BatchNormalization`、`LayerNormalization`、`InstanceNormalization`、`GroupNormalization`
+- **优化器** - `SGD`（支持动量）、`Adam`、`RMSprop`、`AdaGrad`
+- **损失函数** - `MeanSquaredError`、`MeanAbsoluteError`、`BinaryCrossEntropy`、`CategoricalCrossEntropy`、`SparseCategoricalCrossEntropy`
+
+训练支持全批量（`fit`）与小批量（`fit_with_batches`）循环、权重查看（`get_weights`），
+以及 JSON 序列化（`save_to_path` / `load_from_path`）。
+
+### `utils`
+
+数据预处理与降维。
+
+- **降维** - `PCA`（多种 SVD 求解器）、`KernelPCA`（RBF / Linear / Poly / Sigmoid / Cosine 核）、`TSNE`
+- **缩放** - `standardize`（z-score 标准化）、`normalize`（可配置轴与范数阶数）
+- **标签编码** - `to_categorical`、`to_categorical_with_mapping`、`to_sparse_categorical`
+- **数据划分** - `train_test_split`，比例可配置
+
+### `metrics`
+
+一套广泛的评估指标。所有函数都以 `(y_true, y_pred)` 为参数，并在违反前置条件时（长度不匹配、
+输入为空）直接 panic 而非返回 `Result`，从而让这个叶子模块保持轻量、依赖极少。
+
+- **回归** - MSE、RMSE、MAE、中位数绝对误差、MAPE、R²、可解释方差
+- **分类** - 准确率、`ConfusionMatrix` 与 `MulticlassConfusionMatrix`、ROC AUC、对数损失、Cohen's κ、top-k 准确率、平均精度、ROC 与精确率-召回率曲线
+- **聚类** - 调整兰德指数、标准化 / 调整互信息、同质性 / 完整性 / V-measure、Fowlkes–Mallows、轮廓系数、Davies–Bouldin、Calinski–Harabasz
+
+### `math`
+
+整个库共享的纯函数式数值原语：不纯度度量（`entropy`、`gini`）、距离
+（`squared_euclidean_distance_row`、`manhattan_distance_row`、`minkowski_distance_row`）、
+统计量（`variance`、`standard_deviation`、`sum_of_square_total`、`sum_of_squared_errors`），
+以及激活/损失辅助函数（`sigmoid`、`logistic_loss`、`hinge_loss`）。
+
+### `prelude`
+
+按领域拆分的一站式导入，让你只引入需要的部分：
+
+```rust
+use rustyml::prelude::machine_learning::*; // 机器学习模型、trait、配置枚举
+use rustyml::prelude::neural_network::*;   // 层、优化器、损失函数
+use rustyml::prelude::utils::*;            // PCA、t-SNE、缩放、数据划分
+use rustyml::prelude::metrics::*;          // 评估指标
+use rustyml::prelude::math::*;             // 数学原语
+```
+
+## 特性标志（Feature Flags）
+
+该 crate 使用 feature 进行模块化编译：
+
+| Feature | 说明 |
+|---------|------|
+| `machine_learning` | 经典机器学习算法（启用 `math`） |
+| `neural_network` | 神经网络框架 |
+| `utils` | 数据预处理与降维（启用 `math`） |
+| `metrics` | 评估指标（启用 `math`） |
+| `math` | 数学与统计原语 |
+| `default` | `machine_learning` + `neural_network` |
+| `full` | 以上全部模块 |
+| `show_progress` | 在终端渲染训练/迭代进度条 |
+
+## 可复现性
+
+每个随机化组件（权重初始化、K-means++、隔离森林、t-SNE、dropout……）都会将其
+`random_state: Option<u64>` 解析到一个共享入口。只需设置一个全局种子，整个库即变得确定：
+
+```rust
+use rustyml::set_global_seed;
+
+set_global_seed(42);
+// ……训练模型；结果在多次运行间可复现...
+```
+
+单次调用传入的 `random_state` 优先级高于全局种子，全局种子又高于系统熵。完整的解析规则请见
+[`random`](https://docs.rs/rustyml/latest/rustyml/random/index.html) 模块。
+
+## 错误处理
+
+除 `metrics` 和 `math` 这两个叶子模块外，所有可能失败的操作都返回 `RustymlResult<T>`
+（即 `Result<T, error::Error>` 的别名）。`Error` 类型被组织为多个类别变体，并将领域相关的失败
+归入嵌套的 `NnError`、`TreeError`、`IoError` 子枚举，因此你可以精确匹配出错原因，而无需解析字符串。
 
 ## 项目状态
-RustyML是积极开发中的。虽然API正在稳定，但在1.0.0版本之前，次要版本更新中可能会出现破坏性更改。
+
+RustyML 正在积极开发中。API 正在趋于稳定，但在 `1.0.0` 之前，次要版本更新中仍可能出现破坏性更改。
 
 ## 贡献
-欢迎贡献！如果您有兴趣帮助构建Rust中的强大机器学习生态系统，请随时：
-1. 提交bug或功能请求
-2. 创建改进的拉取请求
-3. 提供API设计的反馈意见
-4. 帮助完善文档和示例
+
+欢迎贡献！如果你有兴趣帮助构建一个强大的 Rust 机器学习生态，你可以：
+
+1. 提交 issue 反馈 bug 或功能需求
+2. 提交 pull request 改进代码
+3. 就 API 设计提供反馈
+4. 完善文档与示例
+
+也请阅读[行为准则](https://github.com/SomeB1oody/RustyML/blob/master/CODE_OF_CONDUCT.md)。
 
 ## 作者
-SomeB1oody – [stanyin64@gmail.com](mailto:stanyin64@gmail.com)
+
+SomeB1oody — [stanyin64@gmail.com](mailto:stanyin64@gmail.com)
 
 ## 许可证
-根据[MIT许可证](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)授权。有关详细信息，请参阅LICENSE文件。
+
+基于 [MIT 许可证](https://github.com/SomeB1oody/RustyML/blob/master/LICENSE)授权。详情请参阅 LICENSE 文件。
