@@ -10,6 +10,13 @@
 [![crates.io](https://img.shields.io/crates/v/rustyml.svg)](https://crates.io/crates/rustyml)
 [![docs.rs](https://img.shields.io/docsrs/rustyml)](https://docs.rs/rustyml)
 
+<p align="center">
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml"><img alt="fmt" src="https://github.com/SomeB1oody/RustyML/actions/workflows/fmt.yml/badge.svg?branch=master"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml"><img alt="clippy" src="https://github.com/SomeB1oody/RustyML/actions/workflows/clippy.yml/badge.svg?branch=master"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml"><img alt="test" src="https://github.com/SomeB1oody/RustyML/actions/workflows/test.yml/badge.svg?branch=master"></a>
+  <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml"><img alt="doc" src="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml/badge.svg?branch=master"></a>
+</p>
+
 ## 概述
 
 RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端到端实现，不依赖任何 C/C++ 代码。
