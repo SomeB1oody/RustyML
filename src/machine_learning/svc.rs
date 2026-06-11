@@ -3,17 +3,15 @@
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
 //! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`]
 
-use super::parallel::{map_collect, try_map_collect};
+use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 pub use crate::KernelType;
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, ParallelBridge, ParallelIterator,
-};
+use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
 /// Sample-count threshold for switching SVC operations to parallel computation
 ///
@@ -173,38 +171,28 @@ impl SVC {
     );
     get_field!(get_bias, bias, Option<f64>);
 
-    /// Computes the decision value for a single sample
-    ///
-    /// # Parameters
-    ///
-    /// - `x_row` - Input sample
-    /// - `support_vectors` - Support vector matrix
-    /// - `alphas` - Alpha values
-    /// - `support_vector_labels` - Support vector labels
-    /// - `bias` - Bias term
-    /// - `kernel_fn` - Kernel function closure
-    ///
-    /// # Returns
-    ///
-    /// - `f64` - The computed decision value
-    fn compute_decision_value<F>(
-        x_row: ArrayView1<f64>,
+    /// Computes the raw decision-function value for every row of `x` in one batched pass,
+    /// returning one value per sample
+    fn decision_values_batch<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
         support_vectors: &Array2<f64>,
         alphas: &Array1<f64>,
         support_vector_labels: &Array1<f64>,
         bias: f64,
-        kernel_fn: F,
-    ) -> f64
+    ) -> Array1<f64>
     where
-        F: Fn(ArrayView1<f64>, ArrayView1<f64>) -> f64,
+        S: Data<Elem = f64> + Sync,
     {
-        (0..support_vectors.nrows())
-            .map(|j| {
-                let kernel_val = kernel_fn(x_row, support_vectors.row(j));
-                alphas[j] * support_vector_labels[j] * kernel_val
-            })
-            .sum::<f64>()
-            + bias
+        // Batched form of `decision_i = sum_j alpha_j * y_j * K(x_i, sv_j) + bias`, written as
+        // `(K * coef)_i + bias` with `coef_j = alpha_j * y_j` and `K[i, j] = K(x_i, sv_j)`;
+        // `compute_matrix` builds K in one pass parallelized over rows, replacing the n*m scalar
+        // kernel calls (each of which allocated a temporary difference vector for RBF/Cosine)
+        let coef = alphas * support_vector_labels;
+        let kernel_matrix = self.kernel.compute_matrix(x, support_vectors);
+        let mut decision_values = kernel_matrix.dot(&coef);
+        decision_values += bias;
+        decision_values
     }
 
     /// Fits the SVC model to the training data
@@ -435,28 +423,16 @@ impl SVC {
             ));
         }
 
-        let n_samples = x.nrows();
+        let decision_values =
+            self.decision_values_batch(x, support_vectors, alphas, support_vector_labels, bias);
 
-        let compute_prediction = |i: usize| {
-            let decision_value = Self::compute_decision_value(
-                x.row(i),
-                support_vectors,
-                alphas,
-                support_vector_labels,
-                bias,
-                |x1, x2| self.kernel.compute(x1, x2),
-            );
+        if decision_values.iter().any(|v| !v.is_finite()) {
+            return Err(Error::non_finite("decision function during prediction"));
+        }
 
-            if !decision_value.is_finite() {
-                Err(Error::non_finite("decision function during prediction"))
-            } else {
-                Ok(if decision_value >= 0.0 { 1.0 } else { -1.0 })
-            }
-        };
+        let predictions = decision_values.mapv(|v| if v >= 0.0 { 1.0 } else { -1.0 });
 
-        let predictions = try_map_collect(n_samples, SVC_PARALLEL_THRESHOLD, compute_prediction)?;
-
-        Ok(Array1::from(predictions))
+        Ok(predictions)
     }
 
     /// Computes the decision function values for samples in X
@@ -505,35 +481,8 @@ impl SVC {
             ));
         }
 
-        let n_samples = x.nrows();
-
-        let mut decision_values = Array1::<f64>::zeros(n_samples);
-
-        // Fill each element of decision_values
-        let compute_fn = |(i, mut val): (usize, ArrayViewMut0<f64>)| {
-            let decision_val = Self::compute_decision_value(
-                x.row(i),
-                support_vectors,
-                alphas,
-                support_vector_labels,
-                bias,
-                |x1, x2| self.kernel.compute(x1, x2),
-            );
-            val.fill(decision_val);
-        };
-
-        if n_samples >= SVC_PARALLEL_THRESHOLD {
-            decision_values
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(compute_fn);
-        } else {
-            decision_values
-                .axis_iter_mut(Axis(0))
-                .enumerate()
-                .for_each(compute_fn);
-        }
+        let decision_values =
+            self.decision_values_batch(x, support_vectors, alphas, support_vector_labels, bias);
 
         Ok(decision_values)
     }

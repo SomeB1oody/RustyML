@@ -1,9 +1,8 @@
 //! Index-mapping helpers that pick parallel or sequential execution based on a size threshold
 //!
-//! Provides [`map_collect`] and its fallible counterpart [`try_map_collect`], the shared
-//! "parallelize only for large inputs" dispatch used across the machine-learning models
+//! Provides [`map_collect`], the shared "parallelize only for large inputs" dispatch used
+//! across the machine-learning models
 
-use crate::error::Error;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Maps `f` over `0..n`, choosing parallel or sequential execution by `threshold`
@@ -25,34 +24,6 @@ pub(super) fn map_collect<R, F>(n: usize, threshold: usize, f: F) -> Vec<R>
 where
     R: Send,
     F: Fn(usize) -> R + Sync + Send,
-{
-    if n >= threshold {
-        (0..n).into_par_iter().map(f).collect()
-    } else {
-        (0..n).map(f).collect()
-    }
-}
-
-/// Fallible counterpart to [`map_collect`]: short-circuits on the first `Err`
-///
-/// # Parameters
-///
-/// - `n` - Number of items to process (the iterator runs over `0..n`)
-/// - `threshold` - Minimum `n` at which parallel execution is used
-/// - `f` - Fallible mapping applied to each index
-///
-/// # Returns
-///
-/// - `Result<Vec<R>, Error>` - The collected results, or the first error encountered
-///
-/// # Errors
-///
-/// - Propagates any `Error` returned by `f`
-#[inline]
-pub(super) fn try_map_collect<R, F>(n: usize, threshold: usize, f: F) -> Result<Vec<R>, Error>
-where
-    R: Send,
-    F: Fn(usize) -> Result<R, Error> + Sync + Send,
 {
     if n >= threshold {
         (0..n).into_par_iter().map(f).collect()
@@ -99,37 +70,5 @@ mod tests {
     fn map_collect_empty() {
         let out: Vec<usize> = map_collect(0, 4, |i| i * 2);
         assert!(out.is_empty(), "empty range must produce empty output");
-    }
-
-    /// try_map_collect surfaces the first (lowest-index) Err when multiple mappings fail
-    #[test]
-    fn try_map_collect_propagates_first_err() {
-        let threshold = 100_usize; // keep n=5 on the sequential, deterministic-order branch
-
-        let result: Result<Vec<usize>, Error> = try_map_collect(5, threshold, |i| {
-            if i == 2 || i == 4 {
-                Err(Error::invalid_input(format!("fail at {i}")))
-            } else {
-                Ok(i * 10)
-            }
-        });
-
-        match result {
-            Err(Error::InvalidInput(msg)) => {
-                assert_eq!(
-                    msg, "fail at 2",
-                    "the first (lowest-index) error must propagate"
-                );
-            }
-            other => panic!("expected Err(InvalidInput), got {other:?}"),
-        }
-    }
-
-    /// `try_map_collect` returns `Ok` with all values in index order when every mapping succeeds
-    #[test]
-    fn try_map_collect_all_ok_index_order() {
-        let result: Result<Vec<usize>, Error> =
-            try_map_collect(4, 100, |i| Ok::<usize, Error>(i + 1));
-        assert_eq!(result.unwrap(), vec![1, 2, 3, 4]);
     }
 }

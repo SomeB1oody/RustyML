@@ -102,19 +102,22 @@ impl SVDSolver {
             .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
         let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
         let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
-        let mut y_mat = &x_mat * &omega_mat;
+        // Initial sketch Y = X * Omega, orthonormalized to an orthonormal basis Q
+        let mut q = nalgebra::linalg::QR::new(&x_mat * &omega_mat).q();
+        let x_t = x_mat.transpose();
 
-        // A few power iterations sharpen the spectral separation
+        // Subspace (power) iterations with re-orthonormalization between each step. Halko et al.
+        // require orthonormalizing between iterations; without it the iterates collapse toward
+        // the dominant singular vector in finite precision and the trailing components become
+        // inaccurate (especially for slowly-decaying spectra)
         let n_iter = 2usize;
         for _ in 0..n_iter {
-            let y_t = x_mat.transpose() * &y_mat;
-            y_mat = &x_mat * y_t;
+            let w = nalgebra::linalg::QR::new(&x_t * &q).q();
+            q = nalgebra::linalg::QR::new(&x_mat * &w).q();
         }
 
-        // Orthonormalize the sketch and compute SVD in the reduced space
-        let qr = nalgebra::linalg::QR::new(y_mat);
-        let q = qr.q();
-        let b = q.transpose() * x_mat;
+        // Project X onto the orthonormal basis and compute the SVD in the reduced space
+        let b = &q.transpose() * &x_mat;
 
         let svd = nalgebra::linalg::SVD::new(b, false, true);
         let v_t = svd

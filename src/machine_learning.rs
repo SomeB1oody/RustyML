@@ -29,6 +29,8 @@ pub mod logistic_regression;
 pub mod mean_shift;
 /// Internal shared helpers for parallel/sequential dispatch across models
 mod parallel;
+/// Internal kd-tree spatial index for fixed-radius and k-nearest-neighbor queries
+mod spatial;
 /// Support Vector Classification (SVC)
 pub mod svc;
 /// Common `Fit` / `Predict` traits implemented by every estimator

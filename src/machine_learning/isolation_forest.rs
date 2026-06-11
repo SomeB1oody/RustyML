@@ -78,6 +78,10 @@ pub struct IsolationForest {
     random_state: Option<u64>,
     /// Number of features in the training data
     n_features: usize,
+    /// Actual sub-sample size used per tree at fit time, `min(max_samples, n_rows)`. The
+    /// anomaly-score normalization `c(n)` uses this realized size, not `max_samples`, so the
+    /// scores stay correct when the dataset is smaller than `max_samples`
+    sample_size: usize,
 }
 
 impl Default for IsolationForest {
@@ -96,6 +100,7 @@ impl Default for IsolationForest {
             trees: None,
             n_estimators: 100,
             max_samples: 256,
+            sample_size: 0,
             max_depth: 8, // ceil(log2(256)) = 8
             random_state: None,
             n_features: 0,
@@ -161,6 +166,7 @@ impl IsolationForest {
             trees: None,
             n_estimators,
             max_samples,
+            sample_size: 0,
             max_depth: computed_max_depth,
             random_state,
             n_features: 0,
@@ -170,6 +176,7 @@ impl IsolationForest {
     // Getters
     get_field!(get_n_estimators, n_estimators, usize);
     get_field!(get_max_samples, max_samples, usize);
+    get_field!(get_sample_size, sample_size, usize);
     get_field!(get_max_depth, max_depth, usize);
     get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_n_features, n_features, usize);
@@ -205,6 +212,9 @@ impl IsolationForest {
         preliminary_check(x, None)?;
 
         self.n_features = x.ncols();
+        // Realized sub-sample size used for every tree; the score normalization c(n) below is
+        // computed from this, not from the configured max_samples
+        self.sample_size = self.max_samples.min(x.nrows());
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -221,9 +231,8 @@ impl IsolationForest {
             let mut rng =
                 crate::random::make_rng(self.random_state.map(|s| s.wrapping_add(i as u64)));
 
-            // Sample a subset of data for this tree
-            let sample_size = self.max_samples.min(x.nrows());
-            let sample_indices = self.sample_indices(x.nrows(), sample_size, &mut rng);
+            // Sample a subset of data for this tree (same realized size for every tree)
+            let sample_indices = self.sample_indices(x.nrows(), self.sample_size, &mut rng);
 
             let result = self.build_isolation_tree(x, &sample_indices, 0, &mut rng);
 
@@ -376,8 +385,8 @@ impl IsolationForest {
 
         let trees = self.trees.as_ref().unwrap();
 
-        // Normalize using c(max_samples)
-        let c_n = average_path_length_factor(self.max_samples);
+        // Normalize using c(sample_size), the actual sub-sample size used at fit time
+        let c_n = average_path_length_factor(self.sample_size);
 
         Ok(self.normalized_score(sample, trees, c_n))
     }
@@ -394,6 +403,12 @@ impl IsolationForest {
             .map(|tree| self.path_length(sample, tree, 0))
             .sum::<f64>()
             / trees.len() as f64;
+
+        // Degenerate sub-sample of size <= 1 makes c(n) = 0; every point isolates immediately
+        // (path length 0), which is maximally anomalous, so the score is 1.0 by convention
+        if c_n <= 0.0 {
+            return 1.0;
+        }
 
         // Anomaly score: s(x, n) = 2^(-E(h(x)) / c(n))
         2.0_f64.powf(-avg_path_length / c_n)
@@ -430,7 +445,7 @@ impl IsolationForest {
         // Precompute the normalization constant once for the whole batch; inputs were
         // validated above, so rows are scored directly without per-sample validation
         let trees = self.trees.as_ref().unwrap();
-        let c_n = average_path_length_factor(self.max_samples);
+        let c_n = average_path_length_factor(self.sample_size);
 
         let scores: Vec<f64> = if x.nrows() >= DEFAULT_PARALLEL_THRESHOLD_SAMPLES {
             x.axis_iter(Axis(0))

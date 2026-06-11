@@ -35,5 +35,5 @@ pub use label_encoding::{to_categorical, to_categorical_with_mapping, to_sparse_
 pub use normalize::{NormalizationAxis, NormalizationOrder, normalize};
 pub use pca::{PCA, SVDSolver};
 pub use standardize::{StandardizationAxis, standardize};
-pub use t_sne::TSNE;
-pub use train_test_split::{TrainTestSplit, train_test_split};
+pub use t_sne::{Init, TSNE, TSNEMethod};
+pub use train_test_split::{TrainTestSplit, train_test_split, train_test_split_stratified};

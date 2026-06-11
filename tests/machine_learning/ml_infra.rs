@@ -795,7 +795,7 @@ fn generic_fit_predict_mean_shift_outputs_usize_labels() {
     )
     .unwrap();
 
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true), None).unwrap();
+    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
     Fit::fit(&mut ms, &data).expect("fit via Fit trait should succeed");
     let labels: Array1<usize> =
         Predict::predict(&ms, &data).expect("predict via Predict trait should succeed");

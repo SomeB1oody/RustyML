@@ -302,45 +302,51 @@ impl LinearSVC {
             for batch_indices in indices.chunks(batch_size) {
                 let batch_len = batch_indices.len() as f64;
 
-                let compute_gradient = |&idx: &usize| {
+                // Accumulate the batch hinge-loss gradient in place: for each margin violation
+                // add `yi * xi` to the running sum via `scaled_add`, avoiding the per-sample
+                // temporary vector (`xi.to_owned() * yi`) and the per-step array addition the
+                // previous map/reduce incurred
+                let accumulate = |idx: usize, w_grad: &mut Array1<f64>, b_grad: &mut f64| {
                     let xi = x.slice(s![idx, ..]);
                     let yi = y_binary[idx];
                     let margin = xi.dot(&weights) + bias;
-
-                    // Hinge loss gradient: only contribute if margin violation occurs
                     if yi * margin < 1.0 {
-                        let weight_grad = xi.to_owned() * yi;
-                        let bias_grad = yi;
-                        (weight_grad, bias_grad)
-                    } else {
-                        (Array1::zeros(n_features), 0.0)
+                        w_grad.scaled_add(yi, &xi);
+                        *b_grad += yi;
                     }
                 };
 
                 // Use parallel or sequential processing based on batch size
                 let (weight_grad_sum, bias_grad_sum) =
                     if batch_indices.len() >= LINEAR_SVC_PARALLEL_THRESHOLD {
-                        batch_indices.par_iter().map(compute_gradient).reduce(
-                            || (Array1::zeros(n_features), 0.0),
-                            |mut acc, (w_grad, b_grad)| {
-                                acc.0 = &acc.0 + &w_grad;
-                                acc.1 += b_grad;
-                                acc
-                            },
-                        )
+                        // Per-thread accumulators via fold, combined once at the end
+                        batch_indices
+                            .par_iter()
+                            .fold(
+                                || (Array1::zeros(n_features), 0.0),
+                                |mut acc, &idx| {
+                                    accumulate(idx, &mut acc.0, &mut acc.1);
+                                    acc
+                                },
+                            )
+                            .reduce(
+                                || (Array1::zeros(n_features), 0.0),
+                                |mut a, b| {
+                                    a.0 += &b.0;
+                                    a.1 += b.1;
+                                    a
+                                },
+                            )
                     } else {
-                        batch_indices.iter().map(compute_gradient).fold(
-                            (Array1::zeros(n_features), 0.0),
-                            |mut acc, (w_grad, b_grad)| {
-                                acc.0 = &acc.0 + &w_grad;
-                                acc.1 += b_grad;
-                                acc
-                            },
-                        )
+                        let mut acc = (Array1::<f64>::zeros(n_features), 0.0);
+                        for &idx in batch_indices {
+                            accumulate(idx, &mut acc.0, &mut acc.1);
+                        }
+                        acc
                     };
 
-                // Update weights with hinge loss gradient
-                weights = &weights + &(weight_grad_sum * (self.learning_rate / batch_len));
+                // Update weights with the averaged hinge-loss gradient (in place, no allocation)
+                weights.scaled_add(self.learning_rate / batch_len, &weight_grad_sum);
 
                 // Apply regularization
                 match self.penalty {

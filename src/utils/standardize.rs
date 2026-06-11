@@ -54,6 +54,9 @@ impl StandardizationAxis {
 /// Subtracts the mean and divides by the standard deviation per the chosen axis, so the
 /// standardized values have mean 0 and standard deviation 1
 ///
+/// The standard deviation uses the population variance (divides by `n`), matching scikit-learn's
+/// `StandardScaler`. There is no sample-variance (divide by `n - 1`) option
+///
 /// # Parameters
 ///
 /// - `data` - Input array as `ArrayBase` with arbitrary dimensions and f64 elements
@@ -114,6 +117,38 @@ where
     Ok(result)
 }
 
+/// Running (count, mean, sum-of-squared-deviations) statistics for Welford's online
+/// algorithm, which computes mean and variance in a single numerically-stable pass
+type WelfordState = (f64, f64, f64);
+
+/// Folds one value into a Welford accumulator
+#[inline]
+fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordState {
+    let count = count + 1.0;
+    let delta = x - mean;
+    let mean = mean + delta / count;
+    let m2 = m2 + delta * (x - mean);
+    (count, mean, m2)
+}
+
+/// Merges two Welford accumulators (Chan et al.), enabling a parallel one-pass reduction
+#[inline]
+fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
+    let (na, ma, m2a) = a;
+    let (nb, mb, m2b) = b;
+    if na == 0.0 {
+        return b;
+    }
+    if nb == 0.0 {
+        return a;
+    }
+    let n = na + nb;
+    let delta = mb - ma;
+    let mean = ma + delta * nb / n;
+    let m2 = m2a + m2b + delta * delta * na * nb / n;
+    (n, mean, m2)
+}
+
 /// Standardizes the entire array as a single dataset
 fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
 where
@@ -125,16 +160,20 @@ where
         return Err(Error::computation("No values to standardize"));
     }
 
+    // Single stable pass for both mean and (population) variance, then one transform pass
+    let (_, mean, m2) = if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
+        data.par_iter()
+            .fold(|| (0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x))
+            .reduce(|| (0.0, 0.0, 0.0), welford_merge)
+    } else {
+        data.iter()
+            .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x))
+    };
+    let std_dev = (m2 / n + epsilon * epsilon).sqrt();
+
     if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
-        let mean = data.par_iter().sum::<f64>() / n;
-        let variance = data.par_iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-        let std_dev = (variance + epsilon * epsilon).sqrt();
         data.par_mapv_inplace(|x| (x - mean) / std_dev);
     } else {
-        // Same computation as the parallel branch, run sequentially
-        let mean = data.iter().sum::<f64>() / n;
-        let variance = data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-        let std_dev = (variance + epsilon * epsilon).sqrt();
         data.mapv_inplace(|x| (x - mean) / std_dev);
     }
 
@@ -147,9 +186,11 @@ where
 /// strictly positive so the subsequent division is always well defined
 fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
     let n = lane.len() as f64;
-    let mean = lane.sum() / n;
-    let variance = lane.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n;
-    let std_dev = (variance + epsilon * epsilon).sqrt();
+    // Single stable pass (Welford) for both mean and population variance
+    let (_, mean, m2) = lane
+        .iter()
+        .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x));
+    let std_dev = (m2 / n + epsilon * epsilon).sqrt();
     (mean, std_dev)
 }
 

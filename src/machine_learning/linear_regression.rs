@@ -266,7 +266,9 @@ impl LinearRegression {
                         alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
                     }
                 }
-                Some(RegularizationType::L2(alpha)) => alpha * weights.dot(&weights),
+                // Penalty (alpha/2)*||w||^2; the 1/2 matches the gradient alpha*w applied below
+                // and mirrors the 1/2 in the sse/(2n) data term
+                Some(RegularizationType::L2(alpha)) => 0.5 * alpha * weights.dot(&weights),
             };
 
             let cost = sse / (2.0 * n_samples as f64) + regularization_term;
@@ -326,6 +328,7 @@ impl LinearRegression {
                     }
                 }
                 Some(RegularizationType::L2(alpha)) => {
+                    // d/dw [(alpha/2) * ||w||^2] = alpha * w, matching the cost term above
                     weight_gradients.scaled_add(*alpha, &weights);
                 }
             }

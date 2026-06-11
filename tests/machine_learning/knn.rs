@@ -298,6 +298,43 @@ fn predict_k3_majority_clean() {
     assert_eq!(predictions[1], 1, "Q1=(10.5,0) → 3 votes for class 1");
 }
 
+/// Above 16 features KNN falls back from the kd-tree to the brute-force search; predictions
+/// (and the sequential/parallel paths) must remain correct on that path
+#[test]
+fn predict_high_dimensional_falls_back_to_brute_force() {
+    let n_features = 18; // above the kd-tree dimensionality cutoff (16)
+    let mut x_train = Array2::<f64>::zeros((6, n_features));
+    for i in 0..3 {
+        for j in 0..n_features {
+            x_train[[i, j]] = 0.1 * i as f64; // class 0 near the origin
+        }
+    }
+    for i in 3..6 {
+        for j in 0..n_features {
+            x_train[[i, j]] = 10.0 + 0.1 * i as f64; // class 1 near 10
+        }
+    }
+    let y_train = array![0, 0, 0, 1, 1, 1];
+
+    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    knn.fit(&x_train, &y_train).unwrap();
+
+    let mut x_test = Array2::<f64>::zeros((2, n_features));
+    for j in 0..n_features {
+        x_test[[0, j]] = 0.15; // near class 0
+        x_test[[1, j]] = 10.15; // near class 1
+    }
+
+    let seq = knn.predict(&x_test).unwrap();
+    let par = knn.predict_parallel(&x_test).unwrap();
+    assert_eq!(seq[0], 0, "high-dim query near class 0 must predict 0");
+    assert_eq!(seq[1], 1, "high-dim query near class 1 must predict 1");
+    assert_eq!(
+        seq, par,
+        "sequential and parallel must agree on the brute-force path"
+    );
+}
+
 /// k=3 Euclidean Uniform resolves a 2:1 split (2 of 3 neighbours decide the class)
 #[test]
 fn predict_k3_majority_two_to_one_split() {

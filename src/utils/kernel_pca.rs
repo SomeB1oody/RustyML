@@ -718,12 +718,19 @@ impl KernelPCA {
         Ok(())
     }
 
-    /// Validates eigenvalues for positivity and finiteness
+    /// Validates that eigenvalues are finite
+    ///
+    /// Only non-finite eigenvalues (NaN/Inf) indicate a genuine numerical failure. Non-positive
+    /// eigenvalues are tolerated: a centered kernel (Gram) matrix is only PSD up to round-off,
+    /// and non-Mercer kernels such as `Sigmoid` legitimately produce near-zero or slightly
+    /// negative trailing eigenvalues. Those components carry no information and are zeroed out
+    /// at projection time (see [`compute_scaling_factors`]), matching scikit-learn, rather than
+    /// failing the whole fit
     fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), Error> {
         for &value in eigenvalues.iter() {
-            if !value.is_finite() || value <= 0.0 {
+            if !value.is_finite() {
                 return Err(Error::computation(format!(
-                    "Kernel PCA requires positive finite eigenvalues, got {}",
+                    "Kernel PCA requires finite eigenvalues, got {}",
                     value
                 )));
             }
@@ -731,17 +738,34 @@ impl KernelPCA {
         Ok(())
     }
 
-    /// Computes scaling factors from eigenvalues for projection
+    /// Computes the `1/sqrt(lambda)` projection scaling factors from eigenvalues
+    ///
+    /// Components whose eigenvalue is not meaningfully positive (near-zero from round-off, or
+    /// negative from a non-PSD kernel) get a scale of `0.0`, which zeroes their projection
+    /// instead of producing `Inf`/`NaN`. This preserves the requested `n_components`
+    /// dimensionality while ignoring degenerate directions, as scikit-learn does
     fn compute_scaling_factors(eigenvalues: &Array1<f64>) -> Result<Vec<f64>, Error> {
+        // Relative threshold below which an eigenvalue is treated as non-informative
+        let max_eig = eigenvalues
+            .iter()
+            .cloned()
+            .filter(|v| v.is_finite())
+            .fold(0.0_f64, f64::max);
+        let tol = (1e-12 * max_eig).max(f64::MIN_POSITIVE);
+
         let mut scales = Vec::with_capacity(eigenvalues.len());
         for &value in eigenvalues.iter() {
-            if !value.is_finite() || value <= 0.0 {
+            if !value.is_finite() {
                 return Err(Error::computation(format!(
-                    "Eigenvalue must be positive and finite, got {}",
+                    "Eigenvalue must be finite, got {}",
                     value
                 )));
             }
-            scales.push(1.0 / value.sqrt());
+            if value > tol {
+                scales.push(1.0 / value.sqrt());
+            } else {
+                scales.push(0.0);
+            }
         }
         Ok(scales)
     }

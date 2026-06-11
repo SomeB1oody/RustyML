@@ -99,6 +99,39 @@ impl Algorithm {
         }
     }
 
+    /// Classification impurity computed directly from per-class counts, where `n_side` is the
+    /// number of samples on this side of a split
+    ///
+    /// Equivalent to [`classification_impurity`] (Gini for CART, entropy for ID3/C4.5) but
+    /// driven by running counts, which lets the numeric split search update impurity
+    /// incrementally instead of re-scanning the label subset for every candidate threshold
+    fn impurity_from_counts(&self, counts: &[f64], n_side: f64) -> f64 {
+        match self {
+            Algorithm::CART => {
+                // Gini: 1 - sum (c/n)^2
+                let mut sum_sq = 0.0;
+                for &c in counts {
+                    if c > 0.0 {
+                        let p = c / n_side;
+                        sum_sq += p * p;
+                    }
+                }
+                1.0 - sum_sq
+            }
+            Algorithm::ID3 | Algorithm::C45 => {
+                // Entropy: -sum (c/n) log2(c/n)
+                let mut ent = 0.0;
+                for &c in counts {
+                    if c > 0.0 {
+                        let p = c / n_side;
+                        ent -= p * p.log2();
+                    }
+                }
+                ent
+            }
+        }
+    }
+
     /// Selection score for a candidate split, given its impurity decrease and the sample
     /// counts of its partitions
     ///
@@ -778,55 +811,119 @@ impl DecisionTree {
     where
         S: Data<Elem = f64>,
     {
-        // Unique sorted values give the candidate thresholds (midpoints)
-        let mut feature_values: Vec<f64> = indices.iter().map(|&i| x[[i, feature_idx]]).collect();
-        feature_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        feature_values.dedup();
+        let n = indices.len();
+        if n < 2 {
+            return None;
+        }
+        let n_f = n as f64;
 
-        let n = indices.len() as f64;
-        let mut best_score = 0.0;
-        let mut best: Option<(Split, f64)> = None;
+        // Sort the samples by the feature value once (O(n log n)), then sweep left to right
+        // maintaining running left/right impurity statistics incrementally, instead of
+        // re-partitioning all samples and recomputing both child impurities from scratch for
+        // every candidate threshold (the old O(unique * n) loop)
+        let mut order: Vec<(f64, usize)> =
+            indices.iter().map(|&i| (x[[i, feature_idx]], i)).collect();
+        order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        for i in 0..feature_values.len().saturating_sub(1) {
-            let threshold = (feature_values[i] + feature_values[i + 1]) / 2.0;
+        // Start below any real score so the best candidate is found regardless of magnitude;
+        // the single `min_impurity_decrease` gate (in build_tree) decides acceptance
+        let mut best_score = f64::NEG_INFINITY;
+        // (split position, threshold, impurity_decrease); left = order[..pos], right = order[pos..]
+        let mut best: Option<(usize, f64, f64)> = None;
 
-            let (left, right): (Vec<usize>, Vec<usize>) = indices
-                .iter()
-                .partition(|&&idx| x[[idx, feature_idx]] <= threshold);
-
-            if left.is_empty() || right.is_empty() {
-                continue;
-            }
-
-            let n_left = left.len() as f64;
-            let n_right = right.len() as f64;
-            let weighted = (n_left / n) * self.calculate_impurity(y, &left)
-                + (n_right / n) * self.calculate_impurity(y, &right);
+        // Evaluates the candidate split between sorted positions `pos-1` and `pos`, given the
+        // already-computed child impurities, and updates `best` if it scores higher
+        let consider = |pos: usize,
+                        imp_left: f64,
+                        imp_right: f64,
+                        best_score: &mut f64,
+                        best: &mut Option<(usize, f64, f64)>| {
+            let n_left = pos as f64;
+            let n_right = (n - pos) as f64;
+            let weighted = (n_left / n_f) * imp_left + (n_right / n_f) * imp_right;
             let impurity_decrease = parent_impurity - weighted;
 
-            // C4.5 uses gain ratio (gain / split information), ID3 and CART use the raw decrease; a degenerate split-info skips this threshold
-            let Some(score) =
+            // C4.5 uses gain ratio (gain / split information); ID3 and CART use the raw decrease,
+            // and a degenerate split-info skips this threshold
+            if let Some(score) =
                 self.algorithm
-                    .selection_score(impurity_decrease, &[n_left, n_right], n)
-            else {
-                continue;
-            };
+                    .selection_score(impurity_decrease, &[n_left, n_right], n_f)
+                && score > *best_score
+            {
+                *best_score = score;
+                let threshold = (order[pos - 1].0 + order[pos].0) / 2.0;
+                *best = Some((pos, threshold, impurity_decrease));
+            }
+        };
 
-            if score > best_score {
-                best_score = score;
-                best = Some((
-                    Split::Numeric {
-                        feature: feature_idx,
-                        threshold,
-                        left,
-                        right,
-                    },
-                    impurity_decrease,
-                ));
+        if self.is_classifier {
+            let n_classes = self.n_classes.unwrap();
+            let mut left_counts = vec![0.0_f64; n_classes];
+            let mut right_counts = vec![0.0_f64; n_classes];
+            for &(_, idx) in &order {
+                right_counts[y[idx] as usize] += 1.0;
+            }
+
+            for pos in 1..n {
+                // Move the sample at position pos-1 from the right child to the left child
+                let cls = y[order[pos - 1].1] as usize;
+                left_counts[cls] += 1.0;
+                right_counts[cls] -= 1.0;
+
+                // A split is only valid between two distinct feature values
+                if order[pos - 1].0 == order[pos].0 {
+                    continue;
+                }
+
+                let imp_left = self
+                    .algorithm
+                    .impurity_from_counts(&left_counts, pos as f64);
+                let imp_right = self
+                    .algorithm
+                    .impurity_from_counts(&right_counts, (n - pos) as f64);
+                consider(pos, imp_left, imp_right, &mut best_score, &mut best);
+            }
+        } else {
+            // Regression (CART/MSE): maintain running sum and sum of squares for the left side;
+            // the right side is recovered from the totals. Population variance is E[x^2]-E[x]^2
+            let total_sum: f64 = order.iter().map(|&(_, idx)| y[idx]).sum();
+            let total_sumsq: f64 = order.iter().map(|&(_, idx)| y[idx] * y[idx]).sum();
+            let mut left_sum = 0.0;
+            let mut left_sumsq = 0.0;
+
+            for pos in 1..n {
+                let val = y[order[pos - 1].1];
+                left_sum += val;
+                left_sumsq += val * val;
+
+                if order[pos - 1].0 == order[pos].0 {
+                    continue;
+                }
+
+                let n_left = pos as f64;
+                let n_right = (n - pos) as f64;
+                let right_sum = total_sum - left_sum;
+                let right_sumsq = total_sumsq - left_sumsq;
+                let var_left = (left_sumsq / n_left - (left_sum / n_left).powi(2)).max(0.0);
+                let var_right = (right_sumsq / n_right - (right_sum / n_right).powi(2)).max(0.0);
+                consider(pos, var_left, var_right, &mut best_score, &mut best);
             }
         }
 
-        best.map(|(split, decrease)| (best_score, split, decrease))
+        best.map(|(pos, threshold, decrease)| {
+            let left: Vec<usize> = order[..pos].iter().map(|&(_, idx)| idx).collect();
+            let right: Vec<usize> = order[pos..].iter().map(|&(_, idx)| idx).collect();
+            (
+                best_score,
+                Split::Numeric {
+                    feature: feature_idx,
+                    threshold,
+                    left,
+                    right,
+                },
+                decrease,
+            )
+        })
     }
 
     /// Evaluates a multi-way categorical split for a single feature (one branch per value)
@@ -870,11 +967,10 @@ impl DecisionTree {
         }
 
         let impurity_decrease = parent_impurity - weighted;
-        if impurity_decrease <= 0.0 {
-            return None;
-        }
 
-        // C4.5 uses gain ratio (gain / split information), ID3 uses the raw decrease; a degenerate split-info rejects this feature
+        // Defer the acceptance threshold to the single `min_impurity_decrease` gate in
+        // build_tree (consistent with the numeric path); only reject a degenerate split-info
+        // here. C4.5 uses gain ratio (gain / split information), ID3/CART use the raw decrease
         let score = self
             .algorithm
             .selection_score(impurity_decrease, &counts, n)?;

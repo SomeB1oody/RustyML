@@ -4,12 +4,39 @@
 //! neighbor votes are weighted
 
 pub use super::DistanceCalculationMetric;
+use super::spatial::KdTree;
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::sync::OnceLock;
+
+/// Feature-count ceiling for using the kd-tree neighbor index. Above this many features the
+/// tree no longer prunes effectively, so KNN falls back to the brute-force search
+const KNN_KD_TREE_MAX_DIMS: usize = 16;
+
+/// Selects the class with the greatest accumulated score (vote count or summed weight),
+/// breaking ties in favor of the smallest class index
+///
+/// This makes the prediction deterministic: `AHashMap` iteration order is randomized per
+/// process, so a plain `max_by`/`max_by_key` would resolve tied classes differently across
+/// runs. Tying by the smallest class index matches the conventional scikit-learn behavior
+fn select_top_class<T>(scores: &AHashMap<usize, T>) -> Option<usize>
+where
+    T: PartialOrd + Copy,
+{
+    scores
+        .iter()
+        .max_by(|a, b| {
+            let (sa, sb): (T, T) = (*a.1, *b.1);
+            sa.partial_cmp(&sb)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.0.cmp(a.0)) // smaller class index wins ties
+        })
+        .map(|(&idx, _)| idx)
+}
 
 /// Strategy used for weighting neighbors in the KNN algorithm
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -79,6 +106,13 @@ pub struct KNN<T> {
     weighting_strategy: WeightingStrategy,
     /// Distance metric used for finding neighbors
     metric: DistanceCalculationMetric,
+
+    /// Lazily-built kd-tree over the training data, accelerating neighbor search in low
+    /// dimensions. Derived from `x_train`, so it is not serialized; it is rebuilt on first use
+    /// after loading. `Some(None)` records "high-dimensional, use brute force" so the decision
+    /// is made only once
+    #[serde(skip)]
+    tree: OnceLock<Option<KdTree>>,
 }
 
 impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
@@ -97,6 +131,7 @@ impl<T: Clone + std::hash::Hash + Eq> Default for KNN<T> {
             label_map: None,
             weighting_strategy: WeightingStrategy::Uniform,
             metric: DistanceCalculationMetric::Euclidean,
+            tree: OnceLock::new(),
         }
     }
 }
@@ -133,6 +168,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
             label_map: None,
             weighting_strategy,
             metric,
+            tree: OnceLock::new(),
         })
     }
 
@@ -210,6 +246,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         self.x_train = Some(x.to_owned());
         self.y_train_encoded = Some(Array1::from(encoded_labels));
         self.label_map = Some((label_to_idx, idx_to_label));
+        // Drop any kd-tree built from previous training data so it is rebuilt lazily on demand
+        self.tree = OnceLock::new();
 
         Ok(self)
     }
@@ -249,8 +287,15 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
-        // Training squared norms, shared by every query (Euclidean fast path only)
-        let train_sq_norms = self.euclidean_train_sq_norms(x_train);
+        // Neighbor index (kd-tree in low dimensions, else None for the brute-force fallback)
+        let tree = self.neighbor_tree(x_train.view());
+        // Training squared norms feed the brute-force Euclidean fast path; skip them when the
+        // tree handles the search
+        let train_sq_norms = if tree.is_some() {
+            None
+        } else {
+            self.euclidean_train_sq_norms(x_train)
+        };
 
         // Sequential prediction on encoded indices
         let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
@@ -261,6 +306,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     x_train.view(),
                     y_train_encoded,
                     train_sq_norms.as_ref(),
+                    tree,
                 )
             })
             .collect();
@@ -312,8 +358,15 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
-        // Training squared norms, shared by every query (Euclidean fast path only)
-        let train_sq_norms = self.euclidean_train_sq_norms(x_train);
+        // Neighbor index built once (single-threaded) before the parallel queries fan out
+        let tree = self.neighbor_tree(x_train.view());
+        // Training squared norms feed the brute-force Euclidean fast path; skip them when the
+        // tree handles the search
+        let train_sq_norms = if tree.is_some() {
+            None
+        } else {
+            self.euclidean_train_sq_norms(x_train)
+        };
 
         // Parallel prediction on encoded indices
         let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
@@ -325,6 +378,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
                     x_train.view(),
                     y_train_encoded,
                     train_sq_norms.as_ref(),
+                    tree,
                 )
             })
             .collect();
@@ -358,6 +412,21 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         }
     }
 
+    /// Returns the kd-tree neighbor index over the training data, building and caching it on
+    /// first use. Returns `None` in high dimensions (where the tree no longer helps), so the
+    /// caller falls back to the brute-force search
+    fn neighbor_tree(&self, x_train: ArrayView2<f64>) -> Option<&KdTree> {
+        self.tree
+            .get_or_init(|| {
+                if x_train.ncols() <= KNN_KD_TREE_MAX_DIMS {
+                    Some(KdTree::build(x_train, self.metric))
+                } else {
+                    None
+                }
+            })
+            .as_ref()
+    }
+
     /// Predicts the encoded class index for a single data point
     fn predict_one(
         &self,
@@ -365,34 +434,48 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         x_train: ArrayView2<f64>,
         y_train_encoded: &Array1<usize>,
         train_sq_norms: Option<&Array1<f64>>,
+        tree: Option<&KdTree>,
     ) -> Result<usize, Error> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        let mut distances: Vec<(f64, usize)> = match train_sq_norms {
-            Some(train_sq_norms) => {
-                let x_sq = x.dot(&x);
-                let projections = x_train.dot(&x); // [n_train] = X_train * x
-                projections
-                    .iter()
-                    .zip(train_sq_norms.iter())
-                    .enumerate()
-                    .map(|(i, (&proj, &t_sq))| {
-                        let dist_sq = (x_sq + t_sq - 2.0 * proj).max(0.0);
-                        (dist_sq.sqrt(), i)
-                    })
-                    .collect()
-            }
-            None => (0..n_samples)
-                .map(|i| (self.metric.distance(x, x_train.row(i)), i))
-                .collect(),
-        };
+        // The k nearest neighbors as (distance, train_index) pairs. Both the kd-tree path and
+        // the brute-force path select the k smallest under the (distance, index) total order,
+        // so they return the same set and the prediction is deterministic even on distance ties
+        let k_neighbors_owned: Vec<(f64, usize)> = if let Some(tree) = tree {
+            tree.k_nearest(x, k)
+                .into_iter()
+                .map(|(idx, cmp)| (self.metric.distance_from_comparable(cmp), idx))
+                .collect()
+        } else {
+            let mut distances: Vec<(f64, usize)> = match train_sq_norms {
+                Some(train_sq_norms) => {
+                    let x_sq = x.dot(&x);
+                    let projections = x_train.dot(&x); // [n_train] = X_train * x
+                    projections
+                        .iter()
+                        .zip(train_sq_norms.iter())
+                        .enumerate()
+                        .map(|(i, (&proj, &t_sq))| {
+                            let dist_sq = (x_sq + t_sq - 2.0 * proj).max(0.0);
+                            (dist_sq.sqrt(), i)
+                        })
+                        .collect()
+                }
+                None => (0..n_samples)
+                    .map(|i| (self.metric.distance(x, x_train.row(i)), i))
+                    .collect(),
+            };
 
-        // Use partial sorting to get only k smallest elements instead of full sort
-        distances.select_nth_unstable_by(k - 1, |a, b| {
-            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal) // Handle NaN by treating as equal
-        });
-        let k_neighbors = &distances[..k];
+            // Partial selection of the k smallest under the (distance, index) total order
+            if k < distances.len() {
+                distances
+                    .select_nth_unstable_by(k - 1, |a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            }
+            distances.truncate(k);
+            distances
+        };
+        let k_neighbors = &k_neighbors_owned[..];
 
         // Calculate based on weight strategy
         let result = match self.weighting_strategy {
@@ -400,15 +483,14 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                 // Threshold for using parallel voting aggregation
                 const VOTING_PARALLEL_THRESHOLD: usize = 100;
 
-                if k >= VOTING_PARALLEL_THRESHOLD {
+                let class_counts: AHashMap<usize, usize> = if k >= VOTING_PARALLEL_THRESHOLD {
                     // Parallel aggregation for large k values
-                    let class_counts = k_neighbors
+                    k_neighbors
                         .par_iter()
                         .fold(
                             AHashMap::new,
                             |mut acc: AHashMap<usize, usize>, &(_, idx)| {
-                                let class_idx = y_train_encoded[idx];
-                                *acc.entry(class_idx).or_insert(0) += 1;
+                                *acc.entry(y_train_encoded[idx]).or_insert(0) += 1;
                                 acc
                             },
                         )
@@ -417,98 +499,75 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                                 *a.entry(class_idx).or_insert(0) += count;
                             }
                             a
-                        });
-
-                    // Find the most common class
-                    class_counts
-                        .into_iter()
-                        .max_by_key(|(_, count)| *count)
-                        .map(|(class_idx, _)| class_idx)
-                        .ok_or_else(|| {
-                            Error::computation("No valid neighbors found for classification")
-                        })?
+                        })
                 } else {
                     // Sequential counting for small k values
                     let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
                     for &(_, idx) in k_neighbors {
-                        let class_idx = y_train_encoded[idx];
-                        *class_counts.entry(class_idx).or_insert(0) += 1;
+                        *class_counts.entry(y_train_encoded[idx]).or_insert(0) += 1;
                     }
-
-                    // Find the most common class
                     class_counts
-                        .into_iter()
-                        .max_by_key(|(_, count)| *count)
-                        .map(|(class_idx, _)| class_idx)
-                        .ok_or_else(|| {
-                            Error::computation("No valid neighbors found for classification")
-                        })?
-                }
+                };
+
+                // Most common class, ties broken deterministically by smallest class index
+                select_top_class(&class_counts).ok_or_else(|| {
+                    Error::computation("No valid neighbors found for classification")
+                })?
             }
             WeightingStrategy::Distance => {
-                // Check for zero distance early (exact match)
-                if let Some(&(distance, idx)) = k_neighbors.first()
-                    && distance == 0.0
-                {
-                    return Ok(y_train_encoded[idx]);
-                }
+                // Exact matches (distance 0) carry infinite weight and dominate every
+                // finite-distance neighbor. `select_nth_unstable` leaves the k neighbors in
+                // arbitrary order, so inspecting only the first element is unreliable; scan all
+                // k neighbors and, when any exact match exists, vote among the exact matches
+                // alone (each counts once, ties broken by smallest class index)
+                let exact_matches: AHashMap<usize, usize> = k_neighbors
+                    .iter()
+                    .filter(|&&(distance, _)| distance == 0.0)
+                    .fold(AHashMap::new(), |mut acc, &(_, idx)| {
+                        *acc.entry(y_train_encoded[idx]).or_insert(0) += 1;
+                        acc
+                    });
 
-                // Threshold for using parallel weight aggregation
-                const WEIGHT_PARALLEL_THRESHOLD: usize = 100;
-
-                if k >= WEIGHT_PARALLEL_THRESHOLD {
-                    // Parallel weight aggregation for large k values
-                    let class_weights = k_neighbors
-                        .par_iter()
-                        .fold(
-                            AHashMap::new,
-                            |mut acc: AHashMap<usize, f64>, &(distance, idx)| {
-                                let weight = 1.0 / distance;
-                                let class_idx = y_train_encoded[idx];
-                                *acc.entry(class_idx).or_insert(0.0) += weight;
-                                acc
-                            },
-                        )
-                        .reduce(AHashMap::new, |mut a, b| {
-                            for (class_idx, weight) in b {
-                                *a.entry(class_idx).or_insert(0.0) += weight;
-                            }
-                            a
-                        });
-
-                    // Find the class with highest weight
-                    class_weights
-                        .into_iter()
-                        .max_by(|(_, weight_a), (_, weight_b)| {
-                            weight_a
-                                .partial_cmp(weight_b)
-                                .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
-                        })
-                        .map(|(class_idx, _)| class_idx)
-                        .ok_or_else(|| {
-                            Error::computation("No valid neighbors found for classification")
-                        })?
+                if !exact_matches.is_empty() {
+                    select_top_class(&exact_matches).ok_or_else(|| {
+                        Error::computation("No valid neighbors found for classification")
+                    })?
                 } else {
-                    // Sequential weight calculation for small k values
-                    let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
-                    for &(distance, idx) in k_neighbors {
-                        let weight = 1.0 / distance;
-                        let class_idx = y_train_encoded[idx];
-                        *class_weights.entry(class_idx).or_insert(0.0) += weight;
-                    }
+                    // Threshold for using parallel weight aggregation
+                    const WEIGHT_PARALLEL_THRESHOLD: usize = 100;
 
-                    // Find the class with highest weight
-                    class_weights
-                        .into_iter()
-                        .max_by(|(_, weight_a), (_, weight_b)| {
-                            weight_a
-                                .partial_cmp(weight_b)
-                                .unwrap_or(std::cmp::Ordering::Equal) // Handle NaN/Inf by treating as equal
-                        })
-                        .map(|(class_idx, _)| class_idx)
-                        .ok_or_else(|| {
-                            Error::computation("No valid neighbors found for classification")
-                        })?
+                    let class_weights: AHashMap<usize, f64> = if k >= WEIGHT_PARALLEL_THRESHOLD {
+                        // Parallel weight aggregation for large k values
+                        k_neighbors
+                            .par_iter()
+                            .fold(
+                                AHashMap::new,
+                                |mut acc: AHashMap<usize, f64>, &(distance, idx)| {
+                                    *acc.entry(y_train_encoded[idx]).or_insert(0.0) +=
+                                        1.0 / distance;
+                                    acc
+                                },
+                            )
+                            .reduce(AHashMap::new, |mut a, b| {
+                                for (class_idx, weight) in b {
+                                    *a.entry(class_idx).or_insert(0.0) += weight;
+                                }
+                                a
+                            })
+                    } else {
+                        // Sequential weight calculation for small k values
+                        let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
+                        for &(distance, idx) in k_neighbors {
+                            *class_weights.entry(y_train_encoded[idx]).or_insert(0.0) +=
+                                1.0 / distance;
+                        }
+                        class_weights
+                    };
+
+                    // Highest summed weight, ties broken deterministically by class index
+                    select_top_class(&class_weights).ok_or_else(|| {
+                        Error::computation("No valid neighbors found for classification")
+                    })?
                 }
             }
         };

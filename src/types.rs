@@ -55,6 +55,70 @@ impl DistanceCalculationMetric {
             DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&a, &b, p),
         }
     }
+
+    /// Returns whether `distance(a, b) <= threshold` under this metric
+    ///
+    /// For the Euclidean metric this compares the squared distance against `threshold^2`,
+    /// avoiding the per-pair square root that `distance` would otherwise take, which helps
+    /// neighborhood queries (e.g. DBSCAN's `eps` test) that only need the threshold decision.
+    /// `threshold` is assumed to be non-negative
+    pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
+        use crate::math::{
+            manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
+        };
+        match *self {
+            DistanceCalculationMetric::Euclidean => {
+                squared_euclidean_distance_row(&a, &b) <= threshold * threshold
+            }
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b) <= threshold,
+            DistanceCalculationMetric::Minkowski(p) => {
+                minkowski_distance_row(&a, &b, p) <= threshold
+            }
+        }
+    }
+
+    /// Maps a non-negative scalar (a true distance or a per-axis coordinate gap) into this
+    /// metric's order-preserving "comparable" space, where the final root is skipped:
+    /// `Euclidean -> t^2`, `Manhattan -> t`, `Minkowski(p) -> t^p`
+    ///
+    /// Used by spatial indexes so radius thresholds and per-axis pruning bounds can be compared
+    /// against [`comparable_distance`](Self::comparable_distance) without repeated roots. The
+    /// mapping is monotonic on `t >= 0`, so all ordering decisions are preserved
+    pub(crate) fn comparable_scalar(&self, t: f64) -> f64 {
+        match *self {
+            DistanceCalculationMetric::Euclidean => t * t,
+            DistanceCalculationMetric::Manhattan => t,
+            DistanceCalculationMetric::Minkowski(p) => t.powf(p),
+        }
+    }
+
+    /// Distance between two vectors in this metric's comparable space (see
+    /// [`comparable_scalar`](Self::comparable_scalar)): the monotonic, root-free form of
+    /// [`distance`](Self::distance). Equals `distance(a, b)` raised to the metric's power
+    /// (squared for Euclidean, `^p` for Minkowski, unchanged for Manhattan)
+    pub(crate) fn comparable_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        use crate::math::{manhattan_distance_row, squared_euclidean_distance_row};
+        match *self {
+            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b),
+            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b),
+            DistanceCalculationMetric::Minkowski(p) => a
+                .iter()
+                .zip(b.iter())
+                .map(|(&x, &y)| (x - y).abs().powf(p))
+                .sum(),
+        }
+    }
+
+    /// Converts a comparable-space distance back to a true distance (inverse of
+    /// [`comparable_distance`](Self::comparable_distance)): `Euclidean -> sqrt`,
+    /// `Manhattan -> identity`, `Minkowski(p) -> ^(1/p)`
+    pub(crate) fn distance_from_comparable(&self, c: f64) -> f64 {
+        match *self {
+            DistanceCalculationMetric::Euclidean => c.sqrt(),
+            DistanceCalculationMetric::Manhattan => c,
+            DistanceCalculationMetric::Minkowski(p) => c.powf(1.0 / p),
+        }
+    }
 }
 
 /// Represents different types of regularization techniques used in machine learning models.

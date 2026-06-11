@@ -293,6 +293,44 @@ fn fit_euclidean_correct_labels_two_blobs_noise() {
     assert_eq!(label_b, 1, "blob B should be cluster 1 (discovered second)");
 }
 
+/// Above 16 features DBSCAN falls back from the kd-tree to the brute-force scan; the
+/// clustering result must remain correct on that path
+#[test]
+fn fit_high_dimensional_falls_back_to_brute_force() {
+    let n_features = 18; // above the kd-tree dimensionality cutoff (16)
+    // Two tight blobs (rows 0..=3 near 0, rows 4..=7 near 10) and one far noise point (row 8)
+    let mut data = Array2::<f64>::zeros((9, n_features));
+    for i in 0..4 {
+        for j in 0..n_features {
+            data[[i, j]] = 0.1 * i as f64;
+        }
+    }
+    for i in 4..8 {
+        for j in 0..n_features {
+            data[[i, j]] = 10.0 + 0.1 * i as f64;
+        }
+    }
+    for j in 0..n_features {
+        data[[8, j]] = 100.0;
+    }
+
+    let mut m = DBSCAN::new(2.0, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    m.fit(&data).unwrap();
+    let labels = m.get_labels().unwrap();
+
+    let label_a = labels[0];
+    let label_b = labels[4];
+    assert!(label_a >= 0 && label_b >= 0, "both blobs must be clustered");
+    assert_ne!(label_a, label_b, "the two blobs must be distinct clusters");
+    for i in 0..4 {
+        assert_eq!(labels[i], label_a, "blob A row {i} mislabeled");
+    }
+    for i in 4..8 {
+        assert_eq!(labels[i], label_b, "blob B row {i} mislabeled");
+    }
+    assert_eq!(labels[8], -1, "isolated point must be noise");
+}
+
 /// core_sample_indices are sorted ascending and carry only non-negative labels
 #[test]
 fn fit_euclidean_core_indices_sorted_and_non_noise() {

@@ -875,34 +875,45 @@ fn test_two_samples_is_valid() {
         Err(e) => panic!("unexpected error for 2-sample fit: {e:?}"),
     }
 }
-// Indefinite Sigmoid kernel yields a negative eigenvalue in its centered Gram matrix,
-// which validate_eigenvalues must reject with Error::Computation
+// An indefinite Sigmoid kernel yields a non-positive eigenvalue in its centered Gram matrix.
+// Kernel PCA tolerates this (matching scikit-learn): the fit succeeds and the non-positive
+// component is zeroed at projection time rather than failing the whole fit
 #[test]
-fn test_fit_indefinite_kernel_negative_eigenvalue_returns_computation() {
+fn test_fit_indefinite_kernel_negative_eigenvalue_is_tolerated() {
     let x = array![[1.0], [4.0]]; // 2 samples, 1 feature
     let mut kpca = KernelPCA::new(
         KernelType::Sigmoid {
             gamma: 1.0,
             coef0: 0.0,
         },
-        2, // == n_samples, so the negative eigenvalue is necessarily selected
+        2, // == n_samples, so a non-positive eigenvalue is necessarily selected
         EigenSolver::Dense,
     )
     .unwrap();
 
-    let err = kpca.fit(&x).unwrap_err();
+    // Fit succeeds despite the indefinite kernel, and persists fitted state
+    kpca.fit(&x).unwrap();
+    let eigenvalues = kpca
+        .get_eigenvalues()
+        .expect("eigenvalues must be persisted after a successful fit");
+    assert_eq!(kpca.get_n_samples(), Some(2));
     assert!(
-        matches!(err, Error::Computation { .. }),
-        "expected Computation (negative eigenvalue from indefinite Sigmoid kernel), got {err:?}"
+        eigenvalues.iter().any(|&v| v <= 0.0),
+        "the indefinite Sigmoid kernel is expected to yield a non-positive eigenvalue"
     );
 
-    // The fit must fail before persisting any state: fitted getters stay None
+    // Projection stays finite, and the non-positive component is zeroed out
+    let transformed = kpca.transform(&x).unwrap();
+    assert_eq!(transformed.shape(), &[2, 2]);
     assert!(
-        kpca.get_eigenvalues().is_none(),
-        "eigenvalues must remain None after a failed fit"
+        transformed.iter().all(|v| v.is_finite()),
+        "projection must be finite even when a component has a non-positive eigenvalue"
     );
+    let zeroed_columns = (0..transformed.ncols())
+        .filter(|&j| transformed.column(j).iter().all(|&v| v == 0.0))
+        .count();
     assert!(
-        kpca.get_n_samples().is_none(),
-        "n_samples must remain None after a failed fit"
+        zeroed_columns >= 1,
+        "the component with a non-positive eigenvalue must be zeroed in the projection"
     );
 }

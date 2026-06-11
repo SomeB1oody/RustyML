@@ -14,9 +14,7 @@ use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
 use ndarray_rand::rand::seq::SliceRandom;
-use rayon::prelude::{
-    IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
-};
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Sample-count threshold above which processing switches to parallel
 const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
@@ -67,8 +65,6 @@ pub struct MeanShift {
     bin_seeding: bool,
     /// Whether to assign all points to clusters, including potential noise
     cluster_all: bool,
-    /// Optional seed for the random seed-point selection used when `bin_seeding` is disabled, enabling reproducible fitting
-    random_state: Option<u64>,
     /// Number of samples assigned to each cluster center
     n_samples_per_center: Option<Array1<usize>>,
     /// Final cluster centers found by the algorithm
@@ -89,13 +85,12 @@ impl Default for MeanShift {
     /// - `tol` - `1e-3`; convergence tolerance threshold
     /// - `bin_seeding` - `false`; bin seeding is disabled by default
     /// - `cluster_all` - `true`; all data points are assigned to clusters by default
-    /// - `random_state` - `None`; non-deterministic seed-point selection
     ///
     /// # Returns
     ///
     /// - `Self` - A new MeanShift instance with default parameters
     fn default() -> Self {
-        Self::new(1.0, None, None, None, None, None).expect("Default parameters should be valid")
+        Self::new(1.0, None, None, None, None).expect("Default parameters should be valid")
     }
 }
 
@@ -109,7 +104,6 @@ impl MeanShift {
     /// - `tol` - Convergence threshold for the algorithm; must be positive and finite
     /// - `bin_seeding` - Whether to use bin seeding for initialization
     /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid
-    /// - `random_state` - Optional seed for the random seed-point selection used when `bin_seeding` is disabled; pass `Some(seed)` for reproducible fitting, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
@@ -124,7 +118,6 @@ impl MeanShift {
         tol: Option<f64>,
         bin_seeding: Option<bool>,
         cluster_all: Option<bool>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
             return Err(Error::invalid_parameter(
@@ -145,7 +138,6 @@ impl MeanShift {
             tol: tol_val,
             bin_seeding: bin_seeding.unwrap_or(false),
             cluster_all: cluster_all.unwrap_or(true),
-            random_state,
             n_samples_per_center: None,
             cluster_centers: None,
             labels: None,
@@ -167,7 +159,6 @@ impl MeanShift {
     get_field!(get_tolerance, tol, f64);
     get_field!(get_bin_seeding, bin_seeding, bool);
     get_field!(get_cluster_all, cluster_all, bool);
-    get_field!(get_random_state, random_state, Option<u64>);
 
     /// Fits the MeanShift clustering model to the input data
     ///
@@ -199,13 +190,10 @@ impl MeanShift {
         let seeds: Vec<usize> = if self.bin_seeding {
             self.get_bin_seeds(x)
         } else {
-            // Randomly select seeds; seeding the RNG from `random_state` makes selection reproducible
-            let mut indices: Vec<usize> = (0..n_samples).collect();
-            let mut rng = crate::random::make_rng(self.random_state);
-            indices.shuffle(&mut rng);
-            // Limit the number of seeds to avoid excessive computation
-            let max_seeds = n_samples.min(100);
-            indices[..max_seeds].to_vec()
+            // Standard mean-shift seeds from every sample. Seeding from all points (rather
+            // than a random capped subset) avoids silently missing dense clusters that the
+            // subset might not cover; `bin_seeding` is the faster, coarser alternative
+            (0..n_samples).collect()
         };
 
         // RBF weighting: w_i = exp(-gamma * ||center - x_i||^2); gamma folds in the bandwidth
@@ -362,9 +350,19 @@ impl MeanShift {
         // Assign cluster labels to each data point
         let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_label);
 
+        // Count how many samples are actually assigned to each cluster center. Outliers
+        // (label == n_clusters, only possible when cluster_all is false) belong to no center
+        // and are excluded. The merge counts above are unrelated to sample membership
+        let mut samples_per_center = vec![0usize; n_clusters];
+        for &label in &labels {
+            if label < n_clusters {
+                samples_per_center[label] += 1;
+            }
+        }
+
         self.cluster_centers = Some(cluster_centers);
         self.labels = Some(Array1::from(labels));
-        self.n_samples_per_center = Some(Array1::from(center_counts));
+        self.n_samples_per_center = Some(Array1::from(samples_per_center));
 
         Ok(self)
     }
@@ -576,33 +574,36 @@ where
         samples
     };
 
-    // Create all possible pairs of indices (i,j) where i < j
-    let pairs: Vec<(usize, usize)> = (0..n_samples)
-        .flat_map(|i| ((i + 1)..n_samples).map(move |j| (i, j)))
-        .collect();
-
-    // Compute distances between all pairs of points in parallel
-    let distances: Vec<f64> = pairs
-        .par_iter()
-        .map(|&(i, j)| {
+    // Pairwise Euclidean distances over the upper triangle (i < j), computed in parallel
+    // without first materializing the O(m^2) list of index pairs
+    let mut distances: Vec<f64> = (0..n_samples)
+        .into_par_iter()
+        .flat_map(|i| {
             let point_i = x_samples.row(i);
-            let point_j = x_samples.row(j);
-
-            // Euclidean distance
-            point_i
-                .iter()
-                .zip(point_j.iter())
-                .map(|(&a, &b)| (a - b).powi(2))
-                .sum::<f64>()
-                .sqrt()
+            ((i + 1)..n_samples)
+                .map(|j| {
+                    let point_j = x_samples.row(j);
+                    point_i
+                        .iter()
+                        .zip(point_j.iter())
+                        .map(|(&a, &b)| (a - b).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .collect::<Vec<f64>>()
         })
         .collect();
 
-    // Sort distances and select the value at the specified quantile
-    let mut distances = distances;
-    distances.par_sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if distances.is_empty() {
+        return Ok(0.0);
+    }
 
-    // Clamp the quantile index to the last valid position so a near-1.0 quantile (or tiny sample) cannot index past the end
-    let k = ((distances.len() as f64 * quantile) as usize).min(distances.len().saturating_sub(1));
-    Ok(distances.get(k).copied().unwrap_or(0.0))
+    // Select only the quantile order statistic instead of fully sorting every pairwise
+    // distance: O(pairs) on average rather than O(pairs log pairs). The clamp keeps a
+    // near-1.0 quantile (or tiny sample) from indexing past the end
+    let k = ((distances.len() as f64 * quantile) as usize).min(distances.len() - 1);
+    distances.select_nth_unstable_by(k, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(distances[k])
 }

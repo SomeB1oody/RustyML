@@ -5,6 +5,7 @@
 
 pub use super::DistanceCalculationMetric;
 use super::parallel::map_collect;
+use super::spatial::KdTree;
 use super::validation::{preliminary_check, validate_predict_input};
 use crate::error::{Context, Error};
 use crate::{Deserialize, Serialize};
@@ -15,6 +16,10 @@ use std::collections::VecDeque;
 
 /// Sample count at or above which region queries run in parallel
 const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
+
+/// Feature-count ceiling for using the kd-tree spatial index. kd-trees lose their pruning
+/// power in high dimensions, so above this many features the brute-force scan is used instead
+const DBSCAN_KD_TREE_MAX_DIMS: usize = 16;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
@@ -149,8 +154,15 @@ impl DBSCAN {
 
     /// Find all neighbors of point `p` (points within `eps` distance)
     ///
-    /// Runs in parallel for datasets at or above `DBSCAN_PARALLEL_THRESHOLD` samples
-    fn region_query<S>(&self, data: &ArrayBase<S, Ix2>, p: usize) -> Result<Vec<usize>, Error>
+    /// When `tree` is provided the query uses the kd-tree (about O(log n) average); otherwise it
+    /// falls back to a brute-force scan (parallel at or above `DBSCAN_PARALLEL_THRESHOLD`).
+    /// Both paths return indices sorted ascending, so cluster expansion order is identical
+    fn region_query<S>(
+        &self,
+        data: &ArrayBase<S, Ix2>,
+        p: usize,
+        tree: Option<&KdTree>,
+    ) -> Result<Vec<usize>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {
@@ -163,29 +175,27 @@ impl DBSCAN {
             )));
         }
 
-        // Fetch row p once instead of inside every iteration
         let p_row = data.row(p);
         let eps = self.eps;
-        let n_samples = data.nrows();
 
+        if let Some(tree) = tree {
+            // kd-tree radius query; results are already sorted ascending by index
+            return Ok(tree.radius_neighbors(p_row, eps));
+        }
+
+        // Brute-force fallback. `within` performs the `<= eps` test directly, skipping the
+        // square root on the Euclidean path (it compares squared distance against eps^2)
+        let n_samples = data.nrows();
         let neighbors: Vec<usize> = if n_samples >= DBSCAN_PARALLEL_THRESHOLD {
             // Filter rows within eps in parallel
             (0..n_samples)
                 .into_par_iter()
-                .filter(|&q| {
-                    let q_row = data.row(q);
-                    let dist = self.metric.distance(p_row, q_row);
-                    dist <= eps
-                })
+                .filter(|&q| self.metric.within(p_row, data.row(q), eps))
                 .collect()
         } else {
             // Sequential filter for smaller datasets
             (0..n_samples)
-                .filter(|&q| {
-                    let q_row = data.row(q);
-                    let dist = self.metric.distance(p_row, q_row);
-                    dist <= eps
-                })
+                .filter(|&q| self.metric.within(p_row, data.row(q), eps))
                 .collect()
         };
 
@@ -219,6 +229,15 @@ impl DBSCAN {
 
         let n_samples = data.nrows();
 
+        // Build a kd-tree once to accelerate the O(n^2) brute-force region queries, except in
+        // high dimensions where the tree no longer prunes effectively (then fall back to brute)
+        let tree: Option<KdTree> = if data.ncols() <= DBSCAN_KD_TREE_MAX_DIMS {
+            Some(KdTree::build(data.view(), self.metric))
+        } else {
+            None
+        };
+        let tree_ref = tree.as_ref();
+
         let mut labels = Array1::from(vec![-1isize; n_samples]); // -1 marks unclassified or noise
         let mut core_samples = AHashSet::with_capacity(n_samples / 4); // assume ~25% core samples
         let mut cluster_id = 0isize;
@@ -241,7 +260,9 @@ impl DBSCAN {
                 continue;
             }
 
-            let neighbors = self.region_query(data, p).context("region query failed")?;
+            let neighbors = self
+                .region_query(data, p, tree_ref)
+                .context("region query failed")?;
 
             if neighbors.len() < self.min_samples {
                 labels[p] = -1; // Mark as noise
@@ -255,22 +276,24 @@ impl DBSCAN {
 
             // Expand the cluster (still sequential)
             while let Some(q) = seeds.pop_front() {
-                // Already in this cluster, skip
-                if labels[q] == cluster_id {
+                // Skip any point already in a cluster; only noise/unvisited points (label -1)
+                // may be absorbed as border points, so an earlier cluster is never stolen from
+                if labels[q] >= 0 {
                     continue;
                 }
 
-                // Assign to the current cluster (could be noise or unvisited)
+                // q was noise or unvisited: absorb it into the current cluster
                 labels[q] = cluster_id;
 
                 let q_neighbors = self
-                    .region_query(data, q)
+                    .region_query(data, q, tree_ref)
                     .with_context(|| format!("region query failed for point {q}"))?;
 
                 if q_neighbors.len() >= self.min_samples {
                     core_samples.insert(q);
                     for r in q_neighbors {
-                        if labels[r] != cluster_id {
+                        // Only enqueue points not yet assigned to any cluster
+                        if labels[r] < 0 {
                             seeds.push_back(r);
                         }
                     }
@@ -427,7 +450,7 @@ mod tests {
     fn region_query_out_of_bounds_index_gives_computation() {
         let data = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]; // 3 rows
         let model = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-        let err = model.region_query(&data, 3).unwrap_err(); // 3 >= nrows (3)
+        let err = model.region_query(&data, 3, None).unwrap_err(); // 3 >= nrows (3)
         match err {
             Error::Computation { .. } => {}
             other => panic!("expected Computation, got {:?}", other),

@@ -272,7 +272,10 @@ impl KMeans {
 
             for (i, &dist) in distances.iter().enumerate() {
                 cumulative_dist += dist;
-                if cumulative_dist >= choice {
+                // Require `dist > 0` so a point already chosen as a center (distance 0) is never
+                // re-selected. Without this guard, `choice == 0` (possible since `random::<f64>()`
+                // can return 0.0) would pick the first point even if it is an existing center
+                if dist > 0.0 && cumulative_dist >= choice {
                     centroids.row_mut(k).assign(&data.row(i));
                     break;
                 }

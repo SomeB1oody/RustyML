@@ -3,7 +3,7 @@
 
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::utils::train_test_split::train_test_split;
+use rustyml::utils::train_test_split::{train_test_split, train_test_split_stratified};
 
 // Happy-path: split shapes
 
@@ -406,6 +406,106 @@ fn test_error_single_sample() {
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput for n_samples=1, got {:?}",
+        err
+    );
+}
+
+// Stratified split
+
+/// Every class keeps at least one sample on each side, even when classes are imbalanced
+#[test]
+fn test_stratified_keeps_every_class_on_both_sides() {
+    // 8 of class 0 and 2 of class 1: a plain split could drop class 1 from the train set
+    let n = 10usize;
+    let x = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+    let mut labels = vec![0i32; 8];
+    labels.extend(vec![1i32; 2]);
+    let y = Array1::from(labels);
+
+    let (_x_train, _x_test, y_train, y_test) =
+        train_test_split_stratified(x, y, Some(0.3), Some(42)).unwrap();
+
+    // Both classes must appear in both partitions
+    for class in [0i32, 1i32] {
+        assert!(
+            y_train.iter().any(|&l| l == class),
+            "class {class} missing from train"
+        );
+        assert!(
+            y_test.iter().any(|&l| l == class),
+            "class {class} missing from test"
+        );
+    }
+}
+
+/// Per-class counts follow the requested test_size on a balanced dataset
+#[test]
+fn test_stratified_preserves_class_proportions() {
+    // 6 of class 0 and 6 of class 1, test_size=0.5 -> 3 test and 3 train per class
+    let n = 12usize;
+    let x = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+    let mut labels = vec![0i32; 6];
+    labels.extend(vec![1i32; 6]);
+    let y = Array1::from(labels);
+
+    let (_x_train, _x_test, y_train, y_test) =
+        train_test_split_stratified(x, y, Some(0.5), Some(7)).unwrap();
+
+    let count = |arr: &Array1<i32>, class: i32| arr.iter().filter(|&&l| l == class).count();
+    assert_eq!(count(&y_test, 0), 3, "class 0 test count");
+    assert_eq!(count(&y_test, 1), 3, "class 1 test count");
+    assert_eq!(count(&y_train, 0), 3, "class 0 train count");
+    assert_eq!(count(&y_train, 1), 3, "class 1 train count");
+}
+
+/// x[i] and y[i] stay paired after a stratified split
+#[test]
+fn test_stratified_x_y_alignment() {
+    let n = 12usize;
+    // x[i, 0] encodes the row index, y[i] alternates class but x stays the identifier
+    let x = Array2::from_shape_fn((n, 1), |(i, _)| i as f64);
+    let y = Array1::from_iter((0..n as i32).map(|i| i % 3));
+
+    let (x_train, x_test, y_train, y_test) =
+        train_test_split_stratified(x, y, Some(0.34), Some(42)).unwrap();
+
+    // The class of each output row must equal row_index % 3
+    for (x_val, y_val) in x_train
+        .column(0)
+        .iter()
+        .zip(y_train.iter())
+        .chain(x_test.column(0).iter().zip(y_test.iter()))
+    {
+        let row = *x_val as i32;
+        assert_eq!(row % 3, *y_val, "alignment broken at row {row}");
+    }
+}
+
+/// The same seed reproduces a stratified split exactly
+#[test]
+fn test_stratified_same_seed_identical_split() {
+    let n = 12usize;
+    let x = Array2::from_shape_fn((n, 2), |(i, j)| (i + j) as f64);
+    let y = Array1::from_iter((0..n as i32).map(|i| i % 2));
+
+    let (xa_train, xa_test, _, _) =
+        train_test_split_stratified(x.clone(), y.clone(), Some(0.3), Some(42)).unwrap();
+    let (xb_train, xb_test, _, _) = train_test_split_stratified(x, y, Some(0.3), Some(42)).unwrap();
+
+    assert_eq!(xa_train, xb_train, "train must match for same seed");
+    assert_eq!(xa_test, xb_test, "test must match for same seed");
+}
+
+/// A class with fewer than 2 samples yields InvalidInput
+#[test]
+fn test_stratified_error_singleton_class() {
+    let x = Array2::from_shape_fn((5, 1), |(i, _)| i as f64);
+    // Class 2 appears only once, so it cannot land on both sides
+    let y = Array1::from(vec![0i32, 0, 1, 1, 2]);
+    let err = train_test_split_stratified(x, y, Some(0.3), Some(42)).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput for a singleton class, got {:?}",
         err
     );
 }

@@ -630,29 +630,25 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
     }
 }
 
-/// max_samples > n_rows gives leaf size n_rows but normalization c(max_samples),
-/// so for n_rows=4, max_samples=8 the closed form is score = 2^(-c(4)/c(8))
+/// max_samples > n_rows: each tree is built on sample_size = n_rows points, so the score
+/// normalization must use c(sample_size), NOT c(max_samples) (Liu et al. normalise by the
+/// actual sub-sampling size). For identical points the leaf size equals sample_size, hence
+/// score = 2^(-c(n_rows)/c(n_rows)) = 0.5, so identical points are not anomalies
 #[test]
 fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_samples() {
-    // 4 identical rows; max_samples = 8 > 4, so sample_size = 4 (leaf size = 4)
+    // 4 identical rows; max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
     let data = array![[1.0, -3.0], [1.0, -3.0], [1.0, -3.0], [1.0, -3.0]];
     let mut model = IsolationForest::new(25, 8, None, Some(7)).unwrap();
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
 
-    // independent ground truth via c(n) = 2*H_{n-1} - 2(n-1)/n:
-    // c(4) uses H_3 = 1 + 1/2 + 1/3; c(8) uses H_7 = sum_{i=1}^{7} 1/i
-    let h3 = 1.0 + 1.0 / 2.0 + 1.0 / 3.0;
-    let c4 = 2.0 * h3 - 2.0 * 3.0 / 4.0;
-    let h7 = 1.0 + 1.0 / 2.0 + 1.0 / 3.0 + 1.0 / 4.0 + 1.0 / 5.0 + 1.0 / 6.0 + 1.0 / 7.0;
-    let c8 = 2.0 * h7 - 2.0 * 7.0 / 8.0;
-    // score = 2^(-c(4)/c(8)) ~= 0.645894
-    let expected = 2.0_f64.powf(-c4 / c8);
-
+    // Path length c(4) is normalised by c(sample_size) = c(4): score = 2^(-c(4)/c(4)) = 0.5.
+    // Normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
+    // points as anomalous
     for (i, &s) in scores.iter().enumerate() {
         assert!(
-            (s - expected).abs() < 1e-12,
-            "row {i}: expected closed-form 2^(-c(4)/c(8)) = {expected}, got {s}"
+            (s - 0.5).abs() < 1e-12,
+            "row {i}: expected 0.5 (normalization uses c(sample_size), not c(max_samples)), got {s}"
         );
     }
 }

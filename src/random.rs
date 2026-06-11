@@ -1,7 +1,8 @@
 //! Crate-wide control of pseudo-random number generation for reproducibility.
 //!
-//! Every randomized component in the crate draws its RNG through `make_rng`, so a single
-//! [`set_global_seed`] call can make the whole library reproducible. This routes the
+//! Most randomized components in the crate draw their RNG through `make_rng` (or its sibling
+//! `make_rng_opt`, for callers that stay deterministic unless explicitly seeded), so a single
+//! [`set_global_seed`] call can make them reproducible together. This routes the
 //! neural-network components (weight initialization, dropout/noise masks, and the
 //! [`Sequential`](crate::neural_network::sequential::Sequential) minibatch shuffle), the
 //! machine-learning estimators (k-means, SVC/LinearSVC, MeanShift, Isolation Forest, …), and the
@@ -29,6 +30,26 @@
 //! Under `--test-threads=1`, however, all tests share one thread, so a test that sets a global
 //! seed should [`clear_global_seed`] afterwards (ideally panic-safely, e.g. via a drop guard)
 //! to avoid leaking it into a later test that relies on unseeded behavior.
+//!
+//! # Intentional exclusions
+//!
+//! Not every pseudo-random draw in the crate is routed here — a draw is worth seeding through this
+//! module only when it has a real, persistent effect on the result. The `utils` dimensionality
+//! reducers (`pca`, `kernel_pca`) are deliberately left out, for two reasons:
+//!
+//! - Their **iterative eigensolvers** (power iteration and Lanczos — `pca`'s `PowerIteration` solver
+//!   and `kernel_pca`'s `Lanczos` / `PowerIteration` solvers) seed a random *starting vector* with a
+//!   fixed constant. Such methods converge to the same eigenvectors regardless of the (generic)
+//!   starting vector, so the seed is observationally inert: it only pins otherwise-arbitrary
+//!   eigenvector signs, and exists purely to make the solver deterministic. Routing it through the
+//!   global seed would make that sign choice depend on ambient global state — *less* reproducible —
+//!   for no observable benefit.
+//! - **Randomized SVD** (`pca`'s `SVDSolver::Randomized(u64)`) takes its seed as part of the public
+//!   solver variant, so the caller always supplies it explicitly: there is no unseeded (`None`) path
+//!   for the global to fill, and the result is already reproducible by construction.
+//!
+//! The general rule: route a draw through this module only when it makes a pseudo-random choice that
+//! changes the result; a draw whose result converges (or whose seed the user already pins) stays out.
 
 use ndarray_rand::rand::{RngCore, SeedableRng, rng, rngs::StdRng};
 use std::cell::RefCell;

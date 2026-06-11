@@ -283,16 +283,10 @@ impl LogisticRegression {
                 }
             }
 
-            weights = &weights - self.learning_rate * &gradients;
-
-            // Check for numerical issues in updated weights
-            if weights.iter().any(|&val| !val.is_finite()) {
-                #[cfg(feature = "show_progress")]
-                progress_bar.finish_with_message("Error: NaN or infinite weights");
-                return Err(Error::non_finite("weight update"));
-            }
-
-            // Calculate loss using existing predictions
+            // Calculate the loss at the CURRENT weights (before this step's update), so the
+            // data-loss term (from `predictions = X * weights`) and the regularization penalty
+            // are both evaluated at the same weights instead of mixing pre-update logits with a
+            // post-update penalty
             let mut cost = logistic_loss(&predictions, y);
 
             if let Some(reg_type) = &self.regularization_type {
@@ -309,6 +303,16 @@ impl LogisticRegression {
                         cost += regularization_strength * l2_penalty / (2.0 * n_samples as f64);
                     }
                 }
+            }
+
+            // In-place gradient step, avoiding a fresh weight array every iteration
+            weights.scaled_add(-self.learning_rate, &gradients);
+
+            // Check for numerical issues in updated weights
+            if weights.iter().any(|&val| !val.is_finite()) {
+                #[cfg(feature = "show_progress")]
+                progress_bar.finish_with_message("Error: NaN or infinite weights");
+                return Err(Error::non_finite("weight update"));
             }
 
             #[cfg(feature = "show_progress")]

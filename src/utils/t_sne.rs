@@ -1,11 +1,13 @@
 //! t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
 //!
-//! Provides the [`TSNE`] model with early-exaggeration, momentum-based gradient descent,
-//! and a per-point sigma solver that calibrates conditional probabilities to a target perplexity
+//! Provides the [`TSNE`] model with PCA or random embedding initialization, early-exaggeration,
+//! momentum-based gradient descent, and a per-point sigma solver that calibrates conditional
+//! probabilities to a target perplexity
 
 use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
+use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -99,6 +101,37 @@ const MIN_Q: f64 = 1e-12;
 /// Sample-count threshold for switching to parallel computation
 const TSNE_PARALLEL_THRESHOLD: usize = 2000;
 
+/// Strategy for initializing the low-dimensional embedding before optimization
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Init {
+    /// Initialize from the top principal components of the input. This is deterministic and
+    /// gives a stable, well-spread starting layout, so it is the default and ignores
+    /// `random_state`
+    #[default]
+    PCA,
+    /// Initialize from small random noise seeded by `random_state`
+    Random,
+}
+
+/// Gradient computation method for t-SNE optimization
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TSNEMethod {
+    /// Barnes-Hut approximation. Affinities are kept sparse over each point's nearest neighbors
+    /// and the repulsive forces are summarized through a space-partitioning tree, giving roughly
+    /// `O(n log n)` per iteration. `angle` (theta) in `[0, 1)` trades accuracy for speed, where
+    /// larger values are faster and less accurate. Only supports `n_components <= 3`
+    BarnesHut { angle: f64 },
+    /// Exact gradient over all pairs, costing `O(n^2)` per iteration. Supports any `n_components`
+    Exact,
+}
+
+impl Default for TSNEMethod {
+    /// Returns the default method, Barnes-Hut with `angle = 0.5`
+    fn default() -> Self {
+        TSNEMethod::BarnesHut { angle: 0.5 }
+    }
+}
+
 /// t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
 ///
 /// Performs t-SNE optimization with early exaggeration and momentum-based gradient descent
@@ -106,10 +139,10 @@ const TSNE_PARALLEL_THRESHOLD: usize = 2000;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::t_sne::TSNE;
+/// use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
 /// use ndarray::array;
 ///
-/// let tsne = TSNE::new(2, 2.0, 200.0, 250, Some(42)).unwrap();
+/// let tsne = TSNE::new(2, 2.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
 /// let x = array![[0.0, 1.0], [1.0, 0.0], [2.0, 2.0]];
 /// let embedding = tsne.fit_transform(&x).unwrap();
 /// assert_eq!(embedding.ncols(), 2);
@@ -124,8 +157,14 @@ pub struct TSNE {
     learning_rate: f64,
     /// Number of optimization iterations
     n_iter: usize,
-    /// Optional random seed for reproducibility
+    /// Optional random seed used by the random initialization path
     random_state: Option<u64>,
+    /// Embedding initialization strategy
+    #[serde(default)]
+    init: Init,
+    /// Gradient computation method (defaults to [`TSNEMethod::BarnesHut`])
+    #[serde(default)]
+    method: TSNEMethod,
 }
 
 impl Default for TSNE {
@@ -138,8 +177,19 @@ impl Default for TSNE {
     /// - `learning_rate` - 200.0
     /// - `n_iter` - 1000
     /// - `random_state` - None
+    /// - `init` - [`Init::PCA`]
+    /// - `method` - [`TSNEMethod::BarnesHut`] with `angle = 0.5`
     fn default() -> Self {
-        TSNE::new(2, 30.0, 200.0, 1000, None).expect("Default TSNE parameters should be valid")
+        TSNE::new(
+            2,
+            30.0,
+            200.0,
+            1000,
+            None,
+            Init::PCA,
+            TSNEMethod::BarnesHut { angle: 0.5 },
+        )
+        .expect("Default TSNE parameters should be valid")
     }
 }
 
@@ -152,7 +202,10 @@ impl TSNE {
     /// - `perplexity` - Controls effective neighborhood size (must be positive and finite)
     /// - `learning_rate` - Gradient descent learning rate (must be positive and finite)
     /// - `n_iter` - Maximum number of optimization iterations (must be greater than 0)
-    /// - `random_state` - Optional random seed for reproducibility
+    /// - `random_state` - Optional random seed; only affects the random initialization path,
+    ///   since PCA initialization is deterministic
+    /// - `init` - Embedding initialization strategy ([`Init::PCA`] or [`Init::Random`])
+    /// - `method` - Gradient computation method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
     ///
     /// # Returns
     ///
@@ -160,13 +213,16 @@ impl TSNE {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any parameter is invalid
+    /// - `Error::InvalidParameter` - If any parameter is invalid, if a Barnes-Hut `angle` is not
+    ///   in `[0, 1)`, or if Barnes-Hut is paired with `n_components > 3`
     pub fn new(
         n_components: usize,
         perplexity: f64,
         learning_rate: f64,
         n_iter: usize,
         random_state: Option<u64>,
+        init: Init,
+        method: TSNEMethod,
     ) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -193,12 +249,33 @@ impl TSNE {
             return Err(Error::invalid_parameter("n_iter", "must be greater than 0"));
         }
 
+        // Barnes-Hut needs a valid opening angle and a low-dimensional embedding for the tree
+        if let TSNEMethod::BarnesHut { angle } = method {
+            if !angle.is_finite() || !(0.0..1.0).contains(&angle) {
+                return Err(Error::invalid_parameter(
+                    "angle",
+                    format!("Barnes-Hut angle must be in [0, 1), got {}", angle),
+                ));
+            }
+            if n_components > 3 {
+                return Err(Error::invalid_parameter(
+                    "n_components",
+                    format!(
+                        "Barnes-Hut supports at most 3 components, got {}; use TSNEMethod::Exact",
+                        n_components
+                    ),
+                ));
+            }
+        }
+
         Ok(Self {
             n_components,
             perplexity,
             learning_rate,
             n_iter,
             random_state,
+            init,
+            method,
         })
     }
 
@@ -207,6 +284,8 @@ impl TSNE {
     get_field!(get_learning_rate, learning_rate, f64);
     get_field!(get_n_iter, n_iter, usize);
     get_field!(get_random_state, random_state, Option<u64>);
+    get_field!(get_init, init, Init);
+    get_field!(get_method, method, TSNEMethod);
 
     /// Performs t-SNE dimensionality reduction on input data
     ///
@@ -236,23 +315,29 @@ impl TSNE {
         self.validate_input(x)?;
 
         let x_owned = x.to_owned();
-        let n_samples = x_owned.nrows();
-        // Decide execution mode from sample count
+
+        // Initialize the embedding, then optimize with the configured method
+        let y = self.init_embedding(&x_owned);
+        match self.method {
+            TSNEMethod::Exact => self.optimize_exact(&x_owned, y),
+            TSNEMethod::BarnesHut { angle } => self.optimize_barnes_hut(&x_owned, y, angle),
+        }
+    }
+
+    /// Runs the exact `O(n^2)` optimization over the dense joint-probability matrix
+    fn optimize_exact(&self, x: &Array2<f64>, mut y: Array2<f64>) -> Result<Array2<f64>, Error> {
+        let n_samples = x.nrows();
         let use_parallel = n_samples > TSNE_PARALLEL_THRESHOLD;
 
         // Precompute distances and convert them to joint probabilities
-        let distances = self.pairwise_squared_distances(&x_owned, use_parallel);
+        let distances = self.pairwise_squared_distances(x, use_parallel);
         let p_conditional = self.conditional_probabilities(&distances, use_parallel);
         let p = self.symmetrize_probabilities(&p_conditional);
         let p_exaggerated = p.mapv(|v| v * EARLY_EXAGGERATION);
 
-        // Initialize embedding and momentum buffer
-        let mut y = self.init_embedding(n_samples);
         let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
-        // Per-parameter adaptive gains (start neutral at 1.0)
         let mut gains = Array2::<f64>::ones((n_samples, self.n_components));
 
-        // Progress bar reports KL divergence each iteration
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -279,42 +364,13 @@ impl TSNE {
             let (num, sum_num) = self.compute_num_matrix(&y, use_parallel);
             let grad = self.compute_gradient(&y, p_use, &num, sum_num, use_parallel);
 
-            // Switch momentum after the exaggeration phase
             let momentum = if iter < exaggeration_iter {
                 INITIAL_MOMENTUM
             } else {
                 FINAL_MOMENTUM
             };
+            self.apply_gradient_step(&mut y, &mut y_incs, &mut gains, &grad, momentum)?;
 
-            // Adaptive per-parameter gains (Jacobs' delta-bar-delta heuristic)
-            Zip::from(&mut gains)
-                .and(&grad)
-                .and(&y_incs)
-                .for_each(|gain, &g, &inc| {
-                    *gain = if g * inc > 0.0 {
-                        *gain * GAIN_DECAY
-                    } else {
-                        *gain + GAIN_INCREASE
-                    };
-                    if *gain < MIN_GAIN {
-                        *gain = MIN_GAIN;
-                    }
-                });
-
-            // Momentum SGD update with per-parameter gains:
-            // y_incs = momentum*y_incs - learning_rate*(gains*grad), then y += y_incs
-            Zip::from(&mut y_incs)
-                .and(&gains)
-                .and(&grad)
-                .for_each(|inc, &gain, &g| {
-                    *inc = momentum * *inc - self.learning_rate * gain * g;
-                });
-            y += &y_incs;
-
-            // Keep embedding centered to avoid drift
-            self.center_embedding(&mut y)?;
-
-            // Track KL divergence for reporting only
             #[cfg(feature = "show_progress")]
             {
                 last_kl = self.kl_divergence(p_use, &num, sum_num, use_parallel);
@@ -327,6 +383,271 @@ impl TSNE {
         progress_bar.finish_with_message(format!("{:.6}", last_kl));
 
         Ok(y)
+    }
+
+    /// Runs the Barnes-Hut optimization with sparse affinities and tree-summarized repulsion
+    fn optimize_barnes_hut(
+        &self,
+        x: &Array2<f64>,
+        mut y: Array2<f64>,
+        angle: f64,
+    ) -> Result<Array2<f64>, Error> {
+        let n_samples = x.nrows();
+        let use_parallel = n_samples > TSNE_PARALLEL_THRESHOLD;
+
+        // Sparse symmetric joint probabilities over each point's nearest neighbors
+        let adj = self.neighbor_probabilities(x, use_parallel);
+
+        let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
+        let mut gains = Array2::<f64>::ones((n_samples, self.n_components));
+
+        #[cfg(feature = "show_progress")]
+        let progress_bar = {
+            let pb = crate::create_progress_bar(
+                self.n_iter as u64,
+                "[{elapsed_precise}] {bar:40} {pos}/{len} | KL Divergence: {msg}",
+            );
+            pb.set_message(format!("{:.6}", 0.0));
+            pb
+        };
+
+        let exaggeration_iter = EARLY_EXAGGERATION_ITER.min(self.n_iter);
+        #[cfg(feature = "show_progress")]
+        let mut last_kl = 0.0;
+
+        for iter in 0..self.n_iter {
+            let exaggeration = if iter < exaggeration_iter {
+                EARLY_EXAGGERATION
+            } else {
+                1.0
+            };
+
+            let (grad, _z) = self.barnes_hut_gradient(&y, &adj, angle, exaggeration, use_parallel);
+
+            let momentum = if iter < exaggeration_iter {
+                INITIAL_MOMENTUM
+            } else {
+                FINAL_MOMENTUM
+            };
+            self.apply_gradient_step(&mut y, &mut y_incs, &mut gains, &grad, momentum)?;
+
+            #[cfg(feature = "show_progress")]
+            {
+                last_kl = self.barnes_hut_kl(&y, &adj, _z, exaggeration);
+                progress_bar.set_message(format!("{:.6}", last_kl));
+                progress_bar.inc(1);
+            }
+        }
+
+        #[cfg(feature = "show_progress")]
+        progress_bar.finish_with_message(format!("{:.6}", last_kl));
+
+        Ok(y)
+    }
+
+    /// Applies one momentum SGD step with the adaptive per-parameter gains, then recenters
+    ///
+    /// Updates `gains` with Jacobs' delta-bar-delta heuristic, accumulates the momentum increment
+    /// into `y_incs`, advances `y`, and subtracts the mean to keep the embedding centered
+    fn apply_gradient_step(
+        &self,
+        y: &mut Array2<f64>,
+        y_incs: &mut Array2<f64>,
+        gains: &mut Array2<f64>,
+        grad: &Array2<f64>,
+        momentum: f64,
+    ) -> Result<(), Error> {
+        Zip::from(&mut *gains)
+            .and(grad)
+            .and(&*y_incs)
+            .for_each(|gain, &g, &inc| {
+                *gain = if g * inc > 0.0 {
+                    *gain * GAIN_DECAY
+                } else {
+                    *gain + GAIN_INCREASE
+                };
+                if *gain < MIN_GAIN {
+                    *gain = MIN_GAIN;
+                }
+            });
+
+        // y_incs = momentum*y_incs - learning_rate*(gains*grad), then y += y_incs
+        Zip::from(&mut *y_incs)
+            .and(&*gains)
+            .and(grad)
+            .for_each(|inc, &gain, &g| {
+                *inc = momentum * *inc - self.learning_rate * gain * g;
+            });
+        *y += &*y_incs;
+
+        // Keep embedding centered to avoid drift
+        self.center_embedding(y)
+    }
+
+    /// Builds the symmetric sparse joint probabilities over each point's nearest neighbors
+    ///
+    /// For each point the `k = min(n - 1, ceil(3 * perplexity) + 1)` nearest neighbors are found by
+    /// a brute-force search, the per-point sigma is calibrated over those neighbors, and the
+    /// conditional probabilities are symmetrized into joint probabilities. Returns one neighbor
+    /// list per point, each entry holding `(neighbor_index, p_ij)`. The neighbor search is `O(n^2)`
+    /// and runs once, while the per-iteration repulsion stays `O(n log n)`
+    fn neighbor_probabilities(&self, x: &Array2<f64>, parallel: bool) -> Vec<Vec<(usize, f64)>> {
+        let n_samples = x.nrows();
+        let k = (((3.0 * self.perplexity).ceil() as usize) + 1)
+            .min(n_samples - 1)
+            .max(1);
+
+        // Find the k nearest neighbors of point i with their squared distances, calibrate sigma
+        // over them, and return the conditional probabilities
+        let conditional_row = |i: usize| -> (Vec<usize>, Array1<f64>) {
+            let row_i = x.row(i);
+            let mut dists: Vec<(f64, usize)> = (0..n_samples)
+                .filter(|&j| j != i)
+                .map(|j| (squared_euclidean_distance_row(&row_i, &x.row(j)), j))
+                .collect();
+
+            // Partial select the k smallest by (distance, index) for a deterministic neighbor set
+            if dists.len() > k {
+                dists.select_nth_unstable_by(k - 1, |a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                dists.truncate(k);
+            }
+            dists.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+
+            let neighbor_dist = Array1::from_iter(dists.iter().map(|&(d, _)| d));
+            let (p_row, _) = binary_search_sigma(&neighbor_dist, self.perplexity);
+            let neighbor_idx = dists.into_iter().map(|(_, j)| j).collect();
+            (neighbor_idx, p_row)
+        };
+
+        let conditional: Vec<(Vec<usize>, Array1<f64>)> = if parallel {
+            (0..n_samples)
+                .into_par_iter()
+                .map(conditional_row)
+                .collect()
+        } else {
+            (0..n_samples).map(conditional_row).collect()
+        };
+
+        // Symmetrize: p_ij = (p_{j|i} + p_{i|j}) / (2n), accumulated from both directed edges
+        let norm = 2.0 * n_samples as f64;
+        let mut adjacency: Vec<AHashMap<usize, f64>> = vec![AHashMap::new(); n_samples];
+        for (i, (neighbor_idx, p_row)) in conditional.iter().enumerate() {
+            for (slot, &j) in neighbor_idx.iter().enumerate() {
+                let w = p_row[slot] / norm;
+                *adjacency[i].entry(j).or_insert(0.0) += w;
+                *adjacency[j].entry(i).or_insert(0.0) += w;
+            }
+        }
+
+        // Sort each neighbor list by index so the downstream force summation order is fixed.
+        // Hash-map iteration order is otherwise unspecified, and t-SNE is chaotic enough that a
+        // differing summation order would diverge into a different embedding
+        adjacency
+            .into_iter()
+            .map(|row| {
+                let mut neighbors: Vec<(usize, f64)> = row.into_iter().collect();
+                neighbors.sort_unstable_by_key(|&(j, _)| j);
+                neighbors
+            })
+            .collect()
+    }
+
+    /// Computes the Barnes-Hut gradient and the repulsive normalization term `Z`
+    ///
+    /// The attractive part sums the sparse affinities over each point's neighbors, while the
+    /// repulsive part is summarized through the space-partitioning tree. The gradient matches the
+    /// exact path's scale (the factor of 4 is folded in), so the same learning rate fits both
+    /// methods. `Z` is summed sequentially so the result is reproducible
+    fn barnes_hut_gradient(
+        &self,
+        y: &Array2<f64>,
+        adj: &[Vec<(usize, f64)>],
+        angle: f64,
+        exaggeration: f64,
+        parallel: bool,
+    ) -> (Array2<f64>, f64) {
+        let n_samples = y.nrows();
+        let dim = self.n_components;
+        let theta2 = angle * angle;
+        let tree = build_sp_tree(y);
+
+        // Per point: attractive force, repulsive force, and the point's normalizer contribution
+        let per_point = |i: usize| -> ([f64; 3], [f64; 3], f64) {
+            let mut query = [0.0_f64; 3];
+            for (d, slot) in query.iter_mut().enumerate().take(dim) {
+                *slot = y[[i, d]];
+            }
+
+            // Repulsive forces summarized by the tree
+            let mut neg_f = [0.0_f64; 3];
+            let mut sum_q = 0.0;
+            tree.repulsive_force(i, &query[..dim], theta2, &mut neg_f[..dim], &mut sum_q);
+
+            // Attractive forces over the sparse neighbors
+            let mut pos_f = [0.0_f64; 3];
+            for &(j, p_ij) in &adj[i] {
+                let mut d2 = 0.0;
+                let mut diff = [0.0_f64; 3];
+                for d in 0..dim {
+                    diff[d] = query[d] - y[[j, d]];
+                    d2 += diff[d] * diff[d];
+                }
+                let mult = exaggeration * p_ij / (1.0 + d2);
+                for d in 0..dim {
+                    pos_f[d] += mult * diff[d];
+                }
+            }
+            (pos_f, neg_f, sum_q)
+        };
+
+        let results: Vec<([f64; 3], [f64; 3], f64)> = if parallel {
+            (0..n_samples).into_par_iter().map(per_point).collect()
+        } else {
+            (0..n_samples).map(per_point).collect()
+        };
+
+        // Sum the normalizer sequentially so Z does not depend on thread scheduling
+        let mut z = 0.0;
+        for r in &results {
+            z += r.2;
+        }
+        let z = z.max(MIN_Q);
+
+        let mut grad = Array2::<f64>::zeros((n_samples, dim));
+        for (i, (pos_f, neg_f, _)) in results.iter().enumerate() {
+            for d in 0..dim {
+                grad[[i, d]] = 4.0 * (pos_f[d] - neg_f[d] / z);
+            }
+        }
+        (grad, z)
+    }
+
+    /// Approximates the KL divergence over the sparse affinity edges for progress reporting
+    #[cfg(feature = "show_progress")]
+    fn barnes_hut_kl(
+        &self,
+        y: &Array2<f64>,
+        adj: &[Vec<(usize, f64)>],
+        z: f64,
+        exaggeration: f64,
+    ) -> f64 {
+        let dim = self.n_components;
+        let mut kl = 0.0;
+        for (i, neighbors) in adj.iter().enumerate() {
+            for &(j, p_ij) in neighbors {
+                let p = p_ij * exaggeration;
+                if p > 0.0 {
+                    let mut d2 = 0.0;
+                    for d in 0..dim {
+                        let diff = y[[i, d]] - y[[j, d]];
+                        d2 += diff * diff;
+                    }
+                    let q = ((1.0 / (1.0 + d2)) / z).max(MIN_Q);
+                    kl += p * (p / q).ln();
+                }
+            }
+        }
+        kl
     }
 
     fn validate_input<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<(), Error>
@@ -352,8 +673,48 @@ impl TSNE {
         Ok(())
     }
 
-    fn init_embedding(&self, n_samples: usize) -> Array2<f64> {
-        // Seeded RNG for reproducibility if provided
+    /// Builds the initial embedding according to the configured [`Init`] strategy
+    ///
+    /// PCA initialization is deterministic and falls back to random initialization when the
+    /// input has fewer features than components or its leading component is degenerate
+    fn init_embedding(&self, x: &Array2<f64>) -> Array2<f64> {
+        match self.init {
+            Init::PCA => self
+                .pca_init(x)
+                .unwrap_or_else(|| self.random_init(x.nrows())),
+            Init::Random => self.random_init(x.nrows()),
+        }
+    }
+
+    /// Initializes the embedding from the top principal components of `x`
+    ///
+    /// The result is rescaled so the leading component has standard deviation [`INIT_SCALE`],
+    /// which keeps early gradients small. Returns `None` when PCA cannot supply `n_components`
+    /// directions or the leading component has zero spread, letting the caller fall back to random
+    fn pca_init(&self, x: &Array2<f64>) -> Option<Array2<f64>> {
+        if x.ncols() < self.n_components {
+            return None;
+        }
+        let mut pca =
+            crate::utils::pca::PCA::new(self.n_components, crate::utils::pca::SVDSolver::Full)
+                .ok()?;
+        let mut embedding = pca.fit_transform(x).ok()?;
+
+        // Rescale to a small spread on the first component, matching common t-SNE practice
+        let col0 = embedding.column(0);
+        let count = col0.len() as f64;
+        let mean0 = col0.sum() / count;
+        let var0 = col0.iter().map(|&v| (v - mean0) * (v - mean0)).sum::<f64>() / count;
+        let std0 = var0.sqrt();
+        if !std0.is_finite() || std0 <= 0.0 {
+            return None;
+        }
+        embedding.mapv_inplace(|v| v / std0 * INIT_SCALE);
+        Some(embedding)
+    }
+
+    /// Initializes the embedding from small random noise seeded by `random_state`
+    fn random_init(&self, n_samples: usize) -> Array2<f64> {
         let mut rng = crate::random::make_rng(self.random_state);
 
         let mut y = Array2::<f64>::zeros((n_samples, self.n_components));
@@ -372,15 +733,25 @@ impl TSNE {
 
         let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
         if parallel {
-            // Fill every row in parallel; the diagonal evaluates to exactly 0.0, matching the
-            // symmetric sequential path below
-            Zip::from(distances.outer_iter_mut())
-                .and(x.outer_iter())
-                .par_for_each(|mut out_row, row_i| {
-                    for (j, row_j) in x.outer_iter().enumerate() {
-                        out_row[j] = squared_euclidean_distance_row(&row_i, &row_j);
-                    }
-                });
+            // Compute the upper triangle in parallel (each pair exactly once), then scatter it
+            // symmetrically. The previous parallel path filled every row independently and so
+            // recomputed each pair twice; the diagonal stays 0.0 from the zero-initialization
+            let partial: Vec<Vec<f64>> = (0..n_samples)
+                .into_par_iter()
+                .map(|i| {
+                    let row_i = x.row(i);
+                    ((i + 1)..n_samples)
+                        .map(|j| squared_euclidean_distance_row(&row_i, &x.row(j)))
+                        .collect()
+                })
+                .collect();
+            for (i, vals) in partial.into_iter().enumerate() {
+                for (offset, dist) in vals.into_iter().enumerate() {
+                    let j = i + 1 + offset;
+                    distances[[i, j]] = dist;
+                    distances[[j, i]] = dist;
+                }
+            }
         } else {
             for i in 0..n_samples {
                 let row_i = x.row(i);
@@ -447,20 +818,28 @@ impl TSNE {
         let mut num = Array2::<f64>::zeros((n_samples, n_samples));
 
         if parallel {
-            // Fill each row in parallel; the diagonal stays 0 (self-affinity excluded), so the
-            // `i == j` term must be skipped explicitly, unlike in the distance matrix
-            num.outer_iter_mut()
+            // Compute the upper triangle in parallel (each pair exactly once), then scatter it
+            // symmetrically. The previous parallel path computed every pair twice; the diagonal
+            // stays 0 (self-affinity excluded) from the zero-initialization
+            let partial: Vec<Vec<f64>> = (0..n_samples)
                 .into_par_iter()
-                .enumerate()
-                .for_each(|(i, mut out_row)| {
+                .map(|i| {
                     let row_i = y.row(i);
-                    for (j, row_j) in y.outer_iter().enumerate() {
-                        if i != j {
-                            let dist = squared_euclidean_distance_row(&row_i, &row_j);
-                            out_row[j] = 1.0 / (1.0 + dist);
-                        }
-                    }
-                });
+                    ((i + 1)..n_samples)
+                        .map(|j| {
+                            let dist = squared_euclidean_distance_row(&row_i, &y.row(j));
+                            1.0 / (1.0 + dist)
+                        })
+                        .collect()
+                })
+                .collect();
+            for (i, vals) in partial.into_iter().enumerate() {
+                for (offset, val) in vals.into_iter().enumerate() {
+                    let j = i + 1 + offset;
+                    num[[i, j]] = val;
+                    num[[j, i]] = val;
+                }
+            }
         } else {
             for i in 0..n_samples {
                 let row_i = y.row(i);
@@ -574,6 +953,202 @@ impl TSNE {
     }
 }
 
+/// Maximum subdivision depth for the Barnes-Hut tree, bounding recursion on coincident points
+const BH_MAX_DEPTH: usize = 50;
+
+/// A node of the space-partitioning tree used for the Barnes-Hut repulsive force approximation
+///
+/// Each node owns a rectangular cell, the running center of mass and count of the points it
+/// contains, and (once subdivided) its `2^dim` child cells. Supports up to 3 embedding dimensions
+struct SPNode {
+    /// Number of embedding dimensions
+    dim: usize,
+    /// Geometric center of this cell per dimension
+    center: Vec<f64>,
+    /// Half-width of this cell per dimension
+    half_width: Vec<f64>,
+    /// Number of points contained in this cell
+    cum_size: usize,
+    /// Center of mass of the contained points
+    center_of_mass: Vec<f64>,
+    /// Index and coordinates of the single point held while this node stays a leaf
+    leaf_point: Option<(usize, Vec<f64>)>,
+    /// Child cells, empty until the node subdivides, then of length `2^dim`
+    children: Vec<SPNode>,
+}
+
+impl SPNode {
+    /// Creates an empty leaf cell with the given center and half-width
+    fn new(center: Vec<f64>, half_width: Vec<f64>, dim: usize) -> Self {
+        SPNode {
+            dim,
+            center,
+            half_width,
+            cum_size: 0,
+            center_of_mass: vec![0.0; dim],
+            leaf_point: None,
+            children: Vec::new(),
+        }
+    }
+
+    /// Returns the child cell index whose region contains `p`
+    fn child_index(&self, p: &[f64]) -> usize {
+        let mut idx = 0;
+        for (d, (&pd, &cd)) in p.iter().zip(self.center.iter()).enumerate() {
+            if pd > cd {
+                idx |= 1 << d;
+            }
+        }
+        idx
+    }
+
+    /// Splits this leaf into `2^dim` empty child cells
+    fn subdivide(&mut self) {
+        let n_children = 1usize << self.dim;
+        self.children = Vec::with_capacity(n_children);
+        for c in 0..n_children {
+            let mut center = vec![0.0; self.dim];
+            let mut half_width = vec![0.0; self.dim];
+            for d in 0..self.dim {
+                half_width[d] = self.half_width[d] / 2.0;
+                center[d] = if (c >> d) & 1 == 1 {
+                    self.center[d] + half_width[d]
+                } else {
+                    self.center[d] - half_width[d]
+                };
+            }
+            self.children
+                .push(SPNode::new(center, half_width, self.dim));
+        }
+    }
+
+    /// Inserts a point into the subtree rooted at this node
+    fn insert(&mut self, idx: usize, p: &[f64], depth: usize) {
+        // Update the running count and center of mass
+        self.cum_size += 1;
+        let cs = self.cum_size as f64;
+        for (com, &pd) in self.center_of_mass.iter_mut().zip(p.iter()) {
+            *com = *com * ((cs - 1.0) / cs) + pd / cs;
+        }
+
+        if self.children.is_empty() {
+            match self.leaf_point.take() {
+                None => {
+                    // First point lands directly in this empty leaf
+                    self.leaf_point = Some((idx, p.to_vec()));
+                    return;
+                }
+                Some((old_idx, old_p)) => {
+                    // The depth cap stops coincident points from recursing without end
+                    if depth >= BH_MAX_DEPTH {
+                        self.leaf_point = Some((old_idx, old_p));
+                        return;
+                    }
+                    self.subdivide();
+                    let oc = self.child_index(&old_p);
+                    self.children[oc].insert(old_idx, &old_p, depth + 1);
+                }
+            }
+        }
+
+        let ci = self.child_index(p);
+        self.children[ci].insert(idx, p, depth + 1);
+    }
+
+    /// Accumulates the Barnes-Hut repulsive force and normalization term for `query`
+    ///
+    /// `target_idx` is the index of the query point so its own leaf is skipped, and `theta2` is the
+    /// squared opening angle. Adds the unnormalized repulsive force into `neg_f` and the Student-t
+    /// normalizer into `sum_q`
+    fn repulsive_force(
+        &self,
+        target_idx: usize,
+        query: &[f64],
+        theta2: f64,
+        neg_f: &mut [f64],
+        sum_q: &mut f64,
+    ) {
+        if self.cum_size == 0 {
+            return;
+        }
+        // Skip the leaf that holds the query point itself
+        if self.children.is_empty()
+            && let Some((idx, _)) = &self.leaf_point
+            && *idx == target_idx
+            && self.cum_size == 1
+        {
+            return;
+        }
+
+        let mut diff = [0.0_f64; 3];
+        let mut d2 = 0.0;
+        for d in 0..self.dim {
+            diff[d] = query[d] - self.center_of_mass[d];
+            d2 += diff[d] * diff[d];
+        }
+
+        // Largest side length of this cell
+        let mut max_width = 0.0_f64;
+        for d in 0..self.dim {
+            let w = 2.0 * self.half_width[d];
+            if w > max_width {
+                max_width = w;
+            }
+        }
+
+        // Treat the cell as one summary when it is a leaf or distant enough (width/dist < theta)
+        if self.children.is_empty() || max_width * max_width < theta2 * d2 {
+            let inv = 1.0 / (1.0 + d2);
+            let mult = self.cum_size as f64 * inv;
+            *sum_q += mult;
+            let force = mult * inv;
+            for d in 0..self.dim {
+                neg_f[d] += force * diff[d];
+            }
+        } else {
+            for child in &self.children {
+                child.repulsive_force(target_idx, query, theta2, neg_f, sum_q);
+            }
+        }
+    }
+}
+
+/// Builds the Barnes-Hut tree over the current embedding `y`
+fn build_sp_tree(y: &Array2<f64>) -> SPNode {
+    let dim = y.ncols();
+    let n = y.nrows();
+
+    // Axis-aligned bounding box of all points
+    let mut min = vec![f64::INFINITY; dim];
+    let mut max = vec![f64::NEG_INFINITY; dim];
+    for row in y.outer_iter() {
+        for d in 0..dim {
+            let v = row[d];
+            if v < min[d] {
+                min[d] = v;
+            }
+            if v > max[d] {
+                max[d] = v;
+            }
+        }
+    }
+
+    let mut center = vec![0.0; dim];
+    let mut half_width = vec![0.0; dim];
+    for d in 0..dim {
+        center[d] = (min[d] + max[d]) / 2.0;
+        // Pad the half-width so every point lies strictly inside the root cell
+        half_width[d] = ((max[d] - min[d]) / 2.0).max(1e-12) + 1e-12;
+    }
+
+    let mut root = SPNode::new(center, half_width, dim);
+    for i in 0..n {
+        let p: Vec<f64> = (0..dim).map(|d| y[[i, d]]).collect();
+        root.insert(i, &p, 0);
+    }
+    root
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,5 +1183,51 @@ mod tests {
         for &v in p.iter() {
             assert!(v >= 0.0, "probability must be non-negative, got {v}");
         }
+    }
+
+    /// The Barnes-Hut tree root holds every point and its center of mass equals the point mean
+    #[test]
+    fn sp_tree_root_aggregates_all_points() {
+        let y = array![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]];
+        let root = build_sp_tree(&y);
+
+        assert_eq!(root.cum_size, 4);
+        // Mean of the four corners is (1.0, 1.0)
+        assert_abs_diff_eq!(root.center_of_mass[0], 1.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(root.center_of_mass[1], 1.0, epsilon = 1e-12);
+    }
+
+    /// The sparse joint probabilities are symmetric and sum to 1
+    #[test]
+    fn neighbor_probabilities_are_symmetric_and_normalized() {
+        let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(0), Init::PCA, TSNEMethod::Exact).unwrap();
+        let x = array![
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [5.0, 5.0],
+            [6.0, 5.0],
+            [5.0, 6.0]
+        ];
+        let adj = tsne.neighbor_probabilities(&x, false);
+
+        // Look up p_ij in point i's neighbor list
+        let lookup = |i: usize, j: usize| -> f64 {
+            adj[i]
+                .iter()
+                .find(|&&(k, _)| k == j)
+                .map(|&(_, p)| p)
+                .unwrap_or(0.0)
+        };
+
+        let mut total = 0.0;
+        for (i, neighbors) in adj.iter().enumerate() {
+            for &(j, p_ij) in neighbors {
+                total += p_ij;
+                assert_abs_diff_eq!(p_ij, lookup(j, i), epsilon = 1e-12);
+            }
+        }
+        // The joint distribution sums to 1 over all directed pairs
+        assert_abs_diff_eq!(total, 1.0, epsilon = 1e-9);
     }
 }
