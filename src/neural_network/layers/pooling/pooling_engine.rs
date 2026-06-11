@@ -19,7 +19,7 @@ use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
 /// Threshold (in `batch * channels` units) at or above which a pooling pass runs in parallel
-pub(super) const POOL_PARALLEL_THRESHOLD: usize = 32;
+const POOL_PARALLEL_THRESHOLD: usize = 32;
 
 /// Per-spatial-axis pooling output sizes and leading padding for a given padding mode
 ///

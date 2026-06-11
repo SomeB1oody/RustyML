@@ -10,7 +10,7 @@ use ndarray::{Array2, ArrayView2};
 
 /// Epsilon used to clip predicted probabilities into the open interval `(0, 1)`,
 /// preventing `log(0)` and division-by-zero in the cross-entropy losses
-pub(crate) const PROB_CLIP_EPS: f32 = 1e-7;
+const PROB_CLIP_EPS: f32 = 1e-7;
 
 /// Row-wise numerically stable log-softmax and softmax over the last axis of a `[batch, classes]`
 /// view, returned as `(log_softmax, softmax)`
@@ -18,7 +18,7 @@ pub(crate) const PROB_CLIP_EPS: f32 = 1e-7;
 /// Used by the `from_logits` cross-entropy paths: subtracting each row's max before exponentiating
 /// keeps `exp` from overflowing, and computing `log_softmax = z - logsumexp(z)` directly (rather
 /// than `ln(softmax)`) avoids the precision loss of logging a clipped probability
-pub(crate) fn stable_log_softmax_softmax(logits: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>) {
+fn stable_log_softmax_softmax(logits: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>) {
     let mut log_sm = logits.to_owned();
     for mut row in log_sm.rows_mut() {
         let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -38,7 +38,7 @@ pub(crate) fn stable_log_softmax_softmax(logits: &ArrayView2<f32>) -> (Array2<f3
 /// # Errors
 ///
 /// Returns [`Error::shape_mismatch`] when the two shapes differ
-pub(crate) fn validate_same_shape(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
+fn validate_same_shape(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.shape() != y_pred.shape() {
         return Err(Error::shape_mismatch(y_true.shape(), y_pred.shape()));
     }
@@ -49,7 +49,7 @@ pub(crate) fn validate_same_shape(y_true: &Tensor, y_pred: &Tensor) -> Result<()
 ///
 /// Shared by the cross-entropy losses (binary/categorical/sparse-categorical) so the
 /// numerical-stability constant lives in exactly one place
-pub(crate) fn clip_probabilities(probs: &Tensor) -> Tensor {
+fn clip_probabilities(probs: &Tensor) -> Tensor {
     let mut clipped = probs.clone();
     clipped.par_mapv_inplace(|x| x.clamp(PROB_CLIP_EPS, 1.0 - PROB_CLIP_EPS));
     clipped
