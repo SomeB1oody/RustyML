@@ -14,12 +14,6 @@ use crate::neural_network::layers::regularization::validation::{
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::Axis;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
-
-/// Total-element count above which layer normalization switches from sequential to parallel
-const LAYER_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
 
 /// Axis selection for layer normalization
 #[derive(Debug, Clone)]
@@ -299,78 +293,20 @@ impl Layer for LayerNormalization {
             (LayerNormalizationAxis::Multiple(_), None) => unreachable!(),
         };
 
-        let total_elements = input.len();
-
         // Mean along the axis, then insert the axis back so broadcasting works
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
         let mean = mean.insert_axis(Axis(axis_idx));
 
-        // Center the data and compute variance
-        let (x_centered, var) = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_centered = Tensor::zeros(input.raw_dim());
-            let mut squared_diff = Tensor::zeros(input.raw_dim());
+        // Center the data and compute variance over the normalized axis (broadcasting `mean`)
+        let x_centered = input - &mean;
+        let var = (&x_centered * &x_centered)
+            .mean_axis(Axis(axis_idx))
+            .unwrap()
+            .insert_axis(Axis(axis_idx));
 
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            x_centered
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(squared_diff.as_slice_mut().unwrap().par_iter_mut())
-                .zip(input.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, ((centered, sq_diff), &val))| {
-                    // Map flat index to position in mean array
-                    let mean_idx =
-                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
-                    let mean_val = mean.as_slice().unwrap()[mean_idx];
-                    let diff = val - mean_val;
-                    *centered = diff;
-                    *sq_diff = diff * diff;
-                });
-
-            let var = squared_diff
-                .mean_axis(Axis(axis_idx))
-                .unwrap()
-                .insert_axis(Axis(axis_idx));
-            (x_centered, var)
-        } else {
-            let x_centered = input - &mean;
-            let var = (&x_centered * &x_centered)
-                .mean_axis(Axis(axis_idx))
-                .unwrap();
-            let var = var.insert_axis(Axis(axis_idx));
-            (x_centered, var)
-        };
-
-        // Normalize
+        // Normalize (broadcasting the per-row std over the normalized axis)
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
-
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            x_normalized
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (norm, &centered))| {
-                    let std_idx =
-                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
-                    let std_val = std_dev.as_slice().unwrap()[std_idx];
-                    *norm = centered / std_val;
-                });
-
-            x_normalized
-        } else {
-            &x_centered / &std_dev
-        };
+        let x_normalized = &x_centered / &std_dev;
 
         // Scale and shift: reshape gamma/beta to broadcast over the input shape
         let mut gamma_shape = vec![1; input.ndim()];
@@ -392,31 +328,7 @@ impl Layer for LayerNormalization {
             .into_shape_with_order(beta_shape.as_slice())
             .unwrap();
 
-        let output = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut output = Tensor::zeros(x_normalized.raw_dim());
-
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            output
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_normalized.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (out, &norm))| {
-                    // Index of this element along the normalized axis (gamma/beta are 1-D)
-                    let param_idx = (i / after_axis_size) % axis_size;
-                    let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
-                    let beta_val = beta_broadcast.as_slice().unwrap()[param_idx];
-                    *out = norm * gamma_val + beta_val;
-                });
-
-            output
-        } else {
-            &x_normalized * &gamma_broadcast + &beta_broadcast
-        };
+        let output = &x_normalized * &gamma_broadcast + &beta_broadcast;
 
         // Cache values for backward pass
         self.x_normalized = Some(x_normalized);
@@ -467,78 +379,20 @@ impl Layer for LayerNormalization {
             (LayerNormalizationAxis::Multiple(_), None) => unreachable!(),
         };
 
-        let total_elements = input.len();
-
         // Mean along the axis, then insert the axis back so broadcasting works
         let mean = input.mean_axis(Axis(axis_idx)).unwrap();
         let mean = mean.insert_axis(Axis(axis_idx));
 
-        // Center the data and compute variance
-        let (x_centered, var) = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_centered = Tensor::zeros(input.raw_dim());
-            let mut squared_diff = Tensor::zeros(input.raw_dim());
+        // Center the data and compute variance over the normalized axis (broadcasting `mean`)
+        let x_centered = input - &mean;
+        let var = (&x_centered * &x_centered)
+            .mean_axis(Axis(axis_idx))
+            .unwrap()
+            .insert_axis(Axis(axis_idx));
 
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            x_centered
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(squared_diff.as_slice_mut().unwrap().par_iter_mut())
-                .zip(input.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, ((centered, sq_diff), &val))| {
-                    // Map flat index to position in mean array
-                    let mean_idx =
-                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
-                    let mean_val = mean.as_slice().unwrap()[mean_idx];
-                    let diff = val - mean_val;
-                    *centered = diff;
-                    *sq_diff = diff * diff;
-                });
-
-            let var = squared_diff
-                .mean_axis(Axis(axis_idx))
-                .unwrap()
-                .insert_axis(Axis(axis_idx));
-            (x_centered, var)
-        } else {
-            let x_centered = input - &mean;
-            let var = (&x_centered * &x_centered)
-                .mean_axis(Axis(axis_idx))
-                .unwrap();
-            let var = var.insert_axis(Axis(axis_idx));
-            (x_centered, var)
-        };
-
-        // Normalize
+        // Normalize (broadcasting the per-row std over the normalized axis)
         let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
-
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            x_normalized
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (norm, &centered))| {
-                    let std_idx =
-                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
-                    let std_val = std_dev.as_slice().unwrap()[std_idx];
-                    *norm = centered / std_val;
-                });
-
-            x_normalized
-        } else {
-            &x_centered / &std_dev
-        };
+        let x_normalized = &x_centered / &std_dev;
 
         // Scale and shift: reshape gamma/beta to broadcast over the input shape
         let mut gamma_shape = vec![1; input.ndim()];
@@ -560,31 +414,7 @@ impl Layer for LayerNormalization {
             .into_shape_with_order(beta_shape.as_slice())
             .unwrap();
 
-        let output = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut output = Tensor::zeros(x_normalized.raw_dim());
-
-            let input_shape = input.shape();
-            let axis_size = input_shape[axis_idx];
-            let after_axis_size: usize = input_shape[axis_idx + 1..].iter().product();
-
-            output
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_normalized.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (out, &norm))| {
-                    // Index of this element along the normalized axis (gamma/beta are 1-D)
-                    let param_idx = (i / after_axis_size) % axis_size;
-                    let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
-                    let beta_val = beta_broadcast.as_slice().unwrap()[param_idx];
-                    *out = norm * gamma_val + beta_val;
-                });
-
-            output
-        } else {
-            &x_normalized * &gamma_broadcast + &beta_broadcast
-        };
+        let output = &x_normalized * &gamma_broadcast + &beta_broadcast;
 
         let output = match &merged {
             Some((_, perm, permuted_shape)) => {
@@ -651,8 +481,6 @@ impl Layer for LayerNormalization {
         self.grad_gamma = Some(grad_gamma);
         self.grad_beta = Some(grad_beta);
 
-        let total_elements = grad_output.len();
-
         // Gradient with respect to normalized input: reshape gamma for broadcasting
         let mut gamma_shape = vec![1; grad_output.ndim()];
         for (i, &dim) in self.gamma.shape().iter().enumerate() {
@@ -664,29 +492,7 @@ impl Layer for LayerNormalization {
             .into_shape_with_order(gamma_shape.as_slice())
             .unwrap();
 
-        let grad_x_normalized = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
-
-            let output_shape = grad_output.shape();
-            let axis_size = output_shape[axis_idx];
-            let after_axis_size: usize = output_shape[axis_idx + 1..].iter().product();
-
-            grad_x_norm
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(grad_output.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (g_norm, &g_out))| {
-                    // Index of this element along the normalized axis (gamma is 1-D)
-                    let param_idx = (i / after_axis_size) % axis_size;
-                    let gamma_val = gamma_broadcast.as_slice().unwrap()[param_idx];
-                    *g_norm = g_out * gamma_val;
-                });
-            grad_x_norm
-        } else {
-            grad_output * &gamma_broadcast
-        };
+        let grad_x_normalized = grad_output * &gamma_broadcast;
 
         // Inverse standard deviation and size of the normalization dimension
         let inv_std = std_dev.mapv(|x| 1.0 / x);
@@ -709,37 +515,9 @@ impl Layer for LayerNormalization {
         let grad_mean = grad_mean_1 + grad_mean_2;
 
         // Gradient with respect to input
-        let grad_input = if total_elements >= LAYER_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-
-            let output_shape = grad_output.shape();
-            let axis_size = output_shape[axis_idx];
-            let after_axis_size: usize = output_shape[axis_idx + 1..].iter().product();
-
-            grad_inp
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(grad_x_normalized.as_slice().unwrap().par_iter())
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, ((g_inp, &g_norm), &x_cent))| {
-                    let stat_idx =
-                        (i / after_axis_size / axis_size) * after_axis_size + (i % after_axis_size);
-                    let inv_std_val = inv_std.as_slice().unwrap()[stat_idx];
-                    let grad_var_val = grad_var.as_slice().unwrap()[stat_idx];
-                    let grad_mean_val = grad_mean.as_slice().unwrap()[stat_idx];
-
-                    *g_inp = g_norm * inv_std_val
-                        + grad_var_val * x_cent * 2.0 / norm_size
-                        + grad_mean_val / norm_size;
-                });
-            grad_inp
-        } else {
-            &grad_x_normalized * &inv_std
-                + &grad_var * (x_centered * 2.0 / norm_size)
-                + &grad_mean / norm_size
-        };
+        let grad_input = &grad_x_normalized * &inv_std
+            + &grad_var * (x_centered * 2.0 / norm_size)
+            + &grad_mean / norm_size;
 
         let grad_input = match &merged {
             Some((_, perm, permuted_shape)) => {

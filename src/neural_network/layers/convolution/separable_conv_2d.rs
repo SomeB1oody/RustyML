@@ -8,6 +8,7 @@ use crate::neural_network::layers::conv_op_helpers::{
     compute_row_gradient_sum, merge_results, pad_tensor_4d_spatial,
 };
 use crate::neural_network::layers::convolution::PaddingType;
+use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
 use crate::neural_network::layers::convolution::validation::{
     validate_depth_multiplier, validate_filters, validate_input_shape_2d, validate_kernel_size_2d,
     validate_strides_2d,
@@ -306,53 +307,22 @@ impl SeparableConv2D {
     }
 
     /// Performs the pointwise (1x1) convolution stage
+    ///
+    /// A 1x1 convolution is a per-position cross-channel matrix multiply, so this delegates to the
+    /// shared [`conv_forward`] engine (im2col + gemm) rather than a hand-rolled loop nest. The
+    /// pointwise weights `[filters, C*dm, 1, 1]` are already the engine's flat `[F, Cin, k...]`
+    /// layout, and the bias `[1, filters]` is its per-filter `[F]` vector
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
-        let input_shape = input.shape();
-        let batch_size = input_shape[0];
-        let output_shape = vec![batch_size, self.filters, input_shape[2], input_shape[3]];
-
-        // Run per-batch in parallel above the threshold, sequentially below it
-        let workload_size = batch_size * self.filters * input_shape[2] * input_shape[3];
-
-        let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
-            (0..batch_size)
-                .into_par_iter()
-                .map(|b| self.compute_pointwise_batch(b, input, input_shape))
-                .collect()
-        } else {
-            (0..batch_size)
-                .map(|b| self.compute_pointwise_batch(b, input, input_shape))
-                .collect()
-        };
-
-        merge_results(output_shape, results)
-    }
-
-    /// Computes the pointwise convolution for a single batch element
-    fn compute_pointwise_batch(
-        &self,
-        b: usize,
-        input: &Tensor,
-        input_shape: &[usize],
-    ) -> (usize, Array3<f32>) {
-        let mut batch_output = Array3::zeros((self.filters, input_shape[2], input_shape[3]));
-
-        for f in 0..self.filters {
-            for i in 0..input_shape[2] {
-                for j in 0..input_shape[3] {
-                    let mut sum = 0.0;
-
-                    for c in 0..input_shape[1] {
-                        sum += input[[b, c, i, j]] * self.pointwise_weights[[f, c, 0, 0]];
-                    }
-
-                    sum += self.bias[[0, f]];
-                    batch_output[[f, i, j]] = sum;
-                }
-            }
-        }
-
-        (b, batch_output)
+        conv_forward(
+            input,
+            self.pointwise_weights
+                .as_slice()
+                .expect("pointwise weights must be contiguous"),
+            self.pointwise_weights.shape(),
+            self.bias.as_slice().expect("bias must be contiguous"),
+            &[1, 1],
+            PaddingType::Valid,
+        )
     }
 
     /// Calculates the output shape after the depthwise convolution stage
@@ -487,7 +457,6 @@ impl Layer for SeparableConv2D {
             let batch_size = input_shape[0];
             let channels = input_shape[1];
             let depthwise_shape = depthwise_output.shape();
-            let grad_shape = grad_output.shape();
 
             // Re-create the zero-padded input from `depthwise_convolve` so gradients accumulate in
             // padded coordinates; the padding is stripped from the input gradient before returning
@@ -505,71 +474,26 @@ impl Layer for SeparableConv2D {
             let padded_input: &Tensor = padded_storage.as_ref().unwrap_or(input);
             let padded_shape = padded_input.shape().to_vec();
 
-            let gradient = grad_upstream;
+            // Pointwise (1x1) backward via the shared engine (im2col + gemm)
+            let pw_grads = conv_backward(
+                &grad_upstream,
+                depthwise_output,
+                self.pointwise_weights
+                    .as_slice()
+                    .expect("pointwise weights must be contiguous"),
+                self.pointwise_weights.shape(),
+                &[1, 1],
+                PaddingType::Valid,
+            );
+            let pointwise_weight_grads =
+                Array4::from_shape_vec(self.pointwise_weights.raw_dim(), pw_grads.weight_grad)
+                    .expect("pointwise weight gradient shape matches weights");
+            let bias_grads = Array2::from_shape_vec(self.bias.raw_dim(), pw_grads.bias_grad)
+                .expect("bias gradient shape matches bias");
+            // Gradient w.r.t. the depthwise output, shape [batch, C*dm, H', W']
+            let depthwise_grad = pw_grads.input_grad;
 
-            let mut pointwise_weight_grads = Array4::zeros(self.pointwise_weights.dim());
             let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());
-            let mut bias_grads = Array2::zeros((1, self.filters));
-
-            // Each gradient below is parallelized over an axis whose entries are written
-            // independently (disjoint mutable sub-views), so the result matches the sequential one
-
-            // Bias gradients: one independent sum per output filter
-            bias_grads
-                .axis_iter_mut(Axis(1))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(f, mut bias)| {
-                    let mut sum = 0.0;
-                    for b in 0..batch_size {
-                        for i in 0..grad_shape[2] {
-                            for j in 0..grad_shape[3] {
-                                sum += gradient[[b, f, i, j]];
-                            }
-                        }
-                    }
-                    *bias.first_mut().unwrap() = sum;
-                });
-
-            // Pointwise weight gradients: parallel over output filters
-            pointwise_weight_grads
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(f, mut pw_grad)| {
-                    for c in 0..depthwise_shape[1] {
-                        let mut sum = 0.0;
-                        for b in 0..batch_size {
-                            for i in 0..depthwise_shape[2] {
-                                for j in 0..depthwise_shape[3] {
-                                    sum += gradient[[b, f, i, j]] * depthwise_output[[b, c, i, j]];
-                                }
-                            }
-                        }
-                        pw_grad[[c, 0, 0]] = sum;
-                    }
-                });
-
-            // Gradient w.r.t. the depthwise output: parallel over the batch axis
-            let mut depthwise_grad = ArrayD::zeros(depthwise_output.dim());
-            depthwise_grad
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(b, mut dw_grad_b)| {
-                    for c in 0..depthwise_shape[1] {
-                        for i in 0..depthwise_shape[2] {
-                            for j in 0..depthwise_shape[3] {
-                                let mut sum = 0.0;
-                                for f in 0..self.filters {
-                                    sum += gradient[[b, f, i, j]]
-                                        * self.pointwise_weights[[f, c, 0, 0]];
-                                }
-                                dw_grad_b[[c, i, j]] = sum;
-                            }
-                        }
-                    }
-                });
 
             // Depthwise weight gradients: parallel over the depth-multiplier axis
             depthwise_weight_grads

@@ -12,8 +12,7 @@ use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut0, Axis, Data, 
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelBridge,
-    ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, ParallelBridge, ParallelIterator,
 };
 
 /// Sample-count threshold for switching SVC operations to parallel computation
@@ -174,57 +173,6 @@ impl SVC {
     );
     get_field!(get_bias, bias, Option<f64>);
 
-    /// Computes the kernel matrix (Gram matrix) for the given data
-    ///
-    /// # Parameters
-    ///
-    /// - `x` - Input data matrix where each row is a sample
-    ///
-    /// # Returns
-    ///
-    /// - `Array2<f64>` - The computed kernel matrix
-    fn compute_kernel_matrix<S>(&self, x: &ArrayBase<S, Ix2>) -> Array2<f64>
-    where
-        S: Data<Elem = f64> + Send + Sync,
-    {
-        let n_samples = x.nrows();
-        let mut kernel_matrix = Array2::<f64>::zeros((n_samples, n_samples));
-
-        // (i, j) pairs with i <= j, covering only the upper triangle plus diagonal
-        let pairs: Vec<(usize, usize)> = (0..n_samples)
-            .flat_map(|i| (i..n_samples).map(move |j| (i, j)))
-            .collect();
-
-        // Compute kernel values (parallel for large datasets, sequential for small)
-        let kernel_values: Vec<((usize, usize), f64)> = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            pairs
-                .par_iter()
-                .map(|&(i, j)| {
-                    let k_val = self.kernel.compute(x.row(i), x.row(j));
-                    ((i, j), k_val)
-                })
-                .collect()
-        } else {
-            pairs
-                .iter()
-                .map(|&(i, j)| {
-                    let k_val = self.kernel.compute(x.row(i), x.row(j));
-                    ((i, j), k_val)
-                })
-                .collect()
-        };
-
-        // Fill the matrix, mirroring across the diagonal
-        for ((i, j), val) in kernel_values {
-            kernel_matrix[[i, j]] = val;
-            if i != j {
-                kernel_matrix[[j, i]] = val;
-            }
-        }
-
-        kernel_matrix
-    }
-
     /// Computes the decision value for a single sample
     ///
     /// # Parameters
@@ -306,7 +254,8 @@ impl SVC {
         let mut alphas = Array1::<f64>::zeros(n_samples);
         let mut b = 0.0;
 
-        let kernel_matrix = self.compute_kernel_matrix(x);
+        // Symmetric Gram matrix via one GEMM + elementwise kernel transform
+        let kernel_matrix = self.kernel.compute_matrix(x, x);
 
         if kernel_matrix.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("kernel matrix"));

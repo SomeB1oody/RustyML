@@ -4,7 +4,6 @@
 //! points toward higher-density regions without requiring the number of clusters up front,
 //! plus the [`estimate_bandwidth`] helper for choosing a bandwidth from the data
 
-use super::KernelType;
 use super::parallel::map_collect;
 use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
@@ -13,7 +12,7 @@ use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
 use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{
     IntoParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
@@ -209,38 +208,38 @@ impl MeanShift {
             indices[..max_seeds].to_vec()
         };
 
-        // Pre-compute the RBF kernel used to weight neighbours; gamma folds in the bandwidth
+        // RBF weighting: w_i = exp(-gamma * ||center - x_i||^2); gamma folds in the bandwidth
         let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
-        let kernel = KernelType::RBF { gamma };
         let tol_squared = self.tol * self.tol;
         let bandwidth_squared = self.bandwidth * self.bandwidth;
+        // Per-sample squared norms, shared across all seeds and iterations
+        let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
 
         let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
 
-        // Mean shift on a single seed; kept sequential since seeds run in parallel below (no nested
-        // Rayon pools), with weighting and weighted-sum fused into one pass to skip a weight buffer
+        // Mean shift on a single seed
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
             let mut center = x.row(seed_idx).to_owned();
             let mut completed_iterations = 0;
 
             loop {
-                let mut new_center = Array1::zeros(n_features);
-                let mut weight_sum = 0.0;
+                // RBF weights for every point via the squared-norm identity
+                let center_sq = center.dot(&center);
+                let projections = x.dot(&center);
+                let weights: Array1<f64> =
+                    Zip::from(&projections)
+                        .and(&x_sq)
+                        .map_collect(|&proj, &x_norm_sq| {
+                            let dist_sq = (center_sq + x_norm_sq - 2.0 * proj).max(0.0);
+                            (-gamma * dist_sq).exp()
+                        });
+                let weight_sum = weights.sum();
 
-                for i in 0..n_samples {
-                    let point = x.row(i);
-                    let weight = kernel.compute(center.view(), point);
-                    if weight > 0.0 {
-                        for j in 0..n_features {
-                            new_center[j] += point[j] * weight;
-                        }
-                        weight_sum += weight;
-                    }
-                }
-
-                if weight_sum > 0.0 {
-                    new_center.mapv_inplace(|x| x / weight_sum);
-                }
+                let new_center = if weight_sum > 0.0 {
+                    x.t().dot(&weights) / weight_sum
+                } else {
+                    Array1::zeros(n_features)
+                };
 
                 // Check convergence using squared distance to avoid sqrt
                 let shift_squared = squared_euclidean_distance_row(&center, &new_center);

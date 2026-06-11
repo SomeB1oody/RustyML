@@ -8,7 +8,7 @@ use super::validation::{check_is_fitted, preliminary_check, validate_predict_inp
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Data, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Strategy used for weighting neighbors in the KNN algorithm
@@ -249,11 +249,19 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
+        // Training squared norms, shared by every query (Euclidean fast path only)
+        let train_sq_norms = self.euclidean_train_sq_norms(x_train);
+
         // Sequential prediction on encoded indices
         let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
             .map(|i| {
                 let sample = x.row(i);
-                self.predict_one(sample, x_train.view(), y_train_encoded)
+                self.predict_one(
+                    sample,
+                    x_train.view(),
+                    y_train_encoded,
+                    train_sq_norms.as_ref(),
+                )
             })
             .collect();
 
@@ -304,12 +312,20 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
         let y_train_encoded = self.y_train_encoded.as_ref().unwrap();
         let (_, idx_to_label) = self.label_map.as_ref().unwrap();
 
+        // Training squared norms, shared by every query (Euclidean fast path only)
+        let train_sq_norms = self.euclidean_train_sq_norms(x_train);
+
         // Parallel prediction on encoded indices
         let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
             .into_par_iter()
             .map(|i| {
                 let sample = x.row(i);
-                self.predict_one(sample, x_train.view(), y_train_encoded)
+                self.predict_one(
+                    sample,
+                    x_train.view(),
+                    y_train_encoded,
+                    train_sq_norms.as_ref(),
+                )
             })
             .collect();
 
@@ -326,21 +342,51 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
 }
 
 impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
+    /// Precomputes per-training-sample squared norms for the Euclidean fast path,
+    /// or `None` for metrics (Manhattan / Minkowski) that have no GEMV form
+    ///
+    /// Shared across every query, so the `||t||^2` term is paid once, not per query
+    fn euclidean_train_sq_norms<S>(&self, x_train: &ArrayBase<S, Ix2>) -> Option<Array1<f64>>
+    where
+        S: Data<Elem = f64>,
+    {
+        match self.metric {
+            DistanceCalculationMetric::Euclidean => {
+                Some(x_train.map_axis(Axis(1), |row| row.dot(&row)))
+            }
+            _ => None,
+        }
+    }
+
     /// Predicts the encoded class index for a single data point
     fn predict_one(
         &self,
         x: ArrayView1<f64>,
         x_train: ArrayView2<f64>,
         y_train_encoded: &Array1<usize>,
+        train_sq_norms: Option<&Array1<f64>>,
     ) -> Result<usize, Error> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        // Distances to all training samples; kept sequential because callers parallelize across
-        // query samples (see `predict_parallel`), and nesting Rayon pools gives no real speedup
-        let mut distances: Vec<(f64, usize)> = (0..n_samples)
-            .map(|i| (self.metric.distance(x, x_train.row(i)), i))
-            .collect();
+        let mut distances: Vec<(f64, usize)> = match train_sq_norms {
+            Some(train_sq_norms) => {
+                let x_sq = x.dot(&x);
+                let projections = x_train.dot(&x); // [n_train] = X_train * x
+                projections
+                    .iter()
+                    .zip(train_sq_norms.iter())
+                    .enumerate()
+                    .map(|(i, (&proj, &t_sq))| {
+                        let dist_sq = (x_sq + t_sq - 2.0 * proj).max(0.0);
+                        (dist_sq.sqrt(), i)
+                    })
+                    .collect()
+            }
+            None => (0..n_samples)
+                .map(|i| (self.metric.distance(x, x_train.row(i)), i))
+                .collect(),
+        };
 
         // Use partial sorting to get only k smallest elements instead of full sort
         distances.select_nth_unstable_by(k - 1, |a, b| {

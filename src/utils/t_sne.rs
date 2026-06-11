@@ -88,6 +88,12 @@ const INITIAL_MOMENTUM: f64 = 0.5;
 const FINAL_MOMENTUM: f64 = 0.8;
 /// Scale for random initialization of the embedding
 const INIT_SCALE: f64 = 1e-4;
+/// Additive step for the adaptive gain when the gradient keeps its direction
+const GAIN_INCREASE: f64 = 0.2;
+/// Multiplicative decay for the adaptive gain when the step oscillates
+const GAIN_DECAY: f64 = 0.8;
+/// Floor for the per-parameter adaptive gain
+const MIN_GAIN: f64 = 0.01;
 /// Lower bound for q_ij to avoid numerical instability
 const MIN_Q: f64 = 1e-12;
 /// Sample-count threshold for switching to parallel computation
@@ -243,6 +249,8 @@ impl TSNE {
         // Initialize embedding and momentum buffer
         let mut y = self.init_embedding(n_samples);
         let mut y_incs = Array2::<f64>::zeros((n_samples, self.n_components));
+        // Per-parameter adaptive gains (start neutral at 1.0)
+        let mut gains = Array2::<f64>::ones((n_samples, self.n_components));
 
         // Progress bar reports KL divergence each iteration
         #[cfg(feature = "show_progress")]
@@ -278,10 +286,29 @@ impl TSNE {
                 FINAL_MOMENTUM
             };
 
-            // Momentum SGD update: y_incs = momentum*y_incs - learning_rate*grad, then y += y_incs
-            Zip::from(&mut y_incs).and(&grad).for_each(|inc, &g| {
-                *inc = momentum * *inc - self.learning_rate * g;
-            });
+            // Adaptive per-parameter gains (Jacobs' delta-bar-delta heuristic)
+            Zip::from(&mut gains)
+                .and(&grad)
+                .and(&y_incs)
+                .for_each(|gain, &g, &inc| {
+                    *gain = if g * inc > 0.0 {
+                        *gain * GAIN_DECAY
+                    } else {
+                        *gain + GAIN_INCREASE
+                    };
+                    if *gain < MIN_GAIN {
+                        *gain = MIN_GAIN;
+                    }
+                });
+
+            // Momentum SGD update with per-parameter gains:
+            // y_incs = momentum*y_incs - learning_rate*(gains*grad), then y += y_incs
+            Zip::from(&mut y_incs)
+                .and(&gains)
+                .and(&grad)
+                .for_each(|inc, &gain, &g| {
+                    *inc = momentum * *inc - self.learning_rate * gain * g;
+                });
             y += &y_incs;
 
             // Keep embedding centered to avoid drift

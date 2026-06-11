@@ -7,7 +7,7 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{LSTMGateWeight, LSTMLayerWeight, LayerWeight};
 use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{
-    Gate, compute_gate_value, store_gate_gradients, take_cache,
+    Gate, gate_value_from_projection, project_gate_input, store_gate_gradients, take_cache,
 };
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
@@ -285,37 +285,46 @@ impl Layer for LSTM {
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
+        // Batched input projection for all 4 gates (one big gemm each); the loop only adds the
+        // per-step h_prev @ recurrent_kernel term
+        let xw_i = project_gate_input(&self.input_gate, &x3);
+        let xw_f = project_gate_input(&self.forget_gate, &x3);
+        let xw_g = project_gate_input(&self.cell_gate, &x3);
+        let xw_o = project_gate_input(&self.output_gate, &x3);
+
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+            let xw_i_t = xw_i.index_axis(Axis(1), t);
+            let xw_f_t = xw_f.index_axis(Axis(1), t);
+            let xw_g_t = xw_g.index_axis(Axis(1), t);
+            let xw_o_t = xw_o.index_axis(Axis(1), t);
 
             // Compute all 4 gate values (parallel or sequential)
             let (i_raw, f_raw, g_raw, o_raw) = if use_parallel {
                 let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
                     || {
                         rayon::join(
-                            || compute_gate_value(&self.input_gate, &x_t, &h_prev),
-                            || compute_gate_value(&self.forget_gate, &x_t, &h_prev),
+                            || gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
+                            || gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
                         )
                     },
                     || {
                         rayon::join(
-                            || compute_gate_value(&self.cell_gate, &x_t, &h_prev),
-                            || compute_gate_value(&self.output_gate, &x_t, &h_prev),
+                            || gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
+                            || gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
                         )
                     },
                 );
                 (i_raw, f_raw, g_raw, o_raw)
             } else {
                 (
-                    compute_gate_value(&self.input_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.forget_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.cell_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.output_gate, &x_t, &h_prev),
+                    gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
+                    gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
+                    gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
+                    gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
                 )
             };
 
-            // Gates use the recurrent activation (sigmoid); the candidate uses the
-            // configurable activation (Keras-style, default tanh)
+            // Gates use the recurrent activation (sigmoid)
             let i_t = apply_sigmoid(i_raw);
             let f_t = apply_sigmoid(f_raw);
             let o_t = apply_sigmoid(o_raw);
@@ -358,8 +367,7 @@ impl Layer for LSTM {
         self.g_cache = Some(g_vals);
         self.o_cache = Some(o_vals);
 
-        // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so the last hidden state is returned directly
+        // The hidden state already passed through the configurable activation at each timestep (Keras-style)
         Ok(h_prev.into_dyn())
     }
 
@@ -381,37 +389,46 @@ impl Layer for LSTM {
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
+        // Batched input projection for all 4 gates (one big gemm each); the loop only adds the
+        // per-step h_prev @ recurrent_kernel term
+        let xw_i = project_gate_input(&self.input_gate, &x3);
+        let xw_f = project_gate_input(&self.forget_gate, &x3);
+        let xw_g = project_gate_input(&self.cell_gate, &x3);
+        let xw_o = project_gate_input(&self.output_gate, &x3);
+
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+            let xw_i_t = xw_i.index_axis(Axis(1), t);
+            let xw_f_t = xw_f.index_axis(Axis(1), t);
+            let xw_g_t = xw_g.index_axis(Axis(1), t);
+            let xw_o_t = xw_o.index_axis(Axis(1), t);
 
             // Compute all 4 gate values (parallel or sequential)
             let (i_raw, f_raw, g_raw, o_raw) = if use_parallel {
                 let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
                     || {
                         rayon::join(
-                            || compute_gate_value(&self.input_gate, &x_t, &h_prev),
-                            || compute_gate_value(&self.forget_gate, &x_t, &h_prev),
+                            || gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
+                            || gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
                         )
                     },
                     || {
                         rayon::join(
-                            || compute_gate_value(&self.cell_gate, &x_t, &h_prev),
-                            || compute_gate_value(&self.output_gate, &x_t, &h_prev),
+                            || gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
+                            || gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
                         )
                     },
                 );
                 (i_raw, f_raw, g_raw, o_raw)
             } else {
                 (
-                    compute_gate_value(&self.input_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.forget_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.cell_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.output_gate, &x_t, &h_prev),
+                    gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
+                    gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
+                    gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
+                    gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
                 )
             };
 
-            // Gates use the recurrent activation (sigmoid); the candidate uses the
-            // configurable activation (Keras-style, default tanh)
+            // Gates use the recurrent activation (sigmoid)
             let i_t = apply_sigmoid(i_raw);
             let f_t = apply_sigmoid(f_raw);
             let o_t = apply_sigmoid(o_raw);
@@ -436,8 +453,7 @@ impl Layer for LSTM {
             c_prev = c_t;
         }
 
-        // The hidden state already passed through the configurable activation at each
-        // timestep (Keras-style), so the last hidden state is returned directly
+        // The hidden state already passed through the configurable activation at each timestep (Keras-style)
         Ok(h_prev.into_dyn())
     }
 
@@ -461,34 +477,19 @@ impl Layer for LSTM {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Initialize gradient accumulators
-        let mut grad_i_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_i_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_i_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_f_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_f_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_f_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_g_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_g_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_g_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_o_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_o_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_o_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
+        // Per-gate pre-activation gradients for every timestep, stored so the input-weight,
+        // recurrent-weight, bias, and input gradients can batch into single gemms after the loop
+        // Only `grad_h` (via the recurrent kernels) and `grad_c` stay sequential
+        let mut dz_i = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut dz_f = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut dz_g = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut dz_o = Array3::<f32>::zeros((batch, timesteps, self.units));
 
         let mut grad_h = grad_h_t;
         let mut grad_c = Array2::<f32>::zeros((batch, self.units));
 
-        // Parallelize once the computational load clears the threshold
-        let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
-
         // Backpropagation through time
         for t in (0..timesteps).rev() {
-            let h_prev = &hs[t];
             let c_prev = &cs[t];
             let c_t_activated = &cs_activated[t];
             let i_t = &i_vals[t];
@@ -524,96 +525,65 @@ impl Layer for LSTM {
                 .into_dimensionality::<Ix2>()
                 .unwrap();
 
-            let x_t = x3.index_axis(Axis(1), t).to_owned();
+            // Gradient w.r.t. the previous hidden state (sequential recurrence - the only per-step
+            // gemms left in the loop)
+            grad_h = grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
+                + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
+                + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
+                + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t());
 
-            let x_t_t = x_t.t();
-            let h_prev_t = h_prev.t();
-
-            // Gradient updates for a single gate
-            let compute_gate_gradients = |grad_raw: &Array2<f32>| {
-                let kernel_update = x_t_t.dot(grad_raw);
-                let recurrent_update = h_prev_t.dot(grad_raw);
-                let bias_update = grad_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
-                (kernel_update, recurrent_update, bias_update)
-            };
-
-            // Compute all gradient updates (parallel or sequential)
-            let (o_updates, f_updates, i_updates, g_updates) = if use_parallel {
-                let ((o_updates, f_updates), (i_updates, g_updates)) = rayon::join(
-                    || {
-                        rayon::join(
-                            || compute_gate_gradients(&grad_o_raw),
-                            || compute_gate_gradients(&grad_f_raw),
-                        )
-                    },
-                    || {
-                        rayon::join(
-                            || compute_gate_gradients(&grad_i_raw),
-                            || compute_gate_gradients(&grad_g_raw),
-                        )
-                    },
-                );
-                (o_updates, f_updates, i_updates, g_updates)
-            } else {
-                (
-                    compute_gate_gradients(&grad_o_raw),
-                    compute_gate_gradients(&grad_f_raw),
-                    compute_gate_gradients(&grad_i_raw),
-                    compute_gate_gradients(&grad_g_raw),
-                )
-            };
-
-            grad_o_kernel += &o_updates.0;
-            grad_o_recurrent += &o_updates.1;
-            grad_o_bias += &o_updates.2;
-
-            grad_f_kernel += &f_updates.0;
-            grad_f_recurrent += &f_updates.1;
-            grad_f_bias += &f_updates.2;
-
-            grad_i_kernel += &i_updates.0;
-            grad_i_recurrent += &i_updates.1;
-            grad_i_bias += &i_updates.2;
-
-            grad_g_kernel += &g_updates.0;
-            grad_g_recurrent += &g_updates.1;
-            grad_g_bias += &g_updates.2;
-
-            // Compute gradient with respect to input and hidden state (parallel or sequential)
-            let (dx, grad_h_next) = if use_parallel {
-                rayon::join(
-                    || {
-                        grad_o_raw.dot(&self.output_gate.kernel.t())
-                            + grad_f_raw.dot(&self.forget_gate.kernel.t())
-                            + grad_i_raw.dot(&self.input_gate.kernel.t())
-                            + grad_g_raw.dot(&self.cell_gate.kernel.t())
-                    },
-                    || {
-                        grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
-                            + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
-                            + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
-                            + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t())
-                    },
-                )
-            } else {
-                (
-                    grad_o_raw.dot(&self.output_gate.kernel.t())
-                        + grad_f_raw.dot(&self.forget_gate.kernel.t())
-                        + grad_i_raw.dot(&self.input_gate.kernel.t())
-                        + grad_g_raw.dot(&self.cell_gate.kernel.t()),
-                    grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
-                        + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
-                        + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
-                        + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t()),
-                )
-            };
-
-            grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
-            grad_h = grad_h_next;
+            dz_o.index_axis_mut(Axis(1), t).assign(&grad_o_raw);
+            dz_f.index_axis_mut(Axis(1), t).assign(&grad_f_raw);
+            dz_i.index_axis_mut(Axis(1), t).assign(&grad_i_raw);
+            dz_g.index_axis_mut(Axis(1), t).assign(&grad_g_raw);
 
             // Gradient with respect to previous cell state
             grad_c = grad_c_prev;
         }
+
+        // Batched reductions over all timesteps. Stack X and H_prev (hs[0..timesteps]) as
+        // [batch*timesteps, *]; each gate's gradients are then single gemms:
+        //   grad_kernel = X^T @ DZ, grad_recurrent = H_prev^T @ DZ, grad_bias = sum_rows(DZ),
+        //   grad_x += DZ @ kernel^T (summed over gates)
+        let x_flat = x3
+            .to_shape((batch * timesteps, feat))
+            .expect("contiguous input reshape");
+        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, self.units));
+        for (mut dst, h) in h_prev3.axis_iter_mut(Axis(1)).zip(hs.iter()) {
+            dst.assign(h);
+        }
+        let h_prev_flat = h_prev3
+            .to_shape((batch * timesteps, self.units))
+            .expect("contiguous H_prev reshape");
+
+        let flat = |dz: &Array3<f32>| {
+            dz.to_shape((batch * timesteps, self.units))
+                .expect("contiguous DZ reshape")
+                .to_owned()
+        };
+        let dz_i = flat(&dz_i);
+        let dz_f = flat(&dz_f);
+        let dz_g = flat(&dz_g);
+        let dz_o = flat(&dz_o);
+
+        let gate_grads = |dz_flat: &Array2<f32>| {
+            (
+                x_flat.t().dot(dz_flat),
+                h_prev_flat.t().dot(dz_flat),
+                dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0)),
+            )
+        };
+        let (grad_i_kernel, grad_i_recurrent, grad_i_bias) = gate_grads(&dz_i);
+        let (grad_f_kernel, grad_f_recurrent, grad_f_bias) = gate_grads(&dz_f);
+        let (grad_g_kernel, grad_g_recurrent, grad_g_bias) = gate_grads(&dz_g);
+        let (grad_o_kernel, grad_o_recurrent, grad_o_bias) = gate_grads(&dz_o);
+
+        let grad_x3 = (dz_i.dot(&self.input_gate.kernel.t())
+            + dz_f.dot(&self.forget_gate.kernel.t())
+            + dz_g.dot(&self.cell_gate.kernel.t())
+            + dz_o.dot(&self.output_gate.kernel.t()))
+        .into_shape_with_order((batch, timesteps, feat))
+        .expect("reshape grad_x to [batch, timesteps, feat]");
 
         store_gate_gradients(
             &mut self.input_gate,

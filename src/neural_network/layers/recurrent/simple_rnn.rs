@@ -159,6 +159,19 @@ impl SimpleRNN {
         self.bias = bias;
         Ok(())
     }
+
+    /// Batched input projection: `x3 [batch, timesteps, input_dim] @ kernel` for all timesteps in a
+    /// single gemm, returning `[batch, timesteps, units]`. Collapsing the (batch, timesteps) axes
+    /// into one matmul beats `timesteps` separate small gemms on cache/SIMD utilization
+    fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
+        let (batch, timesteps) = (x3.shape()[0], x3.shape()[1]);
+        let x2 = x3
+            .to_shape((batch * timesteps, self.input_dim))
+            .expect("contiguous [batch*timesteps, input_dim] reshape");
+        x2.dot(&self.kernel)
+            .into_shape_with_order((batch, timesteps, self.units))
+            .expect("reshape projection to [batch, timesteps, units]")
+    }
 }
 
 impl Layer for SimpleRNN {
@@ -171,16 +184,19 @@ impl Layer for SimpleRNN {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
+        // The input projection X @ W does not depend on the recurrence, so compute it for every
+        // timestep in one gemm: [batch*timesteps, input_dim] @ [input_dim, units]. `xw[:, t, :]` is
+        // x_t @ W. Only h_{t-1} @ U below has to stay sequential
+        let xw = self.project_input(&x3);
+
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         let mut hs = Vec::with_capacity(timesteps + 1);
         hs.push(h_prev.clone());
 
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
-
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
+            let z = h_prev.dot(&self.recurrent_kernel) + xw.index_axis(Axis(1), t) + &self.bias;
 
             let h_t = self
                 .activation
@@ -204,14 +220,15 @@ impl Layer for SimpleRNN {
         // input shape (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
+        // Batched input projection (see `forward`); only the recurrence stays sequential
+        let xw = self.project_input(&x3);
+
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
 
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t); // (batch, input_dim)
-
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = x_t.dot(&self.kernel) + h_prev.dot(&self.recurrent_kernel) + &self.bias;
+            let z = h_prev.dot(&self.recurrent_kernel) + xw.index_axis(Axis(1), t) + &self.bias;
 
             let h_t = self
                 .activation
@@ -256,14 +273,13 @@ impl Layer for SimpleRNN {
             .grad_bias
             .take()
             .unwrap_or_else(|| Array2::<f32>::zeros((1, self.units)));
-        let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
-
+        // Per-timestep d_z, stored so the input-side reductions can batch into single gemms. Only
+        // `grad_h = d_z @ U^T` (the recurrence) has to be computed step by step
+        let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut grad_h = grad_h_t;
         // backpropagation through time (BPTT)
         for t in (0..timesteps).rev() {
-            let h_tm1 = &hs[t];
-
-            // backprop through activation using this timestep's cached output `hs[t + 1]`;
+            // backprop through activation using this timestep's cached output `hs[t + 1]`
             // every supported activation's derivative is a function of its output
             let d_z = {
                 let h_t = hs[t + 1].clone().into_dyn();
@@ -272,20 +288,37 @@ impl Layer for SimpleRNN {
                 grad_z_dyn.into_dimensionality::<ndarray::Ix2>().unwrap()
             };
 
-            // accumulate weight gradients
-            let x_t = x3.index_axis(Axis(1), t);
-            grad_k += &x_t.t().dot(&d_z);
-            grad_rk += &h_tm1.t().dot(&d_z);
-            grad_b += &d_z.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-            // gradient w.r.t. input at timestep t
-            grad_x3
-                .index_axis_mut(Axis(1), t)
-                .assign(&d_z.dot(&self.kernel.t()));
-
-            // gradient w.r.t. previous hidden state, used by the next iteration
+            // gradient w.r.t. previous hidden state, used by the next iteration (sequential)
             grad_h = d_z.dot(&self.recurrent_kernel.t());
+            dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }
+
+        // Batched reductions over all timesteps. With DZ and X stacked as [batch*timesteps, *]:
+        //   grad_k = X^T @ DZ, grad_x = DZ @ W^T, grad_b = sum_rows(DZ); and with H_prev stacked
+        //   from hs[0..timesteps], grad_rk = H_prev^T @ DZ
+        let dz_flat = dz_all
+            .to_shape((batch * timesteps, self.units))
+            .expect("contiguous DZ reshape");
+        let x_flat = x3
+            .to_shape((batch * timesteps, feat))
+            .expect("contiguous input reshape");
+
+        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, self.units));
+        for (mut dst, h) in h_prev3.axis_iter_mut(Axis(1)).zip(hs.iter()) {
+            dst.assign(h);
+        }
+        let h_prev_flat = h_prev3
+            .to_shape((batch * timesteps, self.units))
+            .expect("contiguous H_prev reshape");
+
+        grad_k += &x_flat.t().dot(&dz_flat);
+        grad_rk += &h_prev_flat.t().dot(&dz_flat);
+        grad_b += &dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
+
+        let grad_x3 = dz_flat
+            .dot(&self.kernel.t())
+            .into_shape_with_order((batch, timesteps, feat))
+            .expect("reshape grad_x to [batch, timesteps, feat]");
 
         // gradient clipping to prevent exploding gradients
         grad_k.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));

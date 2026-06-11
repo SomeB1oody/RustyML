@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2, Zip};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
@@ -373,7 +373,7 @@ impl KernelPCA {
         }
 
         // Build the training kernel (Gram) matrix
-        let mut kernel_matrix = self.compute_kernel_matrix(x, x, use_parallel);
+        let mut kernel_matrix = self.kernel.compute_matrix(x, x);
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
         #[cfg(feature = "show_progress")]
@@ -478,7 +478,7 @@ impl KernelPCA {
         }
 
         // Build the cross-kernel matrix between new data and the fitted samples
-        let mut kernel_matrix = self.compute_kernel_matrix(x, x_fit, use_parallel);
+        let mut kernel_matrix = self.kernel.compute_matrix(x, x_fit);
         Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
 
         #[cfg(feature = "show_progress")]
@@ -601,39 +601,6 @@ impl KernelPCA {
         }
 
         Ok(())
-    }
-
-    /// Computes the kernel matrix `K[i, j] = kernel(x_i, y_j)` into an `Array2`, in
-    /// parallel over rows when requested
-    ///
-    /// Used both for the training Gram matrix (called with `y == x`) and for the
-    /// cross-kernel matrix against the fitted data during `transform`
-    fn compute_kernel_matrix<S1, S2>(
-        &self,
-        x: &ArrayBase<S1, Ix2>,
-        y: &ArrayBase<S2, Ix2>,
-        use_parallel: bool,
-    ) -> Array2<f64>
-    where
-        S1: Data<Elem = f64> + Sync,
-        S2: Data<Elem = f64> + Sync,
-    {
-        let mut matrix = Array2::<f64>::zeros((x.nrows(), y.nrows()));
-        let fill = |mut out_row: ArrayViewMut1<f64>, x_row: ArrayView1<f64>| {
-            for (j, y_row) in y.outer_iter().enumerate() {
-                out_row[j] = self.kernel.compute(x_row, y_row);
-            }
-        };
-        if use_parallel {
-            Zip::from(matrix.outer_iter_mut())
-                .and(x.outer_iter())
-                .par_for_each(fill);
-        } else {
-            Zip::from(matrix.outer_iter_mut())
-                .and(x.outer_iter())
-                .for_each(fill);
-        }
-        matrix
     }
 
     /// Computes per-row means and the overall mean of a kernel matrix

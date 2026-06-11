@@ -9,7 +9,7 @@ use super::validation::{
 use crate::error::Error;
 use crate::math::squared_euclidean_distance_row;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use std::ops::AddAssign;
@@ -345,22 +345,28 @@ impl KMeans {
             new_centroids.fill(0.0);
             counts.fill(0);
 
+            // Squared centroid norms, shared by every sample this iteration
+            let centroids = self.centroids.as_ref().unwrap();
+            let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
+
             // Closest cluster center and distance for a single sample
             let compute_assignments = |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
-                let mut min_dist = f64::MAX;
-                let mut min_cluster = 0;
+                let projections = centroids.dot(&sample);
 
-                for (cluster_idx, centroid) in
-                    self.centroids.as_ref().unwrap().outer_iter().enumerate()
+                let mut min_cluster = 0;
+                let mut min_val = f64::MAX;
+                for (cluster_idx, (&c_sq, &proj)) in
+                    centroid_sq_norms.iter().zip(projections.iter()).enumerate()
                 {
-                    let dist = squared_euclidean_distance_row(&sample, &centroid);
-                    if dist < min_dist {
-                        min_dist = dist;
+                    let val = c_sq - 2.0 * proj;
+                    if val < min_val {
+                        min_val = val;
                         min_cluster = cluster_idx;
                     }
                 }
 
-                Ok((min_cluster, min_dist))
+                let dist = squared_euclidean_distance_row(&sample, &centroids.row(min_cluster));
+                Ok((min_cluster, dist))
             };
 
             let results: Result<Vec<(usize, f64)>, Error> =

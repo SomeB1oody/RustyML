@@ -257,8 +257,8 @@ fn fit_transform_well_separated_clusters_remain_separated() {
     let flat: Vec<f64> = rows.iter().flat_map(|r| r.iter().copied()).collect();
     let x = Array2::from_shape_vec((2 * n_per_cluster, 2), flat).unwrap();
 
-    // lr=100 stays in the stable range; the default lr=200 overshoots on a dataset this tiny
-    // (no per-parameter adaptive gains), letting the embedding expand without settling
+    // On a set this tiny (20 points) the default lr=200 over-expands the absolute
+    // scale; lr=100 keeps the step sized to the data
     let tsne = TSNE::new(2, 5.0, 100.0, 1000, Some(42)).unwrap();
     let emb = tsne.fit_transform(&x).unwrap();
 

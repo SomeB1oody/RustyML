@@ -4,6 +4,7 @@
 //! normalization layer implementations
 
 use crate::neural_network::Tensor;
+use ndarray::{Array2, Axis};
 use std::borrow::Cow;
 
 /// Returns the axis permutation that moves `channel_axis` to position 1 (channels-first), keeping
@@ -62,6 +63,127 @@ pub(super) fn from_channels_first(output_cf: Tensor, channel_axis: usize) -> Ten
         .to_owned()
 }
 
+/// Channels-first group-normalization forward core (reshape + axis reductions)
+///
+/// `input` is contiguous channels-first `[batch, channels, spatial...]`. Each sample's channels are
+/// split into `num_groups` contiguous groups and normalized within the group. Because a group is a
+/// contiguous `channels_per_group * spatial` block in this layout, the whole op reduces to a flat
+/// `[num_instances, group_size]` reshape plus axis-1 reductions - no per-element index arithmetic
+///
+/// Returns `(output, x_normalized, inv_std)`:
+/// - `output` already includes the per-channel affine (`gamma * x_norm + beta`)
+/// - `x_normalized` is channels-first `[batch, channels, spatial...]`, cached for backward
+/// - `inv_std` is `1 / sqrt(var + epsilon)`, one value per instance `[batch * num_groups]`
+pub(super) fn group_norm_forward_core(
+    input: &Tensor,
+    num_groups: usize,
+    gamma: &Tensor,
+    beta: &Tensor,
+    epsilon: f32,
+) -> (Tensor, Tensor, Tensor) {
+    let shape = input.shape().to_vec();
+    let (batch, channels) = (shape[0], shape[1]);
+    let spatial: usize = shape[2..].iter().product();
+    let group_size = (channels / num_groups) * spatial;
+    let num_instances = batch * num_groups;
+
+    let input_std = input.as_standard_layout();
+    // Owned [num_instances, group_size]; all the group statistics are axis-1 reductions on this
+    let flat: Array2<f32> = input_std
+        .to_shape((num_instances, group_size))
+        .expect("contiguous channels-first reshape to [num_instances, group_size]")
+        .to_owned();
+
+    let mean = flat.mean_axis(Axis(1)).unwrap().insert_axis(Axis(1)); // [N, 1]
+    let centered = &flat - &mean; // [N, group_size]
+    let var = centered.mapv(|v| v * v).mean_axis(Axis(1)).unwrap(); // [N]
+    let inv_std = var.mapv(|v| 1.0 / (v + epsilon).sqrt()); // [N]
+    let inv_std_col = inv_std.clone().insert_axis(Axis(1)); // [N, 1]
+    let normalized = &centered * &inv_std_col; // [N, group_size]
+
+    let x_normalized = normalized
+        .to_shape(shape.as_slice())
+        .expect("reshape normalized back to channels-first")
+        .to_owned();
+
+    // Per-channel affine, broadcast over batch and spatial via owned [1, C, 1...] arrays
+    let mut affine_shape = vec![1usize; shape.len()];
+    affine_shape[1] = channels;
+    let gamma_b = gamma.to_shape(affine_shape.as_slice()).unwrap().to_owned();
+    let beta_b = beta.to_shape(affine_shape.as_slice()).unwrap().to_owned();
+    let output = &x_normalized * &gamma_b + &beta_b;
+
+    (output, x_normalized, inv_std.into_dyn())
+}
+
+/// Channels-first group-normalization backward core (reshape + axis reductions)
+///
+/// Inverse of [`group_norm_forward_core`]; all arguments are channels-first / contiguous. Uses the
+/// standard group-norm input-gradient identity
+/// `dx = inv_std * (g - (sum(g) + x_norm * sum(g * x_norm)) / group_size)`, where `g = grad * gamma`
+///
+/// Returns `(grad_input, grad_gamma, grad_beta)` with `grad_input` channels-first and the parameter
+/// gradients shaped `[channels]`
+pub(super) fn group_norm_backward_core(
+    grad_output: &Tensor,
+    x_normalized: &Tensor,
+    inv_std: &Tensor,
+    num_groups: usize,
+    gamma: &Tensor,
+) -> (Tensor, Tensor, Tensor) {
+    let shape = grad_output.shape().to_vec();
+    let (batch, channels) = (shape[0], shape[1]);
+    let spatial: usize = shape[2..].iter().product();
+    let group_size = (channels / num_groups) * spatial;
+    let num_instances = batch * num_groups;
+    let gs = group_size as f32;
+
+    let grad_std = grad_output.as_standard_layout();
+    let xnorm_std = x_normalized.as_standard_layout();
+
+    // Parameter gradients: sum over batch and spatial per channel (reshape to [B, C, spatial])
+    let go_bcs = grad_std
+        .to_shape((batch, channels, spatial))
+        .unwrap()
+        .to_owned();
+    let xn_bcs = xnorm_std
+        .to_shape((batch, channels, spatial))
+        .unwrap()
+        .to_owned();
+    let grad_beta = go_bcs.sum_axis(Axis(2)).sum_axis(Axis(0)); // [C]
+    let grad_gamma = (&go_bcs * &xn_bcs).sum_axis(Axis(2)).sum_axis(Axis(0)); // [C]
+
+    // g = grad_output * gamma, broadcast over batch/spatial via an owned [1, C, 1...] array
+    let mut affine_shape = vec![1usize; shape.len()];
+    affine_shape[1] = channels;
+    let gamma_b = gamma.to_shape(affine_shape.as_slice()).unwrap().to_owned();
+    let grad_ixdyn = grad_std.to_owned();
+    let grad_xnorm = &grad_ixdyn * &gamma_b;
+
+    // Per-instance gradient reduction on the flat [num_instances, group_size] view
+    let g: Array2<f32> = grad_xnorm
+        .to_shape((num_instances, group_size))
+        .unwrap()
+        .to_owned();
+    let xhat: Array2<f32> = xnorm_std
+        .to_shape((num_instances, group_size))
+        .unwrap()
+        .to_owned();
+    let sum_g = g.sum_axis(Axis(1)).insert_axis(Axis(1)); // [N, 1]
+    let sum_gxhat = (&g * &xhat).sum_axis(Axis(1)).insert_axis(Axis(1)); // [N, 1]
+    let inv_std_col = inv_std.to_shape((num_instances, 1)).unwrap().to_owned(); // [N, 1]
+
+    let combo = (&sum_g + &(&xhat * &sum_gxhat)) / gs; // [N, group_size]
+    let grad_flat = (&g - &combo) * &inv_std_col; // [N, group_size]
+
+    let grad_input = grad_flat
+        .to_shape(shape.as_slice())
+        .expect("reshape grad_input back to channels-first")
+        .to_owned();
+
+    (grad_input, grad_gamma.into_dyn(), grad_beta.into_dyn())
+}
+
 /// Batch Normalization layer for neural networks
 pub mod batch_normalization;
 /// Group Normalization layer for neural networks
@@ -97,89 +219,6 @@ macro_rules! normalization_layer_output_shape {
     };
 }
 
-/// Common implementation for computing gamma and beta gradients in normalization layers
-///
-/// Sums grad_output (for beta) and grad_output * x_normalized (for gamma) over all batch and
-/// spatial positions per channel, choosing parallel or sequential based on total element count
-///
-/// # Parameters
-///
-/// - `$grad_gamma:expr` - mutable tensor to store gamma gradients
-/// - `$grad_beta:expr` - mutable tensor to store beta gradients
-/// - `$grad_output:expr` - gradient from the next layer
-/// - `$x_normalized:expr` - normalized input from the forward pass
-/// - `$batch_size:expr` - number of samples in the batch
-/// - `$num_channels:expr` - number of channels
-/// - `$spatial_size:expr` - product of all spatial dimensions
-/// - `$total_elements:expr` - total number of elements in the tensor
-/// - `$parallel_threshold:expr` - element count at which parallel computation kicks in
-macro_rules! compute_normalization_layer_parameter_gradients {
-    (
-        $grad_gamma:expr,
-        $grad_beta:expr,
-        $grad_output:expr,
-        $x_normalized:expr,
-        $batch_size:expr,
-        $num_channels:expr,
-        $spatial_size:expr,
-        $total_elements:expr,
-        $parallel_threshold:expr
-    ) => {{
-        if $total_elements >= $parallel_threshold {
-            // Parallel: compute both gamma and beta gradients in a single pass
-            let (grad_gamma_vec, grad_beta_vec): (Vec<f32>, Vec<f32>) = (0..$num_channels)
-                .into_par_iter()
-                .map(|channel_idx| {
-                    let mut gamma_sum = 0.0f32;
-                    let mut beta_sum = 0.0f32;
-
-                    for batch_idx in 0..$batch_size {
-                        let start = (batch_idx * $num_channels + channel_idx) * $spatial_size;
-                        let end = start + $spatial_size;
-
-                        for i in start..end {
-                            let grad_out = $grad_output.as_slice().unwrap()[i];
-                            gamma_sum += grad_out * $x_normalized.as_slice().unwrap()[i];
-                            beta_sum += grad_out;
-                        }
-                    }
-
-                    (gamma_sum, beta_sum)
-                })
-                .unzip();
-
-            $grad_gamma
-                .as_slice_mut()
-                .unwrap()
-                .copy_from_slice(&grad_gamma_vec);
-            $grad_beta
-                .as_slice_mut()
-                .unwrap()
-                .copy_from_slice(&grad_beta_vec);
-        } else {
-            // Sequential computation
-            for channel_idx in 0..$num_channels {
-                let mut gamma_sum = 0.0f32;
-                let mut beta_sum = 0.0f32;
-
-                for batch_idx in 0..$batch_size {
-                    let start = (batch_idx * $num_channels + channel_idx) * $spatial_size;
-                    let end = start + $spatial_size;
-
-                    for i in start..end {
-                        gamma_sum += $grad_output.as_slice().unwrap()[i]
-                            * $x_normalized.as_slice().unwrap()[i];
-                        beta_sum += $grad_output.as_slice().unwrap()[i];
-                    }
-                }
-
-                $grad_gamma.as_slice_mut().unwrap()[channel_idx] = gamma_sum;
-                $grad_beta.as_slice_mut().unwrap()[channel_idx] = beta_sum;
-            }
-        }
-    }};
-}
-pub(in crate::neural_network::layers::regularization::normalization) use compute_normalization_layer_parameter_gradients;
 pub(in crate::neural_network::layers::regularization::normalization) use normalization_layer_output_shape;
 
 #[cfg(test)]
@@ -190,6 +229,17 @@ mod tests {
     // Helper: build a Tensor from a flat Vec and shape
     fn make_tensor(data: Vec<f32>, shape: &[usize]) -> Tensor {
         ArrayD::from_shape_vec(shape, data).expect("shape/data mismatch in test helper")
+    }
+
+    // Helper: assert a tensor's elements (logical order) match `expected` within `tol`
+    fn assert_close(actual: &Tensor, expected: &[f32], tol: f32) {
+        assert_eq!(actual.len(), expected.len(), "length mismatch");
+        for (i, (got, &exp)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (got - exp).abs() <= tol,
+                "index {i}: got {got}, expected {exp}"
+            );
+        }
     }
 
     // channels_first_perm
@@ -257,5 +307,104 @@ mod tests {
         for (i, (&orig, &got)) in x_flat.iter().zip(r_flat.iter()).enumerate() {
             assert_eq!(orig, got, "noop round-trip mismatch at flat index {i}");
         }
+    }
+
+    // group_norm_forward_core
+
+    /// num_groups=1 normalizes all C*spatial values of a sample together, then applies
+    /// the per-channel affine gamma*x_norm + beta. Input [1,2,3,4]: mean=2.5, var=1.25
+    #[test]
+    fn test_group_norm_forward_core_single_group() {
+        // [batch=1, channels=2, spatial=2], channels-first flat [1,2,3,4]
+        let input = make_tensor(vec![1.0, 2.0, 3.0, 4.0], &[1, 2, 2]);
+        let gamma = make_tensor(vec![2.0, 3.0], &[2]);
+        let beta = make_tensor(vec![10.0, 20.0], &[2]);
+
+        let (output, x_norm, inv_std) = group_norm_forward_core(&input, 1, &gamma, &beta, 0.0);
+
+        // x_norm = (x - 2.5) * inv_std, inv_std = 1/sqrt(1.25)
+        let inv = 1.0_f32 / 1.25_f32.sqrt();
+        assert_close(
+            &x_norm,
+            &[-1.5 * inv, -0.5 * inv, 0.5 * inv, 1.5 * inv],
+            1e-5,
+        );
+        assert_close(&inv_std, &[inv], 1e-6);
+        // channel 0 (elems 0,1) affine 2x+10; channel 1 (elems 2,3) affine 3x+20
+        assert_close(
+            &output,
+            &[
+                2.0 * (-1.5 * inv) + 10.0,
+                2.0 * (-0.5 * inv) + 10.0,
+                3.0 * (0.5 * inv) + 20.0,
+                3.0 * (1.5 * inv) + 20.0,
+            ],
+            1e-5,
+        );
+    }
+
+    /// num_groups=2: each group is one channel of 2 spatial values, so every group
+    /// [a,b] normalizes to [-1, 1] (var=0.25, inv_std=2) independently
+    #[test]
+    fn test_group_norm_forward_core_two_groups() {
+        let input = make_tensor(vec![1.0, 2.0, 3.0, 4.0], &[1, 2, 2]);
+        let gamma = make_tensor(vec![1.0, 1.0], &[2]);
+        let beta = make_tensor(vec![0.0, 0.0], &[2]);
+
+        let (output, x_norm, inv_std) = group_norm_forward_core(&input, 2, &gamma, &beta, 0.0);
+
+        assert_close(&x_norm, &[-1.0, 1.0, -1.0, 1.0], 1e-5);
+        assert_close(&inv_std, &[2.0, 2.0], 1e-6);
+        assert_close(&output, &[-1.0, 1.0, -1.0, 1.0], 1e-5);
+    }
+
+    // group_norm_backward_core
+
+    /// Input gradient for one group, checked against the hand-evaluated identity
+    /// dx = inv_std * (g - (sum(g) + x_norm*sum(g*x_norm))/group_size) with
+    /// grad_output = [1,0,0,0] and gamma = 1; combo works out to [0.7, 0.4, 0.1, -0.2]
+    #[test]
+    fn test_group_norm_backward_core_single_group() {
+        let inv = 1.0_f32 / 1.25_f32.sqrt();
+        let x_norm = make_tensor(
+            vec![-1.5 * inv, -0.5 * inv, 0.5 * inv, 1.5 * inv],
+            &[1, 2, 2],
+        );
+        let inv_std = make_tensor(vec![inv], &[1]);
+        let grad_output = make_tensor(vec![1.0, 0.0, 0.0, 0.0], &[1, 2, 2]);
+        let gamma = make_tensor(vec![1.0, 1.0], &[2]);
+
+        let (grad_input, grad_gamma, grad_beta) =
+            group_norm_backward_core(&grad_output, &x_norm, &inv_std, 1, &gamma);
+
+        // grad = (g - combo) * inv_std
+        assert_close(
+            &grad_input,
+            &[0.3 * inv, -0.4 * inv, -0.1 * inv, 0.2 * inv],
+            1e-5,
+        );
+        // grad_gamma[c] = sum(grad_output * x_norm) over the channel
+        assert_close(&grad_gamma, &[-1.5 * inv, 0.0], 1e-5);
+        // grad_beta[c] = sum(grad_output) over the channel
+        assert_close(&grad_beta, &[1.0, 0.0], 1e-6);
+    }
+
+    /// A group of two elements is fully determined (+/-1) after normalization, so its
+    /// input gradient is exactly zero for any grad_output; parameter grads are the sums
+    #[test]
+    fn test_group_norm_backward_core_two_groups_zero_input_grad() {
+        let x_norm = make_tensor(vec![-1.0, 1.0, -1.0, 1.0], &[1, 2, 2]);
+        let inv_std = make_tensor(vec![2.0, 2.0], &[2]);
+        let grad_output = make_tensor(vec![1.0, 2.0, 3.0, 4.0], &[1, 2, 2]);
+        let gamma = make_tensor(vec![1.0, 1.0], &[2]);
+
+        let (grad_input, grad_gamma, grad_beta) =
+            group_norm_backward_core(&grad_output, &x_norm, &inv_std, 2, &gamma);
+
+        assert_close(&grad_input, &[0.0, 0.0, 0.0, 0.0], 1e-6);
+        // grad_gamma[c] = sum(grad_output * x_norm): ch0 = 1*-1+2*1 = 1; ch1 = 3*-1+4*1 = 1
+        assert_close(&grad_gamma, &[1.0, 1.0], 1e-6);
+        // grad_beta[c] = sum(grad_output): ch0 = 1+2 = 3; ch1 = 3+4 = 7
+        assert_close(&grad_beta, &[3.0, 7.0], 1e-6);
     }
 }

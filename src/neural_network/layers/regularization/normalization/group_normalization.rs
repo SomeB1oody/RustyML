@@ -7,10 +7,9 @@ use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::{GroupNormalizationLayerWeight, LayerWeight};
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
-use crate::neural_network::layers::regularization::normalization::compute_normalization_layer_parameter_gradients;
 use crate::neural_network::layers::regularization::normalization::normalization_layer_output_shape;
 use crate::neural_network::layers::regularization::normalization::{
-    from_channels_first, to_channels_first,
+    from_channels_first, group_norm_backward_core, group_norm_forward_core, to_channels_first,
 };
 use crate::neural_network::layers::regularization::validation::{
     validate_channel_axis, validate_epsilon, validate_input_shape, validate_input_shape_not_empty,
@@ -18,22 +17,6 @@ use crate::neural_network::layers::regularization::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
-};
-
-/// Total-element count above which group normalization switches from sequential to parallel
-const GROUP_NORMALIZATION_PARALLEL_THRESHOLD: usize = 1024;
-
-/// Macro to compute start and end indices for a specific channel within a batch
-macro_rules! channel_range {
-    ($batch_idx:expr, $channel_idx:expr, $num_channels:expr, $spatial_size:expr) => {{
-        let start = ($batch_idx * $num_channels + $channel_idx) * $spatial_size;
-        let end = start + $spatial_size;
-        (start, end)
-    }};
-}
 
 /// Group Normalization layer for neural networks
 ///
@@ -74,14 +57,10 @@ pub struct GroupNormalization {
     beta: Tensor,
     /// Whether the layer is in training mode or inference mode
     training: bool,
-    /// Normalized input, cached for the backward pass
+    /// Normalized input (channels-first), cached for the backward pass
     x_normalized: Option<Tensor>,
-    /// Centered input, cached for the backward pass
-    x_centered: Option<Tensor>,
-    /// Per-group mean from the forward pass, cached for the backward pass
-    mean: Option<Tensor>,
-    /// Per-group standard deviation from the forward pass, cached for the backward pass
-    std_dev: Option<Tensor>,
+    /// Per-instance `1 / sqrt(var + epsilon)` from the forward pass, cached for the backward pass
+    inv_std: Option<Tensor>,
     /// Gradient for the gamma parameter
     grad_gamma: Option<Tensor>,
     /// Gradient for the beta parameter
@@ -142,9 +121,7 @@ impl GroupNormalization {
             beta: Tensor::zeros(param_shape_ndarray),
             training: true,
             x_normalized: None,
-            x_centered: None,
-            mean: None,
-            std_dev: None,
+            inv_std: None,
             grad_gamma: None,
             grad_beta: None,
         })
@@ -180,233 +157,20 @@ impl Layer for GroupNormalization {
         // Permute to channels-first so the layout-equivariant core handles any channel position
         // (borrows when channel_axis == 1)
         let cf_input = to_channels_first(input, self.channel_axis);
-        let input = cf_input.as_ref();
+        let input_cf = cf_input.as_ref();
+        validate_num_groups(input_cf.shape()[1], self.num_groups)?;
 
-        let input_shape = input.shape();
-        let batch_size = input_shape[0];
-        let num_channels = input_shape[1];
+        let (output, x_normalized, inv_std) = group_norm_forward_core(
+            input_cf,
+            self.num_groups,
+            &self.gamma,
+            &self.beta,
+            self.epsilon,
+        );
 
-        validate_num_groups(num_channels, self.num_groups)?;
-
-        let channels_per_group = num_channels / self.num_groups;
-
-        // Spatial size: all dimensions except batch and channel
-        let spatial_size: usize = input_shape
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != 0 && i != 1)
-            .map(|(_, &dim)| dim)
-            .product();
-
-        let group_size = channels_per_group * spatial_size;
-        let total_elements = input.len();
-
-        // Build mean shape: keep batch and group dimensions
-        let num_instances = batch_size * self.num_groups;
-        let mut mean_shape = vec![1; input.ndim()];
-        mean_shape[0] = batch_size;
-        mean_shape[1] = self.num_groups;
-
-        // Closure to compute mean for a single (batch, group) instance
-        let compute_group_mean = |batch_idx: usize, group_idx: usize| -> f32 {
-            let mut sum = 0.0f32;
-            for ch in 0..channels_per_group {
-                let channel_idx = group_idx * channels_per_group + ch;
-                let start = (batch_idx * num_channels + channel_idx) * spatial_size;
-                let end = start + spatial_size;
-                sum += input.as_slice().unwrap()[start..end].iter().sum::<f32>();
-            }
-            sum / group_size as f32
-        };
-
-        // Compute mean for each (batch, group) pair
-        let mean = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mean_flat: Vec<f32> = (0..num_instances)
-                .into_par_iter()
-                .map(|idx| {
-                    let batch_idx = idx / self.num_groups;
-                    let group_idx = idx % self.num_groups;
-                    compute_group_mean(batch_idx, group_idx)
-                })
-                .collect();
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
-        } else {
-            let mut mean_flat = vec![0.0f32; num_instances];
-
-            for batch_idx in 0..batch_size {
-                for group_idx in 0..self.num_groups {
-                    mean_flat[batch_idx * self.num_groups + group_idx] =
-                        compute_group_mean(batch_idx, group_idx);
-                }
-            }
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
-        };
-
-        // Expand mean to match input shape for broadcasting
-        let mut mean_expanded_shape = input_shape.to_vec();
-        mean_expanded_shape[1] = self.num_groups;
-
-        // Map each channel to its group mean
-        let x_centered = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_cent = Tensor::zeros(input.raw_dim());
-
-            x_cent
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(input.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (cent, &val))| {
-                    let flat_idx = i / spatial_size;
-                    let batch_idx = flat_idx / num_channels;
-                    let channel_idx = flat_idx % num_channels;
-                    let group_idx = channel_idx / channels_per_group;
-                    let mean_idx = batch_idx * self.num_groups + group_idx;
-                    let mean_val = mean.as_slice().unwrap()[mean_idx];
-                    *cent = val - mean_val;
-                });
-
-            x_cent
-        } else {
-            let mut x_cent = Tensor::zeros(input.raw_dim());
-
-            for i in 0..total_elements {
-                let flat_idx = i / spatial_size;
-                let batch_idx = flat_idx / num_channels;
-                let channel_idx = flat_idx % num_channels;
-                let group_idx = channel_idx / channels_per_group;
-                let mean_idx = batch_idx * self.num_groups + group_idx;
-                let mean_val = mean.as_slice().unwrap()[mean_idx];
-                x_cent.as_slice_mut().unwrap()[i] = input.as_slice().unwrap()[i] - mean_val;
-            }
-
-            x_cent
-        };
-
-        // Closure to compute variance for a single (batch, group) instance
-        let compute_group_variance = |batch_idx: usize, group_idx: usize| -> f32 {
-            let mut sum_sq = 0.0f32;
-            for ch in 0..channels_per_group {
-                let channel_idx = group_idx * channels_per_group + ch;
-                let (start, end) =
-                    channel_range!(batch_idx, channel_idx, num_channels, spatial_size);
-
-                for i in start..end {
-                    let val = x_centered.as_slice().unwrap()[i];
-                    sum_sq += val * val;
-                }
-            }
-            sum_sq / group_size as f32
-        };
-
-        // Compute variance for each (batch, group) pair
-        let var = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let var_flat: Vec<f32> = (0..num_instances)
-                .into_par_iter()
-                .map(|idx| {
-                    let batch_idx = idx / self.num_groups;
-                    let group_idx = idx % self.num_groups;
-                    compute_group_variance(batch_idx, group_idx)
-                })
-                .collect();
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
-        } else {
-            let mut var_flat = vec![0.0f32; num_instances];
-
-            for batch_idx in 0..batch_size {
-                for group_idx in 0..self.num_groups {
-                    var_flat[batch_idx * self.num_groups + group_idx] =
-                        compute_group_variance(batch_idx, group_idx);
-                }
-            }
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
-        };
-
-        // Normalize
-        let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_norm = Tensor::zeros(x_centered.raw_dim());
-
-            x_norm
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (norm, &centered))| {
-                    let flat_idx = i / spatial_size;
-                    let batch_idx = flat_idx / num_channels;
-                    let channel_idx = flat_idx % num_channels;
-                    let group_idx = channel_idx / channels_per_group;
-                    let std_idx = batch_idx * self.num_groups + group_idx;
-                    let std_val = std_dev.as_slice().unwrap()[std_idx];
-                    *norm = centered / std_val;
-                });
-
-            x_norm
-        } else {
-            let mut x_norm = Tensor::zeros(x_centered.raw_dim());
-
-            for i in 0..total_elements {
-                let flat_idx = i / spatial_size;
-                let batch_idx = flat_idx / num_channels;
-                let channel_idx = flat_idx % num_channels;
-                let group_idx = channel_idx / channels_per_group;
-                let std_idx = batch_idx * self.num_groups + group_idx;
-                let std_val = std_dev.as_slice().unwrap()[std_idx];
-                x_norm.as_slice_mut().unwrap()[i] = x_centered.as_slice().unwrap()[i] / std_val;
-            }
-
-            x_norm
-        };
-
-        // Scale and shift: reshape gamma and beta for broadcasting over the input
-        let mut gamma_shape = vec![1; input.ndim()];
-        gamma_shape[1] = num_channels;
-        let mut beta_shape = vec![1; input.ndim()];
-        beta_shape[1] = num_channels;
-
-        let gamma_broadcast = self
-            .gamma
-            .clone()
-            .into_shape_with_order(gamma_shape.as_slice())
-            .unwrap();
-        let beta_broadcast = self
-            .beta
-            .clone()
-            .into_shape_with_order(beta_shape.as_slice())
-            .unwrap();
-
-        let output = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut out = Tensor::zeros(x_normalized.raw_dim());
-
-            out.as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_normalized.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (output_val, &norm))| {
-                    let flat_idx = i / spatial_size;
-                    let channel_idx = flat_idx % num_channels;
-                    let gamma_val = self.gamma.as_slice().unwrap()[channel_idx];
-                    let beta_val = self.beta.as_slice().unwrap()[channel_idx];
-                    *output_val = norm * gamma_val + beta_val;
-                });
-
-            out
-        } else {
-            &x_normalized * &gamma_broadcast + &beta_broadcast
-        };
-
-        // Cache values for backward pass
+        // Cache the channels-first intermediates for the backward pass
         self.x_normalized = Some(x_normalized);
-        self.x_centered = Some(x_centered);
-        self.mean = Some(mean);
-        self.std_dev = Some(std_dev);
+        self.inv_std = Some(inv_std);
 
         Ok(from_channels_first(output, self.channel_axis))
     }
@@ -419,227 +183,16 @@ impl Layer for GroupNormalization {
 
         // See `forward`: permute channel to axis 1, run the channels-first core, permute back
         let cf_input = to_channels_first(input, self.channel_axis);
-        let input = cf_input.as_ref();
+        let input_cf = cf_input.as_ref();
+        validate_num_groups(input_cf.shape()[1], self.num_groups)?;
 
-        let input_shape = input.shape();
-        let batch_size = input_shape[0];
-        let num_channels = input_shape[1];
-
-        validate_num_groups(num_channels, self.num_groups)?;
-
-        let channels_per_group = num_channels / self.num_groups;
-
-        // Calculate spatial size (all dimensions except batch and channel)
-        let spatial_size: usize = input_shape
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != 0 && i != 1)
-            .map(|(_, &dim)| dim)
-            .product();
-
-        let group_size = channels_per_group * spatial_size;
-        let total_elements = input.len();
-
-        // Build mean shape: keep batch and group dimensions
-        let num_instances = batch_size * self.num_groups;
-        let mut mean_shape = vec![1; input.ndim()];
-        mean_shape[0] = batch_size;
-        mean_shape[1] = self.num_groups;
-
-        // Closure to compute mean for a single (batch, group) instance
-        let compute_group_mean = |batch_idx: usize, group_idx: usize| -> f32 {
-            let mut sum = 0.0f32;
-            for ch in 0..channels_per_group {
-                let channel_idx = group_idx * channels_per_group + ch;
-                let start = (batch_idx * num_channels + channel_idx) * spatial_size;
-                let end = start + spatial_size;
-                sum += input.as_slice().unwrap()[start..end].iter().sum::<f32>();
-            }
-            sum / group_size as f32
-        };
-
-        // Compute mean for each (batch, group) pair
-        let mean = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mean_flat: Vec<f32> = (0..num_instances)
-                .into_par_iter()
-                .map(|idx| {
-                    let batch_idx = idx / self.num_groups;
-                    let group_idx = idx % self.num_groups;
-                    compute_group_mean(batch_idx, group_idx)
-                })
-                .collect();
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
-        } else {
-            let mut mean_flat = vec![0.0f32; num_instances];
-
-            for batch_idx in 0..batch_size {
-                for group_idx in 0..self.num_groups {
-                    mean_flat[batch_idx * self.num_groups + group_idx] =
-                        compute_group_mean(batch_idx, group_idx);
-                }
-            }
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), mean_flat).unwrap()
-        };
-
-        // Expand mean to match input shape for broadcasting
-        let mut mean_expanded_shape = input_shape.to_vec();
-        mean_expanded_shape[1] = self.num_groups;
-
-        // Map each channel to its group mean
-        let x_centered = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_cent = Tensor::zeros(input.raw_dim());
-
-            x_cent
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(input.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (cent, &val))| {
-                    let flat_idx = i / spatial_size;
-                    let batch_idx = flat_idx / num_channels;
-                    let channel_idx = flat_idx % num_channels;
-                    let group_idx = channel_idx / channels_per_group;
-                    let mean_idx = batch_idx * self.num_groups + group_idx;
-                    let mean_val = mean.as_slice().unwrap()[mean_idx];
-                    *cent = val - mean_val;
-                });
-
-            x_cent
-        } else {
-            let mut x_cent = Tensor::zeros(input.raw_dim());
-
-            for i in 0..total_elements {
-                let flat_idx = i / spatial_size;
-                let batch_idx = flat_idx / num_channels;
-                let channel_idx = flat_idx % num_channels;
-                let group_idx = channel_idx / channels_per_group;
-                let mean_idx = batch_idx * self.num_groups + group_idx;
-                let mean_val = mean.as_slice().unwrap()[mean_idx];
-                x_cent.as_slice_mut().unwrap()[i] = input.as_slice().unwrap()[i] - mean_val;
-            }
-
-            x_cent
-        };
-
-        // Closure to compute variance for a single (batch, group) instance
-        let compute_group_variance = |batch_idx: usize, group_idx: usize| -> f32 {
-            let mut sum_sq = 0.0f32;
-            for ch in 0..channels_per_group {
-                let channel_idx = group_idx * channels_per_group + ch;
-                let (start, end) =
-                    channel_range!(batch_idx, channel_idx, num_channels, spatial_size);
-
-                for i in start..end {
-                    let val = x_centered.as_slice().unwrap()[i];
-                    sum_sq += val * val;
-                }
-            }
-            sum_sq / group_size as f32
-        };
-
-        // Compute variance for each (batch, group) pair
-        let var = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let var_flat: Vec<f32> = (0..num_instances)
-                .into_par_iter()
-                .map(|idx| {
-                    let batch_idx = idx / self.num_groups;
-                    let group_idx = idx % self.num_groups;
-                    compute_group_variance(batch_idx, group_idx)
-                })
-                .collect();
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
-        } else {
-            let mut var_flat = vec![0.0f32; num_instances];
-
-            for batch_idx in 0..batch_size {
-                for group_idx in 0..self.num_groups {
-                    var_flat[batch_idx * self.num_groups + group_idx] =
-                        compute_group_variance(batch_idx, group_idx);
-                }
-            }
-
-            Tensor::from_shape_vec(mean_shape.as_slice(), var_flat).unwrap()
-        };
-
-        // Normalize
-        let std_dev = (&var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut x_norm = Tensor::zeros(x_centered.raw_dim());
-
-            x_norm
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (norm, &centered))| {
-                    let flat_idx = i / spatial_size;
-                    let batch_idx = flat_idx / num_channels;
-                    let channel_idx = flat_idx % num_channels;
-                    let group_idx = channel_idx / channels_per_group;
-                    let std_idx = batch_idx * self.num_groups + group_idx;
-                    let std_val = std_dev.as_slice().unwrap()[std_idx];
-                    *norm = centered / std_val;
-                });
-
-            x_norm
-        } else {
-            let mut x_norm = Tensor::zeros(x_centered.raw_dim());
-
-            for i in 0..total_elements {
-                let flat_idx = i / spatial_size;
-                let batch_idx = flat_idx / num_channels;
-                let channel_idx = flat_idx % num_channels;
-                let group_idx = channel_idx / channels_per_group;
-                let std_idx = batch_idx * self.num_groups + group_idx;
-                let std_val = std_dev.as_slice().unwrap()[std_idx];
-                x_norm.as_slice_mut().unwrap()[i] = x_centered.as_slice().unwrap()[i] / std_val;
-            }
-
-            x_norm
-        };
-
-        // Scale and shift: reshape gamma and beta for broadcasting over the input
-        let mut gamma_shape = vec![1; input.ndim()];
-        gamma_shape[1] = num_channels;
-        let mut beta_shape = vec![1; input.ndim()];
-        beta_shape[1] = num_channels;
-
-        let gamma_broadcast = self
-            .gamma
-            .clone()
-            .into_shape_with_order(gamma_shape.as_slice())
-            .unwrap();
-        let beta_broadcast = self
-            .beta
-            .clone()
-            .into_shape_with_order(beta_shape.as_slice())
-            .unwrap();
-
-        let output = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut out = Tensor::zeros(x_normalized.raw_dim());
-
-            out.as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(x_normalized.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (output_val, &norm))| {
-                    let flat_idx = i / spatial_size;
-                    let channel_idx = flat_idx % num_channels;
-                    let gamma_val = self.gamma.as_slice().unwrap()[channel_idx];
-                    let beta_val = self.beta.as_slice().unwrap()[channel_idx];
-                    *output_val = norm * gamma_val + beta_val;
-                });
-
-            out
-        } else {
-            &x_normalized * &gamma_broadcast + &beta_broadcast
-        };
+        let (output, _x_normalized, _inv_std) = group_norm_forward_core(
+            input_cf,
+            self.num_groups,
+            &self.gamma,
+            &self.beta,
+            self.epsilon,
+        );
 
         Ok(from_channels_first(output, self.channel_axis))
     }
@@ -650,195 +203,24 @@ impl Layer for GroupNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Channels-first matches the cached intermediates; the input-gradient is permuted back at the end
+        // Channels-first matches the cached intermediates; the input-gradient is permuted back below
         let cf_grad = to_channels_first(grad_output, self.channel_axis);
-        let grad_output = cf_grad.as_ref();
-
-        let input_shape = grad_output.shape();
-        let batch_size = input_shape[0];
-        let num_channels = input_shape[1];
-        let channels_per_group = num_channels / self.num_groups;
-
-        let spatial_size: usize = input_shape
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != 0 && i != 1)
-            .map(|(_, &dim)| dim)
-            .product();
-        let group_size = channels_per_group * spatial_size;
-        let group_size_f32 = group_size as f32;
+        let grad_cf = cf_grad.as_ref();
 
         let x_normalized = self
             .x_normalized
             .as_ref()
             .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
-
-        let x_centered = self
-            .x_centered
+        let inv_std = self
+            .inv_std
             .as_ref()
             .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
 
-        let std_dev = self
-            .std_dev
-            .as_ref()
-            .ok_or_else(|| Error::forward_pass_not_run("GroupNormalization"))?;
-
-        let total_elements = grad_output.len();
-        let num_instances = batch_size * self.num_groups;
-
-        // Compute gradients for gamma and beta
-        let mut grad_gamma = Tensor::zeros(self.gamma.raw_dim());
-        let mut grad_beta = Tensor::zeros(self.beta.raw_dim());
-
-        compute_normalization_layer_parameter_gradients!(
-            grad_gamma,
-            grad_beta,
-            grad_output,
-            x_normalized,
-            batch_size,
-            num_channels,
-            spatial_size,
-            total_elements,
-            GROUP_NORMALIZATION_PARALLEL_THRESHOLD
-        );
+        let (grad_input, grad_gamma, grad_beta) =
+            group_norm_backward_core(grad_cf, x_normalized, inv_std, self.num_groups, &self.gamma);
 
         self.grad_gamma = Some(grad_gamma);
         self.grad_beta = Some(grad_beta);
-
-        // Compute gradient with respect to normalized input
-        let grad_x_normalized = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
-
-            grad_x_norm
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(grad_output.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, (g_norm, &g_out))| {
-                    let flat_idx = i / spatial_size;
-                    let channel_idx = flat_idx % num_channels;
-                    let gamma_val = self.gamma.as_slice().unwrap()[channel_idx];
-                    *g_norm = g_out * gamma_val;
-                });
-
-            grad_x_norm
-        } else {
-            let mut gamma_shape = vec![1; grad_output.ndim()];
-            gamma_shape[1] = num_channels;
-            let gamma_broadcast = self
-                .gamma
-                .clone()
-                .into_shape_with_order(gamma_shape.as_slice())
-                .unwrap();
-            grad_output * &gamma_broadcast
-        };
-
-        // Compute inverse standard deviation
-        let inv_std = std_dev.mapv(|x| 1.0 / x);
-
-        // Closure to compute gradient statistics for a single (batch, group) instance
-        let compute_group_grad_stats =
-            |batch_idx: usize, group_idx: usize, inv_std_val: f32| -> (f32, f32) {
-                let mut grad_var_sum = 0.0f32;
-                let mut grad_mean_1 = 0.0f32;
-                let mut x_sum = 0.0f32;
-
-                for ch in 0..channels_per_group {
-                    let channel_idx = group_idx * channels_per_group + ch;
-                    let (start, end) =
-                        channel_range!(batch_idx, channel_idx, num_channels, spatial_size);
-
-                    for i in start..end {
-                        grad_var_sum += grad_x_normalized.as_slice().unwrap()[i]
-                            * x_centered.as_slice().unwrap()[i];
-                        grad_mean_1 += -grad_x_normalized.as_slice().unwrap()[i];
-                        x_sum += x_centered.as_slice().unwrap()[i];
-                    }
-                }
-
-                let grad_var = grad_var_sum * -0.5 * inv_std_val * inv_std_val * inv_std_val;
-                let grad_mean_2 = grad_var * (-2.0 * x_sum / group_size_f32);
-                let grad_mean = grad_mean_1 * inv_std_val + grad_mean_2;
-
-                (grad_var, grad_mean)
-            };
-
-        // Compute gradient with respect to variance and mean for each (batch, group) instance
-        let grad_input = if total_elements >= GROUP_NORMALIZATION_PARALLEL_THRESHOLD {
-            let (grad_var_flat, grad_mean_flat): (Vec<f32>, Vec<f32>) = (0..num_instances)
-                .into_par_iter()
-                .map(|idx| {
-                    let batch_idx = idx / self.num_groups;
-                    let group_idx = idx % self.num_groups;
-                    let inv_std_val = inv_std.as_slice().unwrap()[idx];
-                    compute_group_grad_stats(batch_idx, group_idx, inv_std_val)
-                })
-                .unzip();
-
-            // Compute gradient with respect to input
-            let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-
-            grad_inp
-                .as_slice_mut()
-                .unwrap()
-                .par_iter_mut()
-                .zip(grad_x_normalized.as_slice().unwrap().par_iter())
-                .zip(x_centered.as_slice().unwrap().par_iter())
-                .enumerate()
-                .for_each(|(i, ((g_inp, &g_norm), &x_cent))| {
-                    let flat_idx = i / spatial_size;
-                    let batch_idx = flat_idx / num_channels;
-                    let channel_idx = flat_idx % num_channels;
-                    let group_idx = channel_idx / channels_per_group;
-                    let group_instance_idx = batch_idx * self.num_groups + group_idx;
-
-                    let inv_std_val = inv_std.as_slice().unwrap()[group_instance_idx];
-                    let grad_var_val = grad_var_flat[group_instance_idx];
-                    let grad_mean_val = grad_mean_flat[group_instance_idx];
-
-                    *g_inp = g_norm * inv_std_val
-                        + grad_var_val * x_cent * 2.0 / group_size_f32
-                        + grad_mean_val / group_size_f32;
-                });
-
-            grad_inp
-        } else {
-            let mut grad_var_flat = vec![0.0f32; num_instances];
-            let mut grad_mean_flat = vec![0.0f32; num_instances];
-
-            for idx in 0..num_instances {
-                let batch_idx = idx / self.num_groups;
-                let group_idx = idx % self.num_groups;
-                let inv_std_val = inv_std.as_slice().unwrap()[idx];
-
-                let (grad_var, grad_mean) =
-                    compute_group_grad_stats(batch_idx, group_idx, inv_std_val);
-                grad_var_flat[idx] = grad_var;
-                grad_mean_flat[idx] = grad_mean;
-            }
-
-            let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
-
-            for i in 0..total_elements {
-                let flat_idx = i / spatial_size;
-                let batch_idx = flat_idx / num_channels;
-                let channel_idx = flat_idx % num_channels;
-                let group_idx = channel_idx / channels_per_group;
-                let group_instance_idx = batch_idx * self.num_groups + group_idx;
-
-                let inv_std_val = inv_std.as_slice().unwrap()[group_instance_idx];
-                let grad_var_val = grad_var_flat[group_instance_idx];
-                let grad_mean_val = grad_mean_flat[group_instance_idx];
-
-                grad_inp.as_slice_mut().unwrap()[i] = grad_x_normalized.as_slice().unwrap()[i]
-                    * inv_std_val
-                    + grad_var_val * x_centered.as_slice().unwrap()[i] * 2.0 / group_size_f32
-                    + grad_mean_val / group_size_f32;
-            }
-
-            grad_inp
-        };
 
         Ok(from_channels_first(grad_input, self.channel_axis))
     }

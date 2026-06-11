@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::neural_network::layers::recurrent::validation::validate_dimension_greater_than_zero;
 use crate::neural_network::layers::recurrent::{GRADIENT_CLIP_VALUE, orthogonal_init};
 use crate::neural_network::traits::ParamGrad;
-use ndarray::{Array, Array2};
+use ndarray::{Array, Array2, Array3, ArrayView2, ArrayView3};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
@@ -151,6 +151,34 @@ impl Gate {
 #[inline]
 pub fn compute_gate_value(gate: &Gate, x_t: &Array2<f32>, h_prev: &Array2<f32>) -> Array2<f32> {
     x_t.dot(&gate.kernel) + h_prev.dot(&gate.recurrent_kernel) + &gate.bias
+}
+
+/// Batched input projection for a gate: `x3 [batch, timesteps, input_dim] @ gate.kernel` for every
+/// timestep in a single gemm, returning `[batch, timesteps, units]`
+///
+/// The input projection does not depend on the recurrence, so collapsing the (batch, timesteps) axes
+/// into one matmul replaces `timesteps` small gemms with one large one (better cache/SIMD use). Only
+/// the `h_prev @ recurrent_kernel` term has to stay sequential
+pub fn project_gate_input(gate: &Gate, x3: &ArrayView3<f32>) -> Array3<f32> {
+    let (batch, timesteps, input_dim) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
+    let units = gate.kernel.shape()[1];
+    let x2 = x3
+        .to_shape((batch * timesteps, input_dim))
+        .expect("contiguous [batch*timesteps, input_dim] reshape");
+    x2.dot(&gate.kernel)
+        .into_shape_with_order((batch, timesteps, units))
+        .expect("reshape gate projection to [batch, timesteps, units]")
+}
+
+/// Gate value from a precomputed input projection: `xw_t + h_prev @ recurrent_kernel + bias`
+/// Equivalent to [`compute_gate_value`] with `xw_t == x_t @ gate.kernel` already computed
+#[inline]
+pub fn gate_value_from_projection(
+    gate: &Gate,
+    xw_t: &ArrayView2<f32>,
+    h_prev: &Array2<f32>,
+) -> Array2<f32> {
+    h_prev.dot(&gate.recurrent_kernel) + xw_t + &gate.bias
 }
 
 /// Extracts the cached value, erroring if it is absent

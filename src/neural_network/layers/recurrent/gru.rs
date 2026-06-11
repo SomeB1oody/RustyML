@@ -7,7 +7,7 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{GRUGateWeight, GRULayerWeight, LayerWeight};
 use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{
-    Gate, compute_gate_value, store_gate_gradients, take_cache,
+    Gate, gate_value_from_projection, project_gate_input, store_gate_gradients, take_cache,
 };
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
@@ -250,19 +250,26 @@ impl Layer for GRU {
         // Configurable activation (Copy) applied to the candidate hidden state
         let act = self.activation;
 
+        // Batched input projection for all 3 gates (one big gemm each)
+        let xw_r = project_gate_input(&self.reset_gate, &x3);
+        let xw_z = project_gate_input(&self.update_gate, &x3);
+        let xw_c = project_gate_input(&self.candidate_gate, &x3);
+
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+            let xw_r_t = xw_r.index_axis(Axis(1), t);
+            let xw_z_t = xw_z.index_axis(Axis(1), t);
+            let xw_c_t = xw_c.index_axis(Axis(1), t);
 
             // Reset and update gate values (parallel or sequential)
             let (r_raw, z_raw) = if use_parallel {
                 rayon::join(
-                    || compute_gate_value(&self.reset_gate, &x_t, &h_prev),
-                    || compute_gate_value(&self.update_gate, &x_t, &h_prev),
+                    || gate_value_from_projection(&self.reset_gate, &xw_r_t, &h_prev),
+                    || gate_value_from_projection(&self.update_gate, &xw_z_t, &h_prev),
                 )
             } else {
                 (
-                    compute_gate_value(&self.reset_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.update_gate, &x_t, &h_prev),
+                    gate_value_from_projection(&self.reset_gate, &xw_r_t, &h_prev),
+                    gate_value_from_projection(&self.update_gate, &xw_z_t, &h_prev),
                 )
             };
 
@@ -277,9 +284,8 @@ impl Layer for GRU {
             let r_h = &r_t * &h_prev;
 
             // Candidate hidden state: activation(W_h^T [r_t .* h_{t-1}, x_t] + b_h)
-            let h_candidate_raw = x_t.dot(&self.candidate_gate.kernel)
-                + r_h.dot(&self.candidate_gate.recurrent_kernel)
-                + &self.candidate_gate.bias;
+            let h_candidate_raw =
+                r_h.dot(&self.candidate_gate.recurrent_kernel) + xw_c_t + &self.candidate_gate.bias;
             let h_candidate = act
                 .forward(&h_candidate_raw.into_dyn())?
                 .into_dimensionality::<ndarray::Ix2>()
@@ -325,19 +331,26 @@ impl Layer for GRU {
         // Configurable activation (Copy) applied to the candidate hidden state
         let act = self.activation;
 
+        // Batched input projection for all 3 gates (one big gemm each)
+        let xw_r = project_gate_input(&self.reset_gate, &x3);
+        let xw_z = project_gate_input(&self.update_gate, &x3);
+        let xw_c = project_gate_input(&self.candidate_gate, &x3);
+
         for t in 0..timesteps {
-            let x_t = x3.index_axis(Axis(1), t).to_owned(); // (batch, input_dim)
+            let xw_r_t = xw_r.index_axis(Axis(1), t);
+            let xw_z_t = xw_z.index_axis(Axis(1), t);
+            let xw_c_t = xw_c.index_axis(Axis(1), t);
 
             // Reset and update gate values (parallel or sequential)
             let (r_raw, z_raw) = if use_parallel {
                 rayon::join(
-                    || compute_gate_value(&self.reset_gate, &x_t, &h_prev),
-                    || compute_gate_value(&self.update_gate, &x_t, &h_prev),
+                    || gate_value_from_projection(&self.reset_gate, &xw_r_t, &h_prev),
+                    || gate_value_from_projection(&self.update_gate, &xw_z_t, &h_prev),
                 )
             } else {
                 (
-                    compute_gate_value(&self.reset_gate, &x_t, &h_prev),
-                    compute_gate_value(&self.update_gate, &x_t, &h_prev),
+                    gate_value_from_projection(&self.reset_gate, &xw_r_t, &h_prev),
+                    gate_value_from_projection(&self.update_gate, &xw_z_t, &h_prev),
                 )
             };
 
@@ -352,9 +365,8 @@ impl Layer for GRU {
             let r_h = &r_t * &h_prev;
 
             // Candidate hidden state: activation(W_h^T [r_t .* h_{t-1}, x_t] + b_h)
-            let h_candidate_raw = x_t.dot(&self.candidate_gate.kernel)
-                + r_h.dot(&self.candidate_gate.recurrent_kernel)
-                + &self.candidate_gate.bias;
+            let h_candidate_raw =
+                r_h.dot(&self.candidate_gate.recurrent_kernel) + xw_c_t + &self.candidate_gate.bias;
             let h_candidate = act
                 .forward(&h_candidate_raw.into_dyn())?
                 .into_dimensionality::<ndarray::Ix2>()
@@ -392,25 +404,12 @@ impl Layer for GRU {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Initialize gradient accumulators
-        let mut grad_r_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_r_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_r_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_z_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_z_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_z_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_h_kernel = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_h_recurrent = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_h_bias = Array2::<f32>::zeros((1, self.units));
-
-        let mut grad_x3 = Array3::<f32>::zeros((batch, timesteps, feat));
+        // Per-gate pre-activation gradients for every timestep
+        let mut dz_r = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut dz_z = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut dz_h = Array3::<f32>::zeros((batch, timesteps, self.units));
 
         let mut grad_h = grad_h_t;
-
-        // Use parallel execution once the computational load clears the threshold
-        let use_parallel = batch * self.units >= GRU_PARALLEL_THRESHOLD;
 
         // Backpropagation through time
         for t in (0..timesteps).rev() {
@@ -418,7 +417,6 @@ impl Layer for GRU {
             let r_t = &r_vals[t];
             let z_t = &z_vals[t];
             let h_candidate = &h_candidate_vals[t];
-            let r_h = &rh_vals[t];
 
             // Gradient through h_t = (1 - z_t) .* h_{t-1} + z_t .* h_candidate
             let grad_z_t = &grad_h * (h_candidate - h_prev);
@@ -434,84 +432,71 @@ impl Layer for GRU {
                 .into_dimensionality::<ndarray::Ix2>()
                 .unwrap();
 
-            // Gradient through the candidate gate computation
-            let x_t = x3.index_axis(Axis(1), t).to_owned();
-            let x_t_t = x_t.t();
-            let h_prev_t = h_prev.t();
-            let rh_t = r_h.t();
-
-            grad_h_kernel += &x_t_t.dot(&grad_h_candidate_raw);
-            grad_h_recurrent += &rh_t.dot(&grad_h_candidate_raw);
-            grad_h_bias += &grad_h_candidate_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-            // Gradient through r_h = r_t .* h_{t-1}. Both terms share the recurrent matmul, so
-            // compute it once instead of twice per timestep
+            // Gradient through r_h = r_t .* h_{t-1} (one recurrent matmul shared by both terms)
             let grad_rh = grad_h_candidate_raw.dot(&self.candidate_gate.recurrent_kernel.t());
             let grad_r_t = &grad_rh * h_prev;
             let grad_h_prev_from_reset = &grad_rh * r_t;
 
-            // Gradient through the gates (parallel or sequential)
-            let (grad_z_raw, grad_r_raw) = if use_parallel {
-                rayon::join(
-                    || &grad_z_t * z_t * &(1.0 - z_t), // sigmoid derivative
-                    || &grad_r_t * r_t * &(1.0 - r_t), // sigmoid derivative
-                )
-            } else {
-                (
-                    &grad_z_t * z_t * &(1.0 - z_t), // sigmoid derivative
-                    &grad_r_t * r_t * &(1.0 - r_t), // sigmoid derivative
-                )
-            };
+            // Gate pre-activation gradients (sigmoid derivative)
+            let grad_z_raw = &grad_z_t * z_t * &(1.0 - z_t);
+            let grad_r_raw = &grad_r_t * r_t * &(1.0 - r_t);
 
-            // Gradient updates for the gates
-            grad_z_kernel += &x_t_t.dot(&grad_z_raw);
-            grad_z_recurrent += &h_prev_t.dot(&grad_z_raw);
-            grad_z_bias += &grad_z_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
+            // Gradient w.r.t. the previous hidden state (sequential recurrence - the per-step gemms
+            // that have to stay in the loop)
+            grad_h = grad_r_raw.dot(&self.reset_gate.recurrent_kernel.t())
+                + grad_z_raw.dot(&self.update_gate.recurrent_kernel.t())
+                + &grad_h_prev_from_reset
+                + &grad_h_prev_from_update;
 
-            grad_r_kernel += &x_t_t.dot(&grad_r_raw);
-            grad_r_recurrent += &h_prev_t.dot(&grad_r_raw);
-            grad_r_bias += &grad_r_raw.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-            // Gradient with respect to the input (parallel or sequential)
-            let dx = if use_parallel {
-                let (dx1, dx2) = rayon::join(
-                    || grad_r_raw.dot(&self.reset_gate.kernel.t()),
-                    || {
-                        rayon::join(
-                            || grad_z_raw.dot(&self.update_gate.kernel.t()),
-                            || grad_h_candidate_raw.dot(&self.candidate_gate.kernel.t()),
-                        )
-                    },
-                );
-                dx1 + dx2.0 + dx2.1
-            } else {
-                grad_r_raw.dot(&self.reset_gate.kernel.t())
-                    + grad_z_raw.dot(&self.update_gate.kernel.t())
-                    + grad_h_candidate_raw.dot(&self.candidate_gate.kernel.t())
-            };
-
-            // Gradient with respect to the previous hidden state (parallel or sequential)
-            let grad_h_next = if use_parallel {
-                let (dh1, dh2) = rayon::join(
-                    || grad_r_raw.dot(&self.reset_gate.recurrent_kernel.t()),
-                    || {
-                        rayon::join(
-                            || grad_z_raw.dot(&self.update_gate.recurrent_kernel.t()),
-                            || grad_h_prev_from_reset + &grad_h_prev_from_update,
-                        )
-                    },
-                );
-                dh1 + dh2.0 + dh2.1
-            } else {
-                grad_r_raw.dot(&self.reset_gate.recurrent_kernel.t())
-                    + grad_z_raw.dot(&self.update_gate.recurrent_kernel.t())
-                    + grad_h_prev_from_reset
-                    + grad_h_prev_from_update
-            };
-
-            grad_x3.index_axis_mut(Axis(1), t).assign(&dx);
-            grad_h = grad_h_next;
+            dz_r.index_axis_mut(Axis(1), t).assign(&grad_r_raw);
+            dz_z.index_axis_mut(Axis(1), t).assign(&grad_z_raw);
+            dz_h.index_axis_mut(Axis(1), t)
+                .assign(&grad_h_candidate_raw);
         }
+
+        // Batched reductions over all timesteps
+        let x_flat = x3
+            .to_shape((batch * timesteps, feat))
+            .expect("contiguous input reshape");
+        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut rh3 = Array3::<f32>::zeros((batch, timesteps, self.units));
+        for t in 0..timesteps {
+            h_prev3.index_axis_mut(Axis(1), t).assign(&hs[t]);
+            rh3.index_axis_mut(Axis(1), t).assign(&rh_vals[t]);
+        }
+        let h_prev_flat = h_prev3
+            .to_shape((batch * timesteps, self.units))
+            .expect("contiguous H_prev reshape");
+        let rh_flat = rh3
+            .to_shape((batch * timesteps, self.units))
+            .expect("contiguous RH reshape");
+
+        let flat = |dz: &Array3<f32>| {
+            dz.to_shape((batch * timesteps, self.units))
+                .expect("contiguous DZ reshape")
+                .to_owned()
+        };
+        let dz_r = flat(&dz_r);
+        let dz_z = flat(&dz_z);
+        let dz_h = flat(&dz_h);
+
+        let grad_r_kernel = x_flat.t().dot(&dz_r);
+        let grad_r_recurrent = h_prev_flat.t().dot(&dz_r);
+        let grad_r_bias = dz_r.sum_axis(Axis(0)).insert_axis(Axis(0));
+
+        let grad_z_kernel = x_flat.t().dot(&dz_z);
+        let grad_z_recurrent = h_prev_flat.t().dot(&dz_z);
+        let grad_z_bias = dz_z.sum_axis(Axis(0)).insert_axis(Axis(0));
+
+        let grad_h_kernel = x_flat.t().dot(&dz_h);
+        let grad_h_recurrent = rh_flat.t().dot(&dz_h);
+        let grad_h_bias = dz_h.sum_axis(Axis(0)).insert_axis(Axis(0));
+
+        let grad_x3 = (dz_r.dot(&self.reset_gate.kernel.t())
+            + dz_z.dot(&self.update_gate.kernel.t())
+            + dz_h.dot(&self.candidate_gate.kernel.t()))
+        .into_shape_with_order((batch, timesteps, feat))
+        .expect("reshape grad_x to [batch, timesteps, feat]");
 
         store_gate_gradients(
             &mut self.reset_gate,

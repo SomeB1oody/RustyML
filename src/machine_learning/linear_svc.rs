@@ -265,8 +265,7 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            // Hinge loss via the shared math primitive (margins = w . x_i + b)
-            let margins: Array1<f64> = x.outer_iter().map(|xi| xi.dot(weights) + bias).collect();
+            let margins: Array1<f64> = x.dot(weights) + bias;
             let hinge = hinge_loss(&margins, y);
 
             // Calculate regularization term

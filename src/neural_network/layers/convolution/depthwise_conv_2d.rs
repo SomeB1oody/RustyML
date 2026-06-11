@@ -290,7 +290,7 @@ impl DepthwiseConv2D {
     ) -> (Array4<f32>, Array4<f32>) {
         let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
         // Accumulate input gradients in PADDED coordinates (matching `pad_tensor_2d` in the forward
-        // pass), then strip the padding; using padded indices unpadded would misplace contributions
+        // pass), then strip the padding
         let padded_height = input_height + pad_h;
         let padded_width = input_width + pad_w;
         let mut batch_input_grads_padded =
@@ -306,40 +306,21 @@ impl DepthwiseConv2D {
                 input_channel.to_owned()
             };
 
-            // Weight gradients
             for kh in 0..self.kernel_size.0 {
+                let h_end = kh + (output_height - 1) * self.strides.0 + 1;
                 for kw in 0..self.kernel_size.1 {
-                    let mut weight_grad = 0.0;
-                    for oh in 0..output_height {
-                        for ow in 0..output_width {
-                            let ih = oh * self.strides.0 + kh;
-                            let iw = ow * self.strides.1 + kw;
+                    let w_end = kw + (output_width - 1) * self.strides.1 + 1;
 
-                            if ih < padded_input.shape()[0] && iw < padded_input.shape()[1] {
-                                weight_grad += padded_input[[ih, iw]] * grad_channel[[oh, ow]];
-                            }
-                        }
-                    }
-                    batch_weight_grads[[c, 0, kh, kw]] = weight_grad;
-                }
-            }
+                    // Weight gradient: sum(window .* grad_channel)
+                    let window = padded_input
+                        .slice(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1]);
+                    batch_weight_grads[[c, 0, kh, kw]] = (&window * &grad_channel).sum();
 
-            // Input gradients
-            for oh in 0..output_height {
-                for ow in 0..output_width {
-                    let grad_val = grad_channel[[oh, ow]];
-
-                    for kh in 0..self.kernel_size.0 {
-                        for kw in 0..self.kernel_size.1 {
-                            let ih = oh * self.strides.0 + kh;
-                            let iw = ow * self.strides.1 + kw;
-
-                            if ih < padded_height && iw < padded_width {
-                                batch_input_grads_padded[[0, c, ih, iw]] +=
-                                    self.weights[[c, 0, kh, kw]] * grad_val;
-                            }
-                        }
-                    }
+                    // Input gradient: scatter weight * grad_channel back into the padded window
+                    let w_val = self.weights[[c, 0, kh, kw]];
+                    batch_input_grads_padded
+                        .slice_mut(s![0, c, kh..h_end; self.strides.0, kw..w_end; self.strides.1])
+                        .scaled_add(w_val, &grad_channel);
                 }
             }
         }

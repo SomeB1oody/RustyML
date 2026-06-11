@@ -20,7 +20,7 @@
 
 use super::PaddingType;
 use crate::neural_network::Tensor;
-use ndarray::{ArrayD, IxDyn};
+use ndarray::{Array2, ArrayD, ArrayView2, IxDyn};
 use rayon::prelude::*;
 
 /// Workload (output-element count) at or above which an engine pass runs in parallel
@@ -133,6 +133,107 @@ fn build_padded(
     out
 }
 
+/// Inverse of [`build_padded`]: gathers the unpadded `[bc, sp...]` region out of a padded buffer
+/// Used to crop the input-gradient back to the original spatial size after col2im
+fn crop_padded(
+    padded: &[f32],
+    bc: usize,
+    sp: &[usize],
+    padded_sp: &[usize],
+    pad_before: &[usize],
+) -> Vec<f32> {
+    let r = sp.len();
+    let in_plane: usize = sp.iter().product();
+    let padded_plane: usize = padded_sp.iter().product();
+    let padded_strides = row_major_strides(padded_sp);
+    let mut out = vec![0.0f32; bc * in_plane];
+
+    for chan in 0..bc {
+        let in_base = chan * in_plane;
+        let pad_base = chan * padded_plane;
+        let mut si = vec![0usize; r];
+        let mut si_flat = 0usize;
+        loop {
+            let mut pidx = 0usize;
+            for d in 0..r {
+                pidx += (si[d] + pad_before[d]) * padded_strides[d];
+            }
+            out[in_base + si_flat] = padded[pad_base + pidx];
+            si_flat += 1;
+            if !increment_index(&mut si, sp) {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Flat padded-plane offsets for im2col/col2im, laid out `[k_plane, out_plane]`:
+/// `offsets[kk * out_plane + o]` is the index, within a single padded channel-plane, that output
+/// position `o` reads for kernel tap `kk`. Independent of batch and channel, so it is computed once
+/// and reused for every im2col gather and every col2im scatter
+fn im2col_offsets(
+    out_sp: &[usize],
+    k_dims: &[usize],
+    strides: &[usize],
+    padded_strides: &[usize],
+) -> Vec<usize> {
+    let r = out_sp.len();
+    let out_plane: usize = out_sp.iter().product();
+    let k_plane: usize = k_dims.iter().product();
+    let mut offsets = vec![0usize; k_plane * out_plane];
+
+    let mut o = vec![0usize; r];
+    let mut o_flat = 0usize;
+    loop {
+        let mut kk = vec![0usize; r];
+        let mut kk_flat = 0usize;
+        loop {
+            let mut pidx = 0usize;
+            for d in 0..r {
+                pidx += (o[d] * strides[d] + kk[d]) * padded_strides[d];
+            }
+            offsets[kk_flat * out_plane + o_flat] = pidx;
+            kk_flat += 1;
+            if !increment_index(&mut kk, k_dims) {
+                break;
+            }
+        }
+        o_flat += 1;
+        if !increment_index(&mut o, out_sp) {
+            break;
+        }
+    }
+    offsets
+}
+
+/// im2col for one batch: gathers the padded data into a `[Cin*k_plane, out_plane]` row-major matrix
+/// whose rows align with the flat weight matrix `[F, Cin*k_plane]`, so a single gemm computes the
+/// whole batch's convolution
+fn build_col(
+    padded: &[f32],
+    b: usize,
+    cin: usize,
+    padded_plane: usize,
+    k_plane: usize,
+    out_plane: usize,
+    offsets: &[usize],
+) -> Vec<f32> {
+    let mut col = vec![0.0f32; cin * k_plane * out_plane];
+    let b_base = b * cin * padded_plane;
+    for c in 0..cin {
+        let pc = b_base + c * padded_plane;
+        for kk in 0..k_plane {
+            let krow = (c * k_plane + kk) * out_plane;
+            let off = kk * out_plane;
+            for o in 0..out_plane {
+                col[krow + o] = padded[pc + offsets[off + o]];
+            }
+        }
+    }
+    col
+}
+
 /// Forward convolution; `weight_shape` is `[F, Cin, k...]`, `bias` is `[F]`, `strides` has length `R`
 pub(super) fn conv_forward(
     input: &Tensor,
@@ -172,45 +273,29 @@ pub(super) fn conv_forward(
     };
     let padded: &[f32] = padded_storage.as_deref().unwrap_or(in_flat);
 
-    // One [out_plane] tile per (batch, filter) pair
-    let process_bf = |bf: usize| -> Vec<f32> {
-        let b = bf / filters;
-        let f = bf % filters;
-        let mut tile = vec![0.0f32; out_plane];
-        let mut o = vec![0usize; r];
-        let mut kk = vec![0usize; r];
-        let mut o_flat = 0usize;
-        loop {
-            let mut sum = 0.0f32;
-            for c in 0..cin {
-                let w_base = (f * cin + c) * k_plane;
-                let p_base = (b * cin + c) * padded_plane;
-                kk.iter_mut().for_each(|x| *x = 0);
-                let mut kk_flat = 0usize;
-                loop {
-                    let mut pidx = 0usize;
-                    for d in 0..r {
-                        pidx += (o[d] * strides[d] + kk[d]) * padded_strides[d];
-                    }
-                    sum += padded[p_base + pidx] * weights[w_base + kk_flat];
-                    kk_flat += 1;
-                    if !increment_index(&mut kk, k_dims) {
-                        break;
-                    }
-                }
-            }
-            // Bias added last to fix the accumulation order
-            tile[o_flat] = sum + bias[f];
-            o_flat += 1;
-            if !increment_index(&mut o, &out_sp) {
-                break;
-            }
+    // im2col + gemm: each batch gathers a `[Cin*k_plane, out_plane]` column matrix, then a single
+    // `W (F x Cin*k_plane) . col` gemm (ndarray's SIMD `matrixmultiply` kernel) yields `[F, out_plane]`
+    let k_total = cin * k_plane;
+    let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
+    let w_mat = ArrayView2::from_shape((filters, k_total), weights)
+        .expect("weights length matches [F, Cin*k]");
+
+    let process_b = |b: usize| -> Vec<f32> {
+        let col = build_col(padded, b, cin, padded_plane, k_plane, out_plane, &offsets);
+        let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
+            .expect("col length matches [Cin*k, out_plane]");
+        let out_b = w_mat.dot(&col_mat); // [F, out_plane]
+        // Bias added last, per filter row, matching the output layout [F, out_plane]
+        let mut tile = Vec::with_capacity(filters * out_plane);
+        for (f, row) in out_b.outer_iter().enumerate() {
+            let bf = bias[f];
+            tile.extend(row.iter().map(|&v| v + bf));
         }
         tile
     };
 
     let parallel = batch * filters * out_plane >= CONV_PARALLEL_THRESHOLD;
-    let tiles = map_indexed(batch * filters, parallel, process_bf);
+    let tiles = map_indexed(batch, parallel, process_b);
 
     let mut out_flat = Vec::with_capacity(batch * filters * out_plane);
     for tile in tiles {
@@ -269,115 +354,66 @@ pub(super) fn conv_backward(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // weight and bias gradients: one filter per task (reduces over batch and output)
-    let per_f = |f: usize| -> (Vec<f32>, f32) {
-        let mut wg = vec![0.0f32; cin * k_plane];
-        let mut bias_sum = 0.0f32;
-        let mut o = vec![0usize; r];
-        let mut kk = vec![0usize; r];
-        for b in 0..batch {
-            let g_base = (b * filters + f) * out_plane;
-            o.iter_mut().for_each(|x| *x = 0);
-            let mut o_flat = 0usize;
-            loop {
-                let g = grad_flat[g_base + o_flat];
-                bias_sum += g;
-                for c in 0..cin {
-                    let p_base = (b * cin + c) * padded_plane;
-                    let w_base = c * k_plane;
-                    kk.iter_mut().for_each(|x| *x = 0);
-                    let mut kk_flat = 0usize;
-                    loop {
-                        let mut pidx = 0usize;
-                        for d in 0..r {
-                            pidx += (o[d] * strides[d] + kk[d]) * padded_strides[d];
-                        }
-                        wg[w_base + kk_flat] += g * padded[p_base + pidx];
-                        kk_flat += 1;
-                        if !increment_index(&mut kk, k_dims) {
-                            break;
-                        }
-                    }
-                }
-                o_flat += 1;
-                if !increment_index(&mut o, &out_sp) {
-                    break;
+    // im2col + gemm, one task per batch. Each batch rebuilds its column matrix and emits a partial
+    // weight gradient, partial bias gradient, and its own input-gradient plane:
+    //   weight_grad += G (F x out_plane) . col^T (out_plane x Cin*k)   -> [F, Cin*k]
+    //   bias_grad   += row-sums of G                                   -> [F]
+    //   dcol         = W^T (Cin*k x F) . G (F x out_plane)             -> [Cin*k, out_plane]
+    // then col2im scatters `dcol` back into a padded input-grad plane, which is cropped to `[Cin, sp]`
+    let k_total = cin * k_plane;
+    let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
+    let w_mat = ArrayView2::from_shape((filters, k_total), weights)
+        .expect("weights length matches [F, Cin*k]");
+
+    let process_b = |b: usize| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
+        let col = build_col(padded, b, cin, padded_plane, k_plane, out_plane, &offsets);
+        let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
+            .expect("col length matches [Cin*k, out_plane]");
+        let g_slice = &grad_flat[b * filters * out_plane..(b + 1) * filters * out_plane];
+        let g_mat = ArrayView2::from_shape((filters, out_plane), g_slice)
+            .expect("grad slice matches [F, out_plane]");
+
+        let wg = g_mat.dot(&col_mat.t()); // [F, Cin*k]
+        let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
+
+        // Input gradient: dcol = W^T . G, then col2im scatter-add into the padded plane
+        let dcol = w_mat.t().dot(&g_mat); // [Cin*k, out_plane]
+        let dcol = dcol.as_slice().expect("dot result is standard layout");
+        let mut pad_grad = vec![0.0f32; cin * padded_plane];
+        for c in 0..cin {
+            let pc = c * padded_plane;
+            for kk in 0..k_plane {
+                let krow = (c * k_plane + kk) * out_plane;
+                let off = kk * out_plane;
+                for o in 0..out_plane {
+                    pad_grad[pc + offsets[off + o]] += dcol[krow + o];
                 }
             }
         }
-        (wg, bias_sum)
+        let input_grad_b = if padded_sp.as_slice() != sp {
+            crop_padded(&pad_grad, cin, sp, &padded_sp, &pad_before)
+        } else {
+            pad_grad
+        };
+        (wg, bias_p, input_grad_b)
     };
 
-    let parallel_w = batch * out_plane * cin * k_plane >= CONV_PARALLEL_THRESHOLD;
-    let f_results = map_indexed(filters, parallel_w, per_f);
-    let mut weight_grad = Vec::with_capacity(filters * cin * k_plane);
-    let mut bias_grad = Vec::with_capacity(filters);
-    for (wg, b) in f_results {
-        weight_grad.extend(wg);
-        bias_grad.push(b);
-    }
+    let parallel = batch * out_plane * k_total >= CONV_PARALLEL_THRESHOLD;
+    let per_b = map_indexed(batch, parallel, process_b);
 
-    // input gradient: one channel-plane per (batch, channel), gathered per original position
-    let process_bc = |bc: usize| -> Vec<f32> {
-        let b = bc / cin;
-        let c = bc % cin;
-        let mut plane = vec![0.0f32; in_plane];
-        let mut si = vec![0usize; r];
-        let mut kk = vec![0usize; r];
-        let mut si_flat = 0usize;
-        loop {
-            let mut sum = 0.0f32;
-            for f in 0..filters {
-                let g_base = (b * filters + f) * out_plane;
-                let w_base = (f * cin + c) * k_plane;
-                kk.iter_mut().for_each(|x| *x = 0);
-                let mut kk_flat = 0usize;
-                loop {
-                    // Map padded position (si + pad_before) back to the output position it came from
-                    let mut valid = true;
-                    let mut o_flat = 0usize;
-                    for d in 0..r {
-                        let pd = si[d] + pad_before[d];
-                        if pd < kk[d] {
-                            valid = false;
-                            break;
-                        }
-                        let diff = pd - kk[d];
-                        if !diff.is_multiple_of(strides[d]) {
-                            valid = false;
-                            break;
-                        }
-                        let od = diff / strides[d];
-                        if od >= out_sp[d] {
-                            valid = false;
-                            break;
-                        }
-                        o_flat = o_flat * out_sp[d] + od;
-                    }
-                    if valid {
-                        sum += weights[w_base + kk_flat] * grad_flat[g_base + o_flat];
-                    }
-                    kk_flat += 1;
-                    if !increment_index(&mut kk, k_dims) {
-                        break;
-                    }
-                }
-            }
-            plane[si_flat] = sum;
-            si_flat += 1;
-            if !increment_index(&mut si, sp) {
-                break;
-            }
-        }
-        plane
-    };
-
-    let parallel_ig = batch * cin * in_plane >= CONV_PARALLEL_THRESHOLD;
-    let ig_planes = map_indexed(batch * cin, parallel_ig, process_bc);
+    // Reduce the per-batch partials in batch order (weight/bias sum across the batch axis)
+    let mut weight_grad_arr = Array2::<f32>::zeros((filters, k_total));
+    let mut bias_grad = vec![0.0f32; filters];
     let mut in_grad_flat = Vec::with_capacity(batch * cin * in_plane);
-    for plane in ig_planes {
-        in_grad_flat.extend(plane);
+    for (wg, bias_p, ig_b) in per_b {
+        weight_grad_arr += &wg;
+        for (acc, v) in bias_grad.iter_mut().zip(bias_p) {
+            *acc += v;
+        }
+        in_grad_flat.extend(ig_b);
     }
+    let weight_grad = weight_grad_arr.into_raw_vec_and_offset().0;
+
     let mut ig_shape = Vec::with_capacity(2 + r);
     ig_shape.push(batch);
     ig_shape.push(cin);
@@ -570,5 +606,41 @@ mod tests {
         let in_flat = [5.0f32, 6.0, 7.0, 8.0];
         let got = build_padded(&in_flat, 1, &[2, 2], &[2, 2], &[0, 0]);
         assert_eq!(got, vec![5.0f32, 6.0, 7.0, 8.0]);
+    }
+
+    // crop_padded (inverse of build_padded)
+
+    /// Cropping the padded buffer recovers exactly the data `build_padded` inserted
+    #[test]
+    fn test_crop_padded_roundtrip() {
+        let in_flat = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let padded = build_padded(&in_flat, 2, &[2, 2], &[4, 4], &[1, 1]);
+        let got = crop_padded(&padded, 2, &[2, 2], &[4, 4], &[1, 1]);
+        assert_eq!(got, in_flat.to_vec());
+    }
+
+    /// 1-D crop pulls the interior back out and drops the zero ends
+    #[test]
+    fn test_crop_padded_1d() {
+        let padded = [0.0f32, 10.0, 20.0, 30.0, 0.0];
+        let got = crop_padded(&padded, 1, &[3], &[5], &[1]);
+        assert_eq!(got, vec![10.0f32, 20.0, 30.0]);
+    }
+
+    // im2col_offsets
+
+    /// 1-D, kernel 3, stride 1 over a length-5 (already padded) plane: tap `kk` at output `o` reads
+    /// index `o + kk`, laid out as `[k_plane, out_plane]`
+    #[test]
+    fn test_im2col_offsets_1d() {
+        // out_sp = (5 - 3)/1 + 1 = 3; padded plane length 5, stride 1
+        let offsets = im2col_offsets(&[3], &[3], &[1], &[1]);
+        // rows = kk (0..3), cols = o (0..3); offset = o*1 + kk*1
+        assert_eq!(
+            offsets,
+            vec![
+                0, 1, 2, /*kk0*/ 1, 2, 3, /*kk1*/ 2, 3, 4 /*kk2*/
+            ]
+        );
     }
 }
