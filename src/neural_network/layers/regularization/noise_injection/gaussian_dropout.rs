@@ -48,6 +48,9 @@ pub struct GaussianDropout {
     training: bool,
     /// Random number generator used to sample the multiplicative Gaussian noise
     rng: StdRng,
+    /// Multiplicative noise sampled during the forward pass, cached so backward can reuse the
+    /// exact same draw (y = x * noise => dx = grad * noise)
+    noise_cache: Option<Tensor>,
 }
 
 impl GaussianDropout {
@@ -80,6 +83,7 @@ impl GaussianDropout {
             input_shape,
             training: true,
             rng,
+            noise_cache: None,
         })
     }
 
@@ -108,6 +112,9 @@ impl Layer for GaussianDropout {
 
         let output = input * &noise;
 
+        // Cache the exact draw so backward can apply the same multiplier
+        self.noise_cache = Some(noise);
+
         Ok(output)
     }
 
@@ -121,8 +128,16 @@ impl Layer for GaussianDropout {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Gradient passes through unchanged
-        Ok(grad_output.clone())
+        // During inference or zero rate, forward was the identity, so pass the gradient through
+        if !self.training || self.rate == 0.0 {
+            return Ok(grad_output.clone());
+        }
+
+        // y = x * noise => dL/dx = dL/dy * noise, reusing the exact draw from the forward pass
+        match self.noise_cache.take() {
+            Some(noise) => Ok(grad_output * &noise),
+            None => Err(Error::forward_pass_not_run("GaussianDropout")),
+        }
     }
 
     fn layer_type(&self) -> &str {

@@ -45,7 +45,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
 /// model.add(LSTM::new(4, 3, Activation::Tanh, None).unwrap())
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();

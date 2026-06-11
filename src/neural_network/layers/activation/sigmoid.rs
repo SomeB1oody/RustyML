@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Sigmoid::new())
-///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -101,10 +101,6 @@ impl Layer for Sigmoid {
         if let Some(output) = &self.output_cache {
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-                return Err(Error::non_finite("gradient output"));
             }
 
             // Sigmoid derivative: f'(x) = f(x) * (1 - f(x))

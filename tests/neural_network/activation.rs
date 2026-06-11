@@ -679,8 +679,9 @@ fn all_layers_empty_input_predict_is_error() {
     }
 }
 
-// All five activation layers validate grad_output in backward: wrong shape gives
-// ShapeMismatch and a non-finite value gives NonFinite; the shape check runs first
+// All five activation layers validate only the structural shape of grad_output in backward
+// (wrong shape gives ShapeMismatch); they do NOT sanitize values. A non-finite grad_output is
+// pure-math propagated, surfacing downstream (next forward / NaN loss) rather than being rejected here
 
 /// Wrong-shaped grad_output after a valid forward gives Error::ShapeMismatch
 #[test]
@@ -699,18 +700,21 @@ fn all_layers_backward_wrong_shape_is_shape_mismatch() {
     }
 }
 
-/// Non-finite grad_output (correct shape) gives Error::NonFinite("gradient output")
+/// Non-finite grad_output (correct shape) is propagated, not rejected: backward is pure math, so it
+/// returns Ok and the non-finite value flows into the result instead of being masked or erroring
 #[test]
-fn all_layers_backward_non_finite_grad_is_error() {
+fn all_layers_backward_propagates_non_finite_grad() {
     let input = tensor2(1, 3, vec![1.0, 2.0, 3.0]);
     let nan_grad = tensor2(1, 3, vec![1.0, f32::NAN, 1.0]);
     for (name, mut layer) in all_activation_layers() {
         layer.forward(&input).expect("valid forward should succeed");
-        let result = layer.backward(&nan_grad);
+        let grad_in = layer
+            .backward(&nan_grad)
+            .unwrap_or_else(|e| panic!("{name}: backward should propagate, not error, got {:?}", e));
         assert!(
-            matches!(result, Err(Error::NonFinite(ref s)) if s == "gradient output"),
-            "{name}: expected NonFinite(\"gradient output\") from backward, got {:?}",
-            result
+            grad_in.iter().any(|&v| !v.is_finite()),
+            "{name}: expected a non-finite value to propagate through backward, got {:?}",
+            grad_in
         );
     }
 }

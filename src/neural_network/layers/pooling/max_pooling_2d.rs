@@ -58,7 +58,7 @@ use crate::neural_network::traits::Layer;
 ///         vec![2, 3, 6, 6], // Input shape
 ///         None,             // Use default stride (2,2)
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Create target tensor - corresponding to the pooled shape
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();

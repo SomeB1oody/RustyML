@@ -147,7 +147,7 @@ fn training_reproducible() {
         model
             .add(dense_4_3(Some(7)))
             .add(Dense::new(3, 1, Activation::Linear, Some(11)).unwrap())
-            .compile(SGD::new(0.05).unwrap(), MeanSquaredError::new());
+            .compile(SGD::new(0.05, None).unwrap(), MeanSquaredError::new());
         // batch_size < n_samples => the seeded per-epoch shuffle is actually used
         model.fit_with_batches(&x, &y, 5, 2).unwrap();
         model

@@ -45,7 +45,7 @@ use std::io::{BufWriter, Write};
 ///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
-///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
+///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Display model structure
 /// model.summary();
@@ -67,7 +67,7 @@ use std::io::{BufWriter, Write};
 /// new_model.load_from_path("model.json").unwrap();
 ///
 /// // Compile before using (required for training, optional for prediction)
-/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8).unwrap(), CategoricalCrossEntropy::new());
+/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Make predictions with loaded model
 /// let predictions = new_model.predict(&x).unwrap();
@@ -91,6 +91,22 @@ impl Default for Sequential {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
+///
+/// Squared terms accumulate in f64 to limit round-off when summing across many parameters. Layers
+/// without gradients contribute nothing; with no gradients at all the norm is 0.0
+fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
+    let mut sum_sq = 0.0_f64;
+    for layer in layers.iter_mut() {
+        for pg in layer.parameters() {
+            for &g in pg.grad {
+                sum_sq += (g as f64) * (g as f64);
+            }
+        }
+    }
+    sum_sq.sqrt() as f32
 }
 
 impl Sequential {
@@ -255,11 +271,29 @@ impl Sequential {
             optimizer.step();
         }
 
-        // Backward pass and parameter updates (iterate through layers in reverse)
+        // run every layer's backward so each stashes its gradients
         for layer in self.layers.iter_mut().rev() {
             grad = layer.backward(&grad)?;
-            if let Some(ref mut optimizer) = self.optimizer {
-                optimizer.update(&mut **layer);
+        }
+
+        // Clip-by-global-norm
+        let clip_norm = self.optimizer.as_ref().and_then(|opt| opt.clip_norm());
+        let grad_scale = match clip_norm {
+            Some(max_norm) => {
+                let norm = global_grad_norm(&mut self.layers);
+                if norm.is_finite() && norm > max_norm {
+                    max_norm / norm
+                } else {
+                    1.0
+                }
+            }
+            None => 1.0,
+        };
+
+        // Parameter updates
+        if let Some(ref mut optimizer) = self.optimizer {
+            for layer in self.layers.iter_mut().rev() {
+                optimizer.update(&mut **layer, grad_scale);
             }
         }
 
@@ -505,8 +539,7 @@ impl Sequential {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Inference path: each layer's `predict` runs in eval mode and writes no caches, so this
-        // only needs `&self` (the model can be shared across threads for concurrent inference)
+        // Inference path: each layer's `predict` runs in eval mode and writes no caches
         let mut layers_iter = self.layers.iter();
         let first_layer = layers_iter
             .next()

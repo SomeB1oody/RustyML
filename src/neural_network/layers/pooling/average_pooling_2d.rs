@@ -58,7 +58,7 @@ use crate::neural_network::traits::Layer;
 ///  vec![2, 3, 4, 4], // Input shape
 ///  Some((2, 2)),     // Strides (optional, defaults to pool_size if None)
 ///  ).unwrap())
-///  .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+///  .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 ///  // Output shape should be [2, 3, 2, 2]
 ///  let output = model.predict(&x).unwrap();

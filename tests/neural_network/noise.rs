@@ -6,8 +6,9 @@
 //! sample mean and sample std converge tightly to their population parameters,
 //! with a +/-0.05 tolerance around the expected values
 
+use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::error::Error;
+use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
@@ -524,9 +525,10 @@ fn gaussian_dropout_empty_input_shape_accepts_any_tensor() {
     assert!(layer.predict(&b).is_ok());
 }
 
-/// backward() references no forward-pass state, so it succeeds even without a prior forward() call
+/// In training mode, backward multiplies by the cached forward noise, so without a prior forward()
+/// there is no noise to reuse and it errors, matching Dense/Dropout's forward-pass-not-run contract
 #[test]
-fn gaussian_dropout_backward_without_forward_does_not_panic() {
+fn gaussian_dropout_backward_without_forward_errors() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
@@ -534,10 +536,50 @@ fn gaussian_dropout_backward_without_forward_does_not_panic() {
 
     let result = layer.backward(&grad);
     assert!(
-        result.is_ok(),
-        "backward() without prior forward() should succeed, got {:?}",
+        matches!(result, Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))),
+        "expected Err(ForwardPassNotRun) without a prior forward, got {:?}",
         result
     );
+}
+
+/// backward reuses the exact multiplicative noise from forward: with input = ones, output == noise,
+/// so backward(g) must equal g * output elementwise (y = x * noise => dx = g * noise)
+#[test]
+fn gaussian_dropout_backward_multiplies_by_forward_noise() {
+    let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
+        .unwrap()
+        .into_dyn();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3], Some(42)).unwrap();
+
+    // With input = ones, output = ones * noise = noise
+    let output = layer.forward(&input).unwrap();
+
+    let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+        .unwrap()
+        .into_dyn();
+    let grad_input = layer.backward(&grad).unwrap();
+
+    // grad_input should be grad * noise == grad * output
+    let expected = &grad * &output;
+    for (got, exp) in grad_input.iter().zip(expected.iter()) {
+        assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
+    }
+}
+
+/// During inference (training = false) forward is the identity, so backward passes the gradient
+/// through unchanged
+#[test]
+fn gaussian_dropout_backward_inference_is_passthrough() {
+    let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+        .unwrap()
+        .into_dyn();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3], None).unwrap();
+    layer.set_training(false);
+
+    let grad_input = layer.backward(&grad).unwrap();
+    for (got, exp) in grad_input.iter().zip(grad.iter()) {
+        assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
+    }
 }
 
 // GaussianDropout: metadata

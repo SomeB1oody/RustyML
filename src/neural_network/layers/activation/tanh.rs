@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Tanh::new())
-///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -102,10 +102,6 @@ impl Layer for Tanh {
             // tanh preserves shape, so the gradient must match the cached output
             if grad_output.shape() != output.shape() {
                 return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-            }
-
-            if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-                return Err(Error::non_finite("gradient output"));
             }
 
             // Derivative: d/dx tanh(x) = 1 - tanh^2(x)

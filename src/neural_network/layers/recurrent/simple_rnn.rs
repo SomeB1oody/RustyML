@@ -8,7 +8,7 @@ use crate::neural_network::layers::layer_weight::{LayerWeight, SimpleRNNLayerWei
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
-use crate::neural_network::layers::recurrent::{GRADIENT_CLIP_VALUE, orthogonal_init};
+use crate::neural_network::layers::recurrent::orthogonal_init;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
@@ -38,7 +38,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let mut model = Sequential::new();
 /// model
 /// .add(SimpleRNN::new(4, 3, Activation::Tanh, None).unwrap())
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
 /// model.summary();
@@ -260,19 +260,12 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // reuse existing gradient buffers so accumulation persists across calls
-        let mut grad_k = self
-            .grad_kernel
-            .take()
-            .unwrap_or_else(|| Array2::<f32>::zeros((self.input_dim, self.units)));
-        let mut grad_rk = self
-            .grad_recurrent_kernel
-            .take()
-            .unwrap_or_else(|| Array2::<f32>::zeros((self.units, self.units)));
-        let mut grad_b = self
-            .grad_bias
-            .take()
-            .unwrap_or_else(|| Array2::<f32>::zeros((1, self.units)));
+        // Fresh per-call gradient buffers (replace semantics, matching Dense/LSTM/GRU). The
+        // optimizer reads grads without clearing them and there is no zero_grad step, so reusing
+        // the previous call's buffers would sum gradients across every batch/epoch
+        let mut grad_k = Array2::<f32>::zeros((self.input_dim, self.units));
+        let mut grad_rk = Array2::<f32>::zeros((self.units, self.units));
+        let mut grad_b = Array2::<f32>::zeros((1, self.units));
         // Per-timestep d_z, stored so the input-side reductions can batch into single gemms. Only
         // `grad_h = d_z @ U^T` (the recurrence) has to be computed step by step
         let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
@@ -320,11 +313,8 @@ impl Layer for SimpleRNN {
             .into_shape_with_order((batch, timesteps, feat))
             .expect("reshape grad_x to [batch, timesteps, feat]");
 
-        // gradient clipping to prevent exploding gradients
-        grad_k.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
-        grad_rk.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
-        grad_b.mapv_inplace(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
-
+        // Gradient clipping is no longer applied here; configure clip-by-global-norm on the
+        // optimizer (the `clip_norm` constructor argument) if exploding gradients need taming
         self.grad_kernel = Some(grad_k);
         self.grad_recurrent_kernel = Some(grad_rk);
         self.grad_bias = Some(grad_b);

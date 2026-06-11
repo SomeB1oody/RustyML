@@ -45,7 +45,7 @@ use crate::neural_network::traits::Layer;
 ///
 /// // Compile the model with optimizer and loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8).unwrap(),    // RMSprop optimizer
+///     RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(),    // RMSprop optimizer
 ///     MeanSquaredError::new()            // Mean squared error loss
 /// );
 ///

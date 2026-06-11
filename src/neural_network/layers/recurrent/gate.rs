@@ -4,8 +4,8 @@
 //! gradient-storage helpers reused across recurrent layers
 
 use crate::error::Error;
+use crate::neural_network::layers::recurrent::orthogonal_init;
 use crate::neural_network::layers::recurrent::validation::validate_dimension_greater_than_zero;
-use crate::neural_network::layers::recurrent::{GRADIENT_CLIP_VALUE, orthogonal_init};
 use crate::neural_network::traits::ParamGrad;
 use ndarray::{Array, Array2, Array3, ArrayView2, ArrayView3};
 use ndarray_rand::rand::rngs::StdRng;
@@ -204,7 +204,7 @@ pub fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> crate::error
         .ok_or_else(|| Error::forward_pass_not_run(layer))
 }
 
-/// Stores clipped gradients into a gate
+/// Stores gradients into a gate (replace semantics, matching Dense/SimpleRNN)
 ///
 /// Reduces duplication when storing gradients during backpropagation
 ///
@@ -221,12 +221,9 @@ pub fn store_gate_gradients(
     grad_recurrent: Array2<f32>,
     grad_bias: Array2<f32>,
 ) {
-    // Clip at storage time to curb exploding gradients (matches SimpleRNN) and keep the
-    // optimizer update uniform across layer types
-    let clip = |g: Array2<f32>| g.mapv(|x| x.clamp(-GRADIENT_CLIP_VALUE, GRADIENT_CLIP_VALUE));
-    gate.grad_kernel = Some(clip(grad_kernel));
-    gate.grad_recurrent_kernel = Some(clip(grad_recurrent));
-    gate.grad_bias = Some(clip(grad_bias));
+    gate.grad_kernel = Some(grad_kernel);
+    gate.grad_recurrent_kernel = Some(grad_recurrent);
+    gate.grad_bias = Some(grad_bias);
 }
 
 #[cfg(test)]
@@ -303,12 +300,12 @@ mod tests {
         );
     }
 
-    // store_gate_gradients (clipping)
+    // store_gate_gradients (replace semantics, no clipping)
 
-    /// `store_gate_gradients` clamps every stored gradient to [-GRADIENT_CLIP_VALUE, +GRADIENT_CLIP_VALUE]
-    /// (=[-5.0, 5.0]), pulling out-of-range magnitudes to the bounds and passing in-range values through
+    /// `store_gate_gradients` stores gradients exactly as computed, with no clipping; any
+    /// magnitude (including ones the old +/-5 clamp would have pulled in) passes through unchanged
     #[test]
-    fn store_gate_gradients_clips_to_pm_five() {
+    fn store_gate_gradients_stores_unchanged() {
         let mut gate = Gate {
             kernel: Array2::<f32>::zeros((2, 2)),
             recurrent_kernel: Array2::<f32>::zeros((2, 2)),
@@ -318,42 +315,34 @@ mod tests {
             grad_bias: None,
         };
 
-        // grad_kernel: 10 -> 5, -7 -> -5, 3 -> 3 (kept), -100 -> -5
+        // Values far outside the old +/-5 clamp must now be preserved verbatim
         let grad_kernel = array![[10.0_f32, -7.0], [3.0, -100.0]];
-        // grad_recurrent: 5 -> 5 (boundary), -5 -> -5 (boundary), 0 -> 0, 6 -> 5
         let grad_recurrent = array![[5.0_f32, -5.0], [0.0, 6.0]];
-        // grad_bias: 8 -> 5, -8 -> -5
         let grad_bias = array![[8.0_f32, -8.0]];
 
-        store_gate_gradients(&mut gate, grad_kernel, grad_recurrent, grad_bias);
+        store_gate_gradients(
+            &mut gate,
+            grad_kernel.clone(),
+            grad_recurrent.clone(),
+            grad_bias.clone(),
+        );
 
         let gk = gate.grad_kernel.as_ref().expect("grad_kernel stored");
-        assert_abs_diff_eq!(gk[[0, 0]], 5.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(gk[[0, 1]], -5.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(gk[[1, 0]], 3.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(gk[[1, 1]], -5.0_f32, epsilon = 1e-6);
+        for (got, exp) in gk.iter().zip(grad_kernel.iter()) {
+            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
+        }
 
         let grk = gate
             .grad_recurrent_kernel
             .as_ref()
             .expect("grad_recurrent_kernel stored");
-        assert_abs_diff_eq!(grk[[0, 0]], 5.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(grk[[0, 1]], -5.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(grk[[1, 0]], 0.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(grk[[1, 1]], 5.0_f32, epsilon = 1e-6);
+        for (got, exp) in grk.iter().zip(grad_recurrent.iter()) {
+            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
+        }
 
         let gb = gate.grad_bias.as_ref().expect("grad_bias stored");
-        assert_abs_diff_eq!(gb[[0, 0]], 5.0_f32, epsilon = 1e-6);
-        assert_abs_diff_eq!(gb[[0, 1]], -5.0_f32, epsilon = 1e-6);
-
-        // Every stored gradient must lie within the clip bounds
-        for g in [gk, grk, gb] {
-            for &v in g.iter() {
-                assert!(
-                    (-GRADIENT_CLIP_VALUE..=GRADIENT_CLIP_VALUE).contains(&v),
-                    "stored gradient {v} outside [-{GRADIENT_CLIP_VALUE}, {GRADIENT_CLIP_VALUE}]"
-                );
-            }
+        for (got, exp) in gb.iter().zip(grad_bias.iter()) {
+            assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
         }
     }
 

@@ -50,8 +50,6 @@ pub use sigmoid::Sigmoid;
 pub use softmax::Softmax;
 pub use tanh::Tanh;
 
-/// Gradient clipping bound shared by the differentiable activations to curb exploding gradients
-const GRAD_CLIP_VALUE: f32 = 1e6;
 /// Lower input clamp for sigmoid/tanh to keep `exp` from overflowing
 const INPUT_CLIP_MIN: f32 = -500.0;
 /// Upper input clamp for sigmoid/tanh to keep `exp` from overflowing
@@ -66,15 +64,6 @@ const SIGMOID_PARALLEL_THRESHOLD: usize = 1000;
 const TANH_PARALLEL_THRESHOLD: usize = 2048;
 /// Row threshold above which Softmax switches to parallel evaluation
 const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
-
-/// Clamps a differentiable activation's gradient, zeroing non-finite values
-fn clip_grad(g: &mut f32) {
-    if g.is_nan() || g.is_infinite() {
-        *g = 0.0;
-    } else {
-        *g = g.clamp(-GRAD_CLIP_VALUE, GRAD_CLIP_VALUE);
-    }
-}
 
 /// The element-wise activation functions that trainable layers can embed
 ///
@@ -180,6 +169,8 @@ impl Activation {
     /// Every supported activation's derivative is expressible in terms of its own
     /// output, so this takes the cached activated tensor rather than the original input
     ///
+    /// This is pure math with no clamping or NaN/Inf sanitization
+    ///
     /// # Parameters
     ///
     /// - `activated` - The activated output `a` produced by [`forward`](Activation::forward)
@@ -200,10 +191,9 @@ impl Activation {
                 // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`
                 let mut grad = grad_output.clone();
                 let relu_grad = |g: &mut f32, &a: &f32| {
+                    // a > 0: ReLU'(z) = 1, gradient passes through unchanged
                     if a <= 0.0 {
                         *g = 0.0;
-                    } else {
-                        *g = g.clamp(-GRAD_CLIP_VALUE, GRAD_CLIP_VALUE);
                     }
                 };
                 if activated.len() >= RELU_PARALLEL_THRESHOLD {
@@ -218,7 +208,6 @@ impl Activation {
                 let mut grad = grad_output.clone();
                 let sigmoid_grad = |g: &mut f32, &a: &f32| {
                     *g *= a * (1.0 - a);
-                    clip_grad(g);
                 };
                 if grad.len() >= SIGMOID_PARALLEL_THRESHOLD {
                     Zip::from(&mut grad)
@@ -234,7 +223,6 @@ impl Activation {
                 let mut grad = grad_output.clone();
                 let tanh_grad = |g: &mut f32, &a: &f32| {
                     *g *= 1.0 - a * a;
-                    clip_grad(g);
                 };
                 if activated.len() >= TANH_PARALLEL_THRESHOLD {
                     Zip::from(&mut grad).and(activated).par_for_each(tanh_grad);
@@ -349,7 +337,6 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
 
         for j in 0..num_features {
             grad_row[j] = out_row[j] * (grad_out_row[j] - dot);
-            clip_grad(&mut grad_row[j]);
         }
     };
 
@@ -384,53 +371,6 @@ mod tests {
         Array2::from_shape_vec((rows, cols), data)
             .expect("shape/data mismatch")
             .into_dyn()
-    }
-
-    // clip_grad
-
-    #[test]
-    fn clip_grad_nan_becomes_zero() {
-        let mut g = f32::NAN;
-        clip_grad(&mut g);
-        assert_eq!(g, 0.0, "NaN should be zeroed");
-    }
-
-    #[test]
-    fn clip_grad_pos_inf_becomes_zero() {
-        let mut g = f32::INFINITY;
-        clip_grad(&mut g);
-        assert_eq!(g, 0.0, "+Inf should be zeroed");
-    }
-
-    #[test]
-    fn clip_grad_neg_inf_becomes_zero() {
-        let mut g = f32::NEG_INFINITY;
-        clip_grad(&mut g);
-        assert_eq!(g, 0.0, "-Inf should be zeroed");
-    }
-
-    #[test]
-    fn clip_grad_normal_value_unchanged() {
-        // -5.0 is well within [-1e6, 1e6], so it must pass through untouched
-        let mut g = -5.0_f32;
-        clip_grad(&mut g);
-        assert_abs_diff_eq!(g, -5.0_f32, epsilon = 1e-6);
-    }
-
-    #[test]
-    fn clip_grad_above_max_clamped() {
-        // 2e6 > GRAD_CLIP_VALUE (1e6) => should be clamped to GRAD_CLIP_VALUE
-        let mut g = 2.0e6_f32;
-        clip_grad(&mut g);
-        assert_abs_diff_eq!(g, GRAD_CLIP_VALUE, epsilon = 1.0);
-    }
-
-    #[test]
-    fn clip_grad_below_min_clamped() {
-        // -2e6 < -GRAD_CLIP_VALUE => should be clamped to -GRAD_CLIP_VALUE
-        let mut g = -2.0e6_f32;
-        clip_grad(&mut g);
-        assert_abs_diff_eq!(g, -GRAD_CLIP_VALUE, epsilon = 1.0);
     }
 
     // softmax_forward

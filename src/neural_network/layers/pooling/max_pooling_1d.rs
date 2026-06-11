@@ -55,7 +55,7 @@ use crate::neural_network::traits::Layer;
 ///         vec![2, 3, 8],  // input shape
 ///         Some(2),        // stride
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
 /// let output = model.predict(&x).unwrap();

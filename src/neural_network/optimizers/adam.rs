@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
-    validate_decay_rate, validate_epsilon, validate_learning_rate,
+    validate_clip_norm, validate_decay_rate, validate_epsilon, validate_learning_rate,
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
@@ -33,6 +33,8 @@ pub struct Adam {
     states: Vec<AdamParamState>,
     /// Position within `states` for the parameter currently being updated; reset each `step`
     cursor: usize,
+    /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
+    clip_norm: Option<f32>,
 }
 
 impl Adam {
@@ -46,6 +48,9 @@ impl Adam {
     /// - `beta1` - Decay rate for the first moment estimates (typically 0.9)
     /// - `beta2` - Decay rate for the second moment estimates (typically 0.999)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
+    /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
+    ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
+    ///   disables clipping
     ///
     /// # Returns
     ///
@@ -53,12 +58,20 @@ impl Adam {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any hyperparameter is out of range
-    pub fn new(learning_rate: f32, beta1: f32, beta2: f32, epsilon: f32) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If any hyperparameter is out of range, or `clip_norm` is
+    ///   `Some` value that is not positive and finite
+    pub fn new(
+        learning_rate: f32,
+        beta1: f32,
+        beta2: f32,
+        epsilon: f32,
+        clip_norm: Option<f32>,
+    ) -> Result<Self, Error> {
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(beta1, "beta1")?;
         validate_decay_rate(beta2, "beta2")?;
         validate_epsilon(epsilon)?;
+        validate_clip_norm(clip_norm)?;
 
         Ok(Self {
             learning_rate,
@@ -68,20 +81,24 @@ impl Adam {
             t: 0,
             states: Vec::new(),
             cursor: 0,
+            clip_norm,
         })
     }
 }
 
 impl Optimizer for Adam {
+    fn clip_norm(&self) -> Option<f32> {
+        self.clip_norm
+    }
+
     fn step(&mut self) {
-        // Advance the timestep once per batch; saturating at i32::MAX keeps the later `t as i32`
-        // casts in bias correction from wrapping to a negative exponent
+        // Advance the timestep once per batch
         self.t = self.t.saturating_add(1).min(i32::MAX as u64);
-        // Rewind to the first parameter; layers yield parameters in the same order every step
+        // Rewind to the first parameter
         self.cursor = 0;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer) {
+    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             if self.cursor >= self.states.len() {
                 self.states.push(AdamParamState {
@@ -90,9 +107,10 @@ impl Optimizer for Adam {
                 });
             }
             let state = &mut self.states[self.cursor];
+            let grad = kernels::scaled_grad(pg.grad, grad_scale);
             kernels::adam_step(
                 pg.value,
-                pg.grad,
+                &grad,
                 &mut state.m,
                 &mut state.v,
                 self.learning_rate,

@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Softmax::new())
-///     .compile(SGD::new(0.01).unwrap(), CategoricalCrossEntropy::new());
+///     .compile(SGD::new(0.01, None).unwrap(), CategoricalCrossEntropy::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -103,10 +103,6 @@ impl Layer for Softmax {
                 // Softmax preserves shape, so the gradient must match the cached output
                 if grad_output.shape() != output.shape() {
                     return Err(Error::shape_mismatch(output.shape(), grad_output.shape()));
-                }
-
-                if grad_output.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-                    return Err(Error::non_finite("gradient output"));
                 }
 
                 Activation::Softmax.backward(output, grad_output)

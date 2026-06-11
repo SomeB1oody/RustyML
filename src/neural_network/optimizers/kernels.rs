@@ -7,9 +7,22 @@
 //! state structs and update implementations
 
 use rayon::prelude::*;
+use std::borrow::Cow;
 
 /// Element-count threshold above which a kernel switches to parallel evaluation
 const PARALLEL_THRESHOLD: usize = 1024;
+
+/// Scales a gradient by `grad_scale`, used to apply clip-by-global-norm before the optimizer step
+///
+/// Returns a borrow of the original gradient when `grad_scale == 1.0` (the no-clip case), so the
+/// common path allocates nothing; only an active clip (`grad_scale < 1.0`) materializes a scaled copy
+pub fn scaled_grad(grad: &[f32], grad_scale: f32) -> Cow<'_, [f32]> {
+    if grad_scale == 1.0 {
+        Cow::Borrowed(grad)
+    } else {
+        Cow::Owned(grad.iter().map(|&g| g * grad_scale).collect())
+    }
+}
 
 /// SGD update: `param -= lr * grad`
 pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
@@ -147,6 +160,28 @@ pub fn adagrad_step(
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+
+    // scaled_grad
+
+    /// A scale of exactly 1.0 borrows the original gradient without allocating or changing values
+    #[test]
+    fn scaled_grad_unit_scale_borrows_unchanged() {
+        let grad = vec![1.0_f32, -2.0, 3.5];
+        let out = scaled_grad(&grad, 1.0);
+        assert!(matches!(out, Cow::Borrowed(_)), "unit scale must borrow");
+        assert_eq!(out.as_ref(), grad.as_slice());
+    }
+
+    /// A non-unit scale multiplies every element (owned copy)
+    #[test]
+    fn scaled_grad_nonunit_scale_multiplies() {
+        let grad = vec![2.0_f32, -4.0, 6.0];
+        let out = scaled_grad(&grad, 0.5);
+        assert!(matches!(out, Cow::Owned(_)), "non-unit scale must own");
+        assert_abs_diff_eq!(out[0], 1.0_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(out[1], -2.0_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(out[2], 3.0_f32, epsilon = 1e-6);
+    }
 
     // SGD
 

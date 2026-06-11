@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
-    validate_decay_rate, validate_epsilon, validate_learning_rate,
+    validate_clip_norm, validate_decay_rate, validate_epsilon, validate_learning_rate,
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
@@ -22,6 +22,8 @@ pub struct RMSprop {
     caches: Vec<Vec<f32>>,
     /// Position within `caches` for the parameter currently being updated; reset each `step`
     cursor: usize,
+    /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
+    clip_norm: Option<f32>,
 }
 
 impl RMSprop {
@@ -32,6 +34,9 @@ impl RMSprop {
     /// - `learning_rate` - Step size for parameter updates
     /// - `rho` - Decay rate for moving average of squared gradients (typically 0.9)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
+    /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
+    ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
+    ///   disables clipping
     ///
     /// # Returns
     ///
@@ -39,11 +44,18 @@ impl RMSprop {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite, or `rho` is outside [0, 1)
-    pub fn new(learning_rate: f32, rho: f32, epsilon: f32) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite,
+    ///   `rho` is outside [0, 1), or `clip_norm` is `Some` value that is not positive and finite
+    pub fn new(
+        learning_rate: f32,
+        rho: f32,
+        epsilon: f32,
+        clip_norm: Option<f32>,
+    ) -> Result<Self, Error> {
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(rho, "rho")?;
         validate_epsilon(epsilon)?;
+        validate_clip_norm(clip_norm)?;
 
         Ok(Self {
             learning_rate,
@@ -51,6 +63,7 @@ impl RMSprop {
             epsilon,
             caches: Vec::new(),
             cursor: 0,
+            clip_norm,
         })
     }
 }
@@ -61,14 +74,19 @@ impl Optimizer for RMSprop {
         self.cursor = 0;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer) {
+    fn clip_norm(&self) -> Option<f32> {
+        self.clip_norm
+    }
+
+    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             if self.cursor >= self.caches.len() {
                 self.caches.push(vec![0.0; pg.value.len()]);
             }
+            let grad = kernels::scaled_grad(pg.grad, grad_scale);
             kernels::rmsprop_step(
                 pg.value,
-                pg.grad,
+                &grad,
                 &mut self.caches[self.cursor],
                 self.rho,
                 self.learning_rate,

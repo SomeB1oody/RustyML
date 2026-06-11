@@ -7,10 +7,6 @@ use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Gradient clipping bound shared by the recurrent layers (SimpleRNN, GRU, LSTM) to curb
-/// exploding gradients during backpropagation through time
-const GRADIENT_CLIP_VALUE: f32 = 5.0;
-
 /// Applies stable sigmoid activation to an array
 ///
 /// Clamps the input before computing sigmoid to prevent numerical overflow,

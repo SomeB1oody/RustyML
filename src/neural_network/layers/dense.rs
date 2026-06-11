@@ -37,7 +37,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let mut model = Sequential::new();
 /// model.add(Dense::new(4, 3, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(3, 1, Activation::ReLU, None).unwrap());
-/// model.compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+/// model.compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
 /// model.summary();

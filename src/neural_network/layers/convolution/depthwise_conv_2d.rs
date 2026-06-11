@@ -53,7 +53,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// // Add layer and compile model
 /// model
 ///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
 ///
 /// // Create test input data: [batch_size, channels, height, width]
 /// let batch_size = 1;

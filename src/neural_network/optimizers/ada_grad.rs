@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
-use crate::neural_network::optimizers::validation::validate_positive_finite;
+use crate::neural_network::optimizers::validation::{validate_clip_norm, validate_positive_finite};
 use crate::neural_network::traits::{Layer, Optimizer};
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
@@ -18,6 +18,8 @@ pub struct AdaGrad {
     accumulators: Vec<Vec<f32>>,
     /// Position within `accumulators` for the parameter currently being updated; reset each `step`
     cursor: usize,
+    /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
+    clip_norm: Option<f32>,
 }
 
 impl AdaGrad {
@@ -27,6 +29,9 @@ impl AdaGrad {
     ///
     /// - `learning_rate` - Initial step size for parameter updates (typically 0.01)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
+    /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
+    ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
+    ///   disables clipping
     ///
     /// # Returns
     ///
@@ -34,34 +39,42 @@ impl AdaGrad {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite
-    pub fn new(learning_rate: f32, epsilon: f32) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite, or
+    ///   `clip_norm` is `Some` value that is not positive and finite
+    pub fn new(learning_rate: f32, epsilon: f32, clip_norm: Option<f32>) -> Result<Self, Error> {
         validate_positive_finite(learning_rate, "learning_rate")?;
         validate_positive_finite(epsilon, "epsilon")?;
+        validate_clip_norm(clip_norm)?;
 
         Ok(Self {
             learning_rate,
             epsilon,
             accumulators: Vec::new(),
             cursor: 0,
+            clip_norm,
         })
     }
 }
 
 impl Optimizer for AdaGrad {
     fn step(&mut self) {
-        // Rewind to the first parameter; layers yield parameters in the same order every step
+        // Rewind to the first parameter
         self.cursor = 0;
     }
 
-    fn update(&mut self, layer: &mut dyn Layer) {
+    fn clip_norm(&self) -> Option<f32> {
+        self.clip_norm
+    }
+
+    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             if self.cursor >= self.accumulators.len() {
                 self.accumulators.push(vec![0.0; pg.value.len()]);
             }
+            let grad = kernels::scaled_grad(pg.grad, grad_scale);
             kernels::adagrad_step(
                 pg.value,
-                pg.grad,
+                &grad,
                 &mut self.accumulators[self.cursor],
                 self.learning_rate,
                 self.epsilon,

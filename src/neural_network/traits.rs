@@ -63,6 +63,15 @@ pub trait Layer: std::any::Any + Send + Sync {
 
     /// Performs backward propagation through the layer
     ///
+    /// # Numerical policy
+    ///
+    /// Backward is pure math: it does **not** sanitize NaN/Inf (no zeroing, no element-wise
+    /// clamping). Such values are propagated, not masked, and surface loudly at the
+    /// next forward pass (which rejects non-finite input) or as a NaN loss. To tame large-but-finite
+    /// gradients, enable clip-by-global-norm on the optimizer
+    /// ([`Optimizer::clip_norm`](crate::neural_network::traits::Optimizer::clip_norm)) rather than
+    /// clamping inside a layer, since global-norm scaling preserves gradient direction
+    ///
     /// # Parameters
     ///
     /// - `grad_output` - The gradient tensor from the next layer
@@ -73,7 +82,8 @@ pub trait Layer: std::any::Any + Send + Sync {
     ///
     /// # Errors
     ///
-    /// - `Error` - If the layer encountered an error during processing
+    /// - `Error` - If the layer encountered an error during processing (e.g. shape mismatch or a
+    ///   missing forward-pass cache)
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error>;
 
     /// Returns the type name of the layer (e.g. "Dense")
@@ -217,12 +227,25 @@ pub trait Optimizer {
     /// which is correct for step-independent optimizers (SGD, RMSprop, AdaGrad)
     fn step(&mut self) {}
 
+    /// The global gradient-norm clip threshold, or `None` (the default) to disable clipping
+    ///
+    /// When `Some(max_norm)`, the training loop computes the global L2 norm across **all** of the
+    /// model's gradients and, if it exceeds `max_norm`, scales every gradient by
+    /// `max_norm / global_norm` before [`update`](Optimizer::update). This single uniform factor
+    /// preserves gradient direction (unlike per-element clamping). A non-finite global norm is left
+    /// unscaled so divergence still surfaces rather than being masked
+    fn clip_norm(&self) -> Option<f32> {
+        None
+    }
+
     /// Updates the parameters of a layer according to the optimization algorithm
     ///
     /// # Parameters
     ///
     /// - `layer` - The layer whose parameters should be updated
-    fn update(&mut self, layer: &mut dyn Layer);
+    /// - `grad_scale` - Uniform factor applied to every gradient before the update, supplied by the
+    ///   training loop to implement clip-by-global-norm. Pass `1.0` for an unscaled update
+    fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32);
 }
 
 /// Trait for applying serialized weights to a specific layer type

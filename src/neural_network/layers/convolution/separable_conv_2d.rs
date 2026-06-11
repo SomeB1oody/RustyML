@@ -64,7 +64,7 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 ///         Activation::ReLU, // ReLU activation
 ///         None,                        // random_state
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();

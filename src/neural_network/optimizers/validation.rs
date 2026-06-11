@@ -79,3 +79,17 @@ pub(super) fn validate_positive_finite(value: f32, param_name: &str) -> Result<(
     }
     Ok(())
 }
+
+/// Validates an optional clip-by-global-norm threshold
+///
+/// `None` (clipping disabled) is always valid; a `Some(max_norm)` must be positive and finite
+///
+/// # Errors
+///
+/// Returns `Error::InvalidParameter` if `clip_norm` is `Some` value that is not positive and finite
+pub(super) fn validate_clip_norm(clip_norm: Option<f32>) -> Result<(), Error> {
+    if let Some(max_norm) = clip_norm {
+        validate_positive_finite(max_norm, "clip_norm")?;
+    }
+    Ok(())
+}
