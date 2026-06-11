@@ -92,7 +92,7 @@ impl Dropout {
 
 impl Layer for Dropout {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was validated in `new()`; only the runtime input shape needs checking
+        // `rate` was validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         if !self.training {
@@ -109,7 +109,7 @@ impl Layer for Dropout {
             return Ok(Tensor::zeros(input.raw_dim()));
         }
 
-        // Sample a uniform value per element: kept with probability (1 - rate)
+        // Sample a uniform value per element
         let mut mask = Tensor::random_using(
             input.raw_dim(),
             Uniform::new(0.0, 1.0).unwrap(),
@@ -135,7 +135,7 @@ impl Layer for Dropout {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` was validated in `new()`; only the runtime input shape needs checking
+        // `rate` was validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // Inverted dropout passes the input through unchanged during inference

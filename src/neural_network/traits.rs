@@ -246,6 +246,17 @@ pub trait Optimizer {
     /// - `grad_scale` - Uniform factor applied to every gradient before the update, supplied by the
     ///   training loop to implement clip-by-global-norm. Pass `1.0` for an unscaled update
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32);
+
+    /// Sets the learning rate, the hook for external learning-rate scheduling
+    ///
+    /// Call between batches or epochs (e.g. for step decay or warmup) to retune the step size
+    /// without rebuilding the optimizer, preserving its accumulated state. The default
+    /// implementation is a no-op; every built-in optimizer overrides it
+    ///
+    /// # Parameters
+    ///
+    /// - `_learning_rate` - The new learning rate to use for subsequent updates
+    fn set_learning_rate(&mut self, _learning_rate: f32) {}
 }
 
 /// Trait for applying serialized weights to a specific layer type

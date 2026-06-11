@@ -211,8 +211,6 @@ pub struct SerializableSequential {
 macro_rules! apply_weights_simple {
     ($layer_any:expr, $weight:expr, $layer_type:ident, $layer_name:expr, $expected_type:expr) => {{
         if let Some(layer) = $layer_any.downcast_mut::<$layer_type>() {
-            // A weight-shape error here means the saved file does not match the target
-            // model, so surface it uniformly as `ModelStructureMismatch` (keeps shape detail)
             $weight
                 .apply_to_layer(layer)
                 .map_err(|e| Error::Io(IoError::ModelStructureMismatch(e.to_string())))?;

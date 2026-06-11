@@ -926,3 +926,52 @@ fn bn_new_scalar_param_branch_forward_1d() {
     let expected = tensor1(vec![-1.5 / std, -0.5 / std, 0.5 / std, 1.5 / std]);
     assert_allclose(&output, &expected, 1e-5);
 }
+
+/// Spatial batch norm (rank > 2): a [1, 2, 2, 2] input normalizes each channel over its (N, H, W)
+/// values, and the parameters are per-channel (2*C), not per spatial element
+#[test]
+fn bn_spatial_4d_normalizes_per_channel() {
+    use rustyml::neural_network::Tensor;
+    use rustyml::neural_network::layers::TrainingParameters;
+
+    let mut bn = BatchNormalization::new(vec![1, 2, 2, 2], 0.9, 1e-5).unwrap();
+    // Per-channel (C=2) parameters: gamma[2] + beta[2] = 4 trainable (not 2*C*H*W = 16)
+    assert!(matches!(bn.param_count(), TrainingParameters::Trainable(4)));
+
+    // channel 0 = {1,2,3,4}, channel 1 = {5,6,7,8} (row-major [N, C, H, W])
+    let x: Tensor =
+        ArrayD::from_shape_vec(vec![1, 2, 2, 2], vec![1., 2., 3., 4., 5., 6., 7., 8.]).unwrap();
+    let out = bn.forward(&x).unwrap();
+    assert_eq!(out.shape(), &[1, 2, 2, 2]);
+
+    // Each channel has variance 1.25, so the normalized values repeat per channel
+    let inv = 1.0 / (1.25f32 + 1e-5).sqrt();
+    let expected: Tensor = ArrayD::from_shape_vec(
+        vec![1, 2, 2, 2],
+        vec![
+            -1.5 * inv,
+            -0.5 * inv,
+            0.5 * inv,
+            1.5 * inv,
+            -1.5 * inv,
+            -0.5 * inv,
+            0.5 * inv,
+            1.5 * inv,
+        ],
+    )
+    .unwrap();
+    assert_allclose(&out, &expected, 1e-4);
+}
+
+/// Spatial batch-norm backward returns a gradient matching the input shape (folds/unfolds correctly)
+#[test]
+fn bn_spatial_4d_backward_shape() {
+    use rustyml::neural_network::Tensor;
+    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    let x: Tensor = ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);
+    bn.forward(&x).unwrap();
+    let grad: Tensor = ArrayD::ones(vec![2, 3, 2, 2]);
+    let grad_in = bn.backward(&grad).unwrap();
+    assert_eq!(grad_in.shape(), &[2, 3, 2, 2]);
+    assert!(grad_in.iter().all(|v| v.is_finite()));
+}

@@ -54,7 +54,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///         Activation::ReLU, // ReLU activation
 ///         None,                   // random_state
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -219,7 +219,7 @@ impl Layer for Conv1D {
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
             self.padding,
-        );
+        )?;
         let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
         Ok(activated)
@@ -239,7 +239,7 @@ impl Layer for Conv1D {
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.stride],
             self.padding,
-        );
+        )?;
         let activated = self.activation.forward(&output)?;
         Ok(activated)
     }
@@ -264,7 +264,7 @@ impl Layer for Conv1D {
             self.weights.shape(),
             &[self.stride],
             self.padding,
-        );
+        )?;
 
         self.weight_gradients = Some(
             Array3::from_shape_vec(self.weights.raw_dim(), grads.weight_grad)

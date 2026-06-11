@@ -64,7 +64,7 @@ const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 ///         Activation::ReLU, // ReLU activation
 ///         None,                        // random_state
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
@@ -132,8 +132,6 @@ impl SeparableConv2D {
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
-    // Eight positional parameters mirror the other convolution constructors; the trailing
-    // `random_state` pushes this past clippy's 7-argument threshold
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         filters: usize,
@@ -153,7 +151,7 @@ impl SeparableConv2D {
 
         let channels = input_shape[1];
 
-        // Xavier init for the depthwise weights; each filter operates on a single channel
+        // Xavier init for the depthwise weights
         let depthwise_fan_in = kernel_size.0 * kernel_size.1;
         let depthwise_fan_out = depth_multiplier * kernel_size.0 * kernel_size.1;
         let depthwise_bound = (6.0 / (depthwise_fan_in + depthwise_fan_out) as f32).sqrt();
@@ -222,8 +220,7 @@ impl SeparableConv2D {
         let channels = input_shape[1];
         let output_shape = self.calculate_depthwise_output_shape(input_shape);
 
-        // Zero-pad the spatial dims for `Same`; without it, `compute_depthwise_batch`'s boundary
-        // clipping degrades `Same` into a top-left `Valid` at the borders. `Valid` is a no-op
+        // Zero-pad the spatial dims for `Same`
         let (pad_h, pad_w) = self.calculate_padding(
             input_shape[2],
             input_shape[3],
@@ -323,6 +320,9 @@ impl SeparableConv2D {
             &[1, 1],
             PaddingType::Valid,
         )
+        // A 1x1 kernel under Valid padding can never exceed the input (every spatial dim >= 1), so
+        // the geometry is always valid here
+        .expect("1x1 pointwise convolution geometry is always valid")
     }
 
     /// Calculates the output shape after the depthwise convolution stage
@@ -458,8 +458,7 @@ impl Layer for SeparableConv2D {
             let channels = input_shape[1];
             let depthwise_shape = depthwise_output.shape();
 
-            // Re-create the zero-padded input from `depthwise_convolve` so gradients accumulate in
-            // padded coordinates; the padding is stripped from the input gradient before returning
+            // Re-create the zero-padded input from `depthwise_convolve`
             let (pad_h, pad_w) = self.calculate_padding(
                 input_shape[2],
                 input_shape[3],
@@ -484,7 +483,9 @@ impl Layer for SeparableConv2D {
                 self.pointwise_weights.shape(),
                 &[1, 1],
                 PaddingType::Valid,
-            );
+            )
+            // 1x1 Valid geometry is always valid (see `pointwise_convolve`)
+            .expect("1x1 pointwise convolution geometry is always valid");
             let pointwise_weight_grads =
                 Array4::from_shape_vec(self.pointwise_weights.raw_dim(), pw_grads.weight_grad)
                     .expect("pointwise weight gradient shape matches weights");
@@ -532,8 +533,7 @@ impl Layer for SeparableConv2D {
                     }
                 });
 
-            // Input gradients: parallel over the batch axis, accumulated in padded coordinates
-            // (matching the padded forward pass) then sliced back to the original shape below
+            // Input gradients
             let mut input_gradients = ArrayD::zeros(padded_input.dim());
             input_gradients
                 .axis_iter_mut(Axis(0))
@@ -570,8 +570,6 @@ impl Layer for SeparableConv2D {
                     }
                 });
 
-            // Strip the symmetric padding so the returned gradient matches the original input
-            // shape (no-op for `Valid`, where no padding was added)
             let input_gradients = if pad_h == 0 && pad_w == 0 {
                 input_gradients
             } else {

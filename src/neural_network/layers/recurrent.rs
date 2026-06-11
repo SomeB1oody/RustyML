@@ -7,16 +7,14 @@ use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Applies stable sigmoid activation to an array
+/// Applies the logistic sigmoid to an array. Used by both GRU and LSTM gates
 ///
-/// Clamps the input before computing sigmoid to prevent numerical overflow,
-/// then computes sigmoid. Used by both GRU and LSTM gates
+/// `1/(1 + e^-x)` is correct and finite for any finite `x` (when `e^-x` overflows to `+inf` the
+/// result is the exact limit `0`), and it saturates to `1`/`0` at `±inf`, so no input clamping is
+/// needed; the only non-finite output comes from a `NaN` input, which propagates
 #[inline]
 fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
-    arr.mapv(|x| {
-        let clipped_x = x.clamp(-500.0, 500.0);
-        1.0 / (1.0 + (-clipped_x).exp())
-    })
+    arr.mapv(|x| 1.0 / (1.0 + (-x).exp()))
 }
 
 /// Generates a square orthogonal matrix via Gram-Schmidt orthonormalization of a random matrix
@@ -26,14 +24,13 @@ fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
 /// norm-preserving, mitigating vanishing/exploding gradients. Used to initialize the recurrent
 /// kernels of SimpleRNN and the GRU/LSTM gates
 fn orthogonal_init(size: usize, rng: &mut StdRng) -> Array2<f32> {
-    // Random starting matrix; Gram-Schmidt below orthonormalizes its columns in place
+    // Random starting matrix
     let mut matrix = Array::random_using((size, size), Uniform::new(-1.0, 1.0).unwrap(), rng);
 
     const EPSILON: f32 = 1e-8;
 
     for i in 0..size {
-        // Orthogonalize column i against all previously finalized (already normalized) columns,
-        // so each projection denominator is 1
+        // Orthogonalize column i against all previously finalized (already normalized) columns
         for j in 0..i {
             let mut projection = 0.0;
             for k in 0..size {
@@ -124,26 +121,26 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 0.5_f32, epsilon = 1e-6);
     }
 
-    /// sigmoid at the clamp boundary 500 is ~= 1.0 with no overflow
+    /// sigmoid saturates to ~= 1.0 for large positive input with no overflow
     #[test]
     fn apply_sigmoid_large_positive_approaches_one() {
         let input = array![[500.0_f32]];
         let output = apply_sigmoid(input);
-        // exp(-500) is ~7e-218, so the result is indistinguishable from 1.0
+        // exp(-500) underflows to 0 in f32, so the result is exactly 1.0
         assert_abs_diff_eq!(output[[0, 0]], 1.0_f32, epsilon = 1e-6);
     }
 
-    /// Input 1000.0 clamps to 500.0 and yields the same finite value as sigmoid(500)
+    /// Large positive inputs all saturate to the same value (1.0); no clamping is involved
     #[test]
-    fn apply_sigmoid_clamped_input_1000_same_as_500() {
+    fn apply_sigmoid_large_positive_inputs_saturate_equally() {
         let out_500 = apply_sigmoid(array![[500.0_f32]]);
         let out_1000 = apply_sigmoid(array![[1000.0_f32]]);
-        // Both must produce the same float (clamp to 500) and be ~= 1.0
+        // Both saturate to exactly 1.0 (exp(-x) underflows to 0)
         assert_abs_diff_eq!(out_500[[0, 0]], out_1000[[0, 0]], epsilon = 1e-9);
         assert_abs_diff_eq!(out_1000[[0, 0]], 1.0_f32, epsilon = 1e-6);
     }
 
-    /// sigmoid(-1000) clamps to -500 and yields ~= 0.0
+    /// sigmoid(-1000) saturates to ~= 0.0
     #[test]
     fn apply_sigmoid_large_negative_approaches_zero() {
         let input = array![[-1000.0_f32]];
@@ -151,7 +148,7 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 0.0_f32, epsilon = 1e-6);
     }
 
-    /// Output stays finite for inputs far beyond the clamp boundaries
+    /// Output stays finite even for ±inf and huge-magnitude inputs (no clamp needed)
     #[test]
     fn apply_sigmoid_no_nan_or_inf() {
         let input = array![[

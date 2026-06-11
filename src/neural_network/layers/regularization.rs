@@ -14,9 +14,6 @@ pub use dropout::*;
 pub use noise_injection::*;
 pub use normalization::*;
 
-// Macros are path-exported via `pub(in ...) use`, so callers import them explicitly rather than
-// relying on textual macro ordering
-
 /// Defines a layer-specific `set_training` method for toggling the training mode
 ///
 /// The generated method sets the `training` field to `true` (training) or `false` (inference),

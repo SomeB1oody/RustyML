@@ -104,7 +104,7 @@ model
     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
     .compile(
-        Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(),
+        Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
         CategoricalCrossEntropy::new(),
     );
 

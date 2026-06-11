@@ -53,7 +53,7 @@ const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 /// // Add layer and compile model
 /// model
 ///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Create test input data: [batch_size, channels, height, width]
 /// let batch_size = 1;
@@ -155,8 +155,7 @@ impl DepthwiseConv2D {
         validate_strides_2d(strides)?;
         validate_input_shape_2d(&input_shape, kernel_size)?;
 
-        // Pure depthwise convolution fixes the filter count to the input channels; enforce it
-        // here so a shape mismatch is an explicit construction error, not a silent first-forward one
+        // Pure depthwise convolution fixes the filter count to the input channels
         let channels = input_shape[1];
         if channels != filters {
             return Err(Error::invalid_parameter(
@@ -167,8 +166,7 @@ impl DepthwiseConv2D {
 
         let (kernel_height, kernel_width) = kernel_size;
 
-        // Xavier (Glorot) uniform init: each filter maps one channel, so fan_in == fan_out ==
-        // kernel_area. Weight shape is [filters, 1, kernel_height, kernel_width]; biases start at zero
+        // Xavier (Glorot) uniform init
         let fan = kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
@@ -289,8 +287,7 @@ impl DepthwiseConv2D {
         pad_w: usize,
     ) -> (Array4<f32>, Array4<f32>) {
         let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
-        // Accumulate input gradients in PADDED coordinates (matching `pad_tensor_2d` in the forward
-        // pass), then strip the padding
+        // Accumulate input gradients in PADDED coordinates
         let padded_height = input_height + pad_h;
         let padded_width = input_width + pad_w;
         let mut batch_input_grads_padded =
@@ -359,10 +356,9 @@ impl Layer for DepthwiseConv2D {
             input_array.shape()[3],
         );
 
-        assert_eq!(
-            channels, self.filters,
-            "Input channels must equal number of filters for depthwise convolution"
-        );
+        if channels != self.filters {
+            return Err(Error::dimension_mismatch(self.filters, channels));
+        }
 
         let output_shape = calculate_output_shape_2d(
             &self.input_shape,
@@ -457,10 +453,9 @@ impl Layer for DepthwiseConv2D {
             input_array.shape()[3],
         );
 
-        assert_eq!(
-            channels, self.filters,
-            "Input channels must equal number of filters for depthwise convolution"
-        );
+        if channels != self.filters {
+            return Err(Error::dimension_mismatch(self.filters, channels));
+        }
 
         let output_shape =
             calculate_output_shape_2d(&input_shape, self.kernel_size, self.strides, &self.padding);

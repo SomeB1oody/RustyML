@@ -2,7 +2,9 @@
 
 use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
-use crate::neural_network::optimizers::validation::{validate_clip_norm, validate_positive_finite};
+use crate::neural_network::optimizers::validation::{
+    validate_clip_norm, validate_non_negative_finite, validate_positive_finite,
+};
 use crate::neural_network::traits::{Layer, Optimizer};
 
 /// AdaGrad (Adaptive Gradient Algorithm) optimizer
@@ -20,6 +22,8 @@ pub struct AdaGrad {
     cursor: usize,
     /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
     clip_norm: Option<f32>,
+    /// Decoupled (AdamW-style) weight decay coefficient; `0.0` disables it
+    weight_decay: f32,
 }
 
 impl AdaGrad {
@@ -32,6 +36,8 @@ impl AdaGrad {
     /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
     ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
     ///   disables clipping
+    /// - `weight_decay` - Decoupled (AdamW-style) weight-decay coefficient applied directly to the
+    ///   parameters; `0.0` disables it
     ///
     /// # Returns
     ///
@@ -39,12 +45,19 @@ impl AdaGrad {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite, or
-    ///   `clip_norm` is `Some` value that is not positive and finite
-    pub fn new(learning_rate: f32, epsilon: f32, clip_norm: Option<f32>) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite,
+    ///   `clip_norm` is `Some` value that is not positive and finite, or `weight_decay` is negative
+    ///   or not finite
+    pub fn new(
+        learning_rate: f32,
+        epsilon: f32,
+        clip_norm: Option<f32>,
+        weight_decay: f32,
+    ) -> Result<Self, Error> {
         validate_positive_finite(learning_rate, "learning_rate")?;
         validate_positive_finite(epsilon, "epsilon")?;
         validate_clip_norm(clip_norm)?;
+        validate_non_negative_finite(weight_decay, "weight_decay")?;
 
         Ok(Self {
             learning_rate,
@@ -52,6 +65,7 @@ impl AdaGrad {
             accumulators: Vec::new(),
             cursor: 0,
             clip_norm,
+            weight_decay,
         })
     }
 }
@@ -66,12 +80,21 @@ impl Optimizer for AdaGrad {
         self.clip_norm
     }
 
+    fn set_learning_rate(&mut self, learning_rate: f32) {
+        self.learning_rate = learning_rate;
+    }
+
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             if self.cursor >= self.accumulators.len() {
                 self.accumulators.push(vec![0.0; pg.value.len()]);
+            } else if self.accumulators[self.cursor].len() != pg.value.len() {
+                // Reset the accumulator to match
+                self.accumulators[self.cursor] = vec![0.0; pg.value.len()];
             }
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
+            // Decoupled weight decay shrinks the parameter before the adaptive step
+            kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
             kernels::adagrad_step(
                 pg.value,
                 &grad,

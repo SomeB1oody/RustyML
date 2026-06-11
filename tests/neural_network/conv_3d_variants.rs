@@ -294,6 +294,49 @@ fn conv3d_forward_rejects_non_5d_input() {
     );
 }
 
+/// Constructing with a declared input spatial dim smaller than the kernel is rejected (parity
+/// with Conv1D/Conv2D, which already checked this)
+#[test]
+fn conv3d_new_rejects_input_smaller_than_kernel() {
+    let err = Conv3D::new(
+        1,
+        (3, 3, 3),
+        vec![1, 1, 2, 4, 4], // depth = 2 < kernel depth 3
+        (1, 1, 1),
+        PaddingType::Valid,
+        Linear::new(),
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
+/// A runtime input smaller than the kernel under Valid padding returns an error instead of
+/// panicking on a usize underflow in the geometry
+#[test]
+fn conv3d_forward_rejects_input_smaller_than_kernel() {
+    let mut conv = Conv3D::new(
+        1,
+        (3, 3, 3),
+        vec![1, 1, 5, 5, 5], // declared shape is valid (>= kernel)
+        (1, 1, 1),
+        PaddingType::Valid,
+        Linear::new(),
+        None,
+    )
+    .unwrap();
+    // Feed a genuinely smaller tensor at runtime: depth 2 < kernel depth 3
+    let x_small = Array::ones((1_usize, 1, 2, 5, 5)).into_dyn();
+    let err = conv.forward(&x_small).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
 /// set_weights with wrong shape must return NeuralNetwork(WeightShape)
 #[test]
 fn conv3d_set_weights_shape_mismatch_errors() {
@@ -336,6 +379,29 @@ fn depthwise_conv2d_new_rejects_filters_not_equal_channels() {
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for filters != channels, got {err:?}"
+    );
+}
+
+/// A runtime input whose channel count differs from `filters` returns DimensionMismatch
+/// (previously an `assert_eq!` panic)
+#[test]
+fn depthwise_conv2d_forward_rejects_wrong_channels() {
+    let mut conv = DepthwiseConv2D::new(
+        2,
+        (2, 2),
+        vec![1, 2, 4, 4], // declared with 2 channels == filters
+        (1, 1),
+        PaddingType::Valid,
+        Linear::new(),
+        None,
+    )
+    .unwrap();
+    // Feed a tensor with 3 channels instead of 2
+    let x = Array::ones((1_usize, 3, 4, 4)).into_dyn();
+    let err = conv.forward(&x).unwrap_err();
+    assert!(
+        matches!(err, Error::DimensionMismatch { .. }),
+        "expected DimensionMismatch, got {err:?}"
     );
 }
 

@@ -231,7 +231,7 @@ fn test_fit_before_compile_returns_not_compiled() {
 #[test]
 fn test_fit_empty_model_returns_empty_model_error() {
     let mut model = Sequential::new();
-    model.compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+    model.compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
     let y = t2(2, 1, vec![1.0, 0.0]);
     assert!(
@@ -261,7 +261,7 @@ fn test_fit_empty_x_returns_empty_input_error() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x: Tensor = Array::zeros((0, 2)).into_dyn();
     let y: Tensor = Array::zeros((0, 1)).into_dyn();
@@ -277,7 +277,7 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x = t2(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let y = t2(2, 1, vec![1.0, 2.0]); // batch 2 != 3
@@ -307,7 +307,7 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x = t2(4, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     let y = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
@@ -327,7 +327,7 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
     let mut model = Sequential::new();
     model
         .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x = t2(3, 2, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let y = t2(3, 1, vec![1.0, 2.0, 3.0]);
@@ -355,7 +355,7 @@ fn test_fit_zero_epochs_unchanged_weights() {
     let mut model = Sequential::new();
     model
         .add(dense)
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x = t2(1, 1, vec![2.0]);
     let y = t2(1, 1, vec![10.0]); // irrelevant with 0 epochs
@@ -379,7 +379,7 @@ fn test_convergence_linear_regression_y_eq_2x_plus_1() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     model.fit(&x, &y, 300).unwrap();
 
@@ -399,7 +399,7 @@ fn test_convergence_linear_regression_with_batches() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     model.fit_with_batches(&x, &y, 500, 2).unwrap();
 
@@ -447,8 +447,8 @@ fn test_convergence_2class_softmax_adam() {
         .add(Dense::new(2, 8, Activation::Tanh, None).unwrap())
         .add(Dense::new(8, 2, Activation::Softmax, None).unwrap())
         .compile(
-            Adam::new(0.01, 0.9, 0.999, 1e-8, None).unwrap(),
-            CategoricalCrossEntropy::new(),
+            Adam::new(0.01, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
+            CategoricalCrossEntropy::new(false),
         );
 
     model.fit(&x, &y, 600).unwrap();
@@ -483,7 +483,7 @@ fn test_predict_deterministic_after_training() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(2, 2, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     model.fit(&x, &y, 5).unwrap();
 
@@ -501,7 +501,7 @@ fn test_fit_returns_mutable_self() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     let x = t2(2, 1, vec![1.0, 2.0]);
     let y = t2(2, 1, vec![1.0, 2.0]);
@@ -520,7 +520,7 @@ fn test_fit_with_batches_full_batch_equivalent() {
     let mut model = Sequential::new();
     model
         .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
-        .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 
     // batch_size == n_samples: one batch per epoch
     model.fit_with_batches(&x, &y, 400, 4).unwrap();

@@ -537,42 +537,42 @@ fn softmax_input_gradient_matches_finite_difference() {
 
 #[test]
 fn max_pooling_1d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling1D::new(2, vec![1, 2, 6], None).unwrap();
+    let mut pool = MaxPooling1D::new(2, vec![1, 2, 6], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 2, 6]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn max_pooling_2d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling2D::new((2, 2), vec![1, 2, 4, 4], None).unwrap();
+    let mut pool = MaxPooling2D::new((2, 2), vec![1, 2, 4, 4], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 2, 4, 4]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn max_pooling_3d_input_gradient_matches_finite_difference() {
-    let mut pool = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None).unwrap();
+    let mut pool = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 1, 4, 4, 4]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_1d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling1D::new(2, vec![1, 2, 6], None).unwrap();
+    let mut pool = AveragePooling1D::new(2, vec![1, 2, 6], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 2, 6]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_2d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling2D::new((2, 2), vec![1, 2, 4, 4], None).unwrap();
+    let mut pool = AveragePooling2D::new((2, 2), vec![1, 2, 4, 4], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 2, 4, 4]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }
 
 #[test]
 fn average_pooling_3d_input_gradient_matches_finite_difference() {
-    let mut pool = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None).unwrap();
+    let mut pool = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
     let x = ramp(&[1, 1, 4, 4, 4]);
     check_input_gradient_weighted(&mut pool, &x, 1e-3, 1e-2);
 }

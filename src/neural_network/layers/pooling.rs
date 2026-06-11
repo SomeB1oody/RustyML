@@ -112,6 +112,7 @@ macro_rules! layer_functions_1d_pooling {
                     &self.input_shape,
                     self.pool_size,
                     self.stride,
+                    self.padding,
                 );
                 format!(
                     "({}, {}, {})",
@@ -157,6 +158,7 @@ macro_rules! layer_functions_2d_pooling {
                     &self.input_shape,
                     self.pool_size,
                     self.strides,
+                    self.padding,
                 );
                 format!(
                     "({}, {}, {}, {})",
@@ -202,6 +204,7 @@ macro_rules! layer_functions_3d_pooling {
                     &self.input_shape,
                     self.pool_size,
                     self.strides,
+                    self.padding,
                 );
                 format!(
                     "({}, {}, {}, {}, {})",

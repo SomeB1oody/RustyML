@@ -80,6 +80,22 @@ pub(super) fn validate_positive_finite(value: f32, param_name: &str) -> Result<(
     Ok(())
 }
 
+/// Validates that a value is non-negative and finite (e.g. `momentum`, `weight_decay`, where 0
+/// disables the feature)
+///
+/// # Errors
+///
+/// Returns `Error::InvalidParameter` if the value is negative or not finite
+pub(super) fn validate_non_negative_finite(value: f32, param_name: &str) -> Result<(), Error> {
+    if !(value >= 0.0 && value.is_finite()) {
+        return Err(Error::invalid_parameter(
+            param_name.to_string(),
+            format!("must be non-negative and finite, got {}", value),
+        ));
+    }
+    Ok(())
+}
+
 /// Validates an optional clip-by-global-norm threshold
 ///
 /// `None` (clipping disabled) is always valid; a `Some(max_norm)` must be positive and finite

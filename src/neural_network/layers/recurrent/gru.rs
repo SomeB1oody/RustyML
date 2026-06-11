@@ -44,7 +44,7 @@ const GRU_PARALLEL_THRESHOLD: usize = 1024;
 /// // Create GRU layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
 /// model.add(GRU::new(4, 3, Activation::Tanh, None).unwrap())
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -388,7 +388,12 @@ impl Layer for GRU {
         let grad_h_t = grad_output
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
-            .unwrap();
+            .map_err(|_| {
+                Error::invalid_input(format!(
+                    "GRU backward expects a 2D gradient [batch, units], got shape {:?}",
+                    grad_output.shape()
+                ))
+            })?;
 
         // Configurable activation (Copy) used for the candidate derivative
         let act = self.activation;

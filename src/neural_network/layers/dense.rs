@@ -37,7 +37,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let mut model = Sequential::new();
 /// model.add(Dense::new(4, 3, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(3, 1, Activation::ReLU, None).unwrap());
-/// model.compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+/// model.compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
 /// model.summary();
@@ -142,8 +142,7 @@ impl Dense {
     pub fn set_weights(&mut self, weights: Array2<f32>, bias: Array2<f32>) -> Result<(), Error> {
         validate_weight_shape("weight", self.weights.shape(), weights.shape())?;
         validate_weight_shape("bias", self.bias.shape(), bias.shape())?;
-        // Force standard layout: `parameters()` exposes the weights as a flat mutable slice via
-        // `as_slice_mut().expect(..)`, which panics on a non-contiguous array
+
         self.weights = weights.as_standard_layout().into_owned();
         self.bias = bias.as_standard_layout().into_owned();
         Ok(())
@@ -162,8 +161,7 @@ impl Layer for Dense {
         // Input shape is [batch_size, input_dim]
         self.input_cache = Some(input_2d.to_owned());
 
-        // Linear transform. ndarray's `dot` dispatches to the cache-blocked SIMD `matrixmultiply`
-        // kernel, which beats a hand-rolled parallel triple loop across all sizes
+        // Linear transform
         let z = input_2d.dot(&self.weights) + &self.bias;
 
         // Apply activation and cache the activated output for backpropagation
@@ -181,10 +179,10 @@ impl Layer for Dense {
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Linear transform (see `forward` for why `dot` rather than a hand-rolled loop)
+        // Linear transform
         let z = input_2d.dot(&self.weights) + &self.bias;
 
-        // Apply activation (no cache writes during inference)
+        // Apply activation
         self.activation.forward(&z.into_dyn())
     }
 
@@ -194,17 +192,31 @@ impl Layer for Dense {
             .output_cache
             .take()
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
+        // Guard the activation backward
+        if grad_output.shape() != activated.shape() {
+            return Err(Error::shape_mismatch(
+                activated.shape(),
+                grad_output.shape(),
+            ));
+        }
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
         // Gradient as a 2D array with shape [batch_size, output_dim]
-        let grad_upstream_2d = grad_upstream.into_dimensionality::<ndarray::Ix2>().unwrap();
+        let grad_upstream_2d = grad_upstream
+            .into_dimensionality::<ndarray::Ix2>()
+            .map_err(|_| {
+                Error::invalid_input(format!(
+                    "Dense backward expects a 2D gradient [batch, output_dim], got shape {:?}",
+                    grad_output.shape()
+                ))
+            })?;
 
         let input = self
             .input_cache
             .take()
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
-        // Weight gradients: grad_w = input^T * grad_upstream (matmul via `dot`)
+        // Weight gradients
         let grad_w = input.t().dot(&grad_upstream_2d);
 
         // Calculate bias gradients by summing over batch dimension
@@ -214,7 +226,7 @@ impl Layer for Dense {
         self.grad_weights = Some(grad_w.as_standard_layout().to_owned());
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
-        // Gradient w.r.t. the input: grad_input = grad_upstream * weights^T
+        // Gradient w.r.t. the input
         let grad_input = grad_upstream_2d.dot(&self.weights.t());
 
         Ok(grad_input.into_dyn())

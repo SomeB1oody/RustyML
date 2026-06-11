@@ -5,7 +5,7 @@
 //! file does not duplicate those backward-value checks. Coverage:
 //!   - forward values, predict() == forward()
 //!   - backward before forward -> NnError::ForwardPassNotRun
-//!   - NaN/Inf input -> NonFinite, empty input -> EmptyInput
+//!   - non-finite input propagates (pure math, no rejection); empty input -> EmptyInput
 //!   - Activation enum forward delegation, and the Linear layer
 
 use approx::assert_abs_diff_eq;
@@ -92,30 +92,19 @@ fn relu_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input -> NonFinite error
+/// Non-finite input is no longer rejected: ReLU is pure math (matching the embedded activation),
+/// so +inf passes through while NaN and -inf (neither > 0) map to 0
 #[test]
-fn relu_nan_input_is_error() {
+fn relu_non_finite_input_propagates() {
     let mut layer = ReLU::new();
-    let input = tensor2(1, 2, vec![1.0, f32::NAN]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
-}
-
-/// Inf in input -> NonFinite error
-#[test]
-fn relu_inf_input_is_error() {
-    let mut layer = ReLU::new();
-    let input = tensor2(1, 2, vec![1.0, f32::INFINITY]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+    let input = tensor2(1, 3, vec![f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+    let out = layer
+        .forward(&input)
+        .expect("forward must not reject non-finite input");
+    let v = out.as_slice().expect("contiguous");
+    assert_eq!(v[0], 0.0, "NaN is not > 0, so ReLU maps it to 0");
+    assert!(v[1].is_infinite() && v[1] > 0.0, "+inf passes through");
+    assert_eq!(v[2], 0.0, "-inf maps to 0");
 }
 
 // Sigmoid layer
@@ -191,17 +180,17 @@ fn sigmoid_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input -> NonFinite
+/// NaN input is no longer rejected: it propagates through (sigmoid(NaN) = NaN)
 #[test]
-fn sigmoid_nan_input_is_error() {
+fn sigmoid_nan_input_propagates() {
     let mut layer = Sigmoid::new();
     let input = tensor2(1, 2, vec![f32::NAN, 1.0]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+    let out = layer
+        .forward(&input)
+        .expect("forward must not reject non-finite input");
+    let v = out.as_slice().expect("contiguous");
+    assert!(v[0].is_nan(), "NaN propagates through sigmoid");
+    assert!((v[1] - 0.7310586).abs() < 1e-6, "finite values are unaffected");
 }
 
 // Tanh layer
@@ -279,30 +268,18 @@ fn tanh_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input -> NonFinite
+/// Non-finite input is no longer rejected: NaN propagates and tanh saturates ±inf to ±1
 #[test]
-fn tanh_nan_input_is_error() {
+fn tanh_non_finite_input_propagates() {
     let mut layer = Tanh::new();
-    let input = tensor2(1, 2, vec![0.5, f32::NAN]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
-}
-
-/// -Inf in input -> NonFinite
-#[test]
-fn tanh_neg_inf_input_is_error() {
-    let mut layer = Tanh::new();
-    let input = tensor2(1, 2, vec![f32::NEG_INFINITY, 0.0]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+    let input = tensor2(1, 3, vec![f32::NAN, f32::NEG_INFINITY, f32::INFINITY]);
+    let out = layer
+        .forward(&input)
+        .expect("forward must not reject non-finite input");
+    let v = out.as_slice().expect("contiguous");
+    assert!(v[0].is_nan(), "NaN propagates through tanh");
+    assert_eq!(v[1], -1.0, "tanh(-inf) saturates to -1");
+    assert_eq!(v[2], 1.0, "tanh(+inf) saturates to +1");
 }
 
 // Softmax layer
@@ -411,16 +388,17 @@ fn softmax_1d_input_is_error() {
     );
 }
 
-/// NaN in input -> NonFinite
+/// NaN input is no longer rejected: it contaminates the row's normalizer, so the whole row is NaN
 #[test]
-fn softmax_nan_input_is_error() {
+fn softmax_nan_input_propagates() {
     let mut layer = Softmax::new();
     let input = tensor2(1, 3, vec![1.0, f32::NAN, 2.0]);
-    let result = layer.forward(&input);
+    let out = layer
+        .forward(&input)
+        .expect("forward must not reject non-finite input");
     assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
+        out.iter().any(|v| v.is_nan()),
+        "a NaN in the row propagates into the softmax output"
     );
 }
 
@@ -489,43 +467,27 @@ fn linear_backward_before_forward_is_error() {
     );
 }
 
-/// NaN in input -> NonFinite
+/// Non-finite input is no longer rejected: Linear is the identity, so NaN/Inf pass straight through
 #[test]
-fn linear_nan_input_is_error() {
+fn linear_non_finite_input_propagates() {
     let mut layer = Linear::new();
-    let input = tensor2(1, 2, vec![f32::NAN, 1.0]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+    let input = tensor2(1, 2, vec![f32::NAN, f32::NEG_INFINITY]);
+    let out = layer
+        .forward(&input)
+        .expect("forward must not reject non-finite input");
+    let v = out.as_slice().expect("contiguous");
+    assert!(v[0].is_nan() && v[1] == f32::NEG_INFINITY, "identity passes values through");
 }
 
-/// Inf in input -> NonFinite
+/// predict() likewise passes non-finite values through unchanged
 #[test]
-fn linear_inf_input_is_error() {
-    let mut layer = Linear::new();
-    let input = tensor2(1, 2, vec![1.0, f32::NEG_INFINITY]);
-    let result = layer.forward(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
-}
-
-/// predict() also rejects NaN
-#[test]
-fn linear_predict_nan_is_error() {
+fn linear_predict_non_finite_propagates() {
     let layer = Linear::new();
     let input = tensor2(1, 2, vec![f32::NAN, 1.0]);
-    let result = layer.predict(&input);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite in predict, got {:?}",
-        result
-    );
+    let out = layer
+        .predict(&input)
+        .expect("predict must not reject non-finite input");
+    assert!(out.as_slice().expect("contiguous")[0].is_nan());
 }
 
 // Activation enum - forward delegates to the standalone layers, so the enum's

@@ -6,10 +6,29 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
+use ndarray::{Array2, ArrayView2};
 
 /// Epsilon used to clip predicted probabilities into the open interval `(0, 1)`,
 /// preventing `log(0)` and division-by-zero in the cross-entropy losses
 pub(crate) const PROB_CLIP_EPS: f32 = 1e-7;
+
+/// Row-wise numerically stable log-softmax and softmax over the last axis of a `[batch, classes]`
+/// view, returned as `(log_softmax, softmax)`
+///
+/// Used by the `from_logits` cross-entropy paths: subtracting each row's max before exponentiating
+/// keeps `exp` from overflowing, and computing `log_softmax = z - logsumexp(z)` directly (rather
+/// than `ln(softmax)`) avoids the precision loss of logging a clipped probability
+pub(crate) fn stable_log_softmax_softmax(logits: &ArrayView2<f32>) -> (Array2<f32>, Array2<f32>) {
+    let mut log_sm = logits.to_owned();
+    for mut row in log_sm.rows_mut() {
+        let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let sum_exp: f32 = row.iter().map(|&x| (x - max).exp()).sum();
+        let log_sum_exp = max + sum_exp.ln();
+        row.mapv_inplace(|x| x - log_sum_exp);
+    }
+    let sm = log_sm.mapv(|v| v.exp());
+    (log_sm, sm)
+}
 
 /// Validates that `y_true` and `y_pred` have identical shapes
 ///

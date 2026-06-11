@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Tanh::new())
-///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -70,10 +70,6 @@ impl Layer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
-        }
-
         // tanh(x), with input clamped for numerical stability
         let output = Activation::Tanh.forward(input)?;
 
@@ -87,10 +83,6 @@ impl Layer for Tanh {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
-        }
-
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
         }
 
         // tanh(x), with input clamped for numerical stability

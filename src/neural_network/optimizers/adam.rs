@@ -4,6 +4,7 @@ use crate::error::Error;
 use crate::neural_network::optimizers::kernels;
 use crate::neural_network::optimizers::validation::{
     validate_clip_norm, validate_decay_rate, validate_epsilon, validate_learning_rate,
+    validate_non_negative_finite,
 };
 use crate::neural_network::traits::{Layer, Optimizer};
 
@@ -35,6 +36,8 @@ pub struct Adam {
     cursor: usize,
     /// Optional clip-by-global-norm threshold; `None` disables gradient clipping
     clip_norm: Option<f32>,
+    /// Decoupled (AdamW-style) weight decay coefficient; `0.0` disables it
+    weight_decay: f32,
 }
 
 impl Adam {
@@ -51,6 +54,8 @@ impl Adam {
     /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
     ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
     ///   disables clipping
+    /// - `weight_decay` - Decoupled (AdamW-style) weight-decay coefficient applied directly to the
+    ///   parameters; `0.0` disables it
     ///
     /// # Returns
     ///
@@ -58,20 +63,22 @@ impl Adam {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any hyperparameter is out of range, or `clip_norm` is
-    ///   `Some` value that is not positive and finite
+    /// - `Error::InvalidParameter` - If any hyperparameter is out of range, `clip_norm` is `Some`
+    ///   value that is not positive and finite, or `weight_decay` is negative or not finite
     pub fn new(
         learning_rate: f32,
         beta1: f32,
         beta2: f32,
         epsilon: f32,
         clip_norm: Option<f32>,
+        weight_decay: f32,
     ) -> Result<Self, Error> {
         validate_learning_rate(learning_rate)?;
         validate_decay_rate(beta1, "beta1")?;
         validate_decay_rate(beta2, "beta2")?;
         validate_epsilon(epsilon)?;
         validate_clip_norm(clip_norm)?;
+        validate_non_negative_finite(weight_decay, "weight_decay")?;
 
         Ok(Self {
             learning_rate,
@@ -82,6 +89,7 @@ impl Adam {
             states: Vec::new(),
             cursor: 0,
             clip_norm,
+            weight_decay,
         })
     }
 }
@@ -89,6 +97,10 @@ impl Adam {
 impl Optimizer for Adam {
     fn clip_norm(&self) -> Option<f32> {
         self.clip_norm
+    }
+
+    fn set_learning_rate(&mut self, learning_rate: f32) {
+        self.learning_rate = learning_rate;
     }
 
     fn step(&mut self) {
@@ -105,9 +117,17 @@ impl Optimizer for Adam {
                     m: vec![0.0; pg.value.len()],
                     v: vec![0.0; pg.value.len()],
                 });
+            } else if self.states[self.cursor].m.len() != pg.value.len() {
+                // Reset the moment buffers to match
+                self.states[self.cursor] = AdamParamState {
+                    m: vec![0.0; pg.value.len()],
+                    v: vec![0.0; pg.value.len()],
+                };
             }
             let state = &mut self.states[self.cursor];
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
+            // Decoupled (AdamW) weight decay shrinks the parameter before the adaptive step
+            kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
             kernels::adam_step(
                 pg.value,
                 &grad,

@@ -1,4 +1,5 @@
-//! Batch normalization layer that normalizes each mini-batch over the batch dimension
+//! Batch normalization layer that normalizes each mini-batch per channel: over the batch axis for
+//! 2-D inputs, and over the batch + spatial axes for rank > 2 (convolutional) inputs
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
@@ -12,13 +13,58 @@ use crate::neural_network::layers::regularization::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::Axis;
+use ndarray::{Axis, IxDyn};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
 /// Total-element count above which forward/backward switch from sequential to parallel
 const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
+
+/// Folds a `[batch, channels, *spatial]` tensor into `[M, channels]` (`M` = product of every axis
+/// except the channel axis 1) by moving the channel axis last and flattening
+///
+/// This is what makes batch norm *spatial* for rank > 2 inputs: every `(batch, *spatial)` position
+/// becomes a sample for its channel, so the per-channel statistics reduce over all of them (axis 0
+/// of the folded view), matching Keras/PyTorch. A 2-D (or lower) input is already `[N, C]` and is
+/// returned unchanged
+fn fold_to_2d(t: &Tensor) -> Tensor {
+    if t.ndim() <= 2 {
+        return t.to_owned();
+    }
+    let channels = t.shape()[1];
+    let r = t.ndim();
+    // Move axis 1 (channels) to the end: [0, 2, 3, ..., r-1, 1]
+    let mut perm: Vec<usize> = (0..r).filter(|&a| a != 1).collect();
+    perm.push(1);
+    let m = t.len() / channels;
+    t.view()
+        .permuted_axes(perm)
+        .as_standard_layout()
+        .to_owned()
+        .into_shape_with_order(IxDyn(&[m, channels]))
+        .expect("fold to [M, channels] preserves element count")
+}
+
+/// Inverse of [`fold_to_2d`]: reshapes a `[M, channels]` tensor back to `orig_shape`
+/// `[batch, channels, *spatial]`. A 2-D (or lower) `orig_shape` is returned unchanged
+fn unfold_from_2d(t2: Tensor, orig_shape: &[usize]) -> Tensor {
+    if orig_shape.len() <= 2 {
+        return t2;
+    }
+    let r = orig_shape.len();
+    let channels = orig_shape[1];
+    // Channel-last shape: the non-channel axes (in order), then channels
+    let mut cl_shape: Vec<usize> = (0..r).filter(|&a| a != 1).map(|a| orig_shape[a]).collect();
+    cl_shape.push(channels);
+    let cl = t2
+        .into_shape_with_order(IxDyn(&cl_shape))
+        .expect("unfold reshape preserves element count");
+    // Inverse of the fold permutation [0, 2, .., r-1, 1]: move the trailing channel axis back to 1
+    let mut inv: Vec<usize> = vec![0, r - 1];
+    inv.extend(1..(r - 1));
+    cl.permuted_axes(inv).as_standard_layout().to_owned()
+}
 
 /// Batch Normalization layer for neural networks
 ///
@@ -78,11 +124,14 @@ impl BatchNormalization {
     ///
     /// # Parameters
     ///
-    /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0. The
-    ///   trainable `gamma`/`beta` (and the running mean/variance) are shaped from
-    ///   `input_shape[1..]` - the per-feature dimensions. A 1-D `input_shape` (e.g. `vec![4]`)
-    ///   therefore has *no* feature dimensions and yields scalar (length-1) parameters broadcast
-    ///   over the whole input; pass `vec![batch, 4]` if you mean "4 features"
+    /// - `input_shape` - Shape of the input tensor, with the **batch** as dimension 0 and the
+    ///   **channel/feature** as dimension 1. The trainable `gamma`/`beta` (and the running
+    ///   mean/variance) are per-channel, length `input_shape[1]`. For a 2-D `[batch, features]`
+    ///   input this is standard per-feature BN; for a rank > 2 `[batch, channels, *spatial]` input
+    ///   the statistics reduce over batch **and** all spatial positions (true spatial BN, matching
+    ///   Keras/PyTorch), so there is one mean/variance/scale/shift per channel. A 1-D `input_shape`
+    ///   (e.g. `vec![4]`) has no channel axis and yields scalar (length-1) parameters broadcast over
+    ///   the whole input; pass `vec![batch, 4]` if you mean "4 features"
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
@@ -100,9 +149,11 @@ impl BatchNormalization {
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
 
-        // Normalize across the batch dimension (dim 0), so parameters take the feature shape
+        // Parameters are per-channel: axis 1 is the channel/feature axis. For a 2-D `[N, F]` input
+        // this is `[F]` (standard per-feature BN); for a rank > 2 `[N, C, *spatial]` input it is
+        // `[C]`, and statistics reduce over batch + spatial (true spatial BN, like Keras/PyTorch)
         let param_shape = if input_shape.len() > 1 {
-            input_shape[1..].to_vec()
+            vec![input_shape[1]]
         } else {
             vec![1]
         };
@@ -168,6 +219,12 @@ impl BatchNormalization {
 impl Layer for BatchNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
+
+        // Fold to [M, channels] so the rest of the routine reduces per-channel over batch + spatial.
+        // For a 2-D input this is a no-op, so the standard per-feature BN path is unchanged
+        let orig_shape = input.shape().to_vec();
+        let folded = fold_to_2d(input);
+        let input = &folded;
 
         if self.training {
             let total_elements = input.len();
@@ -267,14 +324,14 @@ impl Layer for BatchNormalization {
             self.x_normalized = Some(x_normalized);
             self.x_centered = Some(x_centered);
 
-            Ok(output)
+            Ok(unfold_from_2d(output, &orig_shape))
         } else {
             // Inference mode: use running statistics
             let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
             let x_normalized = (input - &self.running_mean) / &std_dev;
             let output = &x_normalized * &self.gamma + &self.beta;
 
-            Ok(output)
+            Ok(unfold_from_2d(output, &orig_shape))
         }
     }
 
@@ -282,12 +339,15 @@ impl Layer for BatchNormalization {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Inference mode: use running statistics
+        // Fold to [M, channels], normalize per channel with the running stats, then unfold
+        let orig_shape = input.shape().to_vec();
+        let input = fold_to_2d(input);
+
         let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = (input - &self.running_mean) / &std_dev;
+        let x_normalized = (&input - &self.running_mean) / &std_dev;
         let output = &x_normalized * &self.gamma + &self.beta;
 
-        Ok(output)
+        Ok(unfold_from_2d(output, &orig_shape))
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -295,6 +355,12 @@ impl Layer for BatchNormalization {
             // During inference, pass gradient through unchanged
             return Ok(grad_output.clone());
         }
+
+        // Fold to [M, channels] to match the folded forward caches; `batch_size` is then the number
+        // of folded samples M (batch * spatial), which is the count the statistics were taken over
+        let orig_shape = grad_output.shape().to_vec();
+        let folded = fold_to_2d(grad_output);
+        let grad_output = &folded;
 
         let batch_size = grad_output.shape()[0] as f32;
         let total_elements = grad_output.len();
@@ -387,7 +453,7 @@ impl Layer for BatchNormalization {
                 + &grad_mean / batch_size
         };
 
-        Ok(grad_input)
+        Ok(unfold_from_2d(grad_input, &orig_shape))
     }
 
     fn layer_type(&self) -> &str {

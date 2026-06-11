@@ -2,6 +2,14 @@
 
 use crate::neural_network::layers::convolution::PaddingType;
 
+/// Output size of one pooling axis: `(in - pool)/stride + 1` for `Valid`, `ceil(in/stride)` for `Same`
+fn pool_out_dim(input: usize, pool: usize, stride: usize, padding: PaddingType) -> usize {
+    match padding {
+        PaddingType::Valid => (input - pool) / stride + 1,
+        PaddingType::Same => input.div_ceil(stride),
+    }
+}
+
 /// Calculate output shape for 1d pooling layer
 ///
 /// # Parameters
@@ -17,12 +25,13 @@ pub(super) fn calculate_output_shape_1d_pooling(
     input_shape: &[usize],
     pool_size: usize,
     stride: usize,
+    padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
     let channels = input_shape[1];
     let length = input_shape[2];
 
-    let output_length = (length - pool_size) / stride + 1;
+    let output_length = pool_out_dim(length, pool_size, stride, padding);
 
     vec![batch_size, channels, output_length]
 }
@@ -42,14 +51,15 @@ pub(super) fn calculate_output_shape_2d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize),
     strides: (usize, usize),
+    padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
     let channels = input_shape[1];
     let input_height = input_shape[2];
     let input_width = input_shape[3];
 
-    let output_height = (input_height - pool_size.0) / strides.0 + 1;
-    let output_width = (input_width - pool_size.1) / strides.1 + 1;
+    let output_height = pool_out_dim(input_height, pool_size.0, strides.0, padding);
+    let output_width = pool_out_dim(input_width, pool_size.1, strides.1, padding);
 
     vec![batch_size, channels, output_height, output_width]
 }
@@ -69,6 +79,7 @@ pub(super) fn calculate_output_shape_3d_pooling(
     input_shape: &[usize],
     pool_size: (usize, usize, usize),
     strides: (usize, usize, usize),
+    padding: PaddingType,
 ) -> Vec<usize> {
     let batch_size = input_shape[0];
     let channels = input_shape[1];
@@ -76,9 +87,9 @@ pub(super) fn calculate_output_shape_3d_pooling(
     let input_height = input_shape[3];
     let input_width = input_shape[4];
 
-    let output_depth = (input_depth - pool_size.0) / strides.0 + 1;
-    let output_height = (input_height - pool_size.1) / strides.1 + 1;
-    let output_width = (input_width - pool_size.2) / strides.2 + 1;
+    let output_depth = pool_out_dim(input_depth, pool_size.0, strides.0, padding);
+    let output_height = pool_out_dim(input_height, pool_size.1, strides.1, padding);
+    let output_width = pool_out_dim(input_width, pool_size.2, strides.2, padding);
 
     vec![
         batch_size,
@@ -183,28 +194,28 @@ mod tests {
     /// 1D pooling output length, with batch and channel axes passing through unchanged
     #[test]
     fn test_calculate_output_shape_1d_pooling() {
-        let out = calculate_output_shape_1d_pooling(&[8, 5, 10], 3, 2);
+        let out = calculate_output_shape_1d_pooling(&[8, 5, 10], 3, 2, PaddingType::Valid);
         assert_eq!(out, vec![8, 5, 4]);
     }
 
     /// 1D pooling with a window equal to the length yields a single output position
     #[test]
     fn test_calculate_output_shape_1d_pooling_full_window() {
-        let out = calculate_output_shape_1d_pooling(&[2, 3, 6], 6, 1);
+        let out = calculate_output_shape_1d_pooling(&[2, 3, 6], 6, 1, PaddingType::Valid);
         assert_eq!(out, vec![2, 3, 1]);
     }
 
     /// 2D pooling output shape for distinct window sizes and strides per axis
     #[test]
     fn test_calculate_output_shape_2d_pooling() {
-        let out = calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1));
+        let out = calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1), PaddingType::Valid);
         assert_eq!(out, vec![4, 6, 3, 6]);
     }
 
     /// 3D pooling output shape across depth, height, and width axes
     #[test]
     fn test_calculate_output_shape_3d_pooling() {
-        let out = calculate_output_shape_3d_pooling(&[2, 4, 5, 6, 9], (2, 2, 3), (1, 2, 3));
+        let out = calculate_output_shape_3d_pooling(&[2, 4, 5, 6, 9], (2, 2, 3), (1, 2, 3), PaddingType::Valid);
         assert_eq!(out, vec![2, 4, 4, 3, 3]);
     }
 

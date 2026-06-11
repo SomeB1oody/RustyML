@@ -32,7 +32,7 @@ use ndarray::IxDyn;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Flatten::new(vec![2, 3, 4, 4]).unwrap())
-///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();
@@ -169,8 +169,6 @@ impl Layer for Flatten {
     }
 
     fn output_shape(&self) -> String {
-        // `None` is the batch placeholder used by the other definition-time-shaped layers
-        // (Dense, SimpleRNN, GRU, LSTM), whose batch size is not fixed until forward
         format!("(None, {})", self.flattened_features)
     }
 

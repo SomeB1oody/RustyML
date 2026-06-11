@@ -2,8 +2,9 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::losses::clip_probabilities;
+use crate::neural_network::losses::{clip_probabilities, stable_log_softmax_softmax};
 use crate::neural_network::traits::Loss;
+use ndarray::Ix2;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Sparse Categorical Cross Entropy loss function for multi-class classification
@@ -17,7 +18,8 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 /// use rustyml::neural_network::traits::Loss;
 ///
 /// // Create a Sparse Categorical Cross Entropy loss function instance
-/// let scce = SparseCategoricalCrossEntropy::new();
+/// // (pass `true` for `from_logits` to feed raw logits instead of probabilities)
+/// let scce = SparseCategoricalCrossEntropy::new(false);
 ///
 /// // Create sample data - true class labels (as integers) and predicted probabilities
 /// let y_true = ArrayD::from_shape_vec(
@@ -43,22 +45,33 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 /// println!("Gradients shape: {:?}", gradients.shape());
 /// println!("Gradients: {:?}", gradients);
 /// ```
-pub struct SparseCategoricalCrossEntropy;
+pub struct SparseCategoricalCrossEntropy {
+    /// When `true`, `y_pred` is treated as raw logits: a stable log-softmax is applied internally
+    /// and `compute_grad` returns the fused `(softmax(z) - one_hot(label)) / batch` gradient. When
+    /// `false` (default), `y_pred` must already be a probability distribution per row
+    from_logits: bool,
+}
 
 impl SparseCategoricalCrossEntropy {
     /// Creates a new instance of SparseCategoricalCrossEntropy
     ///
+    /// # Parameters
+    ///
+    /// - `from_logits` - If `true`, `y_pred` is interpreted as raw logits and softmax is applied
+    ///   internally (more numerically stable, gradient computed in one fused step). If `false`,
+    ///   `y_pred` must already be a normalized probability distribution per row
+    ///
     /// # Returns
     ///
-    /// - `SparseCategoricalCrossEntropy` - Returns a unit-like struct `SparseCategoricalCrossEntropy`
-    pub fn new() -> Self {
-        Self {}
+    /// - `SparseCategoricalCrossEntropy` - the configured loss
+    pub fn new(from_logits: bool) -> Self {
+        Self { from_logits }
     }
 }
 
 impl Default for SparseCategoricalCrossEntropy {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
@@ -125,38 +138,56 @@ fn validate_and_extract_labels(y_true: &Tensor, y_pred: &Tensor) -> Result<Vec<u
 
 impl Loss for SparseCategoricalCrossEntropy {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
-        // Ensure predictions are in a numerically stable range to avoid log(0) issues
-        let y_pred_clipped = clip_probabilities(y_pred);
-
         let class_indices = validate_and_extract_labels(y_true, y_pred)?;
         let batch_size = class_indices.len();
 
-        // Compute loss in parallel
+        if self.from_logits {
+            // Stable log-softmax over logits, then pick the true class's log-probability per sample
+            let logits = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
+                Error::invalid_input("SparseCategoricalCrossEntropy expects 2D logits")
+            })?;
+            let (log_sm, _) = stable_log_softmax_softmax(&logits);
+            let total: f32 = class_indices
+                .iter()
+                .enumerate()
+                .map(|(i, &class_idx)| -log_sm[[i, class_idx]])
+                .sum();
+            return Ok(total / batch_size as f32);
+        }
+
+        // Probability path
+        let y_pred_clipped = clip_probabilities(y_pred);
         let total_loss: f32 = class_indices
             .par_iter()
             .enumerate()
             .map(|(i, &class_idx)| -y_pred_clipped[[i, class_idx]].ln())
             .sum();
-
-        // Return average loss
         Ok(total_loss / batch_size as f32)
     }
 
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
-        // Ensure predictions are in a numerically stable range
-        let y_pred_clipped = clip_probabilities(y_pred);
-
         let class_indices = validate_and_extract_labels(y_true, y_pred)?;
         let batch_size = class_indices.len();
 
-        // Each sample writes a single distinct entry, so a sequential pass is both
-        // correct and faster than collecting parallel updates and re-applying them
+        if self.from_logits {
+            // Fused gradient w.r.t. the logits: softmax(z) with 1 subtracted at each true class
+            let logits = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
+                Error::invalid_input("SparseCategoricalCrossEntropy expects 2D logits")
+            })?;
+            let (_, mut grad) = stable_log_softmax_softmax(&logits);
+            for (i, &class_idx) in class_indices.iter().enumerate() {
+                grad[[i, class_idx]] -= 1.0;
+            }
+            grad /= batch_size as f32;
+            return Ok(grad.into_dyn());
+        }
+
+        // Probability path
+        let y_pred_clipped = clip_probabilities(y_pred);
         let mut grad = Tensor::zeros(y_pred.raw_dim());
         for (i, &class_idx) in class_indices.iter().enumerate() {
             grad[[i, class_idx]] = -1.0 / y_pred_clipped[[i, class_idx]];
         }
-
-        // Return average gradient
         Ok(grad / batch_size as f32)
     }
 }

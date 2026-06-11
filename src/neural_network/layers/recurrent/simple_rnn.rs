@@ -5,10 +5,10 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{LayerWeight, SimpleRNNLayerWeight};
+use crate::neural_network::layers::recurrent::orthogonal_init;
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
-use crate::neural_network::layers::recurrent::orthogonal_init;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
@@ -38,7 +38,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// let mut model = Sequential::new();
 /// model
 /// .add(SimpleRNN::new(4, 3, Activation::Tanh, None).unwrap())
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
 /// model.summary();
@@ -184,9 +184,6 @@ impl Layer for SimpleRNN {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
-        // The input projection X @ W does not depend on the recurrence, so compute it for every
-        // timestep in one gemm: [batch*timesteps, input_dim] @ [input_dim, units]. `xw[:, t, :]` is
-        // x_t @ W. Only h_{t-1} @ U below has to stay sequential
         let xw = self.project_input(&x3);
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
@@ -245,7 +242,12 @@ impl Layer for SimpleRNN {
         let grad_h_t = grad_output
             .clone()
             .into_dimensionality::<ndarray::Ix2>()
-            .unwrap();
+            .map_err(|_| {
+                Error::invalid_input(format!(
+                    "SimpleRNN backward expects a 2D gradient [batch, units], got shape {:?}",
+                    grad_output.shape()
+                ))
+            })?;
 
         fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> Result<T, Error> {
             cache
@@ -260,20 +262,16 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Fresh per-call gradient buffers (replace semantics, matching Dense/LSTM/GRU). The
-        // optimizer reads grads without clearing them and there is no zero_grad step, so reusing
-        // the previous call's buffers would sum gradients across every batch/epoch
+        // Fresh per-call gradient buffers
         let mut grad_k = Array2::<f32>::zeros((self.input_dim, self.units));
         let mut grad_rk = Array2::<f32>::zeros((self.units, self.units));
         let mut grad_b = Array2::<f32>::zeros((1, self.units));
-        // Per-timestep d_z, stored so the input-side reductions can batch into single gemms. Only
-        // `grad_h = d_z @ U^T` (the recurrence) has to be computed step by step
+        // Per-timestep d_z, stored so the input-side reductions can batch into single gemms
         let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut grad_h = grad_h_t;
         // backpropagation through time (BPTT)
         for t in (0..timesteps).rev() {
-            // backprop through activation using this timestep's cached output `hs[t + 1]`
-            // every supported activation's derivative is a function of its output
+            // backprop
             let d_z = {
                 let h_t = hs[t + 1].clone().into_dyn();
                 let grad_h_dyn = grad_h.clone().into_dyn();
@@ -286,9 +284,7 @@ impl Layer for SimpleRNN {
             dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }
 
-        // Batched reductions over all timesteps. With DZ and X stacked as [batch*timesteps, *]:
-        //   grad_k = X^T @ DZ, grad_x = DZ @ W^T, grad_b = sum_rows(DZ); and with H_prev stacked
-        //   from hs[0..timesteps], grad_rk = H_prev^T @ DZ
+        // Batched reductions over all timesteps
         let dz_flat = dz_all
             .to_shape((batch * timesteps, self.units))
             .expect("contiguous DZ reshape");
@@ -313,8 +309,7 @@ impl Layer for SimpleRNN {
             .into_shape_with_order((batch, timesteps, feat))
             .expect("reshape grad_x to [batch, timesteps, feat]");
 
-        // Gradient clipping is no longer applied here; configure clip-by-global-norm on the
-        // optimizer (the `clip_norm` constructor argument) if exploding gradients need taming
+        // Gradient clipping is no longer applied here
         self.grad_kernel = Some(grad_k);
         self.grad_recurrent_kernel = Some(grad_rk);
         self.grad_bias = Some(grad_b);

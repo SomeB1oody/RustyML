@@ -94,7 +94,7 @@ impl SpatialDropout2D {
 
 impl Layer for SpatialDropout2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is already validated in `new()`; only validate the runtime input
+        // `rate` is already validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -122,7 +122,7 @@ impl Layer for SpatialDropout2D {
         let height = shape[2];
         let width = shape[3];
 
-        // Per-channel mask of shape (batch_size, channels); each channel is fully kept or fully dropped
+        // Per-channel mask of shape (batch_size, channels)
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
@@ -162,7 +162,7 @@ impl Layer for SpatialDropout2D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is already validated in `new()`; only validate the runtime input
+        // `rate` is already validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),

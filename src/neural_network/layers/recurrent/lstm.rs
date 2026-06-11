@@ -45,7 +45,7 @@ const LSTM_PARALLEL_THRESHOLD: usize = 1024;
 /// // Create LSTM layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
 /// model.add(LSTM::new(4, 3, Activation::Tanh, None).unwrap())
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -285,8 +285,7 @@ impl Layer for LSTM {
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Batched input projection for all 4 gates (one big gemm each); the loop only adds the
-        // per-step h_prev @ recurrent_kernel term
+        // Batched input projection for all 4 gates
         let xw_i = project_gate_input(&self.input_gate, &x3);
         let xw_f = project_gate_input(&self.forget_gate, &x3);
         let xw_g = project_gate_input(&self.cell_gate, &x3);
@@ -389,8 +388,7 @@ impl Layer for LSTM {
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Batched input projection for all 4 gates (one big gemm each); the loop only adds the
-        // per-step h_prev @ recurrent_kernel term
+        // Batched input projection for all 4 gates
         let xw_i = project_gate_input(&self.input_gate, &x3);
         let xw_f = project_gate_input(&self.forget_gate, &x3);
         let xw_g = project_gate_input(&self.cell_gate, &x3);
@@ -459,7 +457,15 @@ impl Layer for LSTM {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         // The upstream gradient is dL/dh_T directly (no extra output activation)
-        let grad_h_t = grad_output.clone().into_dimensionality::<Ix2>().unwrap();
+        let grad_h_t = grad_output
+            .clone()
+            .into_dimensionality::<Ix2>()
+            .map_err(|_| {
+                Error::invalid_input(format!(
+                    "LSTM backward expects a 2D gradient [batch, units], got shape {:?}",
+                    grad_output.shape()
+                ))
+            })?;
 
         // Configurable activation, used for the candidate and cell-state derivatives
         let act = self.activation;
@@ -477,9 +483,7 @@ impl Layer for LSTM {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Per-gate pre-activation gradients for every timestep, stored so the input-weight,
-        // recurrent-weight, bias, and input gradients can batch into single gemms after the loop
-        // Only `grad_h` (via the recurrent kernels) and `grad_c` stay sequential
+        // Per-gate pre-activation gradients for every timestep
         let mut dz_i = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut dz_f = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut dz_g = Array3::<f32>::zeros((batch, timesteps, self.units));
@@ -515,8 +519,7 @@ impl Layer for LSTM {
             let grad_g_t = &grad_c * i_t;
             let grad_c_prev = &grad_c * f_t;
 
-            // Gates use the sigmoid (recurrent activation) derivative; the candidate uses
-            // the configurable activation derivative
+            // Gates use the sigmoid (recurrent activation) derivative
             let grad_o_raw = &grad_o_t * o_t * &(1.0 - o_t);
             let grad_f_raw = &grad_f_t * f_t * &(1.0 - f_t);
             let grad_i_raw = &grad_i_t * i_t * &(1.0 - i_t);
@@ -525,8 +528,7 @@ impl Layer for LSTM {
                 .into_dimensionality::<Ix2>()
                 .unwrap();
 
-            // Gradient w.r.t. the previous hidden state (sequential recurrence - the only per-step
-            // gemms left in the loop)
+            // Gradient w.r.t. the previous hidden state
             grad_h = grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
                 + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
                 + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
@@ -541,10 +543,7 @@ impl Layer for LSTM {
             grad_c = grad_c_prev;
         }
 
-        // Batched reductions over all timesteps. Stack X and H_prev (hs[0..timesteps]) as
-        // [batch*timesteps, *]; each gate's gradients are then single gemms:
-        //   grad_kernel = X^T @ DZ, grad_recurrent = H_prev^T @ DZ, grad_bias = sum_rows(DZ),
-        //   grad_x += DZ @ kernel^T (summed over gates)
+        // Batched reductions over all timesteps
         let x_flat = x3
             .to_shape((batch * timesteps, feat))
             .expect("contiguous input reshape");

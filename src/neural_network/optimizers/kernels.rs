@@ -38,6 +38,60 @@ pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
     }
 }
 
+/// SGD with (optionally Nesterov) momentum. `velocity` is the per-parameter momentum buffer
+///
+/// ```text
+/// v = momentum*v + grad
+/// step = if nesterov { grad + momentum*v } else { v }
+/// param -= lr * step
+/// ```
+pub fn sgd_momentum_step(
+    param: &mut [f32],
+    grad: &[f32],
+    velocity: &mut [f32],
+    lr: f32,
+    momentum: f32,
+    nesterov: bool,
+) {
+    let step = |p: &mut f32, g: f32, v: &mut f32| {
+        *v = momentum * *v + g;
+        let s = if nesterov { g + momentum * *v } else { *v };
+        *p -= lr * s;
+    };
+    if param.len() >= PARALLEL_THRESHOLD {
+        param
+            .par_iter_mut()
+            .zip(grad.par_iter())
+            .zip(velocity.par_iter_mut())
+            .for_each(|((p, &g), v)| step(p, g, v));
+    } else {
+        for ((p, &g), v) in param.iter_mut().zip(grad).zip(velocity.iter_mut()) {
+            step(p, g, v);
+        }
+    }
+}
+
+/// Decoupled (AdamW/SGDW-style) weight decay: shrinks each parameter toward zero by the factor
+/// `(1 - lr * weight_decay)`, independent of the gradient. A no-op when `weight_decay == 0`
+///
+/// Apply this *before* the optimizer's gradient step so the shrink uses the pre-step parameter,
+/// matching the AdamW formulation `θ ← θ - lr*(update + wd*θ)`. "Decoupled" means the penalty acts
+/// directly on the weights rather than being folded into the gradient (where an adaptive optimizer
+/// would rescale it inconsistently)
+pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
+    if weight_decay == 0.0 {
+        return;
+    }
+    let factor = 1.0 - lr * weight_decay;
+    if param.len() >= PARALLEL_THRESHOLD {
+        param.par_iter_mut().for_each(|p| *p *= factor);
+    } else {
+        for p in param.iter_mut() {
+            *p *= factor;
+        }
+    }
+}
+
 /// Adam update with bias correction at timestep `t`
 ///
 /// `m`/`v` are the first/second moment buffers for this parameter (same length as `param`)
@@ -181,6 +235,48 @@ mod tests {
         assert_abs_diff_eq!(out[0], 1.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(out[1], -2.0_f32, epsilon = 1e-6);
         assert_abs_diff_eq!(out[2], 3.0_f32, epsilon = 1e-6);
+    }
+
+    // SGD momentum / weight decay
+
+    /// Plain (non-Nesterov) momentum accumulates velocity across steps: v = mu*v + g, p -= lr*v
+    #[test]
+    fn sgd_momentum_step_accumulates() {
+        let mut param = vec![1.0_f32];
+        let grad = vec![2.0_f32];
+        let mut v = vec![0.0_f32];
+        // step 1: v = 2, p = 1 - 0.1*2 = 0.8
+        sgd_momentum_step(&mut param, &grad, &mut v, 0.1, 0.9, false);
+        assert_abs_diff_eq!(v[0], 2.0_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(param[0], 0.8_f32, epsilon = 1e-6);
+        // step 2: v = 0.9*2 + 2 = 3.8, p = 0.8 - 0.1*3.8 = 0.42
+        sgd_momentum_step(&mut param, &grad, &mut v, 0.1, 0.9, false);
+        assert_abs_diff_eq!(v[0], 3.8_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(param[0], 0.42_f32, epsilon = 1e-6);
+    }
+
+    /// Nesterov momentum uses the look-ahead step `grad + momentum*v`
+    #[test]
+    fn sgd_momentum_step_nesterov() {
+        let mut param = vec![1.0_f32];
+        let grad = vec![2.0_f32];
+        let mut v = vec![0.0_f32];
+        // v = 2, step = 2 + 0.9*2 = 3.8, p = 1 - 0.1*3.8 = 0.62
+        sgd_momentum_step(&mut param, &grad, &mut v, 0.1, 0.9, true);
+        assert_abs_diff_eq!(param[0], 0.62_f32, epsilon = 1e-6);
+    }
+
+    /// Decoupled weight decay scales the parameter by (1 - lr*wd) and is a no-op when wd == 0
+    #[test]
+    fn apply_weight_decay_scales_param() {
+        let mut param = vec![1.0_f32, 2.0];
+        apply_weight_decay(&mut param, 0.1, 0.5); // factor 1 - 0.05 = 0.95
+        assert_abs_diff_eq!(param[0], 0.95_f32, epsilon = 1e-6);
+        assert_abs_diff_eq!(param[1], 1.9_f32, epsilon = 1e-6);
+
+        let mut p2 = vec![3.0_f32];
+        apply_weight_decay(&mut p2, 0.1, 0.0); // no-op
+        assert_abs_diff_eq!(p2[0], 3.0_f32, epsilon = 1e-9);
     }
 
     // SGD

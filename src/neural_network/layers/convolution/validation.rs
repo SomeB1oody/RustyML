@@ -174,7 +174,11 @@ pub(super) fn validate_input_shape_2d(
 /// Returns `Error::InvalidInput` if:
 /// - Shape is not 5D
 /// - Any dimension is 0
-pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error> {
+/// - Input spatial dimensions are less than the kernel size
+pub(super) fn validate_input_shape_3d(
+    input_shape: &[usize],
+    kernel_size: (usize, usize, usize),
+) -> Result<(), Error> {
     if input_shape.len() != 5 {
         return Err(Error::invalid_input(
             "Input shape must be 5-dimensional: [batch, channels, depth, height, width]",
@@ -183,6 +187,14 @@ pub(super) fn validate_input_shape_3d(input_shape: &[usize]) -> Result<(), Error
     if input_shape.contains(&0) {
         return Err(Error::invalid_input(
             "All input dimensions must be greater than 0",
+        ));
+    }
+    if input_shape[2] < kernel_size.0
+        || input_shape[3] < kernel_size.1
+        || input_shape[4] < kernel_size.2
+    {
+        return Err(Error::invalid_input(
+            "Input spatial dimensions must be at least as large as the kernel size",
         ));
     }
     Ok(())

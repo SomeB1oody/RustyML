@@ -55,7 +55,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 ///         Activation::ReLU, // ReLU activation
 ///         None,                      // random_state
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -132,7 +132,7 @@ impl Conv3D {
         validate_filters(filters)?;
         validate_kernel_size_3d(kernel_size)?;
         validate_strides_3d(strides)?;
-        validate_input_shape_3d(&input_shape)?;
+        validate_input_shape_3d(&input_shape, kernel_size)?;
 
         let channels = input_shape[1];
         let (kd, kh, kw) = kernel_size;
@@ -234,7 +234,7 @@ impl Layer for Conv3D {
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1, self.strides.2],
             self.padding,
-        );
+        )?;
         let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
         Ok(activated)
@@ -254,7 +254,7 @@ impl Layer for Conv3D {
             self.bias.as_slice().expect("bias must be contiguous"),
             &[self.strides.0, self.strides.1, self.strides.2],
             self.padding,
-        );
+        )?;
         let activated = self.activation.forward(&output)?;
         Ok(activated)
     }
@@ -279,7 +279,7 @@ impl Layer for Conv3D {
             self.weights.shape(),
             &[self.strides.0, self.strides.1, self.strides.2],
             self.padding,
-        );
+        )?;
 
         self.weight_gradients = Some(
             Array5::from_shape_vec(self.weights.raw_dim(), grads.weight_grad)

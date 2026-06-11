@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::pooling::layer_functions_3d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
@@ -41,11 +42,12 @@ use crate::neural_network::traits::Layer;
 ///     (2, 2, 2),                    // Pooling window size: 2x2x2
 ///     vec![1, 16, 32, 32, 32],      // Input shape: [batch, channels, depth, height, width]
 ///     Some((2, 2, 2)),              // Strides: move by 2 in each dimension
+///     PaddingType::Valid,           // no padding
 /// ).unwrap());
 ///
 /// // Compile the model with optimizer and loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(),    // RMSprop optimizer
+///     RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(),    // RMSprop optimizer
 ///     MeanSquaredError::new()            // Mean squared error loss
 /// );
 ///
@@ -82,6 +84,8 @@ pub struct AveragePooling3D {
     strides: (usize, usize, usize),
     /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Padding mode applied around the input before pooling
+    padding: PaddingType,
     /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
 }
@@ -111,6 +115,7 @@ impl AveragePooling3D {
         pool_size: (usize, usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize, usize)>,
+        padding: PaddingType,
     ) -> Result<Self, Error> {
         let strides = strides.unwrap_or(pool_size);
 
@@ -124,6 +129,7 @@ impl AveragePooling3D {
             pool_size,
             strides,
             input_shape,
+            padding,
             forward_input_shape: None,
         })
     }
@@ -144,6 +150,7 @@ impl Layer for AveragePooling3D {
             &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
             &[self.strides.0, self.strides.1, self.strides.2],
             PoolKind::Average,
+            self.padding,
         );
         Ok(output)
     }
@@ -160,6 +167,7 @@ impl Layer for AveragePooling3D {
             &[self.pool_size.0, self.pool_size.1, self.pool_size.2],
             &[self.strides.0, self.strides.1, self.strides.2],
             PoolKind::Average,
+            self.padding,
         );
         Ok(output)
     }
@@ -177,6 +185,7 @@ impl Layer for AveragePooling3D {
             &[self.strides.0, self.strides.1, self.strides.2],
             PoolKind::Average,
             None,
+            self.padding,
         ))
     }
 

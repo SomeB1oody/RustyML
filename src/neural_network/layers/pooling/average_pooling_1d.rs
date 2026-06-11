@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::pooling::layer_functions_1d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
@@ -54,8 +55,9 @@ use crate::neural_network::traits::Layer;
 ///         2,              // Pool window size
 ///         vec![2, 3, 8],  // Input shape
 ///         Some(2),        // Stride (optional, defaults to pool_size if None)
+///         PaddingType::Valid,
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Output shape should be [2, 3, 4]
 /// let output = model.predict(&x).unwrap();
@@ -84,6 +86,8 @@ pub struct AveragePooling1D {
     stride: usize,
     /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Padding mode applied around the input before pooling
+    padding: PaddingType,
     /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
 }
@@ -113,6 +117,7 @@ impl AveragePooling1D {
         pool_size: usize,
         input_shape: Vec<usize>,
         stride: Option<usize>,
+        padding: PaddingType,
     ) -> Result<Self, Error> {
         let stride = stride.unwrap_or(pool_size);
 
@@ -126,6 +131,7 @@ impl AveragePooling1D {
             pool_size,
             stride,
             input_shape,
+            padding,
             forward_input_shape: None,
         })
     }
@@ -142,7 +148,7 @@ impl Layer for AveragePooling1D {
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average);
+            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average, self.padding);
         Ok(output)
     }
 
@@ -154,7 +160,7 @@ impl Layer for AveragePooling1D {
         }
 
         let (output, _) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average);
+            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average, self.padding);
         Ok(output)
     }
 
@@ -171,6 +177,7 @@ impl Layer for AveragePooling1D {
             &[self.stride],
             PoolKind::Average,
             None,
+            self.padding,
         ))
     }
 

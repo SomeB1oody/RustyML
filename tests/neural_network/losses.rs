@@ -295,7 +295,7 @@ fn bce_shape_mismatch_returns_err() {
 /// CCE forward value is the mean per-sample cross-entropy, divided by batch size (not element count)
 #[test]
 fn cce_forward_value_divided_by_batch() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(
         vec![3, 3],
@@ -318,7 +318,7 @@ fn cce_forward_value_divided_by_batch() {
 /// CCE gradient equals -y_true / y_pred / batch_size, zero where y_true is zero
 #[test]
 fn cce_gradient_value() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(
         vec![3, 3],
@@ -358,7 +358,7 @@ fn cce_gradient_value() {
 /// Perfect one-hot prediction gives near-zero CCE loss (< 1e-4) and finite gradient under clipping
 #[test]
 fn cce_perfect_prediction_near_zero_loss_and_finite_grad() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(vec![2, 2], vec![1.0_f32, 0.0, 0.0, 1.0])
         .unwrap()
@@ -391,7 +391,7 @@ fn cce_perfect_prediction_near_zero_loss_and_finite_grad() {
 /// Predictions at exactly 0.0 and 1.0 do not produce NaN or Inf in CCE loss or gradient
 #[test]
 fn cce_extreme_predictions_clipped_to_finite() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     // One sample, 3 classes; predicted probability at 0.0 on a hot class
     let y_true: Tensor = Array::from_shape_vec(vec![1, 3], vec![1.0_f32, 0.0, 0.0])
@@ -419,7 +419,7 @@ fn cce_extreme_predictions_clipped_to_finite() {
 /// Shape mismatch is rejected with an Err
 #[test]
 fn cce_shape_mismatch_returns_err() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     let a: Tensor = Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0])
         .unwrap()
@@ -441,7 +441,7 @@ fn cce_shape_mismatch_returns_err() {
 /// Empty y_true is rejected with an Err
 #[test]
 fn cce_empty_input_returns_err() {
-    let cce = CategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
 
     // Shape [0, 3] is a valid shape but has zero elements
     let y_true: Tensor = Array::from_shape_vec(vec![0, 3], vec![])
@@ -461,12 +461,72 @@ fn cce_empty_input_returns_err() {
     ));
 }
 
+/// 1D inputs are rejected: `shape()[0]` would be the element count rather than the batch size,
+/// silently rescaling the loss/gradient
+#[test]
+fn cce_rejects_1d_input() {
+    let cce = CategoricalCrossEntropy::new(false);
+    let y_true: Tensor = Array::from_shape_vec((3,), vec![1.0, 0.0, 0.0])
+        .unwrap()
+        .into_dyn();
+    let y_pred: Tensor = Array::from_shape_vec((3,), vec![0.5, 0.3, 0.2])
+        .unwrap()
+        .into_dyn();
+    assert!(matches!(
+        cce.compute_loss(&y_true, &y_pred),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        cce.compute_grad(&y_true, &y_pred),
+        Err(Error::InvalidInput(_))
+    ));
+}
+
+/// from_logits CCE applies softmax internally: its loss matches probability-mode CCE on the same
+/// softmax, and its gradient is the fused `(softmax(z) - y) / batch`
+#[test]
+fn cce_from_logits_loss_and_grad() {
+    let logits: Tensor = Array::from_shape_vec(vec![1, 3], vec![1.0_f32, 2.0, 0.5])
+        .unwrap()
+        .into_dyn();
+    let y_true: Tensor = Array::from_shape_vec(vec![1, 3], vec![0.0_f32, 1.0, 0.0])
+        .unwrap()
+        .into_dyn();
+
+    // Hand-computed softmax of [1, 2, 0.5]
+    let exp = [1.0_f32.exp(), 2.0_f32.exp(), 0.5_f32.exp()];
+    let sum: f32 = exp.iter().sum();
+    let p = [exp[0] / sum, exp[1] / sum, exp[2] / sum];
+
+    let cce_logits = CategoricalCrossEntropy::new(true);
+    let loss = cce_logits.compute_loss(&y_true, &logits).unwrap();
+    assert_abs_diff_eq!(loss, -p[1].ln(), epsilon = 1e-5);
+
+    // Gradient w.r.t. logits is softmax - one_hot
+    let grad = cce_logits.compute_grad(&y_true, &logits).unwrap();
+    let expected: Tensor = Array::from_shape_vec(vec![1, 3], vec![p[0], p[1] - 1.0, p[2]])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&grad, &expected, 1e-5_f32);
+
+    // Consistency: from_logits loss == probability-mode loss on the same softmax
+    let probs: Tensor = Array::from_shape_vec(vec![1, 3], p.to_vec())
+        .unwrap()
+        .into_dyn();
+    let cce_probs = CategoricalCrossEntropy::new(false);
+    assert_abs_diff_eq!(
+        cce_probs.compute_loss(&y_true, &probs).unwrap(),
+        loss,
+        epsilon = 1e-5
+    );
+}
+
 // Sparse Categorical Cross-Entropy
 
 /// SCCE forward value with integer labels equals CCE on the equivalent one-hot encoding
 #[test]
 fn scce_forward_value_equals_cce_equivalent() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     // Labels as [batch, 1] float tensor of class indices
     let y_true: Tensor = Array::from_shape_vec(vec![3, 1], vec![0.0_f32, 1.0, 2.0])
@@ -487,7 +547,7 @@ fn scce_forward_value_equals_cce_equivalent() {
 /// SCCE gradient is -1/y_pred / batch at each sample's true class and zero elsewhere
 #[test]
 fn scce_gradient_value() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(vec![3, 1], vec![0.0_f32, 1.0, 2.0])
         .unwrap()
@@ -522,8 +582,8 @@ fn scce_gradient_value() {
 /// SCCE gradient matches CCE gradient on the equivalent one-hot encoding
 #[test]
 fn scce_gradient_matches_cce_equivalent() {
-    let scce = SparseCategoricalCrossEntropy::new();
-    let cce = CategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
+    let cce = CategoricalCrossEntropy::new(false);
 
     let y_pred: Tensor = Array::from_shape_vec(
         vec![3, 3],
@@ -551,7 +611,7 @@ fn scce_gradient_matches_cce_equivalent() {
 /// A prediction at exactly 0.0 on the true class is clipped so SCCE loss and grad stay finite
 #[test]
 fn scce_extreme_prediction_clipped_to_finite() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     // Label 0, but predicted probability for class 0 is 0.0 (worst case)
     let y_true: Tensor = Array::from_shape_vec(vec![1, 1], vec![0.0_f32])
@@ -579,7 +639,7 @@ fn scce_extreme_prediction_clipped_to_finite() {
 /// SCCE rejects a negative label with InvalidInput
 #[test]
 fn scce_negative_label_returns_err() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![-1.0_f32, 0.0])
         .unwrap()
@@ -607,7 +667,7 @@ fn scce_negative_label_returns_err() {
 /// SCCE rejects an out-of-range label (class index >= num_classes) with InvalidInput
 #[test]
 fn scce_out_of_range_label_returns_err() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     // 3 classes but label = 3 (valid range is 0..=2)
     let y_true: Tensor = Array::from_shape_vec(vec![1, 1], vec![3.0_f32])
@@ -629,7 +689,7 @@ fn scce_out_of_range_label_returns_err() {
 /// SCCE rejects y_true with wrong shape (1D or wrong second dimension, not [batch, 1])
 #[test]
 fn scce_wrong_label_shape_returns_err() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     // Labels are 1D - must be [batch, 1]
     let y_true_1d: Tensor = Array::from_shape_vec(vec![2], vec![0.0_f32, 1.0])
@@ -658,7 +718,7 @@ fn scce_wrong_label_shape_returns_err() {
 /// SCCE rejects a batch-size mismatch between labels and predictions
 #[test]
 fn scce_batch_mismatch_returns_err() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![0.0_f32, 1.0])
         .unwrap()
@@ -683,7 +743,7 @@ fn scce_batch_mismatch_returns_err() {
 /// SCCE rejects 3-D predictions (not [batch, num_classes]) with InvalidInput
 #[test]
 fn scce_non_2d_predictions_returns_err() {
-    let scce = SparseCategoricalCrossEntropy::new();
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![0.0_f32, 1.0])
         .unwrap()
@@ -708,8 +768,8 @@ fn scce_non_2d_predictions_returns_err() {
 /// divide-by-batch_size convention
 #[test]
 fn scce_loss_equals_cce_loss_on_equivalent_inputs() {
-    let cce = CategoricalCrossEntropy::new();
-    let scce = SparseCategoricalCrossEntropy::new();
+    let cce = CategoricalCrossEntropy::new(false);
+    let scce = SparseCategoricalCrossEntropy::new(false);
 
     let y_pred: Tensor = Array::from_shape_vec(
         vec![4, 3],
@@ -739,4 +799,30 @@ fn scce_loss_equals_cce_loss_on_equivalent_inputs() {
     let scce_loss = scce.compute_loss(&y_true_labels, &y_pred).unwrap();
 
     assert_abs_diff_eq!(scce_loss, cce_loss, epsilon = 1e-5);
+}
+
+/// from_logits SCCE: loss equals -log_softmax at the label, and the gradient w.r.t. the logits is
+/// softmax with 1 subtracted at the true class
+#[test]
+fn scce_from_logits_loss_and_grad() {
+    let logits: Tensor = Array::from_shape_vec(vec![1, 3], vec![1.0_f32, 2.0, 0.5])
+        .unwrap()
+        .into_dyn();
+    let labels: Tensor = Array::from_shape_vec(vec![1, 1], vec![1.0_f32])
+        .unwrap()
+        .into_dyn();
+
+    let exp = [1.0_f32.exp(), 2.0_f32.exp(), 0.5_f32.exp()];
+    let sum: f32 = exp.iter().sum();
+    let p = [exp[0] / sum, exp[1] / sum, exp[2] / sum];
+
+    let scce = SparseCategoricalCrossEntropy::new(true);
+    let loss = scce.compute_loss(&labels, &logits).unwrap();
+    assert_abs_diff_eq!(loss, -p[1].ln(), epsilon = 1e-5);
+
+    let grad = scce.compute_grad(&labels, &logits).unwrap();
+    let expected: Tensor = Array::from_shape_vec(vec![1, 3], vec![p[0], p[1] - 1.0, p[2]])
+        .unwrap()
+        .into_dyn();
+    assert_allclose(&grad, &expected, 1e-5_f32);
 }

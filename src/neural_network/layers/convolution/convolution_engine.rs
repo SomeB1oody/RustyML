@@ -19,6 +19,7 @@
 //! `batch * channels` (input gradient) - each task writes a disjoint output region
 
 use super::PaddingType;
+use crate::error::Error;
 use crate::neural_network::Tensor;
 use ndarray::{Array2, ArrayD, ArrayView2, IxDyn};
 use rayon::prelude::*;
@@ -72,19 +73,30 @@ where
 }
 
 /// Per-spatial-axis output size, leading padding, and padded size for the given padding mode
+/// Output spatial sizes, per-axis leading padding, and padded spatial sizes — the geometry a
+/// convolution pass needs (`(out_sp, pad_before, padded_sp)`)
+type ConvGeometry = (Vec<usize>, Vec<usize>, Vec<usize>);
+
 fn conv_geometry(
     sp: &[usize],
     k_dims: &[usize],
     strides: &[usize],
     padding: PaddingType,
-) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+) -> Result<ConvGeometry, Error> {
     let r = sp.len();
     match padding {
         PaddingType::Valid => {
+            if let Some(d) = (0..r).find(|&d| sp[d] < k_dims[d]) {
+                return Err(Error::invalid_input(format!(
+                    "Valid-padding convolution requires every input spatial dimension to be at \
+                     least the kernel size: axis {d} has input size {} < kernel size {}",
+                    sp[d], k_dims[d]
+                )));
+            }
             let out_sp: Vec<usize> = (0..r)
                 .map(|d| (sp[d] - k_dims[d]) / strides[d] + 1)
                 .collect();
-            (out_sp, vec![0; r], sp.to_vec())
+            Ok((out_sp, vec![0; r], sp.to_vec()))
         }
         PaddingType::Same => {
             let out_sp: Vec<usize> = (0..r).map(|d| sp[d].div_ceil(strides[d])).collect();
@@ -94,7 +106,7 @@ fn conv_geometry(
             let padded_sp: Vec<usize> = (0..r)
                 .map(|d| ((out_sp[d] - 1) * strides[d] + k_dims[d]).max(sp[d]))
                 .collect();
-            (out_sp, pad_before, padded_sp)
+            Ok((out_sp, pad_before, padded_sp))
         }
     }
 }
@@ -242,7 +254,7 @@ pub(super) fn conv_forward(
     bias: &[f32],
     strides: &[usize],
     padding: PaddingType,
-) -> Tensor {
+) -> Result<Tensor, Error> {
     let in_shape = input.shape();
     let (batch, cin) = (in_shape[0], in_shape[1]);
     let sp = &in_shape[2..];
@@ -251,7 +263,7 @@ pub(super) fn conv_forward(
     let k_dims = &weight_shape[2..];
     let k_plane: usize = k_dims.iter().product();
 
-    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding);
+    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding)?;
     let out_plane: usize = out_sp.iter().product();
     let padded_plane: usize = padded_sp.iter().product();
     let padded_strides = row_major_strides(&padded_sp);
@@ -273,8 +285,7 @@ pub(super) fn conv_forward(
     };
     let padded: &[f32] = padded_storage.as_deref().unwrap_or(in_flat);
 
-    // im2col + gemm: each batch gathers a `[Cin*k_plane, out_plane]` column matrix, then a single
-    // `W (F x Cin*k_plane) . col` gemm (ndarray's SIMD `matrixmultiply` kernel) yields `[F, out_plane]`
+    // im2col + gemm
     let k_total = cin * k_plane;
     let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
     let w_mat = ArrayView2::from_shape((filters, k_total), weights)
@@ -285,7 +296,7 @@ pub(super) fn conv_forward(
         let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
             .expect("col length matches [Cin*k, out_plane]");
         let out_b = w_mat.dot(&col_mat); // [F, out_plane]
-        // Bias added last, per filter row, matching the output layout [F, out_plane]
+        // Bias added last
         let mut tile = Vec::with_capacity(filters * out_plane);
         for (f, row) in out_b.outer_iter().enumerate() {
             let bf = bias[f];
@@ -305,7 +316,8 @@ pub(super) fn conv_forward(
     out_shape.push(batch);
     out_shape.push(filters);
     out_shape.extend_from_slice(&out_sp);
-    ArrayD::from_shape_vec(IxDyn(&out_shape), out_flat).expect("conv output length matches shape")
+    Ok(ArrayD::from_shape_vec(IxDyn(&out_shape), out_flat)
+        .expect("conv output length matches shape"))
 }
 
 /// Backward convolution; `input` is the original (unpadded) forward input, `grad_output` is the
@@ -317,7 +329,7 @@ pub(super) fn conv_backward(
     weight_shape: &[usize],
     strides: &[usize],
     padding: PaddingType,
-) -> ConvGradients {
+) -> Result<ConvGradients, Error> {
     let in_shape = input.shape();
     let (batch, cin) = (in_shape[0], in_shape[1]);
     let sp = &in_shape[2..];
@@ -326,7 +338,7 @@ pub(super) fn conv_backward(
     let k_dims = &weight_shape[2..];
     let k_plane: usize = k_dims.iter().product();
 
-    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding);
+    let (out_sp, pad_before, padded_sp) = conv_geometry(sp, k_dims, strides, padding)?;
     let out_plane: usize = out_sp.iter().product();
     let in_plane: usize = sp.iter().product();
     let padded_plane: usize = padded_sp.iter().product();
@@ -354,12 +366,7 @@ pub(super) fn conv_backward(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    // im2col + gemm, one task per batch. Each batch rebuilds its column matrix and emits a partial
-    // weight gradient, partial bias gradient, and its own input-gradient plane:
-    //   weight_grad += G (F x out_plane) . col^T (out_plane x Cin*k)   -> [F, Cin*k]
-    //   bias_grad   += row-sums of G                                   -> [F]
-    //   dcol         = W^T (Cin*k x F) . G (F x out_plane)             -> [Cin*k, out_plane]
-    // then col2im scatters `dcol` back into a padded input-grad plane, which is cropped to `[Cin, sp]`
+    // im2col + gemm
     let k_total = cin * k_plane;
     let offsets = im2col_offsets(&out_sp, k_dims, strides, &padded_strides);
     let w_mat = ArrayView2::from_shape((filters, k_total), weights)
@@ -376,7 +383,7 @@ pub(super) fn conv_backward(
         let wg = g_mat.dot(&col_mat.t()); // [F, Cin*k]
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
-        // Input gradient: dcol = W^T . G, then col2im scatter-add into the padded plane
+        // Input gradient:
         let dcol = w_mat.t().dot(&g_mat); // [Cin*k, out_plane]
         let dcol = dcol.as_slice().expect("dot result is standard layout");
         let mut pad_grad = vec![0.0f32; cin * padded_plane];
@@ -421,11 +428,11 @@ pub(super) fn conv_backward(
     let input_grad =
         ArrayD::from_shape_vec(IxDyn(&ig_shape), in_grad_flat).expect("input grad matches shape");
 
-    ConvGradients {
+    Ok(ConvGradients {
         weight_grad,
         bias_grad,
         input_grad,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -511,10 +518,22 @@ mod tests {
     /// Valid 1-D geometry shrinks the output and adds no padding
     #[test]
     fn test_conv_geometry_valid_1d() {
-        let (out_sp, pad_before, padded_sp) = conv_geometry(&[5], &[3], &[1], PaddingType::Valid);
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[5], &[3], &[1], PaddingType::Valid).unwrap();
         assert_eq!(out_sp, vec![3]);
         assert_eq!(pad_before, vec![0]);
         assert_eq!(padded_sp, vec![5]);
+    }
+
+    /// Valid padding errors (no panic) when an input axis is smaller than the kernel
+    #[test]
+    fn test_conv_geometry_valid_input_smaller_than_kernel_errors() {
+        let result = conv_geometry(&[2], &[3], &[1], PaddingType::Valid);
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "expected InvalidInput, got {:?}",
+            result
+        );
     }
 
     // conv_geometry - Same padding, 1-D
@@ -522,7 +541,8 @@ mod tests {
     /// Same 1-D geometry rounds the output up and pads to preserve coverage
     #[test]
     fn test_conv_geometry_same_1d() {
-        let (out_sp, pad_before, padded_sp) = conv_geometry(&[7], &[3], &[2], PaddingType::Same);
+        let (out_sp, pad_before, padded_sp) =
+            conv_geometry(&[7], &[3], &[2], PaddingType::Same).unwrap();
         assert_eq!(out_sp, vec![4]);
         assert_eq!(pad_before, vec![1]);
         assert_eq!(padded_sp, vec![9]);
@@ -534,7 +554,7 @@ mod tests {
     #[test]
     fn test_conv_geometry_same_2d() {
         let (out_sp, pad_before, padded_sp) =
-            conv_geometry(&[4, 4], &[3, 3], &[1, 1], PaddingType::Same);
+            conv_geometry(&[4, 4], &[3, 3], &[1, 1], PaddingType::Same).unwrap();
         assert_eq!(out_sp, vec![4, 4]);
         assert_eq!(pad_before, vec![1, 1]);
         assert_eq!(padded_sp, vec![6, 6]);

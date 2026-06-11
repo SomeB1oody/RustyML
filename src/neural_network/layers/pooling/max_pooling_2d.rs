@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
+use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::pooling::layer_functions_2d_pooling;
 use crate::neural_network::layers::pooling::pooling_engine::{
@@ -57,8 +58,9 @@ use crate::neural_network::traits::Layer;
 ///         (2, 2),           // Pool window size
 ///         vec![2, 3, 6, 6], // Input shape
 ///         None,             // Use default stride (2,2)
+///         PaddingType::Valid,
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Create target tensor - corresponding to the pooled shape
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
@@ -88,6 +90,8 @@ pub struct MaxPooling2D {
     strides: (usize, usize),
     /// Shape of the input tensor declared at construction time
     input_shape: Vec<usize>,
+    /// Padding mode applied around the input before pooling
+    padding: PaddingType,
     /// Shape of the most recent forward input, cached for backpropagation
     forward_input_shape: Option<Vec<usize>>,
     /// Cached flat per-output arg-max indices used for backpropagation
@@ -104,6 +108,8 @@ impl MaxPooling2D {
     /// - `pool_size` - Size of the pooling window as (height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, channels, height, width]`
     /// - `strides` - Optional strides of the pooling operation as (vertical stride, horizontal stride)
+    /// - `padding` - Padding mode: `Valid` (no padding) or `Same` (pad so the output covers the
+    ///   input; padded cells are excluded from each window)
     ///
     /// # Returns
     ///
@@ -117,6 +123,7 @@ impl MaxPooling2D {
         pool_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: Option<(usize, usize)>,
+        padding: PaddingType,
     ) -> Result<Self, Error> {
         let strides = strides.unwrap_or(pool_size);
 
@@ -130,6 +137,7 @@ impl MaxPooling2D {
             pool_size,
             strides,
             input_shape,
+            padding,
             forward_input_shape: None,
             argmax: None,
         })
@@ -151,6 +159,7 @@ impl Layer for MaxPooling2D {
             &[self.pool_size.0, self.pool_size.1],
             &[self.strides.0, self.strides.1],
             PoolKind::Max,
+            self.padding,
         );
         self.argmax = argmax;
         Ok(output)
@@ -168,6 +177,7 @@ impl Layer for MaxPooling2D {
             &[self.pool_size.0, self.pool_size.1],
             &[self.strides.0, self.strides.1],
             PoolKind::Max,
+            self.padding,
         );
         Ok(output)
     }
@@ -189,6 +199,7 @@ impl Layer for MaxPooling2D {
             &[self.strides.0, self.strides.1],
             PoolKind::Max,
             Some(argmax),
+            self.padding,
         ))
     }
 

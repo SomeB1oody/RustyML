@@ -218,6 +218,26 @@ fn dense_backward_before_forward_returns_err() {
     );
 }
 
+/// A wrong-shaped upstream gradient returns ShapeMismatch instead of panicking in the activation
+/// backward / dimensionality conversion
+#[test]
+fn dense_backward_wrong_grad_shape_returns_err() {
+    let mut d = Dense::new(3, 2, Linear::new(), None).unwrap();
+    // Valid forward establishes the cached 2D output of shape [1, 2]
+    let x = t2(1, 3, vec![1.0, 2.0, 3.0]);
+    d.forward(&x).unwrap();
+    // Feed a 3D gradient: backward must reject it, not panic
+    let bad_grad = Array::from_shape_vec((1, 2, 1), vec![1.0_f32, 1.0])
+        .unwrap()
+        .into_dyn();
+    let result = d.backward(&bad_grad);
+    assert!(
+        matches!(result, Err(Error::ShapeMismatch { .. })),
+        "expected ShapeMismatch, got {:?}",
+        result
+    );
+}
+
 #[test]
 fn dense_set_weights_wrong_weight_shape_returns_err() {
     let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();

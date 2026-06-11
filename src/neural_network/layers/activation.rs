@@ -50,10 +50,6 @@ pub use sigmoid::Sigmoid;
 pub use softmax::Softmax;
 pub use tanh::Tanh;
 
-/// Lower input clamp for sigmoid/tanh to keep `exp` from overflowing
-const INPUT_CLIP_MIN: f32 = -500.0;
-/// Upper input clamp for sigmoid/tanh to keep `exp` from overflowing
-const INPUT_CLIP_MAX: f32 = 500.0;
 /// Epsilon guarding the softmax normalizer against division by zero
 const SOFTMAX_EPSILON: f32 = 1e-8;
 /// Element threshold above which ReLU switches to parallel evaluation
@@ -138,10 +134,7 @@ impl Activation {
             }
             Activation::Sigmoid => {
                 let mut out = z.clone();
-                let sigmoid = |x: f32| {
-                    let clipped = x.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX);
-                    1.0 / (1.0 + (-clipped).exp())
-                };
+                let sigmoid = |x: f32| 1.0 / (1.0 + (-x).exp());
                 if out.len() >= SIGMOID_PARALLEL_THRESHOLD {
                     out.par_mapv_inplace(sigmoid);
                 } else {
@@ -150,7 +143,9 @@ impl Activation {
                 Ok(out)
             }
             Activation::Tanh => {
-                let tanh = |x: f32| x.clamp(INPUT_CLIP_MIN, INPUT_CLIP_MAX).tanh();
+                // No input clamp: tanh saturates to ±1 at ±inf (finite), so the only non-finite
+                // output comes from a NaN input, which propagates
+                let tanh = |x: f32| x.tanh();
                 let out = if z.len() >= TANH_PARALLEL_THRESHOLD {
                     let mut out = z.clone();
                     out.par_mapv_inplace(tanh);

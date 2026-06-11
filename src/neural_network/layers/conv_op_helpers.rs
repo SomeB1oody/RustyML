@@ -55,7 +55,7 @@ pub(super) fn merge_results(
 /// # Returns
 ///
 /// - `f32` - accumulated weight-gradient sum for this row
-#[allow(clippy::too_many_arguments)] // convolution geometry params are all needed
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_row_gradient_sum(
     gradient: &Tensor,
     input: &Tensor,

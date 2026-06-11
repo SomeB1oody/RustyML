@@ -131,7 +131,7 @@
 //!     .add(Dense::new(784, 128, ReLU::new(), None).unwrap())
 //!     .add(Dense::new(128, 64, ReLU::new(), None).unwrap())
 //!     .add(Dense::new(64, 10, Softmax::new(), None).unwrap())
-//!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
+//!     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
 //! // Display model structure
 //! model.summary();
@@ -153,7 +153,7 @@
 //! new_model.load_from_path("model.json").unwrap();
 //!
 //! // Compile before using (required for training, optional for prediction)
-//! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
+//! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 //!
 //! // Make predictions with loaded model
 //! let predictions = new_model.predict(&x).unwrap();
@@ -736,7 +736,7 @@ pub mod metrics;
 ///      .add(Dense::new(3, 1, Activation::Linear, None).unwrap()); // Output layer: 3 -> 1
 ///
 /// // Compile with optimizer and loss function
-/// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), MeanSquaredError::new());
+/// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Display model architecture
 /// model.summary();

@@ -96,7 +96,7 @@ impl SpatialDropout1D {
 
 impl Layer for SpatialDropout1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is validated in `new()`; only validate the runtime input here
+        // `rate` is validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),
@@ -123,7 +123,7 @@ impl Layer for SpatialDropout1D {
         let channels = shape[1];
         let length = shape[2];
 
-        // Per-channel mask of shape (batch_size, channels); each channel is fully kept or fully dropped
+        // Per-channel mask of shape (batch_size, channels)
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),

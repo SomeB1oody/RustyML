@@ -2,7 +2,7 @@
 //! prediction, summary, and JSON save/load support
 
 use super::traits::{Layer, Loss, Optimizer};
-use crate::error::{Context, Error, IoError, NnError};
+use crate::error::{Error, IoError, NnError};
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
@@ -10,7 +10,7 @@ use crate::neural_network::layers::serialize_weight::{
     LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
     apply_weights_to_layer,
 };
-use ndarray::{Array, Axis, IxDyn};
+use ndarray::Axis;
 use ndarray_rand::rand::seq::SliceRandom;
 use serde_json::{from_reader, to_writer_pretty};
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ use std::io::{BufWriter, Write};
 ///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
 ///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
-///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
+///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Display model structure
 /// model.summary();
@@ -67,7 +67,7 @@ use std::io::{BufWriter, Write};
 /// new_model.load_from_path("model.json").unwrap();
 ///
 /// // Compile before using (required for training, optional for prediction)
-/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None).unwrap(), CategoricalCrossEntropy::new());
+/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Make predictions with loaded model
 /// let predictions = new_model.predict(&x).unwrap();
@@ -139,6 +139,22 @@ impl Sequential {
     /// - `&mut Self` - Mutable reference to self for method chaining
     pub fn set_seed(&mut self, seed: u64) -> &mut Self {
         self.seed = Some(seed);
+        self
+    }
+
+    /// Sets the learning rate on the compiled optimizer, the entry point for external
+    /// learning-rate scheduling (step decay, warmup, ...) between epochs or batches
+    ///
+    /// Does nothing if the model has not been compiled yet. The optimizer keeps all of its
+    /// accumulated state (momentum buffers, Adam moments, ...) across the change
+    ///
+    /// # Parameters
+    ///
+    /// - `learning_rate` - The new learning rate for subsequent parameter updates
+    pub fn set_learning_rate(&mut self, learning_rate: f32) -> &mut Self {
+        if let Some(ref mut optimizer) = self.optimizer {
+            optimizer.set_learning_rate(learning_rate);
+        }
         self
     }
 
@@ -225,8 +241,7 @@ impl Sequential {
             return Err(Error::empty_input("input tensors"));
         }
 
-        // Verify batch size match. `dimension_mismatch(expected, found)` takes x's batch as the
-        // reference (`expected`) and y's as `found`, matching the crate-wide `(x, y)` ordering
+        // Verify batch size match
         if x.shape()[0] != y.shape()[0] {
             return Err(Error::dimension_mismatch(x.shape()[0], y.shape()[0]));
         }
@@ -265,8 +280,7 @@ impl Sequential {
         // Calculate gradient of loss with respect to output
         let mut grad = self.loss.as_ref().unwrap().compute_grad(y, &output)?;
 
-        // Advance the optimizer's global step once per batch, before the per-layer updates, so
-        // step-dependent optimizers (Adam) use a single consistent timestep across all layers
+        // Advance the optimizer's global step once per batch, before the per-layer updates
         if let Some(ref mut optimizer) = self.optimizer {
             optimizer.step();
         }
@@ -406,42 +420,10 @@ impl Sequential {
             ));
         }
 
-        // Creates batch tensors from the full dataset
+        // Creates batch tensors by gathering the selected rows along axis 0
         let create_batch_tensors =
             |x: &Tensor, y: &Tensor, indices: &[usize]| -> Result<(Tensor, Tensor), Error> {
-                let batch_size = indices.len();
-
-                // Get shapes for batch tensors
-                let mut x_batch_shape = x.shape().to_vec();
-                x_batch_shape[0] = batch_size;
-
-                let mut y_batch_shape = y.shape().to_vec();
-                y_batch_shape[0] = batch_size;
-
-                // Create batch arrays
-                let mut x_batch_data = Vec::new();
-                let mut y_batch_data = Vec::new();
-
-                // Extract data for selected indices. Index along axis 0 so this works for any
-                // input rank (Dense=2D, Conv1D/RNN=3D, Conv2D=4D, Conv3D=5D), not just 2D
-                for &idx in indices {
-                    // Extract sample from x
-                    let x_sample = x.index_axis(Axis(0), idx);
-                    x_batch_data.extend(x_sample.iter().cloned());
-
-                    // Extract sample from y
-                    let y_sample = y.index_axis(Axis(0), idx);
-                    y_batch_data.extend(y_sample.iter().cloned());
-                }
-
-                // Create batch tensors
-                let x_batch = Array::from_shape_vec(IxDyn(&x_batch_shape), x_batch_data)
-                    .context("create batch tensor for x")?;
-
-                let y_batch = Array::from_shape_vec(IxDyn(&y_batch_shape), y_batch_data)
-                    .context("create batch tensor for y")?;
-
-                Ok((x_batch, y_batch))
+                Ok((x.select(Axis(0), indices), y.select(Axis(0), indices)))
             };
 
         // Create sample indices for shuffling

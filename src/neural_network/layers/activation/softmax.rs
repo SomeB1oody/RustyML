@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Softmax::new())
-///     .compile(SGD::new(0.01, None).unwrap(), CategoricalCrossEntropy::new());
+///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -70,10 +70,6 @@ impl Layer for Softmax {
             return Err(Error::empty_input("input tensor"));
         }
 
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
-        }
-
         // Apply softmax over the last axis (input must be at least 2D)
         let output = Activation::Softmax.forward(input)?;
 
@@ -87,10 +83,6 @@ impl Layer for Softmax {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
-        }
-
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
         }
 
         // Apply softmax over the last axis (input must be at least 2D)

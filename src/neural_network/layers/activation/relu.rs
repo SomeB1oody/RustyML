@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(ReLU::new())
-///     .compile(SGD::new(0.01, None).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);
@@ -70,10 +70,6 @@ impl Layer for ReLU {
             return Err(Error::empty_input("input tensor"));
         }
 
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
-        }
-
         let output = Activation::ReLU.forward(input)?;
 
         // Cache activated output for backpropagation
@@ -86,10 +82,6 @@ impl Layer for ReLU {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.is_empty() {
             return Err(Error::empty_input("input tensor"));
-        }
-
-        if input.iter().any(|&x| x.is_nan() || x.is_infinite()) {
-            return Err(Error::non_finite("input tensor"));
         }
 
         Activation::ReLU.forward(input)
