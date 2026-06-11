@@ -6,6 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::metrics::*;
+use rustyml::types::DistanceCalculationMetric;
 
 // adjusted_rand_index
 
@@ -139,13 +140,27 @@ fn test_nmi_range_zero_to_one() {
     assert!((0.0..=1.0 + 1e-12).contains(&nmi));
 }
 
-/// Asymmetric case true=[0,0,1,1] pred=[0,1,2,3] gives NMI = 1/sqrt(2)
+/// Asymmetric case true=[0,0,1,1] pred=[0,1,2,3]: MI=ln(2), H_true=ln(2), H_pred=2ln(2), so with
+/// arithmetic-mean normalization NMI = ln(2) / ((ln(2) + 2ln(2)) / 2) = 2/3
 #[test]
 fn test_nmi_asymmetric_case() {
     let t = array![0usize, 0, 1, 1];
     let p = array![0usize, 1, 2, 3];
-    let expected = 1.0_f64 / 2.0_f64.sqrt(); // 1/sqrt(2) ~= 0.7071067812
+    let expected = 2.0_f64 / 3.0; // arithmetic mean (sklearn >= 0.22); geometric mean gave 1/sqrt(2)
     assert_abs_diff_eq!(normalized_mutual_info(&t, &p), expected, epsilon = 1e-9);
+}
+
+/// Arithmetic-mean NMI equals V-measure exactly (both are MI / ((H_true + H_pred) / 2)), the
+/// consistency that geometric-mean normalization broke
+#[test]
+fn test_nmi_equals_v_measure() {
+    let t = array![0usize, 0, 1, 1, 2, 2];
+    let p = array![0usize, 0, 1, 2, 1, 2];
+    assert_abs_diff_eq!(
+        normalized_mutual_info(&t, &p),
+        v_measure_score(&t, &p),
+        epsilon = 1e-12
+    );
 }
 
 /// NMI panics on length mismatch
@@ -496,7 +511,43 @@ fn test_silhouette_well_separated() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
     let labels = array![0usize, 0, 1, 1];
     let expected = 359.0_f64 / 399.0; // = (19/21 + 17/19) / 2
-    assert_abs_diff_eq!(silhouette_score(&x, &labels), expected, epsilon = 1e-9);
+    assert_abs_diff_eq!(
+        silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean),
+        expected,
+        epsilon = 1e-9
+    );
+}
+
+/// The metric is honoured: Manhattan distances give a different (closed-form) score than the
+/// Euclidean one on the same 2-D points
+#[test]
+fn test_silhouette_respects_manhattan_metric() {
+    let x = array![[0.0, 0.0], [0.0, 1.0], [10.0, 10.0], [10.0, 11.0]];
+    let labels = array![0usize, 0, 1, 1];
+    // Manhattan: each a = 1; b for p0/p3 = 20.5, for p1/p2 = 19.5 -> mean = (39/41 + 37/39) / 2
+    let expected = (39.0_f64 / 41.0 + 37.0_f64 / 39.0) / 2.0;
+    let manhattan = silhouette_score(&x, &labels, DistanceCalculationMetric::Manhattan);
+    assert_abs_diff_eq!(manhattan, expected, epsilon = 1e-9);
+    // Differs from the Euclidean score on these points, confirming the metric is actually used
+    let euclidean = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
+    assert!((manhattan - euclidean).abs() > 1e-3);
+}
+
+/// Exercises the parallel path (n >= the internal threshold). Two well-separated clusters of
+/// coincident points give a == 0 and b == const for every sample, so the silhouette is exactly 1.0
+#[test]
+fn test_silhouette_parallel_path_large_n() {
+    // 128 samples: 64 at the origin (cluster 0), 64 at (10, 0) (cluster 1)
+    let n = 128;
+    let x = Array2::from_shape_fn(
+        (n, 2),
+        |(i, j)| {
+            if j == 0 && i >= n / 2 { 10.0 } else { 0.0 }
+        },
+    );
+    let labels = Array1::from_shape_fn(n, |i| if i < n / 2 { 0usize } else { 1 });
+    let score = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
+    assert_abs_diff_eq!(score, 1.0, epsilon = 1e-12);
 }
 
 /// Mislabeled points where distant pairs share a cluster give silhouette = -4/9
@@ -505,7 +556,11 @@ fn test_silhouette_mislabeled_negative() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
     let labels = array![0usize, 1, 1, 0]; // p0 and p3 in cluster 0, p1 and p2 in cluster 1
     let expected = -4.0_f64 / 9.0;
-    assert_abs_diff_eq!(silhouette_score(&x, &labels), expected, epsilon = 1e-9);
+    assert_abs_diff_eq!(
+        silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean),
+        expected,
+        epsilon = 1e-9
+    );
 }
 
 /// A lone singleton cluster contributes 0 to the mean; score = 1/6 here
@@ -514,7 +569,11 @@ fn test_silhouette_lone_cluster_contributes_zero() {
     let x = array![[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]];
     let labels = array![0usize, 1, 1];
     let expected = 1.0_f64 / 6.0;
-    assert_abs_diff_eq!(silhouette_score(&x, &labels), expected, epsilon = 1e-9);
+    assert_abs_diff_eq!(
+        silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean),
+        expected,
+        epsilon = 1e-9
+    );
 }
 
 /// When all points coincide (a=b=0 everywhere), silhouette returns 0.0
@@ -522,7 +581,11 @@ fn test_silhouette_lone_cluster_contributes_zero() {
 fn test_silhouette_all_same_location_zero() {
     let x = array![[5.0, 5.0], [5.0, 5.0], [5.0, 5.0], [5.0, 5.0]];
     let labels = array![0usize, 0, 1, 1];
-    assert_abs_diff_eq!(silhouette_score(&x, &labels), 0.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(
+        silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean),
+        0.0,
+        epsilon = 1e-12
+    );
 }
 
 /// Silhouette lies in [-1.0, 1.0]
@@ -530,7 +593,7 @@ fn test_silhouette_all_same_location_zero() {
 fn test_silhouette_range() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
     let labels = array![0usize, 0, 1, 1];
-    let s = silhouette_score(&x, &labels);
+    let s = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
     assert!((-1.0 - 1e-12..=1.0 + 1e-12).contains(&s));
 }
 
@@ -540,7 +603,7 @@ fn test_silhouette_range() {
 fn test_silhouette_all_singletons_panics() {
     let x = array![[0.0], [1.0], [2.0]];
     let labels = array![0usize, 1, 2]; // k = n = 3, invalid
-    let _ = silhouette_score(&x, &labels);
+    let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
 /// Silhouette panics when only one distinct cluster is present
@@ -549,7 +612,7 @@ fn test_silhouette_all_singletons_panics() {
 fn test_silhouette_single_cluster_panics() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
     let labels = array![0usize, 0, 0];
-    let _ = silhouette_score(&x, &labels);
+    let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
 /// Silhouette panics on row/label length mismatch
@@ -558,7 +621,7 @@ fn test_silhouette_single_cluster_panics() {
 fn test_silhouette_length_mismatch_panics() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]];
     let labels = array![0usize, 1];
-    let _ = silhouette_score(&x, &labels);
+    let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
 /// Silhouette panics on empty input
@@ -567,7 +630,7 @@ fn test_silhouette_length_mismatch_panics() {
 fn test_silhouette_empty_panics() {
     let x: Array2<f64> = Array2::zeros((0, 2));
     let labels: Array1<usize> = array![];
-    let _ = silhouette_score(&x, &labels);
+    let _ = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 }
 
 // davies_bouldin_score

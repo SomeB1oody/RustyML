@@ -146,11 +146,10 @@ impl ConfusionMatrix {
     ///
     /// # Returns
     ///
-    /// - `f64` - Recall in `[0.0, 1.0]` (returns 1.0 when there are no actual positives, avoiding
-    ///   a 0/0 division)
+    /// - `f64` - Recall in `[0.0, 1.0]` (returns 0.0 when there are no actual positives)
     pub fn recall(&self) -> f64 {
         if self.tp + self.fn_ == 0 {
-            return 1.0;
+            return 0.0;
         }
         self.tp as f64 / (self.tp + self.fn_) as f64
     }
@@ -319,16 +318,17 @@ where
     correct as f64 / y_true.len() as f64
 }
 
-/// NaN-aware score equality used to group ties after a [`f64::total_cmp`] sort
+/// Rejects `NaN` scores from the input array
 ///
-/// The ranking functions sort by `total_cmp` (a total order that places NaN deterministically),
-/// then walk the sorted pairs grouping equal scores. Plain `==` cannot be used for that grouping
-/// because `NaN == NaN` is `false`, which would leave the group-advancing loop stuck on a NaN
-/// element forever. Treating two NaNs as equal here lets the loop advance; finite values fall back
-/// to `==`, so +/-0.0 still group together and all finite behavior is unchanged
+/// Panics if any score is `NaN`
 #[inline]
-fn scores_tie(a: f64, b: f64) -> bool {
-    a == b || (a.is_nan() && b.is_nan())
+fn reject_nan_scores<S>(scores: &ArrayBase<S, Ix1>)
+where
+    S: Data<Elem = f64>,
+{
+    if scores.iter().any(|s| s.is_nan()) {
+        panic!("invalid input: scores must not contain NaN");
+    }
 }
 
 /// Calculates the Area Under the ROC Curve (ROC AUC) for binary classification
@@ -349,6 +349,7 @@ fn scores_tie(a: f64, b: f64) -> bool {
 ///
 /// - Panics if `labels` and `scores` have different lengths
 /// - Panics if the inputs are empty
+/// - Panics if `scores` contains `NaN` (it cannot be ranked meaningfully)
 /// - Panics if the labels do not contain both a positive and a negative sample
 ///
 /// # Examples
@@ -368,9 +369,9 @@ where
     S2: Data<Elem = f64>,
 {
     validate_pair(labels.len(), scores.len(), "labels and scores");
+    reject_nan_scores(scores);
 
-    // Pack (score, label) pairs and sort by score ascending. `total_cmp` gives a total order, so
-    // NaN scores are ordered deterministically instead of panicking
+    // Pack (score, label) pairs and sort by score ascending
     let mut pairs: Vec<(f64, bool)> = scores
         .iter()
         .zip(labels.iter())
@@ -389,7 +390,7 @@ where
     while i < n {
         let current_score = pairs[i].0;
         let mut j = i;
-        while j < n && scores_tie(pairs[j].0, current_score) {
+        while j < n && pairs[j].0 == current_score {
             j += 1;
         }
         // Average rank of the tie group [i, j): (rank + ... + rank + count - 1) / count
@@ -710,8 +711,10 @@ impl MulticlassConfusionMatrix {
 /// Calculates the multi-class logarithmic loss (cross-entropy) of predicted probabilities
 ///
 /// For each sample only the probability assigned to its true class contributes:
-/// `-mean(ln(p[i, y_true[i]]))`. Probabilities are clamped away from 0 and 1 to keep the logarithm
-/// finite. Each value of `y_true` indexes a column of `y_prob`
+/// `-mean(ln(p[i, y_true[i]]))`. Each row of `y_prob` is first renormalized to sum to 1 (matching
+/// scikit-learn), so rows that do not already sum to 1 are scored consistently; the selected
+/// probability is then clamped away from 0 and 1 to keep the logarithm finite. Each value of
+/// `y_true` indexes a column of `y_prob`
 ///
 /// # Parameters
 ///
@@ -762,7 +765,10 @@ where
                 "invalid input: label {label} is out of range for {n_classes} probability columns"
             );
         }
-        let p = y_prob[[i, label]].clamp(EPS, 1.0 - EPS);
+        // Renormalize the row to a probability distribution (scikit-learn does the same); the row
+        // sum is floored at EPS so an all-zero row divides cleanly instead of producing NaN
+        let row_sum: f64 = y_prob.row(i).sum();
+        let p = (y_prob[[i, label]] / row_sum.max(EPS)).clamp(EPS, 1.0 - EPS);
         total -= p.ln();
     }
     total / n as f64
@@ -842,6 +848,8 @@ where
 /// - Panics if `y_true`'s length differs from the number of rows in `y_prob`
 /// - Panics if the inputs are empty
 /// - Panics if `k` is zero, or if any label is out of range for `y_prob`'s columns
+/// - Panics if `y_prob` contains `NaN`: a `NaN` true-class probability makes every `p > true_prob`
+///   comparison false, which would otherwise miscount the sample as a hit
 ///
 /// # Examples
 ///
@@ -883,7 +891,17 @@ where
             );
         }
         let true_prob = y_prob[[i, label]];
-        let n_greater = y_prob.row(i).iter().filter(|&&p| p > true_prob).count();
+        // A NaN anywhere in the row breaks the `p > true_prob` ranking (every comparison with NaN
+        // is false), so reject it rather than silently miscount the sample
+        let mut n_greater = 0;
+        for &p in y_prob.row(i) {
+            if p.is_nan() {
+                panic!("invalid input: y_prob must not contain NaN");
+            }
+            if p > true_prob {
+                n_greater += 1;
+            }
+        }
         if n_greater < k {
             correct += 1;
         }
@@ -894,6 +912,9 @@ where
 /// Sorts samples by score descending and returns, at each distinct score, the cumulative
 /// `(threshold, cumulative_true_positives, cumulative_false_positives)`, plus the total positive
 /// and negative counts. Shared by the precision-recall / ROC curve builders
+///
+/// Panics on a length mismatch, empty input, or a `NaN` score (see [`reject_nan_scores`]), so all
+/// callers (`average_precision`, `roc_curve`, `precision_recall_curve`) inherit those guarantees
 fn ranked_cumulative<S1, S2>(
     labels: &ArrayBase<S1, Ix1>,
     scores: &ArrayBase<S2, Ix1>,
@@ -903,6 +924,7 @@ where
     S2: Data<Elem = f64>,
 {
     validate_pair(labels.len(), scores.len(), "labels and scores");
+    reject_nan_scores(scores);
 
     let mut pairs: Vec<(f64, bool)> = scores
         .iter()
@@ -920,7 +942,7 @@ where
     let mut i = 0;
     while i < n {
         let score = pairs[i].0;
-        while i < n && scores_tie(pairs[i].0, score) {
+        while i < n && pairs[i].0 == score {
             if pairs[i].1 {
                 tp += 1;
             } else {
@@ -949,6 +971,7 @@ where
 ///
 /// - Panics if `labels` and `scores` have different lengths
 /// - Panics if the inputs are empty
+/// - Panics if `scores` contains `NaN`
 /// - Panics if there are no positive labels
 ///
 /// # Examples
@@ -1003,6 +1026,7 @@ where
 ///
 /// - Panics if `labels` and `scores` have different lengths
 /// - Panics if the inputs are empty
+/// - Panics if `scores` contains `NaN`
 /// - Panics if the labels do not contain both a positive and a negative sample
 ///
 /// # Examples
@@ -1074,6 +1098,7 @@ where
 ///
 /// - Panics if `labels` and `scores` have different lengths
 /// - Panics if the inputs are empty
+/// - Panics if `scores` contains `NaN`
 /// - Panics if there are no positive labels
 ///
 /// # Examples

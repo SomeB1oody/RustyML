@@ -5,8 +5,8 @@
 
 use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
-pub use crate::KernelType;
 use crate::error::Error;
+pub use crate::types::KernelType;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;

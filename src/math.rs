@@ -6,9 +6,30 @@
 //! isolation-forest path-length correction
 
 use ahash::AHashMap;
-use ndarray::{ArrayBase, Data, Ix1};
+use ndarray::{ArrayBase, Data, Ix1, Zip};
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
+
+/// Validates a paired `(a, b)` input: equal length and non-empty, panicking otherwise
+///
+/// Mirrors [`crate::metrics`]'s `validate_pair` so this lightweight tier rejects malformed input
+/// with a panic (per the module-level contract) instead of silently truncating to the shorter
+/// input via `zip`. The length check runs first, so a mismatch is reported even when one input is
+/// empty
+///
+/// # Panics
+///
+/// - when `expected != found`
+/// - when `expected == 0` (empty input)
+#[inline]
+fn validate_pair(expected: usize, found: usize, what: &str) {
+    if expected != found {
+        panic!("dimension mismatch: expected {expected}, found {found}");
+    }
+    if expected == 0 {
+        panic!("input is empty: {what}");
+    }
+}
 
 /// Calculates the total sum of squares (SST)
 ///
@@ -59,6 +80,11 @@ where
 ///
 /// - `f64` - Sum of squared errors computed as sum((predicted_i - actual_i)^2)
 ///
+/// # Panics
+///
+/// - Panics if `predicted` and `actual` have different lengths
+/// - Panics if the inputs are empty
+///
 /// # Examples
 ///
 /// ```rust
@@ -80,13 +106,13 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    let sum: f64 = predicted
+    validate_pair(predicted.len(), actual.len(), "predicted and actual");
+
+    predicted
         .iter()
         .zip(actual.iter())
         .map(|(p, a)| (p - a).powi(2))
-        .sum();
-
-    sum
+        .sum()
 }
 
 /// Calculates the mean squared error (variance) of a set of values
@@ -127,8 +153,7 @@ where
         return 0.0;
     }
 
-    // Mean over the finite values only, in one pass: NaN/infinite entries are skipped so a
-    // single bad element does not poison the statistic
+    // Mean over the finite values only, in one pass
     let (finite_sum, finite_count) = y.fold((0.0_f64, 0_usize), |(sum, count), &val| {
         if val.is_finite() {
             (sum + val, count + 1)
@@ -208,6 +233,11 @@ pub fn sigmoid(z: f64) -> f64 {
 ///
 /// - `f64` - Average logistic regression loss
 ///
+/// # Panics
+///
+/// - Panics if `logits` and `actual_labels` have different lengths
+/// - Panics if the inputs are empty (which would otherwise yield `0.0 / 0.0 = NaN`)
+///
 /// # Examples
 ///
 /// ```rust
@@ -226,6 +256,11 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
+    validate_pair(
+        logits.len(),
+        actual_labels.len(),
+        "logits and actual_labels",
+    );
     let n = logits.len() as f64;
 
     let total_loss = logits
@@ -253,7 +288,12 @@ where
 ///
 /// # Returns
 ///
-/// - `f64` - Mean hinge loss (0.0 when the input is empty)
+/// - `f64` - Mean hinge loss
+///
+/// # Panics
+///
+/// - Panics if `margins` and `labels` have different lengths
+/// - Panics if the inputs are empty (kept consistent with [`logistic_loss`])
 ///
 /// # Examples
 ///
@@ -273,10 +313,8 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
+    validate_pair(margins.len(), labels.len(), "margins and labels");
     let n = margins.len();
-    if n == 0 {
-        return 0.0;
-    }
 
     margins
         .iter()
@@ -318,8 +356,13 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    let diff = x1 - x2;
-    diff.mapv(|x| x * x).sum()
+    // Accumulate in a single pass with no intermediate allocation.
+    let mut sum = 0.0;
+    Zip::from(x1).and(x2).for_each(|&a, &b| {
+        let d = a - b;
+        sum += d * d;
+    });
+    sum
 }
 
 /// Calculates the Manhattan (L1) distance between two vectors
@@ -351,8 +394,12 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    let diff = x1 - x2;
-    diff.mapv(|x| x.abs()).sum()
+    // Single-pass, allocation-free L1 norm of the difference
+    let mut sum = 0.0;
+    Zip::from(x1)
+        .and(x2)
+        .for_each(|&a, &b| sum += (a - b).abs());
+    sum
 }
 
 /// Calculates the Minkowski distance between two vectors
@@ -368,6 +415,11 @@ where
 /// # Returns
 ///
 /// - `f64` - Minkowski distance between the two vectors
+///
+/// # Panics
+///
+/// - Panics if `p < 1.0` (or `p` is `NaN`): for such orders the result is not a valid metric
+///   (the triangle inequality fails), and `p <= 0` additionally yields a meaningless `sum^inf`
 ///
 /// # Examples
 ///
@@ -391,9 +443,15 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    // Sum the absolute differences raised to power p, then take the p-th root
-    let diff = x1 - x2;
-    let sum: f64 = diff.mapv(|x| x.abs().powf(p)).sum();
+    // `p.is_nan()` is rejected alongside `p < 1.0`; orders below 1 break the triangle inequality
+    if p < 1.0 || p.is_nan() {
+        panic!("invalid parameter `p`: Minkowski order must be at least 1.0, got {p}");
+    }
+
+    let mut sum = 0.0;
+    Zip::from(x1)
+        .and(x2)
+        .for_each(|&a, &b| sum += (a - b).abs().powf(p));
     sum.powf(1.0 / p)
 }
 
@@ -601,7 +659,9 @@ pub fn average_path_length_factor(n: usize) -> f64 {
     }
 
     let h_n_minus_1 = if n > 50 {
-        ((n - 1) as f64).ln() + EULER_GAMMA
+        // Asymptotic expansion of the harmonic number H_m (m = n - 1)
+        let m = (n - 1) as f64;
+        m.ln() + EULER_GAMMA + 0.5 / m
     } else {
         (1..n).map(|i| 1.0 / i as f64).sum::<f64>()
     };
@@ -634,12 +694,22 @@ mod tests {
         assert_abs_diff_eq!(hinge_loss(&margins, &labels), 0.0, epsilon = 1e-10);
     }
 
-    /// Empty input returns 0.0
+    /// Empty input panics (consistent with `logistic_loss`, which would otherwise return NaN)
     #[test]
-    fn test_hinge_loss_empty() {
+    #[should_panic(expected = "input is empty")]
+    fn test_hinge_loss_empty_panics() {
         let margins: ndarray::Array1<f64> = array![];
         let labels: ndarray::Array1<f64> = array![];
-        assert_abs_diff_eq!(hinge_loss(&margins, &labels), 0.0, epsilon = 1e-10);
+        let _ = hinge_loss(&margins, &labels);
+    }
+
+    /// Length mismatch panics instead of silently truncating to the shorter input
+    #[test]
+    #[should_panic(expected = "dimension mismatch")]
+    fn test_hinge_loss_length_mismatch_panics() {
+        let margins = array![0.8, -0.5, 2.0];
+        let labels = array![1.0, -1.0];
+        let _ = hinge_loss(&margins, &labels);
     }
 
     /// Single-sample hinge loss
@@ -703,8 +773,9 @@ mod tests {
         assert!(f51 < f52, "factor(51)={f51} should be < factor(52)={f52}");
     }
 
-    /// For n>50 the ln(n-1)+gamma approximation stays within the documented error bound of the
-    /// exact value c(n) = 2*H_{n-1} - 2(n-1)/n
+    /// For n>50 the ln(n-1)+gamma+1/(2(n-1)) approximation stays within a tight error bound of the
+    /// exact value c(n) = 2*H_{n-1} - 2(n-1)/n. The `1/(2(n-1))` correction term shrinks the error
+    /// from ~2e-2 (ln+gamma only) to ~1e-5, so a `1e-3` tolerance now comfortably holds
     #[test]
     fn test_average_path_length_factor_matches_exact_harmonic_within_tolerance() {
         for &n in &[51usize, 100, 1000] {
@@ -712,7 +783,7 @@ mod tests {
             let theoretical = 2.0 * exact_h - 2.0 * (n - 1) as f64 / n as f64;
             let got = average_path_length_factor(n);
             assert!(
-                (got - theoretical).abs() < 0.025,
+                (got - theoretical).abs() < 1e-3,
                 "n={n}: factor={got} deviates from theoretical {theoretical} by more than the documented approximation bound",
             );
         }

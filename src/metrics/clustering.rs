@@ -5,14 +5,19 @@
 //! clustering from the feature geometry alone (silhouette, Davies-Bouldin, Calinski-Harabasz)
 
 use ahash::AHashMap;
-use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
+use ndarray::{Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
 
 use super::validate_pair;
 use crate::math::squared_euclidean_distance_row;
+pub use crate::types::DistanceCalculationMetric;
 
 /// Denominator magnitude below which an AMI/ARI normaliser is treated as a degenerate (perfect)
 /// clustering and the score is defined to be `1.0`
 const DEGENERATE_DENOM: f64 = 1e-10;
+
+/// Sample-count threshold at or above which [`silhouette_score`] fills its pairwise-distance matrix
+/// in parallel; below it the serial path is used
+const SILHOUETTE_PARALLEL_THRESHOLD: usize = 128;
 
 /// Maps each distinct label to a dense index in `0..k` in order of first appearance
 fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
@@ -135,7 +140,7 @@ where
 
 /// Calculates the Normalized Mutual Information (NMI) between two cluster assignments
 ///
-/// NMI normalizes the mutual information by the geometric mean of the two clusterings' entropies,
+/// NMI normalizes the mutual information by the arithmetic mean of the two clusterings' entropies,
 /// giving `0.0` for independent assignments and `1.0` for identical ones. If either clustering has
 /// zero entropy (a single cluster), NMI is defined as `0.0`
 ///
@@ -186,7 +191,8 @@ where
     let h_true = entropy_nats(&row_sums, n);
     let h_pred = entropy_nats(&col_sums, n);
 
-    let denominator = (h_true * h_pred).sqrt();
+    // Arithmetic mean of the entropies
+    let denominator = (h_true + h_pred) / 2.0;
     if denominator == 0.0 {
         0.0
     } else {
@@ -335,7 +341,7 @@ where
     }
 }
 
-/// Calculates the mean Silhouette Coefficient over all samples using Euclidean distance
+/// Calculates the mean Silhouette Coefficient over all samples under the given distance metric
 ///
 /// For each sample, the silhouette `s = (b - a) / max(a, b)` compares the mean intra-cluster
 /// distance `a` with the mean distance `b` to the nearest other cluster; it ranges from `-1`
@@ -343,12 +349,15 @@ where
 /// are the sole member of their cluster contribute `0`. The returned score is the mean over all
 /// samples
 ///
-/// This is an `O(n^2*d)` computation in the number of samples `n` and features `d`
+/// Pairwise distances go through [`DistanceCalculationMetric`], the same dispatch point used by the
+/// estimators, so any of `Euclidean`, `Manhattan`, or `Minkowski(p)` can be used. (Pass
+/// `DistanceCalculationMetric::Euclidean` for the conventional silhouette)
 ///
 /// # Parameters
 ///
 /// - `x` - Feature matrix with one sample per row (`n_samples x n_features`)
 /// - `labels` - Cluster assignment for each sample
+/// - `metric` - Distance metric used for every pairwise distance
 ///
 /// # Returns
 ///
@@ -359,21 +368,27 @@ where
 /// - Panics if the number of rows in `x` differs from the length of `labels`
 /// - Panics if the inputs are empty
 /// - Panics if the number of distinct clusters is not in `2..=n_samples - 1`
+/// - Panics if `metric` is `Minkowski(p)` with `p < 1`
 ///
 /// # Examples
 ///
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::silhouette_score;
+/// use rustyml::types::DistanceCalculationMetric;
 ///
 /// let x = array![[0.0, 0.0], [0.0, 1.0], [10.0, 10.0], [10.0, 11.0]];
 /// let labels = array![0, 0, 1, 1];
-/// let score = silhouette_score(&x, &labels);
+/// let score = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
 /// assert!(score > 0.8);
 /// ```
-pub fn silhouette_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
+pub fn silhouette_score<S1, S2>(
+    x: &ArrayBase<S1, Ix2>,
+    labels: &ArrayBase<S2, Ix1>,
+    metric: DistanceCalculationMetric,
+) -> f64
 where
-    S1: Data<Elem = f64>,
+    S1: Data<Elem = f64> + Sync,
     S2: Data<Elem = usize>,
 {
     let n = x.nrows();
@@ -385,15 +400,18 @@ where
         sizes[c] += 1;
     }
 
-    // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in
-    // cluster c, filled once using the symmetry of the distance metric
+    // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in cluster c
     let mut dist_to_cluster = Array2::<f64>::zeros((n, k));
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let d = squared_euclidean_distance_row(&x.row(i), &x.row(j)).sqrt();
-            dist_to_cluster[[i, cluster[j]]] += d;
-            dist_to_cluster[[j, cluster[i]]] += d;
+    let fill_row = |mut row_acc: ArrayViewMut1<f64>, xi: ArrayView1<f64>| {
+        for j in 0..n {
+            row_acc[cluster[j]] += metric.distance(xi, x.row(j));
         }
+    };
+    let fill = Zip::from(dist_to_cluster.rows_mut()).and(x.rows());
+    if n >= SILHOUETTE_PARALLEL_THRESHOLD {
+        fill.par_for_each(fill_row);
+    } else {
+        fill.for_each(fill_row);
     }
 
     let mut total = 0.0;

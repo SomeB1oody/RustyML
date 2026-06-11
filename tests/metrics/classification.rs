@@ -132,13 +132,14 @@ fn cm_recall_partial() {
 
 #[test]
 fn cm_recall_no_actual_positives() {
-    // tp=0, fn=0 (all actual negatives) -> recall = 1.0 (convention)
+    // tp=0, fn=0 (all actual negatives) -> recall = 0.0 (sklearn zero_division=0 convention,
+    // consistent with MulticlassConfusionMatrix::per_class_recall)
     let y_true = array![0.0, 0.0];
     let y_pred = array![0.0, 1.0];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
     // TN=1, FP=1, TP=0, FN=0
     assert_eq!(cm.get_counts(), (0, 1, 1, 0));
-    assert_abs_diff_eq!(cm.recall(), 1.0, epsilon = 1e-12);
+    assert_abs_diff_eq!(cm.recall(), 0.0, epsilon = 1e-12);
 }
 
 #[test]
@@ -672,6 +673,16 @@ fn log_loss_zero_prob_clamped() {
 }
 
 #[test]
+fn log_loss_renormalizes_rows() {
+    // Row [2,2] does not sum to 1; sklearn renormalizes to [0.5, 0.5], so the loss for true
+    // class 0 is -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0.
+    let y_true = array![0usize];
+    let y_prob = arr2(&[[2.0, 2.0]]);
+    let expected = 2.0_f64.ln();
+    assert_abs_diff_eq!(log_loss(&y_true, &y_prob), expected, epsilon = 1e-9);
+}
+
+#[test]
 fn log_loss_multiclass_three_classes() {
     // y_true=[0,1,2], y_prob=[[0.8,0.1,0.1],[0.1,0.7,0.2],[0.2,0.2,0.6]]
     // loss = -(ln(0.8)+ln(0.7)+ln(0.6))/3
@@ -842,6 +853,15 @@ fn top_k_accuracy_k_zero_panics() {
 fn top_k_accuracy_label_out_of_range_panics() {
     let y_true = array![0usize, 5];
     let y_prob = arr2(&[[0.9, 0.1], [0.2, 0.8]]);
+    let _ = top_k_accuracy(&y_true, &y_prob, 1);
+}
+
+#[test]
+#[should_panic(expected = "must not contain NaN")]
+fn top_k_accuracy_nan_true_prob_panics() {
+    // A NaN true-class probability used to be miscounted as a hit (n_greater = 0); now rejected
+    let y_true = array![0usize];
+    let y_prob = arr2(&[[f64::NAN, 0.9]]);
     let _ = top_k_accuracy(&y_true, &y_prob, 1);
 }
 
@@ -1155,85 +1175,37 @@ fn precision_recall_curve_no_positive_panics() {
     let _ = precision_recall_curve(&labels, &scores);
 }
 
-// NaN-score ordering contract: sorting by `f64::total_cmp` ranks a positive NaN above
-// every finite value; a NaN score must not panic and must give deterministic, finite output
+// NaN-score contract: scores cannot be ranked meaningfully (f64::total_cmp would silently treat
+// a NaN as the most confident prediction), so the ranking metrics reject NaN, matching sklearn
 
 #[test]
-fn roc_auc_with_nan_score_is_deterministic_and_finite() {
-    // labels=[F,T,F,T], scores=[0.1, 0.4, 0.35, NaN]; positive NaN sorts last, so
-    // the two positives occupy the top ranks -> AUC = 1.0
+#[should_panic(expected = "must not contain NaN")]
+fn roc_auc_with_nan_score_panics() {
     let labels = array![false, true, false, true];
     let scores = array![0.1, 0.4, 0.35, f64::NAN];
-
-    let auc1 = roc_auc(&labels, &scores);
-    let auc2 = roc_auc(&labels, &scores);
-
-    // Deterministic (call twice -> identical) and finite (no panic)
-    assert!(auc1.is_finite(), "AUC must be finite even with a NaN score");
-    assert_eq!(
-        auc1.to_bits(),
-        auc2.to_bits(),
-        "roc_auc must order NaN deterministically (identical across calls)"
-    );
-    assert_abs_diff_eq!(auc1, 1.0, epsilon = 1e-12);
+    let _ = roc_auc(&labels, &scores);
 }
 
 #[test]
-fn average_precision_with_nan_score_is_deterministic_and_finite() {
-    // labels=[T,T,F,F], scores=[NaN, 0.8, 0.3, 0.1]: positive NaN sorts first via the
-    // shared ranked_cumulative helper, so all positives rank above all negatives -> AP = 1.0
+#[should_panic(expected = "must not contain NaN")]
+fn average_precision_with_nan_score_panics() {
     let labels = array![true, true, false, false];
     let scores = array![f64::NAN, 0.8, 0.3, 0.1];
-
-    let ap1 = average_precision(&labels, &scores);
-    let ap2 = average_precision(&labels, &scores);
-
-    assert!(ap1.is_finite(), "AP must be finite even with a NaN score");
-    assert_eq!(
-        ap1.to_bits(),
-        ap2.to_bits(),
-        "ranked_cumulative must order NaN deterministically (identical across calls)"
-    );
-    assert_abs_diff_eq!(ap1, 1.0, epsilon = 1e-12);
+    let _ = average_precision(&labels, &scores);
 }
 
 #[test]
-fn roc_curve_with_nan_score_is_deterministic_and_no_panic() {
-    // labels=[T,F,T,F], scores=[NaN,0.6,0.4,0.1]: positive NaN ranks highest, giving finite
-    // fpr/tpr; thresholds[0] = NaN+1 = NaN by design, so threshold finiteness is not asserted
+#[should_panic(expected = "must not contain NaN")]
+fn roc_curve_with_nan_score_panics() {
     let labels = array![true, false, true, false];
     let scores = array![f64::NAN, 0.6, 0.4, 0.1];
+    let _ = roc_curve(&labels, &scores);
+}
 
-    let (fpr1, tpr1, thr1) = roc_curve(&labels, &scores);
-    let (fpr2, tpr2, thr2) = roc_curve(&labels, &scores);
-
-    // No panic and deterministic across repeated calls (bit-identical, incl. NaN)
-    assert_eq!(fpr1.len(), 5);
-    assert_eq!(tpr1.len(), 5);
-    assert_eq!(thr1.len(), 5);
-    for i in 0..fpr1.len() {
-        assert!(fpr1[i].is_finite(), "fpr[{i}] must be finite");
-        assert!(tpr1[i].is_finite(), "tpr[{i}] must be finite");
-        assert_eq!(
-            fpr1[i].to_bits(),
-            fpr2[i].to_bits(),
-            "fpr[{i}] nondeterministic"
-        );
-        assert_eq!(
-            tpr1[i].to_bits(),
-            tpr2[i].to_bits(),
-            "tpr[{i}] nondeterministic"
-        );
-        assert_eq!(
-            thr1[i].to_bits(),
-            thr2[i].to_bits(),
-            "threshold[{i}] nondeterministic"
-        );
-    }
-    // Derived finite points (positive NaN is treated as the highest score)
-    assert_abs_diff_eq!(fpr1[0], 0.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(tpr1[0], 0.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(tpr1[1], 0.5, epsilon = 1e-12);
-    assert_abs_diff_eq!(fpr1[4], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(tpr1[4], 1.0, epsilon = 1e-12);
+#[test]
+#[should_panic(expected = "must not contain NaN")]
+fn precision_recall_curve_with_nan_score_panics() {
+    let labels = array![true, false, true, false];
+    let scores = array![0.9, f64::NAN, 0.4, 0.1];
+    let _ = precision_recall_curve(&labels, &scores);
 }

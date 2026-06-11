@@ -42,9 +42,10 @@ const SST_EPSILON: f64 = 1e-10;
 /// //     = (0.25 + 0.25 + 0.01 + 0.64) / 4 = 0.2875
 /// assert!((mse - 0.2875).abs() < 1e-10);
 /// ```
-pub fn mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn mean_squared_error<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
@@ -87,9 +88,13 @@ where
 /// // RMSE = sqrt(((2 - 1)^2 + (3 - 2)^2 + (4 - 3)^2) / 3) = sqrt(3/3) = 1.0
 /// assert!((rmse - 1.0).abs() < 1e-6);
 /// ```
-pub fn root_mean_squared_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn root_mean_squared_error<S1, S2>(
+    y_true: &ArrayBase<S1, Ix1>,
+    y_pred: &ArrayBase<S2, Ix1>,
+) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     mean_squared_error(y_true, y_pred).sqrt()
 }
@@ -125,9 +130,10 @@ where
 /// // MAE = (|2 - 1| + |3 - 2| + |4 - 3|) / 3 = (1 + 1 + 1) / 3 = 1.0
 /// assert!((mae - 1.0).abs() < 1e-6);
 /// ```
-pub fn mean_absolute_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn mean_absolute_error<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
@@ -147,6 +153,13 @@ where
 ///
 /// When `y_true` has (near-)zero variance the score is undefined; following scikit-learn, this
 /// returns `1.0` for a perfect fit (`SSE ~= 0`) and `0.0` otherwise
+///
+/// # NaN handling
+///
+/// Unlike [`explained_variance_score`], this does **not** skip non-finite samples: `SSE` and `SST`
+/// are plain sums, so a single `NaN`/`inf` in `y_true` or `y_pred` propagates and makes the result
+/// `NaN`. That surfaces bad data rather than hiding it - prefer it when you want corruption to be
+/// visible, and clean the inputs beforehand if you do not
 ///
 /// # Parameters
 ///
@@ -174,9 +187,10 @@ where
 /// // mean(y_true) = 3, SST = 4 + 0 + 4 = 8, SSE = 1 + 0 + 1 = 2, so R^2 = 1 - 2/8 = 0.75
 /// assert!((r2 - 0.75).abs() < 1e-6);
 /// ```
-pub fn r2_score<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn r2_score<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
@@ -198,6 +212,14 @@ where
 /// the residuals rather than their mean square, so a constant prediction bias does not lower the
 /// score. The best possible value is 1.0; when `y_true` has zero variance the score is undefined
 /// and returns 1.0 for residuals of zero variance, otherwise 0.0
+///
+/// # NaN handling
+///
+/// This goes through [`crate::math::variance`], which **silently skips** non-finite samples and
+/// averages over the finite subset. So unlike [`r2_score`] (where a `NaN` propagates to a `NaN`
+/// result), a few `NaN`/`inf` entries here leave a normal-looking score computed from the rest.
+/// That is convenient but can mask corrupt data - validate the inputs if a silently dropped sample
+/// would be a problem
 ///
 /// # Parameters
 ///
@@ -225,9 +247,13 @@ where
 /// // predictions are biased (r2_score would be lower here).
 /// assert!((explained_variance_score(&y_true, &y_pred) - 1.0).abs() < 1e-12);
 /// ```
-pub fn explained_variance_score<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn explained_variance_score<S1, S2>(
+    y_true: &ArrayBase<S1, Ix1>,
+    y_pred: &ArrayBase<S2, Ix1>,
+) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
@@ -280,9 +306,13 @@ where
 /// // Sorted absolute errors are [0, 0, 0, 6]; the median is 0.0, unmoved by the outlier.
 /// assert!((median_absolute_error(&y_true, &y_pred) - 0.0).abs() < 1e-12);
 /// ```
-pub fn median_absolute_error<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> f64
+pub fn median_absolute_error<S1, S2>(
+    y_true: &ArrayBase<S1, Ix1>,
+    y_pred: &ArrayBase<S2, Ix1>,
+) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
@@ -332,12 +362,13 @@ where
 /// // Per-sample ratios are 0.5, 0, 0, so MAPE = 0.5 / 3 = 0.1666...
 /// assert!((mean_absolute_percentage_error(&y_true, &y_pred) - 0.166666667).abs() < 1e-6);
 /// ```
-pub fn mean_absolute_percentage_error<S>(
-    y_true: &ArrayBase<S, Ix1>,
-    y_pred: &ArrayBase<S, Ix1>,
+pub fn mean_absolute_percentage_error<S1, S2>(
+    y_true: &ArrayBase<S1, Ix1>,
+    y_pred: &ArrayBase<S2, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 

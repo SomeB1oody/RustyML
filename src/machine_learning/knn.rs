@@ -151,7 +151,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If k is 0
+    /// - `Error::InvalidParameter` - If `k` is 0, or if Minkowski `p` is less than 1 (or not
+    ///   finite); orders below 1 are not valid metrics and would break kd-tree pruning
     pub fn new(
         k: usize,
         weighting_strategy: WeightingStrategy,
@@ -159,6 +160,17 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ) -> Result<Self, Error> {
         if k == 0 {
             return Err(Error::invalid_parameter("k", "must be greater than 0"));
+        }
+
+        // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
+        match metric {
+            DistanceCalculationMetric::Minkowski(p) if p < 1.0 || !p.is_finite() => {
+                return Err(Error::invalid_parameter(
+                    "p",
+                    format!("Minkowski p must be at least 1 and finite, got {}", p),
+                ));
+            }
+            _ => {}
         }
 
         Ok(KNN {

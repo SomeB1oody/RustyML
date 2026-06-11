@@ -100,7 +100,8 @@ impl DBSCAN {
     /// # Errors
     ///
     /// Returns `Error::InvalidParameter` if `eps` is non-positive or not finite,
-    /// if `min_samples` is 0, or if Minkowski `p` is non-positive or not finite
+    /// if `min_samples` is 0, or if Minkowski `p` is less than 1 (or not finite); orders below 1
+    /// are not valid metrics, so they would break the neighborhood test
     pub fn new(
         eps: f64,
         min_samples: usize,
@@ -121,10 +122,11 @@ impl DBSCAN {
         }
 
         match metric {
-            DistanceCalculationMetric::Minkowski(p) if (p <= 0.0 || !p.is_finite()) => {
+            // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
+            DistanceCalculationMetric::Minkowski(p) if p < 1.0 || !p.is_finite() => {
                 return Err(Error::invalid_parameter(
                     "p",
-                    format!("Minkowski p must be positive and finite, got {}", p),
+                    format!("Minkowski p must be at least 1 and finite, got {}", p),
                 ));
             }
             _ => {} // Euclidean and Manhattan need no extra validation

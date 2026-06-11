@@ -25,6 +25,16 @@ fn constructor_k_one_succeeds() {
     KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
 }
 
+/// Minkowski p < 1 is not a valid metric and must return Error::InvalidParameter
+#[test]
+fn constructor_rejects_minkowski_p_below_one() {
+    let err = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(0.5)).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidParameter { .. }),
+        "expected InvalidParameter for Minkowski(0.5), got {err:?}"
+    );
+}
+
 /// Default constructor must expose k=5, Uniform, Euclidean
 #[test]
 fn constructor_default_values() {

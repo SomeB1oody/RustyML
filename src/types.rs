@@ -4,13 +4,15 @@
 //! module:
 //! - [`RegularizationType`](crate::types::RegularizationType) and [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) - used by the machine
 //!   learning models.
-//! - [`KernelType`] - used by both [`SVC`](crate::machine_learning::svc::SVC) and
-//!   [`KernelPCA`](crate::utils::kernel_pca::KernelPCA).
+//! - [`KernelType`](crate::types::KernelType) - used by both [`SVC`](crate::machine_learning::svc::SVC)
+//!   and [`KernelPCA`](crate::utils::kernel_pca::KernelPCA).
 //!
 //! Each type also carries the behavior that belongs to it (distance / kernel
 //! evaluation) as inherent methods, so consumers share a single implementation
 //! instead of re-matching the enum in every model.
 
+// Serde derives are only needed where models serialize (machine_learning / utils)
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 
@@ -24,7 +26,11 @@ use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 /// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
 /// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
 /// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    any(feature = "machine_learning", feature = "utils"),
+    derive(Deserialize, Serialize)
+)]
 pub enum DistanceCalculationMetric {
     Euclidean,
     Manhattan,
@@ -57,24 +63,8 @@ impl DistanceCalculationMetric {
     }
 
     /// Returns whether `distance(a, b) <= threshold` under this metric
-    ///
-    /// For the Euclidean metric this compares the squared distance against `threshold^2`,
-    /// avoiding the per-pair square root that `distance` would otherwise take, which helps
-    /// neighborhood queries (e.g. DBSCAN's `eps` test) that only need the threshold decision.
-    /// `threshold` is assumed to be non-negative
     pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
-        use crate::math::{
-            manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
-        };
-        match *self {
-            DistanceCalculationMetric::Euclidean => {
-                squared_euclidean_distance_row(&a, &b) <= threshold * threshold
-            }
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b) <= threshold,
-            DistanceCalculationMetric::Minkowski(p) => {
-                minkowski_distance_row(&a, &b, p) <= threshold
-            }
-        }
+        self.comparable_distance(a, b) <= self.comparable_scalar(threshold)
     }
 
     /// Maps a non-negative scalar (a true distance or a per-axis coordinate gap) into this
@@ -112,6 +102,7 @@ impl DistanceCalculationMetric {
     /// Converts a comparable-space distance back to a true distance (inverse of
     /// [`comparable_distance`](Self::comparable_distance)): `Euclidean -> sqrt`,
     /// `Manhattan -> identity`, `Minkowski(p) -> ^(1/p)`
+    #[cfg(feature = "machine_learning")]
     pub(crate) fn distance_from_comparable(&self, c: f64) -> f64 {
         match *self {
             DistanceCalculationMetric::Euclidean => c.sqrt(),
@@ -135,7 +126,11 @@ impl DistanceCalculationMetric {
 /// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
 ///   multiplied by the specified coefficient. Discourages large parameter values but
 ///   typically does not produce sparse solutions.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(
+    any(feature = "machine_learning", feature = "utils"),
+    derive(Deserialize, Serialize)
+)]
 pub enum RegularizationType {
     L1(f64),
     L2(f64),
@@ -149,7 +144,11 @@ pub enum RegularizationType {
 /// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma*|x-y|^2)
 /// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma*x*y + coef0)
 /// - `Cosine` - Cosine kernel: K(x, y) = (x*y) / (||x|| * ||y||)
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone)]
+#[cfg_attr(
+    any(feature = "machine_learning", feature = "utils"),
+    derive(Deserialize, Serialize)
+)]
 pub enum KernelType {
     Linear,
     Poly { degree: u32, gamma: f64, coef0: f64 },
@@ -181,7 +180,7 @@ impl KernelType {
                 degree,
                 gamma,
                 coef0,
-            } => (gamma * x1.dot(&x2) + coef0).powf(degree as f64),
+            } => (gamma * x1.dot(&x2) + coef0).powi(degree as i32),
             // K(x, y) = exp(-gamma*|x-y|^2)
             KernelType::RBF { gamma } => {
                 let diff = &x1 - &x2;
@@ -264,8 +263,8 @@ impl KernelType {
                         gamma,
                         coef0,
                     } => {
-                        let degree = degree as f64;
-                        k_row.mapv_inplace(|v| (gamma * v + coef0).powf(degree));
+                        let degree = degree as i32;
+                        k_row.mapv_inplace(|v| (gamma * v + coef0).powi(degree));
                     }
                     KernelType::Sigmoid { gamma, coef0 } => {
                         k_row.mapv_inplace(|v| (gamma * v + coef0).tanh());

@@ -183,13 +183,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Shared configuration types (kernels, distance metrics, regularization).
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(any(feature = "machine_learning", feature = "utils", feature = "metrics"))]
 pub mod types;
-
-/// `KernelType` is re-exported at the crate root for backward compatibility; its
-/// canonical home is the [`types`] module.
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
-pub use types::KernelType;
 
 #[cfg(feature = "show_progress")]
 use indicatif::{ProgressBar, ProgressStyle};

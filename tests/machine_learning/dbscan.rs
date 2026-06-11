@@ -84,13 +84,24 @@ fn constructor_rejects_min_samples_zero() {
     );
 }
 
-/// Minkowski(0) is rejected (p must be > 0)
+/// Minkowski(0) is rejected (p must be >= 1)
 #[test]
 fn constructor_rejects_minkowski_p_zero() {
     let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(0.0));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(0), got: {:?}",
+        result
+    );
+}
+
+/// Minkowski(0.5) is rejected: 0 < p < 1 is not a valid metric (triangle inequality fails)
+#[test]
+fn constructor_rejects_minkowski_p_below_one() {
+    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(0.5));
+    assert!(
+        matches!(result, Err(Error::InvalidParameter { .. })),
+        "expected InvalidParameter for Minkowski(0.5), got: {:?}",
         result
     );
 }
