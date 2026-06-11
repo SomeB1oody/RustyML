@@ -533,11 +533,13 @@ pub mod machine_learning;
 ///
 /// # Examples
 /// ```rust
+/// // Brings every category's items (traits, models, metrics, ...) into scope at once:
 /// use rustyml::prelude::*;
-/// // `use rustyml::prelude::machine_learning::*;` imports machine learning models
-/// // `use rustyml::prelude::utils::*;` imports utility functions
-/// // `use rustyml::prelude::math::*;` imports math functions
-/// // `use rustyml::prelude::metrics::*;` imports metric functions
+///
+/// // Or import a single category:
+/// // `use rustyml::prelude::machine_learning::*;` for the machine learning models
+/// // `use rustyml::prelude::utils::*;`            for the utility functions
+/// // `use rustyml::prelude::metrics::*;`          for the metric functions
 /// ```
 pub mod prelude;
 
