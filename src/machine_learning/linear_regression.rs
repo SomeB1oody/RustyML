@@ -10,7 +10,8 @@ use super::validation::{
 };
 use crate::error::Error;
 use crate::math::matmul::par_matvec;
-use crate::parallel_gates::CHEAP_MAP_F64_PARALLEL_THRESHOLD;
+use crate::math::reduction::det_par_fold;
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
@@ -197,7 +198,9 @@ impl LinearRegression {
     /// # Performance
     ///
     /// Parallel computation is used for L1 regularization and gradient updates when the number of
-    /// features clears the calibrated cheap-map gate (see `crate::parallel_gates`)
+    /// features clears the calibrated cheap-map gate; the SSE and intercept-gradient sums run as
+    /// deterministic blocked folds above the sum gate (see `crate::parallel_gates`), so results
+    /// are bitwise identical at any thread count
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -252,8 +255,18 @@ impl LinearRegression {
             // Calculate errors once; the same vector feeds both the cost and the gradient
             error_vec.assign(&(&predictions - y));
 
-            // Cost (sum of squared errors) reuses the error vector: SSE = e dot e
-            let sse = error_vec.dot(&error_vec);
+            // Cost (sum of squared errors) reuses the error vector: SSE = e dot e.
+            // Above the sum gate, the deterministic blocked fold keeps the float result
+            // independent of the rayon thread count
+            let sse = match error_vec.as_slice() {
+                Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+                    slice,
+                    |block| block.iter().map(|v| v * v).sum::<f64>(),
+                    |a, b| a + b,
+                    0.0,
+                ),
+                _ => error_vec.dot(&error_vec),
+            };
 
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
@@ -282,7 +295,14 @@ impl LinearRegression {
             // Gradients via matrix operations
             let mut weight_gradients = par_matvec(&x.t(), &error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
-                error_vec.sum() / (n_samples as f64)
+                // On the gradient path: same deterministic blocked fold above the sum gate
+                let error_sum = match error_vec.as_slice() {
+                    Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => {
+                        det_par_fold(slice, |block| block.iter().sum::<f64>(), |a, b| a + b, 0.0)
+                    }
+                    _ => error_vec.sum(),
+                };
+                error_sum / (n_samples as f64)
             } else {
                 0.0
             };

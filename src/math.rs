@@ -10,6 +10,10 @@
 /// ndarray operands, with calibrated serial/parallel switching
 pub mod matmul;
 
+/// Deterministic blocked parallel reductions (`det_par_fold`, `det_par_fold_range`) whose
+/// float accumulation order is independent of the rayon thread count
+pub mod reduction;
+
 use ahash::AHashMap;
 use ndarray::{ArrayBase, Data, Ix1, Zip};
 
@@ -224,10 +228,22 @@ pub fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
+/// Parallel gate for exp-heavy `f64` reductions ([`logistic_loss`]): below this element count
+/// the deterministic blocked fold cannot beat the serial sum.
+///
+/// Measured on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-12; see benches/RESULTS.md
+/// "exp-heavy f64 reduction": crossover bracket 16K-32K elements (0.96x at 16K, 1.85x at 32K,
+/// 14.3x at 1M). Sits below the cheap-sum gate because each element costs an `exp` plus an `ln`
+const EXP_REDUCE_MIN_ELEMS: usize = 32_768;
+
 /// Calculates the logistic regression loss (log loss)
 ///
 /// This computes the average cross-entropy loss by applying the sigmoid
-/// to raw logits before evaluating the log-likelihood
+/// to raw logits before evaluating the log-likelihood.
+///
+/// Above a calibrated input size the sum runs as a deterministic blocked parallel reduction
+/// ([`reduction::det_par_fold_range`]): the float result is bitwise identical at any rayon
+/// thread count, though not bitwise identical to the serial sum used below the gate
 ///
 /// # Parameters
 ///
@@ -268,14 +284,22 @@ where
     );
     let n = logits.len() as f64;
 
-    let total_loss = logits
-        .iter()
-        .zip(actual_labels.iter())
-        .map(|(&x, &y)| {
-            // Numerically stable log loss: max(0, x) - x*y + log(1 + exp(-|x|))
-            x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln()
-        })
-        .sum::<f64>();
+    // Numerically stable log loss: max(0, x) - x*y + log(1 + exp(-|x|))
+    let loss_term = |x: f64, y: f64| x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln();
+
+    let total_loss = match (logits.as_slice(), actual_labels.as_slice()) {
+        (Some(x), Some(y)) if x.len() >= EXP_REDUCE_MIN_ELEMS => reduction::det_par_fold_range(
+            x.len(),
+            |range| range.map(|i| loss_term(x[i], y[i])).sum::<f64>(),
+            |a, b| a + b,
+            0.0,
+        ),
+        _ => logits
+            .iter()
+            .zip(actual_labels.iter())
+            .map(|(&x, &y)| loss_term(x, y))
+            .sum::<f64>(),
+    };
 
     total_loss / n
 }

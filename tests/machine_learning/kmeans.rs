@@ -612,11 +612,11 @@ fn load_from_nonexistent_path_is_io_error() {
     );
 }
 
-// Large-dataset parallel assignment branch (n_samples >= 1000)
+// Larger-dataset fits (historically the parallel assignment branch; the work-metric
+// gates have since moved, so this is now a plain medium-size correctness check)
 
 /// Build 1200 points (3 tight, well-separated blobs of 400 each) with fully
-/// deterministic jitter (no RNG); 1200 >= KMEANS_PARALLEL_THRESHOLD (1000), so `fit`
-/// takes the parallel per-sample assignment branch
+/// deterministic jitter (no RNG)
 fn three_blobs_1200() -> Array2<f64> {
     let centers = [(0.0_f64, 0.0_f64), (10.0, 0.0), (5.0, 10.0)];
     let mut v = Vec::with_capacity(1200 * 2);
@@ -671,6 +671,60 @@ fn fit_parallel_branch_k3_centroids_near_true_means_1200() {
                 labels[i], lab,
                 "row {i} (blob {blk}) should share label {lab}, got {}",
                 labels[i]
+            );
+        }
+    }
+}
+
+/// Above the deterministic-fold gate (samples x features >= 262_144) the centroid
+/// accumulation runs as a blocked parallel fold. Integer-valued rows make every cluster
+/// sum exact in `f64` (well below 2^53), so regardless of summation grouping the stored
+/// centroids must equal the per-label means recomputed serially - bit for bit. A wiring
+/// bug in the fold (wrong rows, lost blocks, misordered merge) cannot pass this
+#[test]
+fn fit_parallel_accumulate_matches_serial_means_exactly() {
+    let n = 16_384_usize;
+    let d = 16_usize;
+    let k = 4_usize;
+    assert!(n * d >= 262_144, "dataset must cross the sum-gate work metric");
+
+    // Four integer-valued blobs at offsets 0/100/200/300, deterministic jitter in 0..13
+    let mut v = Vec::with_capacity(n * d);
+    for i in 0..n {
+        for j in 0..d {
+            v.push((((i * 31 + j * 7) % 13) + (i % k) * 100) as f64);
+        }
+    }
+    let data = Array2::from_shape_vec((n, d), v).unwrap();
+
+    // One Lloyd step: labels and centroids then come from the same assignment pass
+    let mut km = KMeans::new(k, 1, 1e-12, Some(7)).unwrap();
+    km.fit(&data).unwrap();
+
+    let labels = km.get_labels().unwrap();
+    let centroids = km.get_centroids().unwrap();
+
+    let mut sums = Array2::<f64>::zeros((k, d));
+    let mut counts = vec![0usize; k];
+    for (i, &lab) in labels.iter().enumerate() {
+        counts[lab] += 1;
+        for j in 0..d {
+            sums[(lab, j)] += data[(i, j)];
+        }
+    }
+
+    for c in 0..k {
+        assert!(
+            counts[c] > 0,
+            "cluster {c} must be non-empty on this designed dataset (else the reseed \
+             path replaces its centroid and the mean identity no longer applies)"
+        );
+        for j in 0..d {
+            let expected = sums[(c, j)] / counts[c] as f64;
+            assert_eq!(
+                centroids[(c, j)],
+                expected,
+                "centroid ({c},{j}): parallel accumulate diverged from the exact serial mean"
             );
         }
     }

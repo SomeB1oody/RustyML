@@ -270,7 +270,8 @@ fn ledoit_wolf_shrinkage(
     let n = n_samples as f64;
     let p = n_features as f64;
 
-    // Identity-target statistics of the maximum-likelihood covariance S = sw / n
+    // Identity-target statistics of the maximum-likelihood covariance S = sw / n.
+    // Serial sums: the inputs are n_features x n_features, far below the parallel sum gate
     let sw_frob_sq: f64 = sw.iter().map(|&v| v * v).sum();
     let s_norm_sq = sw_frob_sq / (p * n * n); // ||S||^2
     let mu = sw.diag().sum() / (p * n); // <S, I> = trace(S) / p

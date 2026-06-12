@@ -402,7 +402,9 @@ impl IsolationForest {
     /// Taking `c_n` as a parameter lets batch prediction compute it a single time
     /// instead of recomputing it for every sample
     fn normalized_score(&self, sample: &[f64], trees: &[IsolationTree], c_n: f64) -> f64 {
-        // Average path length of the sample across all trees
+        // Average path length of the sample across all trees; one term per tree (~10),
+        // far below any parallel reduction gate, and the per-sample batch loop already
+        // parallelizes one level up
         let avg_path_length: f64 = trees
             .iter()
             .map(|tree| self.path_length(sample, tree, 0))

@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::parallel_gates::{
     CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS,
 };
-use crate::reduction::det_par_fold;
+use crate::math::reduction::det_par_fold;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;

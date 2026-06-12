@@ -573,7 +573,8 @@ impl SVC {
     ) -> usize {
         let n_samples = alphas.len();
 
-        // Find the index with maximum |E1-E2|
+        // Find the index with maximum |E1-E2|. Stays serial for the same reason as
+        // `compute_error`: the kernel matrix bounds n far below any parallel scan gate
         let result = (0..n_samples)
             .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
             .map(|i| {
@@ -751,7 +752,9 @@ impl SVC {
     {
         let n_samples = alphas.len();
 
-        // Decision-function sum over the non-zero alphas
+        // Decision-function sum over the non-zero alphas. Stays serial: the O(n^2) kernel
+        // matrix bounds n far below the parallel sum gate (262_144 alphas would need a
+        // ~550 GB kernel matrix)
         let sum: f64 = (0..n_samples)
             .filter(|&j| alphas[j] > 0.0)
             .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])

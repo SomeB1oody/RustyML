@@ -170,7 +170,10 @@ impl LogisticRegression {
     ///
     /// # Performance
     ///
-    /// Parallel processing is automatically enabled when the number of samples reaches 1000
+    /// The per-iteration logits and gradient run as block-parallel GEMVs above their FLOPs
+    /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
+    /// above its exp-reduction gate (see [`crate::math::logistic_loss`]), so results are
+    /// bitwise identical at any thread count
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,

@@ -7,7 +7,7 @@
 use crate::error::Error;
 use crate::math::matmul::par_matmul;
 use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
-use crate::reduction::det_par_fold;
+use crate::math::reduction::det_par_fold;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;

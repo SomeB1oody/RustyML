@@ -405,11 +405,6 @@ pub use random::{clear_global_seed, set_global_seed};
 ))]
 pub(crate) mod parallel_gates;
 
-/// Crate-internal deterministic blocked parallel reduction for `f64` sums whose accumulation
-/// order must not depend on thread scheduling. See `src/reduction.rs`
-#[cfg(feature = "utils")]
-pub(crate) mod reduction;
-
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///
 /// This module provides comprehensive mathematical functions essential for machine learning algorithms,

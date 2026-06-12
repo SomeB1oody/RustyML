@@ -918,11 +918,12 @@ impl TSNE {
         let n_samples = p.nrows();
 
         if parallel {
-            // Sum KL terms per row in parallel
-            (0..n_samples)
+            // Per-row terms in parallel, summed sequentially in row order
+            let row_terms: Vec<f64> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| self.kl_divergence_row(p, num, sum_num, i))
-                .sum()
+                .collect();
+            row_terms.iter().sum()
         } else {
             (0..n_samples)
                 .map(|i| self.kl_divergence_row(p, num, sum_num, i))

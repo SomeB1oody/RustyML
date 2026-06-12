@@ -310,6 +310,9 @@ impl LinearSVC {
                     }
                 };
 
+                // Serial accumulation: one minibatch is far below the parallel sum gate,
+                // and the accumulator is an n_features vector, so blocked merging would
+                // allocate more than it saves
                 let (weight_grad_sum, bias_grad_sum) = {
                     let mut acc = (Array1::<f64>::zeros(n_features), 0.0);
                     for &idx in batch_indices {

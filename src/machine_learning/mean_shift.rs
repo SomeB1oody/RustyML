@@ -223,6 +223,8 @@ impl MeanShift {
                             let dist_sq = (center_sq + x_norm_sq - 2.0 * proj).max(0.0);
                             (-gamma * dist_sq).exp()
                         });
+                // Serial sum: this runs inside the per-seed parallel loop, where nesting
+                // another parallel reduction only adds scheduling overhead
                 let weight_sum = weights.sum();
 
                 let new_center = if weight_sum > 0.0 {

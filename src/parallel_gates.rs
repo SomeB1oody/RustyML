@@ -103,12 +103,14 @@ pub(crate) const TREE_TRAVERSAL_MIN_VISITS: usize = 262_144;
 #[cfg(feature = "machine_learning")]
 pub(crate) const SORT_SCAN_MIN_ELEMS: usize = 8_192;
 
-/// `f64` sum-style reductions (sum of squares, Welford moments), gated on the element count.
+/// `f64` sum-style reductions (sum of squares, Welford moments), gated on the element count
+/// (or an equivalent work metric, e.g. samples x features for k-means' per-sample
+/// centroid accumulation).
 ///
 /// Below the gate a parallel reduction cannot win; above it, callers must use
-/// [`crate::reduction::det_par_fold`] rather than a bare rayon `sum`/`reduce`, whose
-/// scheduling-dependent grouping makes the float result non-reproducible.
+/// [`crate::math::reduction::det_par_fold`] (or its index-range twin) rather than a bare rayon
+/// `sum`/`reduce`, whose scheduling-dependent grouping makes the float result non-reproducible.
 ///
 /// Measured crossover bracket: 131K-262K elements (1.24x at 262K, 3.5x at 1M)
-#[cfg(feature = "utils")]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 pub(crate) const SUM_F64_PARALLEL_MIN_ELEMS: usize = 262_144;

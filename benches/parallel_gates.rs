@@ -24,11 +24,13 @@ use rustyml::bench_internals::{
     KdTree, PoolKind, conv_forward_forced, windowed_pool_forward_impl,
 };
 use rustyml::math::matmul::{par_matmul, split_matmul, split_matvec};
+use rustyml::math::reduction::det_par_fold_range;
 use rustyml::types::DistanceCalculationMetric;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::PaddingType;
 use std::fmt::Write as _;
 use std::hint::black_box;
+use std::ops::AddAssign;
 use std::time::{Duration, Instant};
 
 /// Nanoseconds per call of `f`: the batch size grows until one batch takes >= 5 ms, then the
@@ -1206,6 +1208,136 @@ fn calibrate_det_reduce_block() -> Section {
     }
 }
 
+// ---- exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (math::logistic_loss) ----
+
+/// Per-element work is the numerically stable log-loss term (`exp` + `ln` + a few flops), an
+/// order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits well
+/// below SUM_F64_PARALLEL_MIN_ELEMS. The parallel side is the deterministic blocked range fold
+/// the production path uses
+fn calibrate_exp_reduction() -> Section {
+    let max_n = 1_048_576usize;
+    let logits = random_vector_f64(max_n, 81).mapv(|v| v * 4.0);
+    let labels = random_vector_f64(max_n, 82).mapv(|v| if v > 0.0 { 1.0 } else { 0.0 });
+    let logit_slice = logits.as_slice().unwrap();
+    let label_slice = labels.as_slice().unwrap();
+
+    let loss_term = |x: f64, y: f64| x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln();
+
+    let mut rows = Vec::new();
+    for &n in &[8_192usize, 16_384, 32_768, 65_536, 131_072, 262_144, 1_048_576] {
+        let s = time_per_call_ns(|| {
+            black_box(
+                logit_slice[..n]
+                    .iter()
+                    .zip(label_slice[..n].iter())
+                    .map(|(&x, &y)| loss_term(x, y))
+                    .sum::<f64>(),
+            );
+        });
+        let p = time_per_call_ns(|| {
+            black_box(det_par_fold_range(
+                n,
+                |range| {
+                    range
+                        .map(|i| loss_term(logit_slice[i], label_slice[i]))
+                        .sum::<f64>()
+                },
+                |a, b| a + b,
+                0.0,
+            ));
+        });
+        rows.push(Row {
+            label: format!("logistic loss, n={n}"),
+            work: n,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "exp-heavy f64 reduction (EXP_REDUCE_MIN_ELEMS: logistic loss)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+// ---- k-means assign-accumulate: SUM gate on samples x features ----
+
+/// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
+/// (plus counts and inertia). Serial is the production scatter loop; parallel is the
+/// deterministic blocked range fold with an (Array2 sums, counts, inertia) accumulator per
+/// block. Work metric is samples x features - the d=8 rungs land in the same bracket as the
+/// d=32 rungs, which is what justifies gating on the product
+fn calibrate_kmeans_accumulate() -> Section {
+    let mut rows = Vec::new();
+    for &(n, d, k) in &[
+        (2_048usize, 32usize, 16usize),
+        (4_096, 32, 16),
+        (8_192, 32, 16),
+        (16_384, 32, 16),
+        (65_536, 32, 16),
+        (8_192, 8, 8),
+        (32_768, 8, 8),
+        (131_072, 8, 8),
+    ] {
+        let data = random_matrix_f64(n, d, 91);
+        let mut rng = StdRng::seed_from_u64(92);
+        let results: Vec<(usize, f64)> = (0..n)
+            .map(|_| (rng.random_range(0..k), rng.random_range(0.0..2.0)))
+            .collect();
+
+        let s = time_per_call_ns(|| {
+            let mut sums = Array2::<f64>::zeros((k, d));
+            let mut counts = vec![0usize; k];
+            let mut inertia = 0.0;
+            for (i, &(cluster, dist)) in results.iter().enumerate() {
+                inertia += dist;
+                sums.row_mut(cluster).add_assign(&data.row(i));
+                counts[cluster] += 1;
+            }
+            black_box((sums, counts, inertia));
+        });
+        let p = time_per_call_ns(|| {
+            let folded = det_par_fold_range(
+                n,
+                |range| {
+                    let mut sums = Array2::<f64>::zeros((k, d));
+                    let mut counts = vec![0usize; k];
+                    let mut inertia = 0.0;
+                    for i in range {
+                        let (cluster, dist) = results[i];
+                        inertia += dist;
+                        sums.row_mut(cluster).add_assign(&data.row(i));
+                        counts[cluster] += 1;
+                    }
+                    (sums, counts, inertia)
+                },
+                |(mut sa, mut ca, ia), (sb, cb, ib)| {
+                    sa += &sb;
+                    for (a, b) in ca.iter_mut().zip(cb) {
+                        *a += b;
+                    }
+                    (sa, ca, ia + ib)
+                },
+                (Array2::<f64>::zeros((k, d)), vec![0usize; k], 0.0),
+            );
+            black_box(folded);
+        });
+        rows.push(Row {
+            label: format!("n={n} d={d} k={k}"),
+            work: n * d,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "k-means assign-accumulate (SUM gate on samples x features)",
+        work_unit: "samples x features",
+        pick_fastest: false,
+        rows,
+    }
+}
+
 // ---- kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS ----
 
 /// The "serial" column is the kd-tree path and the "parallel" column the brute-force scan, so
@@ -1311,6 +1443,8 @@ fn main() {
     sections.push(calibrate_sort_scan());
     sections.push(calibrate_tree_build());
     sections.push(calibrate_det_reduce_block());
+    sections.push(calibrate_exp_reduction());
+    sections.push(calibrate_kmeans_accumulate());
     sections.push(calibrate_kd_tree_dims());
 
     for s in &sections {

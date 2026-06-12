@@ -884,7 +884,9 @@ impl DecisionTree {
                 consider(pos, imp_left, imp_right, &mut best_score, &mut best);
             }
         } else {
-            // Regression (CART/MSE): maintain running sum and sum of squares for the left side
+            // Regression (CART/MSE): maintain running sum and sum of squares for the left side.
+            // Serial sums: this runs inside the per-feature parallel split search, and the
+            // prefix scan below is inherently sequential anyway
             let total_sum: f64 = order.iter().map(|&(_, idx)| y[idx]).sum();
             let total_sumsq: f64 = order.iter().map(|&(_, idx)| y[idx] * y[idx]).sum();
             let mut left_sum = 0.0;

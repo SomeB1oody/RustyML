@@ -8,13 +8,15 @@ use super::validation::{
 };
 use crate::error::Error;
 use crate::math::matmul::par_matmul;
+use crate::math::reduction::{DET_REDUCE_BLOCK, det_par_fold, det_par_fold_range};
 use crate::math::squared_euclidean_distance_row;
-use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::{SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+    ParallelSlice, ParallelSliceMut,
 };
 use std::ops::AddAssign;
 
@@ -270,7 +272,18 @@ impl KMeans {
             }
             let distances = &min_dists;
 
-            let total_dist: f64 = distances.iter().sum();
+            // Deterministic blocked sum above the sum gate; the roulette walk below stays
+            // serial (prefix scan)
+            let total_dist: f64 = if distances.len() >= SUM_F64_PARALLEL_MIN_ELEMS {
+                det_par_fold(
+                    distances,
+                    |block| block.iter().sum::<f64>(),
+                    |a, b| a + b,
+                    0.0,
+                )
+            } else {
+                distances.iter().sum()
+            };
 
             // All distances zero: fall back to random selection
             if total_dist == 0.0 {
@@ -318,7 +331,9 @@ impl KMeans {
     /// # Performance
     ///
     /// The per-iteration assignment runs as one block-parallel GEMM; the arg-min scan
-    /// parallelizes above the calibrated scan-class gate (see `crate::parallel_gates`)
+    /// parallelizes above the calibrated scan-class gate, and the centroid accumulation
+    /// runs as a deterministic blocked fold above the sum gate (see
+    /// `crate::parallel_gates`), so results are bitwise identical at any thread count
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -392,17 +407,69 @@ impl KMeans {
 
             let results = results?;
 
-            // Update labels and compute centroids in a single pass
-            let mut inertia = 0.0;
-            for (sample_idx, &(cluster_idx, dist)) in results.iter().enumerate() {
-                labels[sample_idx] = cluster_idx;
-                inertia += dist;
+            // Fold every sample's row into its cluster's running sum, plus counts and
+            // inertia. Above the sum gate (work metric: samples x features; see
+            // benches/RESULTS.md "k-means assign-accumulate") the deterministic blocked
+            // range fold keeps the accumulation order independent of the rayon thread count
+            let n_clusters = self.n_clusters;
+            let inertia = if n_samples.saturating_mul(n_features) >= SUM_F64_PARALLEL_MIN_ELEMS
+            {
+                let (sums, block_counts, inertia) = det_par_fold_range(
+                    n_samples,
+                    |range| {
+                        let mut sums = Array2::<f64>::zeros((n_clusters, n_features));
+                        let mut counts = vec![0usize; n_clusters];
+                        let mut inertia = 0.0;
+                        for i in range {
+                            let (cluster, dist) = results[i];
+                            inertia += dist;
+                            sums.row_mut(cluster).add_assign(&data_view.row(i));
+                            counts[cluster] += 1;
+                        }
+                        (sums, counts, inertia)
+                    },
+                    |(mut sums_a, mut counts_a, inertia_a), (sums_b, counts_b, inertia_b)| {
+                        sums_a += &sums_b;
+                        for (a, b) in counts_a.iter_mut().zip(counts_b) {
+                            *a += b;
+                        }
+                        (sums_a, counts_a, inertia_a + inertia_b)
+                    },
+                    (
+                        Array2::<f64>::zeros((n_clusters, n_features)),
+                        vec![0usize; n_clusters],
+                        0.0,
+                    ),
+                );
+                new_centroids.assign(&sums);
+                counts.copy_from_slice(&block_counts);
 
-                // Accumulate sample contributions to the new centroids
-                let sample = data.row(sample_idx);
-                new_centroids.row_mut(cluster_idx).add_assign(&sample);
-                counts[cluster_idx] += 1;
-            }
+                // The label store is a per-index map (no accumulation order to preserve);
+                // chunking it like the fold keeps the pass cheap for small n
+                labels
+                    .as_slice_mut()
+                    .expect("labels are freshly allocated and contiguous")
+                    .par_chunks_mut(DET_REDUCE_BLOCK)
+                    .zip(results.par_chunks(DET_REDUCE_BLOCK))
+                    .for_each(|(label_block, result_block)| {
+                        for (label, &(cluster, _)) in label_block.iter_mut().zip(result_block) {
+                            *label = cluster;
+                        }
+                    });
+                inertia
+            } else {
+                let mut inertia = 0.0;
+                for (sample_idx, &(cluster_idx, dist)) in results.iter().enumerate() {
+                    labels[sample_idx] = cluster_idx;
+                    inertia += dist;
+
+                    // Accumulate sample contributions to the new centroids
+                    let sample = data.row(sample_idx);
+                    new_centroids.row_mut(cluster_idx).add_assign(&sample);
+                    counts[cluster_idx] += 1;
+                }
+                inertia
+            };
 
             #[cfg(feature = "show_progress")]
             {
