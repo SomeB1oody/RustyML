@@ -14,18 +14,33 @@
 //!
 //! # Layout
 //!
-//! Tensors are `[batch, channels, spatial...]`; weights are flat row-major `[F, Cin, k...]`. Work is
-//! parallelized over `batch * filters` (forward), `filters` (weight/bias gradients), and
-//! `batch * channels` (input gradient) - each task writes a disjoint output region
+//! Tensors are `[batch, channels, spatial...]`; weights are flat row-major `[F, Cin, k...]`. The
+//! forward pass parallelizes over `(batch item, output-position block)` tasks - splitting the
+//! output positions lets a single large image use every core even at `batch == 1` - with each
+//! task building its own im2col block and GEMM, writing a disjoint output region. The backward
+//! pass parallelizes over batch items (their weight/bias partials are reduced in batch order, so
+//! results do not depend on the thread count) and routes its two GEMMs through
+//! [`par_matmul`](crate::neural_network::matmul::par_matmul) so a small batch still spreads the
+//! GEMM work
 
 use super::PaddingType;
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use ndarray::{Array2, ArrayD, ArrayView2, IxDyn};
+use crate::neural_network::matmul::par_matmul;
+use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
-/// Workload (output-element count) at or above which an engine pass runs in parallel
-const CONV_PARALLEL_THRESHOLD: usize = 10_000;
+/// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin*k`) at or above which an engine
+/// pass runs in parallel. Counting FLOPs rather than output elements keeps the gate meaningful
+/// across kernel sizes and channel counts (an output-element count would rate a `7x7x512` and a
+/// `3x3x3` convolution identically). Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md:
+/// the measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
+const CONV_PARALLEL_MIN_FLOPS: usize = 4_000_000;
+
+/// Minimum output-position columns per forward task: each task's GEMM re-packs the weight matrix,
+/// so blocks need enough columns to amortize that (set alongside `PAR_GEMM_MIN_BLOCK`, whose
+/// calibrated 16-64 plateau covers the same packing trade-off; see benches/RESULTS.md)
+const CONV_MIN_CHUNK_COLS: usize = 64;
 
 /// Analytic gradients returned by [`conv_backward`]
 pub(super) struct ConvGradients {
@@ -219,27 +234,37 @@ fn im2col_offsets(
     offsets
 }
 
-/// im2col for one batch: gathers the padded data into a `[Cin*k_plane, out_plane]` row-major matrix
-/// whose rows align with the flat weight matrix `[F, Cin*k_plane]`, so a single gemm computes the
-/// whole batch's convolution
-fn build_col(
-    padded: &[f32],
-    b: usize,
+/// Per-pass im2col inputs shared by every task: the padded data and the gather geometry
+struct ColContext<'a> {
+    /// Flat zero-padded input `[batch * Cin, padded_plane]`
+    padded: &'a [f32],
+    /// Input channels
     cin: usize,
+    /// Elements per padded channel-plane
     padded_plane: usize,
+    /// Kernel taps per channel
     k_plane: usize,
+    /// Output positions per channel-plane
     out_plane: usize,
-    offsets: &[usize],
-) -> Vec<f32> {
-    let mut col = vec![0.0f32; cin * k_plane * out_plane];
-    let b_base = b * cin * padded_plane;
-    for c in 0..cin {
-        let pc = b_base + c * padded_plane;
-        for kk in 0..k_plane {
-            let krow = (c * k_plane + kk) * out_plane;
-            let off = kk * out_plane;
-            for o in 0..out_plane {
-                col[krow + o] = padded[pc + offsets[off + o]];
+    /// `[k_plane, out_plane]` gather offsets from [`im2col_offsets`]
+    offsets: &'a [usize],
+}
+
+/// im2col for one batch item, restricted to the output positions `[c0, c1)`: gathers the padded
+/// data into a `[Cin*k_plane, c1-c0]` row-major matrix whose rows align with the flat weight
+/// matrix `[F, Cin*k_plane]`. Pass the full `[0, out_plane)` range for the whole item; a sub-range
+/// is one forward task's column block
+fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
+    let cols = c1 - c0;
+    let mut col = vec![0.0f32; ctx.cin * ctx.k_plane * cols];
+    let b_base = b * ctx.cin * ctx.padded_plane;
+    for c in 0..ctx.cin {
+        let pc = b_base + c * ctx.padded_plane;
+        for kk in 0..ctx.k_plane {
+            let krow = (c * ctx.k_plane + kk) * cols;
+            let off = kk * ctx.out_plane;
+            for (i, o) in (c0..c1).enumerate() {
+                col[krow + i] = ctx.padded[pc + ctx.offsets[off + o]];
             }
         }
     }
@@ -254,6 +279,21 @@ pub(super) fn conv_forward(
     bias: &[f32],
     strides: &[usize],
     padding: PaddingType,
+) -> Result<Tensor, Error> {
+    conv_forward_impl(input, weights, weight_shape, bias, strides, padding, None)
+}
+
+/// [`conv_forward`] with an optional override of the parallel/serial gate decision, so the
+/// calibration bench can time both paths on either side of the gate. Reachable outside the crate
+/// only through `bench_internals`
+pub fn conv_forward_impl(
+    input: &Tensor,
+    weights: &[f32],
+    weight_shape: &[usize],
+    bias: &[f32],
+    strides: &[usize],
+    padding: PaddingType,
+    force_parallel: Option<bool>,
 ) -> Result<Tensor, Error> {
     let in_shape = input.shape();
     let (batch, cin) = (in_shape[0], in_shape[1]);
@@ -291,32 +331,62 @@ pub(super) fn conv_forward(
     let w_mat = ArrayView2::from_shape((filters, k_total), weights)
         .expect("weights length matches [F, Cin*k]");
 
-    let process_b = |b: usize| -> Vec<f32> {
-        let col = build_col(padded, b, cin, padded_plane, k_plane, out_plane, &offsets);
-        let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
-            .expect("col length matches [Cin*k, out_plane]");
-        let out_b = w_mat.dot(&col_mat); // [F, out_plane]
+    // One task per (batch item, output-position block)
+    let ctx = ColContext {
+        padded,
+        cin,
+        padded_plane,
+        k_plane,
+        out_plane,
+        offsets: &offsets,
+    };
+    let fill_block = |b: usize, c0: usize, mut blk: ArrayViewMut2<f32>| {
+        let cols = blk.ncols();
+        let col = build_col_range(&ctx, b, c0, c0 + cols);
+        let col_mat = ArrayView2::from_shape((k_total, cols), &col)
+            .expect("col block length matches [Cin*k, cols]");
+        let mut prod = w_mat.dot(&col_mat); // [F, cols]
         // Bias added last
-        let mut tile = Vec::with_capacity(filters * out_plane);
-        for (f, row) in out_b.outer_iter().enumerate() {
-            let bf = bias[f];
-            tile.extend(row.iter().map(|&v| v + bf));
+        for (f, mut row) in prod.outer_iter_mut().enumerate() {
+            row += bias[f];
         }
-        tile
+        blk.assign(&prod);
     };
 
-    let parallel = batch * filters * out_plane >= CONV_PARALLEL_THRESHOLD;
-    let tiles = map_indexed(batch, parallel, process_b);
+    let gemm_flops = 2usize
+        .saturating_mul(batch)
+        .saturating_mul(filters)
+        .saturating_mul(out_plane)
+        .saturating_mul(k_total);
+    let parallel = force_parallel.unwrap_or(gemm_flops >= CONV_PARALLEL_MIN_FLOPS);
 
-    let mut out_flat = Vec::with_capacity(batch * filters * out_plane);
-    for tile in tiles {
-        out_flat.extend(tile);
+    let mut out3 = Array3::<f32>::zeros((batch, filters, out_plane));
+    if parallel {
+        // Enough blocks to feed every thread once the batch alone cannot
+        let chunks_per_item = rayon::current_num_threads().div_ceil(batch);
+        let chunk_cols = out_plane.div_ceil(chunks_per_item).max(CONV_MIN_CHUNK_COLS);
+        out3.axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(b, mut out_b)| {
+                out_b
+                    .axis_chunks_iter_mut(Axis(1), chunk_cols)
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(ci, blk)| fill_block(b, ci * chunk_cols, blk));
+            });
+    } else {
+        for (b, mut out_b) in out3.axis_iter_mut(Axis(0)).enumerate() {
+            fill_block(b, 0, out_b.view_mut());
+        }
     }
+
     let mut out_shape = Vec::with_capacity(2 + r);
     out_shape.push(batch);
     out_shape.push(filters);
     out_shape.extend_from_slice(&out_sp);
-    Ok(ArrayD::from_shape_vec(IxDyn(&out_shape), out_flat)
+    Ok(out3
+        .into_shape_with_order(IxDyn(&out_shape))
         .expect("conv output length matches shape"))
 }
 
@@ -372,20 +442,30 @@ pub(super) fn conv_backward(
     let w_mat = ArrayView2::from_shape((filters, k_total), weights)
         .expect("weights length matches [F, Cin*k]");
 
+    let ctx = ColContext {
+        padded,
+        cin,
+        padded_plane,
+        k_plane,
+        out_plane,
+        offsets: &offsets,
+    };
     let process_b = |b: usize| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
-        let col = build_col(padded, b, cin, padded_plane, k_plane, out_plane, &offsets);
+        let col = build_col_range(&ctx, b, 0, out_plane);
         let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
             .expect("col length matches [Cin*k, out_plane]");
         let g_slice = &grad_flat[b * filters * out_plane..(b + 1) * filters * out_plane];
         let g_mat = ArrayView2::from_shape((filters, out_plane), g_slice)
             .expect("grad slice matches [F, out_plane]");
 
-        let wg = g_mat.dot(&col_mat.t()); // [F, Cin*k]
+        let wg = par_matmul(g_mat, col_mat.t()); // [F, Cin*k]
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
         // Input gradient:
-        let dcol = w_mat.t().dot(&g_mat); // [Cin*k, out_plane]
-        let dcol = dcol.as_slice().expect("dot result is standard layout");
+        let dcol = par_matmul(w_mat.t(), g_mat); // [Cin*k, out_plane]
+        let dcol = dcol
+            .as_slice()
+            .expect("par_matmul result is standard layout");
         let mut pad_grad = vec![0.0f32; cin * padded_plane];
         for c in 0..cin {
             let pc = c * padded_plane;
@@ -405,7 +485,13 @@ pub(super) fn conv_backward(
         (wg, bias_p, input_grad_b)
     };
 
-    let parallel = batch * out_plane * k_total >= CONV_PARALLEL_THRESHOLD;
+    // Two GEMMs per item (weight grad + input grad), ~4*F*out_plane*k_total FLOPs apiece
+    let gemm_flops = 4usize
+        .saturating_mul(batch)
+        .saturating_mul(filters)
+        .saturating_mul(out_plane)
+        .saturating_mul(k_total);
+    let parallel = gemm_flops >= CONV_PARALLEL_MIN_FLOPS;
     let per_b = map_indexed(batch, parallel, process_b);
 
     // Reduce the per-batch partials in batch order (weight/bias sum across the batch axis)

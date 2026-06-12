@@ -2,38 +2,30 @@
 
 use crate::error::Error;
 use crate::neural_network::layers::recurrent::lstm::LSTM;
-use crate::neural_network::layers::serialize_weight::SerializableGateWeight;
 use crate::neural_network::traits::ApplyWeights;
+use ndarray::Array2;
 use serde::{Deserialize, Serialize};
 
 /// Serializable representation of LSTM layer weights
+///
+/// The four gates are stored fused, gate column blocks in the order `[i | f | g | o]`
+/// (input, forget, cell, output - the Keras LSTM layout)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableLSTMWeight {
-    /// Weights for the input gate
-    pub input: SerializableGateWeight,
-    /// Weights for the forget gate
-    pub forget: SerializableGateWeight,
-    /// Weights for the cell gate
-    pub cell: SerializableGateWeight,
-    /// Weights for the output gate
-    pub output: SerializableGateWeight,
+    /// Fused input kernel (input_dim, 4 * units)
+    pub kernel: Array2<f32>,
+    /// Fused recurrent kernel (units, 4 * units)
+    pub recurrent_kernel: Array2<f32>,
+    /// Fused bias (1, 4 * units)
+    pub bias: Array2<f32>,
 }
 
 impl ApplyWeights<LSTM> for SerializableLSTMWeight {
     fn apply_to_layer(&self, layer: &mut LSTM) -> Result<(), Error> {
         layer.set_weights(
-            self.input.kernel.clone(),
-            self.input.recurrent_kernel.clone(),
-            self.input.bias.clone(),
-            self.forget.kernel.clone(),
-            self.forget.recurrent_kernel.clone(),
-            self.forget.bias.clone(),
-            self.cell.kernel.clone(),
-            self.cell.recurrent_kernel.clone(),
-            self.cell.bias.clone(),
-            self.output.kernel.clone(),
-            self.output.recurrent_kernel.clone(),
-            self.output.bias.clone(),
+            self.kernel.clone(),
+            self.recurrent_kernel.clone(),
+            self.bias.clone(),
         )?;
         Ok(())
     }

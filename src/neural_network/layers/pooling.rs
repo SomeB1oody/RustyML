@@ -28,7 +28,7 @@ pub mod max_pooling_2d;
 /// 3D max pooling layer
 pub mod max_pooling_3d;
 /// Dimension-generic pooling engine shared by every pooling layer
-mod pooling_engine;
+pub(crate) mod pooling_engine;
 /// Input validation functions for pooling layers
 mod validation;
 

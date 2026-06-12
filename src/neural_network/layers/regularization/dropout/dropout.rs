@@ -13,12 +13,10 @@ use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
     validate_input_shape, validate_rate,
 };
+use crate::neural_network::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use crate::neural_network::traits::Layer;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-
-/// Element count at or above which the mask threshold runs in parallel
-const DROPOUT_PARALLEL_THRESHOLD: usize = 10000;
 
 /// Dropout layer for neural networks
 ///
@@ -117,7 +115,7 @@ impl Layer for Dropout {
         );
 
         // Threshold into a binary mask, in parallel for large inputs
-        if input.len() >= DROPOUT_PARALLEL_THRESHOLD {
+        if input.len() >= CHEAP_MAP_PARALLEL_THRESHOLD {
             mask.par_mapv_inplace(|x| if x >= self.rate { 1.0 } else { 0.0 });
         } else {
             mask.mapv_inplace(|x| if x >= self.rate { 1.0 } else { 0.0 });

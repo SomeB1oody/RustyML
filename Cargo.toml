@@ -46,6 +46,7 @@ thiserror = { version = "2.0.17", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
+criterion = "0.8.2"
 
 [[test]]
 name = "machine_learning"
@@ -71,6 +72,18 @@ required-features = ["metrics"]
 name = "math"
 path = "tests/math.rs"
 required-features = ["math"]
+
+# Parallel/serial gate calibration
+[[bench]]
+name = "parallel_gates"
+harness = false
+required-features = ["neural_network"]
+
+# End-to-end criterion benchmarks over the public API, for performance-regression tracking
+[[bench]]
+name = "nn_end_to_end"
+harness = false
+required-features = ["neural_network"]
 
 [profile.dev]
 opt-level = 0

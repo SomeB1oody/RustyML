@@ -2,6 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
+use crate::neural_network::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
@@ -17,11 +18,6 @@ use crate::neural_network::traits::Layer;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-
-/// Threshold for switching mask expansion to parallel computation
-///
-/// When batch_size * channels >= this value, mask expansion runs in parallel
-const SPATIAL_DROPOUT_1D_PARALLEL_THRESHOLD: usize = 64;
 
 /// Spatial Dropout layer for 1D data
 ///
@@ -134,7 +130,7 @@ impl Layer for SpatialDropout1D {
         apply_spatial_dropout_threshold(
             &mut mask_2d,
             self.rate,
-            SPATIAL_DROPOUT_1D_PARALLEL_THRESHOLD,
+            CHEAP_MAP_PARALLEL_THRESHOLD,
         );
 
         // Broadcast the 2D mask across the length dimension to (batch_size, channels, length)

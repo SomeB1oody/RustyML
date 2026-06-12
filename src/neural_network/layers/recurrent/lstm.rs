@@ -4,30 +4,26 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::layer_weight::{LSTMGateWeight, LSTMLayerWeight, LayerWeight};
+use crate::neural_network::layers::layer_weight::{LSTMLayerWeight, LayerWeight};
 use crate::neural_network::layers::recurrent::apply_sigmoid;
-use crate::neural_network::layers::recurrent::gate::{
-    Gate, gate_value_from_projection, project_gate_input, store_gate_gradients, take_cache,
-};
+use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::matmul::par_matmul;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array3, Axis, Ix2, Ix3};
-
-/// Threshold for switching LSTM computation to parallel execution
-///
-/// When `batch_size * units` is below this value, execution is sequential; at or above it,
-/// execution is parallel. Chosen from empirical benchmarks where rayon's thread-pool overhead
-/// is amortized by the gains from parallelization
-const LSTM_PARALLEL_THRESHOLD: usize = 1024;
+use ndarray::{Array2, Array3, Axis, Ix2, Ix3, concatenate, s};
 
 /// Long Short-Term Memory (LSTM) neural network layer
 ///
 /// Processes a 3D input tensor with shape (batch_size, timesteps, input_dim) and returns
 /// the last hidden state with shape (batch_size, units). Uses input, forget, cell, and
 /// output gates to control memory flow and mitigate vanishing gradients
+///
+/// All four gates are stored fused: the kernels are packed side by side into single matrices
+/// with column blocks in the order `[input | forget | cell | output]` (`[i | f | g | o]`, the
+/// Keras LSTM layout), so each projection runs as one GEMM instead of four
 ///
 /// # Examples
 ///
@@ -62,14 +58,8 @@ pub struct LSTM {
     /// Number of LSTM units (neurons) in the layer
     units: usize,
 
-    /// Gate controlling what new information to store in cell state
-    input_gate: Gate,
-    /// Gate controlling what information to discard from cell state
-    forget_gate: Gate,
-    /// Gate proposing new candidate values for cell state
-    cell_gate: Gate,
-    /// Gate controlling what to output from cell state
-    output_gate: Gate,
+    /// Fused gate weights, column blocks in the order `[i | f | g | o]`
+    gates: FusedGates,
 
     /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
@@ -118,17 +108,14 @@ impl LSTM {
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
 
-        // One RNG threaded through all four gates so the layer shares a single
-        // reproducible initialization stream
+        // One RNG threaded through all 4 gate blocks
         let mut rng = crate::random::make_rng(random_state);
 
         Ok(Self {
             input_dim,
             units,
-            input_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
-            forget_gate: Gate::new(input_dim, units, 1.0, &mut rng)?, // forget gate bias = 1.0
-            cell_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
-            output_gate: Gate::new(input_dim, units, 0.0, &mut rng)?,
+            // Gate blocks [i | f | g | o]; the forget gate bias starts at 1.0
+            gates: FusedGates::new(input_dim, units, &[0.0, 1.0, 0.0, 0.0], &mut rng)?,
             input_cache: None,
             hidden_cache: None,
             cell_cache: None,
@@ -141,7 +128,43 @@ impl LSTM {
         })
     }
 
-    /// Sets the weights for all four gates in this LSTM layer
+    /// Sets the fused weights for this LSTM layer (Keras-style layout)
+    ///
+    /// # Parameters
+    ///
+    /// - `kernel` - Fused input kernel with shape (input_dim, 4 * units), gate column blocks in
+    ///   the order `[i | f | g | o]` (input, forget, cell, output)
+    /// - `recurrent_kernel` - Fused recurrent kernel with shape (units, 4 * units), same block order
+    /// - `bias` - Fused bias with shape (1, 4 * units), same block order
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
+    ///   expected fused shape
+    pub fn set_weights(
+        &mut self,
+        kernel: Array2<f32>,
+        recurrent_kernel: Array2<f32>,
+        bias: Array2<f32>,
+    ) -> Result<(), Error> {
+        validate_weight_shape("kernel", self.gates.kernel.shape(), kernel.shape())?;
+        validate_weight_shape(
+            "recurrent_kernel",
+            self.gates.recurrent_kernel.shape(),
+            recurrent_kernel.shape(),
+        )?;
+        validate_weight_shape("bias", self.gates.bias.shape(), bias.shape())?;
+
+        // Force standard layout: `parameters()` exposes the weights as flat slices
+        self.gates.kernel = kernel.as_standard_layout().into_owned();
+        self.gates.recurrent_kernel = recurrent_kernel.as_standard_layout().into_owned();
+        self.gates.bias = bias.as_standard_layout().into_owned();
+        Ok(())
+    }
+
+    /// Sets the weights gate by gate, packing them into the fused `[i | f | g | o]` layout
+    ///
+    /// Convenience wrapper over [`LSTM::set_weights`] for callers that hold per-gate matrices
     ///
     /// # Parameters
     ///
@@ -160,9 +183,10 @@ impl LSTM {
     ///
     /// # Errors
     ///
-    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the expected shape
+    /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
+    ///   expected per-gate shape
     #[allow(clippy::too_many_arguments)] // four gates x (kernel, recurrent_kernel, bias)
-    pub fn set_weights(
+    pub fn set_gate_weights(
         &mut self,
         input_kernel: Array2<f32>,
         input_recurrent_kernel: Array2<f32>,
@@ -177,80 +201,74 @@ impl LSTM {
         output_recurrent_kernel: Array2<f32>,
         output_bias: Array2<f32>,
     ) -> Result<(), Error> {
-        validate_weight_shape(
-            "input_kernel",
-            self.input_gate.kernel.shape(),
-            input_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "input_recurrent_kernel",
-            self.input_gate.recurrent_kernel.shape(),
-            input_recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "input_bias",
-            self.input_gate.bias.shape(),
-            input_bias.shape(),
-        )?;
-        validate_weight_shape(
-            "forget_kernel",
-            self.forget_gate.kernel.shape(),
-            forget_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "forget_recurrent_kernel",
-            self.forget_gate.recurrent_kernel.shape(),
-            forget_recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "forget_bias",
-            self.forget_gate.bias.shape(),
-            forget_bias.shape(),
-        )?;
-        validate_weight_shape(
-            "cell_kernel",
-            self.cell_gate.kernel.shape(),
-            cell_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "cell_recurrent_kernel",
-            self.cell_gate.recurrent_kernel.shape(),
-            cell_recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape("cell_bias", self.cell_gate.bias.shape(), cell_bias.shape())?;
-        validate_weight_shape(
-            "output_kernel",
-            self.output_gate.kernel.shape(),
-            output_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "output_recurrent_kernel",
-            self.output_gate.recurrent_kernel.shape(),
-            output_recurrent_kernel.shape(),
-        )?;
-        validate_weight_shape(
-            "output_bias",
-            self.output_gate.bias.shape(),
-            output_bias.shape(),
-        )?;
+        let per_gate_kernel = [self.input_dim, self.units];
+        let per_gate_recurrent = [self.units, self.units];
+        let per_gate_bias = [1, self.units];
+        for (name, expected, got) in [
+            ("input_kernel", &per_gate_kernel, input_kernel.shape()),
+            (
+                "input_recurrent_kernel",
+                &per_gate_recurrent,
+                input_recurrent_kernel.shape(),
+            ),
+            ("input_bias", &per_gate_bias, input_bias.shape()),
+            ("forget_kernel", &per_gate_kernel, forget_kernel.shape()),
+            (
+                "forget_recurrent_kernel",
+                &per_gate_recurrent,
+                forget_recurrent_kernel.shape(),
+            ),
+            ("forget_bias", &per_gate_bias, forget_bias.shape()),
+            ("cell_kernel", &per_gate_kernel, cell_kernel.shape()),
+            (
+                "cell_recurrent_kernel",
+                &per_gate_recurrent,
+                cell_recurrent_kernel.shape(),
+            ),
+            ("cell_bias", &per_gate_bias, cell_bias.shape()),
+            ("output_kernel", &per_gate_kernel, output_kernel.shape()),
+            (
+                "output_recurrent_kernel",
+                &per_gate_recurrent,
+                output_recurrent_kernel.shape(),
+            ),
+            ("output_bias", &per_gate_bias, output_bias.shape()),
+        ] {
+            validate_weight_shape(name, expected, got)?;
+        }
 
-        self.input_gate.kernel = input_kernel;
-        self.input_gate.recurrent_kernel = input_recurrent_kernel;
-        self.input_gate.bias = input_bias;
+        let kernel = concatenate(
+            Axis(1),
+            &[
+                input_kernel.view(),
+                forget_kernel.view(),
+                cell_kernel.view(),
+                output_kernel.view(),
+            ],
+        )
+        .expect("per-gate kernels share [input_dim, units]");
+        let recurrent_kernel = concatenate(
+            Axis(1),
+            &[
+                input_recurrent_kernel.view(),
+                forget_recurrent_kernel.view(),
+                cell_recurrent_kernel.view(),
+                output_recurrent_kernel.view(),
+            ],
+        )
+        .expect("per-gate recurrent kernels share [units, units]");
+        let bias = concatenate(
+            Axis(1),
+            &[
+                input_bias.view(),
+                forget_bias.view(),
+                cell_bias.view(),
+                output_bias.view(),
+            ],
+        )
+        .expect("per-gate biases share [1, units]");
 
-        self.forget_gate.kernel = forget_kernel;
-        self.forget_gate.recurrent_kernel = forget_recurrent_kernel;
-        self.forget_gate.bias = forget_bias;
-
-        self.cell_gate.kernel = cell_kernel;
-        self.cell_gate.recurrent_kernel = cell_recurrent_kernel;
-        self.cell_gate.bias = cell_bias;
-
-        self.output_gate.kernel = output_kernel;
-        self.output_gate.recurrent_kernel = output_recurrent_kernel;
-        self.output_gate.bias = output_bias;
-
-        Ok(())
+        self.set_weights(kernel, recurrent_kernel, bias)
     }
 }
 
@@ -264,8 +282,9 @@ impl Layer for LSTM {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
-        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
-        let mut c_prev = Array2::<f32>::zeros((batch, self.units));
+        let u = self.units;
+        let mut h_prev = Array2::<f32>::zeros((batch, u));
+        let mut c_prev = Array2::<f32>::zeros((batch, u));
 
         // Storage for all timesteps
         let mut hs = Vec::with_capacity(timesteps + 1);
@@ -279,60 +298,29 @@ impl Layer for LSTM {
         hs.push(h_prev.clone());
         cs.push(c_prev.clone());
 
-        // Parallelize once the computational load clears the threshold
-        let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
-
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Batched input projection for all 4 gates
-        let xw_i = project_gate_input(&self.input_gate, &x3);
-        let xw_f = project_gate_input(&self.forget_gate, &x3);
-        let xw_g = project_gate_input(&self.cell_gate, &x3);
-        let xw_o = project_gate_input(&self.output_gate, &x3);
+        // Batched fused input projection for all 4 gates
+        let xw = project_input(&self.gates.kernel, &x3);
 
         for t in 0..timesteps {
-            let xw_i_t = xw_i.index_axis(Axis(1), t);
-            let xw_f_t = xw_f.index_axis(Axis(1), t);
-            let xw_g_t = xw_g.index_axis(Axis(1), t);
-            let xw_o_t = xw_o.index_axis(Axis(1), t);
+            let xw_t = xw.index_axis(Axis(1), t); // [batch, 4*units]
 
-            // Compute all 4 gate values (parallel or sequential)
-            let (i_raw, f_raw, g_raw, o_raw) = if use_parallel {
-                let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
-                    || {
-                        rayon::join(
-                            || gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
-                            || gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
-                        )
-                    },
-                    || {
-                        rayon::join(
-                            || gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
-                            || gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
-                        )
-                    },
-                );
-                (i_raw, f_raw, g_raw, o_raw)
-            } else {
-                (
-                    gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
-                    gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
-                    gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
-                    gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
-                )
-            };
+            // All 4 gate pre-activations in one fused recurrent GEMM
+            let z_all =
+                par_matmul(h_prev.view(), self.gates.recurrent_kernel.view()) + xw_t + &self.gates.bias;
 
             // Gates use the recurrent activation (sigmoid)
-            let i_t = apply_sigmoid(i_raw);
-            let f_t = apply_sigmoid(f_raw);
-            let o_t = apply_sigmoid(o_raw);
+            let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
+            let f_t = apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned());
             let g_t = act
-                .forward(&g_raw.into_dyn())?
+                .forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
                 .into_dimensionality::<Ix2>()
                 .unwrap();
+            let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
 
-            // Update cell state: c_t = f_t * c_prev + i_t * g_t
+            // Update cell state
             let c_t = &f_t * &c_prev + &i_t * &g_t;
 
             // Apply the configurable activation to the cell state
@@ -341,7 +329,7 @@ impl Layer for LSTM {
                 .into_dimensionality::<Ix2>()
                 .unwrap();
 
-            // Update hidden state: h_t = o_t * activation(c_t)
+            // Update hidden state
             let h_t = &o_t * &c_t_activated;
 
             // Cache values
@@ -366,7 +354,6 @@ impl Layer for LSTM {
         self.g_cache = Some(g_vals);
         self.o_cache = Some(o_vals);
 
-        // The hidden state already passed through the configurable activation at each timestep (Keras-style)
         Ok(h_prev.into_dyn())
     }
 
@@ -379,63 +366,33 @@ impl Layer for LSTM {
         // Input shape: (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
-        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
-        let mut c_prev = Array2::<f32>::zeros((batch, self.units));
-
-        // Parallelize once the computational load clears the threshold
-        let use_parallel = batch * self.units >= LSTM_PARALLEL_THRESHOLD;
+        let u = self.units;
+        let mut h_prev = Array2::<f32>::zeros((batch, u));
+        let mut c_prev = Array2::<f32>::zeros((batch, u));
 
         // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Batched input projection for all 4 gates
-        let xw_i = project_gate_input(&self.input_gate, &x3);
-        let xw_f = project_gate_input(&self.forget_gate, &x3);
-        let xw_g = project_gate_input(&self.cell_gate, &x3);
-        let xw_o = project_gate_input(&self.output_gate, &x3);
+        // Batched fused input projection for all 4 gates
+        let xw = project_input(&self.gates.kernel, &x3);
 
         for t in 0..timesteps {
-            let xw_i_t = xw_i.index_axis(Axis(1), t);
-            let xw_f_t = xw_f.index_axis(Axis(1), t);
-            let xw_g_t = xw_g.index_axis(Axis(1), t);
-            let xw_o_t = xw_o.index_axis(Axis(1), t);
+            let xw_t = xw.index_axis(Axis(1), t); // [batch, 4*units]
 
-            // Compute all 4 gate values (parallel or sequential)
-            let (i_raw, f_raw, g_raw, o_raw) = if use_parallel {
-                let ((i_raw, f_raw), (g_raw, o_raw)) = rayon::join(
-                    || {
-                        rayon::join(
-                            || gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
-                            || gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
-                        )
-                    },
-                    || {
-                        rayon::join(
-                            || gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
-                            || gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
-                        )
-                    },
-                );
-                (i_raw, f_raw, g_raw, o_raw)
-            } else {
-                (
-                    gate_value_from_projection(&self.input_gate, &xw_i_t, &h_prev),
-                    gate_value_from_projection(&self.forget_gate, &xw_f_t, &h_prev),
-                    gate_value_from_projection(&self.cell_gate, &xw_g_t, &h_prev),
-                    gate_value_from_projection(&self.output_gate, &xw_o_t, &h_prev),
-                )
-            };
+            // All 4 gate pre-activations in one fused recurrent GEMM
+            let z_all =
+                par_matmul(h_prev.view(), self.gates.recurrent_kernel.view()) + xw_t + &self.gates.bias;
 
-            // Gates use the recurrent activation (sigmoid)
-            let i_t = apply_sigmoid(i_raw);
-            let f_t = apply_sigmoid(f_raw);
-            let o_t = apply_sigmoid(o_raw);
+            // Gates use the recurrent activation (sigmoid); the candidate uses `act`
+            let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
+            let f_t = apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned());
             let g_t = act
-                .forward(&g_raw.into_dyn())?
+                .forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
                 .into_dimensionality::<Ix2>()
                 .unwrap();
+            let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
 
-            // Update cell state: c_t = f_t * c_prev + i_t * g_t
+            // Update cell state
             let c_t = &f_t * &c_prev + &i_t * &g_t;
 
             // Apply the configurable activation to the cell state
@@ -444,14 +401,13 @@ impl Layer for LSTM {
                 .into_dimensionality::<Ix2>()
                 .unwrap();
 
-            // Update hidden state: h_t = o_t * activation(c_t)
+            // Update hidden state
             let h_t = &o_t * &c_t_activated;
 
             h_prev = h_t;
             c_prev = c_t;
         }
 
-        // The hidden state already passed through the configurable activation at each timestep (Keras-style)
         Ok(h_prev.into_dyn())
     }
 
@@ -482,15 +438,13 @@ impl Layer for LSTM {
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
+        let u = self.units;
 
-        // Per-gate pre-activation gradients for every timestep
-        let mut dz_i = Array3::<f32>::zeros((batch, timesteps, self.units));
-        let mut dz_f = Array3::<f32>::zeros((batch, timesteps, self.units));
-        let mut dz_g = Array3::<f32>::zeros((batch, timesteps, self.units));
-        let mut dz_o = Array3::<f32>::zeros((batch, timesteps, self.units));
+        // Fused pre-activation gradients for every timestep, gate blocks [i | f | g | o]
+        let mut dz3 = Array3::<f32>::zeros((batch, timesteps, 4 * u));
 
         let mut grad_h = grad_h_t;
-        let mut grad_c = Array2::<f32>::zeros((batch, self.units));
+        let mut grad_c = Array2::<f32>::zeros((batch, u));
 
         // Backpropagation through time
         for t in (0..timesteps).rev() {
@@ -528,86 +482,48 @@ impl Layer for LSTM {
                 .into_dimensionality::<Ix2>()
                 .unwrap();
 
-            // Gradient w.r.t. the previous hidden state
-            grad_h = grad_o_raw.dot(&self.output_gate.recurrent_kernel.t())
-                + grad_f_raw.dot(&self.forget_gate.recurrent_kernel.t())
-                + grad_i_raw.dot(&self.input_gate.recurrent_kernel.t())
-                + grad_g_raw.dot(&self.cell_gate.recurrent_kernel.t());
+            // Assemble the fused dz for this timestep, blocks [i | f | g | o]
+            let mut dz_t = Array2::<f32>::zeros((batch, 4 * u));
+            dz_t.slice_mut(s![.., 0..u]).assign(&grad_i_raw);
+            dz_t.slice_mut(s![.., u..2 * u]).assign(&grad_f_raw);
+            dz_t.slice_mut(s![.., 2 * u..3 * u]).assign(&grad_g_raw);
+            dz_t.slice_mut(s![.., 3 * u..4 * u]).assign(&grad_o_raw);
 
-            dz_o.index_axis_mut(Axis(1), t).assign(&grad_o_raw);
-            dz_f.index_axis_mut(Axis(1), t).assign(&grad_f_raw);
-            dz_i.index_axis_mut(Axis(1), t).assign(&grad_i_raw);
-            dz_g.index_axis_mut(Axis(1), t).assign(&grad_g_raw);
+            // Gradient w.r.t. the previous hidden state: one fused GEMM instead of four
+            grad_h = par_matmul(dz_t.view(), self.gates.recurrent_kernel.t());
+
+            dz3.index_axis_mut(Axis(1), t).assign(&dz_t);
 
             // Gradient with respect to previous cell state
             grad_c = grad_c_prev;
         }
 
-        // Batched reductions over all timesteps
+        // Batched reductions over all timesteps, one fused GEMM each (were four apiece)
         let x_flat = x3
             .to_shape((batch * timesteps, feat))
             .expect("contiguous input reshape");
-        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, self.units));
+        let mut h_prev3 = Array3::<f32>::zeros((batch, timesteps, u));
         for (mut dst, h) in h_prev3.axis_iter_mut(Axis(1)).zip(hs.iter()) {
             dst.assign(h);
         }
         let h_prev_flat = h_prev3
-            .to_shape((batch * timesteps, self.units))
+            .to_shape((batch * timesteps, u))
             .expect("contiguous H_prev reshape");
+        let dz_flat = dz3
+            .to_shape((batch * timesteps, 4 * u))
+            .expect("contiguous DZ reshape");
 
-        let flat = |dz: &Array3<f32>| {
-            dz.to_shape((batch * timesteps, self.units))
-                .expect("contiguous DZ reshape")
-                .to_owned()
-        };
-        let dz_i = flat(&dz_i);
-        let dz_f = flat(&dz_f);
-        let dz_g = flat(&dz_g);
-        let dz_o = flat(&dz_o);
+        let grad_kernel = par_matmul(x_flat.t(), dz_flat.view());
+        let grad_recurrent = par_matmul(h_prev_flat.t(), dz_flat.view());
+        let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-        let gate_grads = |dz_flat: &Array2<f32>| {
-            (
-                x_flat.t().dot(dz_flat),
-                h_prev_flat.t().dot(dz_flat),
-                dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0)),
-            )
-        };
-        let (grad_i_kernel, grad_i_recurrent, grad_i_bias) = gate_grads(&dz_i);
-        let (grad_f_kernel, grad_f_recurrent, grad_f_bias) = gate_grads(&dz_f);
-        let (grad_g_kernel, grad_g_recurrent, grad_g_bias) = gate_grads(&dz_g);
-        let (grad_o_kernel, grad_o_recurrent, grad_o_bias) = gate_grads(&dz_o);
+        let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
+            par_matmul(dz_flat.view(), self.gates.kernel.t()),
+            (batch, timesteps, feat),
+        );
 
-        let grad_x3 = (dz_i.dot(&self.input_gate.kernel.t())
-            + dz_f.dot(&self.forget_gate.kernel.t())
-            + dz_g.dot(&self.cell_gate.kernel.t())
-            + dz_o.dot(&self.output_gate.kernel.t()))
-        .into_shape_with_order((batch, timesteps, feat))
-        .expect("reshape grad_x to [batch, timesteps, feat]");
-
-        store_gate_gradients(
-            &mut self.input_gate,
-            grad_i_kernel,
-            grad_i_recurrent,
-            grad_i_bias,
-        );
-        store_gate_gradients(
-            &mut self.forget_gate,
-            grad_f_kernel,
-            grad_f_recurrent,
-            grad_f_bias,
-        );
-        store_gate_gradients(
-            &mut self.cell_gate,
-            grad_g_kernel,
-            grad_g_recurrent,
-            grad_g_bias,
-        );
-        store_gate_gradients(
-            &mut self.output_gate,
-            grad_o_kernel,
-            grad_o_recurrent,
-            grad_o_bias,
-        );
+        self.gates
+            .store_gradients(grad_kernel, grad_recurrent, grad_bias);
 
         Ok(grad_x3.into_dyn())
     }
@@ -627,35 +543,14 @@ impl Layer for LSTM {
     }
 
     fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
-        let mut params = self.input_gate.parameters();
-        params.extend(self.forget_gate.parameters());
-        params.extend(self.cell_gate.parameters());
-        params.extend(self.output_gate.parameters());
-        params
+        self.gates.parameters()
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::LSTM(LSTMLayerWeight {
-            input: LSTMGateWeight {
-                kernel: &self.input_gate.kernel,
-                recurrent_kernel: &self.input_gate.recurrent_kernel,
-                bias: &self.input_gate.bias,
-            },
-            forget: LSTMGateWeight {
-                kernel: &self.forget_gate.kernel,
-                recurrent_kernel: &self.forget_gate.recurrent_kernel,
-                bias: &self.forget_gate.bias,
-            },
-            cell: LSTMGateWeight {
-                kernel: &self.cell_gate.kernel,
-                recurrent_kernel: &self.cell_gate.recurrent_kernel,
-                bias: &self.cell_gate.bias,
-            },
-            output: LSTMGateWeight {
-                kernel: &self.output_gate.kernel,
-                recurrent_kernel: &self.output_gate.recurrent_kernel,
-                bias: &self.output_gate.bias,
-            },
+            kernel: &self.gates.kernel,
+            recurrent_kernel: &self.gates.recurrent_kernel,
+            bias: &self.gates.bias,
         })
     }
 }

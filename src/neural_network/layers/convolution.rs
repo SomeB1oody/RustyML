@@ -24,7 +24,7 @@ pub mod conv_2d;
 /// 3D convolutional layer
 pub mod conv_3d;
 /// Dimension-generic convolution engine shared by Conv1D, Conv2D, and Conv3D
-mod convolution_engine;
+pub(crate) mod convolution_engine;
 /// 2D depthwise convolutional layer
 pub mod depthwise_conv_2d;
 /// 2D separable convolutional layer

@@ -189,6 +189,21 @@ fn simple_rnn_backward_before_forward_errors() {
     );
 }
 
+/// SimpleRNN backward with units == 1 and input_dim > 1 must not panic on the grad_x reshape
+///
+/// With units == 1 the flattened dz matrix has a row stride of 1, so ndarray's `dot` returns a
+/// column-major grad_x; the reshape back to [batch, timesteps, input_dim] has to tolerate that
+/// layout (regression test for a latent `IncompatibleLayout` panic)
+#[test]
+fn simple_rnn_backward_units_one_multi_feature_reshapes() {
+    let mut rnn = SimpleRNN::new(2, 1, Tanh::new(), None).unwrap();
+    let x = Array::from_elem((1, 2, 2), 0.5_f32).into_dyn();
+    rnn.forward(&x).unwrap();
+    let grad = Array::ones((1, 1)).into_dyn();
+    let grad_x = rnn.backward(&grad).unwrap();
+    assert_eq!(grad_x.shape(), &[1, 2, 2]);
+}
+
 /// SimpleRNN set_weights rejects a kernel with wrong shape
 #[test]
 fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
@@ -216,7 +231,7 @@ fn lstm_forward_1step_1unit_tanh() {
     let b_zero = Array2::zeros((1, 1));
     let b_one = Array2::from_elem((1, 1), 1.0_f32); // forget bias = 1.0
 
-    lstm.set_weights(
+    lstm.set_gate_weights(
         k.clone(),
         rk.clone(),
         b_zero.clone(), // input gate
@@ -254,7 +269,7 @@ fn lstm_forget_bias_is_one_not_zero() {
     let b_one = Array2::from_elem((1, 1), 1.0_f32);
 
     lstm_correct
-        .set_weights(
+        .set_gate_weights(
             k.clone(),
             rk.clone(),
             b_zero.clone(),
@@ -271,7 +286,7 @@ fn lstm_forget_bias_is_one_not_zero() {
         .unwrap();
 
     lstm_zero_forget
-        .set_weights(
+        .set_gate_weights(
             k.clone(),
             rk.clone(),
             b_zero.clone(),
@@ -309,7 +324,7 @@ fn lstm_forward_2step_cell_state_threads_through() {
     let b_zero = Array2::zeros((1, 1));
     let b_one = Array2::from_elem((1, 1), 1.0_f32);
 
-    lstm.set_weights(
+    lstm.set_gate_weights(
         k.clone(),
         rk.clone(),
         b_zero.clone(),
@@ -356,7 +371,7 @@ fn lstm_predict_equals_forward() {
     let b_zero = Array2::zeros((1, 2));
     let b_one = Array2::from_elem((1, 2), 1.0_f32);
 
-    lstm.set_weights(
+    lstm.set_gate_weights(
         kernel.clone(),
         rk.clone(),
         b_zero.clone(),
@@ -447,7 +462,7 @@ fn lstm_set_weights_wrong_shape_errors() {
     // Wrong shape for cell_kernel: should be (2,3), given (3,2)
     let bad_k = Array2::zeros((3, 2));
     let err = lstm
-        .set_weights(
+        .set_gate_weights(
             good_k.clone(),
             good_rk.clone(),
             good_b.clone(),
@@ -479,7 +494,7 @@ fn gru_forward_1step_1unit_tanh() {
     let rk = Array2::zeros((1, 1));
     let bias = Array2::zeros((1, 1));
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k.clone(),
         rk.clone(),
         bias.clone(), // reset gate
@@ -510,7 +525,7 @@ fn gru_forward_2step_hidden_state_blending() {
     let rk = Array2::zeros((1, 1));
     let bias = Array2::zeros((1, 1));
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k.clone(),
         rk.clone(),
         bias.clone(),
@@ -545,7 +560,7 @@ fn gru_update_gate_zero_leaves_hidden_unchanged() {
     let rk = Array2::zeros((1, 1));
     let bias = Array2::zeros((1, 1));
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k_zero.clone(),
         rk.clone(),
         bias.clone(), // reset
@@ -581,7 +596,7 @@ fn gru_update_gate_one_replaces_hidden_with_candidate() {
     let rk = Array2::zeros((1, 1));
     let bias = Array2::zeros((1, 1));
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k_zero.clone(),
         rk.clone(),
         bias.clone(), // reset (r~=0.5, irrelevant since h_prev=0)
@@ -626,7 +641,7 @@ fn gru_predict_equals_forward() {
         .unwrap();
     let bias = Array2::from_shape_vec((1, 3), vec![0.1, -0.1, 0.2]).unwrap();
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k.clone(),
         rk.clone(),
         bias.clone(),
@@ -723,7 +738,7 @@ fn gru_set_weights_wrong_shape_errors() {
     // Wrong shape for update_recurrent_kernel: (2,3) instead of (3,3)
     let bad_rk = Array2::zeros((2, 3));
     let err = gru
-        .set_weights(
+        .set_gate_weights(
             good_k.clone(),
             good_rk.clone(),
             good_b.clone(),
@@ -771,7 +786,7 @@ fn lstm_accepts_activation_enum_tanh() {
     let b_zero = Array2::zeros((1, 1));
     let b_one = Array2::from_elem((1, 1), 1.0_f32);
 
-    lstm.set_weights(
+    lstm.set_gate_weights(
         k.clone(),
         rk.clone(),
         b_zero.clone(),
@@ -803,7 +818,7 @@ fn gru_accepts_activation_enum_tanh() {
     let rk = Array2::zeros((1, 1));
     let bias = Array2::zeros((1, 1));
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k.clone(),
         rk.clone(),
         bias.clone(),
@@ -854,7 +869,7 @@ fn gru_forward_is_deterministic() {
     let rk = Array2::from_shape_vec((2, 2), vec![0.1, 0.0, 0.0, 0.2]).unwrap();
     let bias = Array2::from_shape_vec((1, 2), vec![0.05, -0.05]).unwrap();
 
-    gru.set_weights(
+    gru.set_gate_weights(
         k.clone(),
         rk.clone(),
         bias.clone(),

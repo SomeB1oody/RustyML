@@ -2,10 +2,11 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
+use crate::neural_network::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
-    compute_row_gradient_sum, merge_results, pad_tensor_4d_spatial,
+    compute_row_gradient_sum, pad_tensor_4d_spatial,
 };
 use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
@@ -17,12 +18,10 @@ use crate::neural_network::layers::layer_weight::{LayerWeight, SeparableConv2DLa
 use crate::neural_network::layers::shape_helpers::calculate_output_height_and_weight;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array3, Array4, ArrayD, Axis, s};
+use ndarray::{Array2, Array4, ArrayD, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-/// Workload size at or above which the convolution stages run in parallel rather than sequentially
-const SEPARABLE_CONV_2D_PARALLEL_THRESHOLD: usize = 5000;
 
 /// A 2D separable convolutional layer
 ///
@@ -234,73 +233,80 @@ impl SeparableConv2D {
         };
         let conv_input: &Tensor = padded_storage.as_ref().unwrap_or(input);
 
-        // Run per-batch in parallel above the threshold, sequentially below it
-        let workload_size =
-            batch_size * channels * self.depth_multiplier * output_shape[2] * output_shape[3];
+        // Run per-batch in parallel above the FLOPs gate, sequentially below it
+        let flops = 2
+            * batch_size
+            * channels
+            * self.depth_multiplier
+            * output_shape[2]
+            * output_shape[3]
+            * self.kernel_size.0
+            * self.kernel_size.1;
 
-        let results: Vec<_> = if workload_size >= SEPARABLE_CONV_2D_PARALLEL_THRESHOLD {
-            (0..batch_size)
-                .into_par_iter()
-                .map(|b| self.compute_depthwise_batch(b, conv_input, &output_shape, channels))
-                .collect()
+        // One task per (batch item, output channel)
+        let out_channels = channels * self.depth_multiplier;
+        let tasks: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..out_channels).map(move |oc| (b, oc)))
+            .collect();
+        let run = |&(b, oc): &(usize, usize)| {
+            let c = oc / self.depth_multiplier;
+            let m = oc % self.depth_multiplier;
+            self.compute_depthwise_channel(b, c, m, conv_input, &output_shape)
+        };
+        let results: Vec<Array2<f32>> = if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+            tasks.par_iter().map(run).collect()
         } else {
-            (0..batch_size)
-                .map(|b| self.compute_depthwise_batch(b, conv_input, &output_shape, channels))
-                .collect()
+            tasks.iter().map(run).collect()
         };
 
-        merge_results(output_shape, results)
+        let mut output: Tensor = ArrayD::zeros(output_shape);
+        for (&(b, oc), plane) in tasks.iter().zip(results) {
+            output.slice_mut(s![b, oc, .., ..]).assign(&plane);
+        }
+        output
     }
 
     /// Computes the depthwise convolution for a single batch element
-    fn compute_depthwise_batch(
+    /// Computes one depthwise output plane for a single (batch item, input channel,
+    /// depth-multiplier) combination - the per-task unit of the depthwise stage
+    fn compute_depthwise_channel(
         &self,
         b: usize,
+        c: usize,
+        m: usize,
         input: &Tensor,
         output_shape: &[usize],
-        channels: usize,
-    ) -> (usize, Array3<f32>) {
+    ) -> Array2<f32> {
         let input_shape = input.shape();
-        let mut batch_output = Array3::zeros((
-            channels * self.depth_multiplier,
-            output_shape[2],
-            output_shape[3],
-        ));
+        let mut plane = Array2::zeros((output_shape[2], output_shape[3]));
 
-        for c in 0..channels {
-            for m in 0..self.depth_multiplier {
-                let output_channel = c * self.depth_multiplier + m;
+        for i in 0..output_shape[2] {
+            let i_base = i * self.strides.0;
 
-                for i in 0..output_shape[2] {
-                    let i_base = i * self.strides.0;
+            for j in 0..output_shape[3] {
+                let j_base = j * self.strides.1;
+                let mut sum = 0.0;
 
-                    for j in 0..output_shape[3] {
-                        let j_base = j * self.strides.1;
-                        let mut sum = 0.0;
+                let max_ki = input_shape[2]
+                    .saturating_sub(i_base)
+                    .min(self.kernel_size.0);
+                let max_kj = input_shape[3]
+                    .saturating_sub(j_base)
+                    .min(self.kernel_size.1);
 
-                        let max_ki = input_shape[2]
-                            .saturating_sub(i_base)
-                            .min(self.kernel_size.0);
-                        let max_kj = input_shape[3]
-                            .saturating_sub(j_base)
-                            .min(self.kernel_size.1);
-
-                        for ki in 0..max_ki {
-                            let i_pos = i_base + ki;
-                            for kj in 0..max_kj {
-                                let j_pos = j_base + kj;
-                                sum += input[[b, c, i_pos, j_pos]]
-                                    * self.depthwise_weights[[m, c, ki, kj]];
-                            }
-                        }
-
-                        batch_output[[output_channel, i, j]] = sum;
+                for ki in 0..max_ki {
+                    let i_pos = i_base + ki;
+                    for kj in 0..max_kj {
+                        let j_pos = j_base + kj;
+                        sum += input[[b, c, i_pos, j_pos]] * self.depthwise_weights[[m, c, ki, kj]];
                     }
                 }
+
+                plane[[i, j]] = sum;
             }
         }
 
-        (b, batch_output)
+        plane
     }
 
     /// Performs the pointwise (1x1) convolution stage
@@ -320,8 +326,7 @@ impl SeparableConv2D {
             &[1, 1],
             PaddingType::Valid,
         )
-        // A 1x1 kernel under Valid padding can never exceed the input (every spatial dim >= 1), so
-        // the geometry is always valid here
+        // A 1x1 kernel under Valid padding can never exceed the input (every spatial dim >= 1)
         .expect("1x1 pointwise convolution geometry is always valid")
     }
 
@@ -494,81 +499,107 @@ impl Layer for SeparableConv2D {
             // Gradient w.r.t. the depthwise output, shape [batch, C*dm, H', W']
             let depthwise_grad = pw_grads.input_grad;
 
-            let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());
+            // Estimated FLOPs of the depthwise backward, for the parallel/serial gates below
+            let bwd_flops = 2
+                * batch_size
+                * channels
+                * self.depth_multiplier
+                * depthwise_shape[2]
+                * depthwise_shape[3]
+                * self.kernel_size.0
+                * self.kernel_size.1;
+            let parallel = bwd_flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS;
 
-            // Depthwise weight gradients: parallel over the depth-multiplier axis
-            depthwise_weight_grads
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(m, mut dw_wgrad_m)| {
-                    for c in 0..channels {
-                        for h in 0..self.kernel_size.0 {
-                            for w in 0..self.kernel_size.1 {
-                                let mut sum = 0.0;
-                                let output_channel = c * self.depth_multiplier + m;
-                                for b in 0..batch_size {
-                                    for i in 0..depthwise_shape[2] {
-                                        let i_pos = i * self.strides.0 + h;
-                                        if i_pos < padded_shape[2] {
-                                            sum += compute_row_gradient_sum(
-                                                &depthwise_grad,
-                                                padded_input,
-                                                b,
-                                                output_channel,
-                                                c,
-                                                i,
-                                                i_pos,
-                                                w,
-                                                depthwise_shape,
-                                                &padded_shape,
-                                                self.strides.1,
-                                            );
-                                        }
-                                    }
+            // Depthwise weight gradients
+            let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());
+            let wg_tasks: Vec<(usize, usize)> = (0..self.depth_multiplier)
+                .flat_map(|m| (0..channels).map(move |c| (m, c)))
+                .collect();
+            let wg_run = |&(m, c): &(usize, usize)| -> Array2<f32> {
+                let mut wg = Array2::zeros((self.kernel_size.0, self.kernel_size.1));
+                let output_channel = c * self.depth_multiplier + m;
+                for h in 0..self.kernel_size.0 {
+                    for w in 0..self.kernel_size.1 {
+                        let mut sum = 0.0;
+                        for b in 0..batch_size {
+                            for i in 0..depthwise_shape[2] {
+                                let i_pos = i * self.strides.0 + h;
+                                if i_pos < padded_shape[2] {
+                                    sum += compute_row_gradient_sum(
+                                        &depthwise_grad,
+                                        padded_input,
+                                        b,
+                                        output_channel,
+                                        c,
+                                        i,
+                                        i_pos,
+                                        w,
+                                        depthwise_shape,
+                                        &padded_shape,
+                                        self.strides.1,
+                                    );
                                 }
-                                dw_wgrad_m[[c, h, w]] = sum;
                             }
                         }
+                        wg[[h, w]] = sum;
                     }
-                });
+                }
+                wg
+            };
+            let wg_results: Vec<Array2<f32>> = if parallel {
+                wg_tasks.par_iter().map(wg_run).collect()
+            } else {
+                wg_tasks.iter().map(wg_run).collect()
+            };
+            for (&(m, c), wg) in wg_tasks.iter().zip(wg_results) {
+                depthwise_weight_grads
+                    .slice_mut(s![m, c, .., ..])
+                    .assign(&wg);
+            }
 
             // Input gradients
             let mut input_gradients = ArrayD::zeros(padded_input.dim());
-            input_gradients
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(b, mut in_grad_b)| {
-                    for c in 0..channels {
-                        for i in 0..padded_shape[2] {
-                            for j in 0..padded_shape[3] {
-                                let mut sum = 0.0;
-                                for m in 0..self.depth_multiplier {
-                                    let output_channel = c * self.depth_multiplier + m;
-                                    for h in 0..self.kernel_size.0 {
-                                        for w in 0..self.kernel_size.1 {
-                                            if i >= h && j >= w {
-                                                let grad_i = (i - h) / self.strides.0;
-                                                let grad_j = (j - w) / self.strides.1;
-                                                if grad_i < depthwise_shape[2]
-                                                    && grad_j < depthwise_shape[3]
-                                                    && (i - h) % self.strides.0 == 0
-                                                    && (j - w) % self.strides.1 == 0
-                                                {
-                                                    sum += depthwise_grad
-                                                        [[b, output_channel, grad_i, grad_j]]
-                                                        * self.depthwise_weights[[m, c, h, w]];
-                                                }
-                                            }
+            let ig_tasks: Vec<(usize, usize)> = (0..batch_size)
+                .flat_map(|b| (0..channels).map(move |c| (b, c)))
+                .collect();
+            let ig_run = |&(b, c): &(usize, usize)| -> Array2<f32> {
+                let mut plane = Array2::zeros((padded_shape[2], padded_shape[3]));
+                for i in 0..padded_shape[2] {
+                    for j in 0..padded_shape[3] {
+                        let mut sum = 0.0;
+                        for m in 0..self.depth_multiplier {
+                            let output_channel = c * self.depth_multiplier + m;
+                            for h in 0..self.kernel_size.0 {
+                                for w in 0..self.kernel_size.1 {
+                                    if i >= h && j >= w {
+                                        let grad_i = (i - h) / self.strides.0;
+                                        let grad_j = (j - w) / self.strides.1;
+                                        if grad_i < depthwise_shape[2]
+                                            && grad_j < depthwise_shape[3]
+                                            && (i - h) % self.strides.0 == 0
+                                            && (j - w) % self.strides.1 == 0
+                                        {
+                                            sum += depthwise_grad
+                                                [[b, output_channel, grad_i, grad_j]]
+                                                * self.depthwise_weights[[m, c, h, w]];
                                         }
                                     }
                                 }
-                                in_grad_b[[c, i, j]] = sum;
                             }
                         }
+                        plane[[i, j]] = sum;
                     }
-                });
+                }
+                plane
+            };
+            let ig_results: Vec<Array2<f32>> = if parallel {
+                ig_tasks.par_iter().map(ig_run).collect()
+            } else {
+                ig_tasks.iter().map(ig_run).collect()
+            };
+            for (&(b, c), plane) in ig_tasks.iter().zip(ig_results) {
+                input_gradients.slice_mut(s![b, c, .., ..]).assign(&plane);
+            }
 
             let input_gradients = if pad_h == 0 && pad_w == 0 {
                 input_gradients

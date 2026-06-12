@@ -18,8 +18,13 @@ use crate::neural_network::layers::convolution::PaddingType;
 use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
-/// Threshold (in `batch * channels` units) at or above which a pooling pass runs in parallel
-const POOL_PARALLEL_THRESHOLD: usize = 32;
+/// Estimated total element ops (`bc_total * work_per_plane`) at or above which a pooling pass
+/// runs in parallel. Counting per-plane work rather than plane count keeps the gate meaningful
+/// when a few planes carry large spatial dims (e.g. batch == 1 on a big image) and when many
+/// planes are tiny. Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md: the measured
+/// crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
+/// many-tiny-planes ladders
+const POOL_PARALLEL_MIN_OPS: usize = 12_000;
 
 /// Per-spatial-axis pooling output sizes and leading padding for a given padding mode
 ///
@@ -54,7 +59,7 @@ fn pool_geometry(
 
 /// The reduction performed over each pooling window
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum PoolKind {
+pub enum PoolKind {
     /// Take the maximum element (records the arg-max for backprop)
     Max,
     /// Take the mean of the elements in the window
@@ -85,13 +90,40 @@ fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     false
 }
 
-/// Runs `f` for every `bc` in `0..bc_total`, in parallel above the threshold, preserving order
-fn map_planes<R, F>(bc_total: usize, f: F) -> Vec<R>
+/// Decomposes a flat row-major index into a multi-index for `dims` (inverse of the flat
+/// counter that `increment_index` advances), so a chunked task can start mid-plane
+fn decode_index(mut flat: usize, dims: &[usize]) -> Vec<usize> {
+    let mut idx = vec![0usize; dims.len()];
+    for k in (0..dims.len()).rev() {
+        if dims[k] > 0 {
+            idx[k] = flat % dims[k];
+            flat /= dims[k];
+        }
+    }
+    idx
+}
+
+/// Minimum output positions per forward task: small enough that a `batch * channels == 1` plane
+/// still splits across threads, large enough (~12 us of window reduction) to amortize the rayon
+/// task overhead measured in calibration (see benches/RESULTS.md)
+const POOL_MIN_CHUNK_OUT: usize = 1024;
+
+/// Runs `f` for every `bc` in `0..bc_total`, in parallel once the estimated total work
+/// (`bc_total * work_per_plane` element ops) clears the gate, preserving order.
+/// `force_parallel` overrides the gate decision (calibration bench only; production passes `None`)
+fn map_planes<R, F>(
+    bc_total: usize,
+    work_per_plane: usize,
+    force_parallel: Option<bool>,
+    f: F,
+) -> Vec<R>
 where
     R: Send,
     F: Fn(usize) -> R + Sync + Send,
 {
-    if bc_total >= POOL_PARALLEL_THRESHOLD {
+    let parallel = force_parallel
+        .unwrap_or(bc_total.saturating_mul(work_per_plane) >= POOL_PARALLEL_MIN_OPS);
+    if parallel {
         (0..bc_total).into_par_iter().map(f).collect()
     } else {
         (0..bc_total).map(f).collect()
@@ -110,6 +142,20 @@ pub(super) fn windowed_pool_forward(
     kind: PoolKind,
     padding: PaddingType,
 ) -> (Tensor, Option<Vec<usize>>) {
+    windowed_pool_forward_impl(input, pool, strides, kind, padding, None)
+}
+
+/// [`windowed_pool_forward`] with an optional override of the parallel/serial gate decision, so
+/// the calibration bench can time both paths on either side of the gate. Reachable outside the
+/// crate only through `bench_internals`
+pub fn windowed_pool_forward_impl(
+    input: &Tensor,
+    pool: &[usize],
+    strides: &[usize],
+    kind: PoolKind,
+    padding: PaddingType,
+    force_parallel: Option<bool>,
+) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
     let (batch, channels) = (shape[0], shape[1]);
     let sp = &shape[2..];
@@ -126,19 +172,18 @@ pub(super) fn windowed_pool_forward(
         .as_slice()
         .expect("standard-layout array is contiguous");
 
-    let process_bc = |bc: usize| -> (Vec<f32>, Vec<usize>) {
+    // One task per (plane, output-position chunk): splitting the output positions lets a single
+    // large plane (e.g. batch == 1 with few channels) use every thread, while many planes get one
+    // chunk apiece. Every output element is reduced by the same serial loop regardless of the
+    // chunk boundaries, so the result is bitwise independent of the thread count
+    let process_range = |bc: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
         let plane = &in_flat[bc * plane_in..(bc + 1) * plane_in];
-        let mut out_plane = vec![0.0f32; plane_out];
-        let mut arg_plane = if track {
-            vec![0usize; plane_out]
-        } else {
-            Vec::new()
-        };
+        let mut out_chunk = vec![0.0f32; len];
+        let mut arg_chunk = if track { vec![0usize; len] } else { Vec::new() };
 
-        let mut o = vec![0usize; r];
+        let mut o = decode_index(c0, &out_sp);
         let mut w = vec![0usize; r];
-        let mut o_flat = 0usize;
-        loop {
+        for i in 0..len {
             // Reduce the window anchored at output position `o`
             w.iter_mut().for_each(|x| *x = 0);
             let mut sum = 0.0f32;
@@ -178,33 +223,62 @@ pub(super) fn windowed_pool_forward(
             }
             match kind {
                 PoolKind::Max => {
-                    out_plane[o_flat] = max_val;
-                    arg_plane[o_flat] = max_idx;
+                    out_chunk[i] = max_val;
+                    arg_chunk[i] = max_idx;
                 }
                 PoolKind::Average => {
-                    out_plane[o_flat] = if count > 0 { sum / count as f32 } else { 0.0 };
+                    out_chunk[i] = if count > 0 { sum / count as f32 } else { 0.0 };
                 }
             }
-            o_flat += 1;
-            if !increment_index(&mut o, &out_sp) {
-                break;
-            }
+            increment_index(&mut o, &out_sp);
         }
-        (out_plane, arg_plane)
+        (out_chunk, arg_chunk)
     };
 
-    let planes = map_planes(bc_total, process_bc);
+    let total_ops = bc_total
+        .saturating_mul(plane_out)
+        .saturating_mul(pool.iter().product::<usize>());
+    let parallel = force_parallel.unwrap_or(total_ops >= POOL_PARALLEL_MIN_OPS);
 
-    let mut out_flat = Vec::with_capacity(bc_total * plane_out);
+    // Chunk size: enough chunks to feed every thread once the planes alone cannot, but never
+    // chunks so small the task overhead dominates
+    let chunk_len = if parallel && bc_total > 0 && plane_out > 0 {
+        let chunks_per_plane = rayon::current_num_threads().div_ceil(bc_total);
+        plane_out.div_ceil(chunks_per_plane).max(POOL_MIN_CHUNK_OUT)
+    } else {
+        plane_out.max(1)
+    };
+    let tasks: Vec<(usize, usize, usize)> = (0..bc_total)
+        .flat_map(|bc| {
+            (0..plane_out)
+                .step_by(chunk_len.max(1))
+                .map(move |c0| (bc, c0, chunk_len.min(plane_out - c0)))
+        })
+        .collect();
+
+    let results: Vec<(Vec<f32>, Vec<usize>)> = if parallel {
+        tasks
+            .par_iter()
+            .map(|&(bc, c0, len)| process_range(bc, c0, len))
+            .collect()
+    } else {
+        tasks
+            .iter()
+            .map(|&(bc, c0, len)| process_range(bc, c0, len))
+            .collect()
+    };
+
+    let mut out_flat = vec![0.0f32; bc_total * plane_out];
     let mut argmax = if track {
-        Vec::with_capacity(bc_total * plane_out)
+        vec![0usize; bc_total * plane_out]
     } else {
         Vec::new()
     };
-    for (out_plane, arg_plane) in planes {
-        out_flat.extend(out_plane);
+    for (&(bc, c0, len), (out_chunk, arg_chunk)) in tasks.iter().zip(results) {
+        let base = bc * plane_out + c0;
+        out_flat[base..base + len].copy_from_slice(&out_chunk);
         if track {
-            argmax.extend(arg_plane);
+            argmax[base..base + len].copy_from_slice(&arg_chunk);
         }
     }
 
@@ -312,7 +386,12 @@ pub(super) fn windowed_pool_backward(
         grad_in_plane
     };
 
-    let planes = map_planes(bc_total, process_bc);
+    let planes = map_planes(
+        bc_total,
+        plane_out * pool.iter().product::<usize>(),
+        None,
+        process_bc,
+    );
 
     let mut grad_in = Vec::with_capacity(bc_total * plane_in);
     for plane in planes {
@@ -359,7 +438,7 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
         }
     };
 
-    let results = map_planes(bc_total, process_bc);
+    let results = map_planes(bc_total, plane_in, None, process_bc);
 
     let mut out_flat = Vec::with_capacity(bc_total);
     let mut argmax = if track {
@@ -414,7 +493,7 @@ pub(super) fn global_pool_backward(
         plane
     };
 
-    let planes = map_planes(bc_total, process_bc);
+    let planes = map_planes(bc_total, plane_in, None, process_bc);
 
     let mut grad_in = Vec::with_capacity(bc_total * plane_in);
     for plane in planes {
@@ -427,6 +506,7 @@ pub(super) fn global_pool_backward(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use approx::assert_abs_diff_eq;
 
     // row_major_strides

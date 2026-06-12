@@ -2,6 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
+use crate::neural_network::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::pad_tensor_2d;
@@ -15,11 +16,10 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
 
-/// Element-count threshold above which the forward pass runs in parallel;
-/// below it (batch_size * channels * output_height * output_width) runs sequentially
-const DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD: usize = 1500;
 
 /// A 2D depthwise convolutional layer for neural networks
 ///
@@ -232,7 +232,7 @@ impl DepthwiseConv2D {
     }
 
     /// Performs depthwise convolution for a single channel
-    #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/kernel/padding) are all needed
+    #[allow(clippy::too_many_arguments)]
     fn convolve_channel(
         input_channel: &ArrayView2<f32>,
         kernel: &ArrayView2<f32>,
@@ -272,69 +272,67 @@ impl DepthwiseConv2D {
     }
 
     /// Computes weight and input gradients for a single batch
-    #[allow(clippy::too_many_arguments)] // geometry params (shapes/strides/padding) are all needed
-    fn compute_batch_gradients(
+    /// Gradients for one `(batch item, channel)` pair: the depthwise channels are independent
+    /// (channel `c` only touches filter `c`), so this is the natural task granularity - a single
+    /// large image parallelizes across its channels even at batch == 1
+    #[allow(clippy::too_many_arguments)]
+    fn compute_channel_gradients(
         &self,
         input_array: &ArrayViewD<f32>,
         grad_upstream: &Tensor,
         batch_idx: usize,
-        channels: usize,
+        c: usize,
         input_height: usize,
         input_width: usize,
         output_height: usize,
         output_width: usize,
         pad_h: usize,
         pad_w: usize,
-    ) -> (Array4<f32>, Array4<f32>) {
-        let mut batch_weight_grads = Array4::zeros(self.weights.raw_dim());
-        // Accumulate input gradients in PADDED coordinates
+    ) -> (Array2<f32>, Array2<f32>) {
+        let mut weight_grad = Array2::zeros((self.kernel_size.0, self.kernel_size.1));
+        // Accumulate the input gradient in PADDED coordinates
         let padded_height = input_height + pad_h;
         let padded_width = input_width + pad_w;
-        let mut batch_input_grads_padded =
-            Array4::zeros((1, channels, padded_height, padded_width));
+        let mut input_grad_padded = Array2::zeros((padded_height, padded_width));
 
-        for c in 0..channels {
-            let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
-            let grad_channel = grad_upstream.slice(s![batch_idx, c, .., ..]);
+        let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
+        let grad_channel = grad_upstream.slice(s![batch_idx, c, .., ..]);
 
-            let padded_input = if self.padding == PaddingType::Same {
-                pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
-            } else {
-                input_channel.to_owned()
-            };
+        let padded_input = if self.padding == PaddingType::Same {
+            pad_tensor_2d(&input_channel.to_owned(), pad_h, pad_w)
+        } else {
+            input_channel.to_owned()
+        };
 
-            for kh in 0..self.kernel_size.0 {
-                let h_end = kh + (output_height - 1) * self.strides.0 + 1;
-                for kw in 0..self.kernel_size.1 {
-                    let w_end = kw + (output_width - 1) * self.strides.1 + 1;
+        for kh in 0..self.kernel_size.0 {
+            let h_end = kh + (output_height - 1) * self.strides.0 + 1;
+            for kw in 0..self.kernel_size.1 {
+                let w_end = kw + (output_width - 1) * self.strides.1 + 1;
 
-                    // Weight gradient: sum(window .* grad_channel)
-                    let window = padded_input
-                        .slice(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1]);
-                    batch_weight_grads[[c, 0, kh, kw]] = (&window * &grad_channel).sum();
+                // Weight gradient
+                let window =
+                    padded_input.slice(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1]);
+                weight_grad[[kh, kw]] = (&window * &grad_channel).sum();
 
-                    // Input gradient: scatter weight * grad_channel back into the padded window
-                    let w_val = self.weights[[c, 0, kh, kw]];
-                    batch_input_grads_padded
-                        .slice_mut(s![0, c, kh..h_end; self.strides.0, kw..w_end; self.strides.1])
-                        .scaled_add(w_val, &grad_channel);
-                }
+                // Input gradient
+                let w_val = self.weights[[c, 0, kh, kw]];
+                input_grad_padded
+                    .slice_mut(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1])
+                    .scaled_add(w_val, &grad_channel);
             }
         }
 
-        // Strip the symmetric padding so the input gradient matches the original input shape
+        // Strip the symmetric padding
         let pad_top = pad_h / 2;
         let pad_left = pad_w / 2;
-        let batch_input_grads = batch_input_grads_padded
+        let input_grad = input_grad_padded
             .slice(s![
-                ..,
-                ..,
                 pad_top..pad_top + input_height,
                 pad_left..pad_left + input_width
             ])
             .to_owned();
 
-        (batch_weight_grads, batch_input_grads)
+        (weight_grad, input_grad)
     }
 }
 
@@ -377,9 +375,15 @@ impl Layer for DepthwiseConv2D {
 
         let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
 
-        let total_elements = batch_size * channels * output_height * output_width;
+        let flops = 2
+            * batch_size
+            * channels
+            * output_height
+            * output_width
+            * self.kernel_size.0
+            * self.kernel_size.1;
 
-        if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
+        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
             // Parallel path
             output
                 .axis_iter_mut(Axis(0))
@@ -470,9 +474,15 @@ impl Layer for DepthwiseConv2D {
 
         let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
 
-        let total_elements = batch_size * channels * output_height * output_width;
+        let flops = 2
+            * batch_size
+            * channels
+            * output_height
+            * output_width
+            * self.kernel_size.0
+            * self.kernel_size.1;
 
-        if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
+        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
             // Parallel path
             output
                 .axis_iter_mut(Axis(0))
@@ -574,58 +584,43 @@ impl Layer for DepthwiseConv2D {
         let (pad_h, pad_w) =
             self.calculate_padding(input_height, input_width, output_height, output_width);
 
-        let total_elements = batch_size * channels * output_height * output_width;
+        let flops = 2
+            * batch_size
+            * channels
+            * output_height
+            * output_width
+            * self.kernel_size.0
+            * self.kernel_size.1;
 
-        if total_elements >= DEPTHWISE_CONV_2D_PARALLEL_THRESHOLD {
-            // Parallel path: per-batch weight and input gradients
-            let batch_results: Vec<(Array4<f32>, Array4<f32>)> = (0..batch_size)
-                .into_par_iter()
-                .map(|b| {
-                    self.compute_batch_gradients(
-                        &input_array,
-                        &grad_upstream,
-                        b,
-                        channels,
-                        input_height,
-                        input_width,
-                        output_height,
-                        output_width,
-                        pad_h,
-                        pad_w,
-                    )
-                })
-                .collect();
+        // One task per (batch item, channel)
+        let tasks: Vec<(usize, usize)> = (0..batch_size)
+            .flat_map(|b| (0..channels).map(move |c| (b, c)))
+            .collect();
+        let run = |&(b, c): &(usize, usize)| {
+            self.compute_channel_gradients(
+                &input_array,
+                &grad_upstream,
+                b,
+                c,
+                input_height,
+                input_width,
+                output_height,
+                output_width,
+                pad_h,
+                pad_w,
+            )
+        };
+        let results: Vec<(Array2<f32>, Array2<f32>)> =
+            if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+                tasks.par_iter().map(run).collect()
+            } else {
+                tasks.iter().map(run).collect()
+            };
 
-            // Accumulate gradients from all batches
-            for (b, (batch_weight_grads, batch_input_grads)) in
-                batch_results.into_iter().enumerate()
-            {
-                weight_grads += &batch_weight_grads;
-                input_grads
-                    .slice_mut(s![b, .., .., ..])
-                    .assign(&batch_input_grads.slice(s![0, .., .., ..]));
-            }
-        } else {
-            // Sequential path
-            for b in 0..batch_size {
-                let (batch_weight_grads, batch_input_grads) = self.compute_batch_gradients(
-                    &input_array,
-                    &grad_upstream,
-                    b,
-                    channels,
-                    input_height,
-                    input_width,
-                    output_height,
-                    output_width,
-                    pad_h,
-                    pad_w,
-                );
-
-                weight_grads += &batch_weight_grads;
-                input_grads
-                    .slice_mut(s![b, .., .., ..])
-                    .assign(&batch_input_grads.slice(s![0, .., .., ..]));
-            }
+        for (&(b, c), (weight_grad, input_grad)) in tasks.iter().zip(results) {
+            let mut wg = weight_grads.slice_mut(s![c, 0, .., ..]);
+            wg += &weight_grad;
+            input_grads.slice_mut(s![b, c, .., ..]).assign(&input_grad);
         }
 
         self.weight_gradients = Some(weight_grads);

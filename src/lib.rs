@@ -749,3 +749,9 @@ pub mod metrics;
 /// ```
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
+
+/// Internal hooks for the `benches/` targets - not part of the public API, no stability
+/// guarantees. See `src/bench_internals.rs`
+#[cfg(feature = "neural_network")]
+#[doc(hidden)]
+pub mod bench_internals;

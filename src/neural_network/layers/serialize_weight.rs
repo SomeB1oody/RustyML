@@ -78,43 +78,14 @@ impl SerializableLayerWeight {
                 })
             }
             LayerWeight::LSTM(w) => SerializableLayerWeight::LSTM(SerializableLSTMWeight {
-                input: SerializableGateWeight::from_arrays(
-                    w.input.kernel,
-                    w.input.recurrent_kernel,
-                    w.input.bias,
-                ),
-                forget: SerializableGateWeight::from_arrays(
-                    w.forget.kernel,
-                    w.forget.recurrent_kernel,
-                    w.forget.bias,
-                ),
-                cell: SerializableGateWeight::from_arrays(
-                    w.cell.kernel,
-                    w.cell.recurrent_kernel,
-                    w.cell.bias,
-                ),
-                output: SerializableGateWeight::from_arrays(
-                    w.output.kernel,
-                    w.output.recurrent_kernel,
-                    w.output.bias,
-                ),
+                kernel: w.kernel.clone(),
+                recurrent_kernel: w.recurrent_kernel.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::GRU(w) => SerializableLayerWeight::GRU(SerializableGRUWeight {
-                reset: SerializableGateWeight::from_arrays(
-                    w.reset.kernel,
-                    w.reset.recurrent_kernel,
-                    w.reset.bias,
-                ),
-                update: SerializableGateWeight::from_arrays(
-                    w.update.kernel,
-                    w.update.recurrent_kernel,
-                    w.update.bias,
-                ),
-                candidate: SerializableGateWeight::from_arrays(
-                    w.candidate.kernel,
-                    w.candidate.recurrent_kernel,
-                    w.candidate.bias,
-                ),
+                kernel: w.kernel.clone(),
+                recurrent_kernel: w.recurrent_kernel.clone(),
+                bias: w.bias.clone(),
             }),
             LayerWeight::Conv1D(w) => SerializableLayerWeight::Conv1D(SerializableConv1DWeight {
                 weight: w.weight.clone(),
@@ -342,8 +313,6 @@ pub mod serializable_conv_3d_weight;
 pub mod serializable_dense_weight;
 /// Serializable representation of a DepthwiseConv2D layer's weights
 pub mod serializable_depthwise_conv_2d_weight;
-/// Serializable representation of a single gate's weights
-pub mod serializable_gate_weight;
 /// Serializable representation of a GroupNormalization layer's weights
 pub mod serializable_group_normalization;
 /// Serializable representation of a GRU layer's weights
@@ -365,7 +334,6 @@ pub use serializable_conv_2d_weight::*;
 pub use serializable_conv_3d_weight::*;
 pub use serializable_dense_weight::*;
 pub use serializable_depthwise_conv_2d_weight::*;
-pub use serializable_gate_weight::*;
 pub use serializable_group_normalization::*;
 pub use serializable_gru_weight::*;
 pub use serializable_instance_normalization::*;

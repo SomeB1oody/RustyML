@@ -6,11 +6,10 @@
 //! these kernels work for any parameter shape, replacing the previous per-shape, per-optimizer
 //! state structs and update implementations
 
+use crate::neural_network::parallel_gates::FUSED_SLICE_PARALLEL_THRESHOLD;
 use rayon::prelude::*;
 use std::borrow::Cow;
 
-/// Element-count threshold above which a kernel switches to parallel evaluation
-const PARALLEL_THRESHOLD: usize = 1024;
 
 /// Scales a gradient by `grad_scale`, used to apply clip-by-global-norm before the optimizer step
 ///
@@ -26,7 +25,7 @@ pub fn scaled_grad(grad: &[f32], grad_scale: f32) -> Cow<'_, [f32]> {
 
 /// SGD update: `param -= lr * grad`
 pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
             .par_iter_mut()
             .zip(grad.par_iter())
@@ -58,7 +57,7 @@ pub fn sgd_momentum_step(
         let s = if nesterov { g + momentum * *v } else { *v };
         *p -= lr * s;
     };
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
             .par_iter_mut()
             .zip(grad.par_iter())
@@ -83,7 +82,7 @@ pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
         return;
     }
     let factor = 1.0 - lr * weight_decay;
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param.par_iter_mut().for_each(|p| *p *= factor);
     } else {
         for p in param.iter_mut() {
@@ -124,7 +123,7 @@ pub fn adam_step(
         *p -= lr * m_hat / (v_hat.sqrt() + epsilon);
     };
 
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
             .par_iter_mut()
             .zip(grad.par_iter())
@@ -164,7 +163,7 @@ pub fn rmsprop_step(
         *p -= lr * g / (c.sqrt() + epsilon);
     };
 
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
             .par_iter_mut()
             .zip(grad.par_iter())
@@ -197,7 +196,7 @@ pub fn adagrad_step(
         *p -= lr * g / (a.sqrt() + epsilon);
     };
 
-    if param.len() >= PARALLEL_THRESHOLD {
+    if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
             .par_iter_mut()
             .zip(grad.par_iter())
@@ -487,12 +486,12 @@ mod tests {
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
     // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: uniform inputs
-    // of length PARALLEL_THRESHOLD must make the rayon branch produce the documented update
+    // of length FUSED_SLICE_PARALLEL_THRESHOLD must make the rayon branch produce the documented update
 
     /// Adam parallel path (1024 elements) applies the canonical t=1-from-zero update everywhere
     #[test]
     fn adam_step_parallel_path() {
-        let n = 1024_usize; // == PARALLEL_THRESHOLD, forces the rayon branch
+        let n = 1024_usize; // == FUSED_SLICE_PARALLEL_THRESHOLD, forces the rayon branch
         let mut param = vec![0.0_f32; n];
         let grad = vec![1.0_f32; n];
         let mut m = vec![0.0_f32; n];

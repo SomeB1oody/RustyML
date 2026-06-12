@@ -58,52 +58,30 @@ pub struct SimpleRNNLayerWeight<'a> {
     pub bias: &'a Array2<f32>,
 }
 
-/// Weights for a single gate in an LSTM layer
-pub struct LSTMGateWeight<'a> {
-    /// Weight matrix for input features
-    pub kernel: &'a Array2<f32>,
-    /// Weight matrix for recurrent connections
-    pub recurrent_kernel: &'a Array2<f32>,
-    /// Bias vector for the gate
-    pub bias: &'a Array2<f32>,
-}
-
 /// Weights for a Long Short-Term Memory (LSTM) layer
 ///
-/// Holds the weights for the four gates that control information flow in an LSTM
-/// cell: input gate, forget gate, cell gate, and output gate
+/// The four gates (input, forget, cell, output) are stored fused: each matrix packs the per-gate
+/// blocks side by side as columns in the order `[i | f | g | o]` (the Keras LSTM layout)
 pub struct LSTMLayerWeight<'a> {
-    /// Input gate weights, which control what new information to store
-    pub input: LSTMGateWeight<'a>,
-    /// Forget gate weights, which control what information to discard
-    pub forget: LSTMGateWeight<'a>,
-    /// Cell gate weights, which propose new cell state values
-    pub cell: LSTMGateWeight<'a>,
-    /// Output gate weights, which control what to output
-    pub output: LSTMGateWeight<'a>,
-}
-
-/// Weights for a single gate in a GRU layer
-pub struct GRUGateWeight<'a> {
-    /// Weight matrix for input features
+    /// Fused input kernel with shape (input_dim, 4 * units), gate column blocks `[i | f | g | o]`
     pub kernel: &'a Array2<f32>,
-    /// Weight matrix for recurrent connections
+    /// Fused recurrent kernel with shape (units, 4 * units), same block order
     pub recurrent_kernel: &'a Array2<f32>,
-    /// Bias vector for the gate
+    /// Fused bias with shape (1, 4 * units), same block order
     pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a Gated Recurrent Unit (GRU) layer
 ///
-/// Holds the weights for the three gates that control information flow in a GRU
-/// cell: reset gate, update gate, and candidate gate
+/// The three gates (reset, update, candidate) are stored fused: each matrix packs the per-gate
+/// blocks side by side as columns in the order `[r | z | h]`
 pub struct GRULayerWeight<'a> {
-    /// Reset gate weights, which control what information to forget
-    pub reset: GRUGateWeight<'a>,
-    /// Update gate weights, which control how much to update the hidden state
-    pub update: GRUGateWeight<'a>,
-    /// Candidate gate weights, which propose new hidden state values
-    pub candidate: GRUGateWeight<'a>,
+    /// Fused input kernel with shape (input_dim, 3 * units), gate column blocks `[r | z | h]`
+    pub kernel: &'a Array2<f32>,
+    /// Fused recurrent kernel with shape (units, 3 * units), same block order
+    pub recurrent_kernel: &'a Array2<f32>,
+    /// Fused bias with shape (1, 3 * units), same block order
+    pub bias: &'a Array2<f32>,
 }
 
 /// Weights for a 1D convolutional layer

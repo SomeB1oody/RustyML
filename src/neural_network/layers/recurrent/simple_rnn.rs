@@ -10,6 +10,7 @@ use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
+use crate::neural_network::matmul::par_matmul;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -164,13 +165,7 @@ impl SimpleRNN {
     /// single gemm, returning `[batch, timesteps, units]`. Collapsing the (batch, timesteps) axes
     /// into one matmul beats `timesteps` separate small gemms on cache/SIMD utilization
     fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
-        let (batch, timesteps) = (x3.shape()[0], x3.shape()[1]);
-        let x2 = x3
-            .to_shape((batch * timesteps, self.input_dim))
-            .expect("contiguous [batch*timesteps, input_dim] reshape");
-        x2.dot(&self.kernel)
-            .into_shape_with_order((batch, timesteps, self.units))
-            .expect("reshape projection to [batch, timesteps, units]")
+        crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
     }
 }
 
@@ -193,7 +188,9 @@ impl Layer for SimpleRNN {
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = h_prev.dot(&self.recurrent_kernel) + xw.index_axis(Axis(1), t) + &self.bias;
+            let z = par_matmul(h_prev.view(), self.recurrent_kernel.view())
+                + xw.index_axis(Axis(1), t)
+                + &self.bias;
 
             let h_t = self
                 .activation
@@ -217,7 +214,7 @@ impl Layer for SimpleRNN {
         // input shape (batch, timesteps, input_dim)
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
 
-        // Batched input projection (see `forward`); only the recurrence stays sequential
+        // Batched input projection (see `forward`)
         let xw = self.project_input(&x3);
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
@@ -225,7 +222,9 @@ impl Layer for SimpleRNN {
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = h_prev.dot(&self.recurrent_kernel) + xw.index_axis(Axis(1), t) + &self.bias;
+            let z = par_matmul(h_prev.view(), self.recurrent_kernel.view())
+                + xw.index_axis(Axis(1), t)
+                + &self.bias;
 
             let h_t = self
                 .activation
@@ -280,7 +279,7 @@ impl Layer for SimpleRNN {
             };
 
             // gradient w.r.t. previous hidden state, used by the next iteration (sequential)
-            grad_h = d_z.dot(&self.recurrent_kernel.t());
+            grad_h = par_matmul(d_z.view(), self.recurrent_kernel.t());
             dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }
 
@@ -300,14 +299,15 @@ impl Layer for SimpleRNN {
             .to_shape((batch * timesteps, self.units))
             .expect("contiguous H_prev reshape");
 
-        grad_k += &x_flat.t().dot(&dz_flat);
-        grad_rk += &h_prev_flat.t().dot(&dz_flat);
+        grad_k += &par_matmul(x_flat.t(), dz_flat.view());
+        grad_rk += &par_matmul(h_prev_flat.t(), dz_flat.view());
         grad_b += &dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-        let grad_x3 = dz_flat
-            .dot(&self.kernel.t())
-            .into_shape_with_order((batch, timesteps, feat))
-            .expect("reshape grad_x to [batch, timesteps, feat]");
+        // Layout-tolerant reshape
+        let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
+            par_matmul(dz_flat.view(), self.kernel.t()),
+            (batch, timesteps, feat),
+        );
 
         // Gradient clipping is no longer applied here
         self.grad_kernel = Some(grad_k);

@@ -1,37 +1,7 @@
-//! Convolution-internal helpers: parallel output assembly, weight-gradient accumulation, and 2D/4D
-//! zero-padding
+//! Convolution-internal helpers: weight-gradient accumulation and 2D/4D zero-padding
 
 use crate::neural_network::Tensor;
-use ndarray::{Array2, Array3, ArrayD, Axis, s};
-
-/// Merges per-batch parallel results into a single output tensor
-///
-/// Combines results from independently processed batches, each written into its own batch slot
-///
-/// # Parameters
-///
-/// - `output_shape` - Shape of the final output tensor, `[batch_size, filters, height, width]`
-/// - `results` - One tuple per batch:
-///   - `usize` - batch index this result belongs to
-///   - `Array3<f32>` - the `[filters, height, width]` result for that batch
-///
-/// # Returns
-///
-/// - `ArrayD<f32>` - 4D array with the merged results in the requested shape
-pub(super) fn merge_results(
-    output_shape: Vec<usize>,
-    results: Vec<(usize, Array3<f32>)>,
-) -> ArrayD<f32> {
-    let mut output: ArrayD<f32> = ArrayD::zeros(output_shape);
-
-    // Assign each batch's [filters, height, width] result as a whole sub-view (cheaper than
-    // element-by-element index writes)
-    for (b, batch_output) in results {
-        output.index_axis_mut(Axis(0), b).assign(&batch_output);
-    }
-
-    output
-}
+use ndarray::{Array2, ArrayD, s};
 
 /// Accumulates the weight-gradient sum for a single kernel row during convolution backprop
 ///
@@ -158,37 +128,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
     use ndarray::array;
-
-    /// `merge_results` writes each batch's result into the batch slot named by its index
-    #[test]
-    fn test_merge_results_places_each_batch() {
-        // batch=2, filters=1, height=2, width=2
-        let b0 = array![[[1.0_f32, 2.0], [3.0, 4.0]]]; // Array3 [1,2,2]
-        let b1 = array![[[5.0_f32, 6.0], [7.0, 8.0]]];
-        let out = merge_results(vec![2, 1, 2, 2], vec![(0, b0.clone()), (1, b1.clone())]);
-
-        assert_eq!(out.shape(), &[2, 1, 2, 2]);
-        // Batch 0 slot holds b0, batch 1 slot holds b1, element for element (filters axis = 0)
-        for i in 0..2 {
-            for j in 0..2 {
-                assert_abs_diff_eq!(out[[0, 0, i, j]], b0[[0, i, j]], epsilon = 0.0);
-                assert_abs_diff_eq!(out[[1, 0, i, j]], b1[[0, i, j]], epsilon = 0.0);
-            }
-        }
-    }
-
-    /// A batch index not supplied to `merge_results` stays zero-filled in the output
-    #[test]
-    fn test_merge_results_missing_batch_stays_zero() {
-        let b1 = array![[[9.0_f32, 9.0], [9.0, 9.0]]];
-        let out = merge_results(vec![2, 1, 2, 2], vec![(1, b1)]);
-        for i in 0..2 {
-            for j in 0..2 {
-                assert_abs_diff_eq!(out[[0, 0, i, j]], 0.0, epsilon = 0.0);
-                assert_abs_diff_eq!(out[[1, 0, i, j]], 9.0, epsilon = 0.0);
-            }
-        }
-    }
 
     /// `compute_row_gradient_sum` accumulates gradient * input over in-bounds output columns
     #[test]

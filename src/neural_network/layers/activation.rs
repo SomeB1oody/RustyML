@@ -6,6 +6,9 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
+use crate::neural_network::parallel_gates::{
+    CHEAP_MAP_PARALLEL_THRESHOLD, EXP_MAP_PARALLEL_THRESHOLD,
+};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -52,14 +55,6 @@ pub use tanh::Tanh;
 
 /// Epsilon guarding the softmax normalizer against division by zero
 const SOFTMAX_EPSILON: f32 = 1e-8;
-/// Element threshold above which ReLU switches to parallel evaluation
-const RELU_PARALLEL_THRESHOLD: usize = 10_000;
-/// Element threshold above which Sigmoid switches to parallel evaluation
-const SIGMOID_PARALLEL_THRESHOLD: usize = 1000;
-/// Element threshold above which Tanh switches to parallel evaluation
-const TANH_PARALLEL_THRESHOLD: usize = 2048;
-/// Row threshold above which Softmax switches to parallel evaluation
-const SOFTMAX_PARALLEL_THRESHOLD: usize = 8;
 
 /// The element-wise activation functions that trainable layers can embed
 ///
@@ -125,7 +120,7 @@ impl Activation {
             Activation::ReLU => {
                 let mut out = z.clone();
                 let relu = |x: f32| if x > 0.0 { x } else { 0.0 };
-                if out.len() >= RELU_PARALLEL_THRESHOLD {
+                if out.len() >= CHEAP_MAP_PARALLEL_THRESHOLD {
                     out.par_mapv_inplace(relu);
                 } else {
                     out.mapv_inplace(relu);
@@ -135,7 +130,7 @@ impl Activation {
             Activation::Sigmoid => {
                 let mut out = z.clone();
                 let sigmoid = |x: f32| 1.0 / (1.0 + (-x).exp());
-                if out.len() >= SIGMOID_PARALLEL_THRESHOLD {
+                if out.len() >= EXP_MAP_PARALLEL_THRESHOLD {
                     out.par_mapv_inplace(sigmoid);
                 } else {
                     out.mapv_inplace(sigmoid);
@@ -143,10 +138,8 @@ impl Activation {
                 Ok(out)
             }
             Activation::Tanh => {
-                // No input clamp: tanh saturates to ±1 at ±inf (finite), so the only non-finite
-                // output comes from a NaN input, which propagates
                 let tanh = |x: f32| x.tanh();
-                let out = if z.len() >= TANH_PARALLEL_THRESHOLD {
+                let out = if z.len() >= EXP_MAP_PARALLEL_THRESHOLD {
                     let mut out = z.clone();
                     out.par_mapv_inplace(tanh);
                     out
@@ -180,7 +173,6 @@ impl Activation {
     /// - `Error::Computation` - Softmax failed to reshape the tensors
     pub fn backward(&self, activated: &Tensor, grad_output: &Tensor) -> Result<Tensor, Error> {
         match self {
-            // Derivative is 1, so the gradient passes through unchanged
             Activation::Linear => Ok(grad_output.clone()),
             Activation::ReLU => {
                 // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`
@@ -191,7 +183,7 @@ impl Activation {
                         *g = 0.0;
                     }
                 };
-                if activated.len() >= RELU_PARALLEL_THRESHOLD {
+                if activated.len() >= CHEAP_MAP_PARALLEL_THRESHOLD {
                     Zip::from(&mut grad).and(activated).par_for_each(relu_grad);
                 } else {
                     Zip::from(&mut grad).and(activated).for_each(relu_grad);
@@ -204,7 +196,7 @@ impl Activation {
                 let sigmoid_grad = |g: &mut f32, &a: &f32| {
                     *g *= a * (1.0 - a);
                 };
-                if grad.len() >= SIGMOID_PARALLEL_THRESHOLD {
+                if grad.len() >= EXP_MAP_PARALLEL_THRESHOLD {
                     Zip::from(&mut grad)
                         .and(activated)
                         .par_for_each(sigmoid_grad);
@@ -219,7 +211,7 @@ impl Activation {
                 let tanh_grad = |g: &mut f32, &a: &f32| {
                     *g *= 1.0 - a * a;
                 };
-                if activated.len() >= TANH_PARALLEL_THRESHOLD {
+                if activated.len() >= EXP_MAP_PARALLEL_THRESHOLD {
                     Zip::from(&mut grad).and(activated).par_for_each(tanh_grad);
                 } else {
                     Zip::from(&mut grad).and(activated).for_each(tanh_grad);
@@ -286,7 +278,7 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         row.map_inplace(|x| *x /= sum);
     };
 
-    if batch_size > SOFTMAX_PARALLEL_THRESHOLD {
+    if batch_size * num_features >= EXP_MAP_PARALLEL_THRESHOLD {
         output_2d
             .axis_iter_mut(Axis(0))
             .into_par_iter()
@@ -335,7 +327,7 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
         }
     };
 
-    if batch_size > SOFTMAX_PARALLEL_THRESHOLD {
+    if batch_size * num_features >= EXP_MAP_PARALLEL_THRESHOLD {
         Zip::from(grad_input_2d.axis_iter_mut(Axis(0)))
             .and(output_2d.axis_iter(Axis(0)))
             .and(grad_output_2d.axis_iter(Axis(0)))

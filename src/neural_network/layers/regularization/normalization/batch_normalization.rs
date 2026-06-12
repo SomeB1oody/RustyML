@@ -18,8 +18,13 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
-/// Total-element count above which forward/backward switch from sequential to parallel
-const BATCH_NORM_PARALLEL_THRESHOLD: usize = 1024;
+/// Total-element count above which forward/backward switch from sequential to parallel.
+///
+/// Mapped by analogy from the calibrated multi-stream (adam-like) elementwise class - the
+/// centering/variance/normalize passes stream several arrays like a fused optimizer step does
+/// (crossover bracket 256K-1M elements) - rather than measured directly on this layer.
+/// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md
+const BATCH_NORM_PARALLEL_THRESHOLD: usize = 262_144;
 
 /// Folds a `[batch, channels, *spatial]` tensor into `[M, channels]` (`M` = product of every axis
 /// except the channel axis 1) by moving the channel axis last and flattening
@@ -60,7 +65,7 @@ fn unfold_from_2d(t2: Tensor, orig_shape: &[usize]) -> Tensor {
     let cl = t2
         .into_shape_with_order(IxDyn(&cl_shape))
         .expect("unfold reshape preserves element count");
-    // Inverse of the fold permutation [0, 2, .., r-1, 1]: move the trailing channel axis back to 1
+    // Inverse of the fold permutation [0, 2, .., r-1, 1]
     let mut inv: Vec<usize> = vec![0, r - 1];
     inv.extend(1..(r - 1));
     cl.permuted_axes(inv).as_standard_layout().to_owned()
@@ -149,9 +154,7 @@ impl BatchNormalization {
         validate_momentum(momentum)?;
         validate_epsilon(epsilon)?;
 
-        // Parameters are per-channel: axis 1 is the channel/feature axis. For a 2-D `[N, F]` input
-        // this is `[F]` (standard per-feature BN); for a rank > 2 `[N, C, *spatial]` input it is
-        // `[C]`, and statistics reduce over batch + spatial (true spatial BN, like Keras/PyTorch)
+        // Parameters are per-channel
         let param_shape = if input_shape.len() > 1 {
             vec![input_shape[1]]
         } else {
@@ -220,8 +223,7 @@ impl Layer for BatchNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Fold to [M, channels] so the rest of the routine reduces per-channel over batch + spatial.
-        // For a 2-D input this is a no-op, so the standard per-feature BN path is unchanged
+        // Fold to [M, channels] so the rest of the routine reduces per-channel over batch + spatial
         let orig_shape = input.shape().to_vec();
         let folded = fold_to_2d(input);
         let input = &folded;
@@ -356,8 +358,7 @@ impl Layer for BatchNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Fold to [M, channels] to match the folded forward caches; `batch_size` is then the number
-        // of folded samples M (batch * spatial), which is the count the statistics were taken over
+        // Fold to [M, channels] to match the folded forward caches
         let orig_shape = grad_output.shape().to_vec();
         let folded = fold_to_2d(grad_output);
         let grad_output = &folded;
