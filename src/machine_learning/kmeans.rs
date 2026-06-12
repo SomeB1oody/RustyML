@@ -7,15 +7,16 @@ use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
 use crate::error::Error;
+use crate::math::matmul::par_matmul;
 use crate::math::squared_euclidean_distance_row;
+use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
-use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 use std::ops::AddAssign;
-
-/// Sample-count threshold at or above which clustering switches to parallel processing
-const KMEANS_PARALLEL_THRESHOLD: usize = 1000;
 
 /// KMeans clustering algorithm implementation
 ///
@@ -189,30 +190,24 @@ impl KMeans {
     get_field!(get_inertia, inertia, Option<f64>);
     get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
-    /// Finds the closest centroid to a given data point and returns its index and distance
+    /// Index of the closest centroid given a sample's projection row (`proj[j] = x . c_j`)
     ///
-    /// # Parameters
-    ///
-    /// - `sample` - Data point as a 1D array view
-    ///
-    /// # Returns
-    ///
-    /// - `(usize, f64)` - A tuple containing the index of the closest centroid and the squared distance to it
-    fn closest_centroid(&self, sample: ArrayView1<f64>) -> (usize, f64) {
-        let centroids = self.centroids.as_ref().unwrap();
-
-        let mut min_dist = f64::MAX;
-        let mut min_idx = 0;
-
-        for (i, centroid) in centroids.outer_iter().enumerate() {
-            let dist = squared_euclidean_distance_row(&sample, &centroid);
-            if dist < min_dist {
-                min_dist = dist;
-                min_idx = i;
+    /// Ranks centroids by `||c_j||^2 - 2 x.c_j`, which orders identically to the squared
+    /// distance (the `||x||^2` term is constant per sample). The projections for all samples
+    /// come from one block-parallel GEMM, so per-sample work is a plain scan
+    fn argmin_centroid(proj_row: ArrayView1<f64>, centroid_sq_norms: &Array1<f64>) -> usize {
+        let mut min_cluster = 0;
+        let mut min_val = f64::MAX;
+        for (cluster_idx, (&c_sq, &proj)) in
+            centroid_sq_norms.iter().zip(proj_row.iter()).enumerate()
+        {
+            let val = c_sq - 2.0 * proj;
+            if val < min_val {
+                min_val = val;
+                min_cluster = cluster_idx;
             }
         }
-
-        (min_idx, min_dist)
+        min_cluster
     }
 
     /// Initializes cluster centroids using the k-means++ algorithm
@@ -239,23 +234,41 @@ impl KMeans {
         let first_center_idx = rng.random_range(0..n_samples);
         centroids.row_mut(0).assign(&data.row(first_center_idx));
 
+        let init_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let mut min_dists: Vec<f64> = if init_parallel {
+            data.outer_iter()
+                .into_par_iter()
+                .map(|sample| squared_euclidean_distance_row(&sample, &centroids.row(0)))
+                .collect()
+        } else {
+            data.outer_iter()
+                .map(|sample| squared_euclidean_distance_row(&sample, &centroids.row(0)))
+                .collect()
+        };
+
         // Select the remaining centers
         for k in 1..self.n_clusters {
-            // Distance from each point to its nearest selected center
-            let distances: Vec<f64> = data
-                .outer_iter()
-                .into_par_iter()
-                .map(|sample| {
-                    centroids
-                        .rows()
-                        .into_iter()
-                        .take(k)
-                        .map(|centroid| squared_euclidean_distance_row(&sample, &centroid))
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .fold(f64::MAX, f64::min)
-                })
-                .collect();
+            // Fold the most recently selected center into the running minima
+            if k > 1 {
+                let latest = centroids.row(k - 1);
+                let fold_min = |(sample, min_dist): (ArrayView1<f64>, &mut f64)| {
+                    let dist = squared_euclidean_distance_row(&sample, &latest);
+                    if dist < *min_dist {
+                        *min_dist = dist;
+                    }
+                };
+                if init_parallel {
+                    data.outer_iter()
+                        .into_par_iter()
+                        .zip(min_dists.par_iter_mut())
+                        .for_each(fold_min);
+                } else {
+                    data.outer_iter()
+                        .zip(min_dists.iter_mut())
+                        .for_each(fold_min);
+                }
+            }
+            let distances = &min_dists;
 
             let total_dist: f64 = distances.iter().sum();
 
@@ -272,9 +285,6 @@ impl KMeans {
 
             for (i, &dist) in distances.iter().enumerate() {
                 cumulative_dist += dist;
-                // Require `dist > 0` so a point already chosen as a center (distance 0) is never
-                // re-selected. Without this guard, `choice == 0` (possible since `random::<f64>()`
-                // can return 0.0) would pick the first point even if it is an existing center
                 if dist > 0.0 && cumulative_dist >= choice {
                     centroids.row_mut(k).assign(&data.row(i));
                     break;
@@ -307,7 +317,8 @@ impl KMeans {
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples is >= 1000
+    /// The per-iteration assignment runs as one block-parallel GEMM; the arg-min scan
+    /// parallelizes above the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -352,34 +363,31 @@ impl KMeans {
             let centroids = self.centroids.as_ref().unwrap();
             let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
 
+            let data_view = data.view();
+            let projections = par_matmul(&data_view, &centroids.t());
+
             // Closest cluster center and distance for a single sample
-            let compute_assignments = |sample: ArrayView1<f64>| -> Result<(usize, f64), Error> {
-                let projections = centroids.dot(&sample);
+            let compute_assignments = |sample_idx: usize| -> Result<(usize, f64), Error> {
+                let min_cluster =
+                    Self::argmin_centroid(projections.row(sample_idx), &centroid_sq_norms);
 
-                let mut min_cluster = 0;
-                let mut min_val = f64::MAX;
-                for (cluster_idx, (&c_sq, &proj)) in
-                    centroid_sq_norms.iter().zip(projections.iter()).enumerate()
-                {
-                    let val = c_sq - 2.0 * proj;
-                    if val < min_val {
-                        min_val = val;
-                        min_cluster = cluster_idx;
-                    }
-                }
-
-                let dist = squared_euclidean_distance_row(&sample, &centroids.row(min_cluster));
+                let dist = squared_euclidean_distance_row(
+                    &data_view.row(sample_idx),
+                    &centroids.row(min_cluster),
+                );
                 Ok((min_cluster, dist))
             };
 
+            // Scan-class gate: n tasks, each an O(k) arg-min scan plus an O(d) exact distance
+            let scan_work = n_samples.saturating_mul(self.n_clusters + n_features);
             let results: Result<Vec<(usize, f64)>, Error> =
-                if n_samples >= KMEANS_PARALLEL_THRESHOLD {
-                    data.outer_iter()
+                if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+                    (0..n_samples)
                         .into_par_iter()
                         .map(compute_assignments)
                         .collect()
                 } else {
-                    data.outer_iter().map(compute_assignments).collect()
+                    (0..n_samples).map(compute_assignments).collect()
                 };
 
             let results = results?;
@@ -514,11 +522,21 @@ impl KMeans {
             .ok_or_else(|| Error::not_fitted("KMeans"))?;
         validate_predict_input(data, centroids.ncols())?;
 
-        let labels: Vec<usize> = data
-            .outer_iter()
-            .into_par_iter()
-            .map(|sample| self.closest_centroid(sample).0)
-            .collect();
+        let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
+        let projections = par_matmul(data, &centroids.t());
+
+        // Scan-class gate: n tasks, each an O(k) arg-min scan
+        let scan_work = data.nrows().saturating_mul(centroids.nrows());
+        let labels: Vec<usize> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+            (0..data.nrows())
+                .into_par_iter()
+                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms))
+                .collect()
+        } else {
+            (0..data.nrows())
+                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms))
+                .collect()
+        };
 
         Ok(Array1::from(labels))
     }

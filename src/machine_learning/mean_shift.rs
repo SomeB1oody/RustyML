@@ -9,15 +9,14 @@ use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
 use crate::error::Error;
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, par_matmul};
 use crate::math::squared_euclidean_distance_row;
+use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip, s};
 use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-
-/// Sample-count threshold above which processing switches to parallel
-const MEANSHIFT_PARALLEL_THRESHOLD: usize = 1000;
 
 /// Mean Shift clustering algorithm
 ///
@@ -176,7 +175,8 @@ impl MeanShift {
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000)
+    /// Parallelizes when the total scan work clears the calibrated scan-class gate (see
+    /// `crate::parallel_gates`)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -190,9 +190,6 @@ impl MeanShift {
         let seeds: Vec<usize> = if self.bin_seeding {
             self.get_bin_seeds(x)
         } else {
-            // Standard mean-shift seeds from every sample. Seeding from all points (rather
-            // than a random capped subset) avoids silently missing dense clusters that the
-            // subset might not cover; `bin_seeding` is the faster, coarser alternative
             (0..n_samples).collect()
         };
 
@@ -203,7 +200,12 @@ impl MeanShift {
         // Per-sample squared norms, shared across all seeds and iterations
         let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
 
-        let use_parallel = n_samples > MEANSHIFT_PARALLEL_THRESHOLD;
+        // Each seed task runs O(iterations * n * d) of work
+        let use_parallel = seeds
+            .len()
+            .saturating_mul(n_samples)
+            .saturating_mul(n_features)
+            >= SCAN_F64_PARALLEL_MIN_ELEMS;
 
         // Mean shift on a single seed
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
@@ -253,7 +255,6 @@ impl MeanShift {
             pb
         };
 
-        // Seeds are independent, so this is the single level at which parallelism is applied
         let results: Vec<(Array1<f64>, usize)> = if use_parallel {
             seeds
                 .par_iter()
@@ -347,12 +348,18 @@ impl MeanShift {
             }
         };
 
-        // Assign cluster labels to each data point
-        let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_label);
+        // Assign cluster labels to each data point (scan-class gate: n tasks, each an
+        // O(centers * d) distance scan)
+        let label_work = n_samples
+            .saturating_mul(n_clusters)
+            .saturating_mul(x.ncols());
+        let labels = map_collect(
+            n_samples,
+            label_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            find_label,
+        );
 
-        // Count how many samples are actually assigned to each cluster center. Outliers
-        // (label == n_clusters, only possible when cluster_all is false) belong to no center
-        // and are excluded. The merge counts above are unrelated to sample membership
+        // Count how many samples are actually assigned to each cluster center
         let mut samples_per_center = vec![0usize; n_clusters];
         for &label in &labels {
             if label < n_clusters {
@@ -384,7 +391,8 @@ impl MeanShift {
     ///
     /// # Performance
     ///
-    /// Parallel processing is used when the number of samples exceeds `MEANSHIFT_PARALLEL_THRESHOLD` (1000)
+    /// Parallelizes when the total scan work clears the calibrated scan-class gate (see
+    /// `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
     where
         S: Data<Elem = f64> + Sync,
@@ -424,7 +432,15 @@ impl MeanShift {
             }
         };
 
-        let labels = map_collect(n_samples, MEANSHIFT_PARALLEL_THRESHOLD, find_nearest);
+        // Scan-class gate: n tasks, each an O(centers * d) distance scan
+        let label_work = n_samples
+            .saturating_mul(n_clusters)
+            .saturating_mul(x.ncols());
+        let labels = map_collect(
+            n_samples,
+            label_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            find_nearest,
+        );
 
         Ok(Array1::from(labels))
     }
@@ -470,22 +486,25 @@ impl MeanShift {
         let n_samples = x.shape()[0];
         let n_features = x.shape()[1];
 
-        // Calculate min for each feature in parallel
-        let mins: Vec<f64> = (0..n_features)
-            .into_par_iter()
-            .map(|j| {
-                let col = x.column(j);
-                col.fold(f64::INFINITY, |a, &b| a.min(b))
-            })
-            .collect();
+        // Calculate min for each feature (scan-class gate: d tasks of an O(n) column scan)
+        let scan_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let col_min = |j: usize| {
+            let col = x.column(j);
+            col.fold(f64::INFINITY, |a, &b| a.min(b))
+        };
+        let mins: Vec<f64> = if scan_parallel {
+            (0..n_features).into_par_iter().map(col_min).collect()
+        } else {
+            (0..n_features).map(col_min).collect()
+        };
 
         // The grid is built under a shared HashMap, so this part is harder to parallelize
         let bin_size = self.bandwidth;
 
         let bins_mutex = std::sync::Mutex::new(AHashMap::<Vec<i64>, Vec<usize>>::new());
 
-        // Assign points to bins in parallel
-        (0..n_samples).into_par_iter().for_each(|i| {
+        // Assign points to bins (same scan-class gate: n tasks of O(d) quantization each)
+        let assign_bin = |i: usize| {
             let point = x.row(i);
             let mut bin_index = Vec::with_capacity(n_features);
 
@@ -497,12 +516,16 @@ impl MeanShift {
             // Lock the HashMap only when updating
             let mut bins = bins_mutex.lock().unwrap();
             bins.entry(bin_index).or_default().push(i);
-        });
+        };
+        if scan_parallel {
+            (0..n_samples).into_par_iter().for_each(assign_bin);
+        } else {
+            (0..n_samples).for_each(assign_bin);
+        }
 
         let bins = bins_mutex.into_inner().unwrap();
 
-        // One seed per cell; for reproducible `bin_seeding` take the min index per cell (parallel push
-        // order) and sort seeds (AHashMap order is randomly seeded; the downstream merge is order-sensitive)
+        // One seed per cell
         let mut seeds = Vec::new();
         for (_, indices) in bins {
             if let Some(&min_idx) = indices.iter().min() {
@@ -553,8 +576,7 @@ where
     }
 
     let (n_samples_total, _) = x.dim();
-    // Clamp the requested sample count to the dataset size; without the clamp the pair indices below
-    // run past `x_samples` (only `n_samples_total` rows), causing an out-of-bounds panic
+    // Clamp the requested sample count to the dataset size
     let n_samples = n_samples.unwrap_or(n_samples_total).min(n_samples_total);
 
     let mut rng = crate::random::make_rng(random_state);
@@ -574,33 +596,44 @@ where
         samples
     };
 
-    // Pairwise Euclidean distances over the upper triangle (i < j), computed in parallel
-    // without first materializing the O(m^2) list of index pairs
-    let mut distances: Vec<f64> = (0..n_samples)
-        .into_par_iter()
-        .flat_map(|i| {
-            let point_i = x_samples.row(i);
-            ((i + 1)..n_samples)
-                .map(|j| {
-                    let point_j = x_samples.row(j);
-                    point_i
-                        .iter()
-                        .zip(point_j.iter())
-                        .map(|(&a, &b)| (a - b).powi(2))
-                        .sum::<f64>()
-                        .sqrt()
+    let x_sq = x_samples.map_axis(Axis(1), |row| row.dot(&row));
+    let mut distances: Vec<f64> = if cache_resident::<f64>(n_samples, x_samples.ncols()) {
+        (0..n_samples)
+            .into_par_iter()
+            .flat_map(|i| {
+                let proj_row = x_samples.dot(&x_samples.row(i));
+                ((i + 1)..n_samples)
+                    .map(|j| (x_sq[i] + x_sq[j] - 2.0 * proj_row[j]).max(0.0).sqrt())
+                    .collect::<Vec<f64>>()
+            })
+            .collect()
+    } else {
+        let chunk_rows = gemm_chunk_rows(n_samples);
+        let mut distances: Vec<f64> = Vec::new();
+        for chunk_start in (0..n_samples).step_by(chunk_rows) {
+            let chunk_end = (chunk_start + chunk_rows).min(n_samples);
+            let projections = par_matmul(
+                &x_samples.slice(s![chunk_start..chunk_end, ..]),
+                &x_samples.t(),
+            );
+            let chunk: Vec<f64> = (chunk_start..chunk_end)
+                .into_par_iter()
+                .flat_map(|i| {
+                    let proj_row = projections.row(i - chunk_start);
+                    ((i + 1)..n_samples)
+                        .map(|j| (x_sq[i] + x_sq[j] - 2.0 * proj_row[j]).max(0.0).sqrt())
+                        .collect::<Vec<f64>>()
                 })
-                .collect::<Vec<f64>>()
-        })
-        .collect();
+                .collect();
+            distances.extend(chunk);
+        }
+        distances
+    };
 
     if distances.is_empty() {
         return Ok(0.0);
     }
 
-    // Select only the quantile order statistic instead of fully sorting every pairwise
-    // distance: O(pairs) on average rather than O(pairs log pairs). The clamp keeps a
-    // near-1.0 quantile (or tiny sample) from indexing past the end
     let k = ((distances.len() as f64 * quantile) as usize).min(distances.len() - 1);
     distances.select_nth_unstable_by(k, |a, b| {
         a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)

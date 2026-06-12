@@ -1,6 +1,6 @@
 //! Fused gate parameters and shared helpers for GRU/LSTM recurrent cells
 //!
-//! Defines the [`FusedGates`] weight/gradient container plus the batched input-projection and
+//! Defines the `FusedGates` weight/gradient container plus the batched input-projection and
 //! cache helpers reused across recurrent layers
 
 use crate::error::Error;
@@ -185,7 +185,7 @@ pub fn project_input(kernel: &Array2<f32>, x3: &ArrayView3<f32>) -> Array3<f32> 
         .to_shape((batch * timesteps, input_dim))
         .expect("contiguous [batch*timesteps, input_dim] reshape");
     reshape_2d_to_3d(
-        crate::neural_network::matmul::par_matmul(x2.view(), kernel.view()),
+        crate::math::matmul::par_matmul(&x2, kernel),
         (batch, timesteps, width),
     )
 }

@@ -4,15 +4,13 @@
 //! and parallel paths chosen by data size
 
 use crate::error::Error;
+use crate::parallel_gates::{
+    CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS,
+};
+use crate::reduction::det_par_fold;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
-
-/// Element-count threshold above which the global-axis path computes in parallel
-const STANDARDIZE_PARALLEL_THRESHOLD: usize = 10000;
-
-/// Lane-count threshold above which row/column standardization runs across lanes in parallel
-const STANDARDIZE_PARALLEL_LANES: usize = 100;
 
 /// Axis along which standardization is applied
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +85,9 @@ impl StandardizationAxis {
 ///
 /// # Performance
 ///
-/// - The global-axis path computes in parallel once the element count reaches `STANDARDIZE_PARALLEL_THRESHOLD` (10,000)
+/// - The global-axis path computes its moments through a deterministic blocked parallel
+///   reduction above the calibrated sum gate (see `crate::parallel_gates`), so results are
+///   identical at any thread count
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
@@ -160,18 +160,25 @@ where
         return Err(Error::computation("No values to standardize"));
     }
 
-    // Single stable pass for both mean and (population) variance, then one transform pass
-    let (_, mean, m2) = if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
-        data.par_iter()
-            .fold(|| (0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x))
-            .reduce(|| (0.0, 0.0, 0.0), welford_merge)
-    } else {
-        data.iter()
-            .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x))
+    let (_, mean, m2) = match data.as_slice() {
+        Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+            slice,
+            |block| {
+                block
+                    .iter()
+                    .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x))
+            },
+            welford_merge,
+            (0.0, 0.0, 0.0),
+        ),
+        _ => data
+            .iter()
+            .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x)),
     };
     let std_dev = (m2 / n + epsilon * epsilon).sqrt();
 
-    if n as usize >= STANDARDIZE_PARALLEL_THRESHOLD {
+    // Cheap-map class gate for the transform pass
+    if data.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
         data.par_mapv_inplace(|x| (x - mean) / std_dev);
     } else {
         data.mapv_inplace(|x| (x - mean) / std_dev);
@@ -218,13 +225,15 @@ where
     // ndim >= 2 above and axis_from_end in {1, 2}, so the subtraction cannot underflow
     let axis = Axis(ndim - axis_from_end);
 
+    let data_len = data.len();
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
     let process = |lane: &mut ArrayViewMut1<f64>| {
         let (mean, std_dev) = lane_mean_and_std(lane, epsilon);
         lane.mapv_inplace(|x| (x - mean) / std_dev);
     };
 
-    if lanes.len() >= STANDARDIZE_PARALLEL_LANES {
+    // Scan-class gate: one O(lane) Welford pass + map per lane, so the work is the element count
+    if data_len >= SCAN_F64_PARALLEL_MIN_ELEMS {
         lanes.par_iter_mut().for_each(process);
     } else {
         lanes.iter_mut().for_each(process);

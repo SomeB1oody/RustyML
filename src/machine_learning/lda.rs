@@ -5,6 +5,8 @@
 //! enums
 
 use crate::error::{Context, Error};
+use crate::math::matmul::{par_matmul, par_matvec};
+use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
@@ -51,8 +53,8 @@ impl Solver {
                 Ok(coefficients)
             }
             // The covariance inverse is symmetric, so `means . inv` row c equals `inv * mu_c`
-            Solver::Eigen => Ok(means.dot(&Self::eigen_inverse(cov)?)),
-            Solver::SVD => Ok(means.dot(&Self::svd_pseudo_inverse(cov)?)),
+            Solver::Eigen => Ok(par_matmul(means, &Self::eigen_inverse(cov)?)),
+            Solver::SVD => Ok(par_matmul(means, &Self::svd_pseudo_inverse(cov)?)),
         }
     }
 
@@ -132,8 +134,7 @@ impl Solver {
         let cov_sym = (&cov_mat + &cov_mat.transpose()) * 0.5;
         let cov_eig = SymmetricEigen::new(cov_sym);
 
-        // Whitening W = U diag(d^{-1/2}); drop directions whose S_w eigenvalue is numerically
-        // zero (no within-class information, and they would blow up the inverse sqrt)
+        // Whitening W = U diag(d^{-1/2})
         let max_d = cov_eig.eigenvalues.iter().cloned().fold(0.0_f64, f64::max);
         let tol = (1e-12 * max_d).max(1e-12);
         let mut w_scale = cov_eig.eigenvectors.clone();
@@ -145,8 +146,7 @@ impl Solver {
             }
         }
 
-        // A = W^T S_b W is symmetric; eigendecompose it, then map eigenvectors back to the
-        // original feature space via `directions = W * V`
+        // A = W^T S_b W is symmetric
         let wt = w_scale.transpose();
         let sbw = &sb_mat * &w_scale;
         let a = &wt * &sbw;
@@ -200,7 +200,7 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
     }
     u.mapv_inplace(|v| v / beta);
 
-    let mut v = a.t().dot(&u);
+    let mut v = par_matvec(&a.t(), &u);
     let mut alpha = v.dot(&v).sqrt();
     if alpha <= 0.0 {
         return x; // a^T b = 0 leaves no descent direction
@@ -213,14 +213,14 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 
     for _ in 0..max_iter {
         // Advance the bidiagonalization to u_{k+1} and v_{k+1}
-        let mut u_next = a.dot(&v);
+        let mut u_next = par_matvec(a, &v);
         u_next.scaled_add(-alpha, &u);
         beta = u_next.dot(&u_next).sqrt();
         if beta > 0.0 {
             u_next.mapv_inplace(|val| val / beta);
         }
 
-        let mut v_next = a.t().dot(&u_next);
+        let mut v_next = par_matvec(&a.t(), &u_next);
         v_next.scaled_add(-beta, &v);
         alpha = v_next.dot(&v_next).sqrt();
         if alpha > 0.0 {
@@ -298,11 +298,6 @@ pub enum Shrinkage {
     /// Explicit shrinkage factor in the range [0, 1]
     Manual(f64),
 }
-
-/// Sample-count threshold for switching to parallel computation in LDA
-///
-/// Computation runs sequentially at or below this sample count
-const LDA_PARALLEL_THRESHOLD: usize = 500;
 
 /// Linear Discriminant Analysis (LDA) model
 ///
@@ -443,8 +438,8 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`. Uses
-    /// Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`
+    /// Parallelizes the per-class statistics when the total work clears the calibrated
+    /// scan-class gate (see `crate::parallel_gates`); the internal GEMMs gate themselves
     pub fn fit<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -454,8 +449,7 @@ impl LDA {
         S1: Data<Elem = f64>,
         S2: Data<Elem = i32>,
     {
-        // Non-empty + finiteness checks on `x`; the `i32` label vector is validated
-        // separately below (not via `preliminary_check`'s f64 target argument)
+        // Non-empty + finiteness checks on `x`
         super::validation::preliminary_check(x, None)?;
 
         if x.nrows() != y.len() {
@@ -469,7 +463,7 @@ impl LDA {
         let n_samples = x.nrows();
         let n_features = x.ncols();
         // Decide execution mode from sample count
-        let use_parallel = n_samples > LDA_PARALLEL_THRESHOLD;
+        let use_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -611,8 +605,7 @@ impl LDA {
         let projection = Solver::project(&cov, &sb, self.n_components)?;
         self.projection = Some(projection);
 
-        // Cache the per-class linear-scoring parameters (Sigma^-1 * mu_c and the intercepts) so
-        // `predict` reuses them instead of recomputing them on every call
+        // Cache the per-class linear-scoring parameters (Sigma^-1 * mu_c and the intercepts)
         {
             let means = self.means.as_ref().unwrap();
             let priors = self.priors.as_ref().unwrap();
@@ -665,7 +658,8 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Uses parallel prediction when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD` (500)
+    /// Scores through one block-parallel GEMM; the per-row label pick parallelizes when the
+    /// total scan work clears the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
@@ -699,26 +693,30 @@ impl LDA {
 
         let n_classes = classes.len();
 
-        let predict_sample = |row: ArrayView1<f64>| {
-            // Score each class and keep the best label
+        let mut scores = par_matmul(x, &coefficients.t());
+        scores += intercepts;
+
+        let predict_sample = |score_row: ArrayView1<f64>| {
+            // Keep the best-scoring label; ties resolve to the lowest class index
             let mut best_score = f64::NEG_INFINITY;
             let mut best_class = classes[0];
             for j in 0..n_classes {
-                let score = row.dot(&coefficients.row(j)) + intercepts[j];
-                if score > best_score {
-                    best_score = score;
+                if score_row[j] > best_score {
+                    best_score = score_row[j];
                     best_class = classes[j];
                 }
             }
             best_class
         };
 
-        let predictions: Vec<i32> = if x.nrows() > LDA_PARALLEL_THRESHOLD {
-            // Parallel scoring over borrowed rows (no full-matrix clone); the row views and the
-            // cached coefficient arrays are all Sync, so no copy is needed to satisfy rayon
+        // Scan-class gate: n tasks, each an O(classes) best-score scan
+        let scan_work = x.nrows().saturating_mul(n_classes);
+        let predictions: Vec<i32> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+            // Parallel label pick over the score rows
             #[cfg(feature = "show_progress")]
             let pb = progress_bar.clone();
-            x.axis_iter(Axis(0))
+            scores
+                .axis_iter(Axis(0))
                 .into_par_iter()
                 .map(|row| {
                     let pred = predict_sample(row);
@@ -728,8 +726,9 @@ impl LDA {
                 })
                 .collect()
         } else {
-            // Use sequential scoring for smaller batches
-            x.outer_iter()
+            // Sequential label pick for smaller batches
+            scores
+                .outer_iter()
                 .map(|row| {
                     let pred = predict_sample(row);
                     #[cfg(feature = "show_progress")]
@@ -787,8 +786,8 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Runs sequentially when `x.nrows()` is at or below `LDA_PARALLEL_THRESHOLD`. Uses
-    /// Rayon parallelism when `x.nrows()` is above `LDA_PARALLEL_THRESHOLD`
+    /// Parallelizes the per-class statistics when the total work clears the calibrated
+    /// scan-class gate (see `crate::parallel_gates`); the internal GEMMs gate themselves
     pub fn fit_transform<S1, S2>(
         &mut self,
         x: &ArrayBase<S1, Ix2>,
@@ -830,7 +829,7 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        let transformed = x.dot(projection);
+        let transformed = par_matmul(x, projection);
 
         #[cfg(feature = "show_progress")]
         {
@@ -862,10 +861,8 @@ impl LDA {
             .mean_axis(Axis(0))
             .expect("Error computing class mean");
 
-        // Within-class scatter as a single GEMM S_W = C^T * C (C is the mean-centered
-        // class data), avoiding a per-row rank-1 update loop
         let centered = &class_data - &class_mean;
-        let class_sw = centered.t().dot(&centered);
+        let class_sw = par_matmul(&centered.t(), &centered);
 
         // Fourth power of each centered row norm, summed for the Ledoit-Wolf dispersion term
         let sum_z4 = centered
@@ -879,7 +876,7 @@ impl LDA {
         // Between-class scatter from mean shift
         let mean_diff = &class_mean - overall_mean;
         let mean_diff_col = mean_diff.insert_axis(Axis(1));
-        let class_sb = mean_diff_col.dot(&mean_diff_col.t()) * (n_class as f64);
+        let class_sb = par_matmul(&mean_diff_col, &mean_diff_col.t()) * (n_class as f64);
 
         (prior, class_mean, class_sw, class_sb, sum_z4)
     }

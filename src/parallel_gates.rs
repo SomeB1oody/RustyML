@@ -1,0 +1,114 @@
+//! Shared parallel/serial gate thresholds for the elementwise kernel classes
+//!
+//! Every gated pass in the crate belongs to one of a few **cost classes**, and the calibration
+//! bench (`cargo bench --bench parallel_gates`, results in `benches/RESULTS.md`) measures the
+//! serial/parallel crossover **per class**, not per call site. Declaring one constant per class
+//! here keeps each calibration result in exactly one place; the call sites import the constant
+//! matching their kernel's class instead of restating the value.
+//!
+//! The classes come in two element widths: the `f32` constants serve the neural-network layers,
+//! the `f64` constants serve the classical-ML and utils modules. The crossovers differ (an f64
+//! stream moves twice the bytes per element; an f64 `exp` costs more than the f32 one), so the
+//! widths are calibrated separately.
+//!
+//! The engine-specific gates stay with their engines, because their work metrics are
+//! engine-specific rather than class-shared: `MatmulElem::{PAR_GEMM_MIN_FLOPS,
+//! PAR_GEMV_MIN_FLOPS}` and the block/tiling constants (`crate::math::matmul`),
+//! `CONV_PARALLEL_MIN_FLOPS`/`CONV_MIN_CHUNK_COLS` (im2col+GEMM engine),
+//! `POOL_PARALLEL_MIN_OPS`/`POOL_MIN_CHUNK_OUT` (pooling engine), and
+//! `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer analogy mapping). `metrics` keeps its
+//! silhouette gate module-local on purpose - it is a lightweight leaf module that does not
+//! import crate internals - but documents its value against the same calibration tables.
+//!
+//! All values: calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11, see
+//! benches/RESULTS.md.
+
+// f32 classes (neural-network layers)
+
+/// Cheap memory-bound `f32` maps: ReLU's `max(0, x)`, the dropout layers' compare-into-mask
+/// thresholding, and similar one-stream copy-speed loops.
+///
+/// In calibration the parallel path **never beat serial up to 1M elements** - these ops run at
+/// memory bandwidth on a single core, so rayon only adds fork/join overhead. The gate sits far
+/// out; at every practical tensor size this class runs serial
+#[cfg(feature = "neural_network")]
+pub(crate) const CHEAP_MAP_PARALLEL_THRESHOLD: usize = 4_000_000;
+
+/// Exp-dominated `f32` maps: sigmoid, tanh, and softmax (whose per-element cost is dominated by
+/// the shifted `exp`).
+///
+/// Measured crossover bracket: 64K-128K elements
+#[cfg(feature = "neural_network")]
+pub(crate) const EXP_MAP_PARALLEL_THRESHOLD: usize = 131_072;
+
+/// Fused multi-slice `f32` updates: the optimizer kernels' parameter/gradient/moment loops,
+/// which stream several arrays at once.
+///
+/// Measured crossover bracket: 256K-1M elements
+#[cfg(feature = "neural_network")]
+pub(crate) const FUSED_SLICE_PARALLEL_THRESHOLD: usize = 1_000_000;
+
+/// Naive (non-im2col) convolution loop nests: the DepthwiseConv2D forward/backward and the
+/// SeparableConv2D depthwise stage, gated on estimated FLOPs
+/// (`2 * batch * channels [* depth_multiplier] * out_h * out_w * kh * kw`).
+///
+/// Estimated by analogy, not directly calibrated: these loops cost more per FLOP than the
+/// im2col+GEMM engine (whose measured crossover is ~4M FLOPs), so the crossover sits
+/// proportionally lower
+#[cfg(feature = "neural_network")]
+pub(crate) const NAIVE_CONV_PARALLEL_MIN_FLOPS: usize = 1_000_000;
+
+// f64 classes (classical ML / utils)
+
+/// Cheap memory-bound `f64` maps: centering, scaling, normalization, kernel-matrix centering,
+/// and similar one-or-two-stream copy-speed loops, gated on the total element count.
+///
+/// Measured crossover bracket: 1M-4.2M elements (1.95x at 4.2M) - the same far-out gate as the
+/// f32 class; at typical preprocessing sizes this class runs serial
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) const CHEAP_MAP_F64_PARALLEL_THRESHOLD: usize = 4_000_000;
+
+/// Exp-dominated `f64` maps: the logistic sigmoid and the RBF/Sigmoid kernel transforms, gated
+/// on the total element count.
+///
+/// Measured crossover bracket: 16K-32K elements, but the win at 32K is a thin 1.09x; the gate
+/// sits at 65K where the win is a solid 1.82x. Lower than the f32 class (131K), as expected
+/// from the costlier f64 `exp`
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) const EXP_MAP_F64_PARALLEL_THRESHOLD: usize = 65_536;
+
+/// Short `f64` row scans: KMeans' per-sample arg-min over centroid projections, LDA's per-row
+/// best-class pick, per-sample distance scans (DBSCAN region queries, MeanShift label
+/// assignment), and similar `O(row)` per-task loops, gated on the **total elements scanned**
+/// (tasks x per-task row length, including any per-element dimension multiplier).
+///
+/// Measured crossover bracket: 65K-262K scanned elements (1.61x at 262K)
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) const SCAN_F64_PARALLEL_MIN_ELEMS: usize = 262_144;
+
+/// Tree-traversal tasks: per-sample root-to-leaf walks (DecisionTree and IsolationForest
+/// prediction), gated on the **total node visits** (samples x walk length; for a forest,
+/// samples x trees x average path length).
+///
+/// Measured on a synthetic depth-16 heap-layout tree (the same compare-and-jump shape):
+/// crossover bracket 65K-262K node visits (6.3x at 262K)
+#[cfg(feature = "machine_learning")]
+pub(crate) const TREE_TRAVERSAL_MIN_VISITS: usize = 262_144;
+
+/// Sort-dominated split-search tasks: DecisionTree's per-feature copy + sort + scan in
+/// `find_best_split`, gated on the **total sorted elements** (node samples x features).
+///
+/// Measured on the same copy/sort/prefix-scan shape (8 feature tasks): crossover bracket
+/// 2K-8K sorted elements (1.8x at 8K)
+#[cfg(feature = "machine_learning")]
+pub(crate) const SORT_SCAN_MIN_ELEMS: usize = 8_192;
+
+/// `f64` sum-style reductions (sum of squares, Welford moments), gated on the element count.
+///
+/// Below the gate a parallel reduction cannot win; above it, callers must use
+/// [`crate::reduction::det_par_fold`] rather than a bare rayon `sum`/`reduce`, whose
+/// scheduling-dependent grouping makes the float result non-reproducible.
+///
+/// Measured crossover bracket: 131K-262K elements (1.24x at 262K, 3.5x at 1M)
+#[cfg(feature = "utils")]
+pub(crate) const SUM_F64_PARALLEL_MIN_ELEMS: usize = 262_144;

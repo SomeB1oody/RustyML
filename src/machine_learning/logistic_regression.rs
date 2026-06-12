@@ -11,16 +11,11 @@ use super::validation::{
 };
 use crate::error::Error;
 use crate::math::{logistic_loss, sigmoid};
+use crate::math::matmul::par_matvec;
+use crate::parallel_gates::EXP_MAP_F64_PARALLEL_THRESHOLD;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-
-/// Sample-count threshold for enabling parallel computation
-///
-/// When the number of samples reaches this value, parallel processing is used
-/// to improve performance; smaller datasets stay sequential to avoid
-/// parallelization overhead
-const LOGISTIC_REGRESSION_PARALLEL_THRESHOLD: usize = 1000;
 
 /// Logistic regression model for binary classification
 ///
@@ -234,23 +229,19 @@ impl LogisticRegression {
         while n_iter < self.max_iter {
             n_iter += 1;
 
-            // Compute linear predictions (reuse for both gradient and loss calculation)
-            let predictions = x_train_view.dot(&weights);
-
-            // Apply sigmoid, in parallel for large datasets
-            let sigmoid_preds = if n_samples >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
-                let sigmoid_vec = (0..n_samples)
-                    .into_par_iter()
-                    .map(|i| sigmoid(predictions[i]))
-                    .collect::<Vec<f64>>();
-                Array1::from(sigmoid_vec)
+            // Compute linear predictions (the raw logits feed the loss below), then the
+            // sigmoid activations (exp-map class gate: one f64 exp per element)
+            let predictions = par_matvec(&x_train_view, &weights);
+            let mut sigmoid_preds = predictions.clone();
+            if n_samples >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+                sigmoid_preds.par_mapv_inplace(sigmoid);
             } else {
-                predictions.mapv(sigmoid)
-            };
+                sigmoid_preds.mapv_inplace(sigmoid);
+            }
 
             let errors = &sigmoid_preds - y;
 
-            let mut gradients = x_train_view.t().dot(&errors) / n_samples as f64;
+            let mut gradients = par_matvec(&x_train_view.t(), &errors) / n_samples as f64;
 
             // Check for numerical issues in gradients
             if gradients.iter().any(|&val| !val.is_finite()) {
@@ -449,10 +440,10 @@ impl LogisticRegression {
         S: Data<Elem = f64>,
     {
         let weights = self.weights.as_ref().unwrap();
-        let mut predictions = x.dot(weights);
+        let mut predictions = par_matvec(x, weights);
 
-        // Apply sigmoid with conditional parallelization (mutate in place)
-        if predictions.len() >= LOGISTIC_REGRESSION_PARALLEL_THRESHOLD {
+        // Apply sigmoid with conditional parallelization (mutate in place; exp-map class)
+        if predictions.len() >= EXP_MAP_F64_PARALLEL_THRESHOLD {
             predictions.par_mapv_inplace(sigmoid);
         } else {
             predictions.mapv_inplace(sigmoid);

@@ -6,7 +6,7 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
-use crate::neural_network::parallel_gates::{
+use crate::parallel_gates::{
     CHEAP_MAP_PARALLEL_THRESHOLD, EXP_MAP_PARALLEL_THRESHOLD,
 };
 use crate::{Deserialize, Serialize};

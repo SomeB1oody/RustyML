@@ -10,10 +10,6 @@ pub type Tensor = ArrayD<f32>;
 pub mod layers;
 /// Module that contains loss function implementations
 pub mod losses;
-/// Crate-internal rayon-parallel matrix multiply shared by the layers
-pub(crate) mod matmul;
-/// Shared parallel/serial gate thresholds for the elementwise kernel classes
-pub(crate) mod parallel_gates;
 /// Module that contains optimization algorithms for neural network training
 pub mod optimizers;
 /// Module that contains implementations for sequential model architecture

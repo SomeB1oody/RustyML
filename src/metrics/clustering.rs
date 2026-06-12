@@ -15,9 +15,14 @@ pub use crate::types::DistanceCalculationMetric;
 /// clustering and the score is defined to be `1.0`
 const DEGENERATE_DENOM: f64 = 1e-10;
 
-/// Sample-count threshold at or above which [`silhouette_score`] fills its pairwise-distance matrix
-/// in parallel; below it the serial path is used
-const SILHOUETTE_PARALLEL_THRESHOLD: usize = 128;
+/// Total scanned-element work (`n * n * d`) at or above which [`silhouette_score`] fills its
+/// pairwise-distance matrix in parallel; below it the serial path is used
+///
+/// The fill is n tasks of an O(n * d) distance-row scan each, the same cost class as the
+/// crate's calibrated f64 row-scan gate (crossover bracket 65K-262K scanned elements on an
+/// AMD Ryzen 9 9950X, 2026-06-11; see benches/RESULTS.md). The constant is restated here
+/// rather than imported because `metrics` stays a lightweight leaf module
+const SILHOUETTE_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Maps each distinct label to a dense index in `0..k` in order of first appearance
 fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
@@ -408,7 +413,8 @@ where
         }
     };
     let fill = Zip::from(dist_to_cluster.rows_mut()).and(x.rows());
-    if n >= SILHOUETTE_PARALLEL_THRESHOLD {
+    let scan_work = n.saturating_mul(n).saturating_mul(x.ncols());
+    if scan_work >= SILHOUETTE_PARALLEL_MIN_ELEMS {
         fill.par_for_each(fill_row);
     } else {
         fill.for_each(fill_row);

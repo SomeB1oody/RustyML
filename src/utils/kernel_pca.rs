@@ -5,18 +5,16 @@
 //! routines
 
 use crate::error::Error;
+use crate::math::matmul::par_matmul;
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
 use std::cmp::Ordering;
 
-// Re-exported from the canonical `crate::types` home so the source of `KernelType` is unambiguous
 pub use crate::types::KernelType;
-
-/// Sample-count threshold at or above which Kernel PCA switches to parallel computation
-const KERNEL_PCA_PARALLEL_THRESHOLD: usize = 200;
 
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -230,8 +228,6 @@ impl KernelPCA {
     get_field!(get_n_features, n_features, Option<usize>);
     get_field_as_ref!(get_eigenvalues, eigenvalues, Option<&Array1<f64>>);
     get_field_as_ref!(get_eigenvectors, eigenvectors, Option<&Array2<f64>>);
-    // `kernel_row_means` / `kernel_all_mean` are internal centering statistics for
-    // `transform` and are intentionally not exposed via getters
 
     /// Fits the KernelPCA model to the input data
     ///
@@ -254,7 +250,7 @@ impl KernelPCA {
     /// # Performance
     ///
     /// Uses parallel computation when the number of samples is at least
-    /// `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
+    /// the kernel-matrix work clears the calibrated class gates (see `crate::parallel_gates`)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -283,7 +279,8 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
+    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate; the scans and
+    /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -311,7 +308,8 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `KERNEL_PCA_PARALLEL_THRESHOLD` (200)
+    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate; the scans and
+    /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -354,7 +352,10 @@ impl KernelPCA {
             ));
         }
 
-        let use_parallel = n_samples >= KERNEL_PCA_PARALLEL_THRESHOLD;
+        // Per-class gates over the [n, n] kernel matrix
+        let kernel_elems = n_samples.saturating_mul(n_samples);
+        let scan_parallel = kernel_elems >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let map_parallel = kernel_elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -374,7 +375,7 @@ impl KernelPCA {
 
         // Build the training kernel (Gram) matrix
         let mut kernel_matrix = self.kernel.compute_matrix(x, x);
-        Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
+        Self::validate_kernel_matrix(&kernel_matrix, scan_parallel)?;
 
         #[cfg(feature = "show_progress")]
         {
@@ -383,8 +384,8 @@ impl KernelPCA {
         }
 
         // Compute centering statistics from the training kernel matrix
-        let (row_means, overall_mean) = Self::kernel_means(&kernel_matrix, use_parallel)?;
-        Self::center_kernel_matrix(&mut kernel_matrix, &row_means, overall_mean, use_parallel);
+        let (row_means, overall_mean) = Self::kernel_means(&kernel_matrix, scan_parallel)?;
+        Self::center_kernel_matrix(&mut kernel_matrix, &row_means, overall_mean, map_parallel);
 
         #[cfg(feature = "show_progress")]
         {
@@ -459,7 +460,10 @@ impl KernelPCA {
             ));
         }
 
-        let use_parallel = x.nrows().max(x_fit.nrows()) >= KERNEL_PCA_PARALLEL_THRESHOLD;
+        // Per-class gates over the [n_query, n_fit] cross-kernel matrix
+        let kernel_elems = x.nrows().saturating_mul(x_fit.nrows());
+        let scan_parallel = kernel_elems >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let map_parallel = kernel_elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -479,7 +483,7 @@ impl KernelPCA {
 
         // Build the cross-kernel matrix between new data and the fitted samples
         let mut kernel_matrix = self.kernel.compute_matrix(x, x_fit);
-        Self::validate_kernel_matrix(&kernel_matrix, use_parallel)?;
+        Self::validate_kernel_matrix(&kernel_matrix, scan_parallel)?;
 
         #[cfg(feature = "show_progress")]
         {
@@ -492,7 +496,7 @@ impl KernelPCA {
             &mut kernel_matrix,
             kernel_row_means,
             kernel_all_mean,
-            use_parallel,
+            map_parallel,
         )?;
 
         #[cfg(feature = "show_progress")]
@@ -501,17 +505,12 @@ impl KernelPCA {
             progress_bar.set_message("Projecting data");
         }
 
-        // Scale by inverse sqrt of eigenvalues for projection
+        // Project onto the eigenvectors
         let scales = Self::compute_scaling_factors(eigenvalues)?;
-        let projected = if use_parallel {
-            Self::project_parallel(&kernel_matrix, eigenvectors, &scales)?
-        } else {
-            let mut projected = kernel_matrix.dot(eigenvectors);
-            for (idx, scale) in scales.iter().enumerate() {
-                projected.column_mut(idx).mapv_inplace(|val| val * scale);
-            }
-            projected
-        };
+        let mut projected = par_matmul(&kernel_matrix, eigenvectors);
+        for (idx, scale) in scales.iter().enumerate() {
+            projected.column_mut(idx).mapv_inplace(|val| val * scale);
+        }
 
         #[cfg(feature = "show_progress")]
         {
@@ -631,11 +630,7 @@ impl KernelPCA {
         };
         let row_means = Array1::from_vec(row_means);
 
-        let total: f64 = if use_parallel {
-            row_means.par_iter().copied().sum()
-        } else {
-            row_means.sum()
-        };
+        let total: f64 = row_means.sum();
         let overall_mean = total / n_samples as f64;
 
         if !overall_mean.is_finite() {
@@ -768,30 +763,6 @@ impl KernelPCA {
             }
         }
         Ok(scales)
-    }
-
-    /// Projects the centered kernel matrix onto the eigenvectors, scaled by the inverse
-    /// square root of the eigenvalues, in parallel over output rows
-    fn project_parallel(
-        kernel_centered: &Array2<f64>,
-        eigenvectors: &Array2<f64>,
-        scales: &[f64],
-    ) -> Result<Array2<f64>, Error> {
-        let n_components = eigenvectors.ncols();
-        if scales.len() != n_components {
-            return Err(Error::computation("Scaling factors dimension mismatch"));
-        }
-
-        let mut projected = Array2::<f64>::zeros((kernel_centered.nrows(), n_components));
-        Zip::from(projected.outer_iter_mut())
-            .and(kernel_centered.outer_iter())
-            .par_for_each(|mut out_row, k_row| {
-                for (idx, eigenvector) in eigenvectors.axis_iter(Axis(1)).enumerate() {
-                    out_row[idx] = k_row.dot(&eigenvector) * scales[idx];
-                }
-            });
-
-        Ok(projected)
     }
 
     model_save_and_load_methods!(KernelPCA);

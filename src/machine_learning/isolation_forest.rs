@@ -11,13 +11,20 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
+use crate::parallel_gates::TREE_TRAVERSAL_MIN_VISITS;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction
+///
+/// Backed by the tree-build calibration (benches/RESULTS.md, 9950X, 2026-06-11): a synthetic
+/// ~0.7 us-per-tree build crosses over at 16-32 tasks, i.e. roughly 22 us of total work - one
+/// rayon fork/join. A real iTree build (subsample gather, allocations) costs well over 2.2 us
+/// per tree, so at this gate the parallel path's total work clears the fork cost with margin
 const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 
-/// Default minimum number of samples required to enable parallel prediction
-const DEFAULT_PARALLEL_THRESHOLD_SAMPLES: usize = 100;
+/// Average isolation-tree path length for the prediction work estimate, `c(256) ~= 10`
+/// (`2 * H(psi - 1) - 2(psi - 1)/psi` at the default subsample size 256)
+const ISOLATION_TREE_AVG_PATH: usize = 10;
 
 /// A node in an isolation tree
 ///
@@ -212,8 +219,6 @@ impl IsolationForest {
         preliminary_check(x, None)?;
 
         self.n_features = x.ncols();
-        // Realized sub-sample size used for every tree; the score normalization c(n) below is
-        // computed from this, not from the configured max_samples
         self.sample_size = self.max_samples.min(x.nrows());
 
         #[cfg(feature = "show_progress")]
@@ -404,8 +409,7 @@ impl IsolationForest {
             .sum::<f64>()
             / trees.len() as f64;
 
-        // Degenerate sub-sample of size <= 1 makes c(n) = 0; every point isolates immediately
-        // (path length 0), which is maximally anomalous, so the score is 1.0 by convention
+        // Degenerate sub-sample of size <= 1 makes c(n) = 0
         if c_n <= 0.0 {
             return 1.0;
         }
@@ -434,7 +438,8 @@ impl IsolationForest {
     ///
     /// # Performance
     ///
-    /// Uses parallelization when the number of samples reaches `DEFAULT_PARALLEL_THRESHOLD_SAMPLES`
+    /// Parallelizes when the traversal work (samples x trees x average path length) clears
+    /// the calibrated tree-traversal gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -447,7 +452,12 @@ impl IsolationForest {
         let trees = self.trees.as_ref().unwrap();
         let c_n = average_path_length_factor(self.sample_size);
 
-        let scores: Vec<f64> = if x.nrows() >= DEFAULT_PARALLEL_THRESHOLD_SAMPLES {
+        // Tree-traversal class gate: each sample walks every tree for ~c(psi) nodes
+        let visit_work = x
+            .nrows()
+            .saturating_mul(trees.len())
+            .saturating_mul(ISOLATION_TREE_AVG_PATH);
+        let scores: Vec<f64> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS {
             x.axis_iter(Axis(0))
                 .into_par_iter()
                 .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))

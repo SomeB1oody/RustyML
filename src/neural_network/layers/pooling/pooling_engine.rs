@@ -145,7 +145,7 @@ pub(super) fn windowed_pool_forward(
     windowed_pool_forward_impl(input, pool, strides, kind, padding, None)
 }
 
-/// [`windowed_pool_forward`] with an optional override of the parallel/serial gate decision, so
+/// `windowed_pool_forward` with an optional override of the parallel/serial gate decision, so
 /// the calibration bench can time both paths on either side of the gate. Reachable outside the
 /// crate only through `bench_internals`
 pub fn windowed_pool_forward_impl(

@@ -6,6 +6,7 @@
 
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::{Error, TreeError};
+use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
 use crate::math::{entropy, gini, variance};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
@@ -16,10 +17,12 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 #[cfg(feature = "show_progress")]
 use indicatif::ProgressBar;
 
-/// Minimum sample count at which decision tree operations switch to parallel processing
+/// Assumed average root-to-leaf walk length for the prediction parallel gate
 ///
-/// Below this threshold, sequential processing avoids the parallelization overhead
-const DECISION_TREE_PARALLEL_THRESHOLD: usize = 1000;
+/// The fitted tree does not record its depth, so the traversal-work estimate
+/// (`samples x walk length`) uses this fixed stand-in; a grown CART tree on real data
+/// typically walks 10-30 nodes per sample
+const DECISION_TREE_ASSUMED_DEPTH: usize = 16;
 
 /// The best split found for a node while growing the tree
 enum Split {
@@ -517,7 +520,8 @@ impl DecisionTree {
     ///
     /// # Performance
     ///
-    /// Uses parallel processing for evaluating potential splits when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`
+    /// Parallelizes the per-feature split search when the sort work clears the calibrated
+    /// sort-scan gate (see `crate::parallel_gates`)
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -723,7 +727,8 @@ impl DecisionTree {
     /// categorical are evaluated as multi-way splits for ID3 and C4.5 (CART is always
     /// binary). Selection uses information gain (ID3/CART) or gain ratio (C4.5); the
     /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule
-    /// Uses parallel evaluation when the number of samples exceeds DECISION_TREE_PARALLEL_THRESHOLD
+    /// Parallelizes when the sort work clears the calibrated sort-scan gate (see
+    /// `crate::parallel_gates`)
     fn find_best_split<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -749,9 +754,11 @@ impl DecisionTree {
             }
         };
 
-        // Collect every feature's best candidate, then pick the winner
+        // Collect every feature's best candidate, then pick the winner (sort-scan class
+        // gate: one copy + sort + scan task per feature over the node's samples)
+        let sort_work = indices.len().saturating_mul(self.n_features);
         let candidates: Vec<(f64, Split, f64)> =
-            if indices.len() >= DECISION_TREE_PARALLEL_THRESHOLD {
+            if sort_work >= SORT_SCAN_MIN_ELEMS {
                 (0..self.n_features)
                     .into_par_iter()
                     .filter_map(process_feature)
@@ -788,9 +795,7 @@ impl DecisionTree {
             .map(|(i, _)| i)
             .collect();
         let chosen = match rng {
-            // Seeded: pick a uniformly random tied candidate
             Some(r) => tied[r.random_range(0..tied.len())],
-            // Unseeded: last tied candidate (matches the previous `max_by`; deterministic in parallel too)
             None => *tied.last().unwrap(),
         };
         Some(candidates.swap_remove(chosen))
@@ -818,21 +823,17 @@ impl DecisionTree {
         let n_f = n as f64;
 
         // Sort the samples by the feature value once (O(n log n)), then sweep left to right
-        // maintaining running left/right impurity statistics incrementally, instead of
-        // re-partitioning all samples and recomputing both child impurities from scratch for
-        // every candidate threshold (the old O(unique * n) loop)
+        // maintaining running left/right impurity statistics incrementally
         let mut order: Vec<(f64, usize)> =
             indices.iter().map(|&i| (x[[i, feature_idx]], i)).collect();
         order.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Start below any real score so the best candidate is found regardless of magnitude;
-        // the single `min_impurity_decrease` gate (in build_tree) decides acceptance
+        // Start below any real score so the best candidate is found regardless of magnitude
         let mut best_score = f64::NEG_INFINITY;
         // (split position, threshold, impurity_decrease); left = order[..pos], right = order[pos..]
         let mut best: Option<(usize, f64, f64)> = None;
 
-        // Evaluates the candidate split between sorted positions `pos-1` and `pos`, given the
-        // already-computed child impurities, and updates `best` if it scores higher
+        // Evaluates the candidate split between sorted positions `pos-1` and `pos`
         let consider = |pos: usize,
                         imp_left: f64,
                         imp_right: f64,
@@ -843,8 +844,7 @@ impl DecisionTree {
             let weighted = (n_left / n_f) * imp_left + (n_right / n_f) * imp_right;
             let impurity_decrease = parent_impurity - weighted;
 
-            // C4.5 uses gain ratio (gain / split information); ID3 and CART use the raw decrease,
-            // and a degenerate split-info skips this threshold
+            // C4.5 uses gain ratio (gain / split information)
             if let Some(score) =
                 self.algorithm
                     .selection_score(impurity_decrease, &[n_left, n_right], n_f)
@@ -884,8 +884,7 @@ impl DecisionTree {
                 consider(pos, imp_left, imp_right, &mut best_score, &mut best);
             }
         } else {
-            // Regression (CART/MSE): maintain running sum and sum of squares for the left side;
-            // the right side is recovered from the totals. Population variance is E[x^2]-E[x]^2
+            // Regression (CART/MSE): maintain running sum and sum of squares for the left side
             let total_sum: f64 = order.iter().map(|&(_, idx)| y[idx]).sum();
             let total_sumsq: f64 = order.iter().map(|&(_, idx)| y[idx] * y[idx]).sum();
             let mut left_sum = 0.0;
@@ -969,8 +968,7 @@ impl DecisionTree {
         let impurity_decrease = parent_impurity - weighted;
 
         // Defer the acceptance threshold to the single `min_impurity_decrease` gate in
-        // build_tree (consistent with the numeric path); only reject a degenerate split-info
-        // here. C4.5 uses gain ratio (gain / split information), ID3/CART use the raw decrease
+        // build_tree (consistent with the numeric path)
         let score = self
             .algorithm
             .selection_score(impurity_decrease, &counts, n)?;
@@ -1154,7 +1152,8 @@ impl DecisionTree {
     ///
     /// # Performance
     ///
-    /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`
+    /// Parallelizes when the traversal work clears the calibrated tree-traversal gate (see
+    /// `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -1163,7 +1162,9 @@ impl DecisionTree {
         validate_predict_input(x, self.n_features)?;
 
         // Use parallel processing only when sample size exceeds threshold
-        let predictions: Result<Vec<f64>, Error> = if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD
+        // Tree-traversal class gate: one root-to-leaf walk per sample
+        let visit_work = x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH);
+        let predictions: Result<Vec<f64>, Error> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS
         {
             x.axis_iter(Axis(0))
                 .into_par_iter()
@@ -1227,7 +1228,8 @@ impl DecisionTree {
     ///
     /// # Performance
     ///
-    /// Uses parallel processing for predictions when the number of samples exceeds `DECISION_TREE_PARALLEL_THRESHOLD`
+    /// Parallelizes when the traversal work clears the calibrated tree-traversal gate (see
+    /// `crate::parallel_gates`)
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -1243,7 +1245,7 @@ impl DecisionTree {
 
         // Use parallel processing only when sample size exceeds threshold
         let probabilities: Result<Vec<Vec<f64>>, Error> =
-            if x.nrows() >= DECISION_TREE_PARALLEL_THRESHOLD {
+            if x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH) >= TREE_TRAVERSAL_MIN_VISITS {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
                     .map(|row| {

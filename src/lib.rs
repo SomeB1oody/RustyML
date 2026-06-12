@@ -395,6 +395,21 @@ pub mod random;
 ))]
 pub use random::{clear_global_seed, set_global_seed};
 
+/// Crate-internal parallel/serial gate thresholds, one constant per calibrated kernel cost
+/// class (`f32` classes for the neural-network layers, `f64` classes for ML/utils). See
+/// `src/parallel_gates.rs` and `benches/RESULTS.md`
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub(crate) mod parallel_gates;
+
+/// Crate-internal deterministic blocked parallel reduction for `f64` sums whose accumulation
+/// order must not depend on thread scheduling. See `src/reduction.rs`
+#[cfg(feature = "utils")]
+pub(crate) mod reduction;
+
 /// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
 ///
 /// This module provides comprehensive mathematical functions essential for machine learning algorithms,
@@ -420,6 +435,11 @@ pub use random::{clear_global_seed, set_global_seed};
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
+///
+/// ## Parallel Matrix Products ([`math::matmul`])
+/// - `par_matmul` / `par_matvec` - Rayon-block-parallel `f32`/`f64` matrix products with
+///   calibrated serial/parallel switching, bitwise identical to the serial `dot` at any
+///   thread count
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)
@@ -752,6 +772,6 @@ pub mod neural_network;
 
 /// Internal hooks for the `benches/` targets - not part of the public API, no stability
 /// guarantees. See `src/bench_internals.rs`
-#[cfg(feature = "neural_network")]
+#[cfg(any(feature = "machine_learning", feature = "neural_network"))]
 #[doc(hidden)]
 pub mod bench_internals;

@@ -5,17 +5,12 @@
 //! selecting the axis and norm (L1, L2, Max, or Lp)
 
 use crate::error::Error;
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
 /// Tolerance for treating a norm as effectively zero
 const NORM_ZERO_THRESHOLD: f64 = 1e-15;
-
-/// Element-count threshold above which the global-axis path divides in parallel
-const NORMALIZE_PARALLEL_THRESHOLD: usize = 10000;
-
-/// Lane-count threshold above which row/column normalization runs across lanes in parallel
-const NORMALIZE_PARALLEL_LANES: usize = 100;
 
 /// Defines the axis along which the normalization is applied
 ///
@@ -76,8 +71,8 @@ pub enum NormalizationOrder {
 /// # Performance
 ///
 /// Row/column normalization runs across lanes in parallel once there are at least
-/// `NORMALIZE_PARALLEL_LANES` (100) lanes; global normalization divides in parallel once
-/// the array has at least `NORMALIZE_PARALLEL_THRESHOLD` (10,000) elements
+/// the per-lane scan work clears the calibrated scan-class gate; global normalization
+/// divides in parallel above the cheap-map gate (see `crate::parallel_gates`)
 ///
 /// # Examples
 ///
@@ -136,7 +131,8 @@ where
     let norm = order.norm(data.iter().copied())?;
 
     if norm > NORM_ZERO_THRESHOLD {
-        if data.len() >= NORMALIZE_PARALLEL_THRESHOLD {
+        // Cheap-map class gate
+        if data.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
             data.par_mapv_inplace(|x| x / norm);
         } else {
             data.mapv_inplace(|x| x / norm);
@@ -161,6 +157,7 @@ where
     D: Dimension,
 {
     let ndim = data.ndim();
+    let data_len = data.len();
     if ndim < 2 {
         return Err(Error::invalid_input(format!(
             "{} requires at least 2 dimensions",
@@ -177,7 +174,8 @@ where
         Ok(())
     };
 
-    if lanes.len() >= NORMALIZE_PARALLEL_LANES {
+    // Scan-class gate: one O(lane) norm + map per lane, so the work is the element count
+    if data_len >= SCAN_F64_PARALLEL_MIN_ELEMS {
         lanes.par_iter_mut().try_for_each(process)
     } else {
         lanes.iter_mut().try_for_each(process)

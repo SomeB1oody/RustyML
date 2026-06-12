@@ -9,15 +9,13 @@ use super::validation::{
     validate_regularization_type, validate_tolerance,
 };
 use crate::error::Error;
+use crate::math::matmul::par_matvec;
+use crate::parallel_gates::CHEAP_MAP_F64_PARALLEL_THRESHOLD;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelBridge,
-    ParallelIterator,
+    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-
-/// Feature/sample count at or above which parallel computation is used; below it computation is sequential
-const LINEAR_REGRESSION_PARALLEL_THRESHOLD: usize = 200;
 
 /// Linear regression model implementation
 ///
@@ -199,7 +197,7 @@ impl LinearRegression {
     /// # Performance
     ///
     /// Parallel computation is used for L1 regularization and gradient updates when the number of
-    /// features is at least `LINEAR_REGRESSION_PARALLEL_THRESHOLD` (200)
+    /// features clears the calibrated cheap-map gate (see `crate::parallel_gates`)
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -246,7 +244,7 @@ impl LinearRegression {
             n_iter += 1;
 
             // Vectorized prediction
-            predictions.assign(&x.dot(&weights));
+            predictions.assign(&par_matvec(x, &weights));
             if self.fit_intercept {
                 predictions += intercept;
             }
@@ -260,14 +258,8 @@ impl LinearRegression {
             let regularization_term = match &self.regularization_type {
                 None => 0.0,
                 Some(RegularizationType::L1(alpha)) => {
-                    if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
-                        alpha * weights.iter().par_bridge().map(|w| w.abs()).sum::<f64>()
-                    } else {
-                        alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
-                    }
+                    alpha * weights.iter().map(|w| w.abs()).sum::<f64>()
                 }
-                // Penalty (alpha/2)*||w||^2; the 1/2 matches the gradient alpha*w applied below
-                // and mirrors the 1/2 in the sse/(2n) data term
                 Some(RegularizationType::L2(alpha)) => 0.5 * alpha * weights.dot(&weights),
             };
 
@@ -288,7 +280,7 @@ impl LinearRegression {
             }
 
             // Gradients via matrix operations
-            let mut weight_gradients = x.t().dot(&error_vec) / (n_samples as f64);
+            let mut weight_gradients = par_matvec(&x.t(), &error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
                 error_vec.sum() / (n_samples as f64)
             } else {
@@ -308,7 +300,8 @@ impl LinearRegression {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
                     let alpha_val = *alpha;
-                    if n_features >= LINEAR_REGRESSION_PARALLEL_THRESHOLD {
+                    // Cheap-map class: at realistic feature counts this stays serial
+                    if n_features >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
                         let weights_slice = weights.as_slice().unwrap();
                         let gradients_slice = weight_gradients.as_slice_mut().unwrap();
 
@@ -410,7 +403,7 @@ impl LinearRegression {
 
         validate_predict_input(x, coeffs.len())?;
 
-        let mut predictions = x.dot(coeffs);
+        let mut predictions = par_matvec(x, coeffs);
         if self.fit_intercept {
             predictions += intercept;
         }

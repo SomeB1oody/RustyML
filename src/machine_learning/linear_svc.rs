@@ -11,13 +11,10 @@ use super::validation::{
 };
 use crate::error::Error;
 use crate::math::hinge_loss;
+use crate::math::matmul::par_matvec;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
-
-/// Batch size at or above which parallel gradient processing is used
-const LINEAR_SVC_PARALLEL_THRESHOLD: usize = 200;
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
@@ -223,7 +220,8 @@ impl LinearSVC {
     ///
     /// # Performance
     ///
-    /// Parallel processing is automatically enabled when the batch size reaches `LINEAR_SVC_PARALLEL_THRESHOLD` (200) or more
+    /// The full-batch cost GEMV runs block-parallel above its FLOPs gate; the per-batch
+    /// gradient accumulation is sequential so the f64 result is reproducible
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -245,7 +243,7 @@ impl LinearSVC {
         // Convert labels to -1 and 1
         let y_binary = y.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
 
-        // Index array for shuffling; seeding from `random_state` makes the per-epoch minibatch shuffle reproducible
+        // Index array for shuffling
         let mut indices: Vec<usize> = (0..n_samples).collect();
         let mut rng = crate::random::make_rng(self.random_state);
 
@@ -265,7 +263,7 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            let margins: Array1<f64> = x.dot(weights) + bias;
+            let margins: Array1<f64> = par_matvec(x, weights) + bias;
             let hinge = hinge_loss(&margins, y);
 
             // Calculate regularization term
@@ -302,10 +300,6 @@ impl LinearSVC {
             for batch_indices in indices.chunks(batch_size) {
                 let batch_len = batch_indices.len() as f64;
 
-                // Accumulate the batch hinge-loss gradient in place: for each margin violation
-                // add `yi * xi` to the running sum via `scaled_add`, avoiding the per-sample
-                // temporary vector (`xi.to_owned() * yi`) and the per-step array addition the
-                // previous map/reduce incurred
                 let accumulate = |idx: usize, w_grad: &mut Array1<f64>, b_grad: &mut f64| {
                     let xi = x.slice(s![idx, ..]);
                     let yi = y_binary[idx];
@@ -316,34 +310,13 @@ impl LinearSVC {
                     }
                 };
 
-                // Use parallel or sequential processing based on batch size
-                let (weight_grad_sum, bias_grad_sum) =
-                    if batch_indices.len() >= LINEAR_SVC_PARALLEL_THRESHOLD {
-                        // Per-thread accumulators via fold, combined once at the end
-                        batch_indices
-                            .par_iter()
-                            .fold(
-                                || (Array1::zeros(n_features), 0.0),
-                                |mut acc, &idx| {
-                                    accumulate(idx, &mut acc.0, &mut acc.1);
-                                    acc
-                                },
-                            )
-                            .reduce(
-                                || (Array1::zeros(n_features), 0.0),
-                                |mut a, b| {
-                                    a.0 += &b.0;
-                                    a.1 += b.1;
-                                    a
-                                },
-                            )
-                    } else {
-                        let mut acc = (Array1::<f64>::zeros(n_features), 0.0);
-                        for &idx in batch_indices {
-                            accumulate(idx, &mut acc.0, &mut acc.1);
-                        }
-                        acc
-                    };
+                let (weight_grad_sum, bias_grad_sum) = {
+                    let mut acc = (Array1::<f64>::zeros(n_features), 0.0);
+                    for &idx in batch_indices {
+                        accumulate(idx, &mut acc.0, &mut acc.1);
+                    }
+                    acc
+                };
 
                 // Update weights with the averaged hinge-loss gradient (in place, no allocation)
                 weights.scaled_add(self.learning_rate / batch_len, &weight_grad_sum);
@@ -483,7 +456,7 @@ impl LinearSVC {
 
         validate_predict_input(x, weights.len())?;
 
-        let decision = x.dot(weights) + bias;
+        let decision = par_matvec(x, weights) + bias;
 
         // Check for NaN/Inf in decision values
         if decision.iter().any(|&val| !val.is_finite()) {

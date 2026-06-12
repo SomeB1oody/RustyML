@@ -5,12 +5,14 @@
 //! iteration)
 
 use crate::error::Error;
+use crate::math::matmul::par_matmul;
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
+use crate::reduction::det_par_fold;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use rayon::prelude::IntoParallelRefIterator;
 
 /// SVD solver options for Principal Component Analysis
 ///
@@ -106,10 +108,7 @@ impl SVDSolver {
         let mut q = nalgebra::linalg::QR::new(&x_mat * &omega_mat).q();
         let x_t = x_mat.transpose();
 
-        // Subspace (power) iterations with re-orthonormalization between each step. Halko et al.
-        // require orthonormalizing between iterations; without it the iterates collapse toward
-        // the dominant singular vector in finite precision and the trailing components become
-        // inaccurate (especially for slowly-decaying spectra)
+        // Subspace (power) iterations with re-orthonormalization between each step
         let n_iter = 2usize;
         for _ in 0..n_iter {
             let w = nalgebra::linalg::QR::new(&x_t * &q).q();
@@ -146,7 +145,7 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
         // Extract the leading eigenpairs of the covariance matrix
-        let cov = x_centered.t().dot(x_centered) / denom;
+        let cov = par_matmul(&x_centered.t(), x_centered) / denom;
         let (eigenvalues, eigenvectors) =
             super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
 
@@ -172,9 +171,6 @@ impl SVDSolver {
         Ok((components, Array1::from_vec(singular_values)))
     }
 }
-
-/// Sample-count threshold at or above which PCA switches from sequential to parallel computation
-const PCA_PARALLEL_THRESHOLD: usize = 200;
 
 /// Principal Component Analysis (PCA) model
 ///
@@ -311,7 +307,9 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
+    /// The covariance/projection GEMMs run block-parallel above their FLOPs gates; centering
+    /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
+    /// `crate::parallel_gates`)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -339,7 +337,8 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel projection when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
+    /// The projection GEMM runs block-parallel above a FLOPs gate (bitwise identical to the
+    /// serial product at any thread count)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -366,7 +365,9 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel computation when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
+    /// The covariance/projection GEMMs run block-parallel above their FLOPs gates; centering
+    /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
+    /// `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -415,7 +416,8 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// Uses parallel reconstruction when the number of samples is at least `PCA_PARALLEL_THRESHOLD` (200)
+    /// The reconstruction GEMM runs block-parallel above a FLOPs gate (bitwise identical to
+    /// the serial product at any thread count)
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -447,14 +449,9 @@ impl PCA {
             progress_bar.set_message("Reconstructing data");
         }
 
-        let reconstructed = if x.nrows() >= PCA_PARALLEL_THRESHOLD {
-            let x_owned = x.to_owned();
-            Self::reconstruct_parallel(&x_owned, components, mean)
-        } else {
-            let mut reconstructed = x.dot(components);
-            reconstructed += mean;
-            reconstructed
-        };
+        // Map back to feature space; the GEMM block-parallelizes above its FLOPs gate
+        let mut reconstructed = par_matmul(x, components);
+        reconstructed += mean;
 
         #[cfg(feature = "show_progress")]
         {
@@ -597,12 +594,8 @@ impl PCA {
             progress_bar.set_message("Projecting data");
         }
 
-        // Project into component space with optional parallelism
-        let transformed = if x_centered.nrows() >= PCA_PARALLEL_THRESHOLD {
-            Self::project_parallel(&x_centered, components)
-        } else {
-            x_centered.dot(&components.t())
-        };
+        // Project into component space; the GEMM block-parallelizes above its FLOPs gate
+        let transformed = par_matmul(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]
         {
@@ -615,14 +608,14 @@ impl PCA {
 
     /// Computes the per-feature mean for centering
     fn compute_mean(x: &Array2<f64>) -> Array1<f64> {
-        // `mean_axis` sums each column in row-major (cache-friendly) order; that beats a
-        // hand-rolled parallel column-sum, whose strided column access dominates its runtime
+        // `mean_axis` sums each column in row-major (cache-friendly) order
         x.mean_axis(Axis(0)).expect("Input data must be non-empty")
     }
 
-    /// Centers data in place by subtracting the mean
+    /// Centers data in place by subtracting the mean (cheap-map class gate on the total
+    /// element count)
     fn center_data(x: &mut Array2<f64>, mean: &Array1<f64>) {
-        if x.nrows() >= PCA_PARALLEL_THRESHOLD {
+        if x.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
             let mean = mean.to_owned();
             x.axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -646,51 +639,17 @@ impl PCA {
         }
 
         // Sum of squares over centered data
-        let sum_sq = if x_centered.nrows() >= PCA_PARALLEL_THRESHOLD {
-            if let Some(slice) = x_centered.as_slice() {
-                slice.par_iter().map(|v| v * v).sum::<f64>()
-            } else {
-                x_centered.iter().map(|v| v * v).sum::<f64>()
-            }
-        } else {
-            x_centered.iter().map(|v| v * v).sum::<f64>()
+        let sum_sq = match x_centered.as_slice() {
+            Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+                slice,
+                |block| block.iter().map(|v| v * v).sum::<f64>(),
+                |a, b| a + b,
+                0.0,
+            ),
+            _ => x_centered.iter().map(|v| v * v).sum::<f64>(),
         };
 
         Ok(sum_sq / denom)
-    }
-
-    /// Projects centered data onto the principal components, one output row per
-    /// thread, writing directly into the result matrix (no per-row allocation)
-    fn project_parallel(x_centered: &Array2<f64>, components: &Array2<f64>) -> Array2<f64> {
-        let n_components = components.nrows();
-        let mut projected = Array2::<f64>::zeros((x_centered.nrows(), n_components));
-        Zip::from(projected.outer_iter_mut())
-            .and(x_centered.outer_iter())
-            .par_for_each(|mut out_row, in_row| {
-                for (idx, component) in components.outer_iter().enumerate() {
-                    out_row[idx] = in_row.dot(&component);
-                }
-            });
-        projected
-    }
-
-    /// Reconstructs data from component space in parallel, computing
-    /// `x * components + mean` one output row per thread
-    fn reconstruct_parallel(
-        x: &Array2<f64>,
-        components: &Array2<f64>,
-        mean: &Array1<f64>,
-    ) -> Array2<f64> {
-        let n_features = components.ncols();
-        let mut reconstructed = Array2::<f64>::zeros((x.nrows(), n_features));
-        Zip::from(reconstructed.outer_iter_mut())
-            .and(x.outer_iter())
-            .par_for_each(|mut out_row, in_row| {
-                for (j, component_col) in components.axis_iter(Axis(1)).enumerate() {
-                    out_row[j] = in_row.dot(&component_col) + mean[j];
-                }
-            });
-        reconstructed
     }
 
     model_save_and_load_methods!(PCA);

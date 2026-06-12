@@ -14,7 +14,15 @@
 // Serde derives are only needed where models serialize (machine_learning / utils)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::{Deserialize, Serialize};
-use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
+// The batched kernel-matrix path is only compiled for its callers, SVC (machine_learning)
+// and KernelPCA (utils)
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+use crate::math::matmul::par_matmul;
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, EXP_MAP_F64_PARALLEL_THRESHOLD};
+use ndarray::ArrayView1;
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+use ndarray::{Array2, ArrayBase, Axis, Data, Ix2, Zip};
 
 /// Represents different distance calculation methods used in various machine learning algorithms.
 ///
@@ -202,11 +210,12 @@ impl KernelType {
     }
 
     /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between two sample
-    /// sets in one shot, routing the dominant cost through a single GEMM.
+    /// sets in one shot, routing the dominant cost through a single block-parallel GEMM.
     ///
     /// This is the batched counterpart of [`compute`](Self::compute). Every kernel
-    /// reduces to the cross-Gram matrix `G = X*Y^T` (one cache-blocked matrix
-    /// multiply) plus a cheap elementwise transform:
+    /// reduces to the cross-Gram matrix `G = X*Y^T` (one rayon-block-parallel,
+    /// cache-blocked matrix multiply via `par_matmul`) plus a cheap elementwise
+    /// transform over the `[n, m]` result:
     ///
     /// - `Linear`  - `K = G`
     /// - `Poly`    - `K = (gamma*G + coef0)^degree`
@@ -231,6 +240,7 @@ impl KernelType {
     /// # Returns
     ///
     /// - `Array2<f64>` - The `[n, m]` kernel matrix
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub fn compute_matrix<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -240,58 +250,70 @@ impl KernelType {
         S1: Data<Elem = f64> + Sync,
         S2: Data<Elem = f64> + Sync,
     {
-        let (n, m) = (x.nrows(), y.nrows());
-        let mut k = Array2::<f64>::zeros((n, m));
+        let mut k = par_matmul(x, &y.t());
+        let elems = k.len();
 
-        // RBF / Cosine need each `y` sample's squared norm, shared across all rows.
-        let y_norm_sq = match *self {
-            KernelType::RBF { .. } | KernelType::Cosine => {
-                Some(y.map_axis(Axis(1), |row| row.dot(&row)))
-            }
-            _ => None,
-        };
-
-        // One parallel pass over output rows
-        Zip::from(k.rows_mut())
-            .and(x.rows())
-            .par_for_each(|mut k_row, x_row| {
-                k_row.assign(&y.dot(&x_row));
-                match *self {
-                    KernelType::Linear => {}
-                    KernelType::Poly {
-                        degree,
-                        gamma,
-                        coef0,
-                    } => {
-                        let degree = degree as i32;
-                        k_row.mapv_inplace(|v| (gamma * v + coef0).powi(degree));
-                    }
-                    KernelType::Sigmoid { gamma, coef0 } => {
-                        k_row.mapv_inplace(|v| (gamma * v + coef0).tanh());
-                    }
-                    KernelType::RBF { gamma } => {
-                        // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y; clamp cancellation negatives before exp.
-                        let x_norm_sq = x_row.dot(&x_row);
-                        let y_norm_sq = y_norm_sq.as_ref().unwrap();
-                        Zip::from(&mut k_row).and(y_norm_sq).for_each(|v, &y_sq| {
-                            let dist = (x_norm_sq + y_sq - 2.0 * *v).max(0.0);
-                            *v = (-gamma * dist).exp();
-                        });
-                    }
-                    KernelType::Cosine => {
-                        let x_norm_sq = x_row.dot(&x_row);
-                        let y_norm_sq = y_norm_sq.as_ref().unwrap();
-                        Zip::from(&mut k_row).and(y_norm_sq).for_each(|v, &y_sq| {
-                            let norm_product = (x_norm_sq * y_sq).sqrt();
-                            *v = if norm_product <= f64::EPSILON {
-                                0.0
-                            } else {
-                                *v / norm_product
-                            };
-                        });
-                    }
+        match *self {
+            KernelType::Linear => {}
+            KernelType::Poly {
+                degree,
+                gamma,
+                coef0,
+            } => {
+                let degree = degree as i32;
+                let f = |v: f64| (gamma * v + coef0).powi(degree);
+                if elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+                    k.par_mapv_inplace(f);
+                } else {
+                    k.mapv_inplace(f);
                 }
-            });
+            }
+            KernelType::Sigmoid { gamma, coef0 } => {
+                let f = |v: f64| (gamma * v + coef0).tanh();
+                if elems >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+                    k.par_mapv_inplace(f);
+                } else {
+                    k.mapv_inplace(f);
+                }
+            }
+            KernelType::RBF { gamma } => {
+                // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y; clamp cancellation negatives before exp.
+                let x_norm_sq = x.map_axis(Axis(1), |row| row.dot(&row));
+                let y_norm_sq = y.map_axis(Axis(1), |row| row.dot(&row));
+                let transform_row = |mut k_row: ndarray::ArrayViewMut1<f64>, &x_sq: &f64| {
+                    Zip::from(&mut k_row).and(&y_norm_sq).for_each(|v, &y_sq| {
+                        let dist = (x_sq + y_sq - 2.0 * *v).max(0.0);
+                        *v = (-gamma * dist).exp();
+                    });
+                };
+                let zip = Zip::from(k.rows_mut()).and(&x_norm_sq);
+                if elems >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+                    zip.par_for_each(transform_row);
+                } else {
+                    zip.for_each(transform_row);
+                }
+            }
+            KernelType::Cosine => {
+                let x_norm_sq = x.map_axis(Axis(1), |row| row.dot(&row));
+                let y_norm_sq = y.map_axis(Axis(1), |row| row.dot(&row));
+                let transform_row = |mut k_row: ndarray::ArrayViewMut1<f64>, &x_sq: &f64| {
+                    Zip::from(&mut k_row).and(&y_norm_sq).for_each(|v, &y_sq| {
+                        let norm_product = (x_sq * y_sq).sqrt();
+                        *v = if norm_product <= f64::EPSILON {
+                            0.0
+                        } else {
+                            *v / norm_product
+                        };
+                    });
+                };
+                let zip = Zip::from(k.rows_mut()).and(&x_norm_sq);
+                if elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+                    zip.par_for_each(transform_row);
+                } else {
+                    zip.for_each(transform_row);
+                }
+            }
+        }
 
         k
     }
@@ -415,6 +437,7 @@ mod tests {
     // The batched GEMM path must agree, entry for entry, with looping `compute`
     // over every pair - for every kernel variant, including the asymmetric
     // cross-matrix case `x != y`.
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_matches_pairwise() {
         use ndarray::Array2;
@@ -468,6 +491,7 @@ mod tests {
     }
 
     // RBF diagonal of a Gram matrix must be exactly 1 (||x_i - x_i||^2 clamps to 0).
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_rbf_diagonal_is_one() {
         use ndarray::Array2;
@@ -479,6 +503,7 @@ mod tests {
     }
 
     // Cosine guard: a zero row yields a full row/column of zeros, matching `compute`.
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_cosine_zero_row_guard() {
         use ndarray::Array2;

@@ -5,10 +5,12 @@
 //! probabilities to a target perplexity
 
 use crate::error::Error;
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, par_matmul};
 use crate::math::squared_euclidean_distance_row;
+use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip, s};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
@@ -25,8 +27,6 @@ where
     S: Data<Elem = f64>,
 {
     let tol = 1e-5;
-    // While no finite upper bound is known, sigma grows geometrically (the `sigma *= 2.0` path)
-    // until the perplexity overshoots and brackets it, then bisects; sigma_min floors sigma > 0
     let mut sigma_min: f64 = 1e-20;
     let mut sigma_max: f64 = f64::INFINITY;
     let mut sigma: f64 = 1.0;
@@ -61,8 +61,6 @@ where
         if diff.abs() < tol {
             break;
         }
-        // Perplexity grows with sigma, so shrink sigma when it is too high and grow it when too low
-        // (mirror of the canonical search over precision beta = 1/(2*sigma^2), which is opposite)
         if diff > 0.0 {
             // Perplexity too high, sigma too large: tighten the upper bound and shrink
             sigma_max = sigma;
@@ -98,9 +96,6 @@ const GAIN_DECAY: f64 = 0.8;
 const MIN_GAIN: f64 = 0.01;
 /// Lower bound for q_ij to avoid numerical instability
 const MIN_Q: f64 = 1e-12;
-/// Sample-count threshold for switching to parallel computation
-const TSNE_PARALLEL_THRESHOLD: usize = 2000;
-
 /// Strategy for initializing the low-dimensional embedding before optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Init {
@@ -306,7 +301,8 @@ impl TSNE {
     ///
     /// # Performance
     ///
-    /// Uses Rayon parallel computation when `x.nrows()` is above `TSNE_PARALLEL_THRESHOLD` (2000)
+    /// Parallelizes when the pairwise work clears the calibrated class gates (see
+    /// `crate::parallel_gates`); the GEMMs gate themselves inside `par_matmul`
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -327,7 +323,8 @@ impl TSNE {
     /// Runs the exact `O(n^2)` optimization over the dense joint-probability matrix
     fn optimize_exact(&self, x: &Array2<f64>, mut y: Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_samples = x.nrows();
-        let use_parallel = n_samples > TSNE_PARALLEL_THRESHOLD;
+        // Cheap-map class gate over the [n, n] matrices this path fills each iteration
+        let use_parallel = n_samples.saturating_mul(n_samples) >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
 
         // Precompute distances and convert them to joint probabilities
         let distances = self.pairwise_squared_distances(x, use_parallel);
@@ -393,7 +390,9 @@ impl TSNE {
         angle: f64,
     ) -> Result<Array2<f64>, Error> {
         let n_samples = x.nrows();
-        let use_parallel = n_samples > TSNE_PARALLEL_THRESHOLD;
+        // Scan-class gate: the dominant gated work is the one-off neighbor search, n tasks
+        // of an O(n) projection-row scan each
+        let use_parallel = n_samples.saturating_mul(n_samples) >= SCAN_F64_PARALLEL_MIN_ELEMS;
 
         // Sparse symmetric joint probabilities over each point's nearest neighbors
         let adj = self.neighbor_probabilities(x, use_parallel);
@@ -497,13 +496,18 @@ impl TSNE {
             .min(n_samples - 1)
             .max(1);
 
+        // Squared distances come from the `||x_i||^2 + ||x_j||^2 - 2 x_i.x_j` identity
+        let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
+
         // Find the k nearest neighbors of point i with their squared distances, calibrate sigma
         // over them, and return the conditional probabilities
-        let conditional_row = |i: usize| -> (Vec<usize>, Array1<f64>) {
-            let row_i = x.row(i);
+        let conditional_row = |i: usize, proj_row: ArrayView1<f64>| -> (Vec<usize>, Array1<f64>) {
             let mut dists: Vec<(f64, usize)> = (0..n_samples)
                 .filter(|&j| j != i)
-                .map(|j| (squared_euclidean_distance_row(&row_i, &x.row(j)), j))
+                .map(|j| {
+                    let dist = (x_sq[i] + x_sq[j] - 2.0 * proj_row[j]).max(0.0);
+                    (dist, j)
+                })
                 .collect();
 
             // Partial select the k smallest by (distance, index) for a deterministic neighbor set
@@ -519,14 +523,38 @@ impl TSNE {
             (neighbor_idx, p_row)
         };
 
-        let conditional: Vec<(Vec<usize>, Array1<f64>)> = if parallel {
-            (0..n_samples)
-                .into_par_iter()
-                .map(conditional_row)
-                .collect()
-        } else {
-            (0..n_samples).map(conditional_row).collect()
-        };
+        let conditional: Vec<(Vec<usize>, Array1<f64>)> =
+            if cache_resident::<f64>(n_samples, x.ncols()) {
+                let swarm_row = |i: usize| {
+                    let projections = x.dot(&x.row(i));
+                    conditional_row(i, projections.view())
+                };
+                if parallel {
+                    (0..n_samples).into_par_iter().map(swarm_row).collect()
+                } else {
+                    (0..n_samples).map(swarm_row).collect()
+                }
+            } else {
+                let chunk_rows = gemm_chunk_rows(n_samples);
+                let mut conditional = Vec::with_capacity(n_samples);
+                for chunk_start in (0..n_samples).step_by(chunk_rows) {
+                    let chunk_end = (chunk_start + chunk_rows).min(n_samples);
+                    let projections = par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
+                    if parallel {
+                        let chunk: Vec<(Vec<usize>, Array1<f64>)> = (chunk_start..chunk_end)
+                            .into_par_iter()
+                            .map(|i| conditional_row(i, projections.row(i - chunk_start)))
+                            .collect();
+                        conditional.extend(chunk);
+                    } else {
+                        conditional.extend(
+                            (chunk_start..chunk_end)
+                                .map(|i| conditional_row(i, projections.row(i - chunk_start))),
+                        );
+                    }
+                }
+                conditional
+            };
 
         // Symmetrize: p_ij = (p_{j|i} + p_{i|j}) / (2n), accumulated from both directed edges
         let norm = 2.0 * n_samples as f64;
@@ -539,9 +567,7 @@ impl TSNE {
             }
         }
 
-        // Sort each neighbor list by index so the downstream force summation order is fixed.
-        // Hash-map iteration order is otherwise unspecified, and t-SNE is chaotic enough that a
-        // differing summation order would diverge into a different embedding
+        // Sort each neighbor list by index so the downstream force summation order is fixed
         adjacency
             .into_iter()
             .map(|row| {
@@ -729,38 +755,27 @@ impl TSNE {
     }
 
     fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
-        let n_samples = x.nrows();
+        // D[i, j] = ||x_i||^2 + ||x_j||^2 - 2 x_i.x_j
+        let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
+        let mut distances = par_matmul(x, &x.t());
 
-        let mut distances = Array2::<f64>::zeros((n_samples, n_samples));
-        if parallel {
-            // Compute the upper triangle in parallel (each pair exactly once), then scatter it
-            // symmetrically. The previous parallel path filled every row independently and so
-            // recomputed each pair twice; the diagonal stays 0.0 from the zero-initialization
-            let partial: Vec<Vec<f64>> = (0..n_samples)
-                .into_par_iter()
-                .map(|i| {
-                    let row_i = x.row(i);
-                    ((i + 1)..n_samples)
-                        .map(|j| squared_euclidean_distance_row(&row_i, &x.row(j)))
-                        .collect()
-                })
-                .collect();
-            for (i, vals) in partial.into_iter().enumerate() {
-                for (offset, dist) in vals.into_iter().enumerate() {
-                    let j = i + 1 + offset;
-                    distances[[i, j]] = dist;
-                    distances[[j, i]] = dist;
-                }
+        let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
+            let xi_sq = x_sq[i];
+            for (j, v) in row.iter_mut().enumerate() {
+                *v = (xi_sq + x_sq[j] - 2.0 * *v).max(0.0);
             }
+            row[i] = 0.0;
+        };
+
+        if parallel {
+            distances
+                .outer_iter_mut()
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(i, row)| fill_row(i, row));
         } else {
-            for i in 0..n_samples {
-                let row_i = x.row(i);
-                for j in (i + 1)..n_samples {
-                    // Exploit symmetry: compute each pair once
-                    let dist = squared_euclidean_distance_row(&row_i, &x.row(j));
-                    distances[[i, j]] = dist;
-                    distances[[j, i]] = dist;
-                }
+            for (i, row) in distances.outer_iter_mut().enumerate() {
+                fill_row(i, row);
             }
         }
         distances
@@ -818,9 +833,6 @@ impl TSNE {
         let mut num = Array2::<f64>::zeros((n_samples, n_samples));
 
         if parallel {
-            // Compute the upper triangle in parallel (each pair exactly once), then scatter it
-            // symmetrically. The previous parallel path computed every pair twice; the diagonal
-            // stays 0 (self-affinity excluded) from the zero-initialization
             let partial: Vec<Vec<f64>> = (0..n_samples)
                 .into_par_iter()
                 .map(|i| {
@@ -867,37 +879,32 @@ impl TSNE {
         parallel: bool,
     ) -> Array2<f64> {
         let n_samples = y.nrows();
-        let n_components = y.ncols();
-        let mut grad = Array2::<f64>::zeros((n_samples, n_components));
 
-        // Fills gradient row `i` from the attractive/repulsive forces between point i and every
-        // other point; the t-SNE factor of 4 is folded into `mult`
-        let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
-            let y_i = y.row(i);
+        // grad_i = 4 * sum_j (p_ij - q_ij) * num_ij * (y_i - y_j) factors into GEMM form
+        let mut w = Array2::<f64>::zeros((n_samples, n_samples));
+        let fill_w_row = |i: usize, mut w_row: ArrayViewMut1<f64>| {
             for j in 0..n_samples {
-                if i == j {
-                    continue;
-                }
                 let q_ij = (num[[i, j]] / sum_num).max(MIN_Q);
-                let mult = 4.0 * (p[[i, j]] - q_ij) * num[[i, j]];
-                let y_j = y.row(j);
-                for d in 0..n_components {
-                    row[d] += mult * (y_i[d] - y_j[d]);
-                }
+                w_row[j] = (p[[i, j]] - q_ij) * num[[i, j]];
             }
         };
 
         if parallel {
-            grad.outer_iter_mut()
+            w.outer_iter_mut()
                 .into_par_iter()
                 .enumerate()
-                .for_each(|(i, row)| fill_row(i, row));
+                .for_each(|(i, row)| fill_w_row(i, row));
         } else {
-            for (i, row) in grad.outer_iter_mut().enumerate() {
-                fill_row(i, row);
+            for (i, row) in w.outer_iter_mut().enumerate() {
+                fill_w_row(i, row);
             }
         }
-        grad
+
+        let row_sums = w.sum_axis(Axis(1));
+        let weighted_y = par_matmul(&w, y);
+
+        // 4 * (s_i * y_i - (W * Y)_i), assembled with broadcast elementwise ops (O(n * d))
+        (y * &row_sums.insert_axis(Axis(1)) - weighted_y) * 4.0
     }
 
     #[cfg(feature = "show_progress")]

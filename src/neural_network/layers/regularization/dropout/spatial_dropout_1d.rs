@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
+use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;

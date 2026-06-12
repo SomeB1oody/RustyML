@@ -21,8 +21,10 @@ use ndarray_rand::rand::{Rng, SeedableRng};
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;
 use rustyml::bench_internals::{
-    PoolKind, conv_forward_forced, split_matmul, windowed_pool_forward_impl,
+    KdTree, PoolKind, conv_forward_forced, windowed_pool_forward_impl,
 };
+use rustyml::math::matmul::{par_matmul, split_matmul, split_matvec};
+use rustyml::types::DistanceCalculationMetric;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::PaddingType;
 use std::fmt::Write as _;
@@ -159,6 +161,21 @@ fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f32> {
     Array2::random_using((rows, cols), Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
+fn random_matrix_f64(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    Array2::random_using((rows, cols), Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
+}
+
+fn random_vector_f64(len: usize, seed: u64) -> Array1<f64> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    Array1::random_using(len, Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
+}
+
+fn random_vector_f32(len: usize, seed: u64) -> Array1<f32> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    Array1::random_using(len, Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
+}
+
 // ---- par_matmul: PAR_GEMM_MIN_FLOPS ----
 
 fn calibrate_par_matmul_flops() -> Section {
@@ -171,7 +188,7 @@ fn calibrate_par_matmul_flops() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(a.view(), b.view(), 1));
+            black_box(split_matmul(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("square {n}x{n}x{n}"),
@@ -197,7 +214,7 @@ fn calibrate_par_matmul_flops() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(a.view(), b.view(), 1));
+            black_box(split_matmul(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("skinny {m}x{k}x{n}"),
@@ -225,7 +242,7 @@ fn calibrate_par_matmul_min_block() -> Section {
     let mut rows = Vec::new();
     for &blk in &[8usize, 16, 32, 64, 128, 256, 512] {
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(a.view(), b.view(), blk));
+            black_box(split_matmul(&a, &b, blk));
         });
         rows.push(Row {
             label: format!("2048x512x512 min_block {blk}"),
@@ -488,6 +505,766 @@ fn calibrate_elementwise() -> Vec<Section> {
     sections
 }
 
+// ---- f64 GEMM: MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS ----
+
+fn calibrate_par_matmul_flops_f64() -> Section {
+    let mut rows = Vec::new();
+    for &n in &[32usize, 48, 64, 96, 128, 192, 256, 384, 512] {
+        let a = random_matrix_f64(n, n, 11);
+        let b = random_matrix_f64(n, n, 12);
+        let s = time_per_call_ns(|| {
+            black_box(a.dot(&b));
+        });
+        let p = time_per_call_ns(|| {
+            black_box(split_matmul(&a, &b, 1));
+        });
+        rows.push(Row {
+            label: format!("f64 square {n}x{n}x{n}"),
+            work: 2 * n * n * n,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    for &(m, k, n) in &[
+        (1024usize, 64usize, 64usize),
+        (4096, 64, 64),
+        (16384, 64, 64),
+        (64, 64, 4096),
+        (64, 16384, 64),
+    ] {
+        let a = random_matrix_f64(m, k, 13);
+        let b = random_matrix_f64(k, n, 14);
+        let s = time_per_call_ns(|| {
+            black_box(a.dot(&b));
+        });
+        let p = time_per_call_ns(|| {
+            black_box(split_matmul(&a, &b, 1));
+        });
+        rows.push(Row {
+            label: format!("f64 skinny {m}x{k}x{n}"),
+            work: 2 * m * k * n,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "f64 par_matmul FLOPs gate (MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS)",
+        work_unit: "FLOPs",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+fn calibrate_par_matmul_min_block_f64() -> Section {
+    let a = random_matrix_f64(2048, 512, 15);
+    let b = random_matrix_f64(512, 512, 16);
+    let serial = time_per_call_ns(|| {
+        black_box(a.dot(&b));
+    });
+    let mut rows = Vec::new();
+    for &blk in &[8usize, 16, 32, 64, 128, 256, 512] {
+        let p = time_per_call_ns(|| {
+            black_box(split_matmul(&a, &b, blk));
+        });
+        rows.push(Row {
+            label: format!("f64 2048x512x512 min_block {blk}"),
+            work: blk,
+            serial_ns: serial,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "f64 par_matmul block size (PAR_GEMM_MIN_BLOCK check)",
+        work_unit: "rows per block",
+        pick_fastest: true,
+        rows,
+    }
+}
+
+// ---- matvec: MatmulElem::PAR_GEMV_MIN_FLOPS (f32 + f64) ----
+
+/// `(m, k)` ladder shared by both element types: square-ish plus the tall (`X . w`) and
+/// short-wide (`X^T . e`) shapes the linear models produce
+const MATVEC_SHAPES: &[(usize, usize)] = &[
+    (128, 128),
+    (256, 256),
+    (512, 512),
+    (1024, 1024),
+    (2048, 2048),
+    (4096, 4096),
+    (16384, 64),
+    (65536, 64),
+    (262144, 64),
+    (256, 16384),
+    (128, 65536),
+];
+
+fn calibrate_par_matvec_flops_f64() -> Section {
+    let mut rows = Vec::new();
+    for &(m, k) in MATVEC_SHAPES {
+        let a = random_matrix_f64(m, k, 21);
+        let x = random_vector_f64(k, 22);
+        let s = time_per_call_ns(|| {
+            black_box(a.dot(&x));
+        });
+        let p = time_per_call_ns(|| {
+            black_box(split_matvec(&a, &x, 1));
+        });
+        rows.push(Row {
+            label: format!("f64 matvec {m}x{k}"),
+            work: 2 * m * k,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "f64 matvec FLOPs gate (MatmulElem::<f64>::PAR_GEMV_MIN_FLOPS)",
+        work_unit: "FLOPs",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+fn calibrate_par_matvec_flops_f32() -> Section {
+    let mut rows = Vec::new();
+    for &(m, k) in MATVEC_SHAPES {
+        let a = random_matrix(m, k, 23);
+        let x = random_vector_f32(k, 24);
+        let s = time_per_call_ns(|| {
+            black_box(a.dot(&x));
+        });
+        let p = time_per_call_ns(|| {
+            black_box(split_matvec(&a, &x, 1));
+        });
+        rows.push(Row {
+            label: format!("f32 matvec {m}x{k}"),
+            work: 2 * m * k,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "f32 matvec FLOPs gate (MatmulElem::<f32>::PAR_GEMV_MIN_FLOPS)",
+        work_unit: "FLOPs",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+fn calibrate_par_matvec_min_block() -> Vec<Section> {
+    let mut sections = Vec::new();
+    // Tall (the X . w projection) and short-wide (the X^T . e reduction over few features) -
+    // the wide case is where a high row floor forfeits parallelism entirely
+    for &(m, k, tag) in &[
+        (262144usize, 64usize, "tall"),
+        (128, 65536, "short-wide"),
+    ] {
+        let a = random_matrix_f64(m, k, 25);
+        let x = random_vector_f64(k, 26);
+        let serial = time_per_call_ns(|| {
+            black_box(a.dot(&x));
+        });
+        let mut rows = Vec::new();
+        for &blk in &[1usize, 2, 4, 8, 16, 32, 64, 128] {
+            let p = time_per_call_ns(|| {
+                black_box(split_matvec(&a, &x, blk));
+            });
+            rows.push(Row {
+                label: format!("f64 {tag} {m}x{k} min_block {blk}"),
+                work: blk,
+                serial_ns: serial,
+                parallel_ns: p,
+            });
+        }
+        sections.push(Section {
+            title: match tag {
+                "tall" => "f64 matvec block floor, tall shape (PAR_GEMV_MIN_BLOCK)",
+                _ => "f64 matvec block floor, short-wide shape (PAR_GEMV_MIN_BLOCK)",
+            },
+            work_unit: "rows per block",
+            pick_fastest: true,
+            rows,
+        });
+    }
+    sections
+}
+
+// ---- f64 elementwise classes (the ML/utils gates) ----
+
+fn calibrate_elementwise_f64() -> Vec<Section> {
+    let sizes = [
+        512usize, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 1048576, 4194304,
+    ];
+    let mut sections = Vec::new();
+
+    // Cheap map (centering / scaling): converges to 0.5, so in-place reapplication is stable
+    let mut rows = Vec::new();
+    for &len in &sizes {
+        let mut buf = Array1::from_elem(len, 0.25f64);
+        let s = time_per_call_ns(|| {
+            buf.mapv_inplace(|x| x * 0.9999 + 0.00005);
+            black_box(&buf);
+        });
+        let mut buf = Array1::from_elem(len, 0.25f64);
+        let p = time_per_call_ns(|| {
+            buf.par_mapv_inplace(|x| x * 0.9999 + 0.00005);
+            black_box(&buf);
+        });
+        rows.push(Row {
+            label: format!("f64 center/scale {len}"),
+            work: len,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    sections.push(Section {
+        title: "f64 cheap map (centering/normalize/standardize class)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    });
+
+    // Exp map (the logistic sigmoid, RBF/tanh kernel transforms)
+    let mut rows = Vec::new();
+    for &len in &sizes {
+        let mut buf = Array1::from_elem(len, 0.5f64);
+        let s = time_per_call_ns(|| {
+            buf.mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
+            black_box(&buf);
+        });
+        let mut buf = Array1::from_elem(len, 0.5f64);
+        let p = time_per_call_ns(|| {
+            buf.par_mapv_inplace(|x| 1.0 / (1.0 + (-x).exp()));
+            black_box(&buf);
+        });
+        rows.push(Row {
+            label: format!("f64 sigmoid {len}"),
+            work: len,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    sections.push(Section {
+        title: "f64 exp map (sigmoid / kernel-transform class)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    });
+
+    // Arg-min row scan (the KMeans/LDA label pick): n rows of k = 16 candidates
+    let mut rows = Vec::new();
+    let k = 16usize;
+    for &n in &[256usize, 1024, 4096, 16384, 65536, 262144] {
+        let proj = random_matrix_f64(n, k, 31);
+        let scan_row = |i: usize| -> usize {
+            let row = proj.row(i);
+            let mut best = 0;
+            let mut best_val = f64::MAX;
+            for (j, &v) in row.iter().enumerate() {
+                if v < best_val {
+                    best_val = v;
+                    best = j;
+                }
+            }
+            best
+        };
+        let s = time_per_call_ns(|| {
+            let labels: Vec<usize> = (0..n).map(scan_row).collect();
+            black_box(labels);
+        });
+        let p = time_per_call_ns(|| {
+            let labels: Vec<usize> = (0..n).into_par_iter().map(scan_row).collect();
+            black_box(labels);
+        });
+        rows.push(Row {
+            label: format!("f64 argmin {n}x{k}"),
+            work: n * k,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    sections.push(Section {
+        title: "f64 arg-min row scan (KMeans assignment / LDA label-pick class)",
+        work_unit: "elements scanned",
+        pick_fastest: false,
+        rows,
+    });
+
+    // Parallel f64 sum (reference only: rayon's reduction grouping is scheduling-dependent, so
+    // a parallel float sum is not bitwise reproducible - these sites get serialized unless the
+    // win is overwhelming AND a deterministic blocked reduction is used instead)
+    let mut rows = Vec::new();
+    for &len in &sizes {
+        let buf = random_vector_f64(len, 33);
+        let s = time_per_call_ns(|| {
+            black_box(buf.iter().map(|v| v * v).sum::<f64>());
+        });
+        let slice = buf.as_slice().unwrap();
+        let p = time_per_call_ns(|| {
+            black_box(slice.par_iter().map(|v| v * v).sum::<f64>());
+        });
+        rows.push(Row {
+            label: format!("f64 sum of squares {len}"),
+            work: len,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    sections.push(Section {
+        title: "f64 parallel sum (reference only: non-deterministic reduction order)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    });
+
+    sections
+}
+
+// ---- tiled-GEMM chunk budget: matmul::GEMM_CHUNK_ELEMS ----
+
+fn calibrate_gemm_chunk_budget() -> Vec<Section> {
+    let mut sections = Vec::new();
+    // KNN-predict-shaped workloads: queries against a training set, distance scan per row.
+    // Baseline ("serial" column) is the pre-rewrite path: one GEMV per query, parallel over
+    // queries. The sweep finds the chunk budget for the tiled-GEMM replacement
+    // The 50k/200k training sets (~25 MB) fit in the 9950X's 64 MB L3, where the GEMV swarm
+    // re-reads X from cache for free; the 500k set (256 MB) overflows it, the case tiling
+    // exists for
+    for &(n_train, d, n_query, tag) in &[
+        (50_000usize, 64usize, 2048usize, "50k train, d=64"),
+        (200_000, 16, 1024, "200k train, d=16"),
+        (500_000, 64, 128, "500k train, d=64 (L3 overflow)"),
+    ] {
+        let x_train = random_matrix_f64(n_train, d, 41);
+        let queries = random_matrix_f64(n_query, d, 42);
+        let train_sq: Vec<f64> = x_train
+            .rows()
+            .into_iter()
+            .map(|r| r.dot(&r))
+            .collect();
+
+        // Pre-rewrite baseline: per-query GEMV swarm
+        let baseline = time_per_call_ns(|| {
+            let nearest: Vec<usize> = (0..n_query)
+                .into_par_iter()
+                .map(|qi| {
+                    let q = queries.row(qi);
+                    let proj = x_train.dot(&q);
+                    let mut best = 0;
+                    let mut best_val = f64::MAX;
+                    for (j, &p) in proj.iter().enumerate() {
+                        let dist = train_sq[j] - 2.0 * p;
+                        if dist < best_val {
+                            best_val = dist;
+                            best = j;
+                        }
+                    }
+                    best
+                })
+                .collect();
+            black_box(nearest);
+        });
+
+        let mut rows = Vec::new();
+        for &chunk_rows in &[16usize, 64, 256, 1024, 4096] {
+            let chunk_rows = chunk_rows.min(n_query);
+            let tiled = time_per_call_ns(|| {
+                let mut nearest: Vec<usize> = Vec::with_capacity(n_query);
+                for start in (0..n_query).step_by(chunk_rows) {
+                    let end = (start + chunk_rows).min(n_query);
+                    let proj =
+                        par_matmul(&queries.slice(ndarray::s![start..end, ..]), &x_train.t());
+                    let chunk: Vec<usize> = (start..end)
+                        .into_par_iter()
+                        .map(|qi| {
+                            let row = proj.row(qi - start);
+                            let mut best = 0;
+                            let mut best_val = f64::MAX;
+                            for (j, &p) in row.iter().enumerate() {
+                                let dist = train_sq[j] - 2.0 * p;
+                                if dist < best_val {
+                                    best_val = dist;
+                                    best = j;
+                                }
+                            }
+                            best
+                        })
+                        .collect();
+                    nearest.extend(chunk);
+                }
+                black_box(nearest);
+            });
+            rows.push(Row {
+                label: format!("chunk {chunk_rows} rows ({tag})"),
+                work: chunk_rows * n_train,
+                serial_ns: baseline,
+                parallel_ns: tiled,
+            });
+        }
+        sections.push(Section {
+            title: match tag {
+                "50k train, d=64" => {
+                    "tiled-GEMM chunk budget, 50k train / d=64 / 2048 queries (GEMM_CHUNK_ELEMS)"
+                }
+                "200k train, d=16" => {
+                    "tiled-GEMM chunk budget, 200k train / d=16 / 1024 queries (GEMM_CHUNK_ELEMS)"
+                }
+                _ => "tiled-GEMM chunk budget, 500k train / d=64 / 128 queries, L3 overflow (GEMM_CHUNK_ELEMS)",
+            },
+            work_unit: "buffer elements (rows x n_train)",
+            pick_fastest: true,
+            rows,
+        });
+    }
+    sections
+}
+
+// ---- pairwise-distance strategy (the t-SNE / mean-shift all-pairs shapes) ----
+
+/// Compares three ways of producing the full per-row distance rows that t-SNE's neighbor
+/// search and mean-shift's bandwidth estimation consume: the per-pair scalar loops (the
+/// pre-rewrite code), a per-row GEMV swarm with the norms identity, and the one-shot
+/// block-parallel GEMM with the same identity. The "serial" column is the per-pair scalar
+/// baseline for every row
+fn calibrate_pairwise_strategy() -> Section {
+    let n = 5000usize;
+    let d = 50usize;
+    let x = random_matrix_f64(n, d, 51);
+    let x_sq: Vec<f64> = x.rows().into_iter().map(|r| r.dot(&r)).collect();
+
+    // Strategy 0 (baseline): per-pair scalar distance loops, parallel over rows
+    let scalar = time_per_call_ns(|| {
+        let rows: Vec<Vec<f64>> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let row_i = x.row(i);
+                (0..n)
+                    .map(|j| {
+                        let row_j = x.row(j);
+                        row_i
+                            .iter()
+                            .zip(row_j.iter())
+                            .map(|(&a, &b)| (a - b) * (a - b))
+                            .sum::<f64>()
+                    })
+                    .collect()
+            })
+            .collect();
+        black_box(rows);
+    });
+
+    // Strategy 1: per-row GEMV swarm + norms identity, parallel over rows
+    let gemv_swarm = time_per_call_ns(|| {
+        let rows: Vec<Vec<f64>> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let proj = x.dot(&x.row(i));
+                proj.iter()
+                    .zip(x_sq.iter())
+                    .map(|(&p, &j_sq)| (x_sq[i] + j_sq - 2.0 * p).max(0.0))
+                    .collect()
+            })
+            .collect();
+        black_box(rows);
+    });
+
+    // Strategy 2: one-shot block-parallel GEMM + norms identity (the t-SNE exact path)
+    let full_gemm = time_per_call_ns(|| {
+        let gram = par_matmul(&x, &x.t());
+        let rows: Vec<Vec<f64>> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                gram.row(i)
+                    .iter()
+                    .zip(x_sq.iter())
+                    .map(|(&g, &j_sq)| (x_sq[i] + j_sq - 2.0 * g).max(0.0))
+                    .collect()
+            })
+            .collect();
+        black_box(rows);
+    });
+
+    let rows = vec![
+        Row {
+            label: format!("per-pair scalar {n}x{n} d={d}"),
+            work: 1,
+            serial_ns: scalar,
+            parallel_ns: scalar,
+        },
+        Row {
+            label: format!("per-row GEMV swarm {n}x{n} d={d}"),
+            work: 2,
+            serial_ns: scalar,
+            parallel_ns: gemv_swarm,
+        },
+        Row {
+            label: format!("one-shot GEMM {n}x{n} d={d}"),
+            work: 3,
+            serial_ns: scalar,
+            parallel_ns: full_gemm,
+        },
+    ];
+    Section {
+        title: "pairwise-distance strategy, 5000 points / d=50 (t-SNE / mean-shift shapes)",
+        work_unit: "strategy id",
+        pick_fastest: true,
+        rows,
+    }
+}
+
+// ---- coarse-task classes: tree traversal / sort-scan / tree build ----
+
+/// Synthetic decision-tree predict kernel: per-sample root-to-leaf walk over a heap-layout
+/// binary tree (depth 16, ~65K nodes), the same pointer-chasing shape as DecisionTree and
+/// IsolationForest prediction
+fn calibrate_tree_traversal() -> Section {
+    let depth = 16usize;
+    let n_nodes = (1usize << depth) - 1;
+    let d = 8usize;
+    let nodes: Vec<(usize, f64)> = (0..n_nodes)
+        .map(|i| {
+            let t = i as f64 * 0.618;
+            (i % d, (t.sin() * 43758.5453).fract() * 0.4 - 0.2)
+        })
+        .collect();
+
+    let mut rows = Vec::new();
+    for &n in &[64usize, 256, 1024, 4096, 16384, 65536] {
+        let x = random_matrix_f64(n, d, 63);
+        let walk = |i: usize| -> usize {
+            let row = x.row(i);
+            let mut node = 0usize;
+            while node < n_nodes {
+                let (f, thr) = nodes[node];
+                node = if row[f] < thr { 2 * node + 1 } else { 2 * node + 2 };
+            }
+            node
+        };
+        let s = time_per_call_ns(|| {
+            let leaves: Vec<usize> = (0..n).map(walk).collect();
+            black_box(leaves);
+        });
+        let p = time_per_call_ns(|| {
+            let leaves: Vec<usize> = (0..n).into_par_iter().map(walk).collect();
+            black_box(leaves);
+        });
+        rows.push(Row {
+            label: format!("tree-walk {n} samples, depth {depth}"),
+            work: n * depth,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "tree-traversal class (DecisionTree/IsolationForest predict)",
+        work_unit: "node visits (samples x depth)",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+/// Synthetic split-search kernel: per-feature copy + sort + scan over the node's samples, the
+/// shape of DecisionTree's `find_best_split` (one task per feature)
+fn calibrate_sort_scan() -> Section {
+    let features = 8usize;
+    let mut rows = Vec::new();
+    for &n in &[64usize, 256, 1024, 4096, 16384] {
+        let x = random_matrix_f64(n, features, 65);
+        let task = |f: usize| -> f64 {
+            let mut col: Vec<f64> = x.column(f).to_vec();
+            col.sort_unstable_by(|a, b| a.total_cmp(b));
+            // prefix scan standing in for the running-impurity sweep
+            let mut acc = 0.0;
+            let mut best = f64::MAX;
+            for (i, &v) in col.iter().enumerate() {
+                acc += v;
+                let split_score = (acc / (i + 1) as f64).abs();
+                if split_score < best {
+                    best = split_score;
+                }
+            }
+            best
+        };
+        let s = time_per_call_ns(|| {
+            let scores: Vec<f64> = (0..features).map(task).collect();
+            black_box(scores);
+        });
+        let p = time_per_call_ns(|| {
+            let scores: Vec<f64> = (0..features).into_par_iter().map(task).collect();
+            black_box(scores);
+        });
+        rows.push(Row {
+            label: format!("sort-scan {n} samples x {features} features"),
+            work: n * features,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "sort-scan class (DecisionTree find_best_split, one task per feature)",
+        work_unit: "sorted elements (samples x features)",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+/// Synthetic isolation-tree build kernel: each task recursively random-splits a 256-sample
+/// subsample (the IsolationForest default), the shape of parallel forest construction
+fn calibrate_tree_build() -> Section {
+    let psi = 256usize;
+    let d = 8usize;
+    let x = random_matrix_f64(psi, d, 67);
+
+    fn build_rec(x: &Array2<f64>, idx: &mut [usize], depth: usize, rng: &mut u64) -> usize {
+        if idx.len() <= 1 || depth == 0 {
+            return idx.len();
+        }
+        // LCG for the random feature/threshold pick
+        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let f = (*rng >> 33) as usize % x.ncols();
+        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let t = ((*rng >> 11) as f64 / (1u64 << 53) as f64) - 0.5;
+        let mid = itertools_partition(idx, |&i| x[[i, f]] < t);
+        if mid == 0 || mid == idx.len() {
+            return idx.len();
+        }
+        let (l, r) = idx.split_at_mut(mid);
+        build_rec(x, l, depth - 1, rng) + build_rec(x, r, depth - 1, rng)
+    }
+
+    /// Stable partition returning the split point (no std `partition_point` on unsorted data)
+    fn itertools_partition(idx: &mut [usize], pred: impl Fn(&usize) -> bool) -> usize {
+        let mut split = 0;
+        for i in 0..idx.len() {
+            if pred(&idx[i]) {
+                idx.swap(split, i);
+                split += 1;
+            }
+        }
+        split
+    }
+
+    let mut rows = Vec::new();
+    for &trees in &[2usize, 4, 8, 16, 32, 64] {
+        let build_one = |t: usize| -> usize {
+            let mut idx: Vec<usize> = (0..psi).collect();
+            let mut rng = 0x9E3779B97F4A7C15u64 ^ (t as u64);
+            build_rec(&x, &mut idx, 8, &mut rng)
+        };
+        let s = time_per_call_ns(|| {
+            let sizes: Vec<usize> = (0..trees).map(build_one).collect();
+            black_box(sizes);
+        });
+        let p = time_per_call_ns(|| {
+            let sizes: Vec<usize> = (0..trees).into_par_iter().map(build_one).collect();
+            black_box(sizes);
+        });
+        rows.push(Row {
+            label: format!("build {trees} trees (psi=256)"),
+            work: trees,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "tree-build class (IsolationForest fit, one task per tree)",
+        work_unit: "trees",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+// ---- deterministic blocked reduction: DET_REDUCE_BLOCK ----
+
+fn calibrate_det_reduce_block() -> Section {
+    let data = random_vector_f64(4_194_304, 69);
+    let slice = data.as_slice().unwrap();
+    let serial = time_per_call_ns(|| {
+        black_box(slice.iter().map(|v| v * v).sum::<f64>());
+    });
+    let mut rows = Vec::new();
+    for &block in &[1024usize, 2048, 4096, 8192, 16384, 32768, 65536, 262144] {
+        let p = time_per_call_ns(|| {
+            let parts: Vec<f64> = slice
+                .par_chunks(block)
+                .map(|c| c.iter().map(|v| v * v).sum::<f64>())
+                .collect();
+            black_box(parts.into_iter().fold(0.0, |a, b| a + b));
+        });
+        rows.push(Row {
+            label: format!("4.2M sum-of-squares, block {block}"),
+            work: block,
+            serial_ns: serial,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "deterministic blocked reduction block size (DET_REDUCE_BLOCK)",
+        work_unit: "elements per block",
+        pick_fastest: true,
+        rows,
+    }
+}
+
+// ---- kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS ----
+
+/// The "serial" column is the kd-tree path and the "parallel" column the brute-force scan, so
+/// the crossover reads "the dimension bracket where brute force starts winning for good".
+/// Uniform data; clustered data shifts the boundary, so this is a same-distribution comparison,
+/// not a universal constant
+fn calibrate_kd_tree_dims() -> Section {
+    let n_train = 20_000usize;
+    let n_query = 512usize;
+    let k = 8usize;
+    let mut rows = Vec::new();
+    for &d in &[2usize, 4, 8, 12, 16, 20, 24, 32] {
+        let x_train = random_matrix_f64(n_train, d, 71);
+        let queries = random_matrix_f64(n_query, d, 72);
+        let train_sq: Vec<f64> = x_train.rows().into_iter().map(|r| r.dot(&r)).collect();
+        let tree = KdTree::build(x_train.view(), DistanceCalculationMetric::Euclidean);
+
+        let t_tree = time_per_call_ns(|| {
+            let res: Vec<usize> = (0..n_query)
+                .into_par_iter()
+                .map(|qi| tree.k_nearest(queries.row(qi), k)[0].0)
+                .collect();
+            black_box(res);
+        });
+        let t_brute = time_per_call_ns(|| {
+            let res: Vec<usize> = (0..n_query)
+                .into_par_iter()
+                .map(|qi| {
+                    let q = queries.row(qi);
+                    let proj = x_train.dot(&q);
+                    let mut dists: Vec<(f64, usize)> = proj
+                        .iter()
+                        .zip(train_sq.iter())
+                        .enumerate()
+                        .map(|(j, (&p, &sq))| (sq - 2.0 * p, j))
+                        .collect();
+                    dists.select_nth_unstable_by(k - 1, |a, b| {
+                        a.0.total_cmp(&b.0).then(a.1.cmp(&b.1))
+                    });
+                    dists[0].1
+                })
+                .collect();
+            black_box(res);
+        });
+        rows.push(Row {
+            label: format!("d={d} (20k train, 512 queries, k=8)"),
+            work: d,
+            serial_ns: t_tree,
+            parallel_ns: t_brute,
+        });
+    }
+    Section {
+        title: "kd-tree (serial col) vs brute force (parallel col) by dimension (KD_TREE_MAX_DIMS); uniform data",
+        work_unit: "dimensions",
+        pick_fastest: false,
+        rows,
+    }
+}
+
 fn cpu_model() -> String {
     std::fs::read_to_string("/proc/cpuinfo")
         .ok()
@@ -522,6 +1299,19 @@ fn main() {
         calibrate_pooling(),
     ];
     sections.extend(calibrate_elementwise());
+    sections.push(calibrate_par_matmul_flops_f64());
+    sections.push(calibrate_par_matmul_min_block_f64());
+    sections.push(calibrate_par_matvec_flops_f32());
+    sections.push(calibrate_par_matvec_flops_f64());
+    sections.extend(calibrate_par_matvec_min_block());
+    sections.extend(calibrate_elementwise_f64());
+    sections.extend(calibrate_gemm_chunk_budget());
+    sections.push(calibrate_pairwise_strategy());
+    sections.push(calibrate_tree_traversal());
+    sections.push(calibrate_sort_scan());
+    sections.push(calibrate_tree_build());
+    sections.push(calibrate_det_reduce_block());
+    sections.push(calibrate_kd_tree_dims());
 
     for s in &sections {
         s.print();
@@ -548,9 +1338,10 @@ fn main() {
     }
     let _ = writeln!(
         md,
-        "## End-to-end benchmarks\n\nThe end-to-end numbers (public API: layer forwards, a \
-         training epoch) are tracked separately by criterion via `cargo bench --bench \
-         nn_end_to_end`; detailed reports and saved baselines live under `target/criterion/` \
+        "## End-to-end benchmarks\n\nThe end-to-end numbers are tracked separately by criterion: \
+         `cargo bench --bench nn_end_to_end` (neural-network layer forwards, a training epoch) and \
+         `cargo bench --bench ml_end_to_end --features full` (classical-ML/utils fits, predicts, \
+         and transforms); detailed reports and saved baselines live under `target/criterion/` \
          (use `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes)."
     );
 

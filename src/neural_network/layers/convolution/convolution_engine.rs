@@ -20,13 +20,13 @@
 //! task building its own im2col block and GEMM, writing a disjoint output region. The backward
 //! pass parallelizes over batch items (their weight/bias partials are reduced in batch order, so
 //! results do not depend on the thread count) and routes its two GEMMs through
-//! [`par_matmul`](crate::neural_network::matmul::par_matmul) so a small batch still spreads the
+//! [`par_matmul`](crate::math::matmul::par_matmul) so a small batch still spreads the
 //! GEMM work
 
 use super::PaddingType;
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::matmul::par_matmul;
+use crate::math::matmul::par_matmul;
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
@@ -283,7 +283,7 @@ pub(super) fn conv_forward(
     conv_forward_impl(input, weights, weight_shape, bias, strides, padding, None)
 }
 
-/// [`conv_forward`] with an optional override of the parallel/serial gate decision, so the
+/// `conv_forward` with an optional override of the parallel/serial gate decision, so the
 /// calibration bench can time both paths on either side of the gate. Reachable outside the crate
 /// only through `bench_internals`
 pub fn conv_forward_impl(
@@ -458,11 +458,11 @@ pub(super) fn conv_backward(
         let g_mat = ArrayView2::from_shape((filters, out_plane), g_slice)
             .expect("grad slice matches [F, out_plane]");
 
-        let wg = par_matmul(g_mat, col_mat.t()); // [F, Cin*k]
+        let wg = par_matmul(&g_mat, &col_mat.t()); // [F, Cin*k]
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
         // Input gradient:
-        let dcol = par_matmul(w_mat.t(), g_mat); // [Cin*k, out_plane]
+        let dcol = par_matmul(&w_mat.t(), &g_mat); // [Cin*k, out_plane]
         let dcol = dcol
             .as_slice()
             .expect("par_matmul result is standard layout");

@@ -7,15 +7,22 @@ pub use super::DistanceCalculationMetric;
 use super::spatial::KdTree;
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, par_matmul};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2};
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2, s};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::OnceLock;
 
 /// Feature-count ceiling for using the kd-tree neighbor index. Above this many features the
-/// tree no longer prunes effectively, so KNN falls back to the brute-force search
-const KNN_KD_TREE_MAX_DIMS: usize = 16;
+/// tree no longer prunes effectively, so the brute-force search is used instead.
+///
+/// Measured on AMD Ryzen 9 9950X, 2026-06-11 (see benches/RESULTS.md): on uniform data
+/// (20k points, k = 8) the kd-tree beats the brute-force scan up to d = 8 (2.6x at d = 8) and
+/// loses from d = 12 on (2.2-2.6x slower), so the ceiling sits at the proven-win end of the
+/// 8-12 bracket. The boundary shifts with data distribution (clustered data favors the tree)
+/// and dataset size, so this is a single-shape calibration, not a universal constant
+const KNN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// Selects the class with the greatest accumulated score (vote count or summed weight),
 /// breaking ties in favor of the smallest class index
@@ -301,8 +308,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
 
         // Neighbor index (kd-tree in low dimensions, else None for the brute-force fallback)
         let tree = self.neighbor_tree(x_train.view());
-        // Training squared norms feed the brute-force Euclidean fast path; skip them when the
-        // tree handles the search
+        // Training squared norms feed the brute-force Euclidean fast path
         let train_sq_norms = if tree.is_some() {
             None
         } else {
@@ -310,18 +316,45 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         };
 
         // Sequential prediction on encoded indices
-        let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
-            .map(|i| {
-                let sample = x.row(i);
-                self.predict_one(
-                    sample,
-                    x_train.view(),
-                    y_train_encoded,
-                    train_sq_norms.as_ref(),
-                    tree,
-                )
-            })
-            .collect();
+        let encoded_results: Result<Vec<usize>, Error> = if let Some(train_sq_norms) =
+            train_sq_norms.as_ref()
+        {
+            if cache_resident::<f64>(x_train.nrows(), x_train.ncols()) {
+                (0..x.nrows())
+                    .map(|i| {
+                        self.predict_one(
+                            x.row(i),
+                            x_train.view(),
+                            y_train_encoded,
+                            Some((train_sq_norms, None)),
+                            tree,
+                        )
+                    })
+                    .collect()
+            } else {
+                let chunk_rows = gemm_chunk_rows(x_train.nrows());
+                let mut encoded = Vec::with_capacity(x.nrows());
+                for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
+                    let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
+                    let projections =
+                        par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                    for i in chunk_start..chunk_end {
+                        encoded.push(self.predict_one(
+                            x.row(i),
+                            x_train.view(),
+                            y_train_encoded,
+                            Some((train_sq_norms, Some(projections.row(i - chunk_start)))),
+                            tree,
+                        )?);
+                    }
+                }
+                Ok(encoded)
+            }
+        } else {
+            (0..x.nrows())
+                .map(|i| self.predict_one(x.row(i), x_train.view(), y_train_encoded, None, tree))
+                .collect()
+        };
 
         // Decode the predictions back to original labels
         encoded_results.map(|encoded_preds| {
@@ -380,20 +413,51 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
             self.euclidean_train_sq_norms(x_train)
         };
 
-        // Parallel prediction on encoded indices
-        let encoded_results: Result<Vec<usize>, Error> = (0..x.nrows())
-            .into_par_iter()
-            .map(|i| {
-                let sample = x.row(i);
-                self.predict_one(
-                    sample,
-                    x_train.view(),
-                    y_train_encoded,
-                    train_sq_norms.as_ref(),
-                    tree,
-                )
-            })
-            .collect();
+        let encoded_results: Result<Vec<usize>, Error> = if let Some(train_sq_norms) =
+            train_sq_norms.as_ref()
+        {
+            if cache_resident::<f64>(x_train.nrows(), x_train.ncols()) {
+                (0..x.nrows())
+                    .into_par_iter()
+                    .map(|i| {
+                        self.predict_one(
+                            x.row(i),
+                            x_train.view(),
+                            y_train_encoded,
+                            Some((train_sq_norms, None)),
+                            tree,
+                        )
+                    })
+                    .collect()
+            } else {
+                let chunk_rows = gemm_chunk_rows(x_train.nrows());
+                let mut encoded = Vec::with_capacity(x.nrows());
+                for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
+                    let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
+                    let projections =
+                        par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                    let chunk_results: Result<Vec<usize>, Error> = (chunk_start..chunk_end)
+                        .into_par_iter()
+                        .map(|i| {
+                            self.predict_one(
+                                x.row(i),
+                                x_train.view(),
+                                y_train_encoded,
+                                Some((train_sq_norms, Some(projections.row(i - chunk_start)))),
+                                tree,
+                            )
+                        })
+                        .collect();
+                    encoded.extend(chunk_results?);
+                }
+                Ok(encoded)
+            }
+        } else {
+            (0..x.nrows())
+                .into_par_iter()
+                .map(|i| self.predict_one(x.row(i), x_train.view(), y_train_encoded, None, tree))
+                .collect()
+        };
 
         // Decode the predictions back to original labels
         encoded_results.map(|encoded_preds| {
@@ -440,30 +504,40 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     }
 
     /// Predicts the encoded class index for a single data point
+    ///
+    /// `euclidean_fast` carries the brute-force Euclidean fast path's inputs: the training
+    /// squared norms, plus this query's projection row `X_train . x` when the caller
+    /// precomputed it through a chunked GEMM (the cache-overflow path); `None` in the second
+    /// slot computes the projection here as one GEMV against the cache-resident training
+    /// matrix. A `None` overall selects the kd-tree path or the per-pair metric scan
     fn predict_one(
         &self,
         x: ArrayView1<f64>,
         x_train: ArrayView2<f64>,
         y_train_encoded: &Array1<usize>,
-        train_sq_norms: Option<&Array1<f64>>,
+        euclidean_fast: Option<(&Array1<f64>, Option<ArrayView1<f64>>)>,
         tree: Option<&KdTree>,
     ) -> Result<usize, Error> {
         let n_samples = x_train.nrows();
         let k = self.k.min(n_samples); // Ensure k doesn't exceed available samples
 
-        // The k nearest neighbors as (distance, train_index) pairs. Both the kd-tree path and
-        // the brute-force path select the k smallest under the (distance, index) total order,
-        // so they return the same set and the prediction is deterministic even on distance ties
         let k_neighbors_owned: Vec<(f64, usize)> = if let Some(tree) = tree {
             tree.k_nearest(x, k)
                 .into_iter()
                 .map(|(idx, cmp)| (self.metric.distance_from_comparable(cmp), idx))
                 .collect()
         } else {
-            let mut distances: Vec<(f64, usize)> = match train_sq_norms {
-                Some(train_sq_norms) => {
+            let mut distances: Vec<(f64, usize)> = match euclidean_fast {
+                Some((train_sq_norms, precomputed)) => {
                     let x_sq = x.dot(&x);
-                    let projections = x_train.dot(&x); // [n_train] = X_train * x
+                    let projections_owned;
+                    let projections = match precomputed {
+                        Some(p) => p,
+                        None => {
+                            projections_owned = x_train.dot(&x);
+                            projections_owned.view()
+                        }
+                    };
                     projections
                         .iter()
                         .zip(train_sq_norms.iter())
@@ -492,34 +566,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
         // Calculate based on weight strategy
         let result = match self.weighting_strategy {
             WeightingStrategy::Uniform => {
-                // Threshold for using parallel voting aggregation
-                const VOTING_PARALLEL_THRESHOLD: usize = 100;
-
-                let class_counts: AHashMap<usize, usize> = if k >= VOTING_PARALLEL_THRESHOLD {
-                    // Parallel aggregation for large k values
-                    k_neighbors
-                        .par_iter()
-                        .fold(
-                            AHashMap::new,
-                            |mut acc: AHashMap<usize, usize>, &(_, idx)| {
-                                *acc.entry(y_train_encoded[idx]).or_insert(0) += 1;
-                                acc
-                            },
-                        )
-                        .reduce(AHashMap::new, |mut a, b| {
-                            for (class_idx, count) in b {
-                                *a.entry(class_idx).or_insert(0) += count;
-                            }
-                            a
-                        })
-                } else {
-                    // Sequential counting for small k values
-                    let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
-                    for &(_, idx) in k_neighbors {
-                        *class_counts.entry(y_train_encoded[idx]).or_insert(0) += 1;
-                    }
-                    class_counts
-                };
+                let mut class_counts: AHashMap<usize, usize> = AHashMap::with_capacity(k);
+                for &(_, idx) in k_neighbors {
+                    *class_counts.entry(y_train_encoded[idx]).or_insert(0) += 1;
+                }
 
                 // Most common class, ties broken deterministically by smallest class index
                 select_top_class(&class_counts).ok_or_else(|| {
@@ -527,11 +577,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                 })?
             }
             WeightingStrategy::Distance => {
-                // Exact matches (distance 0) carry infinite weight and dominate every
-                // finite-distance neighbor. `select_nth_unstable` leaves the k neighbors in
-                // arbitrary order, so inspecting only the first element is unreliable; scan all
-                // k neighbors and, when any exact match exists, vote among the exact matches
-                // alone (each counts once, ties broken by smallest class index)
                 let exact_matches: AHashMap<usize, usize> = k_neighbors
                     .iter()
                     .filter(|&&(distance, _)| distance == 0.0)
@@ -545,36 +590,10 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         Error::computation("No valid neighbors found for classification")
                     })?
                 } else {
-                    // Threshold for using parallel weight aggregation
-                    const WEIGHT_PARALLEL_THRESHOLD: usize = 100;
-
-                    let class_weights: AHashMap<usize, f64> = if k >= WEIGHT_PARALLEL_THRESHOLD {
-                        // Parallel weight aggregation for large k values
-                        k_neighbors
-                            .par_iter()
-                            .fold(
-                                AHashMap::new,
-                                |mut acc: AHashMap<usize, f64>, &(distance, idx)| {
-                                    *acc.entry(y_train_encoded[idx]).or_insert(0.0) +=
-                                        1.0 / distance;
-                                    acc
-                                },
-                            )
-                            .reduce(AHashMap::new, |mut a, b| {
-                                for (class_idx, weight) in b {
-                                    *a.entry(class_idx).or_insert(0.0) += weight;
-                                }
-                                a
-                            })
-                    } else {
-                        // Sequential weight calculation for small k values
-                        let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
-                        for &(distance, idx) in k_neighbors {
-                            *class_weights.entry(y_train_encoded[idx]).or_insert(0.0) +=
-                                1.0 / distance;
-                        }
-                        class_weights
-                    };
+                    let mut class_weights: AHashMap<usize, f64> = AHashMap::with_capacity(k);
+                    for &(distance, idx) in k_neighbors {
+                        *class_weights.entry(y_train_encoded[idx]).or_insert(0.0) += 1.0 / distance;
+                    }
 
                     // Highest summed weight, ties broken deterministically by class index
                     select_top_class(&class_weights).ok_or_else(|| {

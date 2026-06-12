@@ -71,7 +71,7 @@ impl Ord for Neighbor {
 /// A kd-tree over a set of points, owning a copy of the coordinates so it is self-contained
 /// (`Send + Sync`, serializable-by-rebuild) and free of self-referential borrows
 #[derive(Debug, Clone)]
-pub(super) struct KdTree {
+pub struct KdTree {
     metric: DistanceCalculationMetric,
     /// Owned copy of the points, indexed by original row index
     points: Array2<f64>,
@@ -86,7 +86,7 @@ impl KdTree {
     /// Construction is `O(n * d * log n)`: each level chooses the maximum-spread axis and splits
     /// at the count-median (via `select_nth_unstable`), so the tree is balanced regardless of how
     /// the coordinate values are distributed
-    pub(super) fn build(points: ArrayView2<f64>, metric: DistanceCalculationMetric) -> Self {
+    pub fn build(points: ArrayView2<f64>, metric: DistanceCalculationMetric) -> Self {
         let points = points.to_owned();
         let n = points.nrows();
         let mut nodes: Vec<KdNode> = Vec::with_capacity(n);
@@ -213,7 +213,7 @@ impl KdTree {
     ///
     /// Distances are returned in comparable space; convert with
     /// [`DistanceCalculationMetric::distance_from_comparable`] when a true distance is needed
-    pub(super) fn k_nearest(&self, query: ArrayView1<f64>, k: usize) -> Vec<(usize, f64)> {
+    pub fn k_nearest(&self, query: ArrayView1<f64>, k: usize) -> Vec<(usize, f64)> {
         let mut heap: BinaryHeap<Neighbor> = BinaryHeap::with_capacity(k.min(self.nodes.len()));
         if k > 0 {
             self.knn_recurse(self.root, query, k, &mut heap);
@@ -241,8 +241,7 @@ impl KdTree {
                 .comparable_distance(query, self.points.row(node.point_idx)),
             idx: node.point_idx,
         };
-        // Keep the heap as the k smallest under the `(cmp_dist, idx)` total order; the max-heap
-        // peek is the current worst of those k
+        // Keep the heap as the k smallest under the `(cmp_dist, idx)` total order
         if heap.len() < k {
             heap.push(candidate);
         } else if candidate < *heap.peek().unwrap() {

@@ -6,7 +6,7 @@ use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::neural_network::matmul::par_matmul;
+use crate::math::matmul::par_matmul;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -163,7 +163,7 @@ impl Layer for Dense {
         self.input_cache = Some(input_2d.to_owned());
 
         // Linear transform (block-parallel for large products)
-        let z = par_matmul(input_2d, self.weights.view()) + &self.bias;
+        let z = par_matmul(&input_2d, &self.weights) + &self.bias;
 
         // Apply activation and cache the activated output for backpropagation
         let output = self.activation.forward(&z.into_dyn())?;
@@ -181,7 +181,7 @@ impl Layer for Dense {
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
         // Linear transform (block-parallel for large products)
-        let z = par_matmul(input_2d, self.weights.view()) + &self.bias;
+        let z = par_matmul(&input_2d, &self.weights) + &self.bias;
 
         // Apply activation
         self.activation.forward(&z.into_dyn())
@@ -218,7 +218,7 @@ impl Layer for Dense {
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
         // Weight gradients
-        let grad_w = par_matmul(input.t(), grad_upstream_2d.view());
+        let grad_w = par_matmul(&input.t(), &grad_upstream_2d);
 
         // Calculate bias gradients by summing over batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -228,7 +228,7 @@ impl Layer for Dense {
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
         // Gradient w.r.t. the input
-        let grad_input = par_matmul(grad_upstream_2d.view(), self.weights.t());
+        let grad_input = par_matmul(&grad_upstream_2d, &self.weights.t());
 
         Ok(grad_input.into_dyn())
     }

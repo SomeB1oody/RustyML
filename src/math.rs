@@ -1,9 +1,14 @@
-//! Free math and statistics functions: variances, distances, losses, and impurity measures
+//! Free math and statistics functions: variances, distances, losses, and impurity measures,
+//! plus the block-parallel matrix products in [`matmul`](crate::math::matmul)
 //!
 //! Each function returns a plain value and may panic on malformed input rather than returning a
 //! `Result`. The module covers regression statistics (SST, SSE, variance, standard deviation),
 //! distance metrics, classification losses, decision-tree impurity (gini, entropy), and the
 //! isolation-forest path-length correction
+
+/// Rayon-block-parallel matrix products (`par_matmul`, `par_matvec`) for `f32`/`f64`
+/// ndarray operands, with calibrated serial/parallel switching
+pub mod matmul;
 
 use ahash::AHashMap;
 use ndarray::{ArrayBase, Data, Ix1, Zip};

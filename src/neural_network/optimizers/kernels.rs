@@ -6,7 +6,7 @@
 //! these kernels work for any parameter shape, replacing the previous per-shape, per-optimizer
 //! state structs and update implementations
 
-use crate::neural_network::parallel_gates::FUSED_SLICE_PARALLEL_THRESHOLD;
+use crate::parallel_gates::FUSED_SLICE_PARALLEL_THRESHOLD;
 use rayon::prelude::*;
 use std::borrow::Cow;
 

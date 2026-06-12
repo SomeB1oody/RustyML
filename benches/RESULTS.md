@@ -12,23 +12,23 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (FLOPs) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| square 32x32x32 | 65536 | 0.6 | 12.8 | 0.05x |
-| square 48x48x48 | 221184 | 1.8 | 13.8 | 0.13x |
-| square 64x64x64 | 524288 | 4.1 | 14.7 | 0.28x |
-| square 96x96x96 | 1769472 | 13.1 | 17.4 | 0.75x |
-| square 128x128x128 | 4194304 | 35.0 | 21.2 | 1.65x |
-| square 192x192x192 | 14155776 | 118.1 | 32.7 | 3.61x |
-| square 256x256x256 | 33554432 | 275.2 | 51.3 | 5.36x |
-| square 384x384x384 | 113246208 | 786.7 | 144.6 | 5.44x |
-| square 512x512x512 | 268435456 | 1861.5 | 280.4 | 6.64x |
-| skinny 256x64x64 | 2097152 | 16.0 | 16.7 | 0.96x |
-| skinny 1024x64x64 | 8388608 | 63.0 | 26.7 | 2.36x |
-| skinny 4096x64x64 | 33554432 | 255.1 | 95.1 | 2.68x |
-| skinny 16384x64x64 | 134217728 | 1017.7 | 280.3 | 3.63x |
-| skinny 64x64x1024 | 8388608 | 66.6 | 43.0 | 1.55x |
-| skinny 64x64x16384 | 134217728 | 1063.2 | 321.5 | 3.31x |
-| skinny 64x4096x64 | 33554432 | 272.5 | 130.6 | 2.09x |
-| skinny 64x65536x64 | 536870912 | 4807.3 | 2893.3 | 1.66x |
+| square 32x32x32 | 65536 | 0.6 | 12.5 | 0.05x |
+| square 48x48x48 | 221184 | 1.8 | 14.4 | 0.12x |
+| square 64x64x64 | 524288 | 4.1 | 15.1 | 0.27x |
+| square 96x96x96 | 1769472 | 13.1 | 17.5 | 0.75x |
+| square 128x128x128 | 4194304 | 35.3 | 22.3 | 1.58x |
+| square 192x192x192 | 14155776 | 118.6 | 33.4 | 3.54x |
+| square 256x256x256 | 33554432 | 275.0 | 50.5 | 5.44x |
+| square 384x384x384 | 113246208 | 790.9 | 165.9 | 4.77x |
+| square 512x512x512 | 268435456 | 1896.2 | 338.6 | 5.60x |
+| skinny 256x64x64 | 2097152 | 16.0 | 16.9 | 0.94x |
+| skinny 1024x64x64 | 8388608 | 63.7 | 26.6 | 2.39x |
+| skinny 4096x64x64 | 33554432 | 254.3 | 86.1 | 2.95x |
+| skinny 16384x64x64 | 134217728 | 1024.9 | 279.5 | 3.67x |
+| skinny 64x64x1024 | 8388608 | 66.3 | 43.6 | 1.52x |
+| skinny 64x64x16384 | 134217728 | 1062.5 | 329.8 | 3.22x |
+| skinny 64x4096x64 | 33554432 | 271.7 | 128.8 | 2.11x |
+| skinny 64x65536x64 | 536870912 | 4672.8 | 1792.1 | 2.61x |
 
 **Takeaway:** crossover between 2097152 and 4194304 FLOPs.
 
@@ -36,27 +36,27 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (rows per block) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| 2048x512x512 min_block 8 | 8 | 7335.1 | 848.8 | 8.64x |
-| 2048x512x512 min_block 16 | 16 | 7335.1 | 790.3 | 9.28x |
-| 2048x512x512 min_block 32 | 32 | 7335.1 | 753.2 | 9.74x |
-| 2048x512x512 min_block 64 | 64 | 7335.1 | 772.2 | 9.50x |
-| 2048x512x512 min_block 128 | 128 | 7335.1 | 1029.0 | 7.13x |
-| 2048x512x512 min_block 256 | 256 | 7335.1 | 1305.9 | 5.62x |
-| 2048x512x512 min_block 512 | 512 | 7335.1 | 2084.3 | 3.52x |
+| 2048x512x512 min_block 8 | 8 | 7279.0 | 757.3 | 9.61x |
+| 2048x512x512 min_block 16 | 16 | 7279.0 | 753.2 | 9.66x |
+| 2048x512x512 min_block 32 | 32 | 7279.0 | 785.2 | 9.27x |
+| 2048x512x512 min_block 64 | 64 | 7279.0 | 768.7 | 9.47x |
+| 2048x512x512 min_block 128 | 128 | 7279.0 | 1028.7 | 7.08x |
+| 2048x512x512 min_block 256 | 256 | 7279.0 | 1325.7 | 5.49x |
+| 2048x512x512 min_block 512 | 512 | 7279.0 | 1958.3 | 3.72x |
 
-**Takeaway:** fastest: 32 rows per block (9.74x).
+**Takeaway:** fastest: 16 rows per block (9.66x).
 
 ## conv engine FLOPs gate (CONV_PARALLEL_MIN_FLOPS), batch == 1
 
 | shape | work (FLOPs) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| conv 3c->8f 16px k3 | 84672 | 7.2 | 26.7 | 0.27x |
-| conv 3c->16f 32px k3 | 777600 | 35.0 | 78.7 | 0.44x |
-| conv 8c->16f 32px k3 | 2073600 | 56.8 | 78.0 | 0.73x |
-| conv 16c->32f 32px k3 | 8294400 | 124.5 | 84.2 | 1.48x |
-| conv 16c->32f 64px k3 | 35426304 | 516.0 | 221.3 | 2.33x |
-| conv 32c->64f 64px k3 | 141705216 | 1431.2 | 336.1 | 4.26x |
-| conv 64c->64f 128px k3 | 1170505728 | 17400.3 | 1670.4 | 10.42x |
+| conv 3c->8f 16px k3 | 84672 | 7.6 | 26.3 | 0.29x |
+| conv 3c->16f 32px k3 | 777600 | 37.0 | 73.3 | 0.51x |
+| conv 8c->16f 32px k3 | 2073600 | 62.3 | 73.5 | 0.85x |
+| conv 16c->32f 32px k3 | 8294400 | 134.3 | 85.5 | 1.57x |
+| conv 16c->32f 64px k3 | 35426304 | 572.0 | 221.6 | 2.58x |
+| conv 32c->64f 64px k3 | 141705216 | 1527.6 | 336.5 | 4.54x |
+| conv 64c->64f 128px k3 | 1170505728 | 18138.3 | 1710.2 | 10.61x |
 
 **Takeaway:** crossover between 2073600 and 8294400 FLOPs.
 
@@ -64,16 +64,16 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (window taps) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| maxpool 1x3x32x32 | 3072 | 10.0 | 22.2 | 0.45x |
-| maxpool 1x3x64x64 | 12288 | 39.4 | 31.6 | 1.25x |
-| maxpool 1x3x128x128 | 49152 | 157.1 | 67.8 | 2.32x |
-| maxpool 1x3x256x256 | 196608 | 631.1 | 123.3 | 5.12x |
-| maxpool 1x3x512x512 | 786432 | 2489.9 | 380.1 | 6.55x |
-| maxpool 1x3x1024x1024 | 3145728 | 10250.6 | 1235.9 | 8.29x |
-| maxpool 16x1x16x16 | 4096 | 14.3 | 23.9 | 0.60x |
-| maxpool 64x1x16x16 | 16384 | 57.6 | 30.7 | 1.88x |
-| maxpool 256x1x16x16 | 65536 | 231.8 | 93.1 | 2.49x |
-| maxpool 1024x1x16x16 | 262144 | 932.4 | 213.0 | 4.38x |
+| maxpool 1x3x32x32 | 3072 | 10.0 | 21.7 | 0.46x |
+| maxpool 1x3x64x64 | 12288 | 39.0 | 30.1 | 1.30x |
+| maxpool 1x3x128x128 | 49152 | 154.2 | 69.7 | 2.21x |
+| maxpool 1x3x256x256 | 196608 | 623.7 | 122.9 | 5.07x |
+| maxpool 1x3x512x512 | 786432 | 2511.2 | 376.1 | 6.68x |
+| maxpool 1x3x1024x1024 | 3145728 | 10225.8 | 1457.2 | 7.02x |
+| maxpool 16x1x16x16 | 4096 | 14.0 | 21.9 | 0.64x |
+| maxpool 64x1x16x16 | 16384 | 57.7 | 30.2 | 1.91x |
+| maxpool 256x1x16x16 | 65536 | 232.1 | 91.2 | 2.54x |
+| maxpool 1024x1x16x16 | 262144 | 926.3 | 208.6 | 4.44x |
 
 **Takeaway:** crossover between 4096 and 12288 window taps.
 
@@ -81,17 +81,17 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (elements) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| relu-like max(0) 512 | 512 | 0.0 | 22.2 | 0.00x |
-| relu-like max(0) 1024 | 1024 | 0.0 | 26.9 | 0.00x |
-| relu-like max(0) 2048 | 2048 | 0.1 | 33.0 | 0.00x |
-| relu-like max(0) 4096 | 4096 | 0.1 | 37.6 | 0.00x |
-| relu-like max(0) 8192 | 8192 | 0.3 | 42.0 | 0.01x |
-| relu-like max(0) 16384 | 16384 | 0.6 | 47.3 | 0.01x |
-| relu-like max(0) 32768 | 32768 | 1.2 | 51.7 | 0.02x |
-| relu-like max(0) 65536 | 65536 | 2.2 | 57.3 | 0.04x |
-| relu-like max(0) 131072 | 131072 | 4.6 | 65.1 | 0.07x |
-| relu-like max(0) 262144 | 262144 | 9.0 | 73.5 | 0.12x |
-| relu-like max(0) 1048576 | 1048576 | 37.8 | 108.3 | 0.35x |
+| relu-like max(0) 512 | 512 | 0.0 | 22.1 | 0.00x |
+| relu-like max(0) 1024 | 1024 | 0.0 | 27.4 | 0.00x |
+| relu-like max(0) 2048 | 2048 | 0.1 | 33.6 | 0.00x |
+| relu-like max(0) 4096 | 4096 | 0.1 | 38.9 | 0.00x |
+| relu-like max(0) 8192 | 8192 | 0.3 | 43.9 | 0.01x |
+| relu-like max(0) 16384 | 16384 | 0.6 | 48.0 | 0.01x |
+| relu-like max(0) 32768 | 32768 | 1.1 | 53.6 | 0.02x |
+| relu-like max(0) 65536 | 65536 | 2.2 | 58.4 | 0.04x |
+| relu-like max(0) 131072 | 131072 | 4.4 | 65.8 | 0.07x |
+| relu-like max(0) 262144 | 262144 | 9.1 | 74.1 | 0.12x |
+| relu-like max(0) 1048576 | 1048576 | 36.7 | 108.5 | 0.34x |
 
 **Takeaway:** no crossover observed in this ladder.
 
@@ -99,17 +99,17 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (elements) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| sigmoid-like exp 512 | 512 | 0.6 | 22.0 | 0.03x |
-| sigmoid-like exp 1024 | 1024 | 1.1 | 26.9 | 0.04x |
-| sigmoid-like exp 2048 | 2048 | 2.3 | 33.1 | 0.07x |
-| sigmoid-like exp 4096 | 4096 | 4.6 | 39.6 | 0.12x |
-| sigmoid-like exp 8192 | 8192 | 9.2 | 46.0 | 0.20x |
-| sigmoid-like exp 16384 | 16384 | 18.2 | 51.7 | 0.35x |
-| sigmoid-like exp 32768 | 32768 | 36.5 | 60.4 | 0.60x |
-| sigmoid-like exp 65536 | 65536 | 73.3 | 70.5 | 1.04x |
-| sigmoid-like exp 131072 | 131072 | 146.7 | 84.1 | 1.74x |
-| sigmoid-like exp 262144 | 262144 | 293.1 | 106.2 | 2.76x |
-| sigmoid-like exp 1048576 | 1048576 | 1166.6 | 191.2 | 6.10x |
+| sigmoid-like exp 512 | 512 | 0.6 | 22.6 | 0.03x |
+| sigmoid-like exp 1024 | 1024 | 1.1 | 29.1 | 0.04x |
+| sigmoid-like exp 2048 | 2048 | 2.2 | 34.5 | 0.06x |
+| sigmoid-like exp 4096 | 4096 | 4.5 | 40.1 | 0.11x |
+| sigmoid-like exp 8192 | 8192 | 8.9 | 45.5 | 0.20x |
+| sigmoid-like exp 16384 | 16384 | 17.9 | 52.6 | 0.34x |
+| sigmoid-like exp 32768 | 32768 | 35.5 | 61.3 | 0.58x |
+| sigmoid-like exp 65536 | 65536 | 70.9 | 71.6 | 0.99x |
+| sigmoid-like exp 131072 | 131072 | 143.5 | 85.3 | 1.68x |
+| sigmoid-like exp 262144 | 262144 | 286.0 | 107.0 | 2.67x |
+| sigmoid-like exp 1048576 | 1048576 | 1145.1 | 192.0 | 5.96x |
 
 **Takeaway:** crossover between 65536 and 131072 elements.
 
@@ -117,17 +117,17 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (elements) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| dropout-like rng 512 | 512 | 0.8 | 0.8 | 0.96x |
-| dropout-like rng 1024 | 1024 | 1.5 | 1.6 | 0.97x |
-| dropout-like rng 2048 | 2048 | 3.0 | 3.1 | 0.98x |
-| dropout-like rng 4096 | 4096 | 6.0 | 6.2 | 0.98x |
-| dropout-like rng 8192 | 8192 | 12.1 | 15.5 | 0.78x |
-| dropout-like rng 16384 | 16384 | 24.4 | 24.7 | 0.99x |
-| dropout-like rng 32768 | 32768 | 48.9 | 25.3 | 1.93x |
-| dropout-like rng 65536 | 65536 | 98.0 | 25.0 | 3.92x |
-| dropout-like rng 131072 | 131072 | 194.7 | 21.5 | 9.06x |
-| dropout-like rng 262144 | 262144 | 391.0 | 33.9 | 11.52x |
-| dropout-like rng 1048576 | 1048576 | 1575.9 | 101.5 | 15.53x |
+| dropout-like rng 512 | 512 | 0.8 | 0.8 | 0.98x |
+| dropout-like rng 1024 | 1024 | 1.5 | 1.5 | 0.99x |
+| dropout-like rng 2048 | 2048 | 3.0 | 3.0 | 1.00x |
+| dropout-like rng 4096 | 4096 | 6.1 | 6.1 | 1.00x |
+| dropout-like rng 8192 | 8192 | 12.1 | 12.8 | 0.94x |
+| dropout-like rng 16384 | 16384 | 24.9 | 24.2 | 1.03x |
+| dropout-like rng 32768 | 32768 | 49.7 | 25.2 | 1.98x |
+| dropout-like rng 65536 | 65536 | 101.8 | 23.0 | 4.43x |
+| dropout-like rng 131072 | 131072 | 194.7 | 21.5 | 9.05x |
+| dropout-like rng 262144 | 262144 | 397.3 | 33.3 | 11.94x |
+| dropout-like rng 1048576 | 1048576 | 1567.4 | 97.9 | 16.01x |
 
 **Takeaway:** crossover between 16384 and 32768 elements.
 
@@ -135,20 +135,305 @@ Each table forces the **serial** and **parallel** implementation of one kernel c
 
 | shape | work (elements) | serial (us) | parallel (us) | speedup |
 |---|---:|---:|---:|---:|
-| adam-like fused 512 | 512 | 0.2 | 23.6 | 0.01x |
-| adam-like fused 1024 | 1024 | 0.3 | 30.1 | 0.01x |
-| adam-like fused 2048 | 2048 | 0.7 | 37.3 | 0.02x |
-| adam-like fused 4096 | 4096 | 1.4 | 43.5 | 0.03x |
-| adam-like fused 8192 | 8192 | 2.7 | 49.8 | 0.06x |
-| adam-like fused 16384 | 16384 | 5.4 | 54.8 | 0.10x |
-| adam-like fused 32768 | 32768 | 10.9 | 60.9 | 0.18x |
-| adam-like fused 65536 | 65536 | 21.8 | 71.1 | 0.31x |
-| adam-like fused 131072 | 131072 | 45.0 | 82.8 | 0.54x |
-| adam-like fused 262144 | 262144 | 89.6 | 101.4 | 0.88x |
-| adam-like fused 1048576 | 1048576 | 368.4 | 185.5 | 1.99x |
+| adam-like fused 512 | 512 | 0.2 | 24.3 | 0.01x |
+| adam-like fused 1024 | 1024 | 0.3 | 30.5 | 0.01x |
+| adam-like fused 2048 | 2048 | 0.7 | 37.0 | 0.02x |
+| adam-like fused 4096 | 4096 | 1.4 | 43.8 | 0.03x |
+| adam-like fused 8192 | 8192 | 2.7 | 49.1 | 0.05x |
+| adam-like fused 16384 | 16384 | 5.4 | 54.9 | 0.10x |
+| adam-like fused 32768 | 32768 | 10.8 | 61.6 | 0.18x |
+| adam-like fused 65536 | 65536 | 21.8 | 69.3 | 0.31x |
+| adam-like fused 131072 | 131072 | 43.8 | 81.4 | 0.54x |
+| adam-like fused 262144 | 262144 | 90.7 | 100.5 | 0.90x |
+| adam-like fused 1048576 | 1048576 | 368.6 | 187.8 | 1.96x |
 
 **Takeaway:** crossover between 262144 and 1048576 elements.
 
+## f64 par_matmul FLOPs gate (MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS)
+
+| shape | work (FLOPs) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 square 32x32x32 | 65536 | 1.1 | 13.8 | 0.08x |
+| f64 square 48x48x48 | 221184 | 3.5 | 15.5 | 0.22x |
+| f64 square 64x64x64 | 524288 | 7.9 | 16.9 | 0.47x |
+| f64 square 96x96x96 | 1769472 | 25.3 | 22.1 | 1.15x |
+| f64 square 128x128x128 | 4194304 | 61.2 | 32.9 | 1.86x |
+| f64 square 192x192x192 | 14155776 | 198.5 | 52.1 | 3.81x |
+| f64 square 256x256x256 | 33554432 | 468.1 | 140.1 | 3.34x |
+| f64 square 384x384x384 | 113246208 | 1580.2 | 381.2 | 4.15x |
+| f64 square 512x512x512 | 268435456 | 3717.4 | 669.8 | 5.55x |
+| f64 skinny 1024x64x64 | 8388608 | 122.3 | 47.2 | 2.59x |
+| f64 skinny 4096x64x64 | 33554432 | 487.5 | 159.3 | 3.06x |
+| f64 skinny 16384x64x64 | 134217728 | 1957.6 | 496.2 | 3.95x |
+| f64 skinny 64x64x4096 | 33554432 | 595.7 | 222.6 | 2.68x |
+| f64 skinny 64x16384x64 | 134217728 | 2084.8 | 982.2 | 2.12x |
+
+**Takeaway:** crossover between 524288 and 1769472 FLOPs.
+
+## f64 par_matmul block size (PAR_GEMM_MIN_BLOCK check)
+
+| shape | work (rows per block) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 2048x512x512 min_block 8 | 8 | 14539.5 | 1728.5 | 8.41x |
+| f64 2048x512x512 min_block 16 | 16 | 14539.5 | 1462.3 | 9.94x |
+| f64 2048x512x512 min_block 32 | 32 | 14539.5 | 1481.6 | 9.81x |
+| f64 2048x512x512 min_block 64 | 64 | 14539.5 | 1462.4 | 9.94x |
+| f64 2048x512x512 min_block 128 | 128 | 14539.5 | 1934.3 | 7.52x |
+| f64 2048x512x512 min_block 256 | 256 | 14539.5 | 2308.3 | 6.30x |
+| f64 2048x512x512 min_block 512 | 512 | 14539.5 | 4216.0 | 3.45x |
+
+**Takeaway:** fastest: 16 rows per block (9.94x).
+
+## f32 matvec FLOPs gate (MatmulElem::<f32>::PAR_GEMV_MIN_FLOPS)
+
+| shape | work (FLOPs) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f32 matvec 128x128 | 32768 | 1.6 | 12.3 | 0.13x |
+| f32 matvec 256x256 | 131072 | 6.3 | 12.9 | 0.49x |
+| f32 matvec 512x512 | 524288 | 24.7 | 13.8 | 1.79x |
+| f32 matvec 1024x1024 | 2097152 | 98.0 | 20.0 | 4.91x |
+| f32 matvec 2048x2048 | 8388608 | 397.0 | 39.1 | 10.15x |
+| f32 matvec 4096x4096 | 33554432 | 1824.3 | 633.0 | 2.88x |
+| f32 matvec 16384x64 | 2097152 | 119.3 | 23.8 | 5.02x |
+| f32 matvec 65536x64 | 8388608 | 481.8 | 54.2 | 8.88x |
+| f32 matvec 262144x64 | 33554432 | 2060.6 | 713.9 | 2.89x |
+| f32 matvec 256x16384 | 8388608 | 393.7 | 40.1 | 9.81x |
+| f32 matvec 128x65536 | 16777216 | 1193.9 | 93.7 | 12.75x |
+
+**Takeaway:** crossover between 131072 and 524288 FLOPs.
+
+## f64 matvec FLOPs gate (MatmulElem::<f64>::PAR_GEMV_MIN_FLOPS)
+
+| shape | work (FLOPs) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 matvec 128x128 | 32768 | 1.6 | 12.0 | 0.14x |
+| f64 matvec 256x256 | 131072 | 6.4 | 13.0 | 0.49x |
+| f64 matvec 512x512 | 524288 | 25.8 | 14.6 | 1.76x |
+| f64 matvec 1024x1024 | 2097152 | 101.2 | 24.8 | 4.08x |
+| f64 matvec 2048x2048 | 8388608 | 545.3 | 85.1 | 6.41x |
+| f64 matvec 4096x4096 | 33554432 | 4287.0 | 1760.0 | 2.44x |
+| f64 matvec 16384x64 | 2097152 | 122.6 | 31.0 | 3.95x |
+| f64 matvec 65536x64 | 8388608 | 599.5 | 116.1 | 5.16x |
+| f64 matvec 262144x64 | 33554432 | 3017.6 | 1972.1 | 1.53x |
+| f64 matvec 256x16384 | 8388608 | 771.9 | 88.3 | 8.74x |
+| f64 matvec 128x65536 | 16777216 | 1739.3 | 658.9 | 2.64x |
+
+**Takeaway:** crossover between 131072 and 524288 FLOPs.
+
+## f64 matvec block floor, tall shape (PAR_GEMV_MIN_BLOCK)
+
+| shape | work (rows per block) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 tall 262144x64 min_block 1 | 1 | 3146.7 | 1961.1 | 1.60x |
+| f64 tall 262144x64 min_block 2 | 2 | 3146.7 | 1862.6 | 1.69x |
+| f64 tall 262144x64 min_block 4 | 4 | 3146.7 | 1952.8 | 1.61x |
+| f64 tall 262144x64 min_block 8 | 8 | 3146.7 | 1904.3 | 1.65x |
+| f64 tall 262144x64 min_block 16 | 16 | 3146.7 | 1908.1 | 1.65x |
+| f64 tall 262144x64 min_block 32 | 32 | 3146.7 | 1891.4 | 1.66x |
+| f64 tall 262144x64 min_block 64 | 64 | 3146.7 | 1880.4 | 1.67x |
+| f64 tall 262144x64 min_block 128 | 128 | 3146.7 | 1903.4 | 1.65x |
+
+**Takeaway:** fastest: 2 rows per block (1.69x).
+
+## f64 matvec block floor, short-wide shape (PAR_GEMV_MIN_BLOCK)
+
+| shape | work (rows per block) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 short-wide 128x65536 min_block 1 | 1 | 1984.0 | 634.4 | 3.13x |
+| f64 short-wide 128x65536 min_block 2 | 2 | 1984.0 | 616.6 | 3.22x |
+| f64 short-wide 128x65536 min_block 4 | 4 | 1984.0 | 660.6 | 3.00x |
+| f64 short-wide 128x65536 min_block 8 | 8 | 1984.0 | 661.7 | 3.00x |
+| f64 short-wide 128x65536 min_block 16 | 16 | 1984.0 | 680.3 | 2.92x |
+| f64 short-wide 128x65536 min_block 32 | 32 | 1984.0 | 835.9 | 2.37x |
+| f64 short-wide 128x65536 min_block 64 | 64 | 1984.0 | 1222.4 | 1.62x |
+| f64 short-wide 128x65536 min_block 128 | 128 | 1984.0 | 1703.3 | 1.16x |
+
+**Takeaway:** fastest: 2 rows per block (3.22x).
+
+## f64 cheap map (centering/normalize/standardize class)
+
+| shape | work (elements) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 center/scale 512 | 512 | 0.0 | 22.3 | 0.00x |
+| f64 center/scale 1024 | 1024 | 0.1 | 27.4 | 0.00x |
+| f64 center/scale 2048 | 2048 | 0.1 | 33.7 | 0.00x |
+| f64 center/scale 4096 | 4096 | 0.3 | 39.3 | 0.01x |
+| f64 center/scale 8192 | 8192 | 0.6 | 43.9 | 0.01x |
+| f64 center/scale 16384 | 16384 | 1.1 | 49.8 | 0.02x |
+| f64 center/scale 32768 | 32768 | 2.5 | 53.5 | 0.05x |
+| f64 center/scale 65536 | 65536 | 4.2 | 61.2 | 0.07x |
+| f64 center/scale 131072 | 131072 | 8.9 | 69.7 | 0.13x |
+| f64 center/scale 262144 | 262144 | 19.3 | 83.0 | 0.23x |
+| f64 center/scale 1048576 | 1048576 | 75.1 | 144.6 | 0.52x |
+| f64 center/scale 4194304 | 4194304 | 578.0 | 299.4 | 1.93x |
+
+**Takeaway:** crossover between 1048576 and 4194304 elements.
+
+## f64 exp map (sigmoid / kernel-transform class)
+
+| shape | work (elements) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 sigmoid 512 | 512 | 1.1 | 22.3 | 0.05x |
+| f64 sigmoid 1024 | 1024 | 2.1 | 28.3 | 0.08x |
+| f64 sigmoid 2048 | 2048 | 4.2 | 34.1 | 0.12x |
+| f64 sigmoid 4096 | 4096 | 8.5 | 40.3 | 0.21x |
+| f64 sigmoid 8192 | 8192 | 17.0 | 46.7 | 0.36x |
+| f64 sigmoid 16384 | 16384 | 34.1 | 54.8 | 0.62x |
+| f64 sigmoid 32768 | 32768 | 68.2 | 64.8 | 1.05x |
+| f64 sigmoid 65536 | 65536 | 136.8 | 78.4 | 1.74x |
+| f64 sigmoid 131072 | 131072 | 273.4 | 99.1 | 2.76x |
+| f64 sigmoid 262144 | 262144 | 546.4 | 135.0 | 4.05x |
+| f64 sigmoid 1048576 | 1048576 | 2186.9 | 267.6 | 8.17x |
+| f64 sigmoid 4194304 | 4194304 | 8801.3 | 766.4 | 11.48x |
+
+**Takeaway:** crossover between 16384 and 32768 elements.
+
+## f64 arg-min row scan (KMeans assignment / LDA label-pick class)
+
+| shape | work (elements scanned) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 argmin 256x16 | 4096 | 2.4 | 19.4 | 0.12x |
+| f64 argmin 1024x16 | 16384 | 9.4 | 30.0 | 0.31x |
+| f64 argmin 4096x16 | 65536 | 37.2 | 44.6 | 0.83x |
+| f64 argmin 16384x16 | 262144 | 149.2 | 65.9 | 2.26x |
+| f64 argmin 65536x16 | 1048576 | 594.3 | 111.6 | 5.33x |
+| f64 argmin 262144x16 | 4194304 | 2369.5 | 226.8 | 10.45x |
+
+**Takeaway:** crossover between 65536 and 262144 elements scanned.
+
+## f64 parallel sum (reference only: non-deterministic reduction order)
+
+| shape | work (elements) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| f64 sum of squares 512 | 512 | 0.2 | 20.9 | 0.01x |
+| f64 sum of squares 1024 | 1024 | 0.3 | 25.9 | 0.01x |
+| f64 sum of squares 2048 | 2048 | 0.7 | 30.7 | 0.02x |
+| f64 sum of squares 4096 | 4096 | 1.4 | 35.8 | 0.04x |
+| f64 sum of squares 8192 | 8192 | 2.8 | 39.2 | 0.07x |
+| f64 sum of squares 16384 | 16384 | 5.8 | 44.6 | 0.13x |
+| f64 sum of squares 32768 | 32768 | 11.4 | 49.2 | 0.23x |
+| f64 sum of squares 65536 | 65536 | 23.1 | 56.0 | 0.41x |
+| f64 sum of squares 131072 | 131072 | 46.1 | 64.6 | 0.71x |
+| f64 sum of squares 262144 | 262144 | 93.3 | 73.6 | 1.27x |
+| f64 sum of squares 1048576 | 1048576 | 369.2 | 104.2 | 3.54x |
+| f64 sum of squares 4194304 | 4194304 | 1475.4 | 176.4 | 8.36x |
+
+**Takeaway:** crossover between 131072 and 262144 elements.
+
+## tiled-GEMM chunk budget, 50k train / d=64 / 2048 queries (GEMM_CHUNK_ELEMS)
+
+| shape | work (buffer elements (rows x n_train)) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| chunk 16 rows (50k train, d=64) | 800000 | 60051.0 | 93672.9 | 0.64x |
+| chunk 64 rows (50k train, d=64) | 3200000 | 60051.0 | 101238.6 | 0.59x |
+| chunk 256 rows (50k train, d=64) | 12800000 | 60051.0 | 126501.0 | 0.47x |
+| chunk 1024 rows (50k train, d=64) | 51200000 | 60051.0 | 117147.8 | 0.51x |
+| chunk 2048 rows (50k train, d=64) | 102400000 | 60051.0 | 120235.4 | 0.50x |
+
+**Takeaway:** fastest: 800000 buffer elements (rows x n_train) (0.64x).
+
+## tiled-GEMM chunk budget, 200k train / d=16 / 1024 queries (GEMM_CHUNK_ELEMS)
+
+| shape | work (buffer elements (rows x n_train)) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| chunk 16 rows (200k train, d=16) | 3200000 | 81558.6 | 156145.7 | 0.52x |
+| chunk 64 rows (200k train, d=16) | 12800000 | 81558.6 | 211059.8 | 0.39x |
+| chunk 256 rows (200k train, d=16) | 51200000 | 81558.6 | 229039.4 | 0.36x |
+| chunk 1024 rows (200k train, d=16) | 204800000 | 81558.6 | 266945.3 | 0.31x |
+| chunk 1024 rows (200k train, d=16) | 204800000 | 81558.6 | 274955.0 | 0.30x |
+
+**Takeaway:** fastest: 3200000 buffer elements (rows x n_train) (0.52x).
+
+## tiled-GEMM chunk budget, 500k train / d=64 / 128 queries, L3 overflow (GEMM_CHUNK_ELEMS)
+
+| shape | work (buffer elements (rows x n_train)) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| chunk 16 rows (500k train, d=64 (L3 overflow)) | 8000000 | 136171.0 | 123965.9 | 1.10x |
+| chunk 64 rows (500k train, d=64 (L3 overflow)) | 32000000 | 136171.0 | 87102.4 | 1.56x |
+| chunk 128 rows (500k train, d=64 (L3 overflow)) | 64000000 | 136171.0 | 83650.9 | 1.63x |
+| chunk 128 rows (500k train, d=64 (L3 overflow)) | 64000000 | 136171.0 | 82348.8 | 1.65x |
+| chunk 128 rows (500k train, d=64 (L3 overflow)) | 64000000 | 136171.0 | 84643.0 | 1.61x |
+
+**Takeaway:** fastest: 64000000 buffer elements (rows x n_train) (1.65x).
+
+## pairwise-distance strategy, 5000 points / d=50 (t-SNE / mean-shift shapes)
+
+| shape | work (strategy id) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| per-pair scalar 5000x5000 d=50 | 1 | 46228.8 | 46228.8 | 1.00x |
+| per-row GEMV swarm 5000x5000 d=50 | 2 | 46228.8 | 12631.6 | 3.66x |
+| one-shot GEMM 5000x5000 d=50 | 3 | 46228.8 | 34487.3 | 1.34x |
+
+**Takeaway:** fastest: 2 strategy id (3.66x).
+
+## tree-traversal class (DecisionTree/IsolationForest predict)
+
+| shape | work (node visits (samples x depth)) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| tree-walk 64 samples, depth 16 | 1024 | 0.6 | 13.1 | 0.05x |
+| tree-walk 256 samples, depth 16 | 4096 | 2.5 | 19.9 | 0.12x |
+| tree-walk 1024 samples, depth 16 | 16384 | 9.7 | 29.8 | 0.33x |
+| tree-walk 4096 samples, depth 16 | 65536 | 39.3 | 47.3 | 0.83x |
+| tree-walk 16384 samples, depth 16 | 262144 | 523.7 | 83.4 | 6.28x |
+| tree-walk 65536 samples, depth 16 | 1048576 | 2240.8 | 181.9 | 12.32x |
+
+**Takeaway:** crossover between 65536 and 262144 node visits (samples x depth).
+
+## sort-scan class (DecisionTree find_best_split, one task per feature)
+
+| shape | work (sorted elements (samples x features)) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| sort-scan 64 samples x 8 features | 512 | 2.2 | 13.3 | 0.17x |
+| sort-scan 256 samples x 8 features | 2048 | 10.9 | 16.4 | 0.67x |
+| sort-scan 1024 samples x 8 features | 8192 | 50.3 | 27.8 | 1.81x |
+| sort-scan 4096 samples x 8 features | 32768 | 414.9 | 89.0 | 4.66x |
+| sort-scan 16384 samples x 8 features | 131072 | 1902.0 | 317.0 | 6.00x |
+
+**Takeaway:** crossover between 2048 and 8192 sorted elements (samples x features).
+
+## tree-build class (IsolationForest fit, one task per tree)
+
+| shape | work (trees) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| build 2 trees (psi=256) | 2 | 1.4 | 11.1 | 0.13x |
+| build 4 trees (psi=256) | 4 | 3.0 | 14.5 | 0.20x |
+| build 8 trees (psi=256) | 8 | 5.5 | 15.5 | 0.35x |
+| build 16 trees (psi=256) | 16 | 11.1 | 11.4 | 0.97x |
+| build 32 trees (psi=256) | 32 | 30.0 | 14.0 | 2.15x |
+| build 64 trees (psi=256) | 64 | 270.7 | 23.7 | 11.40x |
+
+**Takeaway:** crossover between 16 and 32 trees.
+
+## deterministic blocked reduction block size (DET_REDUCE_BLOCK)
+
+| shape | work (elements per block) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| 4.2M sum-of-squares, block 1024 | 1024 | 1478.6 | 103.4 | 14.30x |
+| 4.2M sum-of-squares, block 2048 | 2048 | 1478.6 | 95.4 | 15.50x |
+| 4.2M sum-of-squares, block 4096 | 4096 | 1478.6 | 89.7 | 16.49x |
+| 4.2M sum-of-squares, block 8192 | 8192 | 1478.6 | 84.9 | 17.41x |
+| 4.2M sum-of-squares, block 16384 | 16384 | 1478.6 | 82.8 | 17.86x |
+| 4.2M sum-of-squares, block 32768 | 32768 | 1478.6 | 83.8 | 17.64x |
+| 4.2M sum-of-squares, block 65536 | 65536 | 1478.6 | 84.4 | 17.51x |
+| 4.2M sum-of-squares, block 262144 | 262144 | 1478.6 | 131.9 | 11.21x |
+
+**Takeaway:** fastest: 16384 elements per block (17.86x).
+
+## kd-tree (serial col) vs brute force (parallel col) by dimension (KD_TREE_MAX_DIMS); uniform data
+
+| shape | work (dimensions) | serial (us) | parallel (us) | speedup |
+|---|---:|---:|---:|---:|
+| d=2 (20k train, 512 queries, k=8) | 2 | 39.4 | 2163.3 | 0.02x |
+| d=4 (20k train, 512 queries, k=8) | 4 | 90.6 | 2513.8 | 0.04x |
+| d=8 (20k train, 512 queries, k=8) | 8 | 1086.8 | 2767.9 | 0.39x |
+| d=12 (20k train, 512 queries, k=8) | 12 | 7325.4 | 3291.1 | 2.23x |
+| d=16 (20k train, 512 queries, k=8) | 16 | 8491.9 | 3346.9 | 2.54x |
+| d=20 (20k train, 512 queries, k=8) | 20 | 9344.5 | 3874.7 | 2.41x |
+| d=24 (20k train, 512 queries, k=8) | 24 | 10309.5 | 3983.3 | 2.59x |
+| d=32 (20k train, 512 queries, k=8) | 32 | 11893.6 | 4613.9 | 2.58x |
+
+**Takeaway:** crossover between 8 and 12 dimensions.
+
 ## End-to-end benchmarks
 
-The end-to-end numbers (public API: layer forwards, a training epoch) are tracked separately by criterion via `cargo bench --bench nn_end_to_end`; detailed reports and saved baselines live under `target/criterion/` (use `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes).
+The end-to-end numbers are tracked separately by criterion: `cargo bench --bench nn_end_to_end` (neural-network layer forwards, a training epoch) and `cargo bench --bench ml_end_to_end --features full` (classical-ML/utils fits, predicts, and transforms); detailed reports and saved baselines live under `target/criterion/` (use `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes).

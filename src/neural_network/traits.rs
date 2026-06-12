@@ -69,7 +69,7 @@ pub trait Layer: std::any::Any + Send + Sync {
     /// clamping). Such values are propagated, not masked, and surface loudly at the
     /// next forward pass (which rejects non-finite input) or as a NaN loss. To tame large-but-finite
     /// gradients, enable clip-by-global-norm on the optimizer
-    /// ([`Optimizer::clip_norm`](crate::neural_network::traits::Optimizer::clip_norm)) rather than
+    /// ([`Optimizer::clip_norm`]) rather than
     /// clamping inside a layer, since global-norm scaling preserves gradient direction
     ///
     /// # Parameters

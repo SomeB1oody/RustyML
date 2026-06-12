@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
+use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{

@@ -6,18 +6,15 @@
 use super::parallel::map_collect;
 use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 use crate::error::Error;
+use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 pub use crate::types::KernelType;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
-use rayon::prelude::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 
 /// Sample-count threshold for switching SVC operations to parallel computation
 ///
-/// Below this threshold, sequential computation is used to avoid thread-spawn overhead
-const SVC_PARALLEL_THRESHOLD: usize = 100;
-
 /// Support Vector Machine Classifier
 ///
 /// Support Vector Machines (SVM) are supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm
@@ -184,10 +181,6 @@ impl SVC {
     where
         S: Data<Elem = f64> + Sync,
     {
-        // Batched form of `decision_i = sum_j alpha_j * y_j * K(x_i, sv_j) + bias`, written as
-        // `(K * coef)_i + bias` with `coef_j = alpha_j * y_j` and `K[i, j] = K(x_i, sv_j)`;
-        // `compute_matrix` builds K in one pass parallelized over rows, replacing the n*m scalar
-        // kernel calls (each of which allocated a temporary difference vector for RBF/Cosine)
         let coef = alphas * support_vector_labels;
         let kernel_matrix = self.kernel.compute_matrix(x, support_vectors);
         let mut decision_values = kernel_matrix.dot(&coef);
@@ -217,7 +210,9 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is automatically enabled for various internal operations (kernel matrix calculation, error cache updates, etc.) when the number of samples exceeds 100
+    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate, and the error-cache
+    /// initialization parallelizes above the calibrated scan-class gate; the SMO inner loops
+    /// are sequential so the optimization trajectory is reproducible
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -231,7 +226,7 @@ impl SVC {
 
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
-        // Validate labels (SVC-specific): cheap O(n) scan, kept sequential to avoid cloning
+        // Validate labels (SVC-specific)
         if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
             return Err(Error::invalid_input(
                 "All labels must be either 1.0 or -1.0",
@@ -250,7 +245,9 @@ impl SVC {
         }
 
         // Initialize error cache
-        let error_cache = map_collect(n_samples, SVC_PARALLEL_THRESHOLD, |i| {
+        let error_cache_parallel =
+            n_samples.saturating_mul(n_samples) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let error_cache = map_collect(n_samples, error_cache_parallel, |i| {
             self.compute_error(i, &alphas, &kernel_matrix, y, b)
         });
         let mut error_cache = Array1::from(error_cache);
@@ -260,7 +257,7 @@ impl SVC {
         let mut examine_all = true;
         let mut iteration_count = 0;
 
-        // RNG for SMO working-set selection; seeding from `random_state` makes training reproducible
+        // RNG for SMO working-set selection
         let mut rng = crate::random::make_rng(self.random_state);
 
         // Progress bar for SMO iterations
@@ -330,15 +327,8 @@ impl SVC {
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message(format!("Converged at iteration {}", iteration_count));
 
-        // Extract support vectors
-        let support_indices: Vec<usize> = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            (0..n_samples)
-                .into_par_iter()
-                .filter(|&i| alphas[i] > self.eps)
-                .collect()
-        } else {
-            (0..n_samples).filter(|&i| alphas[i] > self.eps).collect()
-        };
+        let support_indices: Vec<usize> =
+            (0..n_samples).filter(|&i| alphas[i] > self.eps).collect();
 
         if support_indices.is_empty() {
             return Err(Error::not_converged(
@@ -395,7 +385,8 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is used for batch prediction when the number of samples exceeds 100
+    /// The decision values come from one batched kernel-matrix GEMM (block-parallel above
+    /// its FLOPs gate)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -453,7 +444,8 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// Parallel computation is used when the number of samples exceeds 100
+    /// The decision values come from one batched kernel-matrix GEMM (block-parallel above
+    /// its FLOPs gate)
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -502,7 +494,6 @@ impl SVC {
     /// # Returns
     ///
     /// - `usize` - Number of alpha values changed (0 or 1)
-    // SMO threads the full optimization state (alphas, kernel, bias, error cache, RNG); bundling it would obscure the algorithm
     #[allow(clippy::too_many_arguments)]
     fn examine_example<S>(
         &self,
@@ -583,29 +574,14 @@ impl SVC {
         let n_samples = alphas.len();
 
         // Find the index with maximum |E1-E2|
-        let result = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            (0..n_samples)
-                .into_par_iter()
-                .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
-                .map(|i| {
-                    let e1 = error_cache[i];
-                    let delta_e = (e1 - e2).abs();
-                    (i, delta_e)
-                })
-                .reduce(
-                    || (i2, 0.0), // Default to i2 if no better candidate is found
-                    |a, b| if b.1 > a.1 { b } else { a },
-                )
-        } else {
-            (0..n_samples)
-                .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
-                .map(|i| {
-                    let e1 = error_cache[i];
-                    let delta_e = (e1 - e2).abs();
-                    (i, delta_e)
-                })
-                .fold((i2, 0.0), |a, b| if b.1 > a.1 { b } else { a })
-        };
+        let result = (0..n_samples)
+            .filter(|&i| alphas[i] > 0.0 && alphas[i] < self.regularization_param)
+            .map(|i| {
+                let e1 = error_cache[i];
+                let delta_e = (e1 - e2).abs();
+                (i, delta_e)
+            })
+            .fold((i2, 0.0), |a, b| if b.1 > a.1 { b } else { a });
 
         // Return the index of the alpha that maximizes |E1-E2|
         result.0
@@ -625,8 +601,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `bool` - `true` if the alpha values were changed, `false` otherwise
-    // SMO threads the full optimization state (alphas, kernel, bias, error cache); bundling it would obscure the algorithm
+    /// - `bool` - `true` if the alpha values were changed, `false` otherwise)
     #[allow(clippy::too_many_arguments)]
     fn take_step<S>(
         &self,
@@ -715,7 +690,6 @@ impl SVC {
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
         // Update bias under the u = sum + b convention (compute_error / compute_decision_value add + b)
-        // WARNING: signs are flipped vs Platt's u = sum - b formula; using his drives the bias the wrong way
         let b_old = *b;
         let b1 =
             *b - e1 - y1 * (alpha1_new - alpha1_old) * k11 - y2 * (alpha2_new - alpha2_old) * k12;
@@ -734,24 +708,16 @@ impl SVC {
         alphas[i1] = alpha1_new;
         alphas[i2] = alpha2_new;
 
-        // Incremental O(n) error-cache update: only the two changed alphas and the bias shift affect
-        // each E_i, avoiding an O(n^2) full recompute per SMO step; uses kernel symmetry K[i1, i] == K[i, i1]
+        // Incremental O(n) error-cache update
         let coeff1 = y1 * (alpha1_new - alpha1_old);
         let coeff2 = y2 * (alpha2_new - alpha2_old);
         let delta_b = *b - b_old;
         let apply = |i: usize, e: &mut f64| {
             *e += coeff1 * kernel_matrix[[i1, i]] + coeff2 * kernel_matrix[[i2, i]] + delta_b;
         };
-        if error_cache.len() >= SVC_PARALLEL_THRESHOLD {
-            error_cache
-                .indexed_iter_mut()
-                .par_bridge()
-                .for_each(|(i, e)| apply(i, e));
-        } else {
-            error_cache
-                .indexed_iter_mut()
-                .for_each(|(i, e)| apply(i, e));
-        }
+        error_cache
+            .indexed_iter_mut()
+            .for_each(|(i, e)| apply(i, e));
 
         true
     }
@@ -786,18 +752,10 @@ impl SVC {
         let n_samples = alphas.len();
 
         // Decision-function sum over the non-zero alphas
-        let sum: f64 = if n_samples >= SVC_PARALLEL_THRESHOLD {
-            (0..n_samples)
-                .into_par_iter()
-                .filter(|&j| alphas[j] > 0.0)
-                .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
-                .sum()
-        } else {
-            (0..n_samples)
-                .filter(|&j| alphas[j] > 0.0)
-                .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
-                .sum()
-        };
+        let sum: f64 = (0..n_samples)
+            .filter(|&j| alphas[j] > 0.0)
+            .map(|j| alphas[j] * y[j] * kernel_matrix[[i, j]])
+            .sum();
 
         sum - y[i] + b
     }

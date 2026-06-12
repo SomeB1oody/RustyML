@@ -8,18 +8,22 @@ use super::parallel::map_collect;
 use super::spatial::KdTree;
 use super::validation::{preliminary_check, validate_predict_input};
 use crate::error::{Context, Error};
+use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::collections::VecDeque;
 
-/// Sample count at or above which region queries run in parallel
-const DBSCAN_PARALLEL_THRESHOLD: usize = 1000;
-
-/// Feature-count ceiling for using the kd-tree spatial index. kd-trees lose their pruning
-/// power in high dimensions, so above this many features the brute-force scan is used instead
-const DBSCAN_KD_TREE_MAX_DIMS: usize = 16;
+/// Feature-count ceiling for using the kd-tree neighbor index. Above this many features the
+/// tree no longer prunes effectively, so the brute-force search is used instead.
+///
+/// Measured on AMD Ryzen 9 9950X, 2026-06-11 (see benches/RESULTS.md): on uniform data
+/// (20k points, k = 8) the kd-tree beats the brute-force scan up to d = 8 (2.6x at d = 8) and
+/// loses from d = 12 on (2.2-2.6x slower), so the ceiling sits at the proven-win end of the
+/// 8-12 bracket. The boundary shifts with data distribution (clustered data favors the tree)
+/// and dataset size, so this is a single-shape calibration, not a universal constant
+const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
 ///
@@ -157,7 +161,7 @@ impl DBSCAN {
     /// Find all neighbors of point `p` (points within `eps` distance)
     ///
     /// When `tree` is provided the query uses the kd-tree (about O(log n) average); otherwise it
-    /// falls back to a brute-force scan (parallel at or above `DBSCAN_PARALLEL_THRESHOLD`).
+    /// falls back to a brute-force scan (parallel above the calibrated scan-class gate).
     /// Both paths return indices sorted ascending, so cluster expansion order is identical
     fn region_query<S>(
         &self,
@@ -185,10 +189,10 @@ impl DBSCAN {
             return Ok(tree.radius_neighbors(p_row, eps));
         }
 
-        // Brute-force fallback. `within` performs the `<= eps` test directly, skipping the
-        // square root on the Euclidean path (it compares squared distance against eps^2)
+        // Brute-force fallback
         let n_samples = data.nrows();
-        let neighbors: Vec<usize> = if n_samples >= DBSCAN_PARALLEL_THRESHOLD {
+        let scan_work = n_samples.saturating_mul(data.ncols());
+        let neighbors: Vec<usize> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
             // Filter rows within eps in parallel
             (0..n_samples)
                 .into_par_iter()
@@ -222,7 +226,8 @@ impl DBSCAN {
     ///
     /// # Performance
     ///
-    /// Region queries run in parallel when the number of samples is at least 1000
+    /// Region queries run in parallel when the scan work clears the calibrated scan-class
+    /// gate (see `crate::parallel_gates`)
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
@@ -395,21 +400,29 @@ impl DBSCAN {
         validate_predict_input(new_data, core_points.ncols())?;
 
         // Assign each point to the cluster of its nearest core point within `eps`
-        let predictions = map_collect(new_data.nrows(), DBSCAN_PARALLEL_THRESHOLD, |i| {
-            let row = new_data.row(i);
-            let mut min_dist = f64::MAX;
-            let mut label = -1isize;
+        let scan_work = new_data
+            .nrows()
+            .saturating_mul(core_points.nrows())
+            .saturating_mul(core_points.ncols());
+        let predictions = map_collect(
+            new_data.nrows(),
+            scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            |i| {
+                let row = new_data.row(i);
+                let mut min_dist = f64::MAX;
+                let mut label = -1isize;
 
-            for (j, core_row) in core_points.rows().into_iter().enumerate() {
-                let dist = self.metric.distance(row, core_row);
-                if dist < min_dist {
-                    min_dist = dist;
-                    label = core_point_labels[j];
+                for (j, core_row) in core_points.rows().into_iter().enumerate() {
+                    let dist = self.metric.distance(row, core_row);
+                    if dist < min_dist {
+                        min_dist = dist;
+                        label = core_point_labels[j];
+                    }
                 }
-            }
 
-            if min_dist <= self.eps { label } else { -1 }
-        });
+                if min_dist <= self.eps { label } else { -1 }
+            },
+        );
 
         Ok(Array1::from(predictions))
     }
