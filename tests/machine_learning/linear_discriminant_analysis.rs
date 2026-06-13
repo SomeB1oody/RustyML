@@ -1,4 +1,4 @@
-//! Integration tests for `rustyml::machine_learning::lda::LDA`
+//! Integration tests for `rustyml::machine_learning::LDA`
 //!
 //! Expected values are derived from the problem design or closed-form
 //! definitions, never from running the model and recording its output
@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::lda::{LDA, Shrinkage, Solver};
+use rustyml::machine_learning::{LDA, Shrinkage, Solver};
 
 use crate::common::assert_allclose;
 

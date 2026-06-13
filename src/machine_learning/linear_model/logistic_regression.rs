@@ -4,8 +4,8 @@
 //! optional L1/L2 regularization, plus the [`generate_polynomial_features`]
 //! helper for building polynomial feature expansions
 
-pub use super::RegularizationType;
-use super::validation::{
+pub use crate::machine_learning::RegularizationType;
+use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
@@ -24,7 +24,7 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIter
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::logistic_regression::LogisticRegression;
+/// use rustyml::machine_learning::LogisticRegression;
 /// use ndarray::{Array1, Array2};
 ///
 /// // Create a logistic regression model
@@ -505,7 +505,7 @@ impl LogisticRegression {
 ///
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::machine_learning::logistic_regression::{generate_polynomial_features, LogisticRegression};
+/// use rustyml::machine_learning::{generate_polynomial_features, LogisticRegression};
 ///
 /// // Example of using polynomial features with logistic regression
 /// // Create a simple dataset for binary classification

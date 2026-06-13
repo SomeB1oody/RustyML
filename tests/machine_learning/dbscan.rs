@@ -1,11 +1,11 @@
-//! Integration tests for [`rustyml::machine_learning::dbscan::DBSCAN`], covering
+//! Integration tests for [`rustyml::machine_learning::DBSCAN`], covering
 //! constructor validation, fit/predict error paths, cluster correctness across
 //! metrics, edge cases, serialization, and the large-dataset parallel branches
 
 use ndarray::{Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric;
-use rustyml::machine_learning::dbscan::DBSCAN;
+use rustyml::machine_learning::DBSCAN;
 
 // Helpers
 

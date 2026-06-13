@@ -4,8 +4,8 @@
 //! points toward higher-density regions without requiring the number of clusters up front,
 //! plus the [`estimate_bandwidth`] helper for choosing a bandwidth from the data
 
-use super::parallel::map_collect;
-use super::validation::{
+use crate::machine_learning::parallel::map_collect;
+use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
 use crate::error::Error;
@@ -28,7 +28,7 @@ use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIter
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::mean_shift::MeanShift;
+/// use rustyml::machine_learning::MeanShift;
 /// use ndarray::Array2;
 ///
 /// // Create a 2D dataset

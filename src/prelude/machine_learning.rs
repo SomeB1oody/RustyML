@@ -1,16 +1,13 @@
 pub use crate::machine_learning::traits::{Fit, Predict};
 pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
 
-pub use crate::machine_learning::dbscan::DBSCAN;
-pub use crate::machine_learning::decision_tree::{Algorithm, DecisionTree, DecisionTreeParams};
-pub use crate::machine_learning::isolation_forest::IsolationForest;
-pub use crate::machine_learning::kmeans::KMeans;
-pub use crate::machine_learning::knn::{KNN, WeightingStrategy};
-pub use crate::machine_learning::lda::{LDA, Shrinkage, Solver};
-pub use crate::machine_learning::linear_regression::LinearRegression;
-pub use crate::machine_learning::linear_svc::LinearSVC;
-pub use crate::machine_learning::logistic_regression::{
-    LogisticRegression, generate_polynomial_features,
+pub use crate::machine_learning::KernelType;
+pub use crate::machine_learning::clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};
+pub use crate::machine_learning::discriminant_analysis::{LDA, Shrinkage, Solver};
+pub use crate::machine_learning::ensemble::IsolationForest;
+pub use crate::machine_learning::linear_model::{
+    LinearRegression, LogisticRegression, generate_polynomial_features,
 };
-pub use crate::machine_learning::mean_shift::{MeanShift, estimate_bandwidth};
-pub use crate::machine_learning::svc::{KernelType, SVC};
+pub use crate::machine_learning::neighbors::{KNN, WeightingStrategy};
+pub use crate::machine_learning::svm::{LinearSVC, SVC};
+pub use crate::machine_learning::tree::{Algorithm, DecisionTree, DecisionTreeParams};

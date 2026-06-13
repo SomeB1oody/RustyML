@@ -4,7 +4,7 @@
 //! module:
 //! - [`RegularizationType`](crate::types::RegularizationType) and [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) - used by the machine
 //!   learning models.
-//! - [`KernelType`](crate::types::KernelType) - used by both [`SVC`](crate::machine_learning::svc::SVC)
+//! - [`KernelType`](crate::types::KernelType) - used by both [`SVC`](crate::machine_learning::svm::svc::SVC)
 //!   and [`KernelPCA`](crate::utils::kernel_pca::KernelPCA).
 //!
 //! Each type also carries the behavior that belongs to it (distance / kernel

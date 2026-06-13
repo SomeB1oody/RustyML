@@ -5,21 +5,21 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::isolation_forest::IsolationForest;
-use rustyml::machine_learning::kmeans::KMeans;
-use rustyml::machine_learning::linear_regression::LinearRegression;
+use rustyml::machine_learning::IsolationForest;
+use rustyml::machine_learning::KMeans;
+use rustyml::machine_learning::LinearRegression;
 use rustyml::machine_learning::traits::{Fit, Predict};
 use rustyml::types::{DistanceCalculationMetric, KernelType};
 
 use crate::common::assert_allclose;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;
-use rustyml::machine_learning::dbscan::DBSCAN;
-use rustyml::machine_learning::decision_tree::{Algorithm, DecisionTree};
-use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
-use rustyml::machine_learning::lda::LDA;
-use rustyml::machine_learning::linear_svc::{LinearSVC, RegularizationType};
-use rustyml::machine_learning::mean_shift::MeanShift;
-use rustyml::machine_learning::svc::SVC;
+use rustyml::machine_learning::DBSCAN;
+use rustyml::machine_learning::{Algorithm, DecisionTree};
+use rustyml::machine_learning::{KNN, WeightingStrategy};
+use rustyml::machine_learning::LDA;
+use rustyml::machine_learning::{LinearSVC, RegularizationType};
+use rustyml::machine_learning::MeanShift;
+use rustyml::machine_learning::SVC;
 
 // (1) Error smart constructors
 

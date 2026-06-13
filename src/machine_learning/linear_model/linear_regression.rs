@@ -3,8 +3,8 @@
 //! Provides the [`LinearRegression`] model supporting multivariate regression, an
 //! optional intercept term, and L1/L2 regularization
 
-pub use super::RegularizationType;
-use super::validation::{
+pub use crate::machine_learning::RegularizationType;
+use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
@@ -27,7 +27,7 @@ use rayon::prelude::{
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::*;
+/// use rustyml::machine_learning::*;
 /// use ndarray::{Array1, Array2};
 ///
 /// // Create a linear regression model

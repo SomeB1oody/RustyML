@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::svc::{KernelType, SVC};
+use rustyml::machine_learning::{KernelType, SVC};
 
 // helpers
 

@@ -4,8 +4,8 @@
 //! descent and L1 or L2 regularization, along with the [`RegularizationType`] enum
 //! that selects the penalty
 
-pub use super::RegularizationType;
-use super::validation::{
+pub use crate::machine_learning::RegularizationType;
+use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_tolerance,
 };
@@ -25,7 +25,7 @@ use ndarray_rand::rand::seq::SliceRandom;
 ///
 /// ```rust
 /// use ndarray::{Array1, Array2};
-/// use rustyml::machine_learning::linear_svc::*;
+/// use rustyml::machine_learning::*;
 ///
 /// // Create model with custom parameters
 /// let mut model = LinearSVC::new(

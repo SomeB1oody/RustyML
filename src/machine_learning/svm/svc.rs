@@ -3,8 +3,8 @@
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
 //! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`]
 
-use super::parallel::map_collect;
-use super::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
+use crate::machine_learning::parallel::map_collect;
+use crate::machine_learning::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 use crate::error::Error;
 use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 pub use crate::types::KernelType;
@@ -22,7 +22,7 @@ use ndarray_rand::rand::rngs::StdRng;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::svc::{SVC, KernelType};
+/// use rustyml::machine_learning::{SVC, KernelType};
 /// use ndarray::{Array2, Array1};
 ///
 /// // Create training data

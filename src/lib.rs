@@ -63,7 +63,7 @@
 //!
 //! In your Rust code, write:
 //! ```ignored
-//! use rustyml::machine_learning::linear_regression::*;
+//! use rustyml::machine_learning::LinearRegression;
 //! use ndarray::{Array1, Array2};
 //!
 //! // Create a linear regression model
@@ -504,7 +504,7 @@ pub mod math;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::machine_learning::linear_regression::LinearRegression;
+/// use rustyml::machine_learning::LinearRegression;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Linear regression example

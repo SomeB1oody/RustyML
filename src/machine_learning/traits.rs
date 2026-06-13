@@ -17,7 +17,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use rustyml::machine_learning::linear_regression::LinearRegression;
+//! use rustyml::machine_learning::LinearRegression;
 //! use rustyml::machine_learning::traits::{Fit, Predict};
 //! use ndarray::{Array1, Array2};
 //!
@@ -31,17 +31,10 @@
 //! assert_eq!(preds.len(), 3);
 //! ```
 
-use super::dbscan::DBSCAN;
-use super::decision_tree::DecisionTree;
-use super::isolation_forest::IsolationForest;
-use super::kmeans::KMeans;
-use super::knn::KNN;
-use super::lda::LDA;
-use super::linear_regression::LinearRegression;
-use super::linear_svc::LinearSVC;
-use super::logistic_regression::LogisticRegression;
-use super::mean_shift::MeanShift;
-use super::svc::SVC;
+use crate::machine_learning::{
+    DBSCAN, DecisionTree, IsolationForest, KMeans, KNN, LDA, LinearRegression, LinearSVC,
+    LogisticRegression, MeanShift, SVC,
+};
 use crate::error::Error;
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use std::hash::Hash;

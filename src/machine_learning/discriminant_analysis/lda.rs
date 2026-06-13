@@ -309,7 +309,7 @@ pub enum Shrinkage {
 ///
 /// ```rust
 /// use ndarray::{Array1, Array2};
-/// use rustyml::machine_learning::lda::{LDA, Shrinkage, Solver};
+/// use rustyml::machine_learning::{LDA, Shrinkage, Solver};
 ///
 /// let x = Array2::from_shape_vec(
 ///     (6, 2),
@@ -451,7 +451,7 @@ impl LDA {
         S2: Data<Elem = i32>,
     {
         // Non-empty + finiteness checks on `x`
-        super::validation::preliminary_check(x, None)?;
+        crate::machine_learning::validation::preliminary_check(x, None)?;
 
         if x.nrows() != y.len() {
             return Err(Error::dimension_mismatch(x.nrows(), y.len()));
@@ -680,7 +680,7 @@ impl LDA {
             .ok_or_else(|| Error::not_fitted("LDA"))?;
 
         let n_features = coefficients.ncols();
-        super::validation::validate_predict_input(x, n_features)?;
+        crate::machine_learning::validation::validate_predict_input(x, n_features)?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -812,7 +812,7 @@ impl LDA {
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LDA"))?;
 
-        super::validation::validate_predict_input(x, projection.nrows())?;
+        crate::machine_learning::validation::validate_predict_input(x, projection.nrows())?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {

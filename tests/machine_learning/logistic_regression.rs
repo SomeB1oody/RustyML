@@ -7,7 +7,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::RegularizationType;
-use rustyml::machine_learning::logistic_regression::{
+use rustyml::machine_learning::{
     LogisticRegression, generate_polynomial_features,
 };
 

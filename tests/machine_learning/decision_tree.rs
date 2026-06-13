@@ -1,4 +1,4 @@
-//! Integration tests for `rustyml::machine_learning::decision_tree`
+//! Integration tests for `rustyml::machine_learning::tree::decision_tree`
 //!
 //! Expected values are derived from problem design or closed-form results,
 //! never by running the model and recording its output
@@ -7,8 +7,8 @@ use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::{Error, TreeError};
-use rustyml::machine_learning::decision_tree::{Algorithm, DecisionTree, DecisionTreeParams};
-use rustyml::machine_learning::decision_tree::{Node, NodeType};
+use rustyml::machine_learning::{Algorithm, DecisionTree, DecisionTreeParams};
+use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
 
 // Helper: a tiny linearly-separable binary dataset; feature 0 is 0.x for class 0

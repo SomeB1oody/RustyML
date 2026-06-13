@@ -4,7 +4,7 @@
 //! algorithms, along with its node types ([`Node`], [`NodeType`]), the
 //! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters.
 
-use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
+use crate::machine_learning::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::{Error, TreeError};
 use crate::math::{entropy, gini, variance};
 use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
@@ -319,7 +319,7 @@ impl Node {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::decision_tree::{DecisionTree, Algorithm, DecisionTreeParams};
+/// use rustyml::machine_learning::{DecisionTree, Algorithm, DecisionTreeParams};
 /// use ndarray::{array, Array1, Array2};
 ///
 /// // Classification example with Iris dataset

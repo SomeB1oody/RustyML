@@ -6,7 +6,7 @@ use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::kmeans::KMeans;
+use rustyml::machine_learning::KMeans;
 
 // Helpers
 

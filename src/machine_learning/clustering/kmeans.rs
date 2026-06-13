@@ -3,7 +3,7 @@
 //! Provides the [`KMeans`] estimator, which partitions samples into k clusters
 //! using k-means++ initialization and Lloyd's iteration
 
-use super::validation::{
+use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
 use crate::error::Error;
@@ -28,7 +28,7 @@ use std::ops::AddAssign;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::kmeans::KMeans;
+/// use rustyml::machine_learning::KMeans;
 /// use ndarray::Array2;
 /// use ndarray_rand::rand::random; // or `use rand::random;`
 ///

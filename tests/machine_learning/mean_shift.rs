@@ -5,7 +5,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::mean_shift::{MeanShift, estimate_bandwidth};
+use rustyml::machine_learning::{MeanShift, estimate_bandwidth};
 
 // helpers
 

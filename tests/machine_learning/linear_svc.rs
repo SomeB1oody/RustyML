@@ -4,7 +4,7 @@
 
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::linear_svc::{LinearSVC, RegularizationType};
+use rustyml::machine_learning::{LinearSVC, RegularizationType};
 
 // helper
 

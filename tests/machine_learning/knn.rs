@@ -5,7 +5,7 @@
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;
-use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
+use rustyml::machine_learning::{KNN, WeightingStrategy};
 
 // Constructor validation
 

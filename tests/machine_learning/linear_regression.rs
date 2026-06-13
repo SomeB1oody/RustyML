@@ -1,4 +1,4 @@
-//! Integration tests for [`rustyml::machine_learning::linear_regression::LinearRegression`]
+//! Integration tests for [`rustyml::machine_learning::LinearRegression`]
 //!
 //! Every expected value is derived from the problem design or a closed-form analytic result,
 //! never recorded from model output
@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::linear_regression::{LinearRegression, RegularizationType};
+use rustyml::machine_learning::{LinearRegression, RegularizationType};
 
 use crate::common::assert_allclose;
 

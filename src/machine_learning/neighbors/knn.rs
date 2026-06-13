@@ -3,9 +3,9 @@
 //! Provides the [`KNN`] classifier and the [`WeightingStrategy`] enum that controls how
 //! neighbor votes are weighted
 
-pub use super::DistanceCalculationMetric;
-use super::spatial::KdTree;
-use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
+pub use crate::machine_learning::DistanceCalculationMetric;
+use crate::machine_learning::spatial::KdTree;
+use crate::machine_learning::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::{Deserialize, Serialize};
@@ -63,7 +63,7 @@ pub enum WeightingStrategy {
 ///
 /// ```rust
 /// use ndarray::{array, Array1, Array2};
-/// use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
+/// use rustyml::machine_learning::{KNN, WeightingStrategy};
 /// use rustyml::machine_learning::DistanceCalculationMetric as Metric;
 ///
 /// // Create a simple dataset

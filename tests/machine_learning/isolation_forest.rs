@@ -3,7 +3,7 @@
 
 use ndarray::{Array2, array, s};
 use rustyml::error::Error;
-use rustyml::machine_learning::isolation_forest::IsolationForest;
+use rustyml::machine_learning::IsolationForest;
 
 // Constructor validation
 
