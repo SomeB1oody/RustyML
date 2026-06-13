@@ -34,8 +34,8 @@ pub mod pooling;
 pub mod recurrent;
 /// A module containing regularization layers for neural networks
 pub mod regularization;
-/// A module containing helper functions and structs for serializing neural network weights
-pub mod serialize_weight;
+/// Model-level serialization scaffolding (whole-model snapshot and load-time weight application)
+pub mod serialize_model;
 /// Output-shape calculators for pooling and convolution layers
 mod shape_helpers;
 /// Shared input/weight validation for the layer module

@@ -21,6 +21,7 @@ use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use ndarray::{Array2, Array4, ArrayD, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::borrow::Cow;
 
 /// A 2D separable convolutional layer
 ///
@@ -685,10 +686,10 @@ impl Layer for SeparableConv2D {
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::SeparableConv2DLayer(SeparableConv2DLayerWeight {
-            depthwise_weight: &self.depthwise_weights,
-            pointwise_weight: &self.pointwise_weights,
-            bias: &self.bias,
+        LayerWeight::SeparableConv2D(SeparableConv2DLayerWeight {
+            depthwise_weight: Cow::Borrowed(&self.depthwise_weights),
+            pointwise_weight: Cow::Borrowed(&self.pointwise_weights),
+            bias: Cow::Borrowed(&self.bias),
         })
     }
 }

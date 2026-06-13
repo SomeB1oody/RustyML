@@ -19,6 +19,7 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use std::borrow::Cow;
 
 /// Total-element count above which forward/backward switch from sequential to parallel.
 ///
@@ -811,10 +812,10 @@ impl Layer for BatchNormalization {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::BatchNormalization(BatchNormalizationLayerWeight {
-            gamma: &self.gamma,
-            beta: &self.beta,
-            running_mean: &self.running_mean,
-            running_var: &self.running_var,
+            gamma: Cow::Borrowed(&self.gamma),
+            beta: Cow::Borrowed(&self.beta),
+            running_mean: Cow::Borrowed(&self.running_mean),
+            running_var: Cow::Borrowed(&self.running_var),
         })
     }
 

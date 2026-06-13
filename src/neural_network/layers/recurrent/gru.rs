@@ -14,6 +14,7 @@ use crate::neural_network::layers::recurrent::validation::{
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3, Axis, concatenate, s};
+use std::borrow::Cow;
 
 /// Gated Recurrent Unit (GRU) neural network layer
 ///
@@ -536,9 +537,9 @@ impl Layer for GRU {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::GRU(GRULayerWeight {
-            kernel: &self.gates.kernel,
-            recurrent_kernel: &self.gates.recurrent_kernel,
-            bias: &self.gates.bias,
+            kernel: Cow::Borrowed(&self.gates.kernel),
+            recurrent_kernel: Cow::Borrowed(&self.gates.recurrent_kernel),
+            bias: Cow::Borrowed(&self.gates.bias),
         })
     }
 }

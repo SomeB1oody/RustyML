@@ -14,6 +14,7 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use std::borrow::Cow;
 
 /// Simple Recurrent Neural Network (SimpleRNN) layer
 ///
@@ -369,9 +370,9 @@ impl Layer for SimpleRNN {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::SimpleRNN(SimpleRNNLayerWeight {
-            kernel: &self.kernel,
-            recurrent_kernel: &self.recurrent_kernel,
-            bias: &self.bias,
+            kernel: Cow::Borrowed(&self.kernel),
+            recurrent_kernel: Cow::Borrowed(&self.recurrent_kernel),
+            bias: Cow::Borrowed(&self.bias),
         })
     }
 }

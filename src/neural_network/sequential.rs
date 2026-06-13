@@ -7,9 +7,8 @@ use crate::math::reduction::det_reduce;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
-use crate::neural_network::layers::serialize_weight::{
-    LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
-    apply_weights_to_layer,
+use crate::neural_network::layers::serialize_model::{
+    LayerInfo, SerializableLayer, SerializableSequential, apply_weights_to_layer,
 };
 use crate::parallel_gates::SQ_SUM_F32_PARALLEL_MIN_ELEMS;
 use ndarray::Axis;
@@ -644,12 +643,12 @@ impl Sequential {
     /// Returns all the weights from each layer in the model
     ///
     /// Collects the weights from all layers in the sequential model and returns them
-    /// as a vector of `LayerWeight` enums. Each `LayerWeight` holds references to the weight
-    /// matrices and bias vectors of its corresponding layer
+    /// as a vector of `LayerWeight` enums. Each `LayerWeight` borrows the weight matrices and
+    /// bias vectors of its corresponding layer (via `Cow`), so no weights are cloned
     ///
     /// # Returns
     ///
-    /// - `Vec<LayerWeight<'_>>` - A vector containing weight references for each layer in the model
+    /// - `Vec<LayerWeight<'_>>` - A vector borrowing each layer's weights
     pub fn get_weights(&self) -> Vec<LayerWeight<'_>> {
         let mut weights = Vec::with_capacity(self.layers.len());
         for layer in &self.layers {
@@ -686,15 +685,15 @@ impl Sequential {
             .layers
             .iter()
             .map(|layer| {
-                let weights = layer.get_weights();
                 let layer_info = LayerInfo {
                     layer_type: layer.layer_type().to_string(),
                     output_shape: layer.output_shape(),
                 };
 
+                // `get_weights` already borrows the live arrays via `Cow`, so this is clone-free
                 SerializableLayer {
                     info: layer_info,
-                    weights: SerializableLayerWeight::from_layer_weight(&weights),
+                    weights: layer.get_weights(),
                 }
             })
             .collect();
@@ -748,7 +747,7 @@ impl Sequential {
         let reader = IoError::load_in_buf_reader(path)?;
 
         // Deserialize the model from JSON
-        let serializable_model: SerializableSequential = from_reader(reader)?;
+        let serializable_model: SerializableSequential<'static> = from_reader(reader)?;
 
         // Verify layer count matches
         if serializable_model.layers.len() != self.layers.len() {
@@ -759,8 +758,7 @@ impl Sequential {
             ))));
         }
 
-        // Apply weights to each layer, verifying the layer type at each position first to catch
-        // architecture drift that weight application alone cannot detect (e.g. swapped layers)
+        // Apply weights to each layer
         for (i, serializable_layer) in serializable_model.layers.iter().enumerate() {
             let expected_type = self.layers[i].layer_type();
             let saved_type = serializable_layer.info.layer_type.as_str();

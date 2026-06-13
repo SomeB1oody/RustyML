@@ -14,6 +14,7 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use std::borrow::Cow;
 
 /// A 1D convolutional layer for neural networks
 ///
@@ -323,8 +324,8 @@ impl Layer for Conv1D {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::Conv1D(Conv1DLayerWeight {
-            weight: &self.weights,
-            bias: &self.bias,
+            weight: Cow::Borrowed(&self.weights),
+            bias: Cow::Borrowed(&self.bias),
         })
     }
 }

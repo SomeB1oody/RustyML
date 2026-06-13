@@ -19,6 +19,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
+use std::borrow::Cow;
 
 /// A 2D depthwise convolutional layer for neural networks
 ///
@@ -679,9 +680,9 @@ impl Layer for DepthwiseConv2D {
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::DepthwiseConv2DLayer(DepthwiseConv2DLayerWeight {
-            weight: &self.weights,
-            bias: &self.bias,
+        LayerWeight::DepthwiseConv2D(DepthwiseConv2DLayerWeight {
+            weight: Cow::Borrowed(&self.weights),
+            bias: Cow::Borrowed(&self.bias),
         })
     }
 }

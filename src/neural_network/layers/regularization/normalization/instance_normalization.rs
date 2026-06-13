@@ -16,6 +16,7 @@ use crate::neural_network::layers::regularization::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use std::borrow::Cow;
 
 /// Instance Normalization layer for neural networks
 ///
@@ -252,9 +253,9 @@ impl Layer for InstanceNormalization {
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::InstanceNormalizationLayer(InstanceNormalizationLayerWeight {
-            gamma: &self.gamma,
-            beta: &self.beta,
+        LayerWeight::InstanceNormalization(InstanceNormalizationLayerWeight {
+            gamma: Cow::Borrowed(&self.gamma),
+            beta: Cow::Borrowed(&self.beta),
         })
     }
 

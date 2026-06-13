@@ -20,6 +20,7 @@ use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array1, Axis, IxDyn};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
+use std::borrow::Cow;
 
 /// Total-element count above which the trailing-axis row passes (per-row statistics +
 /// normalize, and the backward composition) run on rayon.
@@ -726,9 +727,9 @@ impl Layer for LayerNormalization {
     }
 
     fn get_weights(&self) -> LayerWeight<'_> {
-        LayerWeight::LayerNormalizationLayer(LayerNormalizationLayerWeight {
-            gamma: &self.gamma,
-            beta: &self.beta,
+        LayerWeight::LayerNormalization(LayerNormalizationLayerWeight {
+            gamma: Cow::Borrowed(&self.gamma),
+            beta: Cow::Borrowed(&self.beta),
         })
     }
 

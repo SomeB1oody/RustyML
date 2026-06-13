@@ -126,14 +126,15 @@ pub trait Layer: std::any::Any + Send + Sync {
         Vec::new()
     }
 
-    /// Returns a reference to all weights in the layer
+    /// Returns a borrowing view of all weights in the layer
     ///
-    /// This method provides access to all weight matrices and bias vectors used by the layer
-    /// The weights are organized by layer type and contain references to the actual weight data
+    /// This method provides access to all weight matrices and bias vectors used by the layer.
+    /// Each array is returned as a `Cow::Borrowed` over the layer's live data, so no weights are
+    /// cloned; the same enum doubles as the on-disk weight format (owned when deserialized)
     ///
     /// # Returns
     ///
-    /// - `LayerWeight<'_>` - An enum containing references to layer weights:
+    /// - `LayerWeight<'_>` - An enum borrowing the layer's weights:
     ///     - `LayerWeight::Dense` for Dense layers with weight and bias
     ///     - `LayerWeight::SimpleRNN` for SimpleRNN layers with kernel, recurrent_kernel, and bias
     ///     - `LayerWeight::LSTM` / `LayerWeight::GRU` for recurrent layers with fused kernel,

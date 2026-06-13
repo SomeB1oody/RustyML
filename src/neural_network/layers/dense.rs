@@ -10,6 +10,7 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
+use std::borrow::Cow;
 
 /// Dense (fully connected) layer for neural networks
 ///
@@ -269,8 +270,8 @@ impl Layer for Dense {
 
     fn get_weights(&self) -> LayerWeight<'_> {
         LayerWeight::Dense(DenseLayerWeight {
-            weight: &self.weights,
-            bias: &self.bias,
+            weight: Cow::Borrowed(&self.weights),
+            bias: Cow::Borrowed(&self.bias),
         })
     }
 }
