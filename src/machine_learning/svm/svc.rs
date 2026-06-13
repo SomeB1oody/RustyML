@@ -34,11 +34,12 @@ use ndarray_rand::rand::rngs::StdRng;
 /// // Initialize SVM classifier with RBF kernel
 /// let mut svc = SVC::new(
 ///     KernelType::RBF { gamma: 0.5 },
-///     1.0,      // regularization parameter
-///     1e-3,     // tolerance
-///     100,      // max iterations
-///     Some(42), // random seed for reproducibility
-/// ).expect("Failed to create SVC");
+///     1.0,  // regularization parameter
+///     1e-3, // tolerance
+///     100,  // max iterations
+/// )
+/// .expect("Failed to create SVC")
+/// .with_random_state(42); // fixed seed for reproducible training
 ///
 /// // Train the model
 /// svc.fit(&x_train, &y_train).expect("Failed to train SVM");
@@ -111,7 +112,6 @@ impl SVC {
     /// - `regularization_param` - The regularization parameter (C) that trades off margin size and training error
     /// - `tol` - Tolerance for the stopping criterion
     /// - `max_iter` - Maximum number of iterations for the optimization algorithm
-    /// - `random_state` - Optional seed for the SMO working-set selection. Pass `Some(seed)` for reproducible training, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
@@ -120,12 +120,26 @@ impl SVC {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `regularization_param` is non-positive or non-finite, or if `tol` or `max_iter` fail validation
+    ///
+    /// # Notes
+    ///
+    /// Training is non-deterministic by default. For reproducible runs, set a fixed seed
+    /// after construction with the builder method below:
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for the SMO working-set selection
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{SVC, KernelType};
+    ///
+    /// let model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
+    ///     .unwrap()
+    ///     .with_random_state(42);
+    /// ```
     pub fn new(
         kernel: KernelType,
         regularization_param: f64,
         tol: f64,
         max_iter: usize,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate regularization parameter
         if regularization_param <= 0.0 || !regularization_param.is_finite() {
@@ -149,8 +163,23 @@ impl SVC {
             max_iter,
             eps: 1e-8,
             n_iter: None,
-            random_state,
+            random_state: None,
         })
+    }
+
+    /// Sets a fixed RNG seed for the SMO working-set selection, making training
+    /// reproducible (default: `None`, non-deterministic)
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the working-set selection RNG
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.random_state = Some(seed);
+        self
     }
 
     // Getters

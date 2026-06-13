@@ -89,20 +89,19 @@ impl Default for MeanShift {
     ///
     /// - `Self` - A new MeanShift instance with default parameters
     fn default() -> Self {
-        Self::new(1.0, None, None, None, None).expect("Default parameters should be valid")
+        Self::new(1.0).expect("Default parameters should be valid")
     }
 }
 
 impl MeanShift {
-    /// Creates a new MeanShift instance with the specified parameters
+    /// Creates a new MeanShift instance with the specified bandwidth
+    ///
+    /// `bandwidth` is the dominant hyperparameter; the remaining settings have sensible
+    /// defaults and are tuned afterwards through the builder methods listed in the Notes
     ///
     /// # Parameters
     ///
     /// - `bandwidth` - Bandwidth that determines the size of the kernel; must be positive and finite
-    /// - `max_iter` - Maximum number of iterations for the mean shift algorithm; must be greater than 0
-    /// - `tol` - Convergence threshold for the algorithm; must be positive and finite
-    /// - `bin_seeding` - Whether to use bin seeding for initialization
-    /// - `cluster_all` - Whether to assign all points to clusters, even those far from any centroid
     ///
     /// # Returns
     ///
@@ -110,14 +109,28 @@ impl MeanShift {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g. non-positive bandwidth)
-    pub fn new(
-        bandwidth: f64,
-        max_iter: Option<usize>,
-        tol: Option<f64>,
-        bin_seeding: Option<bool>,
-        cluster_all: Option<bool>,
-    ) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `bandwidth` is non-positive or not finite
+    ///
+    /// # Notes
+    ///
+    /// Lower-priority settings are configured after construction. The convergence-related
+    /// setters validate their input and return `Result`; the boolean toggles return `Self`:
+    ///
+    /// - [`with_max_iter`](Self::with_max_iter) - maximum iterations (default: `300`)
+    /// - [`with_tolerance`](Self::with_tolerance) - convergence tolerance (default: `1e-3`)
+    /// - [`with_bin_seeding`](Self::with_bin_seeding) - bin-seeding for faster init (default: `false`)
+    /// - [`with_cluster_all`](Self::with_cluster_all) - assign all points to clusters (default: `true`)
+    ///
+    /// ```
+    /// use rustyml::machine_learning::MeanShift;
+    ///
+    /// let model = MeanShift::new(2.0)
+    ///     .unwrap()
+    ///     .with_max_iter(500)
+    ///     .unwrap()
+    ///     .with_bin_seeding(true);
+    /// ```
+    pub fn new(bandwidth: f64) -> Result<Self, Error> {
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
             return Err(Error::invalid_parameter(
                 "bandwidth",
@@ -125,23 +138,53 @@ impl MeanShift {
             ));
         }
 
-        let max_iter_val = max_iter.unwrap_or(300);
-        let tol_val = tol.unwrap_or(1e-3);
-
-        validate_max_iterations(max_iter_val)?;
-        validate_tolerance(tol_val)?;
-
         Ok(MeanShift {
             bandwidth,
-            max_iter: max_iter_val,
-            tol: tol_val,
-            bin_seeding: bin_seeding.unwrap_or(false),
-            cluster_all: cluster_all.unwrap_or(true),
+            max_iter: 300,
+            tol: 1e-3,
+            bin_seeding: false,
+            cluster_all: true,
             n_samples_per_center: None,
             cluster_centers: None,
             labels: None,
             n_iter: None,
         })
+    }
+
+    /// Sets the maximum number of iterations (default: `300`)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `max_iter` is 0
+    pub fn with_max_iter(mut self, max_iter: usize) -> Result<Self, Error> {
+        validate_max_iterations(max_iter)?;
+        self.max_iter = max_iter;
+        Ok(self)
+    }
+
+    /// Sets the convergence tolerance (default: `1e-3`)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `tol` is non-positive or not finite
+    pub fn with_tolerance(mut self, tol: f64) -> Result<Self, Error> {
+        validate_tolerance(tol)?;
+        self.tol = tol;
+        Ok(self)
+    }
+
+    /// Enables or disables the bin-seeding initialization strategy (default: `false`).
+    /// Setting this to `true` can speed up fitting on large datasets
+    pub fn with_bin_seeding(mut self, bin_seeding: bool) -> Self {
+        self.bin_seeding = bin_seeding;
+        self
+    }
+
+    /// Sets whether to assign every point to a cluster, including potential noise
+    /// (default: `true`)
+    pub fn with_cluster_all(mut self, cluster_all: bool) -> Self {
+        self.cluster_all = cluster_all;
+        self
     }
 
     // Getters

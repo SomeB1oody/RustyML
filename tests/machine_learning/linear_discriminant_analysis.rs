@@ -63,7 +63,7 @@ fn accuracy(predicted: &Array1<i32>, true_labels: &Array1<i32>) -> f64 {
 
 #[test]
 fn test_new_default_values() {
-    let lda = LDA::new(2, None, None).expect("default construction should succeed");
+    let lda = LDA::new(2).expect("default construction should succeed");
     assert_eq!(lda.get_n_components(), 2);
     assert_eq!(lda.get_solver(), Solver::SVD);
     assert!(lda.get_shrinkage().is_none());
@@ -84,15 +84,18 @@ fn test_default_impl() {
 
 #[test]
 fn test_new_explicit_solver_and_shrinkage() {
-    let lda =
-        LDA::new(1, Some(Solver::Eigen), Some(Shrinkage::Manual(0.3))).expect("valid construction");
+    let lda = LDA::new(1)
+        .expect("valid construction")
+        .with_solver(Solver::Eigen)
+        .with_shrinkage(Shrinkage::Manual(0.3))
+        .unwrap();
     assert_eq!(lda.get_solver(), Solver::Eigen);
     assert_eq!(lda.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
 }
 
 #[test]
 fn test_new_zero_components_errors() {
-    let err = LDA::new(0, None, None).expect_err("n_components=0 must fail");
+    let err = LDA::new(0).expect_err("n_components=0 must fail");
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -101,52 +104,70 @@ fn test_new_zero_components_errors() {
 
 #[test]
 fn test_new_shrinkage_below_zero_errors() {
-    let err = LDA::new(1, None, Some(Shrinkage::Manual(-0.1))).expect_err("alpha<0 must fail");
+    let err = LDA::new(1)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(-0.1))
+        .expect_err("alpha<0 must fail");
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_shrinkage_above_one_errors() {
-    let err = LDA::new(1, None, Some(Shrinkage::Manual(1.1))).expect_err("alpha>1 must fail");
+    let err = LDA::new(1)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(1.1))
+        .expect_err("alpha>1 must fail");
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_shrinkage_nan_errors() {
-    let err =
-        LDA::new(1, None, Some(Shrinkage::Manual(f64::NAN))).expect_err("NaN shrinkage must fail");
+    let err = LDA::new(1)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(f64::NAN))
+        .expect_err("NaN shrinkage must fail");
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_shrinkage_pos_infinity_errors() {
-    let err = LDA::new(1, None, Some(Shrinkage::Manual(f64::INFINITY)))
+    let err = LDA::new(1)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(f64::INFINITY))
         .expect_err("Inf shrinkage must fail");
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_shrinkage_neg_infinity_errors() {
-    let err = LDA::new(1, None, Some(Shrinkage::Manual(f64::NEG_INFINITY)))
+    let err = LDA::new(1)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(f64::NEG_INFINITY))
         .expect_err("-Inf shrinkage must fail");
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_shrinkage_boundary_zero_succeeds() {
-    LDA::new(1, None, Some(Shrinkage::Manual(0.0))).expect("Manual(0.0) must be valid");
+    LDA::new(1)
+        .expect("Manual(0.0) must be valid")
+        .with_shrinkage(Shrinkage::Manual(0.0))
+        .unwrap();
 }
 
 #[test]
 fn test_new_shrinkage_boundary_one_succeeds() {
-    LDA::new(1, None, Some(Shrinkage::Manual(1.0))).expect("Manual(1.0) must be valid");
+    LDA::new(1)
+        .expect("Manual(1.0) must be valid")
+        .with_shrinkage(Shrinkage::Manual(1.0))
+        .unwrap();
 }
 
 // 2. fit() error paths
 
 #[test]
 fn test_fit_empty_rows_errors() {
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x: Array2<f64> = Array2::zeros((0, 2));
     let y: Array1<i32> = Array1::zeros(0);
     let err = lda.fit(&x, &y).expect_err("empty x must fail");
@@ -158,7 +179,7 @@ fn test_fit_empty_rows_errors() {
 
 #[test]
 fn test_fit_x_y_length_mismatch_errors() {
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     // y has 2 entries but x has 3 rows
     let y = array![0, 1];
@@ -172,7 +193,7 @@ fn test_fit_x_y_length_mismatch_errors() {
 #[test]
 fn test_fit_single_class_errors() {
     // All samples belong to class 0: LDA requires >= 2 classes
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     let y = array![0, 0, 0];
     let err = lda.fit(&x, &y).expect_err("single class must fail");
@@ -185,7 +206,7 @@ fn test_fit_single_class_errors() {
 #[test]
 fn test_fit_n_samples_le_n_classes_errors() {
     // 2 samples, 2 classes: n_samples (2) == n_classes (2), which is not > n_classes
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0], [5.0, 6.0]];
     let y = array![0, 1];
     let err = lda
@@ -200,7 +221,7 @@ fn test_fit_n_samples_le_n_classes_errors() {
 #[test]
 fn test_fit_class_with_single_sample_errors() {
     // Class 1 has only 1 sample, must get InvalidInput ("each class must have at least 2")
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![
         [1.0, 1.0],
         [1.5, 1.0],
@@ -220,7 +241,7 @@ fn test_fit_n_components_exceeds_max_errors() {
     // 3 classes: max_components = min(n_classes-1, n_features) = min(2, 2) = 2, so
     // requesting n_components=3 should fail at fit time
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(3, None, None).unwrap(); // constructor allows any n_components > 0
+    let mut lda = LDA::new(3).unwrap(); // constructor allows any n_components > 0
     let err = lda
         .fit(&x, &y)
         .expect_err("n_components > n_classes-1 must fail at fit");
@@ -232,7 +253,7 @@ fn test_fit_n_components_exceeds_max_errors() {
 
 #[test]
 fn test_fit_nan_in_x_errors() {
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![
         [1.0, f64::NAN],
         [2.0, 1.0],
@@ -251,7 +272,7 @@ fn test_fit_nan_in_x_errors() {
 
 #[test]
 fn test_fit_inf_in_x_errors() {
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     let x = array![
         [1.0, f64::INFINITY],
         [2.0, 1.0],
@@ -272,7 +293,7 @@ fn test_fit_inf_in_x_errors() {
 
 #[test]
 fn test_predict_before_fit_errors() {
-    let lda = LDA::new(1, None, None).unwrap();
+    let lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0]];
     let err = lda.predict(&x).expect_err("predict before fit must fail");
     assert!(
@@ -283,7 +304,7 @@ fn test_predict_before_fit_errors() {
 
 #[test]
 fn test_transform_before_fit_errors() {
-    let lda = LDA::new(1, None, None).unwrap();
+    let lda = LDA::new(1).unwrap();
     let x = array![[1.0, 2.0]];
     let err = lda
         .transform(&x)
@@ -299,7 +320,7 @@ fn test_transform_before_fit_errors() {
 #[test]
 fn test_predict_wrong_feature_count_errors() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     // 3 features instead of 2
@@ -319,7 +340,7 @@ fn test_predict_wrong_feature_count_errors() {
 #[test]
 fn test_transform_wrong_feature_count_errors() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let x_bad = array![[1.0, 2.0, 3.0]];
@@ -341,7 +362,7 @@ fn test_transform_wrong_feature_count_errors() {
 fn test_fit_predict_train_100pct_svd() {
     // Clusters 4 units apart, so perfect classification is guaranteed
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -358,7 +379,7 @@ fn test_fit_predict_holdout_svd() {
     let (x_train, y_train) = make_three_class_2d();
     let (x_test, y_test) = make_three_class_holdout();
 
-    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda.fit(&x_train, &y_train).unwrap();
 
     let preds = lda.predict(&x_test).unwrap();
@@ -373,7 +394,7 @@ fn test_fit_predict_holdout_svd() {
 fn test_predict_labels_are_i32_domain() {
     // Contract: predict emits i32 labels identical to the training labels {0, 1, 2}
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -389,7 +410,7 @@ fn test_predict_labels_are_i32_domain() {
 fn test_classes_sorted_after_fit() {
     // classes_vec is sorted_unstable before storing; confirm the getter reflects this
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let classes = lda.get_classes().expect("classes must be set after fit");
@@ -402,7 +423,7 @@ fn test_classes_sorted_after_fit() {
 fn test_all_solvers_classify_correctly() {
     let (x, y) = make_three_class_2d();
     for solver in [Solver::SVD, Solver::Eigen, Solver::LSQR] {
-        let mut lda = LDA::new(2, Some(solver), None).unwrap();
+        let mut lda = LDA::new(2).unwrap().with_solver(solver);
         lda.fit(&x, &y).unwrap();
 
         let preds = lda.predict(&x).unwrap();
@@ -419,7 +440,7 @@ fn test_all_solvers_classify_correctly() {
 #[test]
 fn test_transform_output_shape_2d_3class() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let out = lda.transform(&x).unwrap();
@@ -433,7 +454,7 @@ fn test_transform_output_shape_2d_3class() {
 #[test]
 fn test_transform_output_finite() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let out = lda.transform(&x).unwrap();
@@ -446,7 +467,7 @@ fn test_transform_output_finite() {
 fn test_transform_n_components_1() {
     // Reduce to 1 component (n_classes-1 = 2, so 1 is valid)
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let out = lda.transform(&x).unwrap();
@@ -460,7 +481,7 @@ fn test_transform_n_components_1() {
 fn test_transform_single_sample() {
     // Single-sample inputs always take the sequential path (< 500)
     let (x_train, y_train) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x_train, &y_train).unwrap();
 
     let x_one = array![[5.0, 5.0]]; // should map to class 1
@@ -477,7 +498,7 @@ fn test_transform_single_sample() {
 fn test_two_class_1d_classification_correctness() {
     // class 0 ~ {1,2,3}, class 1 ~ {7,8,9}: any solver must classify all 6 samples
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -493,7 +514,7 @@ fn test_two_class_1d_projected_class_separation() {
     // After projecting onto 1 component the class means must separate: with a unit
     // vector w, |8w - 2w| = 6|w| = 6.0
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let proj = lda.transform(&x).unwrap(); // shape [6, 1]
@@ -523,7 +544,7 @@ fn test_two_class_1d_unit_projection_vector() {
     // For a 1-feature dataset with n_components=1 the projection is a single unit
     // vector (L2-norm = 1.0)
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let w = lda.get_projection().expect("projection must be set");
@@ -540,10 +561,10 @@ fn test_fit_transform_equals_fit_then_transform() {
     // fit_transform(x, y) must match fit(x, y) then transform(x)
     let (x, y) = make_three_class_2d();
 
-    let mut lda_a = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda_a = LDA::new(2).unwrap().with_solver(Solver::SVD);
     let out_a = lda_a.fit_transform(&x, &y).unwrap();
 
-    let mut lda_b = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda_b = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda_b.fit(&x, &y).unwrap();
     let out_b = lda_b.transform(&x).unwrap();
 
@@ -553,7 +574,7 @@ fn test_fit_transform_equals_fit_then_transform() {
 #[test]
 fn test_fit_transform_sets_projection() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit_transform(&x, &y).unwrap();
     assert!(
         lda.get_projection().is_some(),
@@ -566,7 +587,10 @@ fn test_fit_transform_sets_projection() {
 #[test]
 fn test_shrinkage_auto_classifies_correctly() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, Some(Shrinkage::Auto)).unwrap();
+    let mut lda = LDA::new(2)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Auto)
+        .unwrap();
     lda.fit(&x, &y).unwrap();
     let preds = lda.predict(&x).unwrap();
     assert_eq!(accuracy(&preds, &y), 1.0);
@@ -575,7 +599,10 @@ fn test_shrinkage_auto_classifies_correctly() {
 #[test]
 fn test_shrinkage_manual_half_classifies_correctly() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, Some(Shrinkage::Manual(0.5))).unwrap();
+    let mut lda = LDA::new(2)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(0.5))
+        .unwrap();
     lda.fit(&x, &y).unwrap();
     let preds = lda.predict(&x).unwrap();
     assert_eq!(accuracy(&preds, &y), 1.0);
@@ -587,11 +614,15 @@ fn test_shrinkage_manual_zero_matches_no_shrinkage() {
     // so the result must be identical to None shrinkage
     let (x, y) = make_three_class_2d();
 
-    let mut lda_none = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda_none = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda_none.fit(&x, &y).unwrap();
     let out_none = lda_none.transform(&x).unwrap();
 
-    let mut lda_zero = LDA::new(2, Some(Solver::SVD), Some(Shrinkage::Manual(0.0))).unwrap();
+    let mut lda_zero = LDA::new(2)
+        .unwrap()
+        .with_solver(Solver::SVD)
+        .with_shrinkage(Shrinkage::Manual(0.0))
+        .unwrap();
     lda_zero.fit(&x, &y).unwrap();
     let out_zero = lda_zero.transform(&x).unwrap();
 
@@ -604,7 +635,10 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
     // Manual(1.0): shrinks the covariance entirely to a scaled identity; fit and
     // transform should still succeed on well-separated data
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, Some(Shrinkage::Manual(1.0))).unwrap();
+    let mut lda = LDA::new(2)
+        .unwrap()
+        .with_shrinkage(Shrinkage::Manual(1.0))
+        .unwrap();
     lda.fit(&x, &y).unwrap();
     let out = lda.transform(&x).unwrap();
     for v in out.iter() {
@@ -617,7 +651,7 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
 #[test]
 fn test_projection_columns_are_unit_norm_svd() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let w = lda.get_projection().unwrap(); // shape [2, 2]
@@ -634,7 +668,7 @@ fn test_projection_columns_are_unit_norm_svd() {
 #[test]
 fn test_projection_columns_are_unit_norm_eigen() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, Some(Solver::Eigen), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::Eigen);
     lda.fit(&x, &y).unwrap();
 
     let w = lda.get_projection().unwrap();
@@ -648,7 +682,7 @@ fn test_projection_columns_are_unit_norm_eigen() {
 #[test]
 fn test_projection_columns_are_unit_norm_lsqr() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, Some(Solver::LSQR), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::LSQR);
     lda.fit(&x, &y).unwrap();
 
     let w = lda.get_projection().unwrap();
@@ -665,7 +699,7 @@ fn test_projection_columns_are_unit_norm_lsqr() {
 fn test_priors_sum_to_one() {
     // Priors are n_class/n_samples per class and must sum to 1.0
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let priors = lda.get_priors().expect("priors must be set after fit");
@@ -677,7 +711,7 @@ fn test_priors_sum_to_one() {
 fn test_priors_equal_for_balanced_classes() {
     // 9 samples, 3 balanced classes: prior for each class = 3/9 = 1/3
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let priors = lda.get_priors().unwrap();
@@ -692,7 +726,7 @@ fn test_priors_equal_for_balanced_classes() {
 fn test_class_means_correct_2class_1d() {
     // Class 0: [1,2,3] -> mean = 2.0; Class 1: [7,8,9] -> mean = 8.0
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let means = lda.get_means().expect("means must be set");
@@ -709,11 +743,11 @@ fn test_determinism_svd_same_data() {
     // transforms
     let (x, y) = make_three_class_2d();
 
-    let mut lda1 = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda1 = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda1.fit(&x, &y).unwrap();
     let out1 = lda1.transform(&x).unwrap();
 
-    let mut lda2 = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda2 = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda2.fit(&x, &y).unwrap();
     let out2 = lda2.transform(&x).unwrap();
 
@@ -734,7 +768,7 @@ fn test_determinism_svd_same_data() {
 #[test]
 fn test_save_load_round_trip() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds_before = lda.predict(&x).unwrap();
@@ -759,7 +793,11 @@ fn test_save_load_round_trip() {
 
 #[test]
 fn test_save_load_preserves_hyperparameters() {
-    let mut lda = LDA::new(1, Some(Solver::Eigen), Some(Shrinkage::Manual(0.3))).unwrap();
+    let mut lda = LDA::new(1)
+        .unwrap()
+        .with_solver(Solver::Eigen)
+        .with_shrinkage(Shrinkage::Manual(0.3))
+        .unwrap();
     let (x, y) = make_two_class_1d();
     lda.fit(&x, &y).unwrap();
 
@@ -777,7 +815,7 @@ fn test_load_preserves_fit_state() {
     // After round-trip, get_classes / get_priors / get_means / get_projection must
     // all be Some and match the pre-save state
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2, None, None).unwrap();
+    let mut lda = LDA::new(2).unwrap();
     lda.fit(&x, &y).unwrap();
 
     let path = "/tmp/rustyml_lda_state_roundtrip_test.json";
@@ -846,7 +884,7 @@ fn test_fit_predict_large_separable_parallel_paths() {
         x.nrows()
     );
 
-    let mut lda = LDA::new(2, Some(Solver::SVD), None).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();

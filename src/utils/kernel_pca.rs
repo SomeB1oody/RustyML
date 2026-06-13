@@ -17,10 +17,11 @@ use std::cmp::Ordering;
 pub use crate::types::KernelType;
 
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
 pub enum EigenSolver {
     /// Exact dense symmetric eigendecomposition via nalgebra; best for small to
     /// mid-sized kernel matrices
+    #[default]
     Dense,
     /// Krylov-subspace iterative solver (the pure-Rust counterpart of the symmetric
     /// solver behind ARPACK); fast and accurate for a few leading components of a
@@ -130,7 +131,7 @@ impl EigenSolver {
 /// use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA, KernelType};
 /// use ndarray::array;
 ///
-/// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2, EigenSolver::Dense).unwrap();
+/// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// kpca.fit(&x).unwrap();
 /// let projected = kpca.transform(&x).unwrap();
@@ -169,7 +170,7 @@ impl Default for KernelPCA {
     /// - `n_components` - 2
     /// - `eigen_solver` - `EigenSolver::Dense`
     fn default() -> Self {
-        KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2, EigenSolver::Dense)
+        KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2)
             .expect("Default KernelPCA parameters should be valid")
     }
 }
@@ -183,7 +184,6 @@ impl KernelPCA {
     ///
     /// - `kernel` - Kernel function type
     /// - `n_components` - Number of components to keep (must be > 0)
-    /// - `eigen_solver` - Eigen solver strategy
     ///
     /// # Returns
     ///
@@ -192,11 +192,22 @@ impl KernelPCA {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `n_components` is 0 or kernel parameters are invalid
-    pub fn new(
-        kernel: KernelType,
-        n_components: usize,
-        eigen_solver: EigenSolver,
-    ) -> Result<Self, Error> {
+    ///
+    /// # Notes
+    ///
+    /// The eigen solver defaults to `EigenSolver::Dense`. To pick another strategy (e.g.
+    /// a Lanczos solver for a few components on large data), use the builder method below:
+    ///
+    /// - [`with_eigen_solver`](Self::with_eigen_solver) - eigen solver strategy
+    ///
+    /// ```
+    /// use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA, KernelType};
+    ///
+    /// let model = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 8)
+    ///     .unwrap()
+    ///     .with_eigen_solver(EigenSolver::Lanczos);
+    /// ```
+    pub fn new(kernel: KernelType, n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
                 "n_components",
@@ -209,7 +220,7 @@ impl KernelPCA {
         Ok(Self {
             kernel,
             n_components,
-            eigen_solver,
+            eigen_solver: EigenSolver::Dense,
             x_fit: None,
             eigenvalues: None,
             eigenvectors: None,
@@ -218,6 +229,20 @@ impl KernelPCA {
             n_samples: None,
             n_features: None,
         })
+    }
+
+    /// Sets the eigen solver strategy (default: `EigenSolver::Dense`)
+    ///
+    /// # Parameters
+    ///
+    /// - `eigen_solver` - the solver strategy to use
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_eigen_solver(mut self, eigen_solver: EigenSolver) -> Self {
+        self.eigen_solver = eigen_solver;
+        self
     }
 
     // Getters

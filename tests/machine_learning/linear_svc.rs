@@ -26,8 +26,7 @@ fn make_separable() -> (Array2<f64>, Array1<f64>) {
 /// that convergence is expected, returning the trained model
 fn fit_separable_model() -> LinearSVC {
     let (x, y) = make_separable();
-    let mut model =
-        LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5, None).unwrap();
+    let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
     model
 }
@@ -36,7 +35,7 @@ fn fit_separable_model() -> LinearSVC {
 
 #[test]
 fn new_rejects_max_iter_zero() {
-    let result = LinearSVC::new(0, 0.01, RegularizationType::L2(1.0), true, 1e-4, None);
+    let result = LinearSVC::new(0, 0.01, RegularizationType::L2(1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "max_iter=0 must return InvalidParameter"
@@ -45,7 +44,7 @@ fn new_rejects_max_iter_zero() {
 
 #[test]
 fn new_rejects_learning_rate_zero() {
-    let result = LinearSVC::new(100, 0.0, RegularizationType::L2(1.0), true, 1e-4, None);
+    let result = LinearSVC::new(100, 0.0, RegularizationType::L2(1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "learning_rate=0.0 must return InvalidParameter"
@@ -54,7 +53,7 @@ fn new_rejects_learning_rate_zero() {
 
 #[test]
 fn new_rejects_learning_rate_negative() {
-    let result = LinearSVC::new(100, -0.001, RegularizationType::L2(1.0), true, 1e-4, None);
+    let result = LinearSVC::new(100, -0.001, RegularizationType::L2(1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "learning_rate=-0.001 must return InvalidParameter"
@@ -63,7 +62,7 @@ fn new_rejects_learning_rate_negative() {
 
 #[test]
 fn new_rejects_learning_rate_nan() {
-    let result = LinearSVC::new(100, f64::NAN, RegularizationType::L2(1.0), true, 1e-4, None);
+    let result = LinearSVC::new(100, f64::NAN, RegularizationType::L2(1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "learning_rate=NaN must return InvalidParameter"
@@ -72,14 +71,7 @@ fn new_rejects_learning_rate_nan() {
 
 #[test]
 fn new_rejects_learning_rate_infinity() {
-    let result = LinearSVC::new(
-        100,
-        f64::INFINITY,
-        RegularizationType::L2(1.0),
-        true,
-        1e-4,
-        None,
-    );
+    let result = LinearSVC::new(100, f64::INFINITY, RegularizationType::L2(1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "learning_rate=+Inf must return InvalidParameter"
@@ -88,7 +80,7 @@ fn new_rejects_learning_rate_infinity() {
 
 #[test]
 fn new_rejects_tol_zero() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, 0.0, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, 0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=0.0 must return InvalidParameter"
@@ -97,7 +89,7 @@ fn new_rejects_tol_zero() {
 
 #[test]
 fn new_rejects_tol_negative() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, -1e-4, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, -1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=-1e-4 must return InvalidParameter"
@@ -106,7 +98,7 @@ fn new_rejects_tol_negative() {
 
 #[test]
 fn new_rejects_tol_nan() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, f64::NAN, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, f64::NAN);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=NaN must return InvalidParameter"
@@ -115,7 +107,7 @@ fn new_rejects_tol_nan() {
 
 #[test]
 fn new_rejects_penalty_lambda_negative_l2() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(-0.5), true, 1e-4, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(-0.5), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "L2 with negative lambda must return InvalidParameter"
@@ -124,7 +116,7 @@ fn new_rejects_penalty_lambda_negative_l2() {
 
 #[test]
 fn new_rejects_penalty_lambda_negative_l1() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L1(-1.0), true, 1e-4, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L1(-1.0), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "L1 with negative lambda must return InvalidParameter"
@@ -133,14 +125,7 @@ fn new_rejects_penalty_lambda_negative_l1() {
 
 #[test]
 fn new_rejects_penalty_lambda_nan() {
-    let result = LinearSVC::new(
-        100,
-        0.01,
-        RegularizationType::L2(f64::NAN),
-        true,
-        1e-4,
-        None,
-    );
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(f64::NAN), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "L2(NaN) must return InvalidParameter"
@@ -149,14 +134,7 @@ fn new_rejects_penalty_lambda_nan() {
 
 #[test]
 fn new_rejects_penalty_lambda_infinity() {
-    let result = LinearSVC::new(
-        100,
-        0.01,
-        RegularizationType::L1(f64::INFINITY),
-        true,
-        1e-4,
-        None,
-    );
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L1(f64::INFINITY), true, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "L1(+Inf) must return InvalidParameter"
@@ -166,7 +144,7 @@ fn new_rejects_penalty_lambda_infinity() {
 /// Lambda = 0.0 is explicitly allowed (no regularization)
 #[test]
 fn new_accepts_zero_penalty_lambda() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(0.0), true, 1e-4, None);
+    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(0.0), true, 1e-4);
     assert!(result.is_ok(), "L2(0.0) must be accepted");
 }
 
@@ -193,7 +171,7 @@ fn default_constructor_has_documented_defaults() {
 /// Constructor stores the passed parameters exactly
 #[test]
 fn new_stores_parameters() {
-    let model = LinearSVC::new(500, 0.005, RegularizationType::L1(0.1), false, 1e-6, None).unwrap();
+    let model = LinearSVC::new(500, 0.005, RegularizationType::L1(0.1), false, 1e-6).unwrap();
     assert_eq!(model.get_max_iterations(), 500);
     assert_eq!(model.get_learning_rate(), 0.005);
     assert_eq!(model.get_penalty(), RegularizationType::L1(0.1));
@@ -393,8 +371,7 @@ fn sign_consistency_on_new_points() {
 #[test]
 fn predicts_all_training_samples_correctly_on_separable_data() {
     let (x, y) = make_separable();
-    let mut model =
-        LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6, None).unwrap();
+    let mut model = LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6).unwrap();
     model.fit(&x, &y).unwrap();
     let preds = model.predict(&x).unwrap();
     // Ground truth: samples 0-3 are class 0, samples 4-7 are class 1
@@ -412,8 +389,7 @@ fn predicts_all_training_samples_correctly_on_separable_data() {
 fn fit_predict_agrees_with_fit_then_predict() {
     let (x, y) = make_separable();
     // model A uses fit_predict
-    let mut model_a =
-        LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5, None).unwrap();
+    let mut model_a = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5).unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
     // model B uses fit then predict on the same data
     let preds_b = model_a.predict(&x).unwrap();
@@ -440,15 +416,8 @@ fn getters_are_some_after_fit() {
 fn n_iter_is_in_valid_range() {
     let max_iter = 5000usize;
     let (x, y) = make_separable();
-    let mut model = LinearSVC::new(
-        max_iter,
-        0.01,
-        RegularizationType::L2(0.1),
-        true,
-        1e-5,
-        None,
-    )
-    .unwrap();
+    let mut model =
+        LinearSVC::new(max_iter, 0.01, RegularizationType::L2(0.1), true, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
     let n = model.get_actual_iterations().unwrap();
     assert!(n >= 1, "n_iter must be at least 1");
@@ -463,15 +432,8 @@ fn n_iter_is_in_valid_range() {
 fn convergence_stops_before_max_iter_on_separable_data() {
     let max_iter = 50_000usize;
     let (x, y) = make_separable();
-    let mut model = LinearSVC::new(
-        max_iter,
-        0.01,
-        RegularizationType::L2(0.01),
-        true,
-        1e-3,
-        None,
-    )
-    .unwrap();
+    let mut model =
+        LinearSVC::new(max_iter, 0.01, RegularizationType::L2(0.01), true, 1e-3).unwrap();
     model.fit(&x, &y).unwrap();
     let n = model.get_actual_iterations().unwrap();
     assert!(
@@ -505,7 +467,6 @@ fn fit_intercept_false_bias_stays_zero() {
         RegularizationType::L2(0.1),
         false, // no intercept
         1e-5,
-        None,
     )
     .unwrap();
     model.fit(&x, &y).unwrap();
@@ -520,8 +481,7 @@ fn fit_intercept_false_bias_stays_zero() {
 #[test]
 fn fit_intercept_false_decision_function_equals_dot_product() {
     let (x, y) = make_separable();
-    let mut model =
-        LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), false, 1e-5, None).unwrap();
+    let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), false, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
 
     let weights = model.get_weights().unwrap().clone();
@@ -548,13 +508,11 @@ fn fit_intercept_false_decision_function_equals_dot_product() {
 fn l1_and_l2_penalties_produce_different_weights() {
     let (x, y) = make_separable();
 
-    let mut model_l2 =
-        LinearSVC::new(3000, 0.01, RegularizationType::L2(1.0), true, 1e-6, None).unwrap();
+    let mut model_l2 = LinearSVC::new(3000, 0.01, RegularizationType::L2(1.0), true, 1e-6).unwrap();
     model_l2.fit(&x, &y).unwrap();
     let w_l2 = model_l2.get_weights().unwrap().clone();
 
-    let mut model_l1 =
-        LinearSVC::new(3000, 0.01, RegularizationType::L1(1.0), true, 1e-6, None).unwrap();
+    let mut model_l1 = LinearSVC::new(3000, 0.01, RegularizationType::L1(1.0), true, 1e-6).unwrap();
     model_l1.fit(&x, &y).unwrap();
     let w_l1 = model_l1.get_weights().unwrap().clone();
 
@@ -570,15 +528,8 @@ fn l1_and_l2_penalties_produce_different_weights() {
 fn l1_sparsity_irrelevant_feature_closer_to_zero() {
     let (x, y) = make_separable();
     // x column 1 is all zeros, so a strong L1 penalty shrinks w[1] toward zero
-    let mut model = LinearSVC::new(
-        10_000,
-        0.001,
-        RegularizationType::L1(10.0),
-        true,
-        1e-7,
-        None,
-    )
-    .unwrap();
+    let mut model =
+        LinearSVC::new(10_000, 0.001, RegularizationType::L1(10.0), true, 1e-7).unwrap();
     model.fit(&x, &y).unwrap();
     let w = model.get_weights().unwrap();
     assert!(
@@ -658,8 +609,7 @@ fn save_load_preserves_hyperparameters() {
 #[test]
 fn class_one_samples_score_positive_class_zero_samples_score_negative() {
     let (x, y) = make_separable();
-    let mut model =
-        LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6, None).unwrap();
+    let mut model = LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6).unwrap();
     model.fit(&x, &y).unwrap();
 
     let scores = model.decision_function(&x).unwrap();
@@ -721,15 +671,9 @@ fn make_many() -> (Array2<f64>, Array1<f64>) {
 fn same_random_state_is_reproducible() {
     let (x, y) = make_many();
     let train = |seed| {
-        let mut m = LinearSVC::new(
-            300,
-            0.01,
-            RegularizationType::L2(0.1),
-            true,
-            1e-9,
-            Some(seed),
-        )
-        .unwrap();
+        let mut m = LinearSVC::new(300, 0.01, RegularizationType::L2(0.1), true, 1e-9)
+            .unwrap()
+            .with_random_state(seed);
         m.fit(&x, &y).unwrap();
         m
     };
@@ -752,15 +696,9 @@ fn same_random_state_is_reproducible() {
 fn different_random_state_changes_result() {
     let (x, y) = make_many();
     let train = |seed| {
-        let mut m = LinearSVC::new(
-            300,
-            0.01,
-            RegularizationType::L2(0.1),
-            true,
-            1e-9,
-            Some(seed),
-        )
-        .unwrap();
+        let mut m = LinearSVC::new(300, 0.01, RegularizationType::L2(0.1), true, 1e-9)
+            .unwrap()
+            .with_random_state(seed);
         m.fit(&x, &y).unwrap();
         m.get_weights().unwrap().clone()
     };
@@ -787,15 +725,9 @@ fn fit_huge_learning_rate_on_large_finite_data_returns_non_finite() {
     .unwrap();
     let y = array![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
 
-    let mut model = LinearSVC::new(
-        100,
-        f64::MAX,
-        RegularizationType::L2(1.0),
-        true,
-        1e-6,
-        Some(0),
-    )
-    .unwrap();
+    let mut model = LinearSVC::new(100, f64::MAX, RegularizationType::L2(1.0), true, 1e-6)
+        .unwrap()
+        .with_random_state(0);
 
     let result = model.fit(&x, &y);
     assert!(
@@ -821,15 +753,8 @@ fn decision_function_applies_nonzero_fitted_bias() {
     .unwrap();
     let y = array![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
 
-    let mut model = LinearSVC::new(
-        10_000,
-        0.001,
-        RegularizationType::L2(0.01),
-        true,
-        1e-7,
-        None,
-    )
-    .unwrap();
+    let mut model =
+        LinearSVC::new(10_000, 0.001, RegularizationType::L2(0.01), true, 1e-7).unwrap();
     model.fit(&x, &y).unwrap();
 
     let weights = model.get_weights().unwrap().clone();

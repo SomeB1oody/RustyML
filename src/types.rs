@@ -34,12 +34,13 @@ use ndarray::{Array2, ArrayBase, Axis, Data, Ix2, Zip};
 /// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
 /// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
 /// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
     derive(Deserialize, Serialize)
 )]
 pub enum DistanceCalculationMetric {
+    #[default]
     Euclidean,
     Manhattan,
     Minkowski(f64),

@@ -26,7 +26,7 @@ fn small_data() -> Array2<f64> {
 /// perplexity = 0.0 is rejected as not positive
 #[test]
 fn new_perplexity_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 0.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(2, 0.0, 200.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -36,7 +36,7 @@ fn new_perplexity_zero_returns_invalid_parameter() {
 /// Negative perplexity is rejected as InvalidParameter
 #[test]
 fn new_perplexity_negative_returns_invalid_parameter() {
-    let err = TSNE::new(2, -1.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(2, -1.0, 200.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -46,16 +46,7 @@ fn new_perplexity_negative_returns_invalid_parameter() {
 /// NaN perplexity is rejected as not finite
 #[test]
 fn new_perplexity_nan_returns_invalid_parameter() {
-    let err = TSNE::new(
-        2,
-        f64::NAN,
-        200.0,
-        250,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::Exact,
-    )
-    .unwrap_err();
+    let err = TSNE::new(2, f64::NAN, 200.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -65,16 +56,7 @@ fn new_perplexity_nan_returns_invalid_parameter() {
 /// +inf perplexity is rejected as not finite
 #[test]
 fn new_perplexity_infinity_returns_invalid_parameter() {
-    let err = TSNE::new(
-        2,
-        f64::INFINITY,
-        200.0,
-        250,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::Exact,
-    )
-    .unwrap_err();
+    let err = TSNE::new(2, f64::INFINITY, 200.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -86,7 +68,7 @@ fn new_perplexity_infinity_returns_invalid_parameter() {
 /// learning_rate = 0.0 is rejected as not positive
 #[test]
 fn new_learning_rate_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, 0.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(2, 5.0, 0.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -96,7 +78,7 @@ fn new_learning_rate_zero_returns_invalid_parameter() {
 /// Negative learning_rate is rejected as InvalidParameter
 #[test]
 fn new_learning_rate_negative_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, -100.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(2, 5.0, -100.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -106,16 +88,7 @@ fn new_learning_rate_negative_returns_invalid_parameter() {
 /// NaN learning_rate is rejected as not finite
 #[test]
 fn new_learning_rate_nan_returns_invalid_parameter() {
-    let err = TSNE::new(
-        2,
-        5.0,
-        f64::NAN,
-        250,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::Exact,
-    )
-    .unwrap_err();
+    let err = TSNE::new(2, 5.0, f64::NAN, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -125,16 +98,7 @@ fn new_learning_rate_nan_returns_invalid_parameter() {
 /// +inf learning_rate is rejected as not finite
 #[test]
 fn new_learning_rate_infinity_returns_invalid_parameter() {
-    let err = TSNE::new(
-        2,
-        5.0,
-        f64::INFINITY,
-        250,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::Exact,
-    )
-    .unwrap_err();
+    let err = TSNE::new(2, 5.0, f64::INFINITY, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -146,7 +110,7 @@ fn new_learning_rate_infinity_returns_invalid_parameter() {
 /// n_components = 0 is rejected as InvalidParameter
 #[test]
 fn new_n_components_zero_returns_invalid_parameter() {
-    let err = TSNE::new(0, 5.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(0, 5.0, 200.0, 250).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -156,7 +120,7 @@ fn new_n_components_zero_returns_invalid_parameter() {
 /// n_iter = 0 is rejected as InvalidParameter
 #[test]
 fn new_n_iter_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, 200.0, 0, Some(42), Init::PCA, TSNEMethod::Exact).unwrap_err();
+    let err = TSNE::new(2, 5.0, 200.0, 0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -166,7 +130,7 @@ fn new_n_iter_zero_returns_invalid_parameter() {
 /// Valid parameters produce Ok
 #[test]
 fn new_valid_params_returns_ok() {
-    let result = TSNE::new(2, 5.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact);
+    let result = TSNE::new(2, 5.0, 200.0, 250);
     assert!(result.is_ok(), "expected Ok, got {result:?}");
 }
 
@@ -175,7 +139,12 @@ fn new_valid_params_returns_ok() {
 /// fit_transform on an (n, d) matrix returns an (n, n_components) matrix
 #[test]
 fn fit_transform_output_shape_matches_n_samples_n_components() {
-    let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let x = small_data();
     let embedding = tsne.fit_transform(&x).unwrap();
     assert_eq!(
@@ -189,7 +158,12 @@ fn fit_transform_output_shape_matches_n_samples_n_components() {
 /// n_components = 1 produces an (n, 1) output
 #[test]
 fn fit_transform_output_shape_n_components_one() {
-    let tsne = TSNE::new(1, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(1, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let x = small_data();
     let embedding = tsne.fit_transform(&x).unwrap();
     assert_eq!(
@@ -205,7 +179,12 @@ fn fit_transform_output_shape_n_components_one() {
 /// Every element in the embedding is finite (no NaN or +/-inf)
 #[test]
 fn fit_transform_all_elements_finite() {
-    let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let x = small_data();
     let embedding = tsne.fit_transform(&x).unwrap();
     for (idx, &v) in embedding.iter().enumerate() {
@@ -222,8 +201,18 @@ fn fit_transform_all_elements_finite() {
 #[test]
 fn fit_transform_deterministic_same_seed_gives_identical_results() {
     let x = small_data();
-    let tsne1 = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
-    let tsne2 = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne1 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
+    let tsne2 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let emb1 = tsne1.fit_transform(&x).unwrap();
     let emb2 = tsne2.fit_transform(&x).unwrap();
     // eps = 0.0 requires exact bit-equality
@@ -237,17 +226,18 @@ fn fit_transform_deterministic_same_seed_gives_identical_results() {
 #[test]
 fn fit_transform_different_seeds_produce_different_results() {
     let x = small_data();
-    let tsne1 = TSNE::new(2, 2.0, 200.0, 100, Some(0), Init::Random, TSNEMethod::Exact).unwrap();
-    let tsne2 = TSNE::new(
-        2,
-        2.0,
-        200.0,
-        100,
-        Some(999),
-        Init::Random,
-        TSNEMethod::Exact,
-    )
-    .unwrap();
+    let tsne1 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(0)
+        .with_init(Init::Random)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
+    let tsne2 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(999)
+        .with_init(Init::Random)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let emb1 = tsne1.fit_transform(&x).unwrap();
     let emb2 = tsne2.fit_transform(&x).unwrap();
     // At least one element must differ because the random initializations differ
@@ -262,8 +252,18 @@ fn fit_transform_different_seeds_produce_different_results() {
 #[test]
 fn fit_transform_pca_init_is_seed_independent() {
     let x = small_data();
-    let tsne1 = TSNE::new(2, 2.0, 200.0, 100, Some(0), Init::PCA, TSNEMethod::Exact).unwrap();
-    let tsne2 = TSNE::new(2, 2.0, 200.0, 100, Some(999), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne1 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(0)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
+    let tsne2 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(999)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let emb1 = tsne1.fit_transform(&x).unwrap();
     let emb2 = tsne2.fit_transform(&x).unwrap();
     // PCA initialization ignores the seed, and the optimization is otherwise deterministic
@@ -275,7 +275,12 @@ fn fit_transform_pca_init_is_seed_independent() {
 /// Each column of the final embedding has mean ~= 0 (tolerance 1e-10)
 #[test]
 fn fit_transform_column_means_are_zero() {
-    let tsne = TSNE::new(2, 2.0, 200.0, 300, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 300)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let x = small_data();
     let embedding = tsne.fit_transform(&x).unwrap();
     let n = embedding.nrows() as f64;
@@ -288,7 +293,12 @@ fn fit_transform_column_means_are_zero() {
 /// n_components=1: the single output column also has mean ~= 0
 #[test]
 fn fit_transform_column_mean_zero_n_components_one() {
-    let tsne = TSNE::new(1, 2.0, 200.0, 300, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(1, 2.0, 200.0, 300)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let x = small_data();
     let embedding = tsne.fit_transform(&x).unwrap();
     let n = embedding.nrows() as f64;
@@ -319,7 +329,12 @@ fn fit_transform_well_separated_clusters_remain_separated() {
 
     // On a set this tiny (20 points) the default lr=200 over-expands the absolute
     // scale; lr=100 keeps the step sized to the data
-    let tsne = TSNE::new(2, 5.0, 100.0, 1000, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 5.0, 100.0, 1000)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let emb = tsne.fit_transform(&x).unwrap();
 
     // Euclidean distance between two 2-D embedding points
@@ -381,7 +396,12 @@ fn fit_transform_perplexity_equals_n_samples_returns_invalid_parameter() {
     // 5 samples, perplexity = 5.0 (= n_samples)
     let x: Array2<f64> =
         ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
-    let tsne = TSNE::new(2, 5.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 5.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
@@ -394,7 +414,12 @@ fn fit_transform_perplexity_equals_n_samples_returns_invalid_parameter() {
 fn fit_transform_perplexity_exceeds_n_samples_returns_invalid_parameter() {
     let x: Array2<f64> =
         ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
-    let tsne = TSNE::new(2, 10.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 10.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
@@ -406,7 +431,12 @@ fn fit_transform_perplexity_exceeds_n_samples_returns_invalid_parameter() {
 #[test]
 fn fit_transform_single_sample_returns_invalid_input() {
     let x: Array2<f64> = ndarray::array![[1.0, 2.0, 3.0]];
-    let tsne = TSNE::new(2, 0.5, 200.0, 50, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 0.5, 200.0, 50)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
@@ -418,7 +448,12 @@ fn fit_transform_single_sample_returns_invalid_input() {
 #[test]
 fn fit_transform_empty_input_returns_empty_input() {
     let x: Array2<f64> = Array2::zeros((0, 3));
-    let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::EmptyInput(_)),
@@ -430,7 +465,12 @@ fn fit_transform_empty_input_returns_empty_input() {
 #[test]
 fn fit_transform_nan_input_returns_non_finite() {
     let x = ndarray::array![[1.0, f64::NAN], [2.0, 3.0], [4.0, 5.0]];
-    let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::NonFinite(_)),
@@ -442,7 +482,12 @@ fn fit_transform_nan_input_returns_non_finite() {
 #[test]
 fn fit_transform_infinity_input_returns_non_finite() {
     let x = ndarray::array![[f64::INFINITY, 1.0], [2.0, 3.0], [4.0, 5.0]];
-    let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     let err = tsne.fit_transform(&x).unwrap_err();
     assert!(
         matches!(err, Error::NonFinite(_)),
@@ -455,16 +500,12 @@ fn fit_transform_infinity_input_returns_non_finite() {
 /// Getters return exactly the values passed to new()
 #[test]
 fn getters_return_construction_values() {
-    let tsne = TSNE::new(
-        3,
-        15.0,
-        100.0,
-        500,
-        Some(77),
-        Init::Random,
-        TSNEMethod::Exact,
-    )
-    .unwrap();
+    let tsne = TSNE::new(3, 15.0, 100.0, 500)
+        .unwrap()
+        .with_random_state(77)
+        .with_init(Init::Random)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     assert_eq!(tsne.get_n_components(), 3);
     assert_abs_diff_eq!(tsne.get_perplexity(), 15.0, epsilon = 0.0);
     assert_abs_diff_eq!(tsne.get_learning_rate(), 100.0, epsilon = 0.0);
@@ -477,7 +518,11 @@ fn getters_return_construction_values() {
 /// When random_state is None the getter also returns None
 #[test]
 fn getter_random_state_none() {
-    let tsne = TSNE::new(2, 5.0, 200.0, 100, None, Init::PCA, TSNEMethod::Exact).unwrap();
+    let tsne = TSNE::new(2, 5.0, 200.0, 100)
+        .unwrap()
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap();
     assert_eq!(tsne.get_random_state(), None);
 }
 
@@ -486,16 +531,10 @@ fn getter_random_state_none() {
 /// Barnes-Hut rejects embeddings with more than 3 components
 #[test]
 fn new_barnes_hut_rejects_more_than_three_components() {
-    let err = TSNE::new(
-        4,
-        5.0,
-        200.0,
-        100,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    )
-    .unwrap_err();
+    let err = TSNE::new(4, 5.0, 200.0, 100)
+        .unwrap()
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 })
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for n_components=4 with Barnes-Hut, got {err:?}"
@@ -505,15 +544,9 @@ fn new_barnes_hut_rejects_more_than_three_components() {
 /// Barnes-Hut accepts exactly 3 components
 #[test]
 fn new_barnes_hut_accepts_three_components() {
-    let result = TSNE::new(
-        3,
-        5.0,
-        200.0,
-        100,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    );
+    let result = TSNE::new(3, 5.0, 200.0, 100)
+        .unwrap()
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 });
     assert!(
         result.is_ok(),
         "expected Ok for 3 components, got {result:?}"
@@ -524,16 +557,10 @@ fn new_barnes_hut_accepts_three_components() {
 #[test]
 fn new_barnes_hut_rejects_angle_out_of_range() {
     for bad_angle in [1.0_f64, -0.1, f64::NAN] {
-        let err = TSNE::new(
-            2,
-            5.0,
-            200.0,
-            100,
-            Some(42),
-            Init::PCA,
-            TSNEMethod::BarnesHut { angle: bad_angle },
-        )
-        .unwrap_err();
+        let err = TSNE::new(2, 5.0, 200.0, 100)
+            .unwrap()
+            .with_method(TSNEMethod::BarnesHut { angle: bad_angle })
+            .unwrap_err();
         assert!(
             matches!(err, Error::InvalidParameter { .. }),
             "expected InvalidParameter for angle={bad_angle}, got {err:?}"
@@ -553,16 +580,12 @@ fn default_tsne_uses_barnes_hut() {
 #[test]
 fn fit_transform_barnes_hut_shape_and_finite() {
     let x = small_data();
-    let tsne = TSNE::new(
-        2,
-        2.0,
-        200.0,
-        100,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    )
-    .unwrap();
+    let tsne = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 })
+        .unwrap();
     let emb = tsne.fit_transform(&x).unwrap();
     assert_eq!(emb.shape(), &[6, 2]);
     for &v in emb.iter() {
@@ -574,26 +597,18 @@ fn fit_transform_barnes_hut_shape_and_finite() {
 #[test]
 fn fit_transform_barnes_hut_deterministic_same_seed() {
     let x = small_data();
-    let tsne1 = TSNE::new(
-        2,
-        2.0,
-        200.0,
-        100,
-        Some(7),
-        Init::Random,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    )
-    .unwrap();
-    let tsne2 = TSNE::new(
-        2,
-        2.0,
-        200.0,
-        100,
-        Some(7),
-        Init::Random,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    )
-    .unwrap();
+    let tsne1 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(7)
+        .with_init(Init::Random)
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 })
+        .unwrap();
+    let tsne2 = TSNE::new(2, 2.0, 200.0, 100)
+        .unwrap()
+        .with_random_state(7)
+        .with_init(Init::Random)
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 })
+        .unwrap();
     let emb1 = tsne1.fit_transform(&x).unwrap();
     let emb2 = tsne2.fit_transform(&x).unwrap();
     // The tree build and the sequential Z reduction keep Barnes-Hut bit-reproducible
@@ -618,16 +633,12 @@ fn fit_transform_barnes_hut_well_separated_clusters_remain_separated() {
     let flat: Vec<f64> = rows.iter().flat_map(|r| r.iter().copied()).collect();
     let x = Array2::from_shape_vec((2 * n_per_cluster, 2), flat).unwrap();
 
-    let tsne = TSNE::new(
-        2,
-        5.0,
-        100.0,
-        1000,
-        Some(42),
-        Init::PCA,
-        TSNEMethod::BarnesHut { angle: 0.5 },
-    )
-    .unwrap();
+    let tsne = TSNE::new(2, 5.0, 100.0, 1000)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::BarnesHut { angle: 0.5 })
+        .unwrap();
     let emb = tsne.fit_transform(&x).unwrap();
 
     let dist2d = |i: usize, j: usize| -> f64 {

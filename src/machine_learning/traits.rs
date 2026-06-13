@@ -334,7 +334,7 @@ mod tests {
         let x = Array2::from_shape_vec((3, 1), vec![1.0, 2.0, 3.0]).unwrap();
         let y = Array1::from_vec(vec![2.0, 4.0, 6.0]);
 
-        let mut model = LinearRegression::new(true, 0.05, 5000, 1e-9, None).unwrap();
+        let mut model = LinearRegression::new(true, 0.05, 5000, 1e-9).unwrap();
         Fit::fit(&mut model, (&x, &y)).unwrap();
         let preds = Predict::predict(&model, &x).unwrap();
 

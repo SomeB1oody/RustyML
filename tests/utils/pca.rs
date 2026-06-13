@@ -23,10 +23,10 @@ fn anisotropic_data() -> Array2<f64> {
 
 // Construction / validation
 
-/// PCA::new(0, _) returns Error::InvalidParameter
+/// PCA::new(0) returns Error::InvalidParameter
 #[test]
 fn test_new_n_components_zero_is_invalid_parameter() {
-    let err = PCA::new(0, SVDSolver::Full).unwrap_err();
+    let err = PCA::new(0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {:?}",
@@ -37,8 +37,12 @@ fn test_new_n_components_zero_is_invalid_parameter() {
 /// PCA::new with n_components >= 1 is accepted
 #[test]
 fn test_new_valid_n_components() {
-    PCA::new(1, SVDSolver::Full).expect("n_components=1 should be valid");
-    PCA::new(2, SVDSolver::Full).expect("n_components=2 should be valid");
+    PCA::new(1)
+        .expect("n_components=1 should be valid")
+        .with_svd_solver(SVDSolver::Full);
+    PCA::new(2)
+        .expect("n_components=2 should be valid")
+        .with_svd_solver(SVDSolver::Full);
 }
 
 // Error paths: not fitted
@@ -46,7 +50,7 @@ fn test_new_valid_n_components() {
 /// transform before fit returns Error::NotFitted
 #[test]
 fn test_transform_before_fit_is_not_fitted() {
-    let pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let x = collinear_data();
     let err = pca.transform(&x).unwrap_err();
     assert!(
@@ -59,7 +63,7 @@ fn test_transform_before_fit_is_not_fitted() {
 /// inverse_transform before fit returns Error::NotFitted
 #[test]
 fn test_inverse_transform_before_fit_is_not_fitted() {
-    let pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let scores = array![[1.0], [0.0], [0.0], [0.0], [0.0]];
     let err = pca.inverse_transform(&scores).unwrap_err();
     assert!(
@@ -74,7 +78,7 @@ fn test_inverse_transform_before_fit_is_not_fitted() {
 /// Empty matrix returns EmptyInput
 #[test]
 fn test_fit_empty_input_is_empty_input() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let x: Array2<f64> = Array2::zeros((0, 2));
     let err = pca.fit(&x).unwrap_err();
     assert!(
@@ -87,7 +91,7 @@ fn test_fit_empty_input_is_empty_input() {
 /// Single sample returns InvalidInput (check_min_samples requires >= 2)
 #[test]
 fn test_fit_single_sample_is_invalid_input() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let x = array![[1.0, 2.0]];
     let err = pca.fit(&x).unwrap_err();
     assert!(
@@ -100,7 +104,7 @@ fn test_fit_single_sample_is_invalid_input() {
 /// n_components > n_features returns InvalidParameter (max_components = min(5,2) = 2)
 #[test]
 fn test_fit_n_components_exceeds_n_features_is_invalid_parameter() {
-    let mut pca = PCA::new(3, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(3).unwrap().with_svd_solver(SVDSolver::Full);
     let x = collinear_data(); // 5 rows, 2 features
     let err = pca.fit(&x).unwrap_err();
     assert!(
@@ -113,7 +117,7 @@ fn test_fit_n_components_exceeds_n_features_is_invalid_parameter() {
 /// NaN in input returns NonFinite
 #[test]
 fn test_fit_nan_input_is_non_finite() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let x = array![[1.0, f64::NAN], [2.0, 4.0], [3.0, 6.0]];
     let err = pca.fit(&x).unwrap_err();
     assert!(
@@ -126,7 +130,7 @@ fn test_fit_nan_input_is_non_finite() {
 /// Inf in input returns NonFinite
 #[test]
 fn test_fit_inf_input_is_non_finite() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let x = array![[1.0, 2.0], [f64::INFINITY, 4.0], [3.0, 6.0]];
     let err = pca.fit(&x).unwrap_err();
     assert!(
@@ -141,7 +145,7 @@ fn test_fit_inf_input_is_non_finite() {
 /// Wrong feature count on transform returns DimensionMismatch
 #[test]
 fn test_transform_wrong_feature_count_is_dimension_mismatch() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
     let x_wrong = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
     let err = pca.transform(&x_wrong).unwrap_err();
@@ -155,7 +159,7 @@ fn test_transform_wrong_feature_count_is_dimension_mismatch() {
 /// NaN during transform returns NonFinite
 #[test]
 fn test_transform_nan_is_non_finite() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
     let x = array![[1.0, f64::NAN], [2.0, 4.0]];
     let err = pca.transform(&x).unwrap_err();
@@ -171,7 +175,7 @@ fn test_transform_nan_is_non_finite() {
 /// Explained variance ratio is > 0.999 for 1 component on perfectly collinear data
 #[test]
 fn test_full_collinear_explained_variance_ratio() {
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let ratio = pca
@@ -191,7 +195,7 @@ fn test_full_collinear_explained_variance_ratio() {
 fn test_full_collinear_singular_value() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let sv = pca.get_singular_values().expect("fitted; sv is Some");
@@ -206,7 +210,7 @@ fn test_full_collinear_singular_value() {
 fn test_full_collinear_component_is_unit_norm() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let comp = pca.get_components().expect("fitted; components is Some");
@@ -223,7 +227,7 @@ fn test_full_collinear_component_is_unit_norm() {
 fn test_full_collinear_component_direction() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let comp = pca.get_components().expect("fitted; components is Some");
@@ -240,7 +244,7 @@ fn test_full_collinear_component_direction() {
 #[test]
 fn test_full_collinear_inverse_transform_reconstruction() {
     let x = collinear_data();
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
     let projected = pca.transform(&x).unwrap();
     let reconstructed = pca.inverse_transform(&projected).unwrap();
@@ -255,10 +259,10 @@ fn test_full_collinear_inverse_transform_reconstruction() {
 fn test_fit_transform_equals_fit_then_transform_full() {
     let x = collinear_data();
 
-    let mut pca_a = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca_a = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     let result_a = pca_a.fit_transform(&x).unwrap();
 
-    let mut pca_b = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca_b = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca_b.fit(&x).unwrap();
     let result_b = pca_b.transform(&x).unwrap();
 
@@ -273,7 +277,7 @@ fn test_components_orthonormal_full() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
 
     let comp = pca.get_components().expect("fitted; components is Some");
@@ -299,7 +303,7 @@ fn test_singular_values_descending_full() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
 
     let sv = pca.get_singular_values().expect("fitted; sv is Some");
@@ -324,7 +328,7 @@ fn test_explained_variance_ratio_sums_to_one() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
 
     let ratio = pca
@@ -351,7 +355,7 @@ fn test_all_solvers_produce_correct_output_shape() {
         SVDSolver::Randomized(42),
         SVDSolver::PowerIteration,
     ] {
-        let mut pca = PCA::new(n_components, solver).unwrap();
+        let mut pca = PCA::new(n_components).unwrap().with_svd_solver(solver);
         pca.fit(&x).unwrap();
         let projected = pca.transform(&x).unwrap();
         assert_eq!(
@@ -377,7 +381,7 @@ fn test_all_solvers_agree_on_singular_value() {
         SVDSolver::Randomized(42),
         SVDSolver::PowerIteration,
     ] {
-        let mut pca = PCA::new(1, solver).unwrap();
+        let mut pca = PCA::new(1).unwrap().with_svd_solver(solver);
         pca.fit(&x).unwrap();
         let sv = pca.get_singular_values().expect("fitted; sv is Some");
         assert_abs_diff_eq!(
@@ -397,10 +401,14 @@ fn test_all_solvers_agree_on_singular_value() {
 fn test_randomized_determinism_same_seed() {
     let x = anisotropic_data();
 
-    let mut pca_a = PCA::new(2, SVDSolver::Randomized(42)).unwrap();
+    let mut pca_a = PCA::new(2)
+        .unwrap()
+        .with_svd_solver(SVDSolver::Randomized(42));
     let result_a = pca_a.fit_transform(&x).unwrap();
 
-    let mut pca_b = PCA::new(2, SVDSolver::Randomized(42)).unwrap();
+    let mut pca_b = PCA::new(2)
+        .unwrap()
+        .with_svd_solver(SVDSolver::Randomized(42));
     let result_b = pca_b.fit_transform(&x).unwrap();
 
     assert_allclose(&result_a, &result_b, 0.0);
@@ -414,7 +422,9 @@ fn test_randomized_components_orthonormal() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::Randomized(42)).unwrap();
+    let mut pca = PCA::new(2)
+        .unwrap()
+        .with_svd_solver(SVDSolver::Randomized(42));
     pca.fit(&x).unwrap();
 
     let comp = pca.get_components().expect("fitted; components is Some");
@@ -432,7 +442,9 @@ fn test_power_iteration_component_unit_norm() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::PowerIteration).unwrap();
+    let mut pca = PCA::new(2)
+        .unwrap()
+        .with_svd_solver(SVDSolver::PowerIteration);
     pca.fit(&x).unwrap();
 
     let comp = pca.get_components().expect("fitted; components is Some");
@@ -446,7 +458,9 @@ fn test_power_iteration_component_unit_norm() {
 #[test]
 fn test_power_iteration_inverse_transform_recovers_collinear() {
     let x = collinear_data();
-    let mut pca = PCA::new(1, SVDSolver::PowerIteration).unwrap();
+    let mut pca = PCA::new(1)
+        .unwrap()
+        .with_svd_solver(SVDSolver::PowerIteration);
     pca.fit(&x).unwrap();
     let projected = pca.transform(&x).unwrap();
     let reconstructed = pca.inverse_transform(&projected).unwrap();
@@ -465,7 +479,7 @@ fn test_all_solvers_capture_full_variance_on_collinear_data() {
         SVDSolver::Randomized(42),
         SVDSolver::PowerIteration,
     ] {
-        let mut pca = PCA::new(1, solver).unwrap();
+        let mut pca = PCA::new(1).unwrap().with_svd_solver(solver);
         pca.fit(&x).unwrap();
         let ratio = pca
             .get_explained_variance_ratio()
@@ -489,7 +503,7 @@ fn test_save_load_roundtrip_preserves_transform() {
     let x = collinear_data();
     let path = "/tmp/rustyml_pca_test_roundtrip.json";
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
     let result_before = pca.transform(&x).unwrap();
 
@@ -516,7 +530,7 @@ fn test_load_nonexistent_path_is_error() {
 #[test]
 fn test_transform_output_shape() {
     let x = collinear_data(); // 5 rows, 2 cols
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
     let out = pca.transform(&x).unwrap();
     assert_eq!(out.shape(), &[5, 1]);
@@ -526,7 +540,7 @@ fn test_transform_output_shape() {
 #[test]
 fn test_inverse_transform_output_shape() {
     let x = collinear_data(); // 5 rows, 2 cols
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
     let projected = pca.transform(&x).unwrap();
     let reconstructed = pca.inverse_transform(&projected).unwrap();
@@ -542,7 +556,7 @@ fn test_anisotropic_projection_values_full() {
     use approx::assert_abs_diff_eq;
 
     let x = anisotropic_data();
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&x).unwrap();
     let projected = pca.transform(&x).unwrap();
 
@@ -572,7 +586,7 @@ fn test_anisotropic_projection_values_full() {
 fn test_full_collinear_get_mean() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let mean = pca.get_mean().expect("fitted; mean is Some");
@@ -587,7 +601,7 @@ fn test_full_collinear_get_mean() {
 fn test_anisotropic_get_mean_is_zero() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&anisotropic_data()).unwrap();
 
     let mean = pca.get_mean().expect("fitted; mean is Some");
@@ -602,7 +616,7 @@ fn test_anisotropic_get_mean_is_zero() {
 fn test_anisotropic_get_explained_variance() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(2, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&anisotropic_data()).unwrap();
 
     let ev = pca
@@ -619,7 +633,7 @@ fn test_anisotropic_get_explained_variance() {
 fn test_full_collinear_get_explained_variance() {
     use approx::assert_abs_diff_eq;
 
-    let mut pca = PCA::new(1, SVDSolver::Full).unwrap();
+    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
     pca.fit(&collinear_data()).unwrap();
 
     let ev = pca

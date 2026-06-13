@@ -321,7 +321,7 @@ impl Node {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::{DecisionTree, Algorithm, DecisionTreeParams};
+/// use rustyml::machine_learning::{DecisionTree, Algorithm};
 /// use ndarray::{array, Array1, Array2};
 ///
 /// // Classification example with Iris dataset
@@ -336,15 +336,10 @@ impl Node {
 /// let y_train = array![0.0, 0.0, 1.0, 1.0, 2.0, 2.0];
 ///
 /// // Create and train a CART classifier with custom parameters
-/// let params = DecisionTreeParams {
-///     max_depth: Some(5),
-///     min_samples_split: 2,
-///     min_samples_leaf: 1,
-///     min_impurity_decrease: 0.0,
-///     random_state: Some(42),
-/// };
-///
-/// let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+/// let mut tree = DecisionTree::new(Algorithm::CART, true)
+///     .unwrap()
+///     .with_max_depth(5)
+///     .with_random_state(42);
 /// tree.fit(&x_train, &y_train).unwrap();
 ///
 /// // Make predictions
@@ -360,7 +355,7 @@ impl Node {
 /// let x_cat = array![[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]];
 /// let y_cat = array![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]; // value 1 -> class 1, values 0/2 -> class 0
 ///
-/// let mut cat_tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+/// let mut cat_tree = DecisionTree::new(Algorithm::C45, true).unwrap();
 /// cat_tree.set_categorical_features(vec![0]); // treat column 0 as categorical
 /// cat_tree.fit(&x_cat, &y_cat).unwrap();
 /// let cat_predictions = cat_tree.predict(&x_cat).unwrap();
@@ -390,7 +385,6 @@ impl DecisionTree {
     ///
     /// - `algorithm` - The splitting algorithm to use (ID3, C45, or CART)
     /// - `is_classifier` - `true` for classification tasks, `false` for regression tasks
-    /// - `params` - Optional hyperparameters. If `None`, default parameters are used
     ///
     /// # Returns
     ///
@@ -398,54 +392,38 @@ impl DecisionTree {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If the algorithm is incompatible with the task type
-    /// - `Error::InvalidParameter` - If hyperparameters are invalid
-    pub fn new(
-        algorithm: Algorithm,
-        is_classifier: bool,
-        params: Option<DecisionTreeParams>,
-    ) -> Result<Self, Error> {
+    /// - `Error::InvalidInput` - If the algorithm is incompatible with the task type (only CART supports regression)
+    ///
+    /// # Notes
+    ///
+    /// Growth and pruning hyperparameters use sensible defaults (no depth limit,
+    /// `min_samples_split = 2`, `min_samples_leaf = 1`, `min_impurity_decrease = 0`, no fixed
+    /// seed). Tune them with the builder methods below; the bounded ones return `Result`:
+    ///
+    /// - [`with_max_depth`](Self::with_max_depth) - maximum tree depth (default: unlimited)
+    /// - [`with_min_samples_split`](Self::with_min_samples_split) - minimum samples to split a node (returns `Result`; must be >= 2)
+    /// - [`with_min_samples_leaf`](Self::with_min_samples_leaf) - minimum samples at a leaf (returns `Result`; must be >= 1)
+    /// - [`with_min_impurity_decrease`](Self::with_min_impurity_decrease) - minimum impurity decrease for a split (returns `Result`; must be >= 0)
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for tie-breaking between equal splits
+    ///
+    /// `min_samples_leaf` must not exceed `min_samples_split`; because the two are set
+    /// independently, that cross-field constraint is checked at [`fit`](Self::fit) time
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{Algorithm, DecisionTree};
+    ///
+    /// let tree = DecisionTree::new(Algorithm::CART, true)
+    ///     .unwrap()
+    ///     .with_max_depth(5)
+    ///     .with_min_samples_split(4)
+    ///     .unwrap()
+    ///     .with_random_state(42);
+    /// ```
+    pub fn new(algorithm: Algorithm, is_classifier: bool) -> Result<Self, Error> {
         // Validate algorithm compatibility with task type
         if !is_classifier && !algorithm.supports_regression() {
             return Err(Error::invalid_input(
                 "Only CART algorithm is supported for regression tasks",
-            ));
-        }
-
-        let params = params.unwrap_or_default();
-
-        // Validate hyperparameters
-        if params.min_samples_split < 2 {
-            return Err(Error::invalid_parameter(
-                "min_samples_split",
-                "must be at least 2",
-            ));
-        }
-
-        if params.min_samples_leaf < 1 {
-            return Err(Error::invalid_parameter(
-                "min_samples_leaf",
-                "must be at least 1",
-            ));
-        }
-
-        if params.min_samples_leaf > params.min_samples_split {
-            return Err(Error::invalid_parameter(
-                "min_samples_leaf",
-                format!(
-                    "min_samples_leaf ({}) cannot be greater than min_samples_split ({})",
-                    params.min_samples_leaf, params.min_samples_split
-                ),
-            ));
-        }
-
-        if params.min_impurity_decrease < 0.0 || !params.min_impurity_decrease.is_finite() {
-            return Err(Error::invalid_parameter(
-                "min_impurity_decrease",
-                format!(
-                    "must be non-negative and finite, got {}",
-                    params.min_impurity_decrease
-                ),
             ));
         }
 
@@ -454,10 +432,86 @@ impl DecisionTree {
             root: None,
             n_features: 0,
             n_classes: None,
-            params,
+            params: DecisionTreeParams::default(),
             is_classifier,
             categorical_features: Vec::new(),
         })
+    }
+
+    /// Sets the maximum tree depth (default: unlimited)
+    ///
+    /// # Parameters
+    ///
+    /// - `max_depth` - maximum depth; nodes are not expanded beyond it
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.params.max_depth = Some(max_depth);
+        self
+    }
+
+    /// Sets the minimum number of samples required to split an internal node (default: `2`)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if `min_samples_split` is less than 2
+    pub fn with_min_samples_split(mut self, min_samples_split: usize) -> Result<Self, Error> {
+        if min_samples_split < 2 {
+            return Err(Error::invalid_parameter(
+                "min_samples_split",
+                "must be at least 2",
+            ));
+        }
+        self.params.min_samples_split = min_samples_split;
+        Ok(self)
+    }
+
+    /// Sets the minimum number of samples required at a leaf node (default: `1`)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if `min_samples_leaf` is less than 1
+    pub fn with_min_samples_leaf(mut self, min_samples_leaf: usize) -> Result<Self, Error> {
+        if min_samples_leaf < 1 {
+            return Err(Error::invalid_parameter(
+                "min_samples_leaf",
+                "must be at least 1",
+            ));
+        }
+        self.params.min_samples_leaf = min_samples_leaf;
+        Ok(self)
+    }
+
+    /// Sets the minimum impurity decrease required for a split (default: `0.0`)
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if `min_impurity_decrease` is negative or not finite
+    pub fn with_min_impurity_decrease(mut self, min_impurity_decrease: f64) -> Result<Self, Error> {
+        if min_impurity_decrease < 0.0 || !min_impurity_decrease.is_finite() {
+            return Err(Error::invalid_parameter(
+                "min_impurity_decrease",
+                format!(
+                    "must be non-negative and finite, got {}",
+                    min_impurity_decrease
+                ),
+            ));
+        }
+        self.params.min_impurity_decrease = min_impurity_decrease;
+        Ok(self)
+    }
+
+    /// Sets a fixed seed for breaking ties between equally-scoring splits
+    /// (default: `None`, non-deterministic tie-breaking)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.params.random_state = Some(seed);
+        self
     }
 
     // Getters
@@ -533,6 +587,18 @@ impl DecisionTree {
         S: Data<Elem = f64> + Send + Sync,
     {
         preliminary_check(x, Some(y))?;
+
+        // min_samples_leaf and min_samples_split are set independently through the builder, so
+        // their cross-field constraint is enforced here at fit time
+        if self.params.min_samples_leaf > self.params.min_samples_split {
+            return Err(Error::invalid_parameter(
+                "min_samples_leaf",
+                format!(
+                    "min_samples_leaf ({}) cannot be greater than min_samples_split ({})",
+                    self.params.min_samples_leaf, self.params.min_samples_split
+                ),
+            ));
+        }
 
         // Need at least min_samples_split samples to attempt a split
         if x.nrows() < self.params.min_samples_split {
@@ -1564,7 +1630,7 @@ mod tests {
     /// traverse_tree returns CorruptStructure when a sample routes to a missing left child
     #[test]
     fn traverse_tree_missing_left_child_is_corrupt_structure() {
-        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         // Internal binary node, threshold 0.5, with NO left child
         let mut node = Node::new_internal(0, 0.5);
         node.right = Some(Box::new(Node::new_leaf(1.0, Some(1), Some(vec![0.0, 1.0]))));
@@ -1579,7 +1645,7 @@ mod tests {
     /// traverse_tree returns CorruptStructure when a sample routes to a missing right child
     #[test]
     fn traverse_tree_missing_right_child_is_corrupt_structure() {
-        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         let mut node = Node::new_internal(0, 0.5);
         node.left = Some(Box::new(Node::new_leaf(0.0, Some(0), Some(vec![1.0, 0.0]))));
         // 1.0 > 0.5 routes right, where there is no child
@@ -1593,7 +1659,7 @@ mod tests {
     /// traverse_tree returns CorruptStructure for a categorical node with no matching child and no fallback
     #[test]
     fn traverse_tree_categorical_no_match_no_fallback_is_corrupt_structure() {
-        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         // Categorical internal node: children map present but empty, and left (fallback) is None
         let node = Node::new_categorical(0, vec!["0".to_string()]);
         // No category key can match an empty map; with no fallback this is corrupt
@@ -1607,7 +1673,7 @@ mod tests {
     /// get_probabilities returns CorruptStructure for a leaf with no stored probability vector
     #[test]
     fn get_probabilities_leaf_without_probabilities_is_corrupt_structure() {
-        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         // Leaf with class set but no stored probability distribution
         let leaf = Node::new_leaf(0.0, Some(0), None);
         let err = tree.get_probabilities(&leaf, &[0.0]).unwrap_err();
@@ -1620,7 +1686,7 @@ mod tests {
     /// get_probabilities returns CorruptStructure for a categorical node with no matching child and no fallback
     #[test]
     fn get_probabilities_categorical_no_match_no_fallback_is_corrupt_structure() {
-        let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
         let node = Node::new_categorical(0, vec!["0".to_string()]);
         let err = tree.get_probabilities(&node, &[0.0]).unwrap_err();
         assert!(

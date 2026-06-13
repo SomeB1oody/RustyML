@@ -29,13 +29,14 @@ use ndarray_rand::rand::seq::SliceRandom;
 ///
 /// // Create model with custom parameters
 /// let mut model = LinearSVC::new(
-///     1000,                           // max_iter
-///     0.001,                          // learning_rate
-///     RegularizationType::L2(1.0),    // penalty type with regularization strength
-///     true,                           // fit_intercept
-///     1e-4,                           // tolerance
-///     Some(42),                       // random_state for reproducible training
-/// ).unwrap();
+///     1000,                        // max_iter
+///     0.001,                       // learning_rate
+///     RegularizationType::L2(1.0), // penalty type with regularization strength
+///     true,                        // fit_intercept
+///     1e-4,                        // tolerance
+/// )
+/// .unwrap()
+/// .with_random_state(42); // fixed seed for reproducible training
 ///
 /// let x = Array2::from_shape_vec((8, 2), vec![
 ///         1.0, 2.0,
@@ -117,7 +118,6 @@ impl LinearSVC {
     /// - `penalty` - Type and strength of regularization (L1(lambda) or L2(lambda))
     /// - `fit_intercept` - Whether to calculate and use bias term
     /// - `tol` - Convergence tolerance that stops training when reached
-    /// - `random_state` - Optional seed for the per-epoch minibatch shuffling. Pass `Some(seed)` for reproducible training, or `None` for non-deterministic behavior
     ///
     /// # Returns
     ///
@@ -130,13 +130,27 @@ impl LinearSVC {
     /// - `learning_rate` is not positive or not finite
     /// - `penalty` regularization parameter is negative or not finite
     /// - `tol` is not positive or not finite
+    ///
+    /// # Notes
+    ///
+    /// The per-epoch minibatch shuffling is non-deterministic by default. For reproducible
+    /// runs, set a fixed seed after construction with the builder method below:
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for minibatch shuffling
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{LinearSVC, RegularizationType};
+    ///
+    /// let model = LinearSVC::new(1000, 0.001, RegularizationType::L2(1.0), true, 1e-4)
+    ///     .unwrap()
+    ///     .with_random_state(42);
+    /// ```
     pub fn new(
         max_iter: usize,
         learning_rate: f64,
         penalty: RegularizationType,
         fit_intercept: bool,
         tol: f64,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate parameters
         validate_max_iterations(max_iter)?;
@@ -164,9 +178,24 @@ impl LinearSVC {
             penalty,
             fit_intercept,
             tol,
-            random_state,
+            random_state: None,
             n_iter: None,
         })
+    }
+
+    /// Sets a fixed RNG seed for the per-epoch minibatch shuffling, making training
+    /// reproducible (default: `None`, non-deterministic)
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the minibatch-shuffling RNG
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.random_state = Some(seed);
+        self
     }
 
     /// Checks if weights contain invalid values (NaN or infinite)

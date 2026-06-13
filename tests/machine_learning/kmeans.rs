@@ -90,7 +90,7 @@ fn assert_blob_structure(labels: &Array1<usize>, blob_size: usize) {
 /// `n_clusters = 0` must yield `Error::InvalidParameter`
 #[test]
 fn constructor_zero_clusters_is_invalid() {
-    let err = KMeans::new(0, 100, 1e-4, None).unwrap_err();
+    let err = KMeans::new(0, 100, 1e-4).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -100,7 +100,7 @@ fn constructor_zero_clusters_is_invalid() {
 /// `max_iterations = 0` must yield `Error::InvalidParameter`
 #[test]
 fn constructor_zero_max_iter_is_invalid() {
-    let err = KMeans::new(3, 0, 1e-4, None).unwrap_err();
+    let err = KMeans::new(3, 0, 1e-4).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -110,7 +110,7 @@ fn constructor_zero_max_iter_is_invalid() {
 /// `tolerance = 0.0` must yield `Error::InvalidParameter`
 #[test]
 fn constructor_zero_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, 0.0, None).unwrap_err();
+    let err = KMeans::new(3, 100, 0.0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -120,7 +120,7 @@ fn constructor_zero_tolerance_is_invalid() {
 /// Negative tolerance must yield `Error::InvalidParameter`
 #[test]
 fn constructor_negative_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, -1e-4, None).unwrap_err();
+    let err = KMeans::new(3, 100, -1e-4).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -130,7 +130,7 @@ fn constructor_negative_tolerance_is_invalid() {
 /// `tolerance = f64::NAN` must yield `Error::InvalidParameter`
 #[test]
 fn constructor_nan_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, f64::NAN, None).unwrap_err();
+    let err = KMeans::new(3, 100, f64::NAN).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -140,7 +140,7 @@ fn constructor_nan_tolerance_is_invalid() {
 /// `tolerance = f64::INFINITY` must yield `Error::InvalidParameter`
 #[test]
 fn constructor_inf_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, f64::INFINITY, None).unwrap_err();
+    let err = KMeans::new(3, 100, f64::INFINITY).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -150,7 +150,7 @@ fn constructor_inf_tolerance_is_invalid() {
 /// Valid parameters succeed and getters reflect the stored values
 #[test]
 fn constructor_valid_stores_params() {
-    let km = KMeans::new(3, 200, 1e-4, Some(42)).unwrap();
+    let km = KMeans::new(3, 200, 1e-4).unwrap().with_random_state(42);
     assert_eq!(km.get_n_clusters(), 3);
     assert_eq!(km.get_max_iterations(), 200);
     assert_abs_diff_eq!(km.get_tolerance(), 1e-4, epsilon = 1e-15);
@@ -177,7 +177,7 @@ fn default_constructor_has_documented_defaults() {
 /// `fit` on an empty array must yield `Error::EmptyInput`
 #[test]
 fn fit_empty_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4, Some(0)).unwrap();
+    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
     let data: Array2<f64> = Array2::zeros((0, 2));
     let err = km.fit(&data).unwrap_err();
     assert!(
@@ -189,7 +189,7 @@ fn fit_empty_data_is_error() {
 /// `fit` on data with NaN must yield `Error::NonFinite`
 #[test]
 fn fit_nan_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4, Some(0)).unwrap();
+    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
     let data = array![[1.0, f64::NAN], [2.0, 3.0]];
     let err = km.fit(&data).unwrap_err();
     assert!(
@@ -201,7 +201,7 @@ fn fit_nan_data_is_error() {
 /// `fit` on data with Inf must yield `Error::NonFinite`
 #[test]
 fn fit_inf_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4, Some(0)).unwrap();
+    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
     let data = array![[1.0, f64::INFINITY], [2.0, 3.0]];
     let err = km.fit(&data).unwrap_err();
     assert!(
@@ -213,7 +213,7 @@ fn fit_inf_data_is_error() {
 /// `fit` with `n_samples < n_clusters` must yield `Error::InvalidInput`
 #[test]
 fn fit_fewer_samples_than_clusters_is_error() {
-    let mut km = KMeans::new(5, 100, 1e-4, Some(0)).unwrap();
+    let mut km = KMeans::new(5, 100, 1e-4).unwrap().with_random_state(0);
     // 3 samples < 5 clusters
     let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     let err = km.fit(&data).unwrap_err();
@@ -228,7 +228,7 @@ fn fit_fewer_samples_than_clusters_is_error() {
 /// `predict` before `fit` must yield `Error::NotFitted`
 #[test]
 fn predict_before_fit_is_not_fitted() {
-    let km = KMeans::new(3, 100, 1e-4, Some(42)).unwrap();
+    let km = KMeans::new(3, 100, 1e-4).unwrap().with_random_state(42);
     let data = array![[1.0, 2.0]];
     let err = km.predict(&data).unwrap_err();
     assert!(
@@ -240,7 +240,7 @@ fn predict_before_fit_is_not_fitted() {
 /// `predict` with wrong number of features must yield `Error::DimensionMismatch`
 #[test]
 fn predict_wrong_feature_count_is_dimension_mismatch() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data(); // shape (15, 2)
     km.fit(&data).unwrap();
 
@@ -256,7 +256,7 @@ fn predict_wrong_feature_count_is_dimension_mismatch() {
 /// `predict` with an empty matrix (after fit) must yield `Error::EmptyInput`
 #[test]
 fn predict_empty_input_after_fit_is_empty_input() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&three_blob_data()).unwrap();
 
     let empty: Array2<f64> = Array2::zeros((0, 2));
@@ -270,7 +270,7 @@ fn predict_empty_input_after_fit_is_empty_input() {
 /// `predict` with NaN input (after fit) must yield `Error::NonFinite`
 #[test]
 fn predict_nan_input_is_non_finite() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data();
     km.fit(&data).unwrap();
 
@@ -288,7 +288,7 @@ fn predict_nan_input_is_non_finite() {
 /// centroid within tol 0.1 (cluster index ordering is arbitrary)
 #[test]
 fn fit_k3_centroids_near_true_blob_means() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data();
     km.fit(&data).unwrap();
 
@@ -316,7 +316,7 @@ fn fit_k3_centroids_near_true_blob_means() {
 /// one label and the three blobs get distinct labels
 #[test]
 fn fit_k3_labels_respect_blob_structure() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data();
     km.fit(&data).unwrap();
 
@@ -328,7 +328,7 @@ fn fit_k3_labels_respect_blob_structure() {
 /// `predict` on the training points agrees with the training labels from `get_labels`
 #[test]
 fn predict_on_training_data_matches_fit_labels() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data();
     km.fit(&data).unwrap();
 
@@ -345,7 +345,7 @@ fn predict_on_training_data_matches_fit_labels() {
 /// cluster as the corresponding training blob
 #[test]
 fn predict_new_points_near_blob_centres() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let data = three_blob_data();
     km.fit(&data).unwrap();
 
@@ -381,11 +381,11 @@ fn predict_new_points_near_blob_centres() {
 fn fit_predict_equals_fit_then_get_labels() {
     let data = three_blob_data();
 
-    let mut km1 = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km1 = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km1.fit(&data).unwrap();
     let labels_via_fit = km1.get_labels().unwrap().clone();
 
-    let mut km2 = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km2 = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     let labels_via_fp = km2.fit_predict(&data).unwrap();
 
     assert_eq!(labels_via_fit.len(), labels_via_fp.len());
@@ -399,7 +399,7 @@ fn fit_predict_equals_fit_then_get_labels() {
 /// Inertia is strictly positive on non-degenerate data (points are not all identical)
 #[test]
 fn inertia_is_positive_on_blob_data() {
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&three_blob_data()).unwrap();
     let inertia = km.get_inertia().unwrap();
     assert!(inertia > 0.0, "inertia must be positive, got {inertia}");
@@ -411,11 +411,11 @@ fn inertia_is_positive_on_blob_data() {
 fn inertia_decreases_as_k_grows() {
     let data = three_blob_data();
 
-    let mut km1 = KMeans::new(1, 300, 1e-4, Some(42)).unwrap();
+    let mut km1 = KMeans::new(1, 300, 1e-4).unwrap().with_random_state(42);
     km1.fit(&data).unwrap();
     let inertia_k1 = km1.get_inertia().unwrap();
 
-    let mut km3 = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km3 = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km3.fit(&data).unwrap();
     let inertia_k3 = km3.get_inertia().unwrap();
 
@@ -431,7 +431,7 @@ fn inertia_decreases_as_k_grows() {
 #[test]
 fn k1_centroid_equals_global_mean() {
     let data = three_blob_data();
-    let mut km = KMeans::new(1, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(1, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
 
     let centroids = km.get_centroids().unwrap();
@@ -450,7 +450,7 @@ fn k1_centroid_equals_global_mean() {
 #[test]
 fn k1_all_labels_are_zero() {
     let data = three_blob_data();
-    let mut km = KMeans::new(1, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(1, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
 
     let labels = km.get_labels().unwrap();
@@ -466,7 +466,7 @@ fn k_equals_n_samples_boundary() {
     let data = three_blob_data();
     let n = data.nrows();
 
-    let mut km_n = KMeans::new(n, 300, 1e-4, Some(42)).unwrap();
+    let mut km_n = KMeans::new(n, 300, 1e-4).unwrap().with_random_state(42);
     km_n.fit(&data).unwrap();
 
     // Centroid matrix must have n rows
@@ -489,7 +489,7 @@ fn k_equals_n_samples_boundary() {
     );
 
     // Inertia with k=n must be <= inertia with k=3
-    let mut km3 = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km3 = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km3.fit(&data).unwrap();
     let inertia_3 = km3.get_inertia().unwrap();
 
@@ -507,10 +507,10 @@ fn k_equals_n_samples_boundary() {
 fn same_seed_gives_identical_results() {
     let data = three_blob_data();
 
-    let mut km_a = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km_a = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km_a.fit(&data).unwrap();
 
-    let mut km_b = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km_b = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km_b.fit(&data).unwrap();
 
     // Centroids must be identical
@@ -542,10 +542,10 @@ fn same_seed_gives_identical_results() {
 fn different_seeds_still_converge_to_same_partition_on_blob_data() {
     let data = three_blob_data();
 
-    let mut km_a = KMeans::new(3, 300, 1e-4, Some(0)).unwrap();
+    let mut km_a = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(0);
     km_a.fit(&data).unwrap();
 
-    let mut km_b = KMeans::new(3, 300, 1e-4, Some(99)).unwrap();
+    let mut km_b = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(99);
     km_b.fit(&data).unwrap();
 
     // Both must produce blob-correct label structures
@@ -560,7 +560,9 @@ fn different_seeds_still_converge_to_same_partition_on_blob_data() {
 #[test]
 fn actual_iterations_is_in_valid_range_after_fit() {
     let max_iter = 300;
-    let mut km = KMeans::new(3, max_iter, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, max_iter, 1e-4)
+        .unwrap()
+        .with_random_state(42);
     km.fit(&three_blob_data()).unwrap();
 
     let n_iter = km.get_actual_iterations().unwrap();
@@ -578,7 +580,7 @@ fn actual_iterations_is_in_valid_range_after_fit() {
 #[test]
 fn save_load_round_trip_preserves_predictions() {
     let data = three_blob_data();
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
 
     let path = "/tmp/rustyml_test_kmeans_round_trip.json";
@@ -636,7 +638,7 @@ fn fit_parallel_branch_k3_centroids_near_true_means_1200() {
     let data = three_blobs_1200();
     assert_eq!(data.nrows(), 1200, "dataset must cross the 1000 threshold");
 
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
 
     let centroids = km.get_centroids().unwrap();
@@ -701,7 +703,7 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     let data = Array2::from_shape_vec((n, d), v).unwrap();
 
     // One Lloyd step: labels and centroids then come from the same assignment pass
-    let mut km = KMeans::new(k, 1, 1e-12, Some(7)).unwrap();
+    let mut km = KMeans::new(k, 1, 1e-12).unwrap().with_random_state(7);
     km.fit(&data).unwrap();
 
     let labels = km.get_labels().unwrap();

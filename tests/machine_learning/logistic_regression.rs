@@ -16,7 +16,7 @@ use crate::common::assert_allclose;
 /// Zero learning rate is rejected with InvalidParameter
 #[test]
 fn new_zero_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, 0.0, 100, 1e-4, None);
+    let result = LogisticRegression::new(true, 0.0, 100, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -27,7 +27,7 @@ fn new_zero_learning_rate_is_invalid() {
 /// Negative learning rate is rejected with InvalidParameter
 #[test]
 fn new_negative_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, -0.01, 100, 1e-4, None);
+    let result = LogisticRegression::new(true, -0.01, 100, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -38,7 +38,7 @@ fn new_negative_learning_rate_is_invalid() {
 /// NaN learning rate is rejected with InvalidParameter
 #[test]
 fn new_nan_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, f64::NAN, 100, 1e-4, None);
+    let result = LogisticRegression::new(true, f64::NAN, 100, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -49,7 +49,7 @@ fn new_nan_learning_rate_is_invalid() {
 /// Infinite learning rate is rejected with InvalidParameter
 #[test]
 fn new_inf_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, f64::INFINITY, 100, 1e-4, None);
+    let result = LogisticRegression::new(true, f64::INFINITY, 100, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -60,7 +60,7 @@ fn new_inf_learning_rate_is_invalid() {
 /// max_iterations = 0 is rejected with InvalidParameter
 #[test]
 fn new_zero_max_iterations_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 0, 1e-4, None);
+    let result = LogisticRegression::new(true, 0.1, 0, 1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -71,7 +71,7 @@ fn new_zero_max_iterations_is_invalid() {
 /// Tolerance = 0.0 is rejected (must be strictly positive)
 #[test]
 fn new_zero_tolerance_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 0.0, None);
+    let result = LogisticRegression::new(true, 0.1, 100, 0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -82,7 +82,7 @@ fn new_zero_tolerance_is_invalid() {
 /// Negative tolerance is rejected with InvalidParameter
 #[test]
 fn new_negative_tolerance_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, -1e-4, None);
+    let result = LogisticRegression::new(true, 0.1, 100, -1e-4);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -93,7 +93,9 @@ fn new_negative_tolerance_is_invalid() {
 /// Negative L1 alpha is rejected with InvalidParameter
 #[test]
 fn new_negative_l1_alpha_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 1e-4, Some(RegularizationType::L1(-0.5)));
+    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
+        .unwrap()
+        .with_regularization(RegularizationType::L1(-0.5));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -104,7 +106,9 @@ fn new_negative_l1_alpha_is_invalid() {
 /// Negative L2 alpha is rejected with InvalidParameter
 #[test]
 fn new_negative_l2_alpha_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 1e-4, Some(RegularizationType::L2(-1.0)));
+    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(-1.0));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -115,8 +119,9 @@ fn new_negative_l2_alpha_is_invalid() {
 /// NaN L2 alpha is rejected with InvalidParameter
 #[test]
 fn new_nan_l2_alpha_is_invalid() {
-    let result =
-        LogisticRegression::new(true, 0.1, 100, 1e-4, Some(RegularizationType::L2(f64::NAN)));
+    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(f64::NAN));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -127,8 +132,10 @@ fn new_nan_l2_alpha_is_invalid() {
 /// Valid constructor parameters succeed and getters return stored values
 #[test]
 fn new_valid_params_succeeds_getters_correct() {
-    let model = LogisticRegression::new(false, 0.05, 200, 1e-5, Some(RegularizationType::L2(0.1)))
-        .expect("valid params should succeed");
+    let model = LogisticRegression::new(false, 0.05, 200, 1e-5)
+        .expect("valid params should succeed")
+        .with_regularization(RegularizationType::L2(0.1))
+        .unwrap();
 
     assert!(!model.get_fit_intercept());
     assert_abs_diff_eq!(model.get_learning_rate(), 0.05, epsilon = 1e-12);
@@ -270,7 +277,7 @@ fn predict_proba_before_fit_returns_not_fitted() {
 /// predict with wrong feature count (trained on 2, called with 3) returns DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
-    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6).expect("valid params");
     // Train on 2-feature data
     let x_train = array![[0.0, 0.0], [0.0, 10.0], [10.0, 0.0], [10.0, 10.0],];
     let y_train = array![0.0, 0.0, 1.0, 1.0];
@@ -290,7 +297,7 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
 /// predict with NaN input returns NonFinite
 #[test]
 fn predict_nan_input_returns_non_finite() {
-    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6).expect("valid params");
     let x_train = array![[0.0], [10.0]];
     let y_train = array![0.0, 1.0];
     model.fit(&x_train, &y_train).expect("fit should succeed");
@@ -307,7 +314,7 @@ fn predict_nan_input_returns_non_finite() {
 /// On perfectly separable data (class 0 at x1 << 0, class 1 at x1 >> 0) all training points are classified correctly
 #[test]
 fn predict_linearly_separable_classifies_correctly() {
-    let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7).expect("valid params");
 
     let x_train = array![
         [-10.0, 0.0],
@@ -339,7 +346,7 @@ fn predict_linearly_separable_classifies_correctly() {
 /// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and class-1 > 0.5, consistent with predict
 #[test]
 fn predict_proba_range_and_consistency_with_predict() {
-    let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-7).expect("valid params");
 
     let x_train = array![[-10.0, 0.0], [-10.0, 5.0], [10.0, 0.0], [10.0, -5.0],];
     let y_train = array![0.0, 0.0, 1.0, 1.0];
@@ -395,12 +402,12 @@ fn fit_predict_agrees_with_fit_then_predict() {
     let x = array![[-5.0, 0.0], [-5.0, 1.0], [5.0, 0.0], [5.0, 1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
 
-    let mut model_a = LogisticRegression::new(true, 0.1, 1000, 1e-7, None).expect("valid params");
+    let mut model_a = LogisticRegression::new(true, 0.1, 1000, 1e-7).expect("valid params");
     let labels_fit_predict = model_a
         .fit_predict(&x, &y)
         .expect("fit_predict should succeed");
 
-    let mut model_b = LogisticRegression::new(true, 0.1, 1000, 1e-7, None).expect("valid params");
+    let mut model_b = LogisticRegression::new(true, 0.1, 1000, 1e-7).expect("valid params");
     model_b.fit(&x, &y).expect("fit should succeed");
     let labels_separate = model_b.predict(&x).expect("predict should succeed");
 
@@ -412,7 +419,7 @@ fn fit_predict_agrees_with_fit_then_predict() {
 /// Without an intercept, the model has exactly n_features weights (2 features -> 2 weights, no bias column)
 #[test]
 fn fit_no_intercept_weight_count_equals_features() {
-    let mut model = LogisticRegression::new(false, 0.1, 1000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(false, 0.1, 1000, 1e-7).expect("valid params");
 
     let x = array![[-5.0, 1.0], [-4.0, 0.0], [4.0, 0.0], [5.0, 1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
@@ -427,7 +434,7 @@ fn fit_no_intercept_weight_count_equals_features() {
 /// With an intercept, the model has n_features + 1 weights (bias is first element)
 #[test]
 fn fit_with_intercept_weight_count_equals_features_plus_one() {
-    let mut model = LogisticRegression::new(true, 0.1, 1000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 1000, 1e-7).expect("valid params");
 
     let x = array![[-5.0, 1.0], [-4.0, 0.0], [4.0, 0.0], [5.0, 1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
@@ -448,7 +455,7 @@ fn fit_with_intercept_weight_count_equals_features_plus_one() {
 /// After fitting, n_iter is Some and at least 1
 #[test]
 fn fit_sets_n_iter() {
-    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-7).expect("valid params");
     let x = array![[-5.0], [5.0]];
     let y = array![0.0, 1.0];
     model.fit(&x, &y).expect("fit should succeed");
@@ -476,13 +483,13 @@ fn l2_regularization_shrinks_weight_norm() {
     ];
     let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
 
-    let mut model_unreg =
-        LogisticRegression::new(true, 0.1, 2000, 1e-8, None).expect("valid params");
+    let mut model_unreg = LogisticRegression::new(true, 0.1, 2000, 1e-8).expect("valid params");
     model_unreg.fit(&x, &y).expect("fit should succeed");
 
-    let mut model_l2 =
-        LogisticRegression::new(true, 0.1, 2000, 1e-8, Some(RegularizationType::L2(5.0)))
-            .expect("valid params");
+    let mut model_l2 = LogisticRegression::new(true, 0.1, 2000, 1e-8)
+        .expect("valid params")
+        .with_regularization(RegularizationType::L2(5.0))
+        .unwrap();
     model_l2.fit(&x, &y).expect("fit should succeed");
 
     let w_unreg = model_unreg.get_weights().expect("weights present");
@@ -511,13 +518,13 @@ fn l1_regularization_shrinks_weight_norm() {
     ];
     let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
 
-    let mut model_unreg =
-        LogisticRegression::new(true, 0.1, 2000, 1e-8, None).expect("valid params");
+    let mut model_unreg = LogisticRegression::new(true, 0.1, 2000, 1e-8).expect("valid params");
     model_unreg.fit(&x, &y).expect("fit should succeed");
 
-    let mut model_l1 =
-        LogisticRegression::new(true, 0.1, 2000, 1e-8, Some(RegularizationType::L1(5.0)))
-            .expect("valid params");
+    let mut model_l1 = LogisticRegression::new(true, 0.1, 2000, 1e-8)
+        .expect("valid params")
+        .with_regularization(RegularizationType::L1(5.0))
+        .unwrap();
     model_l1.fit(&x, &y).expect("fit should succeed");
 
     let w_unreg = model_unreg.get_weights().expect("weights present");
@@ -540,7 +547,7 @@ fn save_load_round_trip_identical_predictions() {
     let x_train = array![[-5.0, 1.0], [-4.0, -1.0], [4.0, 1.0], [5.0, -1.0],];
     let y_train = array![0.0, 0.0, 1.0, 1.0];
 
-    let mut model = LogisticRegression::new(true, 0.05, 1000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.05, 1000, 1e-7).expect("valid params");
     model.fit(&x_train, &y_train).expect("fit should succeed");
 
     let path = "/tmp/rustyml_test_logistic_regression.json";
@@ -574,9 +581,10 @@ fn save_load_preserves_hyperparameters() {
     let x = array![[-1.0], [1.0]];
     let y = array![0.0, 1.0];
 
-    let mut model =
-        LogisticRegression::new(false, 0.05, 300, 1e-5, Some(RegularizationType::L1(0.2)))
-            .expect("valid params");
+    let mut model = LogisticRegression::new(false, 0.05, 300, 1e-5)
+        .expect("valid params")
+        .with_regularization(RegularizationType::L1(0.2))
+        .unwrap();
     model.fit(&x, &y).expect("fit should succeed");
 
     let path = "/tmp/rustyml_test_logistic_regression_hparams.json";
@@ -686,7 +694,7 @@ fn poly_features_pipeline_makes_circular_data_separable() {
     // 2 features, degree 2 -> 5 columns
     assert_eq!(x_poly.ncols(), 5);
 
-    let mut model = LogisticRegression::new(true, 0.01, 3000, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, 0.01, 3000, 1e-7).expect("valid params");
     model
         .fit(&x_poly, &y)
         .expect("fit on polynomial features should succeed");
@@ -708,10 +716,10 @@ fn deterministic_fit_produces_identical_weights() {
     let x = array![[-3.0, 1.0], [-2.0, -1.0], [2.0, 1.0], [3.0, -1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
 
-    let mut model_a = LogisticRegression::new(true, 0.1, 500, 1e-8, None).expect("valid params");
+    let mut model_a = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
     model_a.fit(&x, &y).expect("fit should succeed");
 
-    let mut model_b = LogisticRegression::new(true, 0.1, 500, 1e-8, None).expect("valid params");
+    let mut model_b = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
     model_b.fit(&x, &y).expect("fit should succeed");
 
     let w_a = model_a.get_weights().expect("weights present");
@@ -728,10 +736,10 @@ fn deterministic_fit_produces_identical_predictions_on_unseen_data() {
 
     let x_test = array![[-1.0, 0.0], [1.0, 0.0]];
 
-    let mut model_a = LogisticRegression::new(true, 0.1, 500, 1e-8, None).expect("valid params");
+    let mut model_a = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
     model_a.fit(&x_train, &y_train).expect("fit should succeed");
 
-    let mut model_b = LogisticRegression::new(true, 0.1, 500, 1e-8, None).expect("valid params");
+    let mut model_b = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
     model_b.fit(&x_train, &y_train).expect("fit should succeed");
 
     let preds_a = model_a.predict(&x_test).expect("predict should succeed");
@@ -751,7 +759,7 @@ fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
     let x = array![[-1.0e9, 0.0], [-1.0e9, 1.0], [1.0e9, 0.0], [1.0e9, -1.0],];
     let y = array![0.0, 0.0, 1.0, 1.0];
 
-    let mut model = LogisticRegression::new(true, f64::MAX, 100, 1e-7, None).expect("valid params");
+    let mut model = LogisticRegression::new(true, f64::MAX, 100, 1e-7).expect("valid params");
 
     let result = model.fit(&x, &y);
     assert!(

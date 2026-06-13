@@ -33,7 +33,7 @@ fn bench_kmeans_fit(c: &mut Criterion) {
     let x = random_matrix(20_000, 32, 1);
     c.bench_function("kmeans_fit_20000x32_k16", |b| {
         b.iter(|| {
-            let mut model = KMeans::new(16, 50, 1e-4, Some(42)).unwrap();
+            let mut model = KMeans::new(16, 50, 1e-4).unwrap().with_random_state(42);
             model.fit(black_box(&x)).unwrap();
             black_box(model.get_inertia());
         })
@@ -47,12 +47,11 @@ fn bench_knn_predict(c: &mut Criterion) {
     let y_train: Array1<i64> = Array1::from_iter((0..20_000).map(|i| (i % 4) as i64));
     let queries = random_matrix(512, 64, 3);
 
-    let mut model = KNN::new(
-        8,
-        WeightingStrategy::Uniform,
-        DistanceCalculationMetric::Euclidean,
-    )
-    .unwrap();
+    let mut model = KNN::new(8)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(DistanceCalculationMetric::Euclidean)
+        .unwrap();
     model.fit(&x_train, &y_train).unwrap();
 
     c.bench_function("knn_predict_512q_20000x64", |b| {
@@ -75,8 +74,9 @@ fn bench_svc_fit(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("svc_fit_rbf_1500x16", |b| {
         b.iter(|| {
-            let mut model =
-                SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100, Some(42)).unwrap();
+            let mut model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
+                .unwrap()
+                .with_random_state(42);
             model.fit(black_box(&x), black_box(&y)).unwrap();
             black_box(model.get_bias());
         })
@@ -95,7 +95,7 @@ fn bench_logistic_fit(c: &mut Criterion) {
 
     c.bench_function("logistic_fit_50000x64_100it", |b| {
         b.iter(|| {
-            let mut model = LogisticRegression::new(true, 0.1, 100, 1e-9, None).unwrap();
+            let mut model = LogisticRegression::new(true, 0.1, 100, 1e-9).unwrap();
             model.fit(black_box(&x), black_box(&y)).unwrap();
             black_box(model.get_actual_iterations());
         })
@@ -107,7 +107,9 @@ fn bench_pca_fit_transform(c: &mut Criterion) {
     let x = random_matrix(10_000, 128, 6);
     c.bench_function("pca_fit_transform_10000x128_16c", |b| {
         b.iter(|| {
-            let mut model = PCA::new(16, SVDSolver::PowerIteration).unwrap();
+            let mut model = PCA::new(16)
+                .unwrap()
+                .with_svd_solver(SVDSolver::PowerIteration);
             black_box(model.fit_transform(black_box(&x)).unwrap());
         })
     });
@@ -120,8 +122,9 @@ fn bench_kernel_pca(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("kernel_pca_fit_transform_rbf_1500x32_8c", |b| {
         b.iter(|| {
-            let mut model =
-                KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 8, EigenSolver::Lanczos).unwrap();
+            let mut model = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 8)
+                .unwrap()
+                .with_eigen_solver(EigenSolver::Lanczos);
             black_box(model.fit_transform(black_box(&x)).unwrap());
         })
     });
@@ -135,16 +138,12 @@ fn bench_tsne_exact(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("tsne_exact_1000x32_50it", |b| {
         b.iter(|| {
-            let model = TSNE::new(
-                2,
-                30.0,
-                200.0,
-                50,
-                Some(42),
-                Init::Random,
-                TSNEMethod::Exact,
-            )
-            .unwrap();
+            let model = TSNE::new(2, 30.0, 200.0, 50)
+                .unwrap()
+                .with_random_state(42)
+                .with_init(Init::Random)
+                .with_method(TSNEMethod::Exact)
+                .unwrap();
             black_box(model.fit_transform(black_box(&x)).unwrap());
         })
     });

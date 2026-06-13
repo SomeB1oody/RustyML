@@ -35,7 +35,6 @@ const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 /// ```rust
 /// use rustyml::machine_learning::DBSCAN;
 /// use ndarray::Array2;
-/// use rustyml::machine_learning::DistanceCalculationMetric;
 ///
 /// let data = Array2::from_shape_vec((5, 2), vec![
 ///     0.0, 0.0,
@@ -45,7 +44,8 @@ const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 ///     2.0, 2.0,
 /// ]).unwrap();
 ///
-/// let mut dbscan = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+/// // Euclidean distance is the default; advanced users can override it via `with_metric`
+/// let mut dbscan = DBSCAN::new(0.5, 2).unwrap();
 /// let labels = dbscan.fit_predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -95,7 +95,6 @@ impl DBSCAN {
     ///
     /// - `eps` - Neighborhood radius used to find neighbors
     /// - `min_samples` - Minimum number of neighbors required to form a core point
-    /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
     ///
     /// # Returns
     ///
@@ -104,13 +103,25 @@ impl DBSCAN {
     /// # Errors
     ///
     /// Returns `Error::InvalidParameter` if `eps` is non-positive or not finite,
-    /// if `min_samples` is 0, or if Minkowski `p` is less than 1 (or not finite); orders below 1
-    /// are not valid metrics, so they would break the neighborhood test
-    pub fn new(
-        eps: f64,
-        min_samples: usize,
-        metric: DistanceCalculationMetric,
-    ) -> Result<Self, Error> {
+    /// or if `min_samples` is 0
+    ///
+    /// # Notes
+    ///
+    /// The distance metric defaults to Euclidean. To use another metric, override it
+    /// after construction with the builder method below (returns `Result` because the
+    /// Minkowski order is validated):
+    ///
+    /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{DBSCAN, DistanceCalculationMetric};
+    ///
+    /// let model = DBSCAN::new(0.5, 5)
+    ///     .unwrap()
+    ///     .with_metric(DistanceCalculationMetric::Manhattan)
+    ///     .unwrap();
+    /// ```
+    pub fn new(eps: f64, min_samples: usize) -> Result<Self, Error> {
         if eps <= 0.0 || !eps.is_finite() {
             return Err(Error::invalid_parameter(
                 "eps",
@@ -125,26 +136,43 @@ impl DBSCAN {
             ));
         }
 
-        match metric {
-            // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
-            DistanceCalculationMetric::Minkowski(p) if p < 1.0 || !p.is_finite() => {
-                return Err(Error::invalid_parameter(
-                    "p",
-                    format!("Minkowski p must be at least 1 and finite, got {}", p),
-                ));
-            }
-            _ => {} // Euclidean and Manhattan need no extra validation
-        }
-
         Ok(DBSCAN {
             eps,
             min_samples,
-            metric,
+            metric: DistanceCalculationMetric::Euclidean,
             labels: None,
             core_sample_indices: None,
             core_points: None,
             core_point_labels: None,
         })
+    }
+
+    /// Overrides the distance metric used for neighbor searches (default: Euclidean)
+    ///
+    /// # Parameters
+    ///
+    /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidParameter` if Minkowski `p` is less than 1 or not finite;
+    /// orders below 1 break the triangle inequality, so they would break the neighborhood test
+    pub fn with_metric(mut self, metric: DistanceCalculationMetric) -> Result<Self, Error> {
+        // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
+        if let DistanceCalculationMetric::Minkowski(p) = metric
+            && (p < 1.0 || !p.is_finite())
+        {
+            return Err(Error::invalid_parameter(
+                "p",
+                format!("Minkowski p must be at least 1 and finite, got {}", p),
+            ));
+        }
+        self.metric = metric;
+        Ok(self)
     }
 
     // Getters
@@ -464,7 +492,7 @@ mod tests {
     #[test]
     fn region_query_out_of_bounds_index_gives_computation() {
         let data = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]]; // 3 rows
-        let model = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+        let model = DBSCAN::new(0.5, 2).unwrap();
         let err = model.region_query(&data, 3, None).unwrap_err(); // 3 >= nrows (3)
         match err {
             Error::Computation { .. } => {}

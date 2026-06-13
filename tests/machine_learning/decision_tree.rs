@@ -7,7 +7,7 @@ use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::{Error, TreeError};
-use rustyml::machine_learning::{Algorithm, DecisionTree, DecisionTreeParams};
+use rustyml::machine_learning::{Algorithm, DecisionTree};
 use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
 
@@ -31,7 +31,7 @@ fn linearly_separable_binary() -> (Array2<f64>, Array1<f64>) {
 /// Default params are accepted for CART classifier
 #[test]
 fn test_constructor_default_params_cart_classifier() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None);
+    let tree = DecisionTree::new(Algorithm::CART, true);
     assert!(
         tree.is_ok(),
         "CART classifier with default params should succeed"
@@ -48,7 +48,7 @@ fn test_constructor_default_params_cart_classifier() {
 /// ID3 with is_classifier=false must return InvalidInput
 #[test]
 fn test_constructor_id3_regression_returns_invalid_input() {
-    let err = DecisionTree::new(Algorithm::ID3, false, None).unwrap_err();
+    let err = DecisionTree::new(Algorithm::ID3, false).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "Expected InvalidInput, got {err:?}"
@@ -58,7 +58,7 @@ fn test_constructor_id3_regression_returns_invalid_input() {
 /// C4.5 with is_classifier=false must return InvalidInput
 #[test]
 fn test_constructor_c45_regression_returns_invalid_input() {
-    let err = DecisionTree::new(Algorithm::C45, false, None).unwrap_err();
+    let err = DecisionTree::new(Algorithm::C45, false).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "Expected InvalidInput, got {err:?}"
@@ -68,11 +68,10 @@ fn test_constructor_c45_regression_returns_invalid_input() {
 /// min_samples_split = 1 (less than 2) must return InvalidParameter
 #[test]
 fn test_constructor_min_samples_split_too_small() {
-    let params = DecisionTreeParams {
-        min_samples_split: 1,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+    let err = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_split(1)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
@@ -82,26 +81,29 @@ fn test_constructor_min_samples_split_too_small() {
 /// min_samples_leaf = 0 must return InvalidParameter
 #[test]
 fn test_constructor_min_samples_leaf_zero() {
-    let params = DecisionTreeParams {
-        min_samples_leaf: 0,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+    let err = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_leaf(0)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
     );
 }
 
-/// min_samples_leaf > min_samples_split must return InvalidParameter
+/// min_samples_leaf > min_samples_split is rejected at fit time (the two are set
+/// independently through the builder, so the cross-field constraint cannot be checked earlier)
 #[test]
-fn test_constructor_min_samples_leaf_greater_than_split() {
-    let params = DecisionTreeParams {
-        min_samples_split: 2,
-        min_samples_leaf: 3,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+fn test_min_samples_leaf_greater_than_split_rejected_at_fit() {
+    let mut tree = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_split(2)
+        .unwrap()
+        .with_min_samples_leaf(3)
+        .unwrap();
+    let x = array![[0.0_f64], [1.0], [2.0]];
+    let y = array![0.0_f64, 1.0, 0.0];
+    let err = tree.fit(&x, &y).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
@@ -111,11 +113,10 @@ fn test_constructor_min_samples_leaf_greater_than_split() {
 /// min_impurity_decrease = -0.1 (negative) must return InvalidParameter
 #[test]
 fn test_constructor_negative_min_impurity_decrease() {
-    let params = DecisionTreeParams {
-        min_impurity_decrease: -0.1,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+    let err = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_impurity_decrease(-0.1)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
@@ -125,11 +126,10 @@ fn test_constructor_negative_min_impurity_decrease() {
 /// min_impurity_decrease = f64::NAN must return InvalidParameter
 #[test]
 fn test_constructor_nan_min_impurity_decrease() {
-    let params = DecisionTreeParams {
-        min_impurity_decrease: f64::NAN,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+    let err = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_impurity_decrease(f64::NAN)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
@@ -139,11 +139,10 @@ fn test_constructor_nan_min_impurity_decrease() {
 /// min_impurity_decrease = f64::INFINITY must return InvalidParameter
 #[test]
 fn test_constructor_infinite_min_impurity_decrease() {
-    let params = DecisionTreeParams {
-        min_impurity_decrease: f64::INFINITY,
-        ..DecisionTreeParams::default()
-    };
-    let err = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap_err();
+    let err = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_impurity_decrease(f64::INFINITY)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "Expected InvalidParameter, got {err:?}"
@@ -153,14 +152,16 @@ fn test_constructor_infinite_min_impurity_decrease() {
 /// Custom params are stored and returned by the getters
 #[test]
 fn test_constructor_custom_params_stored_correctly() {
-    let params = DecisionTreeParams {
-        max_depth: Some(3),
-        min_samples_split: 4,
-        min_samples_leaf: 2,
-        min_impurity_decrease: 0.01,
-        random_state: Some(42),
-    };
-    let tree = DecisionTree::new(Algorithm::ID3, true, Some(params)).unwrap();
+    let tree = DecisionTree::new(Algorithm::ID3, true)
+        .unwrap()
+        .with_max_depth(3)
+        .with_min_samples_split(4)
+        .unwrap()
+        .with_min_samples_leaf(2)
+        .unwrap()
+        .with_min_impurity_decrease(0.01)
+        .unwrap()
+        .with_random_state(42);
     let stored = tree.get_parameters();
     assert_eq!(stored.max_depth, Some(3));
     assert_eq!(stored.min_samples_split, 4);
@@ -176,7 +177,7 @@ fn test_constructor_custom_params_stored_correctly() {
 fn test_fit_negative_labels_rejected() {
     let x = array![[0.0_f64, 1.0], [1.0, 0.0]];
     let y = array![-1.0_f64, 1.0]; // -1 is invalid
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.fit(&x, &y).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
@@ -189,7 +190,7 @@ fn test_fit_negative_labels_rejected() {
 fn test_fit_fractional_labels_rejected() {
     let x = array![[0.0_f64, 1.0], [1.0, 0.0]];
     let y = array![0.5_f64, 1.0]; // 0.5 is not an integer
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.fit(&x, &y).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
@@ -201,14 +202,12 @@ fn test_fit_fractional_labels_rejected() {
 #[test]
 fn test_fit_too_few_samples_for_min_samples_split() {
     // Only 2 samples but min_samples_split = 5
-    let params = DecisionTreeParams {
-        min_samples_split: 5,
-        min_samples_leaf: 1,
-        ..DecisionTreeParams::default()
-    };
     let x = array![[0.0_f64], [1.0_f64]];
     let y = array![0.0_f64, 1.0_f64];
-    let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_split(5)
+        .unwrap();
     let err = tree.fit(&x, &y).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
@@ -221,7 +220,7 @@ fn test_fit_too_few_samples_for_min_samples_split() {
 fn test_fit_nan_in_x_rejected() {
     let x = array![[0.0_f64, f64::NAN], [1.0, 0.0], [2.0, 1.0]];
     let y = array![0.0_f64, 1.0, 0.0];
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.fit(&x, &y).unwrap_err();
     assert!(
         matches!(err, Error::NonFinite(_)),
@@ -234,7 +233,7 @@ fn test_fit_nan_in_x_rejected() {
 /// predict() before fit returns NotFitted
 #[test]
 fn test_predict_before_fit_not_fitted() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let x = array![[0.0_f64, 0.0]];
     let err = tree.predict(&x).unwrap_err();
     assert!(
@@ -246,7 +245,7 @@ fn test_predict_before_fit_not_fitted() {
 /// predict_one() before fit returns NotFitted
 #[test]
 fn test_predict_one_before_fit_not_fitted() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.predict_one(&[0.0, 0.0]).unwrap_err();
     assert!(
         matches!(err, Error::NotFitted("DecisionTree")),
@@ -257,7 +256,7 @@ fn test_predict_one_before_fit_not_fitted() {
 /// predict_proba() before fit returns NotFitted
 #[test]
 fn test_predict_proba_before_fit_not_fitted() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let x = array![[0.0_f64, 0.0]];
     let err = tree.predict_proba(&x).unwrap_err();
     assert!(
@@ -269,7 +268,7 @@ fn test_predict_proba_before_fit_not_fitted() {
 /// predict_proba_one() before fit returns NotFitted
 #[test]
 fn test_predict_proba_one_before_fit_not_fitted() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.predict_proba_one(&[0.0, 0.0]).unwrap_err();
     assert!(
         matches!(err, Error::NotFitted("DecisionTree")),
@@ -280,7 +279,7 @@ fn test_predict_proba_one_before_fit_not_fitted() {
 /// generate_tree_structure() before fit returns NotFitted
 #[test]
 fn test_generate_tree_structure_before_fit_not_fitted() {
-    let tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let err = tree.generate_tree_structure().unwrap_err();
     assert!(
         matches!(err, Error::NotFitted("DecisionTree")),
@@ -295,7 +294,7 @@ fn test_generate_tree_structure_before_fit_not_fitted() {
 fn test_predict_wrong_n_features_dimension_mismatch() {
     let (x, y) = linearly_separable_binary();
     // x has 2 features; n_features after fit == 2
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // Supply a matrix with 3 features instead of 2
@@ -317,7 +316,7 @@ fn test_predict_wrong_n_features_dimension_mismatch() {
 #[test]
 fn test_predict_one_wrong_n_features_dimension_mismatch() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // n_features == 2, supply 1 feature
@@ -338,7 +337,7 @@ fn test_predict_one_wrong_n_features_dimension_mismatch() {
 #[test]
 fn test_predict_proba_wrong_n_features_dimension_mismatch() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let x_bad = array![[0.0_f64, 0.0, 0.0]];
@@ -370,7 +369,7 @@ fn test_predict_proba_on_regressor_returns_not_classification_tree() {
         [12.0_f64],
     ];
     let y = array![1.0_f64, 1.0, 1.0, 10.0, 10.0, 10.0];
-    let mut tree = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, false).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let err = tree.predict_proba(&x).unwrap_err();
@@ -383,7 +382,7 @@ fn test_predict_proba_on_regressor_returns_not_classification_tree() {
 /// predict_proba_one() on a CART regressor (before fit) returns NotClassificationTree immediately
 #[test]
 fn test_predict_proba_one_on_unfitted_regressor_returns_not_classification_tree() {
-    let tree = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let tree = DecisionTree::new(Algorithm::CART, false).unwrap();
     // predict_proba_one checks is_classifier first, then NotFitted
     let err = tree.predict_proba_one(&[0.0]).unwrap_err();
     assert!(
@@ -398,7 +397,7 @@ fn test_predict_proba_one_on_unfitted_regressor_returns_not_classification_tree(
 #[test]
 fn test_cart_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // After fit, n_features = 2, n_classes = Some(2), root is Some
@@ -419,11 +418,11 @@ fn test_cart_fit_predict_equals_fit_then_predict() {
     let (x, y) = linearly_separable_binary();
 
     // fit_predict path
-    let mut tree1 = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree1 = DecisionTree::new(Algorithm::CART, true).unwrap();
     let preds_fp = tree1.fit_predict(&x, &y).unwrap();
 
     // fit then predict path
-    let mut tree2 = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree2 = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree2.fit(&x, &y).unwrap();
     let preds_sep = tree2.predict(&x).unwrap();
 
@@ -436,7 +435,7 @@ fn test_cart_fit_predict_equals_fit_then_predict() {
 #[test]
 fn test_id3_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::ID3, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::ID3, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -451,7 +450,7 @@ fn test_id3_classifier_zero_training_error() {
 #[test]
 fn test_c45_classifier_zero_training_error() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::C45, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -478,7 +477,7 @@ fn test_cart_multiclass_zero_training_error() {
     ];
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
 
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // n_classes must be 3 (max label is 2, so 3 classes = 0..=2)
@@ -506,7 +505,7 @@ fn test_id3_multiclass_zero_training_error() {
     ];
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
 
-    let mut tree = DecisionTree::new(Algorithm::ID3, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::ID3, true).unwrap();
     tree.fit(&x, &y).unwrap();
     assert_eq!(tree.get_n_classes(), Some(3));
 
@@ -532,7 +531,7 @@ fn test_c45_multiclass_zero_training_error() {
     ];
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
 
-    let mut tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::C45, true).unwrap();
     tree.fit(&x, &y).unwrap();
     assert_eq!(tree.get_n_classes(), Some(3));
 
@@ -548,7 +547,7 @@ fn test_c45_multiclass_zero_training_error() {
 #[test]
 fn test_predict_proba_rows_sum_to_one_and_argmax_matches_predict() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -580,7 +579,7 @@ fn test_predict_proba_rows_sum_to_one_and_argmax_matches_predict() {
 #[test]
 fn test_predict_proba_one_sum_and_argmax() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // The first training point belongs to class 0 (by design)
@@ -606,7 +605,7 @@ fn test_predict_proba_one_sum_and_argmax() {
 #[test]
 fn test_predict_proba_pure_leaf_gives_one_hot() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     // With full depth the leaf covering the class-0 region holds a [1.0, 0.0]
@@ -648,7 +647,7 @@ fn test_cart_regression_step_function_leaf_means() {
     ];
     let y = array![1.0_f64, 1.0, 1.0, 10.0, 10.0, 10.0];
 
-    let mut tree = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, false).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -676,7 +675,7 @@ fn test_cart_regression_memorizes_unique_samples() {
     ];
     let y = array![1.0_f64, 3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut tree = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, false).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -700,11 +699,9 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
     let y_xor = array![0.0_f64, 1.0, 1.0, 0.0];
 
     // depth-1 tree: cannot fit XOR
-    let params_shallow = DecisionTreeParams {
-        max_depth: Some(1),
-        ..DecisionTreeParams::default()
-    };
-    let mut tree_shallow = DecisionTree::new(Algorithm::CART, true, Some(params_shallow)).unwrap();
+    let mut tree_shallow = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_max_depth(1);
     tree_shallow.fit(&x_xor, &y_xor).unwrap();
     let preds_shallow = tree_shallow.predict(&x_xor).unwrap();
 
@@ -722,7 +719,7 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
 
     // Unlimited depth must do at least as well as depth-1 on XOR; a greedy CART
     // cannot necessarily memorize XOR, since at the root no single-feature split reduces impurity
-    let mut tree_deep = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree_deep = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree_deep.fit(&x_xor, &y_xor).unwrap();
     let preds_deep = tree_deep.predict(&x_xor).unwrap();
     let n_wrong_deep: usize = preds_deep
@@ -741,11 +738,9 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
 #[test]
 fn test_max_depth_1_suffices_for_linearly_separable_data() {
     let (x, y) = linearly_separable_binary();
-    let params = DecisionTreeParams {
-        max_depth: Some(1),
-        ..DecisionTreeParams::default()
-    };
-    let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_max_depth(1);
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -769,7 +764,7 @@ fn test_pure_training_set_creates_pure_root_leaf() {
     // All labels are 1.0
     let y = array![1.0_f64, 1.0, 1.0, 1.0];
 
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -784,7 +779,7 @@ fn test_pure_regression_set_creates_pure_root_leaf() {
     let x = array![[0.0_f64], [1.0_f64], [2.0_f64], [3.0_f64]];
     let y = array![5.5_f64, 5.5, 5.5, 5.5];
 
-    let mut tree = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, false).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -810,7 +805,7 @@ fn test_c45_categorical_multiway_split_zero_training_error() {
     ];
     let y_cat = array![0.0_f64, 0.0, 1.0, 1.0, 0.0, 0.0];
 
-    let mut tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::C45, true).unwrap();
     tree.set_categorical_features(vec![0]);
     tree.fit(&x_cat, &y_cat).unwrap();
 
@@ -834,7 +829,7 @@ fn test_id3_categorical_multiway_split_zero_training_error() {
     ];
     let y_cat = array![0.0_f64, 0.0, 1.0, 1.0, 0.0, 0.0];
 
-    let mut tree = DecisionTree::new(Algorithm::ID3, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::ID3, true).unwrap();
     tree.set_categorical_features(vec![0]);
     tree.fit(&x_cat, &y_cat).unwrap();
 
@@ -849,7 +844,7 @@ fn test_id3_categorical_multiway_split_zero_training_error() {
 #[test]
 fn test_cart_ignores_categorical_feature_designation() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     // Mark feature 0 as categorical - CART must ignore this
     tree.set_categorical_features(vec![0]);
     tree.fit(&x, &y).unwrap();
@@ -874,7 +869,7 @@ fn test_categorical_unseen_value_falls_back_without_error() {
     ];
     let y_cat = array![0.0_f64, 0.0, 1.0, 1.0, 0.0, 0.0];
 
-    let mut tree = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::C45, true).unwrap();
     tree.set_categorical_features(vec![0]);
     tree.fit(&x_cat, &y_cat).unwrap();
 
@@ -896,7 +891,7 @@ fn test_categorical_unseen_value_falls_back_without_error() {
 /// get_categorical_features reflects what was set
 #[test]
 fn test_get_categorical_features_reflects_set() {
-    let mut tree = DecisionTree::new(Algorithm::ID3, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::ID3, true).unwrap();
     assert_eq!(tree.get_categorical_features(), &[] as &[usize]);
 
     tree.set_categorical_features(vec![0, 2]);
@@ -909,7 +904,7 @@ fn test_get_categorical_features_reflects_set() {
 #[test]
 fn test_generate_tree_structure_returns_nonempty_string_after_fit() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
     let structure = tree.generate_tree_structure().unwrap();
     assert!(!structure.is_empty(), "Tree structure should be non-empty");
@@ -927,7 +922,7 @@ fn test_generate_tree_structure_returns_nonempty_string_after_fit() {
 fn test_save_load_round_trip_identical_predictions() {
     let (x_train, y_train) = linearly_separable_binary();
 
-    let mut original = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut original = DecisionTree::new(Algorithm::CART, true).unwrap();
     original.fit(&x_train, &y_train).unwrap();
 
     let preds_before = original.predict(&x_train).unwrap();
@@ -961,7 +956,7 @@ fn test_save_load_round_trip_identical_predictions() {
 #[test]
 fn test_save_load_c45_classifier_round_trip() {
     let (x, y) = linearly_separable_binary();
-    let mut original = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut original = DecisionTree::new(Algorithm::C45, true).unwrap();
     original.fit(&x, &y).unwrap();
 
     let preds_before = original.predict(&x).unwrap();
@@ -990,7 +985,7 @@ fn test_save_load_cart_regressor_round_trip() {
     ];
     let y = array![1.0_f64, 1.0, 1.0, 10.0, 10.0, 10.0];
 
-    let mut original = DecisionTree::new(Algorithm::CART, false, None).unwrap();
+    let mut original = DecisionTree::new(Algorithm::CART, false).unwrap();
     original.fit(&x, &y).unwrap();
 
     let preds_before = original.predict(&x).unwrap();
@@ -1012,7 +1007,7 @@ fn test_save_load_cart_regressor_round_trip() {
 #[test]
 fn test_predict_outputs_are_valid_class_labels() {
     let (x, y) = linearly_separable_binary();
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
     let preds = tree.predict(&x).unwrap();
@@ -1039,7 +1034,7 @@ fn test_multiclass_predict_outputs_in_valid_domain() {
     let y = array![0.0_f64, 0.0, 1.0, 1.0, 2.0, 2.0];
 
     for &algo in &[Algorithm::ID3, Algorithm::C45, Algorithm::CART] {
-        let mut tree = DecisionTree::new(algo, true, None).unwrap();
+        let mut tree = DecisionTree::new(algo, true).unwrap();
         tree.fit(&x, &y).unwrap();
         let preds = tree.predict(&x).unwrap();
         for pred in preds.iter() {
@@ -1069,11 +1064,10 @@ fn tie_break_data() -> (Array2<f64>, Array1<f64>) {
 /// Fit a CART classifier on the tie data with the given `random_state` and return
 /// its tree-structure string (which encodes the chosen split feature at each node)
 fn tie_break_structure(random_state: Option<u64>) -> String {
-    let params = DecisionTreeParams {
-        random_state,
-        ..DecisionTreeParams::default()
-    };
-    let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
+    if let Some(seed) = random_state {
+        tree = tree.with_random_state(seed);
+    }
     let (x, y) = tie_break_data();
     tree.fit(&x, &y).unwrap();
     tree.generate_tree_structure().unwrap()
@@ -1154,11 +1148,10 @@ fn test_min_impurity_decrease_prunes_root_split_at_half() {
     let (x, y) = linearly_separable_binary();
 
     // Just above the root decrease of 0.5 -> the only useful split is pruned away
-    let params_above = DecisionTreeParams {
-        min_impurity_decrease: 0.5001,
-        ..DecisionTreeParams::default()
-    };
-    let mut tree_above = DecisionTree::new(Algorithm::CART, true, Some(params_above)).unwrap();
+    let mut tree_above = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_impurity_decrease(0.5001)
+        .unwrap();
     tree_above.fit(&x, &y).unwrap();
     assert!(
         root_is_leaf(&tree_above),
@@ -1179,11 +1172,10 @@ fn test_min_impurity_decrease_prunes_root_split_at_half() {
     );
 
     // Just below the root decrease of 0.5 -> the split is kept and the data is fit perfectly
-    let params_below = DecisionTreeParams {
-        min_impurity_decrease: 0.4999,
-        ..DecisionTreeParams::default()
-    };
-    let mut tree_below = DecisionTree::new(Algorithm::CART, true, Some(params_below)).unwrap();
+    let mut tree_below = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_impurity_decrease(0.4999)
+        .unwrap();
     tree_below.fit(&x, &y).unwrap();
     assert!(
         !root_is_leaf(&tree_below),
@@ -1204,7 +1196,7 @@ fn test_min_samples_leaf_rejects_too_small_leaf_split() {
     let probe = array![[3.0_f64]];
 
     // Default min_samples_leaf = 1: best split kept, lone class-1 sample separated
-    let mut tree_allow = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree_allow = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree_allow.fit(&x, &y).unwrap();
     assert!(
         !root_is_leaf(&tree_allow),
@@ -1215,11 +1207,10 @@ fn test_min_samples_leaf_rejects_too_small_leaf_split() {
 
     // min_samples_leaf = 2: the only impurity-reducing best split makes a size-1
     // leaf and is rejected, collapsing the node to a majority-class-0 leaf
-    let params = DecisionTreeParams {
-        min_samples_leaf: 2,
-        ..DecisionTreeParams::default()
-    };
-    let mut tree_reject = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree_reject = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_leaf(2)
+        .unwrap();
     tree_reject.fit(&x, &y).unwrap();
     assert!(
         root_is_leaf(&tree_reject),
@@ -1237,7 +1228,7 @@ fn test_min_samples_split_stops_recursion_shallower_tree() {
     let y = array![0.0_f64, 1.0, 2.0];
 
     // Default min_samples_split = 2: internal node {1,2} splits again -> depth 2
-    let mut tree_default = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree_default = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree_default.fit(&x, &y).unwrap();
     let depth_default = leaf_depth(tree_default.get_root().unwrap());
     assert_eq!(
@@ -1246,11 +1237,10 @@ fn test_min_samples_split_stops_recursion_shallower_tree() {
     );
 
     // min_samples_split = 3: the 2-sample internal node must stop -> depth 1
-    let params = DecisionTreeParams {
-        min_samples_split: 3,
-        ..DecisionTreeParams::default()
-    };
-    let mut tree_restricted = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree_restricted = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_min_samples_split(3)
+        .unwrap();
     tree_restricted.fit(&x, &y).unwrap();
     let depth_restricted = leaf_depth(tree_restricted.get_root().unwrap());
     assert_eq!(
@@ -1277,11 +1267,9 @@ fn test_predict_proba_exact_impure_leaf_distribution() {
     ];
     let y = array![1.0_f64, 1.0, 1.0, 0.0, 0.0, 1.0];
 
-    let params = DecisionTreeParams {
-        max_depth: Some(1),
-        ..DecisionTreeParams::default()
-    };
-    let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_max_depth(1);
     tree.fit(&x, &y).unwrap();
 
     // x = 4.0 lands in the impure right leaf {2 of class 0, 1 of class 1}
@@ -1313,11 +1301,9 @@ fn test_max_depth_zero_root_is_leaf_predicts_global_majority() {
     // 3 class-0 and 2 class-1 => global majority is class 0
     let y = array![0.0_f64, 0.0, 0.0, 1.0, 1.0];
 
-    let params = DecisionTreeParams {
-        max_depth: Some(0),
-        ..DecisionTreeParams::default()
-    };
-    let mut tree = DecisionTree::new(Algorithm::CART, true, Some(params)).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .with_max_depth(0);
     tree.fit(&x, &y).unwrap();
 
     // The root must be a single leaf (no split at all)
@@ -1359,7 +1345,7 @@ fn test_save_load_categorical_multiway_round_trip_identical_predictions() {
     ];
     let y_cat = array![0.0_f64, 0.0, 1.0, 1.0, 0.0, 0.0];
 
-    let mut original = DecisionTree::new(Algorithm::C45, true, None).unwrap();
+    let mut original = DecisionTree::new(Algorithm::C45, true).unwrap();
     original.set_categorical_features(vec![0]);
     original.fit(&x_cat, &y_cat).unwrap();
 
@@ -1413,7 +1399,7 @@ impl Drop for GlobalSeedGuard {
 /// Fit a `random_state = None` CART tree on the tie data and return its structure
 /// string; tie-breaking derives from the thread-local global seed when one is set
 fn tie_break_structure_none() -> String {
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     let (x, y) = tie_break_data();
     tree.fit(&x, &y).unwrap();
     tree.generate_tree_structure().unwrap()

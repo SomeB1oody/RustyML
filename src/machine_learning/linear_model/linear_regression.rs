@@ -31,7 +31,7 @@ use rayon::prelude::{
 /// use ndarray::{Array1, Array2};
 ///
 /// // Create a linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
 ///
 /// // Prepare training data
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -129,7 +129,6 @@ impl LinearRegression {
     /// - `learning_rate` - the learning rate for gradient descent optimization
     /// - `max_iterations` - maximum number of iterations for gradient descent
     /// - `tolerance` - the tolerance for stopping criteria
-    /// - `regularization_type` - optional regularization to prevent overfitting (L1, L2, or None)
     ///
     /// # Returns
     ///
@@ -137,19 +136,33 @@ impl LinearRegression {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, tolerance, or the regularization alpha is invalid
+    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, or tolerance is invalid
+    ///
+    /// # Notes
+    ///
+    /// No regularization is applied by default. To add L1/L2 regularization, use the builder
+    /// method below (it returns `Result` because the regularization alpha is validated):
+    ///
+    /// - [`with_regularization`](Self::with_regularization) - L1 or L2 regularization to prevent overfitting
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{LinearRegression, RegularizationType};
+    ///
+    /// let model = LinearRegression::new(true, 0.01, 1000, 1e-6)
+    ///     .unwrap()
+    ///     .with_regularization(RegularizationType::L2(0.1))
+    ///     .unwrap();
+    /// ```
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
-        regularization_type: Option<RegularizationType>,
     ) -> Result<Self, Error> {
         // Input validation
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
         validate_tolerance(tolerance)?;
-        validate_regularization_type(regularization_type)?;
 
         Ok(LinearRegression {
             coefficients: None,
@@ -159,8 +172,30 @@ impl LinearRegression {
             max_iter: max_iterations,
             tol: tolerance,
             n_iter: None,
-            regularization_type,
+            regularization_type: None,
         })
+    }
+
+    /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
+    ///
+    /// # Parameters
+    ///
+    /// - `regularization` - the regularization variant and strength ([`RegularizationType::L1`] or [`RegularizationType::L2`])
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if the regularization alpha is negative or not finite
+    pub fn with_regularization(
+        mut self,
+        regularization: RegularizationType,
+    ) -> Result<Self, Error> {
+        validate_regularization_type(Some(regularization))?;
+        self.regularization_type = Some(regularization);
+        Ok(self)
     }
 
     get_field!(get_fit_intercept, fit_intercept, bool);

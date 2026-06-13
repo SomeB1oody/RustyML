@@ -12,7 +12,7 @@ use rustyml::machine_learning::{KNN, WeightingStrategy};
 /// k=0 must return Error::InvalidParameter
 #[test]
 fn constructor_k_zero_returns_invalid_parameter() {
-    let err = KNN::<i32>::new(0, WeightingStrategy::Uniform, Metric::Euclidean).unwrap_err();
+    let err = KNN::<i32>::new(0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -22,13 +22,20 @@ fn constructor_k_zero_returns_invalid_parameter() {
 /// k=1 (minimum legal) must succeed
 #[test]
 fn constructor_k_one_succeeds() {
-    KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
 }
 
 /// Minkowski p < 1 is not a valid metric and must return Error::InvalidParameter
 #[test]
 fn constructor_rejects_minkowski_p_below_one() {
-    let err = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(0.5)).unwrap_err();
+    let err = KNN::<i32>::new(1)
+        .unwrap()
+        .with_metric(Metric::Minkowski(0.5))
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for Minkowski(0.5), got {err:?}"
@@ -48,7 +55,11 @@ fn constructor_default_values() {
 /// new() must store and expose the exact parameters supplied
 #[test]
 fn constructor_stores_parameters() {
-    let knn = KNN::<i32>::new(3, WeightingStrategy::Distance, Metric::Manhattan).unwrap();
+    let knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Manhattan)
+        .unwrap();
     assert_eq!(knn.get_k(), 3);
     assert_eq!(knn.get_weighting_strategy(), WeightingStrategy::Distance);
     assert_eq!(knn.get_metric(), Metric::Manhattan);
@@ -59,7 +70,11 @@ fn constructor_stores_parameters() {
 /// Fitting with fewer samples than k returns Error::InvalidInput (k=5, 3 rows)
 #[test]
 fn fit_fewer_samples_than_k_returns_invalid_input() {
-    let mut knn = KNN::<i32>::new(5, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(5)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]; // 3 rows < k=5
     let y = array![0, 1, 0];
     let err = knn.fit(&x, &y).unwrap_err();
@@ -72,7 +87,11 @@ fn fit_fewer_samples_than_k_returns_invalid_input() {
 /// Fitting with y length != x.nrows() returns DimensionMismatch (x has 3 rows, y has 2 labels)
 #[test]
 fn fit_mismatched_y_length_returns_dimension_mismatch() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]; // 3 rows
     let y = array![0, 1]; // only 2 labels
     let err = knn.fit(&x, &y).unwrap_err();
@@ -85,7 +104,11 @@ fn fit_mismatched_y_length_returns_dimension_mismatch() {
 /// Fitting with NaN in x must return Error::NonFinite
 #[test]
 fn fit_nan_in_x_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x = array![[f64::NAN, 2.0]];
     let y = array![0];
     let err = knn.fit(&x, &y).unwrap_err();
@@ -98,7 +121,11 @@ fn fit_nan_in_x_returns_non_finite() {
 /// Fitting with Inf in x must return Error::NonFinite
 #[test]
 fn fit_inf_in_x_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x = array![[f64::INFINITY, 2.0]];
     let y = array![0];
     let err = knn.fit(&x, &y).unwrap_err();
@@ -111,7 +138,11 @@ fn fit_inf_in_x_returns_non_finite() {
 /// Fitting with an empty x (0 rows) must return Error::EmptyInput
 #[test]
 fn fit_empty_x_returns_empty_input() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x: Array2<f64> = Array2::zeros((0, 2));
     let y: Array1<i32> = Array1::zeros(0);
     let err = knn.fit(&x, &y).unwrap_err();
@@ -126,7 +157,11 @@ fn fit_empty_x_returns_empty_input() {
 /// predict before fit must return Error::NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
-    let knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_test = array![[1.0, 2.0]];
     let err = knn.predict(&x_test).unwrap_err();
     assert!(
@@ -138,7 +173,11 @@ fn predict_before_fit_returns_not_fitted() {
 /// predict_parallel before fit must return Error::NotFitted
 #[test]
 fn predict_parallel_before_fit_returns_not_fitted() {
-    let knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_test = array![[1.0, 2.0]];
     let err = knn.predict_parallel(&x_test).unwrap_err();
     assert!(
@@ -150,7 +189,11 @@ fn predict_parallel_before_fit_returns_not_fitted() {
 /// predict with wrong feature count must return Error::DimensionMismatch (train 2, predict 3)
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0]];
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -167,7 +210,11 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
 /// predict with NaN in x_test must return Error::NonFinite
 #[test]
 fn predict_nan_in_x_test_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0]];
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -183,7 +230,11 @@ fn predict_nan_in_x_test_returns_non_finite() {
 /// predict with empty x_test must return Error::EmptyInput
 #[test]
 fn predict_empty_x_test_returns_empty_input() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0]];
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -201,7 +252,11 @@ fn predict_empty_x_test_returns_empty_input() {
 /// k=1 Euclidean Uniform picks the single nearest neighbour per query
 #[test]
 fn predict_k1_euclidean_correctness() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -219,7 +274,11 @@ fn predict_k1_euclidean_correctness() {
 /// k=1 Manhattan Uniform picks the single nearest neighbour per query
 #[test]
 fn predict_k1_manhattan_correctness() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Manhattan).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Manhattan)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -238,14 +297,21 @@ fn predict_k1_manhattan_correctness() {
 #[test]
 fn predict_minkowski_p1_equals_manhattan() {
     // Manhattan reference model
-    let mut knn_man = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Manhattan).unwrap();
+    let mut knn_man = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Manhattan)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn_man.fit(&x_train, &y_train).unwrap();
 
     // Minkowski(p=1) model
-    let mut knn_mink =
-        KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(1.0)).unwrap();
+    let mut knn_mink = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Minkowski(1.0))
+        .unwrap();
     knn_mink.fit(&x_train, &y_train).unwrap();
 
     let x_test = array![[0.5, 0.0], [9.5, 0.0], [0.0, 9.5]];
@@ -264,14 +330,21 @@ fn predict_minkowski_p1_equals_manhattan() {
 #[test]
 fn predict_minkowski_p2_equals_euclidean() {
     // Euclidean reference model
-    let mut knn_euc = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn_euc = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn_euc.fit(&x_train, &y_train).unwrap();
 
     // Minkowski(p=2) model
-    let mut knn_mink =
-        KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(2.0)).unwrap();
+    let mut knn_mink = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Minkowski(2.0))
+        .unwrap();
     knn_mink.fit(&x_train, &y_train).unwrap();
 
     let x_test = array![[0.5, 0.0], [9.5, 0.0], [0.0, 9.5]];
@@ -289,7 +362,11 @@ fn predict_minkowski_p2_equals_euclidean() {
 /// k=3 Euclidean Uniform resolves a clean 3-vs-0 majority per query
 #[test]
 fn predict_k3_majority_clean() {
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![
         [0.0, 0.0],
         [1.0, 0.0],
@@ -326,7 +403,11 @@ fn predict_high_dimensional_falls_back_to_brute_force() {
     }
     let y_train = array![0, 0, 0, 1, 1, 1];
 
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     knn.fit(&x_train, &y_train).unwrap();
 
     let mut x_test = Array2::<f64>::zeros((2, n_features));
@@ -348,7 +429,11 @@ fn predict_high_dimensional_falls_back_to_brute_force() {
 /// k=3 Euclidean Uniform resolves a 2:1 split (2 of 3 neighbours decide the class)
 #[test]
 fn predict_k3_majority_two_to_one_split() {
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     // 4 training points - exactly k+1 to keep the problem minimal
     let x_train = array![[0.0, 0.0], [1.0, 0.0], [5.0, 0.0], [6.0, 0.0]];
     let y_train = array![0, 0, 1, 1];
@@ -374,7 +459,11 @@ fn predict_k3_majority_two_to_one_split() {
 /// k=2 Distance weighting: the closer neighbour decides the class
 #[test]
 fn predict_distance_weighting_closer_wins() {
-    let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(2)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0]];
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -395,7 +484,11 @@ fn predict_distance_weighting_closer_wins() {
 /// Distance weighting: an exact-match query (distance 0) returns the matched point's class
 #[test]
 fn predict_distance_zero_exact_match_returns_immediately() {
-    let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(2)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     // at least k=2 training samples needed to fit
     let x_train = array![[3.0, 4.0], [100.0, 100.0]];
     let y_train = array![7, 99];
@@ -413,7 +506,11 @@ fn predict_distance_zero_exact_match_returns_immediately() {
 /// KNN with T=String returns the nearest neighbour's string label
 #[test]
 fn predict_string_labels() {
-    let mut knn = KNN::<String>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<String>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train: Array1<String> = Array1::from(vec![
         "cat".to_string(),
@@ -434,7 +531,11 @@ fn predict_string_labels() {
 /// predict and predict_parallel must produce identical results (Uniform, small k)
 #[test]
 fn predict_and_predict_parallel_agree_small_k() {
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![
         [0.0, 0.0],
         [1.0, 0.0],
@@ -459,7 +560,11 @@ fn predict_and_predict_parallel_agree_small_k() {
 /// predict and predict_parallel must also agree with Distance weighting
 #[test]
 fn predict_and_predict_parallel_agree_distance_weights() {
-    let mut knn = KNN::<i32>::new(2, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(2)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let y_train = array![0, 1, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -496,7 +601,11 @@ fn predict_parallel_large_k_exercises_parallel_voting_branch() {
         Array2::from_shape_vec((N, 2), x_rows.iter().flatten().copied().collect()).unwrap();
     let y_train = Array1::from_vec(y_vals);
 
-    let mut knn = KNN::<i32>::new(100, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(100)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     knn.fit(&x_train, &y_train).unwrap();
 
     let x_test = array![[50.0, 0.0], [250.0, 0.0]];
@@ -538,7 +647,11 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
         Array2::from_shape_vec((N, 2), x_rows.iter().flatten().copied().collect()).unwrap();
     let y_train = Array1::from_vec(y_vals);
 
-    let mut knn = KNN::<i32>::new(100, WeightingStrategy::Distance, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(100)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     knn.fit(&x_train, &y_train).unwrap();
 
     let x_test = array![[50.5, 0.0]];
@@ -559,7 +672,11 @@ fn predict_parallel_large_k_distance_weighting_exercises_parallel_weight_branch(
 /// fit_predict with k=1 on the training data returns every training label unchanged
 #[test]
 fn fit_predict_returns_training_labels() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![[0.0, 0.0], [10.0, 0.0]];
     let y_train = array![0, 1];
     let result = knn.fit_predict(&x_train, &y_train).unwrap();
@@ -573,7 +690,11 @@ fn fit_predict_returns_training_labels() {
 /// k=1 Minkowski(p=3) finds the correct nearest neighbour under the Lp-3 metric
 #[test]
 fn predict_minkowski_p3_correct_nearest_neighbour() {
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Minkowski(3.0)).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Minkowski(3.0))
+        .unwrap();
     let x_train = array![[3.0, 0.0], [0.0, 4.0]];
     let y_train = array![0, 1];
     knn.fit(&x_train, &y_train).unwrap();
@@ -598,7 +719,11 @@ fn predict_minkowski_p3_correct_nearest_neighbour() {
 /// A reloaded KNN model must produce predictions identical to the original
 #[test]
 fn save_and_load_produces_identical_predictions() {
-    let mut knn = KNN::<i32>::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(3)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     let x_train = array![
         [0.0, 0.0],
         [1.0, 0.0],
@@ -630,7 +755,11 @@ fn save_and_load_produces_identical_predictions() {
 /// Save/load preserves the Distance weighting strategy, metric, and k
 #[test]
 fn save_and_load_preserves_model_metadata() {
-    let mut knn = KNN::<i32>::new(7, WeightingStrategy::Distance, Metric::Manhattan).unwrap();
+    let mut knn = KNN::<i32>::new(7)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Distance)
+        .with_metric(Metric::Manhattan)
+        .unwrap();
     // 7 training points to satisfy nrows >= k
     let x_train = Array2::from_shape_vec(
         (7, 2),

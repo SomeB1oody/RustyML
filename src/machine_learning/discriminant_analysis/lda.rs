@@ -17,9 +17,10 @@ use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIter
 /// Selects the numerical method used to derive the per-class linear scoring coefficients from
 /// the shared covariance. The discriminant projection used by `transform` is solver-independent,
 /// so this choice only affects `predict`
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
 pub enum Solver {
     /// Inverts the shared covariance through its SVD pseudo-inverse, then scores with that inverse
+    #[default]
     SVD,
     /// Inverts the shared covariance through a symmetric eigendecomposition, then scores with that inverse
     Eigen,
@@ -317,7 +318,11 @@ pub enum Shrinkage {
 /// ).unwrap();
 /// let y = Array1::from_vec(vec![0, 0, 0, 1, 1, 1]);
 ///
-/// let mut lda = LDA::new(1, Some(Solver::SVD), Some(Shrinkage::Manual(0.1))).unwrap();
+/// let mut lda = LDA::new(1)
+///     .unwrap()
+///     .with_solver(Solver::SVD)
+///     .with_shrinkage(Shrinkage::Manual(0.1))
+///     .unwrap();
 /// lda.fit(&x, &y).unwrap();
 /// let _predictions = lda.predict(&x).unwrap();
 /// let _x_transformed = lda.transform(&x).unwrap();
@@ -356,7 +361,7 @@ pub struct LDA {
 /// - `shrinkage` - `None`
 impl Default for LDA {
     fn default() -> Self {
-        Self::new(2, None, None).expect("Default LDA parameters should be valid")
+        Self::new(2).expect("Default LDA parameters should be valid")
     }
 }
 
@@ -366,8 +371,6 @@ impl LDA {
     /// # Parameters
     ///
     /// - `n_components` - Number of components to keep (must be > 0)
-    /// - `solver` - Optional solver choice (defaults to `Solver::SVD`)
-    /// - `shrinkage` - Optional shrinkage strategy for covariance estimation
     ///
     /// # Returns
     ///
@@ -375,12 +378,27 @@ impl LDA {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `n_components` is zero or shrinkage is out of range
-    pub fn new(
-        n_components: usize,
-        solver: Option<Solver>,
-        shrinkage: Option<Shrinkage>,
-    ) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `n_components` is zero
+    ///
+    /// # Notes
+    ///
+    /// The solver defaults to `Solver::SVD` and no shrinkage is applied. Override either with
+    /// the builder methods below (`with_shrinkage` returns `Result` because a manual shrinkage
+    /// coefficient is validated):
+    ///
+    /// - [`with_solver`](Self::with_solver) - solver strategy for the LDA computation
+    /// - [`with_shrinkage`](Self::with_shrinkage) - shrinkage strategy for covariance estimation
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{LDA, Shrinkage, Solver};
+    ///
+    /// let model = LDA::new(2)
+    ///     .unwrap()
+    ///     .with_solver(Solver::SVD)
+    ///     .with_shrinkage(Shrinkage::Manual(0.1))
+    ///     .unwrap();
+    /// ```
+    pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
                 "n_components",
@@ -388,19 +406,10 @@ impl LDA {
             ));
         }
 
-        if let Some(Shrinkage::Manual(alpha)) = shrinkage
-            && (!alpha.is_finite() || !(0.0..=1.0).contains(&alpha))
-        {
-            return Err(Error::invalid_parameter(
-                "shrinkage",
-                format!("Manual(alpha) must be in [0, 1], got {}", alpha),
-            ));
-        }
-
         Ok(Self {
             n_components,
-            solver: solver.unwrap_or(Solver::SVD),
-            shrinkage,
+            solver: Solver::SVD,
+            shrinkage: None,
             classes: None,
             priors: None,
             means: None,
@@ -408,6 +417,46 @@ impl LDA {
             coefficients: None,
             intercepts: None,
         })
+    }
+
+    /// Sets the solver strategy for the LDA computation (default: `Solver::SVD`)
+    ///
+    /// # Parameters
+    ///
+    /// - `solver` - the solver to use
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_solver(mut self, solver: Solver) -> Self {
+        self.solver = solver;
+        self
+    }
+
+    /// Sets the shrinkage strategy for covariance estimation (default: no shrinkage)
+    ///
+    /// # Parameters
+    ///
+    /// - `shrinkage` - the shrinkage strategy
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if a [`Shrinkage::Manual`] coefficient is outside `[0, 1]` or not finite
+    pub fn with_shrinkage(mut self, shrinkage: Shrinkage) -> Result<Self, Error> {
+        if let Shrinkage::Manual(alpha) = shrinkage
+            && (!alpha.is_finite() || !(0.0..=1.0).contains(&alpha))
+        {
+            return Err(Error::invalid_parameter(
+                "shrinkage",
+                format!("Manual(alpha) must be in [0, 1], got {}", alpha),
+            ));
+        }
+        self.shrinkage = Some(shrinkage);
+        Ok(self)
     }
 
     // Getters

@@ -9,7 +9,7 @@ use rustyml::machine_learning::IsolationForest;
 
 #[test]
 fn test_new_n_estimators_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(0, 256, None, Some(42)).unwrap_err();
+    let err = IsolationForest::new(0, 256).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { ref name, .. } if name == "n_estimators"),
         "expected InvalidParameter for n_estimators=0, got: {err:?}"
@@ -18,7 +18,7 @@ fn test_new_n_estimators_zero_returns_invalid_parameter() {
 
 #[test]
 fn test_new_max_samples_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(10, 0, None, Some(42)).unwrap_err();
+    let err = IsolationForest::new(10, 0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { ref name, .. } if name == "max_samples"),
         "expected InvalidParameter for max_samples=0, got: {err:?}"
@@ -27,7 +27,10 @@ fn test_new_max_samples_zero_returns_invalid_parameter() {
 
 #[test]
 fn test_new_max_depth_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(10, 256, Some(0), Some(42)).unwrap_err();
+    let err = IsolationForest::new(10, 256)
+        .unwrap()
+        .with_max_depth(0)
+        .unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { ref name, .. } if name == "max_depth"),
         "expected InvalidParameter for max_depth=Some(0), got: {err:?}"
@@ -36,7 +39,11 @@ fn test_new_max_depth_zero_returns_invalid_parameter() {
 
 #[test]
 fn test_new_valid_explicit_max_depth_succeeds() {
-    let model = IsolationForest::new(20, 64, Some(5), Some(99)).unwrap();
+    let model = IsolationForest::new(20, 64)
+        .unwrap()
+        .with_max_depth(5)
+        .unwrap()
+        .with_random_state(99);
     assert_eq!(model.get_n_estimators(), 20);
     assert_eq!(model.get_max_samples(), 64);
     assert_eq!(model.get_max_depth(), 5);
@@ -49,21 +56,21 @@ fn test_new_valid_explicit_max_depth_succeeds() {
 #[test]
 fn test_new_auto_max_depth_ceil_log2_max_samples() {
     // max_samples = 256: ceil(log2(256)) = 8
-    let model = IsolationForest::new(10, 256, None, Some(0)).unwrap();
+    let model = IsolationForest::new(10, 256).unwrap().with_random_state(0);
     assert_eq!(model.get_max_depth(), 8);
 }
 
 #[test]
 fn test_new_auto_max_depth_ceil_log2_non_power_of_two() {
     // max_samples = 100: ceil(log2(100)) = ceil(6.6439) = 7
-    let model = IsolationForest::new(10, 100, None, Some(0)).unwrap();
+    let model = IsolationForest::new(10, 100).unwrap().with_random_state(0);
     assert_eq!(model.get_max_depth(), 7);
 }
 
 #[test]
 fn test_new_auto_max_depth_ceil_log2_two() {
     // max_samples = 2: ceil(log2(2)) = 1
-    let model = IsolationForest::new(10, 2, None, Some(0)).unwrap();
+    let model = IsolationForest::new(10, 2).unwrap().with_random_state(0);
     assert_eq!(model.get_max_depth(), 1);
 }
 
@@ -71,7 +78,7 @@ fn test_new_auto_max_depth_ceil_log2_two() {
 fn test_new_auto_max_depth_ceil_log2_one() {
     // max_samples = 1: ceil(log2(1)) = ceil(0.0) = 0, accepted because depth is
     // auto-computed (not an explicit Some(0))
-    let model = IsolationForest::new(10, 1, None, Some(0)).unwrap();
+    let model = IsolationForest::new(10, 1).unwrap().with_random_state(0);
     assert_eq!(model.get_max_depth(), 0);
 }
 
@@ -90,7 +97,7 @@ fn test_default_has_expected_parameter_values() {
 
 #[test]
 fn test_predict_before_fit_returns_not_fitted() {
-    let model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let x = array![[1.0, 2.0], [3.0, 4.0]];
     let err = model.predict(&x).unwrap_err();
     assert!(
@@ -101,7 +108,7 @@ fn test_predict_before_fit_returns_not_fitted() {
 
 #[test]
 fn test_anomaly_score_before_fit_returns_not_fitted() {
-    let model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let err = model.anomaly_score(&[1.0, 2.0]).unwrap_err();
     assert!(
         matches!(err, Error::NotFitted("IsolationForest")),
@@ -113,7 +120,7 @@ fn test_anomaly_score_before_fit_returns_not_fitted() {
 
 #[test]
 fn test_fit_empty_data_returns_empty_input() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let x: Array2<f64> = Array2::zeros((0, 2)); // 0 rows
     let err = model.fit(&x).unwrap_err();
     assert!(
@@ -124,7 +131,7 @@ fn test_fit_empty_data_returns_empty_input() {
 
 #[test]
 fn test_fit_nan_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let x = array![[1.0, f64::NAN], [2.0, 3.0]];
     let err = model.fit(&x).unwrap_err();
     assert!(
@@ -135,7 +142,7 @@ fn test_fit_nan_returns_non_finite() {
 
 #[test]
 fn test_fit_inf_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let x = array![[1.0, f64::INFINITY], [2.0, 3.0]];
     let err = model.fit(&x).unwrap_err();
     assert!(
@@ -146,7 +153,7 @@ fn test_fit_inf_returns_non_finite() {
 
 #[test]
 fn test_fit_neg_inf_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let x = array![[1.0, f64::NEG_INFINITY], [2.0, 3.0]];
     let err = model.fit(&x).unwrap_err();
     assert!(
@@ -159,7 +166,7 @@ fn test_fit_neg_inf_returns_non_finite() {
 
 #[test]
 fn test_predict_empty_data_returns_empty_input() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let train = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     model.fit(&train).unwrap();
 
@@ -173,7 +180,7 @@ fn test_predict_empty_data_returns_empty_input() {
 
 #[test]
 fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
@@ -194,7 +201,7 @@ fn test_predict_wrong_feature_count_returns_dimension_mismatch() {
 
 #[test]
 fn test_predict_nan_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
@@ -210,7 +217,7 @@ fn test_predict_nan_returns_non_finite() {
 
 #[test]
 fn test_anomaly_score_wrong_dim_returns_dimension_mismatch() {
-    let mut model = IsolationForest::new(10, 50, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
@@ -232,7 +239,7 @@ fn test_anomaly_score_wrong_dim_returns_dimension_mismatch() {
 
 #[test]
 fn test_fit_sets_n_features() {
-    let mut model = IsolationForest::new(10, 50, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(42);
     let train = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
     model.fit(&train).unwrap();
     assert_eq!(model.get_n_features(), 3);
@@ -241,7 +248,9 @@ fn test_fit_sets_n_features() {
 #[test]
 fn test_fit_stores_exactly_n_estimators_trees() {
     let n_estimators = 15_usize;
-    let mut model = IsolationForest::new(n_estimators, 50, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(n_estimators, 50)
+        .unwrap()
+        .with_random_state(42);
     let train = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [2.0, 3.0], [4.0, 5.0]];
     model.fit(&train).unwrap();
 
@@ -259,7 +268,7 @@ fn test_fit_stores_exactly_n_estimators_trees() {
 #[test]
 fn test_predict_scores_are_in_unit_interval() {
     // anomaly scores must lie in [0, 1] by design: 2^(-E/c) with E, c > 0
-    let mut model = IsolationForest::new(50, 64, None, Some(7)).unwrap();
+    let mut model = IsolationForest::new(50, 64).unwrap().with_random_state(7);
     let train = array![
         [0.0, 0.0],
         [0.1, 0.0],
@@ -281,7 +290,7 @@ fn test_predict_scores_are_in_unit_interval() {
 
 #[test]
 fn test_anomaly_score_is_in_unit_interval() {
-    let mut model = IsolationForest::new(50, 64, None, Some(7)).unwrap();
+    let mut model = IsolationForest::new(50, 64).unwrap().with_random_state(7);
     let train = array![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [50.0, 50.0]];
     model.fit(&train).unwrap();
 
@@ -322,7 +331,7 @@ fn test_outlier_score_exceeds_all_inlier_scores() {
     train_data.slice_mut(s![..10, ..]).assign(&inliers);
     train_data.slice_mut(s![10..11, ..]).assign(&outlier_row);
 
-    let mut model = IsolationForest::new(100, 64, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(100, 64).unwrap().with_random_state(42);
     model.fit(&train_data).unwrap();
     let scores = model.predict(&train_data).unwrap();
 
@@ -360,7 +369,7 @@ fn test_outlier_anomaly_score_exceeds_inlier_via_single_sample_api() {
     train_data[[10, 0]] = 1000.0;
     train_data[[10, 1]] = 1000.0;
 
-    let mut model = IsolationForest::new(100, 64, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(100, 64).unwrap().with_random_state(42);
     model.fit(&train_data).unwrap();
 
     let outlier_score = model.anomaly_score(&[1000.0, 1000.0]).unwrap();
@@ -386,7 +395,7 @@ fn test_identical_points_have_equal_scores() {
         [1.0, 2.0], // row 0 and row 2 are identical
         [5.0, 6.0]
     ];
-    let mut model = IsolationForest::new(50, 32, None, Some(55)).unwrap();
+    let mut model = IsolationForest::new(50, 32).unwrap().with_random_state(55);
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
     assert_eq!(
@@ -402,11 +411,11 @@ fn test_identical_points_have_equal_scores() {
 fn test_same_seed_produces_identical_scores() {
     let data = array![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0], [2.0, 2.0], [50.0, 50.0]];
 
-    let mut model_a = IsolationForest::new(30, 20, None, Some(13)).unwrap();
+    let mut model_a = IsolationForest::new(30, 20).unwrap().with_random_state(13);
     model_a.fit(&data).unwrap();
     let scores_a = model_a.predict(&data).unwrap();
 
-    let mut model_b = IsolationForest::new(30, 20, None, Some(13)).unwrap();
+    let mut model_b = IsolationForest::new(30, 20).unwrap().with_random_state(13);
     model_b.fit(&data).unwrap();
     let scores_b = model_b.predict(&data).unwrap();
 
@@ -422,11 +431,11 @@ fn test_different_seeds_may_produce_different_scores() {
     // sample; guards against the seed being ignored
     let data = array![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0], [2.0, 2.0], [50.0, 50.0]];
 
-    let mut model_a = IsolationForest::new(50, 32, None, Some(1)).unwrap();
+    let mut model_a = IsolationForest::new(50, 32).unwrap().with_random_state(1);
     model_a.fit(&data).unwrap();
     let scores_a = model_a.predict(&data).unwrap();
 
-    let mut model_b = IsolationForest::new(50, 32, None, Some(2)).unwrap();
+    let mut model_b = IsolationForest::new(50, 32).unwrap().with_random_state(2);
     model_b.fit(&data).unwrap();
     let scores_b = model_b.predict(&data).unwrap();
 
@@ -446,11 +455,11 @@ fn test_different_seeds_may_produce_different_scores() {
 fn test_fit_predict_matches_fit_then_predict() {
     let data = array![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [10.0, 10.0]];
 
-    let mut model_a = IsolationForest::new(40, 32, None, Some(77)).unwrap();
+    let mut model_a = IsolationForest::new(40, 32).unwrap().with_random_state(77);
     model_a.fit(&data).unwrap();
     let scores_a = model_a.predict(&data).unwrap();
 
-    let mut model_b = IsolationForest::new(40, 32, None, Some(77)).unwrap();
+    let mut model_b = IsolationForest::new(40, 32).unwrap().with_random_state(77);
     let scores_b = model_b.fit_predict(&data).unwrap();
 
     assert_eq!(
@@ -464,7 +473,7 @@ fn test_fit_predict_matches_fit_then_predict() {
 #[test]
 fn test_fit_and_predict_on_single_sample() {
     // one training row gives a size-1 leaf with path length 0, so score = 2^0 = 1.0
-    let mut model = IsolationForest::new(5, 10, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(5, 10).unwrap().with_random_state(1);
     let data = array![[3.0, 4.0]];
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
@@ -480,7 +489,7 @@ fn test_fit_and_predict_on_single_sample() {
 
 #[test]
 fn test_n_features_reflects_training_data_columns() {
-    let mut model = IsolationForest::new(10, 20, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 20).unwrap().with_random_state(1);
     assert_eq!(model.get_n_features(), 0); // before fit
 
     let data = array![[1.0, 2.0, 3.0, 4.0, 5.0]];
@@ -493,7 +502,7 @@ fn test_n_features_reflects_training_data_columns() {
 #[test]
 fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
     // max_samples=256 but only 5 rows: forest builds on all 5 rows, no panic
-    let mut model = IsolationForest::new(10, 256, None, Some(1)).unwrap();
+    let mut model = IsolationForest::new(10, 256).unwrap().with_random_state(1);
     let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
@@ -508,7 +517,7 @@ fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
 #[test]
 fn test_fit_with_constant_feature_column_does_not_panic() {
     // column 1 is constant; the tree builder makes a leaf when max_val - min_val < 1e-10
-    let mut model = IsolationForest::new(10, 32, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(10, 32).unwrap().with_random_state(42);
     let data = array![[1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0], [5.0, 5.0]];
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
@@ -519,7 +528,7 @@ fn test_fit_with_constant_feature_column_does_not_panic() {
 
 #[test]
 fn test_fit_and_predict_with_single_feature() {
-    let mut model = IsolationForest::new(20, 32, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(20, 32).unwrap().with_random_state(42);
     // values clustered near 0 except one far outlier at 999
     let data = array![[0.0], [0.1], [-0.1], [0.2], [999.0]];
     model.fit(&data).unwrap();
@@ -542,7 +551,7 @@ fn test_fit_and_predict_with_single_feature() {
 #[test]
 fn test_fit_and_predict_high_dimensional() {
     // 5 features: scores stay in [0,1] and the outlier is detected
-    let mut model = IsolationForest::new(50, 32, None, Some(42)).unwrap();
+    let mut model = IsolationForest::new(50, 32).unwrap().with_random_state(42);
     let mut data: Array2<f64> = Array2::zeros((7, 5));
     // 6 inliers near origin
     for i in 0..6 {
@@ -575,7 +584,7 @@ fn test_fit_and_predict_high_dimensional() {
 fn test_save_load_roundtrip_yields_identical_predictions() {
     let data = array![[0.0, 0.0], [0.5, 0.5], [1.0, 0.0], [0.0, 1.0], [50.0, 50.0]];
 
-    let mut model = IsolationForest::new(30, 20, None, Some(99)).unwrap();
+    let mut model = IsolationForest::new(30, 20).unwrap().with_random_state(99);
     model.fit(&data).unwrap();
     let scores_before = model.predict(&data).unwrap();
 
@@ -617,7 +626,7 @@ fn test_load_from_nonexistent_path_returns_io_error() {
 fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_samples() {
     // 4 identical rows; max_samples = 4 == n_rows, so sample_size = min(4,4) = 4
     let data = array![[2.0, 7.0], [2.0, 7.0], [2.0, 7.0], [2.0, 7.0]];
-    let mut model = IsolationForest::new(20, 4, None, Some(123)).unwrap();
+    let mut model = IsolationForest::new(20, 4).unwrap().with_random_state(123);
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
 
@@ -638,7 +647,7 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
 fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_samples() {
     // 4 identical rows; max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
     let data = array![[1.0, -3.0], [1.0, -3.0], [1.0, -3.0], [1.0, -3.0]];
-    let mut model = IsolationForest::new(25, 8, None, Some(7)).unwrap();
+    let mut model = IsolationForest::new(25, 8).unwrap().with_random_state(7);
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
 

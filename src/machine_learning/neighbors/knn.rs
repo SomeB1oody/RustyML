@@ -48,9 +48,10 @@ where
 }
 
 /// Strategy used for weighting neighbors in the KNN algorithm
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum WeightingStrategy {
     /// Each neighbor is weighted equally
+    #[default]
     Uniform,
     /// Neighbors are weighted by the inverse of their distance, so closer neighbors have greater influence
     Distance,
@@ -65,8 +66,7 @@ pub enum WeightingStrategy {
 ///
 /// ```rust
 /// use ndarray::{array, Array1, Array2};
-/// use rustyml::machine_learning::{KNN, WeightingStrategy};
-/// use rustyml::machine_learning::DistanceCalculationMetric as Metric;
+/// use rustyml::machine_learning::KNN;
 ///
 /// // Create a simple dataset
 /// let x_train = array![
@@ -80,8 +80,8 @@ pub enum WeightingStrategy {
 /// // Target values (classification)
 /// let y_train = array!["A", "A", "A", "B", "B"];
 ///
-/// // Create KNN model with k=3 and default settings
-/// let mut knn = KNN::new(3, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+/// // Create KNN model with k=3 and default settings (uniform weighting, Euclidean distance)
+/// let mut knn = KNN::new(3).unwrap();
 ///
 /// // Fit the model
 /// knn.fit(&x_train, &y_train).unwrap();
@@ -151,8 +151,6 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     /// # Parameters
     ///
     /// - `k` - Number of neighbors to use for classification
-    /// - `weighting_strategy` - Weighting strategy for neighbor votes (Uniform or Distance)
-    /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
     ///
     /// # Returns
     ///
@@ -160,26 +158,29 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `k` is 0, or if Minkowski `p` is less than 1 (or not
-    ///   finite); orders below 1 are not valid metrics and would break kd-tree pruning
-    pub fn new(
-        k: usize,
-        weighting_strategy: WeightingStrategy,
-        metric: DistanceCalculationMetric,
-    ) -> Result<Self, Error> {
+    /// - `Error::InvalidParameter` - If `k` is 0
+    ///
+    /// # Notes
+    ///
+    /// Neighbor votes default to uniform weighting and the Euclidean distance metric.
+    /// Override either with the builder methods below (`with_metric` returns `Result`
+    /// because the Minkowski order is validated):
+    ///
+    /// - [`with_weighting_strategy`](Self::with_weighting_strategy) - uniform or distance-weighted votes
+    /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{KNN, WeightingStrategy, DistanceCalculationMetric};
+    ///
+    /// let model = KNN::<i32>::new(3)
+    ///     .unwrap()
+    ///     .with_weighting_strategy(WeightingStrategy::Distance)
+    ///     .with_metric(DistanceCalculationMetric::Manhattan)
+    ///     .unwrap();
+    /// ```
+    pub fn new(k: usize) -> Result<Self, Error> {
         if k == 0 {
             return Err(Error::invalid_parameter("k", "must be greater than 0"));
-        }
-
-        // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
-        match metric {
-            DistanceCalculationMetric::Minkowski(p) if p < 1.0 || !p.is_finite() => {
-                return Err(Error::invalid_parameter(
-                    "p",
-                    format!("Minkowski p must be at least 1 and finite, got {}", p),
-                ));
-            }
-            _ => {}
         }
 
         Ok(KNN {
@@ -187,10 +188,52 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
             x_train: None,
             y_train_encoded: None,
             label_map: None,
-            weighting_strategy,
-            metric,
+            weighting_strategy: WeightingStrategy::Uniform,
+            metric: DistanceCalculationMetric::Euclidean,
             tree: OnceLock::new(),
         })
+    }
+
+    /// Sets the weighting strategy for neighbor votes (default: [`WeightingStrategy::Uniform`])
+    ///
+    /// # Parameters
+    ///
+    /// - `weighting_strategy` - uniform or distance-weighted votes
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_weighting_strategy(mut self, weighting_strategy: WeightingStrategy) -> Self {
+        self.weighting_strategy = weighting_strategy;
+        self
+    }
+
+    /// Overrides the distance metric used for neighbor searches (default: Euclidean)
+    ///
+    /// # Parameters
+    ///
+    /// - `metric` - Distance metric to use (Euclidean, Manhattan, Minkowski)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if Minkowski `p` is less than 1 or not finite; orders below 1
+    ///   are not valid metrics and would break kd-tree pruning
+    pub fn with_metric(mut self, metric: DistanceCalculationMetric) -> Result<Self, Error> {
+        // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
+        if let DistanceCalculationMetric::Minkowski(p) = metric
+            && (p < 1.0 || !p.is_finite())
+        {
+            return Err(Error::invalid_parameter(
+                "p",
+                format!("Minkowski p must be at least 1 and finite, got {}", p),
+            ));
+        }
+        self.metric = metric;
+        Ok(self)
     }
 
     // Getters

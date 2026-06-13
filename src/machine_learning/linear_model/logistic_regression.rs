@@ -105,7 +105,6 @@ impl LogisticRegression {
     /// - `learning_rate` - Learning rate for gradient descent, must be positive and finite
     /// - `max_iterations` - Maximum number of iterations, must be greater than 0
     /// - `tolerance` - Convergence tolerance, stops when loss change is below this value, must be positive and finite
-    /// - `regularization_type` - Optional regularization to prevent overfitting. Alpha must be non-negative and finite
     ///
     /// # Returns
     ///
@@ -114,17 +113,31 @@ impl LogisticRegression {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If any parameter is invalid (e.g., non-positive learning rate)
+    ///
+    /// # Notes
+    ///
+    /// No regularization is applied by default. To add L1/L2 regularization, use the builder
+    /// method below (it returns `Result` because the regularization alpha is validated):
+    ///
+    /// - [`with_regularization`](Self::with_regularization) - L1 or L2 regularization to prevent overfitting
+    ///
+    /// ```
+    /// use rustyml::machine_learning::{LogisticRegression, RegularizationType};
+    ///
+    /// let model = LogisticRegression::new(true, 0.01, 100, 1e-4)
+    ///     .unwrap()
+    ///     .with_regularization(RegularizationType::L2(0.1))
+    ///     .unwrap();
+    /// ```
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
         max_iterations: usize,
         tolerance: f64,
-        regularization_type: Option<RegularizationType>,
     ) -> Result<Self, Error> {
         validate_learning_rate(learning_rate)?;
         validate_max_iterations(max_iterations)?;
         validate_tolerance(tolerance)?;
-        validate_regularization_type(regularization_type)?;
 
         Ok(LogisticRegression {
             weights: None,
@@ -133,8 +146,30 @@ impl LogisticRegression {
             max_iter: max_iterations,
             tol: tolerance,
             n_iter: None,
-            regularization_type,
+            regularization_type: None,
         })
+    }
+
+    /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
+    ///
+    /// # Parameters
+    ///
+    /// - `regularization` - the regularization variant and strength ([`RegularizationType::L1`] or [`RegularizationType::L2`])
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if the regularization alpha is negative or not finite
+    pub fn with_regularization(
+        mut self,
+        regularization: RegularizationType,
+    ) -> Result<Self, Error> {
+        validate_regularization_type(Some(regularization))?;
+        self.regularization_type = Some(regularization);
+        Ok(self)
     }
 
     // Getters

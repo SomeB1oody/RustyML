@@ -134,10 +134,14 @@ impl Default for TSNEMethod {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
+/// use rustyml::utils::t_sne::{TSNE, TSNEMethod};
 /// use ndarray::array;
 ///
-/// let tsne = TSNE::new(2, 2.0, 200.0, 250, Some(42), Init::PCA, TSNEMethod::Exact).unwrap();
+/// let tsne = TSNE::new(2, 2.0, 200.0, 250)
+///     .unwrap()
+///     .with_random_state(42)
+///     .with_method(TSNEMethod::Exact)
+///     .unwrap();
 /// let x = array![[0.0, 1.0], [1.0, 0.0], [2.0, 2.0]];
 /// let embedding = tsne.fit_transform(&x).unwrap();
 /// assert_eq!(embedding.ncols(), 2);
@@ -175,16 +179,7 @@ impl Default for TSNE {
     /// - `init` - [`Init::PCA`]
     /// - `method` - [`TSNEMethod::BarnesHut`] with `angle = 0.5`
     fn default() -> Self {
-        TSNE::new(
-            2,
-            30.0,
-            200.0,
-            1000,
-            None,
-            Init::PCA,
-            TSNEMethod::BarnesHut { angle: 0.5 },
-        )
-        .expect("Default TSNE parameters should be valid")
+        TSNE::new(2, 30.0, 200.0, 1000).expect("Default TSNE parameters should be valid")
     }
 }
 
@@ -197,10 +192,6 @@ impl TSNE {
     /// - `perplexity` - Controls effective neighborhood size (must be positive and finite)
     /// - `learning_rate` - Gradient descent learning rate (must be positive and finite)
     /// - `n_iter` - Maximum number of optimization iterations (must be greater than 0)
-    /// - `random_state` - Optional random seed; only affects the random initialization path,
-    ///   since PCA initialization is deterministic
-    /// - `init` - Embedding initialization strategy ([`Init::PCA`] or [`Init::Random`])
-    /// - `method` - Gradient computation method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
     ///
     /// # Returns
     ///
@@ -208,16 +199,36 @@ impl TSNE {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If any parameter is invalid, if a Barnes-Hut `angle` is not
-    ///   in `[0, 1)`, or if Barnes-Hut is paired with `n_components > 3`
+    /// - `Error::InvalidParameter` - If `n_components` or `n_iter` is 0, or if `perplexity` or
+    ///   `learning_rate` is non-positive or not finite
+    ///
+    /// # Notes
+    ///
+    /// The gradient method defaults to [`TSNEMethod::BarnesHut`] (with `angle = 0.5`) for
+    /// `n_components <= 3` and falls back to [`TSNEMethod::Exact`] otherwise; the embedding is
+    /// PCA-initialized and the random path is seeded non-deterministically. Override any of
+    /// these with the builder methods below (`with_method` returns `Result` because Barnes-Hut
+    /// requires a valid angle and a low-dimensional embedding):
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed seed for the random init path
+    /// - [`with_init`](Self::with_init) - embedding initialization ([`Init::PCA`] or [`Init::Random`])
+    /// - [`with_method`](Self::with_method) - gradient method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
+    ///
+    /// ```
+    /// use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
+    ///
+    /// let model = TSNE::new(2, 30.0, 200.0, 1000)
+    ///     .unwrap()
+    ///     .with_init(Init::Random)
+    ///     .with_random_state(42)
+    ///     .with_method(TSNEMethod::Exact)
+    ///     .unwrap();
+    /// ```
     pub fn new(
         n_components: usize,
         perplexity: f64,
         learning_rate: f64,
         n_iter: usize,
-        random_state: Option<u64>,
-        init: Init,
-        method: TSNEMethod,
     ) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
@@ -244,6 +255,70 @@ impl TSNE {
             return Err(Error::invalid_parameter("n_iter", "must be greater than 0"));
         }
 
+        // Barnes-Hut needs a low-dimensional embedding for the tree, so default to it only
+        // when valid; higher-dimensional embeddings fall back to the exact gradient
+        let method = if n_components <= 3 {
+            TSNEMethod::BarnesHut { angle: 0.5 }
+        } else {
+            TSNEMethod::Exact
+        };
+
+        Ok(Self {
+            n_components,
+            perplexity,
+            learning_rate,
+            n_iter,
+            random_state: None,
+            init: Init::PCA,
+            method,
+        })
+    }
+
+    /// Sets a fixed RNG seed for the random initialization path, making it reproducible
+    /// (default: `None`; PCA initialization is deterministic regardless)
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the random-init RNG
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.random_state = Some(seed);
+        self
+    }
+
+    /// Sets the embedding initialization strategy (default: [`Init::PCA`])
+    ///
+    /// # Parameters
+    ///
+    /// - `init` - initialization strategy ([`Init::PCA`] or [`Init::Random`])
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_init(mut self, init: Init) -> Self {
+        self.init = init;
+        self
+    }
+
+    /// Sets the gradient computation method
+    /// (default: [`TSNEMethod::BarnesHut`] for `n_components <= 3`, else [`TSNEMethod::Exact`])
+    ///
+    /// # Parameters
+    ///
+    /// - `method` - gradient method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If a Barnes-Hut `angle` is not in `[0, 1)`, or if Barnes-Hut
+    ///   is paired with `n_components > 3`
+    pub fn with_method(mut self, method: TSNEMethod) -> Result<Self, Error> {
         // Barnes-Hut needs a valid opening angle and a low-dimensional embedding for the tree
         if let TSNEMethod::BarnesHut { angle } = method {
             if !angle.is_finite() || !(0.0..1.0).contains(&angle) {
@@ -252,26 +327,18 @@ impl TSNE {
                     format!("Barnes-Hut angle must be in [0, 1), got {}", angle),
                 ));
             }
-            if n_components > 3 {
+            if self.n_components > 3 {
                 return Err(Error::invalid_parameter(
                     "n_components",
                     format!(
                         "Barnes-Hut supports at most 3 components, got {}; use TSNEMethod::Exact",
-                        n_components
+                        self.n_components
                     ),
                 ));
             }
         }
-
-        Ok(Self {
-            n_components,
-            perplexity,
-            learning_rate,
-            n_iter,
-            random_state,
-            init,
-            method,
-        })
+        self.method = method;
+        Ok(self)
     }
 
     get_field!(get_n_components, n_components, usize);
@@ -722,9 +789,7 @@ impl TSNE {
         if x.ncols() < self.n_components {
             return None;
         }
-        let mut pca =
-            crate::utils::pca::PCA::new(self.n_components, crate::utils::pca::SVDSolver::Full)
-                .ok()?;
+        let mut pca = crate::utils::pca::PCA::new(self.n_components).ok()?;
         let mut embedding = pca.fit_transform(x).ok()?;
 
         // Rescale to a small spread on the first component, matching common t-SNE practice
@@ -1210,7 +1275,12 @@ mod tests {
     /// The sparse joint probabilities are symmetric and sum to 1
     #[test]
     fn neighbor_probabilities_are_symmetric_and_normalized() {
-        let tsne = TSNE::new(2, 2.0, 200.0, 100, Some(0), Init::PCA, TSNEMethod::Exact).unwrap();
+        let tsne = TSNE::new(2, 2.0, 200.0, 100)
+            .unwrap()
+            .with_random_state(0)
+            .with_init(Init::PCA)
+            .with_method(TSNEMethod::Exact)
+            .unwrap();
         let x = array![
             [0.0, 0.0],
             [1.0, 0.0],

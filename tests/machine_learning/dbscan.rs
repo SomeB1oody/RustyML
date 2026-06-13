@@ -32,7 +32,7 @@ fn two_blobs_noise() -> Array2<f64> {
 /// eps = 0 is rejected
 #[test]
 fn constructor_rejects_eps_zero() {
-    let result = DBSCAN::new(0.0, 2, DistanceCalculationMetric::Euclidean);
+    let result = DBSCAN::new(0.0, 2);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for eps=0, got: {:?}",
@@ -43,7 +43,7 @@ fn constructor_rejects_eps_zero() {
 /// eps < 0 is rejected
 #[test]
 fn constructor_rejects_eps_negative() {
-    let result = DBSCAN::new(-1.0, 2, DistanceCalculationMetric::Euclidean);
+    let result = DBSCAN::new(-1.0, 2);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for eps=-1, got: {:?}",
@@ -54,7 +54,7 @@ fn constructor_rejects_eps_negative() {
 /// eps = NaN is rejected
 #[test]
 fn constructor_rejects_eps_nan() {
-    let result = DBSCAN::new(f64::NAN, 2, DistanceCalculationMetric::Euclidean);
+    let result = DBSCAN::new(f64::NAN, 2);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for eps=NaN, got: {:?}",
@@ -65,7 +65,7 @@ fn constructor_rejects_eps_nan() {
 /// eps = +inf is rejected
 #[test]
 fn constructor_rejects_eps_inf() {
-    let result = DBSCAN::new(f64::INFINITY, 2, DistanceCalculationMetric::Euclidean);
+    let result = DBSCAN::new(f64::INFINITY, 2);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for eps=inf, got: {:?}",
@@ -76,7 +76,7 @@ fn constructor_rejects_eps_inf() {
 /// min_samples = 0 is rejected
 #[test]
 fn constructor_rejects_min_samples_zero() {
-    let result = DBSCAN::new(0.5, 0, DistanceCalculationMetric::Euclidean);
+    let result = DBSCAN::new(0.5, 0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for min_samples=0, got: {:?}",
@@ -87,7 +87,9 @@ fn constructor_rejects_min_samples_zero() {
 /// Minkowski(0) is rejected (p must be >= 1)
 #[test]
 fn constructor_rejects_minkowski_p_zero() {
-    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(0.0));
+    let result = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(0.0));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(0), got: {:?}",
@@ -98,7 +100,9 @@ fn constructor_rejects_minkowski_p_zero() {
 /// Minkowski(0.5) is rejected: 0 < p < 1 is not a valid metric (triangle inequality fails)
 #[test]
 fn constructor_rejects_minkowski_p_below_one() {
-    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(0.5));
+    let result = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(0.5));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(0.5), got: {:?}",
@@ -109,7 +113,9 @@ fn constructor_rejects_minkowski_p_below_one() {
 /// Minkowski(-1) is rejected
 #[test]
 fn constructor_rejects_minkowski_p_negative() {
-    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(-1.0));
+    let result = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(-1.0));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(-1), got: {:?}",
@@ -120,7 +126,9 @@ fn constructor_rejects_minkowski_p_negative() {
 /// Minkowski(NaN) is rejected
 #[test]
 fn constructor_rejects_minkowski_p_nan() {
-    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(f64::NAN));
+    let result = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(f64::NAN));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(NaN), got: {:?}",
@@ -131,7 +139,9 @@ fn constructor_rejects_minkowski_p_nan() {
 /// Minkowski(+inf) is rejected
 #[test]
 fn constructor_rejects_minkowski_p_inf() {
-    let result = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(f64::INFINITY));
+    let result = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(f64::INFINITY));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for Minkowski(inf), got: {:?}",
@@ -142,7 +152,10 @@ fn constructor_rejects_minkowski_p_inf() {
 /// Valid parameters are stored and readable via getters
 #[test]
 fn constructor_valid_stores_parameters() {
-    let m = DBSCAN::new(0.75, 3, DistanceCalculationMetric::Manhattan).unwrap();
+    let m = DBSCAN::new(0.75, 3)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Manhattan)
+        .unwrap();
     approx::assert_abs_diff_eq!(m.get_epsilon(), 0.75, epsilon = 1e-12);
     assert_eq!(m.get_min_samples(), 3);
     assert_eq!(m.get_metric(), DistanceCalculationMetric::Manhattan);
@@ -166,7 +179,7 @@ fn constructor_default_values() {
 #[test]
 fn fit_rejects_empty_data() {
     let data: Array2<f64> = Array2::zeros((0, 2));
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     assert!(
         matches!(m.fit(&data), Err(Error::EmptyInput(_))),
         "expected EmptyInput for 0-row data"
@@ -177,7 +190,7 @@ fn fit_rejects_empty_data() {
 #[test]
 fn fit_rejects_nan_in_data() {
     let data = array![[1.0f64, 2.0], [f64::NAN, 3.0]];
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     assert!(
         matches!(m.fit(&data), Err(Error::NonFinite(_))),
         "expected NonFinite for NaN in data"
@@ -188,7 +201,7 @@ fn fit_rejects_nan_in_data() {
 #[test]
 fn fit_rejects_inf_in_data() {
     let data = array![[1.0f64, 2.0], [f64::INFINITY, 3.0]];
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     assert!(
         matches!(m.fit(&data), Err(Error::NonFinite(_))),
         "expected NonFinite for infinity in data"
@@ -200,7 +213,7 @@ fn fit_rejects_inf_in_data() {
 /// predict before fit returns NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
-    let m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let m = DBSCAN::new(0.5, 2).unwrap();
     let data = array![[1.0f64, 2.0]];
     assert!(
         matches!(m.predict(&data), Err(Error::NotFitted(_))),
@@ -212,7 +225,7 @@ fn predict_before_fit_returns_not_fitted() {
 #[test]
 fn predict_empty_new_data_returns_empty_array() {
     let train = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
     let empty: Array2<f64> = Array2::zeros((0, 2));
@@ -224,7 +237,7 @@ fn predict_empty_new_data_returns_empty_array() {
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
     let train = two_blobs_noise(); // 2 features
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
     let wrong: Array2<f64> = Array2::zeros((3, 3)); // 3 features
@@ -238,7 +251,7 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
 #[test]
 fn predict_nan_in_new_data_returns_non_finite() {
     let train = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
     let bad = array![[f64::NAN, 1.0f64]];
@@ -252,7 +265,7 @@ fn predict_nan_in_new_data_returns_non_finite() {
 #[test]
 fn predict_inf_in_new_data_returns_non_finite() {
     let train = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
     let bad = array![[f64::INFINITY, 1.0f64]];
@@ -269,7 +282,7 @@ fn predict_inf_in_new_data_returns_non_finite() {
 #[test]
 fn fit_euclidean_correct_labels_two_blobs_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -325,7 +338,7 @@ fn fit_high_dimensional_falls_back_to_brute_force() {
         data[[8, j]] = 100.0;
     }
 
-    let mut m = DBSCAN::new(2.0, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(2.0, 2).unwrap();
     m.fit(&data).unwrap();
     let labels = m.get_labels().unwrap();
 
@@ -346,7 +359,7 @@ fn fit_high_dimensional_falls_back_to_brute_force() {
 #[test]
 fn fit_euclidean_core_indices_sorted_and_non_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     let core_indices = m.get_core_sample_indices().unwrap();
@@ -387,7 +400,7 @@ fn fit_euclidean_core_indices_sorted_and_non_noise() {
 #[test]
 fn predict_core_training_points_return_fit_labels() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     let fit_labels = m.get_labels().unwrap();
@@ -414,7 +427,7 @@ fn predict_core_training_points_return_fit_labels() {
 #[test]
 fn predict_new_point_near_blob_a_returns_label_0() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     // (0.05, 0.05) is at Euclidean distance 0.07 from (0,0), well inside eps=0.5
@@ -430,7 +443,7 @@ fn predict_new_point_near_blob_a_returns_label_0() {
 #[test]
 fn predict_new_point_near_blob_b_returns_label_1() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     // (10.05, 10.05) is at Euclidean distance ~= 0.07 from (10,10), well inside eps=0.5
@@ -446,7 +459,7 @@ fn predict_new_point_near_blob_b_returns_label_1() {
 #[test]
 fn predict_far_point_returns_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     // (5, 5) is far from both blobs; Euclidean distance to nearest core point ~= 7.07
@@ -464,7 +477,7 @@ fn predict_far_point_returns_noise() {
 fn predict_point_at_eps_boundary_inclusive() {
     // Single-core dataset so the nearest (and only) core distance is unambiguous
     let train = array![[0.0f64, 0.0]];
-    let mut m = DBSCAN::new(0.5, 1, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 1).unwrap();
     m.fit(&train).unwrap();
 
     // (0.5, 0.0): Euclidean distance to (0,0) = 0.5 exactly = eps; the dist <= eps
@@ -481,7 +494,7 @@ fn predict_point_at_eps_boundary_inclusive() {
 #[test]
 fn predict_point_just_beyond_eps_is_noise() {
     let train = array![[0.0f64, 0.0]];
-    let mut m = DBSCAN::new(0.5, 1, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 1).unwrap();
     m.fit(&train).unwrap();
 
     let beyond_point = array![[0.65f64, 0.0]];
@@ -498,7 +511,7 @@ fn predict_point_just_beyond_eps_is_noise() {
 #[test]
 fn clustering_euclidean_metric_two_blobs_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     let labels = m.fit_predict(&data).unwrap();
 
     assert_eq!(labels.len(), 9);
@@ -514,7 +527,10 @@ fn clustering_euclidean_metric_two_blobs_noise() {
 #[test]
 fn clustering_manhattan_metric_two_blobs_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Manhattan).unwrap();
+    let mut m = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Manhattan)
+        .unwrap();
     let labels = m.fit_predict(&data).unwrap();
 
     assert_eq!(labels.len(), 9);
@@ -535,7 +551,10 @@ fn clustering_manhattan_metric_two_blobs_noise() {
 #[test]
 fn clustering_minkowski_p3_metric_two_blobs_noise() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(3.0)).unwrap();
+    let mut m = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(3.0))
+        .unwrap();
     let labels = m.fit_predict(&data).unwrap();
 
     assert_eq!(labels.len(), 9);
@@ -557,10 +576,13 @@ fn clustering_minkowski_p3_metric_two_blobs_noise() {
 fn minkowski_p2_same_structure_as_euclidean() {
     let data = two_blobs_noise();
 
-    let mut m_euc = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m_euc = DBSCAN::new(0.5, 2).unwrap();
     let labels_euc = m_euc.fit_predict(&data).unwrap();
 
-    let mut m_mink2 = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(2.0)).unwrap();
+    let mut m_mink2 = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(2.0))
+        .unwrap();
     let labels_mink2 = m_mink2.fit_predict(&data).unwrap();
 
     // Same noise and same cluster membership
@@ -575,10 +597,16 @@ fn minkowski_p2_same_structure_as_euclidean() {
 fn minkowski_p1_same_structure_as_manhattan() {
     let data = two_blobs_noise();
 
-    let mut m_man = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Manhattan).unwrap();
+    let mut m_man = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Manhattan)
+        .unwrap();
     let labels_man = m_man.fit_predict(&data).unwrap();
 
-    let mut m_mink1 = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(1.0)).unwrap();
+    let mut m_mink1 = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(1.0))
+        .unwrap();
     let labels_mink1 = m_mink1.fit_predict(&data).unwrap();
 
     assert_eq!(
@@ -595,11 +623,11 @@ fn fit_predict_equals_fit_then_get_labels() {
     let data = two_blobs_noise();
 
     // Model A: fit_predict
-    let mut m_a = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m_a = DBSCAN::new(0.5, 2).unwrap();
     let labels_fp = m_a.fit_predict(&data).unwrap();
 
     // Model B: fit, then get_labels
-    let mut m_b = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m_b = DBSCAN::new(0.5, 2).unwrap();
     m_b.fit(&data).unwrap();
     let labels_fit = m_b.get_labels().unwrap().clone();
 
@@ -615,7 +643,7 @@ fn fit_predict_equals_fit_then_get_labels() {
 #[test]
 fn single_point_min_samples_1_is_core_cluster_0() {
     let data = array![[1.0f64, 2.0]];
-    let mut m = DBSCAN::new(0.5, 1, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 1).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -637,7 +665,7 @@ fn all_noise_when_eps_tiny() {
     // 4 points spread 1 unit apart; with eps=0.01 and min_samples=3 no point
     // has enough neighbours, so all are noise
     let data = array![[0.0f64, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]];
-    let mut m = DBSCAN::new(0.01, 3, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.01, 3).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -661,7 +689,7 @@ fn all_noise_when_eps_tiny() {
 fn all_connected_single_cluster() {
     // 4 points all within 0.5 of each other; eps=5.0 is more than sufficient
     let data = array![[0.0f64, 0.0], [0.1, 0.0], [0.2, 0.0], [0.3, 0.0]];
-    let mut m = DBSCAN::new(5.0, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(5.0, 2).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -693,7 +721,7 @@ fn default_constructor_model_is_usable() {
 fn predict_assigns_nearest_core_label_not_arbitrary() {
     // Two isolated single-point clusters
     let train = array![[0.0f64, 0.0], [2.0, 0.0]];
-    let mut m = DBSCAN::new(1.5, 1, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(1.5, 1).unwrap();
     m.fit(&train).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -716,7 +744,7 @@ fn predict_assigns_nearest_core_label_not_arbitrary() {
 fn predict_nearest_core_outside_eps_returns_noise() {
     // Single core at origin; query sits 2 units away, beyond eps=1.5
     let train = array![[0.0f64, 0.0]];
-    let mut m = DBSCAN::new(1.5, 1, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(1.5, 1).unwrap();
     m.fit(&train).unwrap();
 
     let query = array![[2.0f64, 0.0]];
@@ -734,7 +762,10 @@ fn predict_nearest_core_outside_eps_returns_noise() {
 #[test]
 fn save_load_round_trip_preserves_state_and_predictions() {
     let data = two_blobs_noise();
-    let mut original = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Manhattan).unwrap();
+    let mut original = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Manhattan)
+        .unwrap();
     original.fit(&data).unwrap();
 
     let path = "/tmp/rustyml_dbscan_test_roundtrip.json";
@@ -788,7 +819,7 @@ fn save_load_round_trip_preserves_state_and_predictions() {
 #[test]
 fn fit_labels_domain_correct() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -805,7 +836,7 @@ fn fit_labels_domain_correct() {
 #[test]
 fn predict_labels_domain_correct() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     let test_points = array![[0.05f64, 0.05], [10.05, 10.05], [5.0, 5.0]];
@@ -819,7 +850,7 @@ fn predict_labels_domain_correct() {
 #[test]
 fn predict_label_values_canonical_three_cases() {
     let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&data).unwrap();
 
     // Three test points with unambiguous labels: (0.05,0.05) in blob A -> 0,
@@ -837,9 +868,15 @@ fn predict_label_values_canonical_three_cases() {
 /// three enum arms (Euclidean, Manhattan, Minkowski)
 #[test]
 fn all_three_metric_variants_stored_correctly() {
-    let m_euc = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Euclidean).unwrap();
-    let m_man = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Manhattan).unwrap();
-    let m_mink = DBSCAN::new(0.5, 2, DistanceCalculationMetric::Minkowski(4.0)).unwrap();
+    let m_euc = DBSCAN::new(0.5, 2).unwrap();
+    let m_man = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Manhattan)
+        .unwrap();
+    let m_mink = DBSCAN::new(0.5, 2)
+        .unwrap()
+        .with_metric(DistanceCalculationMetric::Minkowski(4.0))
+        .unwrap();
 
     assert_eq!(m_euc.get_metric(), DistanceCalculationMetric::Euclidean);
     assert_eq!(m_man.get_metric(), DistanceCalculationMetric::Manhattan);
@@ -877,7 +914,7 @@ fn fit_parallel_branch_three_blobs_1200_correct_structure() {
     let data = three_blobs_1200();
     assert_eq!(data.nrows(), 1200, "dataset must cross the 1000 threshold");
 
-    let mut m = DBSCAN::new(1.0, 5, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(1.0, 5).unwrap();
     m.fit(&data).unwrap();
 
     let labels = m.get_labels().unwrap();
@@ -921,7 +958,7 @@ fn fit_parallel_branch_three_blobs_1200_correct_structure() {
 #[test]
 fn predict_parallel_branch_large_heldout_matches_blobs() {
     let data = three_blobs_1200();
-    let mut m = DBSCAN::new(1.0, 5, DistanceCalculationMetric::Euclidean).unwrap();
+    let mut m = DBSCAN::new(1.0, 5).unwrap();
     m.fit(&data).unwrap();
 
     // 1200 held-out points, blob-contiguous, distinct jitter formula

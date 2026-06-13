@@ -67,7 +67,7 @@
 //! use ndarray::{Array1, Array2};
 //!
 //! // Create a linear regression model
-//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
 //!
 //! // Prepare training data
 //! let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -508,7 +508,7 @@ pub mod math;
 /// use ndarray::{Array1, Array2, array};
 ///
 /// // Linear regression example
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// let y = array![6.0, 9.0, 12.0];
 /// model.fit(&x, &y).unwrap();
@@ -586,14 +586,10 @@ pub mod prelude;
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utils::pca::{PCA, SVDSolver};
+/// use rustyml::utils::pca::PCA;
 /// use ndarray::array;
 ///
-/// let mut pca = PCA::new(
-///     2,
-///     SVDSolver::Full,
-/// )
-/// .unwrap();
+/// let mut pca = PCA::new(2).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// pca.fit(&x).unwrap();
 /// let projected = pca.transform(&x).unwrap();

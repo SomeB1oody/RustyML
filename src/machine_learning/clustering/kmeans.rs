@@ -58,11 +58,12 @@ use std::ops::AddAssign;
 ///
 /// // Create a KMeans instance with 3 clusters
 /// let mut kmeans = KMeans::new(
-///     3,        // Number of clusters
-///     300,      // Maximum iterations
-///     1e-4,     // Convergence tolerance
-///     Some(42)  // Random seed for reproducibility
-/// ).unwrap();
+///     3,    // Number of clusters
+///     300,  // Maximum iterations
+///     1e-4, // Convergence tolerance
+/// )
+/// .unwrap()
+/// .with_random_state(42); // fixed seed for reproducibility
 ///
 /// // Fit the model to the data
 /// kmeans.fit(&data).unwrap();
@@ -133,7 +134,7 @@ impl Default for KMeans {
     /// - `KMeans` - a new `KMeans` instance with default values
     fn default() -> Self {
         // Default parameters are always valid
-        KMeans::new(8, 300, 1e-4, None).expect("Default KMeans parameters should be valid")
+        KMeans::new(8, 300, 1e-4).expect("Default KMeans parameters should be valid")
     }
 }
 
@@ -145,7 +146,6 @@ impl KMeans {
     /// - `n_clusters` - Number of clusters to form (must be greater than 0)
     /// - `max_iterations` - Maximum number of iterations for the algorithm (must be greater than 0)
     /// - `tolerance` - Convergence tolerance; the algorithm stops when centroids move less than this value
-    /// - `random_state` - Optional seed for random number generation to ensure reproducibility
     ///
     /// # Returns
     ///
@@ -154,12 +154,20 @@ impl KMeans {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `n_clusters` or `max_iterations` is 0, or `tolerance` is non-positive/non-finite
-    pub fn new(
-        n_clusters: usize,
-        max_iterations: usize,
-        tolerance: f64,
-        random_state: Option<u64>,
-    ) -> Result<Self, Error> {
+    ///
+    /// # Notes
+    ///
+    /// k-means++ initialization is non-deterministic by default. For reproducible runs, set a
+    /// fixed seed after construction with the builder method below:
+    ///
+    /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for centroid initialization
+    ///
+    /// ```
+    /// use rustyml::machine_learning::KMeans;
+    ///
+    /// let model = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
+    /// ```
+    pub fn new(n_clusters: usize, max_iterations: usize, tolerance: f64) -> Result<Self, Error> {
         if n_clusters == 0 {
             return Err(Error::invalid_parameter(
                 "n_clusters",
@@ -174,12 +182,27 @@ impl KMeans {
             n_clusters,
             max_iter: max_iterations,
             tol: tolerance,
-            random_state,
+            random_state: None,
             centroids: None,
             labels: None,
             inertia: None,
             n_iter: None,
         })
+    }
+
+    /// Sets a fixed RNG seed for k-means++ centroid initialization, making fitting
+    /// reproducible (default: `None`, non-deterministic)
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the initialization RNG
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.random_state = Some(seed);
+        self
     }
 
     // Getters

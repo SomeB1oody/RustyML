@@ -385,7 +385,7 @@ fn generic_fit_predict_with_linear_regression() {
     let y_train = Array1::from_vec(vec![3.0, 5.0, 7.0, 9.0, 11.0]);
     let x_test = Array2::from_shape_vec((3, 1), vec![6.0, 7.0, 8.0]).unwrap();
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let n = train_and_predict_count(&mut model, &x_train, &y_train, &x_test);
     assert_eq!(n, 3, "expected 3 predictions for 3 test points");
 }
@@ -402,7 +402,7 @@ fn generic_fit_trait_with_kmeans_unsupervised() {
     )
     .unwrap();
 
-    let mut km = KMeans::new(2, 200, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(2, 200, 1e-4).unwrap().with_random_state(42);
     // Invoke the Fit and Predict traits explicitly
     Fit::fit(&mut km, &data).expect("fit via Fit trait should succeed");
     let labels = Predict::predict(&km, &data).expect("predict via Predict trait should succeed");
@@ -417,12 +417,12 @@ fn trait_predictions_match_inherent_method_predictions() {
     let x_test = Array2::from_shape_vec((1, 1), vec![6.0]).unwrap();
 
     // Via trait
-    let mut model_trait = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_trait = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     Fit::fit(&mut model_trait, (&x_train, &y_train)).unwrap();
     let preds_trait = Predict::predict(&model_trait, &x_test).unwrap();
 
     // Via inherent method
-    let mut model_direct = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_direct = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model_direct.fit(&x_train, &y_train).unwrap();
     let preds_direct = model_direct.predict(&x_test).unwrap();
 
@@ -440,7 +440,7 @@ fn linear_regression_save_load_round_trip_predictions_identical() {
     let y_train = Array1::from_vec(vec![3.0, 5.0, 7.0, 9.0, 11.0]);
     let x_test = Array2::from_shape_vec((2, 1), vec![6.0, 0.0]).unwrap();
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model.fit(&x_train, &y_train).unwrap();
     let preds_before = model.predict(&x_test).unwrap();
 
@@ -468,7 +468,7 @@ fn linear_regression_save_load_preserves_hyperparameters() {
     let x_train = Array2::from_shape_vec((5, 1), vec![1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
     let y_train = Array1::from_vec(vec![3.0, 5.0, 7.0, 9.0, 11.0]);
 
-    let mut model = LinearRegression::new(false, 0.005, 8_000, 1e-9, None).unwrap();
+    let mut model = LinearRegression::new(false, 0.005, 8_000, 1e-9).unwrap();
     model.fit(&x_train, &y_train).unwrap();
 
     let path = "/tmp/rustyml_ml_infra_linreg_hyperparams.json";
@@ -517,7 +517,7 @@ fn three_blob_data_for_round_trip() -> Array2<f64> {
 fn kmeans_save_load_round_trip_predictions_identical() {
     let data = three_blob_data_for_round_trip();
 
-    let mut km = KMeans::new(3, 300, 1e-4, Some(42)).unwrap();
+    let mut km = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
     km.fit(&data).unwrap();
     let preds_before = km.predict(&data).unwrap();
 
@@ -545,7 +545,7 @@ fn kmeans_save_load_round_trip_predictions_identical() {
 fn kmeans_save_load_preserves_hyperparameters() {
     let data = three_blob_data_for_round_trip();
 
-    let mut km = KMeans::new(3, 200, 1e-5, Some(7)).unwrap();
+    let mut km = KMeans::new(3, 200, 1e-5).unwrap().with_random_state(7);
     km.fit(&data).unwrap();
 
     let path = "/tmp/rustyml_ml_infra_kmeans_hyperparams.json";
@@ -565,7 +565,7 @@ fn kmeans_save_load_preserves_hyperparameters() {
 /// LinearRegression (supervised): predict before fit returns NotFitted
 #[test]
 fn linear_regression_predict_before_fit_is_not_fitted() {
-    let model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     let x = array![[1.0, 2.0]];
     let result = model.predict(&x);
     assert!(
@@ -577,7 +577,7 @@ fn linear_regression_predict_before_fit_is_not_fitted() {
 /// KMeans (unsupervised): predict before fit returns NotFitted
 #[test]
 fn kmeans_predict_before_fit_is_not_fitted() {
-    let km = KMeans::new(3, 100, 1e-4, Some(42)).unwrap();
+    let km = KMeans::new(3, 100, 1e-4).unwrap().with_random_state(42);
     let x = array![[1.0, 2.0]];
     let result = km.predict(&x);
     assert!(
@@ -589,7 +589,7 @@ fn kmeans_predict_before_fit_is_not_fitted() {
 /// IsolationForest (anomaly detection): predict before fit returns NotFitted
 #[test]
 fn isolation_forest_predict_before_fit_is_not_fitted() {
-    let forest = IsolationForest::new(10, 32, None, Some(42)).unwrap();
+    let forest = IsolationForest::new(10, 32).unwrap().with_random_state(42);
     let x = array![[1.0, 2.0]];
     let result = forest.predict(&x);
     assert!(
@@ -646,7 +646,7 @@ fn generic_fit_predict_isolation_forest_outputs_f64_scores() {
     )
     .unwrap();
 
-    let mut forest = IsolationForest::new(20, 32, None, Some(42)).unwrap();
+    let mut forest = IsolationForest::new(20, 32).unwrap().with_random_state(42);
     Fit::fit(&mut forest, &data).expect("fit via Fit trait should succeed");
     let scores: Array1<f64> =
         Predict::predict(&forest, &data).expect("predict via Predict trait should succeed");
@@ -671,7 +671,7 @@ fn generic_fit_predict_dbscan_outputs_isize_labels() {
     )
     .unwrap();
 
-    let mut db = DBSCAN::new(0.5, 2, Metric::Euclidean).unwrap();
+    let mut db = DBSCAN::new(0.5, 2).unwrap();
     Fit::fit(&mut db, &data).expect("fit via Fit trait should succeed");
     // predict assigns each passed-in point to a fitted cluster
     let labels: Array1<isize> =
@@ -696,7 +696,11 @@ fn generic_fit_predict_knn_outputs_generic_labels() {
     let x_train = Array2::from_shape_vec((2, 2), vec![0.0, 0.0, 10.0, 0.0]).unwrap();
     let y_train = Array1::from_vec(vec![0_i32, 1]);
 
-    let mut knn = KNN::<i32>::new(1, WeightingStrategy::Uniform, Metric::Euclidean).unwrap();
+    let mut knn = KNN::<i32>::new(1)
+        .unwrap()
+        .with_weighting_strategy(WeightingStrategy::Uniform)
+        .with_metric(Metric::Euclidean)
+        .unwrap();
     Fit::fit(&mut knn, (&x_train, &y_train)).expect("fit via Fit trait should succeed");
 
     let x_test = Array2::from_shape_vec((2, 2), vec![0.5, 0.0, 9.5, 0.0]).unwrap();
@@ -716,7 +720,7 @@ fn generic_fit_predict_lda_outputs_i32_labels() {
     let x_train = Array2::from_shape_vec((6, 1), vec![1.0, 2.0, 3.0, 7.0, 8.0, 9.0]).unwrap();
     let y_train = Array1::from_vec(vec![0_i32, 0, 0, 1, 1, 1]);
 
-    let mut lda = LDA::new(1, None, None).unwrap();
+    let mut lda = LDA::new(1).unwrap();
     Fit::fit(&mut lda, (&x_train, &y_train)).expect("fit via Fit trait should succeed");
     let preds: Array1<i32> =
         Predict::predict(&lda, &x_train).expect("predict via Predict trait should succeed");
@@ -738,7 +742,7 @@ fn generic_fit_predict_decision_tree_outputs_f64_labels() {
     let x_train = Array2::from_shape_vec((6, 1), vec![0.0, 0.1, 0.2, 1.0, 1.1, 1.2]).unwrap();
     let y_train = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
 
-    let mut tree = DecisionTree::new(Algorithm::CART, true, None).unwrap();
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     Fit::fit(&mut tree, (&x_train, &y_train)).expect("fit via Fit trait should succeed");
     let preds: Array1<f64> =
         Predict::predict(&tree, &x_train).expect("predict via Predict trait should succeed");
@@ -765,8 +769,7 @@ fn generic_fit_predict_linear_svc_outputs_f64_labels() {
     .unwrap();
     let y_train = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
 
-    let mut svc =
-        LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6, None).unwrap();
+    let mut svc = LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6).unwrap();
     Fit::fit(&mut svc, (&x_train, &y_train)).expect("fit via Fit trait should succeed");
     let preds: Array1<f64> =
         Predict::predict(&svc, &x_train).expect("predict via Predict trait should succeed");
@@ -795,7 +798,14 @@ fn generic_fit_predict_mean_shift_outputs_usize_labels() {
     )
     .unwrap();
 
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     Fit::fit(&mut ms, &data).expect("fit via Fit trait should succeed");
     let labels: Array1<usize> =
         Predict::predict(&ms, &data).expect("predict via Predict trait should succeed");
@@ -824,7 +834,9 @@ fn generic_fit_predict_svc_outputs_pm1_labels() {
     .unwrap();
     let y_train = Array1::from_vec(vec![1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0]);
 
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     Fit::fit(&mut svc, (&x_train, &y_train)).expect("fit via Fit trait should succeed");
     let preds: Array1<f64> =
         Predict::predict(&svc, &x_train).expect("predict via Predict trait should succeed");

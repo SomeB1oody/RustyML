@@ -15,7 +15,7 @@ use crate::common::assert_allclose;
 /// learning_rate = 0.0 is not positive -> InvalidParameter
 #[test]
 fn constructor_zero_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, 0.0, 100, 1e-6, None);
+    let result = LinearRegression::new(true, 0.0, 100, 1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -26,7 +26,7 @@ fn constructor_zero_learning_rate_is_invalid() {
 /// learning_rate < 0 -> InvalidParameter
 #[test]
 fn constructor_negative_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, -0.01, 100, 1e-6, None);
+    let result = LinearRegression::new(true, -0.01, 100, 1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -37,7 +37,7 @@ fn constructor_negative_learning_rate_is_invalid() {
 /// learning_rate = NaN -> InvalidParameter
 #[test]
 fn constructor_nan_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, f64::NAN, 100, 1e-6, None);
+    let result = LinearRegression::new(true, f64::NAN, 100, 1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -48,7 +48,7 @@ fn constructor_nan_learning_rate_is_invalid() {
 /// learning_rate = +inf -> InvalidParameter
 #[test]
 fn constructor_inf_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, f64::INFINITY, 100, 1e-6, None);
+    let result = LinearRegression::new(true, f64::INFINITY, 100, 1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -59,7 +59,7 @@ fn constructor_inf_learning_rate_is_invalid() {
 /// max_iterations = 0 -> InvalidParameter
 #[test]
 fn constructor_zero_max_iter_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 0, 1e-6, None);
+    let result = LinearRegression::new(true, 0.01, 0, 1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -70,7 +70,7 @@ fn constructor_zero_max_iter_is_invalid() {
 /// tolerance = 0.0 is not positive -> InvalidParameter
 #[test]
 fn constructor_zero_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 0.0, None);
+    let result = LinearRegression::new(true, 0.01, 100, 0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -81,7 +81,7 @@ fn constructor_zero_tolerance_is_invalid() {
 /// tolerance < 0 -> InvalidParameter
 #[test]
 fn constructor_negative_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, -1e-6, None);
+    let result = LinearRegression::new(true, 0.01, 100, -1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -92,7 +92,7 @@ fn constructor_negative_tolerance_is_invalid() {
 /// tolerance = NaN -> InvalidParameter
 #[test]
 fn constructor_nan_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, f64::NAN, None);
+    let result = LinearRegression::new(true, 0.01, 100, f64::NAN);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -103,7 +103,7 @@ fn constructor_nan_tolerance_is_invalid() {
 /// tolerance = +inf -> InvalidParameter
 #[test]
 fn constructor_inf_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, f64::INFINITY, None);
+    let result = LinearRegression::new(true, 0.01, 100, f64::INFINITY);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -114,7 +114,9 @@ fn constructor_inf_tolerance_is_invalid() {
 /// Negative L2 alpha -> InvalidParameter
 #[test]
 fn constructor_negative_l2_alpha_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 1e-6, Some(RegularizationType::L2(-0.1)));
+    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(-0.1));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -125,7 +127,9 @@ fn constructor_negative_l2_alpha_is_invalid() {
 /// Negative L1 alpha -> InvalidParameter
 #[test]
 fn constructor_negative_l1_alpha_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 1e-6, Some(RegularizationType::L1(-0.5)));
+    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L1(-0.5));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -136,13 +140,9 @@ fn constructor_negative_l1_alpha_is_invalid() {
 /// NaN L2 alpha -> InvalidParameter
 #[test]
 fn constructor_nan_l2_alpha_is_invalid() {
-    let result = LinearRegression::new(
-        true,
-        0.01,
-        100,
-        1e-6,
-        Some(RegularizationType::L2(f64::NAN)),
-    );
+    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(f64::NAN));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -153,14 +153,14 @@ fn constructor_nan_l2_alpha_is_invalid() {
 /// Valid constructor with all legal parameters -> Ok
 #[test]
 fn constructor_valid_parameters_succeeds() {
-    let result = LinearRegression::new(true, 0.01, 1000, 1e-6, None);
+    let result = LinearRegression::new(true, 0.01, 1000, 1e-6);
     assert!(result.is_ok(), "expected Ok, got {:?}", result);
 }
 
 /// Getters on a freshly constructed model return the supplied values
 #[test]
 fn constructor_getters_round_trip() {
-    let model = LinearRegression::new(false, 0.05, 500, 1e-4, None).unwrap();
+    let model = LinearRegression::new(false, 0.05, 500, 1e-4).unwrap();
     assert!(!model.get_fit_intercept());
     assert_abs_diff_eq!(model.get_learning_rate(), 0.05, epsilon = 1e-15);
     assert_eq!(model.get_max_iterations(), 500);
@@ -175,7 +175,7 @@ fn constructor_getters_round_trip() {
 /// predict() on an unfitted model -> NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
-    let model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     let x = array![[1.0, 2.0]];
     let result = model.predict(&x);
     assert!(
@@ -190,7 +190,7 @@ fn predict_before_fit_returns_not_fitted() {
 /// fit() with empty X -> EmptyInput
 #[test]
 fn fit_empty_x_returns_empty_input() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     let x: Array2<f64> = Array2::zeros((0, 2));
     let y: Array1<f64> = Array1::zeros(0);
     let result = model.fit(&x, &y);
@@ -204,7 +204,7 @@ fn fit_empty_x_returns_empty_input() {
 /// fit() with NaN in X -> NonFinite
 #[test]
 fn fit_nan_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     let x = array![[1.0, f64::NAN], [2.0, 3.0]];
     let y = array![1.0, 2.0];
     let result = model.fit(&x, &y);
@@ -218,7 +218,7 @@ fn fit_nan_in_x_returns_non_finite() {
 /// fit() with Inf in X -> NonFinite
 #[test]
 fn fit_inf_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     let x = array![[1.0, f64::INFINITY], [2.0, 3.0]];
     let y = array![1.0, 2.0];
     let result = model.fit(&x, &y);
@@ -232,7 +232,7 @@ fn fit_inf_in_x_returns_non_finite() {
 /// fit() with mismatched y length -> DimensionMismatch
 #[test]
 fn fit_y_length_mismatch_returns_dimension_mismatch() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
     // x has 3 rows but y has 2 elements
     let x = array![[1.0], [2.0], [3.0]];
     let y = array![1.0, 2.0];
@@ -249,7 +249,7 @@ fn fit_y_length_mismatch_returns_dimension_mismatch() {
 /// predict() with empty matrix -> EmptyInput
 #[test]
 fn predict_empty_matrix_returns_empty_input() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
     // Train on y = 2x + 1
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
@@ -267,7 +267,7 @@ fn predict_empty_matrix_returns_empty_input() {
 /// predict() with wrong number of columns -> DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
     // Trained on 1 feature
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
@@ -286,7 +286,7 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
 /// predict() with NaN in X -> NonFinite
 #[test]
 fn predict_nan_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x_train, &y_train).unwrap();
@@ -303,7 +303,7 @@ fn predict_nan_in_x_returns_non_finite() {
 /// predict() with +Inf in X -> NonFinite
 #[test]
 fn predict_inf_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x_train, &y_train).unwrap();
@@ -324,7 +324,7 @@ fn predict_inf_in_x_returns_non_finite() {
 #[test]
 fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
     // Small learning rate and many iterations to ensure gradient descent converges
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -341,7 +341,7 @@ fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
 /// predict on x=6 -> 13.0; predict on x=0 -> 1.0
 #[test]
 fn univariate_y_equals_2x_plus_1_predictions() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -355,7 +355,7 @@ fn univariate_y_equals_2x_plus_1_predictions() {
 /// After fit, n_iter is set (model ran at least 1 iteration)
 #[test]
 fn fit_sets_n_iter() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -371,7 +371,7 @@ fn fit_sets_n_iter() {
 /// Multivariate coefficients and intercept converge to known values
 #[test]
 fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
-    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10).unwrap();
     // 6 training points spanning the feature space well
     let x = Array2::from_shape_vec(
         (6, 2),
@@ -399,7 +399,7 @@ fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
 /// Multivariate predictions match closed-form y = 2*x1 + 3*x2 + 1
 #[test]
 fn multivariate_predictions_match_closed_form() {
-    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10).unwrap();
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 3.0, 2.0, 2.0, 3.0, 4.0, 1.0],
@@ -421,7 +421,7 @@ fn multivariate_predictions_match_closed_form() {
 /// With fit_intercept=false the stored intercept is exactly 0.0
 #[test]
 fn no_intercept_stored_intercept_is_zero() {
-    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     // y = 2x, passes through the origin
     let y = array![2.0, 4.0, 6.0, 8.0, 10.0];
@@ -435,7 +435,7 @@ fn no_intercept_stored_intercept_is_zero() {
 /// With fit_intercept=false the coefficient converges to slope ~= 2.0
 #[test]
 fn no_intercept_coefficient_converges_to_slope() {
-    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![2.0, 4.0, 6.0, 8.0, 10.0];
     model.fit(&x, &y).unwrap();
@@ -447,7 +447,7 @@ fn no_intercept_coefficient_converges_to_slope() {
 /// With fit_intercept=false get_fit_intercept() returns false
 #[test]
 fn no_intercept_getter_returns_false() {
-    let model = LinearRegression::new(false, 0.01, 1000, 1e-6, None).unwrap();
+    let model = LinearRegression::new(false, 0.01, 1000, 1e-6).unwrap();
     assert!(!model.get_fit_intercept());
 }
 
@@ -457,7 +457,7 @@ fn no_intercept_getter_returns_false() {
 /// OLS converges to slope=3.0, intercept=2.0 on y=3x+2
 #[test]
 fn ols_sanity_y_equals_3x_plus_2_parameters() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![5.0, 8.0, 11.0, 14.0, 17.0];
     model.fit(&x, &y).unwrap();
@@ -474,7 +474,7 @@ fn ols_sanity_y_equals_3x_plus_2_parameters() {
 /// OLS prediction at x=6 -> 20.0, x=10 -> 32.0 on y=3x+2
 #[test]
 fn ols_sanity_y_equals_3x_plus_2_predictions() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![5.0, 8.0, 11.0, 14.0, 17.0];
     model.fit(&x, &y).unwrap();
@@ -493,11 +493,11 @@ fn fit_predict_matches_fit_then_predict() {
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
     // Path 1: fit_predict
-    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
 
     // Path 2: fit then predict
-    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model_b.fit(&x, &y).unwrap();
     let preds_b = model_b.predict(&x).unwrap();
 
@@ -510,7 +510,7 @@ fn fit_predict_values_match_known_true_values() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let preds = model.fit_predict(&x, &y).unwrap();
 
     // Trained on exactly this data, so predictions on it closely match y = 2x + 1
@@ -527,13 +527,14 @@ fn l2_regularization_shrinks_coefficient_norm() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     unregularized.fit(&x, &y).unwrap();
     let coeff_unreg = unregularized.get_coefficients().unwrap()[0].abs();
 
-    let mut ridge =
-        LinearRegression::new(true, 0.01, 10_000, 1e-10, Some(RegularizationType::L2(5.0)))
-            .unwrap();
+    let mut ridge = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(5.0))
+        .unwrap();
     ridge.fit(&x, &y).unwrap();
     let coeff_ridge = ridge.get_coefficients().unwrap()[0].abs();
 
@@ -552,13 +553,14 @@ fn l1_regularization_shrinks_coefficient() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     unregularized.fit(&x, &y).unwrap();
     let coeff_unreg = unregularized.get_coefficients().unwrap()[0].abs();
 
-    let mut lasso =
-        LinearRegression::new(true, 0.01, 10_000, 1e-10, Some(RegularizationType::L1(5.0)))
-            .unwrap();
+    let mut lasso = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+        .unwrap()
+        .with_regularization(RegularizationType::L1(5.0))
+        .unwrap();
     lasso.fit(&x, &y).unwrap();
     let coeff_lasso = lasso.get_coefficients().unwrap()[0].abs();
 
@@ -574,9 +576,10 @@ fn l2_regularization_intercept_within_reasonable_range() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut ridge =
-        LinearRegression::new(true, 0.01, 10_000, 1e-10, Some(RegularizationType::L2(0.1)))
-            .unwrap();
+    let mut ridge = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(0.1))
+        .unwrap();
     ridge.fit(&x, &y).unwrap();
 
     // With small alpha=0.1 the intercept stays close to 1.0 (within +/- 0.5)
@@ -597,11 +600,11 @@ fn determinism_same_data_identical_predictions() {
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [7.0], [8.0]];
 
-    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model_a.fit(&x, &y).unwrap();
     let preds_a = model_a.predict(&x_test).unwrap();
 
-    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model_b.fit(&x, &y).unwrap();
     let preds_b = model_b.predict(&x_test).unwrap();
 
@@ -618,7 +621,7 @@ fn save_load_round_trip_identical_predictions() {
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [7.0], [0.5]];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model.fit(&x_train, &y_train).unwrap();
     let preds_before = model.predict(&x_test).unwrap();
 
@@ -640,7 +643,7 @@ fn save_load_preserves_model_state() {
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut model = LinearRegression::new(false, 0.005, 8_000, 1e-9, None).unwrap();
+    let mut model = LinearRegression::new(false, 0.005, 8_000, 1e-9).unwrap();
     model.fit(&x_train, &y_train).unwrap();
 
     let path = "/tmp/rustyml_linear_regression_test_state.json";
@@ -699,7 +702,7 @@ fn clone_of_fitted_model_makes_identical_predictions() {
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [0.0]];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model.fit(&x_train, &y_train).unwrap();
     let preds_orig = model.predict(&x_test).unwrap();
 
@@ -717,7 +720,7 @@ fn clone_of_fitted_model_makes_identical_predictions() {
 #[test]
 fn fit_huge_learning_rate_diverges_returns_non_finite() {
     // learning_rate = 1e8 is positive and finite, so the constructor accepts it
-    let mut model = LinearRegression::new(true, 1e8, 1000, 1e-10, None).unwrap();
+    let mut model = LinearRegression::new(true, 1e8, 1000, 1e-10).unwrap();
 
     // Perfectly clean, finite data: y = 2x + 1 on x = [1..5]
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
@@ -756,14 +759,10 @@ fn l1_regularization_parallel_branch_recovers_informative_feature() {
     let y = Array1::from_shape_fn(n_samples, |i| 3.0 * ((i as f64) - 5.5));
 
     // Very weak L1 so the dominant coefficient is shrunk only slightly; fit_intercept = false
-    let mut model = LinearRegression::new(
-        false,
-        0.01,
-        20_000,
-        1e-12,
-        Some(RegularizationType::L1(1e-3)),
-    )
-    .unwrap();
+    let mut model = LinearRegression::new(false, 0.01, 20_000, 1e-12)
+        .unwrap()
+        .with_regularization(RegularizationType::L1(1e-3))
+        .unwrap();
     model
         .fit(&x, &y)
         .expect("fit with >=200 features and L1 should succeed");

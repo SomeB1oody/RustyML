@@ -27,7 +27,7 @@ fn two_blob_data() -> Array2<f64> {
 
 #[test]
 fn test_new_zero_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(0.0, None, None, None, None);
+    let result = MeanShift::new(0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "bandwidth=0 should return InvalidParameter, got {:?}",
@@ -37,7 +37,7 @@ fn test_new_zero_bandwidth_is_invalid_parameter() {
 
 #[test]
 fn test_new_negative_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(-1.0, None, None, None, None);
+    let result = MeanShift::new(-1.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "bandwidth=-1 should return InvalidParameter, got {:?}",
@@ -47,7 +47,7 @@ fn test_new_negative_bandwidth_is_invalid_parameter() {
 
 #[test]
 fn test_new_inf_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(f64::INFINITY, None, None, None, None);
+    let result = MeanShift::new(f64::INFINITY);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "bandwidth=inf should return InvalidParameter, got {:?}",
@@ -57,7 +57,7 @@ fn test_new_inf_bandwidth_is_invalid_parameter() {
 
 #[test]
 fn test_new_nan_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(f64::NAN, None, None, None, None);
+    let result = MeanShift::new(f64::NAN);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "bandwidth=NaN should return InvalidParameter, got {:?}",
@@ -67,7 +67,7 @@ fn test_new_nan_bandwidth_is_invalid_parameter() {
 
 #[test]
 fn test_new_zero_max_iter_is_invalid_parameter() {
-    let result = MeanShift::new(1.0, Some(0), None, None, None);
+    let result = MeanShift::new(1.0).unwrap().with_max_iter(0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "max_iter=0 should return InvalidParameter, got {:?}",
@@ -77,7 +77,7 @@ fn test_new_zero_max_iter_is_invalid_parameter() {
 
 #[test]
 fn test_new_zero_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0, None, Some(0.0), None, None);
+    let result = MeanShift::new(1.0).unwrap().with_tolerance(0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=0 should return InvalidParameter, got {:?}",
@@ -87,7 +87,7 @@ fn test_new_zero_tol_is_invalid_parameter() {
 
 #[test]
 fn test_new_negative_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0, None, Some(-1e-6), None, None);
+    let result = MeanShift::new(1.0).unwrap().with_tolerance(-1e-6);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol<0 should return InvalidParameter, got {:?}",
@@ -97,7 +97,7 @@ fn test_new_negative_tol_is_invalid_parameter() {
 
 #[test]
 fn test_new_inf_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0, None, Some(f64::INFINITY), None, None);
+    let result = MeanShift::new(1.0).unwrap().with_tolerance(f64::INFINITY);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=inf should return InvalidParameter, got {:?}",
@@ -107,7 +107,7 @@ fn test_new_inf_tol_is_invalid_parameter() {
 
 #[test]
 fn test_new_nan_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0, None, Some(f64::NAN), None, None);
+    let result = MeanShift::new(1.0).unwrap().with_tolerance(f64::NAN);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "tol=NaN should return InvalidParameter, got {:?}",
@@ -117,9 +117,14 @@ fn test_new_nan_tol_is_invalid_parameter() {
 
 #[test]
 fn test_new_valid_parameters_succeeds() {
-    let ms = MeanShift::new(2.0, Some(100), Some(1e-4), Some(false), Some(true));
-    assert!(ms.is_ok(), "valid parameters should succeed");
-    let ms = ms.unwrap();
+    let ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(100)
+        .unwrap()
+        .with_tolerance(1e-4)
+        .unwrap()
+        .with_bin_seeding(false)
+        .with_cluster_all(true);
     assert_abs_diff_eq!(ms.get_bandwidth(), 2.0);
     assert_eq!(ms.get_max_iterations(), 100);
     assert_abs_diff_eq!(ms.get_tolerance(), 1e-4);
@@ -165,7 +170,10 @@ fn test_predict_before_fit_returns_not_fitted() {
 #[test]
 fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
     let data = two_blob_data(); // 2 features
-    let mut ms = MeanShift::new(2.0, None, None, Some(false), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_bin_seeding(false)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     // Provide 3-feature points; the model was trained on 2-feature points
@@ -186,7 +194,14 @@ fn test_predict_wrong_feature_dimension_returns_dimension_mismatch() {
 fn test_fit_produces_two_centers_near_true_means() {
     let data = two_blob_data();
     // bin_seeding=true for deterministic seed selection at a fixed bandwidth
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
@@ -225,7 +240,14 @@ fn test_fit_produces_two_centers_near_true_means() {
 #[test]
 fn test_fit_labels_match_known_cluster_structure() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let labels = ms.get_labels().unwrap();
@@ -248,7 +270,14 @@ fn test_fit_labels_match_known_cluster_structure() {
 #[test]
 fn test_predict_assigns_points_to_correct_cluster() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let labels_train = ms.get_labels().unwrap().clone();
@@ -281,7 +310,14 @@ fn test_predict_assigns_points_to_correct_cluster() {
 #[test]
 fn test_fit_predict_consistent_with_fit_then_labels() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     let labels_fp = ms.fit_predict(&data).unwrap();
     let labels_stored = ms.get_labels().unwrap();
     assert_eq!(labels_fp.len(), labels_stored.len());
@@ -297,7 +333,14 @@ fn test_fit_predict_consistent_with_fit_then_labels() {
 #[test]
 fn test_cluster_all_false_outlier_label_is_n_clusters() {
     let data = two_blob_data(); // blobs at (0,0) and (20,20)
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(false)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(false);
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
@@ -318,7 +361,14 @@ fn test_cluster_all_false_outlier_label_is_n_clusters() {
 #[test]
 fn test_cluster_all_true_never_produces_outlier_label() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
@@ -341,7 +391,14 @@ fn test_cluster_all_true_never_produces_outlier_label() {
 #[test]
 fn test_fit_labels_cluster_all_true_all_assigned() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
@@ -363,7 +420,12 @@ fn test_fit_labels_cluster_all_true_all_assigned() {
 #[test]
 fn test_actual_iterations_bounded_by_max_iter() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(1), None, Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(1)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
     let actual = ms.get_actual_iterations().unwrap();
     assert_eq!(actual, 1, "with max_iter=1, actual iterations must equal 1");
@@ -376,7 +438,14 @@ fn test_actual_iterations_bounded_by_max_iter() {
 #[test]
 fn test_n_samples_per_center_sums_equal_seeds_processed() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let counts = ms.get_n_samples_per_center().unwrap();
@@ -400,7 +469,14 @@ fn test_n_samples_per_center_sums_equal_seeds_processed() {
 #[test]
 fn test_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
-    let mut ms_bin = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms_bin = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms_bin.fit(&data).unwrap();
 
     let centers = ms_bin.get_cluster_centers().unwrap();
@@ -414,8 +490,14 @@ fn test_no_bin_seeding_produces_valid_centers() {
     let data = two_blob_data();
     // bin_seeding=false keeps up to 100 shuffled points as seeds; with only 10 samples
     // the whole set is kept, so this just checks the non-bin_seeding branch is valid
-    let mut ms_no_bin =
-        MeanShift::new(2.0, Some(300), Some(1e-5), Some(false), Some(true)).unwrap();
+    let mut ms_no_bin = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(false)
+        .with_cluster_all(true);
     ms_no_bin.fit(&data).unwrap();
 
     let centers = ms_no_bin.get_cluster_centers().unwrap();
@@ -443,7 +525,14 @@ fn three_blobs_over_100() -> Array2<f64> {
 fn non_bin_seeding_fit_is_deterministic() {
     let data = three_blobs_over_100();
     let run = || {
-        let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(false), Some(true)).unwrap();
+        let mut ms = MeanShift::new(2.0)
+            .unwrap()
+            .with_max_iter(300)
+            .unwrap()
+            .with_tolerance(1e-5)
+            .unwrap()
+            .with_bin_seeding(false)
+            .with_cluster_all(true);
         ms.fit(&data).unwrap();
         (
             ms.get_cluster_centers().unwrap().clone(),
@@ -555,7 +644,7 @@ fn test_estimate_bandwidth_n_samples_larger_than_rows() {
 #[test]
 fn test_fit_single_point_produces_one_center() {
     let x = Array2::from_shape_vec((1, 2), vec![3.0_f64, 7.0]).unwrap();
-    let mut ms = MeanShift::new(1.0, None, None, None, None).unwrap();
+    let mut ms = MeanShift::new(1.0).unwrap();
     ms.fit(&x).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
@@ -596,7 +685,14 @@ fn test_fit_empty_data_returns_error() {
 #[test]
 fn test_save_load_round_trip_identical_predictions() {
     let data = two_blob_data();
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let path = "/tmp/rustyml_mean_shift_test.json";
@@ -680,7 +776,14 @@ fn three_blob_data() -> Array2<f64> {
 fn test_non_bin_seeding_fit_is_reproducible() {
     let data = three_blob_data();
     let fit = || {
-        let mut ms = MeanShift::new(5.0, Some(300), Some(1e-4), Some(false), Some(true)).unwrap();
+        let mut ms = MeanShift::new(5.0)
+            .unwrap()
+            .with_max_iter(300)
+            .unwrap()
+            .with_tolerance(1e-4)
+            .unwrap()
+            .with_bin_seeding(false)
+            .with_cluster_all(true);
         ms.fit(&data).unwrap();
         ms
     };
@@ -704,7 +807,14 @@ fn test_non_bin_seeding_fit_is_reproducible() {
 fn test_bin_seeding_is_deterministic_across_runs() {
     let data = three_blob_data();
     let fit = || {
-        let mut ms = MeanShift::new(5.0, Some(300), Some(1e-4), Some(true), Some(true)).unwrap();
+        let mut ms = MeanShift::new(5.0)
+            .unwrap()
+            .with_max_iter(300)
+            .unwrap()
+            .with_tolerance(1e-4)
+            .unwrap()
+            .with_bin_seeding(true)
+            .with_cluster_all(true);
         ms.fit(&data).unwrap();
         ms
     };
@@ -746,7 +856,14 @@ fn test_fit_parallel_branch_three_blobs_1200() {
     assert_eq!(data.nrows(), 1200, "dataset must exceed the 1000 threshold");
 
     // bin_seeding=true gives deterministic seeds; bandwidth=2.0 separates the blobs
-    let mut ms = MeanShift::new(2.0, Some(300), Some(1e-5), Some(true), Some(true)).unwrap();
+    let mut ms = MeanShift::new(2.0)
+        .unwrap()
+        .with_max_iter(300)
+        .unwrap()
+        .with_tolerance(1e-5)
+        .unwrap()
+        .with_bin_seeding(true)
+        .with_cluster_all(true);
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();

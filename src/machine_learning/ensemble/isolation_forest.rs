@@ -68,7 +68,7 @@ pub enum IsolationTree {
 /// use rustyml::machine_learning::IsolationForest;
 /// use ndarray::array;
 ///
-/// let mut model = IsolationForest::new(100, 256, None, Some(42)).unwrap();
+/// let mut model = IsolationForest::new(100, 256).unwrap().with_random_state(42);
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(&data).unwrap();
 /// let scores = model.predict(&data).unwrap();
@@ -124,8 +124,6 @@ impl IsolationForest {
     ///
     /// - `n_estimators` - Number of isolation trees to build
     /// - `max_samples` - Maximum number of samples to draw from the dataset for each tree
-    /// - `max_depth` - Maximum depth of each tree. If None, defaults to ceil(log2(max_samples))
-    /// - `random_state` - Random seed for reproducibility. If None, uses non-deterministic seed
     ///
     /// # Returns
     ///
@@ -133,16 +131,26 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// Returns `Error::InvalidParameter` if:
-    /// - `n_estimators` is 0
-    /// - `max_samples` is 0
-    /// - `max_depth` (if provided) is 0
-    pub fn new(
-        n_estimators: usize,
-        max_samples: usize,
-        max_depth: Option<usize>,
-        random_state: Option<u64>,
-    ) -> Result<Self, Error> {
+    /// Returns `Error::InvalidParameter` if `n_estimators` or `max_samples` is 0
+    ///
+    /// # Notes
+    ///
+    /// By default the tree depth is derived as `ceil(log2(max_samples))` and the forest is
+    /// seeded non-deterministically. Override either with the builder methods below:
+    ///
+    /// - [`with_max_depth`](Self::with_max_depth) - maximum depth of each tree (returns `Result`; the depth is validated)
+    /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for reproducible forests
+    ///
+    /// ```
+    /// use rustyml::machine_learning::IsolationForest;
+    ///
+    /// let model = IsolationForest::new(100, 256)
+    ///     .unwrap()
+    ///     .with_max_depth(12)
+    ///     .unwrap()
+    ///     .with_random_state(42);
+    /// ```
+    pub fn new(n_estimators: usize, max_samples: usize) -> Result<Self, Error> {
         if n_estimators == 0 {
             return Err(Error::invalid_parameter(
                 "n_estimators",
@@ -157,19 +165,8 @@ impl IsolationForest {
             ));
         }
 
-        if let Some(depth) = max_depth
-            && depth == 0
-        {
-            return Err(Error::invalid_parameter(
-                "max_depth",
-                "must be greater than 0",
-            ));
-        }
-
-        let computed_max_depth = max_depth.unwrap_or_else(|| {
-            // ceil(log2(max_samples))
-            (max_samples as f64).log2().ceil() as usize
-        });
+        // ceil(log2(max_samples))
+        let computed_max_depth = (max_samples as f64).log2().ceil() as usize;
 
         Ok(Self {
             trees: None,
@@ -177,9 +174,49 @@ impl IsolationForest {
             max_samples,
             sample_size: 0,
             max_depth: computed_max_depth,
-            random_state,
+            random_state: None,
             n_features: 0,
         })
+    }
+
+    /// Overrides the maximum depth of each isolation tree
+    /// (default: `ceil(log2(max_samples))`)
+    ///
+    /// # Parameters
+    ///
+    /// - `max_depth` - Maximum depth of each tree; must be greater than 0
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if `max_depth` is 0
+    pub fn with_max_depth(mut self, max_depth: usize) -> Result<Self, Error> {
+        if max_depth == 0 {
+            return Err(Error::invalid_parameter(
+                "max_depth",
+                "must be greater than 0",
+            ));
+        }
+        self.max_depth = max_depth;
+        Ok(self)
+    }
+
+    /// Sets a fixed RNG seed, making forest construction reproducible
+    /// (default: `None`, non-deterministic)
+    ///
+    /// # Parameters
+    ///
+    /// - `seed` - Seed for the tree-building RNG
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_random_state(mut self, seed: u64) -> Self {
+        self.random_state = Some(seed);
+        self
     }
 
     // Getters

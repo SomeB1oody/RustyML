@@ -49,7 +49,7 @@ fn concentric_rings_data() -> (Array2<f64>, Array1<f64>) {
 /// C = 0.0 is non-positive -> InvalidParameter
 #[test]
 fn new_rejects_zero_c() {
-    let result = SVC::new(KernelType::Linear, 0.0, 1e-3, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, 0.0, 1e-3, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -60,7 +60,7 @@ fn new_rejects_zero_c() {
 /// C = -1.0 is negative -> InvalidParameter
 #[test]
 fn new_rejects_negative_c() {
-    let result = SVC::new(KernelType::Linear, -1.0, 1e-3, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, -1.0, 1e-3, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -71,7 +71,7 @@ fn new_rejects_negative_c() {
 /// C = NaN -> InvalidParameter (non-finite check)
 #[test]
 fn new_rejects_nan_c() {
-    let result = SVC::new(KernelType::Linear, f64::NAN, 1e-3, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, f64::NAN, 1e-3, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -82,7 +82,7 @@ fn new_rejects_nan_c() {
 /// C = +Inf -> InvalidParameter (non-finite check)
 #[test]
 fn new_rejects_inf_c() {
-    let result = SVC::new(KernelType::Linear, f64::INFINITY, 1e-3, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, f64::INFINITY, 1e-3, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -93,7 +93,7 @@ fn new_rejects_inf_c() {
 /// tol = 0.0 is non-positive -> InvalidParameter
 #[test]
 fn new_rejects_zero_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, 0.0, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, 1.0, 0.0, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -104,7 +104,7 @@ fn new_rejects_zero_tol() {
 /// tol = -1e-3 is negative -> InvalidParameter
 #[test]
 fn new_rejects_negative_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, -1e-3, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, 1.0, -1e-3, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -115,7 +115,7 @@ fn new_rejects_negative_tol() {
 /// tol = NaN -> InvalidParameter
 #[test]
 fn new_rejects_nan_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, f64::NAN, 100, Some(42));
+    let result = SVC::new(KernelType::Linear, 1.0, f64::NAN, 100);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -126,7 +126,7 @@ fn new_rejects_nan_tol() {
 /// max_iter = 0 -> InvalidParameter
 #[test]
 fn new_rejects_zero_max_iter() {
-    let result = SVC::new(KernelType::Linear, 1.0, 1e-3, 0, Some(42));
+    let result = SVC::new(KernelType::Linear, 1.0, 1e-3, 0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -137,8 +137,9 @@ fn new_rejects_zero_max_iter() {
 /// Valid parameters succeed and getters echo them back
 #[test]
 fn new_valid_parameters_round_trip() {
-    let svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 2.0, 1e-3, 500, Some(7))
-        .expect("valid params must succeed");
+    let svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 2.0, 1e-3, 500)
+        .expect("valid params must succeed")
+        .with_random_state(7);
 
     assert_abs_diff_eq!(svc.get_regularization_parameter(), 2.0, epsilon = 1e-10);
     assert_abs_diff_eq!(svc.get_tolerance(), 1e-3, epsilon = 1e-12);
@@ -168,7 +169,9 @@ fn fit_rejects_labels_not_plus_minus_one() {
     let x = Array2::from_shape_vec((4, 2), vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0]).unwrap();
     // 0-based binary labels, not valid for SVC
     let y = array![0.0, 0.0, 1.0, 1.0];
-    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
     let result = svc.fit(&x, &y);
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
@@ -182,7 +185,9 @@ fn fit_rejects_labels_not_plus_minus_one() {
 fn fit_rejects_fractional_labels() {
     let x = Array2::from_shape_vec((4, 2), vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0]).unwrap();
     let y = array![1.0, -1.0, 0.5, -0.5];
-    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
     let result = svc.fit(&x, &y);
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
@@ -196,7 +201,9 @@ fn fit_rejects_fractional_labels() {
 /// predict before fit -> NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
-    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100, Some(42)).unwrap();
+    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
     let x = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, -1.0, 0.0]).unwrap();
     let result = svc.predict(&x);
     assert!(
@@ -209,7 +216,9 @@ fn predict_before_fit_returns_not_fitted() {
 /// decision_function before fit -> NotFitted
 #[test]
 fn decision_function_before_fit_returns_not_fitted() {
-    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100, Some(42)).unwrap();
+    let svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
     let x = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, -1.0, 0.0]).unwrap();
     let result = svc.decision_function(&x);
     assert!(
@@ -225,7 +234,9 @@ fn decision_function_before_fit_returns_not_fitted() {
 #[test]
 fn predict_wrong_feature_dim_returns_dimension_mismatch() {
     let (x_train, y_train) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 500, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 500)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x_train, &y_train).expect("fit must succeed");
 
     // training used 2 features; pass 3-feature input
@@ -242,7 +253,9 @@ fn predict_wrong_feature_dim_returns_dimension_mismatch() {
 #[test]
 fn decision_function_wrong_feature_dim_returns_dimension_mismatch() {
     let (x_train, y_train) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 500, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 500)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x_train, &y_train).expect("fit must succeed");
 
     let x_bad = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]).unwrap();
@@ -261,7 +274,9 @@ fn decision_function_wrong_feature_dim_returns_dimension_mismatch() {
 #[test]
 fn linear_kernel_classifies_separable_data_perfectly() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y)
         .expect("fit must succeed on linearly separable data");
 
@@ -280,7 +295,9 @@ fn linear_kernel_classifies_separable_data_perfectly() {
 #[test]
 fn predict_output_domain_is_plus_minus_one() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let preds = svc.predict(&x).expect("predict must succeed");
@@ -296,7 +313,9 @@ fn predict_output_domain_is_plus_minus_one() {
 #[test]
 fn sign_consistency_linear_kernel() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let df = svc
@@ -317,7 +336,9 @@ fn sign_consistency_linear_kernel() {
 #[test]
 fn linear_kernel_fit_populates_state() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     assert!(
@@ -337,7 +358,9 @@ fn linear_kernel_fit_populates_state() {
 fn actual_iterations_in_valid_range() {
     let (x, y) = linearly_separable_data();
     let max_iter = 1000_usize;
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, max_iter, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, max_iter)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let n_iter = svc
@@ -358,7 +381,9 @@ fn actual_iterations_in_valid_range() {
 #[test]
 fn rbf_kernel_classifies_concentric_rings_perfectly() {
     let (x, y) = concentric_rings_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 5000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 5000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y)
         .expect("fit must succeed on concentric rings");
 
@@ -375,7 +400,9 @@ fn rbf_kernel_classifies_concentric_rings_perfectly() {
 #[test]
 fn sign_consistency_rbf_kernel() {
     let (x, y) = concentric_rings_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 2000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 2000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let df = svc
@@ -416,8 +443,9 @@ fn all_kernels_fit_and_predict_without_error() {
     let (x, y) = linearly_separable_data();
 
     for kernel in kernels {
-        let mut svc = SVC::new(*kernel, 5.0, 1e-3, 1000, Some(42))
-            .expect("constructor must succeed for all kernel variants");
+        let mut svc = SVC::new(*kernel, 5.0, 1e-3, 1000)
+            .expect("constructor must succeed for all kernel variants")
+            .with_random_state(42);
         svc.fit(&x, &y)
             .unwrap_or_else(|e| panic!("fit failed for kernel {:?}: {e}", kernel));
         let preds = svc
@@ -450,9 +478,9 @@ fn poly_kernel_classifies_separable_data_correctly() {
         10.0,
         1e-3,
         1000,
-        Some(42),
     )
-    .unwrap();
+    .unwrap()
+    .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
     let preds = svc.predict(&x).expect("predict must succeed");
     for (i, (&pred, &true_label)) in preds.iter().zip(y.iter()).enumerate() {
@@ -481,7 +509,9 @@ fn cosine_kernel_zero_vector_does_not_panic() {
     .unwrap();
     let y = array![1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
 
-    let mut svc = SVC::new(KernelType::Cosine, 5.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Cosine, 5.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     // fit may converge or not; what matters is that it does not panic
     let _ = svc.fit(&x, &y);
 }
@@ -494,10 +524,14 @@ fn cosine_kernel_zero_vector_does_not_panic() {
 fn same_seed_produces_identical_results() {
     let (x, y) = linearly_separable_data();
 
-    let mut svc1 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc1 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc1.fit(&x, &y).expect("first fit must succeed");
 
-    let mut svc2 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc2 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc2.fit(&x, &y).expect("second fit must succeed");
 
     // predictions must be identical
@@ -527,10 +561,14 @@ fn same_seed_produces_identical_results() {
 fn fit_predict_agrees_with_fit_then_predict() {
     let (x, y) = linearly_separable_data();
 
-    let mut svc_a = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc_a = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     let fp_preds = svc_a.fit_predict(&x, &y).expect("fit_predict must succeed");
 
-    let mut svc_b = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc_b = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc_b.fit(&x, &y).expect("fit must succeed");
     let preds = svc_b.predict(&x).expect("predict must succeed");
 
@@ -544,7 +582,9 @@ fn fit_predict_agrees_with_fit_then_predict() {
 #[test]
 fn save_load_round_trip_yields_identical_predictions() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let original_preds = svc.predict(&x).expect("predict must succeed before save");
@@ -592,7 +632,9 @@ fn save_load_round_trip_yields_identical_predictions() {
 #[test]
 fn save_load_round_trip_linear_kernel() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let path = "/tmp/rustyml_svc_test_linear_roundtrip.json";
@@ -615,7 +657,9 @@ fn save_load_round_trip_linear_kernel() {
 #[test]
 fn predict_empty_input_returns_error() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let x_empty = Array2::<f64>::zeros((0, 2));
@@ -631,7 +675,9 @@ fn predict_empty_input_returns_error() {
 #[test]
 fn decision_function_empty_input_returns_error() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
+        .unwrap()
+        .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let x_empty = Array2::<f64>::zeros((0, 2));
@@ -658,9 +704,9 @@ fn sigmoid_kernel_sign_consistency() {
         5.0,
         1e-3,
         1000,
-        Some(42),
     )
-    .unwrap();
+    .unwrap()
+    .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let df = svc
@@ -685,7 +731,9 @@ fn sigmoid_kernel_sign_consistency() {
 fn fit_single_class_data_returns_not_converged() {
     let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 0.5], [0.5, 2.0]];
     let y = array![1.0, 1.0, 1.0, 1.0]; // one class only
-    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100, Some(42)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
     let result = svc.fit(&x, &y);
     assert!(
         matches!(result, Err(Error::NotConverged(_))),
@@ -701,7 +749,9 @@ fn fit_single_class_data_returns_not_converged() {
 fn decision_function_and_bias_match_closed_form_linear_kernel() {
     let x = array![[0.0], [-1.0], [2.0], [3.0]];
     let y = array![-1.0, -1.0, 1.0, 1.0];
-    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-5, 5000, Some(7)).unwrap();
+    let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-5, 5000)
+        .unwrap()
+        .with_random_state(7);
     svc.fit(&x, &y).expect("separable data must fit");
 
     // asymmetric placement forces a non-zero intercept: b = -1

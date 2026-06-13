@@ -21,9 +21,10 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 /// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
 /// `Randomized` is recommended for speed with good accuracy. `PowerIteration` is recommended
 /// when you need only a few components from very large or memory-constrained problems
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
 pub enum SVDSolver {
     /// Full SVD using deterministic decomposition
+    #[default]
     Full,
     /// Randomized SVD with a fixed RNG seed
     Randomized(u64),
@@ -183,11 +184,7 @@ impl SVDSolver {
 /// use rustyml::utils::*;
 /// use ndarray::array;
 ///
-/// let mut pca = pca::PCA::new(
-///     2,
-///     pca::SVDSolver::Full,
-/// )
-/// .unwrap();
+/// let mut pca = pca::PCA::new(2).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// pca.fit(&x).unwrap();
 /// let projected = pca.transform(&x).unwrap();
@@ -223,7 +220,7 @@ impl Default for PCA {
     /// - `n_components` - 2
     /// - `svd_solver` - `SVDSolver::Full`
     fn default() -> Self {
-        PCA::new(2, SVDSolver::Full).expect("Default PCA parameters should be valid")
+        PCA::new(2).expect("Default PCA parameters should be valid")
     }
 }
 
@@ -238,7 +235,6 @@ impl PCA {
     /// # Parameters
     ///
     /// - `n_components` - Number of components to keep (must be > 0)
-    /// - `svd_solver` - SVD solver strategy
     ///
     /// # Returns
     ///
@@ -247,7 +243,20 @@ impl PCA {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `n_components` is 0
-    pub fn new(n_components: usize, svd_solver: SVDSolver) -> Result<Self, Error> {
+    ///
+    /// # Notes
+    ///
+    /// The SVD solver defaults to `SVDSolver::Full`. To pick another strategy (e.g. a
+    /// randomized or power-iteration solver for large data), use the builder method below:
+    ///
+    /// - [`with_svd_solver`](Self::with_svd_solver) - SVD solver strategy
+    ///
+    /// ```
+    /// use rustyml::utils::pca::{PCA, SVDSolver};
+    ///
+    /// let model = PCA::new(16).unwrap().with_svd_solver(SVDSolver::Randomized(42));
+    /// ```
+    pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(
                 "n_components",
@@ -258,7 +267,7 @@ impl PCA {
         // Learned parameters stay unset until fit
         Ok(Self {
             n_components,
-            svd_solver,
+            svd_solver: SVDSolver::Full,
             mean: None,
             components: None,
             explained_variance: None,
@@ -267,6 +276,20 @@ impl PCA {
             n_samples: None,
             n_features: None,
         })
+    }
+
+    /// Sets the SVD solver strategy (default: `SVDSolver::Full`)
+    ///
+    /// # Parameters
+    ///
+    /// - `svd_solver` - the solver strategy to use
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_svd_solver(mut self, svd_solver: SVDSolver) -> Self {
+        self.svd_solver = svd_solver;
+        self
     }
 
     // Getters
