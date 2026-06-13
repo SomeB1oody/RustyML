@@ -1,15 +1,15 @@
 //! Linear Support Vector Classifier
 //!
 //! Provides [`LinearSVC`], a hinge-loss classifier trained with stochastic gradient
-//! descent and L1 or L2 regularization, along with the [`RegularizationType`] enum
+//! descent and L1 or L2 regularization, along with the [`RegularizationType`](crate::machine_learning::RegularizationType) enum
 //! that selects the penalty
 
+use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;
 use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_tolerance,
 };
-use crate::error::Error;
 use crate::math::hinge_loss;
 use crate::math::matmul::gemv_internal;
 use crate::{Deserialize, Serialize};

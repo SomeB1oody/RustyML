@@ -12,14 +12,14 @@ use rustyml::machine_learning::traits::{Fit, Predict};
 use rustyml::types::{DistanceCalculationMetric, KernelType};
 
 use crate::common::assert_allclose;
-use rustyml::machine_learning::DistanceCalculationMetric as Metric;
 use rustyml::machine_learning::DBSCAN;
-use rustyml::machine_learning::{Algorithm, DecisionTree};
-use rustyml::machine_learning::{KNN, WeightingStrategy};
+use rustyml::machine_learning::DistanceCalculationMetric as Metric;
 use rustyml::machine_learning::LDA;
-use rustyml::machine_learning::{LinearSVC, RegularizationType};
 use rustyml::machine_learning::MeanShift;
 use rustyml::machine_learning::SVC;
+use rustyml::machine_learning::{Algorithm, DecisionTree};
+use rustyml::machine_learning::{KNN, WeightingStrategy};
+use rustyml::machine_learning::{LinearSVC, RegularizationType};
 
 // (1) Error smart constructors
 

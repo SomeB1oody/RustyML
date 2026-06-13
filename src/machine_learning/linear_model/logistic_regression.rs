@@ -4,12 +4,12 @@
 //! optional L1/L2 regularization, plus the [`generate_polynomial_features`]
 //! helper for building polynomial feature expansions
 
+use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;
 use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::error::Error;
 use crate::math::matmul::gemv_internal;
 use crate::math::{logistic_loss, sigmoid};
 use crate::parallel_gates::EXP_MAP_F64_PARALLEL_THRESHOLD;

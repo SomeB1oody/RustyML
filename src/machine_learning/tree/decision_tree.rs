@@ -4,8 +4,10 @@
 //! algorithms, along with its node types ([`Node`], [`NodeType`]), the
 //! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters.
 
-use crate::machine_learning::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::{Error, TreeError};
+use crate::machine_learning::validation::{
+    check_is_fitted, preliminary_check, validate_predict_input,
+};
 use crate::math::{entropy, gini, variance};
 use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
 use crate::{Deserialize, Serialize};

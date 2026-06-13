@@ -4,8 +4,8 @@
 
 use ndarray::{Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::DistanceCalculationMetric;
 use rustyml::machine_learning::DBSCAN;
+use rustyml::machine_learning::DistanceCalculationMetric;
 
 // Helpers
 

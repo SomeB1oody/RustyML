@@ -31,11 +31,11 @@
 //! assert_eq!(preds.len(), 3);
 //! ```
 
+use crate::error::Error;
 use crate::machine_learning::{
     DBSCAN, DecisionTree, IsolationForest, KMeans, KNN, LDA, LinearRegression, LinearSVC,
     LogisticRegression, MeanShift, SVC,
 };
-use crate::error::Error;
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use std::hash::Hash;
 

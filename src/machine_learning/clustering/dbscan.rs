@@ -3,11 +3,11 @@
 //! Provides the [`DBSCAN`] estimator for density-based clustering of arbitrary-shaped
 //! clusters, including `fit`, `predict`, and `fit_predict`
 
+use crate::error::{Context, Error};
 pub use crate::machine_learning::DistanceCalculationMetric;
 use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::spatial::KdTree;
 use crate::machine_learning::validation::{preliminary_check, validate_predict_input};
-use crate::error::{Context, Error};
 use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;

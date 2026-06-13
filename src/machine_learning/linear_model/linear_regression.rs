@@ -3,12 +3,12 @@
 //! Provides the [`LinearRegression`] model supporting multivariate regression, an
 //! optional intercept term, and L1/L2 regularization
 
+use crate::error::Error;
 pub use crate::machine_learning::RegularizationType;
 use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::error::Error;
 use crate::math::matmul::gemv_internal;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};

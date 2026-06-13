@@ -4,8 +4,10 @@
 //! node type, which isolate outliers via random feature splits and score samples by
 //! their average path length across the forest
 
-use crate::machine_learning::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
+use crate::machine_learning::validation::{
+    check_is_fitted, preliminary_check, validate_predict_input,
+};
 use crate::math::average_path_length_factor;
 use crate::parallel_gates::TREE_TRAVERSAL_MIN_VISITS;
 use crate::{Deserialize, Serialize};

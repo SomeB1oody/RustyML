@@ -4,11 +4,11 @@
 //! points toward higher-density regions without requiring the number of clusters up front,
 //! plus the [`estimate_bandwidth`] helper for choosing a bandwidth from the data
 
+use crate::error::Error;
 use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::error::Error;
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;

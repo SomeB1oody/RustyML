@@ -14,7 +14,9 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
-use rustyml::machine_learning::{KMeans, KNN, KernelType, LogisticRegression, SVC, WeightingStrategy};
+use rustyml::machine_learning::{
+    KMeans, KNN, KernelType, LogisticRegression, SVC, WeightingStrategy,
+};
 use rustyml::types::DistanceCalculationMetric;
 use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
 use rustyml::utils::pca::{PCA, SVDSolver};

@@ -3,10 +3,10 @@
 //! Provides the [`KMeans`] estimator, which partitions samples into k clusters
 //! using k-means++ initialization and Lloyd's iteration
 
+use crate::error::Error;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::error::Error;
 use crate::math::matmul::gemm_internal;
 use crate::math::reduction::{DET_REDUCE_BLOCK, det_reduce, det_reduce_range};
 use crate::math::squared_euclidean_distance_row;

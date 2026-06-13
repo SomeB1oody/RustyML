@@ -1,8 +1,11 @@
 //! Machine learning models for clustering, classification, regression, and anomaly detection
 //!
-//! Models are grouped by algorithm family into submodules — [`clustering`], [`linear_model`],
-//! [`svm`], [`tree`], [`neighbors`], [`discriminant_analysis`], and [`ensemble`] — and every
-//! estimator is also re-exported here so it is reachable directly as `machine_learning::<Model>`.
+//! Models are grouped by algorithm family into submodules — [`clustering`](crate::machine_learning::clustering),
+//! [`linear_model`](crate::machine_learning::linear_model), [`svm`](crate::machine_learning::svm),
+//! [`tree`](crate::machine_learning::tree), [`neighbors`](crate::machine_learning::neighbors),
+//! [`discriminant_analysis`](crate::machine_learning::discriminant_analysis), and
+//! [`ensemble`](crate::machine_learning::ensemble) — and every estimator is also re-exported here
+//! so it is reachable directly as `machine_learning::<Model>`.
 //! All estimators implement the shared [`Fit`](crate::machine_learning::traits::Fit) /
 //! [`Predict`](crate::machine_learning::traits::Predict) traits.
 

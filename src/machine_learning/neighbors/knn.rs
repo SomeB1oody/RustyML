@@ -3,10 +3,12 @@
 //! Provides the [`KNN`] classifier and the [`WeightingStrategy`] enum that controls how
 //! neighbor votes are weighted
 
+use crate::error::Error;
 pub use crate::machine_learning::DistanceCalculationMetric;
 use crate::machine_learning::spatial::KdTree;
-use crate::machine_learning::validation::{check_is_fitted, preliminary_check, validate_predict_input};
-use crate::error::Error;
+use crate::machine_learning::validation::{
+    check_is_fitted, preliminary_check, validate_predict_input,
+};
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;

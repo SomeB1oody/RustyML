@@ -1,11 +1,13 @@
 //! Support Vector Classifier (SVC)
 //!
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
-//! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`]
+//! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`](crate::machine_learning::KernelType)
 
-use crate::machine_learning::parallel::map_collect;
-use crate::machine_learning::validation::{preliminary_check, validate_max_iterations, validate_tolerance};
 use crate::error::Error;
+use crate::machine_learning::parallel::map_collect;
+use crate::machine_learning::validation::{
+    preliminary_check, validate_max_iterations, validate_tolerance,
+};
 use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 pub use crate::types::KernelType;
 use crate::{Deserialize, Serialize};
