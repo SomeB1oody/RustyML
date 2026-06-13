@@ -867,6 +867,55 @@ fn layer_normalization_custom_axis_input_gradient_matches_finite_difference() {
 }
 
 #[test]
+fn layer_normalization_rank3_default_input_gradient_matches_finite_difference() {
+    // Rank-3 Default exercises the fused row path with several rows per leading index
+    let mut ln =
+        LayerNormalization::new(vec![2, 3, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    ln.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 3, 4]);
+    check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn layer_normalization_trailing_custom_weight_gradient_matches_finite_difference() {
+    // Custom on the trailing axis routes to the row path (unlike Custom(0) above)
+    let mut ln =
+        LayerNormalization::new(vec![3, 4], LayerNormalizationAxis::Custom(1), 1e-5).unwrap();
+    ln.set_training_if_mode_dependent(true);
+    let x = ramp(&[3, 4]);
+    check_weight_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn layer_normalization_multiple_trailing_input_gradient_matches_finite_difference() {
+    // Trailing in-order Multiple axes resolve to the zero-copy row path
+    let mut ln = LayerNormalization::new(
+        vec![2, 3, 4],
+        LayerNormalizationAxis::Multiple(vec![1, 2]),
+        1e-5,
+    )
+    .unwrap();
+    ln.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 3, 4]);
+    check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn layer_normalization_multiple_permuted_input_gradient_matches_finite_difference() {
+    // Axes [0, 2] need a genuine merge permutation: the transpose-in / transpose-out bracket
+    // around the row path
+    let mut ln = LayerNormalization::new(
+        vec![2, 3, 4],
+        LayerNormalizationAxis::Multiple(vec![0, 2]),
+        1e-5,
+    )
+    .unwrap();
+    ln.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 3, 4]);
+    check_input_gradient_weighted(&mut ln, &x, 1e-3, 5e-2);
+}
+
+#[test]
 fn group_normalization_input_gradient_matches_finite_difference() {
     let mut gn = GroupNormalization::new(vec![1, 4, 4], 2, 1, 1e-5).unwrap();
     gn.set_training_if_mode_dependent(true);
@@ -880,6 +929,15 @@ fn group_normalization_weight_gradient_matches_finite_difference() {
     gn.set_training_if_mode_dependent(true);
     let x = ramp(&[1, 4, 4]);
     check_weight_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn group_normalization_channel_axis2_input_gradient_matches_finite_difference() {
+    // channel_axis != 1 exercises the channels-first permute bracket around the fused row core
+    let mut gn = GroupNormalization::new(vec![2, 4, 4], 2, 2, 1e-5).unwrap();
+    gn.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 4, 4]);
+    check_input_gradient_weighted(&mut gn, &x, 1e-3, 5e-2);
 }
 
 #[test]
@@ -911,5 +969,23 @@ fn batch_normalization_weight_gradient_matches_finite_difference() {
     let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
     bn.set_training_if_mode_dependent(true);
     let x = ramp(&[4, 3]);
+    check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn batch_normalization_spatial_input_gradient_matches_finite_difference() {
+    // Rank-4 input exercises the native-layout plane path (per-channel plane folds plus the
+    // per-plane elementwise passes) instead of the 2-D column path
+    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    bn.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 3, 2, 2]);
+    check_input_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
+}
+
+#[test]
+fn batch_normalization_spatial_weight_gradient_matches_finite_difference() {
+    let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
+    bn.set_training_if_mode_dependent(true);
+    let x = ramp(&[2, 3, 2, 2]);
     check_weight_gradient_weighted(&mut bn, &x, 1e-3, 5e-2);
 }

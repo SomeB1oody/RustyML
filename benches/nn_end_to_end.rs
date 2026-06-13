@@ -55,8 +55,8 @@ fn lstm_forward(c: &mut Criterion) {
     });
 }
 
-/// Spatial BatchNorm forward at conv scale (training mode): the folded [M, C] statistics
-/// reductions dominate, M = batch x spatial
+/// Spatial BatchNorm forward at conv scale (training mode): per-channel plane folds plus the
+/// per-plane center/normalize passes on the native [B, C, *spatial] layout
 fn batchnorm_forward_spatial(c: &mut Criterion) {
     let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
@@ -64,6 +64,118 @@ fn batchnorm_forward_spatial(c: &mut Criterion) {
     })
     .into_dyn();
     c.bench_function("batchnorm_forward_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// Spatial BatchNorm backward at the same scale: five per-channel plane folds plus two
+/// per-plane elementwise passes over the cached forward tensors
+fn batchnorm_backward_spatial(c: &mut Criterion) {
+    let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    layer.forward(&x).unwrap();
+    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
+    })
+    .into_dyn();
+    c.bench_function("batchnorm_backward_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+    });
+}
+
+/// LayerNorm forward at transformer scale (Default axis): per-row statistics over the
+/// trailing feature axis
+fn layernorm_forward_default(c: &mut Criterion) {
+    let mut layer =
+        LayerNormalization::new(vec![32, 512, 768], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
+        ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    c.bench_function("layernorm_forward_32x512x768", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// LayerNorm backward at the same scale: per-row gradient composition plus the gamma/beta
+/// column reductions
+fn layernorm_backward_default(c: &mut Criterion) {
+    let mut layer =
+        LayerNormalization::new(vec![32, 512, 768], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
+        ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    layer.forward(&x).unwrap();
+    let grad = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
+        ((b * 11 + t * 5 + d * 7) as f32 * 0.293).sin()
+    })
+    .into_dyn();
+    c.bench_function("layernorm_backward_32x512x768", |b| {
+        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+    });
+}
+
+/// LayerNorm forward with a Multiple (merged trailing axes) configuration at conv scale: the
+/// merged-axis layout transform is the interesting cost here
+fn layernorm_forward_multi(c: &mut Criterion) {
+    let mut layer = LayerNormalization::new(
+        vec![32, 64, 64, 64],
+        LayerNormalizationAxis::Multiple(vec![1, 2, 3]),
+        1e-5,
+    )
+    .unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    c.bench_function("layernorm_forward_multi_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// GroupNorm forward at conv scale (channels-first, 8 groups): per-instance group statistics
+/// over contiguous [channels/groups x spatial] blocks
+fn groupnorm_forward(c: &mut Criterion) {
+    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    c.bench_function("groupnorm_forward_32x64x64x64_8g", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// GroupNorm backward at the same scale: per-channel parameter folds plus the per-instance
+/// gradient composition
+fn groupnorm_backward(c: &mut Criterion) {
+    let mut layer = GroupNormalization::new(vec![32, 64, 64, 64], 8, 1, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    layer.forward(&x).unwrap();
+    let grad = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 11 + ch * 5 + h * 7 + w) as f32 * 0.293).sin()
+    })
+    .into_dyn();
+    c.bench_function("groupnorm_backward_32x64x64x64_8g", |b| {
+        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+    });
+}
+
+/// InstanceNorm forward at the same scale (one group per channel: many small instances)
+fn instancenorm_forward(c: &mut Criterion) {
+    let mut layer = InstanceNormalization::new(vec![32, 64, 64, 64], 1, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    c.bench_function("instancenorm_forward_32x64x64x64", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
     });
 }
@@ -97,6 +209,13 @@ criterion_group!(
     conv2d_forward_batch1,
     lstm_forward,
     batchnorm_forward_spatial,
+    batchnorm_backward_spatial,
+    layernorm_forward_default,
+    layernorm_backward_default,
+    layernorm_forward_multi,
+    groupnorm_forward,
+    groupnorm_backward,
+    instancenorm_forward,
     mlp_fit_epoch
 );
 criterion_main!(benches);

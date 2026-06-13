@@ -1,8 +1,8 @@
 //! Batch normalization layer that normalizes each mini-batch per channel: over the batch axis for
 //! 2-D inputs, and over the batch + spatial axes for rank > 2 (convolutional) inputs
 
+use super::folds::{par_col_dot, par_col_sum, par_plane_dot, par_plane_sum};
 use crate::error::Error;
-use crate::math::reduction::DET_REDUCE_BLOCK;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::{BatchNormalizationLayerWeight, LayerWeight};
@@ -14,11 +14,11 @@ use crate::neural_network::layers::regularization::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array1, Axis, IxDyn};
+use ndarray::{Axis, IxDyn};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
-use rayon::slice::ParallelSlice;
+use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
 /// Total-element count above which forward/backward switch from sequential to parallel.
 ///
@@ -28,8 +28,8 @@ use rayon::slice::ParallelSlice;
 /// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md
 const BATCH_NORM_PARALLEL_THRESHOLD: usize = 262_144;
 
-/// Element count (`M x C`) above which the per-channel statistics reductions (mean, variance,
-/// and the backward sums) run as row-block deterministic folds.
+/// Element count (`M x C`) above which the per-channel statistics reductions of **2-D** inputs
+/// (mean, variance, and the backward sums) run as row-block deterministic folds.
 ///
 /// Measured on the row-block fold itself (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
 /// 2026-06-12; see benches/RESULTS.md "BatchNorm column stats, row-block fold"): crossover
@@ -38,131 +38,14 @@ const BATCH_NORM_PARALLEL_THRESHOLD: usize = 262_144;
 /// 0.3-0.9x everywhere and was rejected (negative-result section in the same report)
 const BN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
-/// Rows per block for the column-stats folds: whole rows, sized so one block holds about
-/// [`DET_REDUCE_BLOCK`] elements. A function of the input shape only, so the (deterministic)
-/// fold grouping never depends on scheduling
-fn rows_per_block(c: usize) -> usize {
-    (DET_REDUCE_BLOCK / c).max(1)
-}
-
-/// Folds one chunk of whole rows into a local per-channel accumulator (the serial kernel both
-/// paths of the column folds share)
-fn col_sum_chunk(chunk: &[f32], c: usize, scale: f32) -> Vec<f32> {
-    let mut acc = vec![0.0f32; c];
-    for row in chunk.chunks_exact(c) {
-        for (a, &v) in acc.iter_mut().zip(row) {
-            *a += v * scale;
-        }
-    }
-    acc
-}
-
-/// The product-fold twin of [`col_sum_chunk`]
-fn col_dot_chunk(chunk_a: &[f32], chunk_b: &[f32], c: usize, scale: f32) -> Vec<f32> {
-    let mut acc = vec![0.0f32; c];
-    for (row_a, row_b) in chunk_a.chunks_exact(c).zip(chunk_b.chunks_exact(c)) {
-        for ((s, &va), &vb) in acc.iter_mut().zip(row_a).zip(row_b) {
-            *s += va * vb * scale;
-        }
-    }
-    acc
-}
-
-/// Merges per-block partial column sums in block order
-fn merge_col_parts(parts: Vec<Vec<f32>>, c: usize) -> Tensor {
-    let mut out = vec![0.0f32; c];
-    for part in parts {
-        for (o, p) in out.iter_mut().zip(part) {
-            *o += p;
-        }
-    }
-    Array1::from_vec(out).into_dyn()
-}
-
-/// Per-channel sums of scaled terms over a standard-layout `[M, C]` slice:
-/// `out[j] = sum_r x[r, j] * scale`, computed as a row-block deterministic fold. Each block
-/// streams whole rows into a local `[C]` accumulator and block partials merge in block order;
-/// the `parallel` flag only decides whether the blocks run on rayon, never the result bits.
-/// `scale` is applied per term, matching the serial `(x * scale).sum_axis(Axis(0))` form
-fn par_col_sum(x: &[f32], c: usize, parallel: bool, scale: f32) -> Tensor {
-    let block = rows_per_block(c) * c;
-    let parts: Vec<Vec<f32>> = if parallel {
-        x.par_chunks(block)
-            .map(|chunk| col_sum_chunk(chunk, c, scale))
-            .collect()
-    } else {
-        x.chunks(block)
-            .map(|chunk| col_sum_chunk(chunk, c, scale))
-            .collect()
-    };
-    merge_col_parts(parts, c)
-}
-
-/// Per-channel sums of scaled products over two standard-layout `[M, C]` slices:
-/// `out[j] = sum_r a[r, j] * b[r, j] * scale`, as the same row-block deterministic fold as
-/// [`par_col_sum`] (same flag semantics). Fusing the product into the fold avoids
-/// materializing the `[M, C]` temp the serial `(a * b * scale).sum_axis(Axis(0))` form
-/// requires
-fn par_col_dot(a: &[f32], b: &[f32], c: usize, parallel: bool, scale: f32) -> Tensor {
-    let block = rows_per_block(c) * c;
-    let parts: Vec<Vec<f32>> = if parallel {
-        a.par_chunks(block)
-            .zip(b.par_chunks(block))
-            .map(|(ca, cb)| col_dot_chunk(ca, cb, c, scale))
-            .collect()
-    } else {
-        a.chunks(block)
-            .zip(b.chunks(block))
-            .map(|(ca, cb)| col_dot_chunk(ca, cb, c, scale))
-            .collect()
-    };
-    merge_col_parts(parts, c)
-}
-
-/// Folds a `[batch, channels, *spatial]` tensor into `[M, channels]` (`M` = product of every axis
-/// except the channel axis 1) by moving the channel axis last and flattening
+/// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
+/// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon.
 ///
-/// This is what makes batch norm *spatial* for rank > 2 inputs: every `(batch, *spatial)` position
-/// becomes a sample for its channel, so the per-channel statistics reduce over all of them (axis 0
-/// of the folded view), matching Keras/PyTorch. A 2-D (or lower) input is already `[N, C]` and is
-/// returned unchanged
-fn fold_to_2d(t: &Tensor) -> Tensor {
-    if t.ndim() <= 2 {
-        return t.to_owned();
-    }
-    let channels = t.shape()[1];
-    let r = t.ndim();
-    // Move axis 1 (channels) to the end: [0, 2, 3, ..., r-1, 1]
-    let mut perm: Vec<usize> = (0..r).filter(|&a| a != 1).collect();
-    perm.push(1);
-    let m = t.len() / channels;
-    t.view()
-        .permuted_axes(perm)
-        .as_standard_layout()
-        .to_owned()
-        .into_shape_with_order(IxDyn(&[m, channels]))
-        .expect("fold to [M, channels] preserves element count")
-}
-
-/// Inverse of [`fold_to_2d`]: reshapes a `[M, channels]` tensor back to `orig_shape`
-/// `[batch, channels, *spatial]`. A 2-D (or lower) `orig_shape` is returned unchanged
-fn unfold_from_2d(t2: Tensor, orig_shape: &[usize]) -> Tensor {
-    if orig_shape.len() <= 2 {
-        return t2;
-    }
-    let r = orig_shape.len();
-    let channels = orig_shape[1];
-    // Channel-last shape: the non-channel axes (in order), then channels
-    let mut cl_shape: Vec<usize> = (0..r).filter(|&a| a != 1).map(|a| orig_shape[a]).collect();
-    cl_shape.push(channels);
-    let cl = t2
-        .into_shape_with_order(IxDyn(&cl_shape))
-        .expect("unfold reshape preserves element count");
-    // Inverse of the fold permutation [0, 2, .., r-1, 1]
-    let mut inv: Vec<usize> = vec![0, r - 1];
-    inv.extend(1..(r - 1));
-    cl.permuted_axes(inv).as_standard_layout().to_owned()
-}
+/// Measured on the plane fold itself (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
+/// 2026-06-12; see benches/RESULTS.md "BatchNorm plane stats, native-layout fold"): crossover
+/// bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at the
+/// conv-scale 8.4M
+const BN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Batch Normalization layer for neural networks
 ///
@@ -310,15 +193,297 @@ impl BatchNormalization {
         self.running_var = running_var;
         Ok(())
     }
+
+    /// Training/inference forward for rank >= 3 inputs, working on the native
+    /// `[batch, channels, *spatial]` layout: the per-channel statistics are plane folds and
+    /// every elementwise pass streams contiguous `[P]` planes, so no channel-last transpose
+    /// copy is ever made. Backward caches (`x_centered`, `x_normalized`) keep the input's
+    /// original shape
+    fn forward_spatial(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        let shape = input.shape().to_vec();
+        let c = shape[1];
+        let p: usize = shape[2..].iter().product();
+        let total = input.len();
+        if total == 0 {
+            // Degenerate empty input: nothing to normalize (and no caches to write)
+            return Ok(Tensor::zeros(IxDyn(&shape)));
+        }
+
+        // Plane streaming needs contiguous data; standardize a non-contiguous input once
+        let std_input;
+        let x: &[f32] = match input.as_slice() {
+            Some(s) => s,
+            None => {
+                std_input = input.as_standard_layout().into_owned();
+                std_input.as_slice().unwrap()
+            }
+        };
+
+        // Samples per channel: batch x spatial, the row count of the folded [M, C] view this
+        // layout-native path replaces
+        let m = (total / c) as f32;
+        let elem_parallel = total >= BATCH_NORM_PARALLEL_THRESHOLD;
+
+        if !self.training {
+            return Ok(self.normalize_with_running_stats(x, &shape, c, p, elem_parallel));
+        }
+
+        let stats_parallel = total >= BN_PLANE_STATS_PARALLEL_MIN_ELEMS;
+        let batch_mean = par_plane_sum(x, c, p, stats_parallel, 1.0) / m;
+
+        // Center per plane
+        let mut x_centered = Tensor::zeros(IxDyn(&shape));
+        {
+            let mean_s = batch_mean.as_slice().unwrap();
+            let xc = x_centered.as_slice_mut().unwrap();
+            let center = |(i, (dst, src)): (usize, (&mut [f32], &[f32]))| {
+                let mean_val = mean_s[i % c];
+                for (o, &v) in dst.iter_mut().zip(src) {
+                    *o = v - mean_val;
+                }
+            };
+            if elem_parallel {
+                xc.par_chunks_mut(p)
+                    .zip(x.par_chunks(p))
+                    .enumerate()
+                    .for_each(center);
+            } else {
+                xc.chunks_mut(p)
+                    .zip(x.chunks(p))
+                    .enumerate()
+                    .for_each(center);
+            }
+        }
+
+        // Per-channel variance of the centered data; the fused fold avoids the squared-diff
+        // temporary
+        let xc_s = x_centered.as_slice().unwrap();
+        let batch_var = par_plane_dot(xc_s, xc_s, c, p, stats_parallel, 1.0) / m;
+        let std_dev = (&batch_var + self.epsilon).mapv(|v| v.sqrt());
+
+        // Normalize and scale-shift in one streaming pass that writes both the cached
+        // x_normalized and the output
+        let mut x_normalized = Tensor::zeros(IxDyn(&shape));
+        let mut output = Tensor::zeros(IxDyn(&shape));
+        {
+            let std_s = std_dev.as_slice().unwrap();
+            let gamma_s = self.gamma.as_slice().unwrap();
+            let beta_s = self.beta.as_slice().unwrap();
+            let xn = x_normalized.as_slice_mut().unwrap();
+            let out = output.as_slice_mut().unwrap();
+            type PlanesOut2In1<'a> = (usize, ((&'a mut [f32], &'a mut [f32]), &'a [f32]));
+            let normalize = |(i, ((xn_pl, out_pl), xc_pl)): PlanesOut2In1| {
+                let ch = i % c;
+                let (std_val, gamma_val, beta_val) = (std_s[ch], gamma_s[ch], beta_s[ch]);
+                for ((n, o), &centered) in xn_pl.iter_mut().zip(out_pl.iter_mut()).zip(xc_pl) {
+                    *n = centered / std_val;
+                    *o = *n * gamma_val + beta_val;
+                }
+            };
+            if elem_parallel {
+                xn.par_chunks_mut(p)
+                    .zip(out.par_chunks_mut(p))
+                    .zip(xc_s.par_chunks(p))
+                    .enumerate()
+                    .for_each(normalize);
+            } else {
+                xn.chunks_mut(p)
+                    .zip(out.chunks_mut(p))
+                    .zip(xc_s.chunks(p))
+                    .enumerate()
+                    .for_each(normalize);
+            }
+        }
+
+        // Update running statistics
+        self.running_mean =
+            &self.running_mean * self.momentum + &batch_mean * (1.0 - self.momentum);
+        self.running_var = &self.running_var * self.momentum + &batch_var * (1.0 - self.momentum);
+
+        // Cache values for backward pass
+        self.batch_mean = Some(batch_mean);
+        self.batch_var = Some(batch_var);
+        self.x_normalized = Some(x_normalized);
+        self.x_centered = Some(x_centered);
+
+        Ok(output)
+    }
+
+    /// One fused pass `((x - running_mean) / sqrt(running_var + eps)) * gamma + beta` streamed
+    /// per `[P]` plane of a `[B, C, P]` slice. The per-element operations match the broadcast
+    /// 2-D form exactly, so spatial inference outputs are bitwise identical to the folded
+    /// implementation this replaces; the `parallel` flag never changes the bits
+    fn normalize_with_running_stats(
+        &self,
+        x: &[f32],
+        shape: &[usize],
+        c: usize,
+        p: usize,
+        parallel: bool,
+    ) -> Tensor {
+        let std_dev = (&self.running_var + self.epsilon).mapv(|v| v.sqrt());
+        let mut output = Tensor::zeros(IxDyn(shape));
+        {
+            let std_s = std_dev.as_slice().unwrap();
+            let mean_s = self.running_mean.as_slice().unwrap();
+            let gamma_s = self.gamma.as_slice().unwrap();
+            let beta_s = self.beta.as_slice().unwrap();
+            let out = output.as_slice_mut().unwrap();
+            let kernel = |(i, (out_pl, x_pl)): (usize, (&mut [f32], &[f32]))| {
+                let ch = i % c;
+                let (mean_val, std_val) = (mean_s[ch], std_s[ch]);
+                let (gamma_val, beta_val) = (gamma_s[ch], beta_s[ch]);
+                for (o, &v) in out_pl.iter_mut().zip(x_pl) {
+                    *o = ((v - mean_val) / std_val) * gamma_val + beta_val;
+                }
+            };
+            if parallel {
+                out.par_chunks_mut(p)
+                    .zip(x.par_chunks(p))
+                    .enumerate()
+                    .for_each(kernel);
+            } else {
+                out.chunks_mut(p)
+                    .zip(x.chunks(p))
+                    .enumerate()
+                    .for_each(kernel);
+            }
+        }
+        output
+    }
+
+    /// Backward for rank >= 3 inputs on the native layout, mirroring [`Self::forward_spatial`]:
+    /// the five per-channel reductions are plane folds and the two elementwise passes stream
+    /// per plane, with no transpose copy of `grad_output` or `grad_input`
+    fn backward_spatial(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
+        let shape = grad_output.shape().to_vec();
+        let c = shape[1];
+        let p: usize = shape[2..].iter().product();
+        let total = grad_output.len();
+        if total == 0 {
+            return Ok(Tensor::zeros(IxDyn(&shape)));
+        }
+
+        let std_grad;
+        let g: &[f32] = match grad_output.as_slice() {
+            Some(s) => s,
+            None => {
+                std_grad = grad_output.as_standard_layout().into_owned();
+                std_grad.as_slice().unwrap()
+            }
+        };
+
+        let x_normalized = self
+            .x_normalized
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
+        let x_centered = self
+            .x_centered
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
+        let batch_var = self
+            .batch_var
+            .as_ref()
+            .ok_or_else(|| Error::forward_pass_not_run("BatchNormalization"))?;
+        // The caches were built by forward_spatial, so they are standard layout
+        let xn_s = x_normalized.as_slice().unwrap();
+        let xc_s = x_centered.as_slice().unwrap();
+
+        let m = (total / c) as f32;
+        let stats_parallel = total >= BN_PLANE_STATS_PARALLEL_MIN_ELEMS;
+        let elem_parallel = total >= BATCH_NORM_PARALLEL_THRESHOLD;
+
+        // Gradients for gamma and beta: fused plane folds (no product temporary)
+        self.grad_gamma = Some(par_plane_dot(g, xn_s, c, p, stats_parallel, 1.0));
+        self.grad_beta = Some(par_plane_sum(g, c, p, stats_parallel, 1.0));
+
+        // Gradient with respect to the normalized input
+        let mut grad_x_normalized = Tensor::zeros(IxDyn(&shape));
+        {
+            let gamma_s = self.gamma.as_slice().unwrap();
+            let gxn = grad_x_normalized.as_slice_mut().unwrap();
+            let scale_by_gamma = |(i, (dst, src)): (usize, (&mut [f32], &[f32]))| {
+                let gamma_val = gamma_s[i % c];
+                for (o, &v) in dst.iter_mut().zip(src) {
+                    *o = v * gamma_val;
+                }
+            };
+            if elem_parallel {
+                gxn.par_chunks_mut(p)
+                    .zip(g.par_chunks(p))
+                    .enumerate()
+                    .for_each(scale_by_gamma);
+            } else {
+                gxn.chunks_mut(p)
+                    .zip(g.chunks(p))
+                    .enumerate()
+                    .for_each(scale_by_gamma);
+            }
+        }
+        let gxn_s = grad_x_normalized.as_slice().unwrap();
+
+        let std_dev = (batch_var + self.epsilon).mapv(|v| v.sqrt());
+        let inv_std = std_dev.mapv(|v| 1.0 / v);
+
+        // The -0.5 / -1.0 scales are applied per term inside the folds, matching the
+        // elementwise forms of the 2-D path
+        let grad_var_sum = par_plane_dot(gxn_s, xc_s, c, p, stats_parallel, -0.5);
+        let grad_var = grad_var_sum * &inv_std * &inv_std * &inv_std;
+
+        let grad_mean_1 = par_plane_sum(gxn_s, c, p, stats_parallel, -1.0) * &inv_std;
+        let x_centered_sum = par_plane_sum(xc_s, c, p, stats_parallel, 1.0);
+        let grad_mean_2 = &grad_var * (x_centered_sum * -2.0 / m);
+        let grad_mean = grad_mean_1 + grad_mean_2;
+
+        // Gradient with respect to the input, streamed per plane
+        let mut grad_input = Tensor::zeros(IxDyn(&shape));
+        {
+            let inv_std_s = inv_std.as_slice().unwrap();
+            let grad_var_s = grad_var.as_slice().unwrap();
+            let grad_mean_s = grad_mean.as_slice().unwrap();
+            let gi = grad_input.as_slice_mut().unwrap();
+            type PlanesOut1In2<'a> = (usize, ((&'a mut [f32], &'a [f32]), &'a [f32]));
+            let compose = |(i, ((gi_pl, gxn_pl), xc_pl)): PlanesOut1In2| {
+                let ch = i % c;
+                let (inv_std_val, grad_var_val) = (inv_std_s[ch], grad_var_s[ch]);
+                let grad_mean_term = grad_mean_s[ch] / m;
+                for ((o, &g_norm), &centered) in gi_pl.iter_mut().zip(gxn_pl).zip(xc_pl) {
+                    *o =
+                        g_norm * inv_std_val + grad_var_val * (centered * 2.0 / m) + grad_mean_term;
+                }
+            };
+            if elem_parallel {
+                gi.par_chunks_mut(p)
+                    .zip(gxn_s.par_chunks(p))
+                    .zip(xc_s.par_chunks(p))
+                    .enumerate()
+                    .for_each(compose);
+            } else {
+                gi.chunks_mut(p)
+                    .zip(gxn_s.chunks(p))
+                    .zip(xc_s.chunks(p))
+                    .enumerate()
+                    .for_each(compose);
+            }
+        }
+
+        Ok(grad_input)
+    }
 }
 
 impl Layer for BatchNormalization {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Fold to [M, channels] so the rest of the routine reduces per-channel over batch + spatial
-        let orig_shape = input.shape().to_vec();
-        let folded = fold_to_2d(input);
+        // Rank >= 3 (spatial) inputs reduce per channel over batch + spatial on the native
+        // layout, with no channel-last transpose copies
+        if input.ndim() >= 3 {
+            return self.forward_spatial(input);
+        }
+
+        // 1-D / 2-D path: the input is already [N, C] (or scalar-parameter 1-D); the owned
+        // copy keeps the contiguity guarantee the parallel passes below rely on
+        let folded = input.to_owned();
         let input = &folded;
 
         if self.training {
@@ -430,14 +595,14 @@ impl Layer for BatchNormalization {
             self.x_normalized = Some(x_normalized);
             self.x_centered = Some(x_centered);
 
-            Ok(unfold_from_2d(output, &orig_shape))
+            Ok(output)
         } else {
             // Inference mode: use running statistics
             let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
             let x_normalized = (input - &self.running_mean) / &std_dev;
             let output = &x_normalized * &self.gamma + &self.beta;
 
-            Ok(unfold_from_2d(output, &orig_shape))
+            Ok(output)
         }
     }
 
@@ -445,15 +610,31 @@ impl Layer for BatchNormalization {
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Fold to [M, channels], normalize per channel with the running stats, then unfold
-        let orig_shape = input.shape().to_vec();
-        let input = fold_to_2d(input);
+        // Rank >= 3: per-channel running-stat normalization streamed on the native layout
+        if input.ndim() >= 3 {
+            let shape = input.shape().to_vec();
+            let c = shape[1];
+            let p: usize = shape[2..].iter().product();
+            if input.is_empty() {
+                return Ok(Tensor::zeros(IxDyn(&shape)));
+            }
+            let std_input;
+            let x: &[f32] = match input.as_slice() {
+                Some(s) => s,
+                None => {
+                    std_input = input.as_standard_layout().into_owned();
+                    std_input.as_slice().unwrap()
+                }
+            };
+            let parallel = input.len() >= BATCH_NORM_PARALLEL_THRESHOLD;
+            return Ok(self.normalize_with_running_stats(x, &shape, c, p, parallel));
+        }
 
         let std_dev = (&self.running_var + self.epsilon).mapv(|x| x.sqrt());
-        let x_normalized = (&input - &self.running_mean) / &std_dev;
+        let x_normalized = (input - &self.running_mean) / &std_dev;
         let output = &x_normalized * &self.gamma + &self.beta;
 
-        Ok(unfold_from_2d(output, &orig_shape))
+        Ok(output)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -462,9 +643,14 @@ impl Layer for BatchNormalization {
             return Ok(grad_output.clone());
         }
 
-        // Fold to [M, channels] to match the folded forward caches
-        let orig_shape = grad_output.shape().to_vec();
-        let folded = fold_to_2d(grad_output);
+        // Rank >= 3 gradients flow through the native-layout path that produced the caches
+        if grad_output.ndim() >= 3 {
+            return self.backward_spatial(grad_output);
+        }
+
+        // 1-D / 2-D path; the owned copy keeps the contiguity guarantee the parallel passes
+        // below rely on
+        let folded = grad_output.to_owned();
         let grad_output = &folded;
 
         let batch_size = grad_output.shape()[0] as f32;
@@ -586,7 +772,7 @@ impl Layer for BatchNormalization {
                 + &grad_mean / batch_size
         };
 
-        Ok(unfold_from_2d(grad_input, &orig_shape))
+        Ok(grad_input)
     }
 
     fn layer_type(&self) -> &str {
@@ -637,11 +823,40 @@ impl Layer for BatchNormalization {
 
 #[cfg(test)]
 mod tests {
+    use super::super::folds::{plane_range_dot, plane_range_sum, rows_per_block};
     use super::*;
-    use ndarray::Array2;
+    use crate::math::reduction::DET_REDUCE_BLOCK;
+    use ndarray::{Array1, Array2, Array3, Array4};
 
     fn test_matrix(m: usize, c: usize, salt: f32) -> Array2<f32> {
         Array2::from_shape_fn((m, c), |(i, j)| ((i * 31 + j * 17) as f32 * salt).sin())
+    }
+
+    /// Channel-last fold to `[M, C]`, the transpose-copy reference the plane path replaces
+    fn fold_ref(t: &Tensor) -> Array2<f32> {
+        let c = t.shape()[1];
+        let r = t.ndim();
+        let mut perm: Vec<usize> = (0..r).filter(|&a| a != 1).collect();
+        perm.push(1);
+        let m = t.len() / c;
+        t.view()
+            .permuted_axes(perm)
+            .as_standard_layout()
+            .to_owned()
+            .into_shape_with_order((m, c))
+            .unwrap()
+    }
+
+    /// Inverse of [`fold_ref`]
+    fn unfold_ref(t2: Array2<f32>, orig_shape: &[usize]) -> Tensor {
+        let r = orig_shape.len();
+        let channels = orig_shape[1];
+        let mut cl_shape: Vec<usize> = (0..r).filter(|&a| a != 1).map(|a| orig_shape[a]).collect();
+        cl_shape.push(channels);
+        let cl = t2.into_shape_with_order(IxDyn(&cl_shape)).unwrap();
+        let mut inv: Vec<usize> = vec![0, r - 1];
+        inv.extend(1..(r - 1));
+        cl.permuted_axes(inv).as_standard_layout().to_owned()
     }
 
     /// The row-block fold must be bitwise identical to a serial fold over the same blocks,
@@ -734,6 +949,238 @@ mod tests {
                 "integer-data column dots must be exact and grouping-independent \
                  (parallel={parallel})"
             );
+        }
+    }
+
+    /// The plane folds must be bitwise identical to a straight-line composition of the same
+    /// per-channel block ranges, for both flag values, including planes that cross block
+    /// boundaries, blocks that split a plane, and single-channel/single-batch shapes
+    #[test]
+    fn par_plane_folds_match_serial_blocked_reference() {
+        for &(b, c, p) in &[
+            (3usize, 5usize, 7usize),
+            (2, 4, 16_384),
+            (1, 3, 20_000),
+            (4, 1, 1_000),
+            (5, 8, 8_191),
+            (2, 2, 3),
+        ] {
+            let x = Array3::from_shape_fn((b, c, p), |(i, j, k)| {
+                ((i * 31 + j * 17 + k * 7) as f32 * 0.731).sin()
+            });
+            let y = Array3::from_shape_fn((b, c, p), |(i, j, k)| {
+                ((i * 13 + j * 29 + k * 5) as f32 * 0.377).sin()
+            });
+            let xs = x.as_slice().unwrap();
+            let ys = y.as_slice().unwrap();
+            let len_per_chan = b * p;
+            let n_blocks = len_per_chan.div_ceil(DET_REDUCE_BLOCK);
+
+            for &scale in &[1.0f32, -0.5, -1.0] {
+                let mut ref_sum = vec![0.0f32; c];
+                let mut ref_dot = vec![0.0f32; c];
+                for ch in 0..c {
+                    for blk in 0..n_blocks {
+                        let start = blk * DET_REDUCE_BLOCK;
+                        let end = (start + DET_REDUCE_BLOCK).min(len_per_chan);
+                        ref_sum[ch] += plane_range_sum(xs, ch, c, p, start..end, scale);
+                        ref_dot[ch] += plane_range_dot(xs, ys, ch, c, p, start..end, scale);
+                    }
+                }
+
+                for parallel in [false, true] {
+                    let plane_sum = par_plane_sum(xs, c, p, parallel, scale);
+                    let plane_dot = par_plane_dot(xs, ys, c, p, parallel, scale);
+                    assert_eq!(
+                        plane_sum.as_slice().unwrap(),
+                        ref_sum.as_slice(),
+                        "par_plane_sum mismatch at [{b}x{c}x{p}] scale {scale} \
+                         (parallel={parallel})"
+                    );
+                    assert_eq!(
+                        plane_dot.as_slice().unwrap(),
+                        ref_dot.as_slice(),
+                        "par_plane_dot mismatch at [{b}x{c}x{p}] scale {scale} \
+                         (parallel={parallel})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// On integer-valued data every per-channel sum is exact in f32, so the plane folds must
+    /// agree with ndarray's axis reductions bit for bit regardless of grouping or kernel
+    #[test]
+    fn par_plane_folds_exact_on_integer_data() {
+        let (b, c, p) = (8usize, 16usize, 4_096usize);
+        let x = Array3::from_shape_fn((b, c, p), |(i, j, k)| ((i * 7 + j * 13 + k) % 9) as f32);
+        let y = Array3::from_shape_fn((b, c, p), |(i, j, k)| ((i * 5 + j * 3 + k) % 7) as f32);
+
+        let serial_sum = x.sum_axis(Axis(2)).sum_axis(Axis(0));
+        let serial_dot = (&x * &y).sum_axis(Axis(2)).sum_axis(Axis(0));
+        for parallel in [false, true] {
+            let plane_sum = par_plane_sum(x.as_slice().unwrap(), c, p, parallel, 1.0);
+            assert_eq!(
+                plane_sum.as_slice().unwrap(),
+                serial_sum.as_slice().unwrap(),
+                "integer-data plane sums must be exact and grouping-independent \
+                 (parallel={parallel})"
+            );
+
+            let plane_dot = par_plane_dot(
+                x.as_slice().unwrap(),
+                y.as_slice().unwrap(),
+                c,
+                p,
+                parallel,
+                1.0,
+            );
+            assert_eq!(
+                plane_dot.as_slice().unwrap(),
+                serial_dot.as_slice().unwrap(),
+                "integer-data plane dots must be exact and grouping-independent \
+                 (parallel={parallel})"
+            );
+        }
+    }
+
+    /// Spatial inference is pure per-element arithmetic, so the native-layout pass must
+    /// reproduce the fold -> broadcast -> unfold reference bit for bit, both below and above
+    /// the parallel threshold
+    #[test]
+    fn spatial_predict_matches_folded_reference_bitwise() {
+        for &(b, c, h, w) in &[(3usize, 3usize, 5usize, 7usize), (16, 16, 32, 32)] {
+            let mut bn = BatchNormalization::new(vec![b, c, h, w], 0.9, 1e-5).unwrap();
+            let gamma = Array1::from_shape_fn(c, |j| 1.5 - 0.25 * j as f32);
+            let beta = Array1::from_shape_fn(c, |j| -0.75 + 0.5 * j as f32);
+            let running_mean = Array1::from_shape_fn(c, |j| 0.5 * j as f32 - 1.25);
+            let running_var = Array1::from_shape_fn(c, |j| 0.25 + 0.5 * j as f32);
+            bn.set_weights(
+                gamma.clone().into_dyn(),
+                beta.clone().into_dyn(),
+                running_mean.clone().into_dyn(),
+                running_var.clone().into_dyn(),
+            )
+            .unwrap();
+
+            let x = Array4::from_shape_fn((b, c, h, w), |(i, j, k, l)| {
+                ((i * 31 + j * 17 + k * 7 + l * 3) as f32 * 0.519).sin()
+            })
+            .into_dyn();
+
+            let x_folded = fold_ref(&x);
+            let std_dev = (&running_var + 1e-5f32).mapv(|v| v.sqrt());
+            let x_normalized = (&x_folded - &running_mean) / &std_dev;
+            let expected = unfold_ref(&x_normalized * &gamma + &beta, x.shape());
+
+            let out = bn.predict(&x).unwrap();
+            assert_eq!(
+                out, expected,
+                "spatial predict must be bitwise identical to the folded reference \
+                 at [{b}x{c}x{h}x{w}]"
+            );
+        }
+    }
+
+    /// On integer-valued data with a power-of-two sample count the batch statistics are exact
+    /// (grouping-independent), so the spatial training forward and its running stats must
+    /// reproduce the fold -> broadcast -> unfold reference bit for bit
+    #[test]
+    fn spatial_forward_training_matches_folded_reference_on_exact_stats() {
+        // B x P = 4 x 16 = 64 samples per channel: integer sums / 64 are exact dyadics
+        let (b, c, h, w) = (4usize, 3usize, 4usize, 4usize);
+        let mut bn = BatchNormalization::new(vec![b, c, h, w], 0.0, 1e-5).unwrap();
+        let gamma = Array1::from(vec![1.5f32, -2.0, 0.5]);
+        let beta = Array1::from(vec![0.25f32, 1.0, -0.75]);
+        bn.set_weights(
+            gamma.clone().into_dyn(),
+            beta.clone().into_dyn(),
+            Array1::zeros(c).into_dyn(),
+            Array1::ones(c).into_dyn(),
+        )
+        .unwrap();
+
+        let x = Array4::from_shape_fn((b, c, h, w), |(i, j, k, l)| {
+            ((i * 7 + j * 5 + k * 3 + l) % 4) as f32
+        })
+        .into_dyn();
+
+        let x_folded = fold_ref(&x);
+        let mean = x_folded.mean_axis(Axis(0)).unwrap();
+        let x_centered = &x_folded - &mean;
+        let var = (&x_centered * &x_centered).mean_axis(Axis(0)).unwrap();
+        let std_dev = (&var + 1e-5f32).mapv(|v| v.sqrt());
+        let x_normalized = &x_centered / &std_dev;
+        let expected = unfold_ref(&x_normalized * &gamma + &beta, x.shape());
+
+        let out = bn.forward(&x).unwrap();
+        assert_eq!(
+            out, expected,
+            "spatial training forward must be bitwise identical to the folded reference \
+             on exact statistics"
+        );
+
+        // Momentum 0 makes the running stats equal the batch stats of this single step
+        match bn.get_weights() {
+            LayerWeight::BatchNormalization(weight) => {
+                assert_eq!(
+                    weight.running_mean.as_slice().unwrap(),
+                    mean.as_slice().unwrap()
+                );
+                assert_eq!(
+                    weight.running_var.as_slice().unwrap(),
+                    var.as_slice().unwrap()
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// The spatial path and an equivalent 2-D layer fed the folded input compute the same
+    /// mathematics with different (but each deterministic) reduction groupings, so forward,
+    /// grad_input, and the parameter gradients must agree to rounding
+    #[test]
+    fn spatial_path_matches_folded_2d_layer_closely() {
+        let (b, c, h, w) = (2usize, 3usize, 4usize, 5usize);
+        let m = b * h * w;
+        let mut bn_spatial = BatchNormalization::new(vec![b, c, h, w], 0.9, 1e-5).unwrap();
+        let mut bn_2d = BatchNormalization::new(vec![m, c], 0.9, 1e-5).unwrap();
+
+        let x = Array4::from_shape_fn((b, c, h, w), |(i, j, k, l)| {
+            ((i * 31 + j * 17 + k * 7 + l * 3) as f32 * 0.871).sin()
+        })
+        .into_dyn();
+        let x_folded = fold_ref(&x).into_dyn();
+
+        let out_spatial = bn_spatial.forward(&x).unwrap();
+        let out_2d = bn_2d.forward(&x_folded).unwrap();
+        let out_spatial_folded = fold_ref(&out_spatial).into_dyn();
+
+        let grad = Array4::from_shape_fn((b, c, h, w), |(i, j, k, l)| {
+            ((i * 13 + j * 29 + k * 5 + l * 11) as f32 * 0.433).sin()
+        })
+        .into_dyn();
+        let grad_folded = fold_ref(&grad).into_dyn();
+
+        let gi_spatial = bn_spatial.backward(&grad).unwrap();
+        let gi_2d = bn_2d.backward(&grad_folded).unwrap();
+        let gi_spatial_folded = fold_ref(&gi_spatial).into_dyn();
+
+        let close = |a: f32, e: f32| (a - e).abs() <= 1e-5 + 1e-4 * e.abs();
+        for (i, (&a, &e)) in out_spatial_folded.iter().zip(out_2d.iter()).enumerate() {
+            assert!(close(a, e), "forward mismatch at {i}: {a} vs {e}");
+        }
+        for (i, (&a, &e)) in gi_spatial_folded.iter().zip(gi_2d.iter()).enumerate() {
+            assert!(close(a, e), "grad_input mismatch at {i}: {a} vs {e}");
+        }
+        for (pg_s, pg_2d) in bn_spatial
+            .parameters()
+            .iter()
+            .zip(bn_2d.parameters().iter())
+        {
+            for (i, (&a, &e)) in pg_s.grad.iter().zip(pg_2d.grad.iter()).enumerate() {
+                assert!(close(a, e), "parameter grad mismatch at {i}: {a} vs {e}");
+            }
         }
     }
 }
