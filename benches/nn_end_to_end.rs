@@ -55,6 +55,19 @@ fn lstm_forward(c: &mut Criterion) {
     });
 }
 
+/// Spatial BatchNorm forward at conv scale (training mode): the folded [M, C] statistics
+/// reductions dominate, M = batch x spatial
+fn batchnorm_forward_spatial(c: &mut Criterion) {
+    let mut layer = BatchNormalization::new(vec![32, 64, 64, 64], 0.99, 1e-5).unwrap();
+    let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
+        ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
+    })
+    .into_dyn();
+    c.bench_function("batchnorm_forward_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
 /// One epoch of MLP training: forward + loss + backward + optimizer across the whole stack
 fn mlp_fit_epoch(c: &mut Criterion) {
     let x = Array::from_elem((512, 256), 0.5f32).into_dyn();
@@ -83,6 +96,7 @@ criterion_group!(
     dense_forward,
     conv2d_forward_batch1,
     lstm_forward,
+    batchnorm_forward_spatial,
     mlp_fit_epoch
 );
 criterion_main!(benches);

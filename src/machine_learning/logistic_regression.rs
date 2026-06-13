@@ -10,8 +10,8 @@ use super::validation::{
     validate_regularization_type, validate_tolerance,
 };
 use crate::error::Error;
+use crate::math::matmul::gemv_internal;
 use crate::math::{logistic_loss, sigmoid};
-use crate::math::matmul::par_matvec;
 use crate::parallel_gates::EXP_MAP_F64_PARALLEL_THRESHOLD;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
@@ -234,7 +234,7 @@ impl LogisticRegression {
 
             // Compute linear predictions (the raw logits feed the loss below), then the
             // sigmoid activations (exp-map class gate: one f64 exp per element)
-            let predictions = par_matvec(&x_train_view, &weights);
+            let predictions = gemv_internal(&x_train_view, &weights);
             let mut sigmoid_preds = predictions.clone();
             if n_samples >= EXP_MAP_F64_PARALLEL_THRESHOLD {
                 sigmoid_preds.par_mapv_inplace(sigmoid);
@@ -244,7 +244,7 @@ impl LogisticRegression {
 
             let errors = &sigmoid_preds - y;
 
-            let mut gradients = par_matvec(&x_train_view.t(), &errors) / n_samples as f64;
+            let mut gradients = gemv_internal(&x_train_view.t(), &errors) / n_samples as f64;
 
             // Check for numerical issues in gradients
             if gradients.iter().any(|&val| !val.is_finite()) {
@@ -443,7 +443,7 @@ impl LogisticRegression {
         S: Data<Elem = f64>,
     {
         let weights = self.weights.as_ref().unwrap();
-        let mut predictions = par_matvec(x, weights);
+        let mut predictions = gemv_internal(x, weights);
 
         // Apply sigmoid with conditional parallelization (mutate in place; exp-map class)
         if predictions.len() >= EXP_MAP_F64_PARALLEL_THRESHOLD {

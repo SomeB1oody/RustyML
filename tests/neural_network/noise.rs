@@ -536,7 +536,10 @@ fn gaussian_dropout_backward_without_forward_errors() {
 
     let result = layer.backward(&grad);
     assert!(
-        matches!(result, Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))),
+        matches!(
+            result,
+            Err(Error::NeuralNetwork(NnError::ForwardPassNotRun(_)))
+        ),
         "expected Err(ForwardPassNotRun) without a prior forward, got {:?}",
         result
     );

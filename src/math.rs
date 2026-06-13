@@ -6,11 +6,11 @@
 //! distance metrics, classification losses, decision-tree impurity (gini, entropy), and the
 //! isolation-forest path-length correction
 
-/// Rayon-block-parallel matrix products (`par_matmul`, `par_matvec`) for `f32`/`f64`
-/// ndarray operands, with calibrated serial/parallel switching
+/// Rayon-block-parallel matrix products (`gemm`, `gemv`) with a caller-supplied
+/// serial/parallel FLOPs threshold
 pub mod matmul;
 
-/// Deterministic blocked parallel reductions (`det_par_fold`, `det_par_fold_range`) whose
+/// Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) whose
 /// float accumulation order is independent of the rayon thread count
 pub mod reduction;
 
@@ -242,7 +242,7 @@ const EXP_REDUCE_MIN_ELEMS: usize = 32_768;
 /// to raw logits before evaluating the log-likelihood.
 ///
 /// Above a calibrated input size the sum runs as a deterministic blocked parallel reduction
-/// ([`reduction::det_par_fold_range`]): the float result is bitwise identical at any rayon
+/// ([`reduction::det_reduce_range`]): the float result is bitwise identical at any rayon
 /// thread count, though not bitwise identical to the serial sum used below the gate
 ///
 /// # Parameters
@@ -288,12 +288,14 @@ where
     let loss_term = |x: f64, y: f64| x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln();
 
     let total_loss = match (logits.as_slice(), actual_labels.as_slice()) {
-        (Some(x), Some(y)) if x.len() >= EXP_REDUCE_MIN_ELEMS => reduction::det_par_fold_range(
+        (Some(x), Some(y)) => reduction::det_reduce_range(
             x.len(),
+            x.len() >= EXP_REDUCE_MIN_ELEMS,
             |range| range.map(|i| loss_term(x[i], y[i])).sum::<f64>(),
             |a, b| a + b,
             0.0,
         ),
+        // Non-contiguous storage: plain flat fold
         _ => logits
             .iter()
             .zip(actual_labels.iter())

@@ -3,6 +3,7 @@
 
 use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Error, IoError, NnError};
+use crate::math::reduction::det_reduce;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
@@ -10,6 +11,7 @@ use crate::neural_network::layers::serialize_weight::{
     LayerInfo, SerializableLayer, SerializableLayerWeight, SerializableSequential,
     apply_weights_to_layer,
 };
+use crate::parallel_gates::SQ_SUM_F32_PARALLEL_MIN_ELEMS;
 use ndarray::Axis;
 use ndarray_rand::rand::seq::SliceRandom;
 use serde_json::{from_reader, to_writer_pretty};
@@ -95,15 +97,22 @@ impl Default for Sequential {
 
 /// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
 ///
-/// Squared terms accumulate in f64 to limit round-off when summing across many parameters. Layers
-/// without gradients contribute nothing; with no gradients at all the norm is 0.0
+/// Squared terms accumulate in f64 to limit round-off when summing across many parameters.
+/// Each tensor folds as deterministic blocks (on rayon at or above the calibrated square-sum
+/// gate - a pure performance switch, bitwise identical either way), and the per-tensor totals
+/// merge in the fixed (layer, parameter) order. Layers without gradients contribute nothing;
+/// with no gradients at all the norm is 0.0
 fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     let mut sum_sq = 0.0_f64;
     for layer in layers.iter_mut() {
         for pg in layer.parameters() {
-            for &g in pg.grad {
-                sum_sq += (g as f64) * (g as f64);
-            }
+            sum_sq += det_reduce(
+                pg.grad,
+                pg.grad.len() >= SQ_SUM_F32_PARALLEL_MIN_ELEMS,
+                |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
+                |a, b| a + b,
+                0.0,
+            );
         }
     }
     sum_sq.sqrt() as f32

@@ -6,9 +6,7 @@
 
 use crate::error::{Context, Error};
 use crate::neural_network::Tensor;
-use crate::parallel_gates::{
-    CHEAP_MAP_PARALLEL_THRESHOLD, EXP_MAP_PARALLEL_THRESHOLD,
-};
+use crate::parallel_gates::{CHEAP_MAP_PARALLEL_THRESHOLD, EXP_MAP_PARALLEL_THRESHOLD};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};

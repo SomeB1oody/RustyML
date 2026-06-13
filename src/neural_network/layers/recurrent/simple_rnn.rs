@@ -1,6 +1,7 @@
 //! SimpleRNN layer: a basic recurrent layer that returns the last hidden state
 
 use crate::error::Error;
+use crate::math::matmul::gemm_internal;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -10,7 +11,6 @@ use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::math::matmul::par_matmul;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -188,7 +188,7 @@ impl Layer for SimpleRNN {
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = par_matmul(&h_prev, &self.recurrent_kernel)
+            let z = gemm_internal(&h_prev, &self.recurrent_kernel)
                 + xw.index_axis(Axis(1), t)
                 + &self.bias;
 
@@ -222,7 +222,7 @@ impl Layer for SimpleRNN {
         // sequential timestep processing is required for an RNN
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b
-            let z = par_matmul(&h_prev, &self.recurrent_kernel)
+            let z = gemm_internal(&h_prev, &self.recurrent_kernel)
                 + xw.index_axis(Axis(1), t)
                 + &self.bias;
 
@@ -279,7 +279,7 @@ impl Layer for SimpleRNN {
             };
 
             // gradient w.r.t. previous hidden state, used by the next iteration (sequential)
-            grad_h = par_matmul(&d_z, &self.recurrent_kernel.t());
+            grad_h = gemm_internal(&d_z, &self.recurrent_kernel.t());
             dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }
 
@@ -299,13 +299,13 @@ impl Layer for SimpleRNN {
             .to_shape((batch * timesteps, self.units))
             .expect("contiguous H_prev reshape");
 
-        grad_k += &par_matmul(&x_flat.t(), &dz_flat);
-        grad_rk += &par_matmul(&h_prev_flat.t(), &dz_flat);
+        grad_k += &gemm_internal(&x_flat.t(), &dz_flat);
+        grad_rk += &gemm_internal(&h_prev_flat.t(), &dz_flat);
         grad_b += &dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Layout-tolerant reshape
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            par_matmul(&dz_flat, &self.kernel.t()),
+            gemm_internal(&dz_flat, &self.kernel.t()),
             (batch, timesteps, feat),
         );
 

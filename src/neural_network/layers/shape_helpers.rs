@@ -208,14 +208,20 @@ mod tests {
     /// 2D pooling output shape for distinct window sizes and strides per axis
     #[test]
     fn test_calculate_output_shape_2d_pooling() {
-        let out = calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1), PaddingType::Valid);
+        let out =
+            calculate_output_shape_2d_pooling(&[4, 6, 7, 8], (2, 3), (2, 1), PaddingType::Valid);
         assert_eq!(out, vec![4, 6, 3, 6]);
     }
 
     /// 3D pooling output shape across depth, height, and width axes
     #[test]
     fn test_calculate_output_shape_3d_pooling() {
-        let out = calculate_output_shape_3d_pooling(&[2, 4, 5, 6, 9], (2, 2, 3), (1, 2, 3), PaddingType::Valid);
+        let out = calculate_output_shape_3d_pooling(
+            &[2, 4, 5, 6, 9],
+            (2, 2, 3),
+            (1, 2, 3),
+            PaddingType::Valid,
+        );
         assert_eq!(out, vec![2, 4, 4, 3, 3]);
     }
 

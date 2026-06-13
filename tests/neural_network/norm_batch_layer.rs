@@ -968,7 +968,8 @@ fn bn_spatial_4d_normalizes_per_channel() {
 fn bn_spatial_4d_backward_shape() {
     use rustyml::neural_network::Tensor;
     let mut bn = BatchNormalization::new(vec![2, 3, 2, 2], 0.9, 1e-5).unwrap();
-    let x: Tensor = ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);
+    let x: Tensor =
+        ArrayD::from_shape_fn(vec![2, 3, 2, 2], |idx| (idx[1] + idx[2] + idx[3]) as f32);
     bn.forward(&x).unwrap();
     let grad: Tensor = ArrayD::ones(vec![2, 3, 2, 2]);
     let grad_in = bn.backward(&grad).unwrap();

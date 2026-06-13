@@ -190,7 +190,10 @@ fn sigmoid_nan_input_propagates() {
         .expect("forward must not reject non-finite input");
     let v = out.as_slice().expect("contiguous");
     assert!(v[0].is_nan(), "NaN propagates through sigmoid");
-    assert!((v[1] - 0.7310586).abs() < 1e-6, "finite values are unaffected");
+    assert!(
+        (v[1] - 0.7310586).abs() < 1e-6,
+        "finite values are unaffected"
+    );
 }
 
 // Tanh layer
@@ -476,7 +479,10 @@ fn linear_non_finite_input_propagates() {
         .forward(&input)
         .expect("forward must not reject non-finite input");
     let v = out.as_slice().expect("contiguous");
-    assert!(v[0].is_nan() && v[1] == f32::NEG_INFINITY, "identity passes values through");
+    assert!(
+        v[0].is_nan() && v[1] == f32::NEG_INFINITY,
+        "identity passes values through"
+    );
 }
 
 /// predict() likewise passes non-finite values through unchanged
@@ -670,9 +676,9 @@ fn all_layers_backward_propagates_non_finite_grad() {
     let nan_grad = tensor2(1, 3, vec![1.0, f32::NAN, 1.0]);
     for (name, mut layer) in all_activation_layers() {
         layer.forward(&input).expect("valid forward should succeed");
-        let grad_in = layer
-            .backward(&nan_grad)
-            .unwrap_or_else(|e| panic!("{name}: backward should propagate, not error, got {:?}", e));
+        let grad_in = layer.backward(&nan_grad).unwrap_or_else(|e| {
+            panic!("{name}: backward should propagate, not error, got {:?}", e)
+        });
         assert!(
             grad_in.iter().any(|&v| !v.is_finite()),
             "{name}: expected a non-finite value to propagate through backward, got {:?}",

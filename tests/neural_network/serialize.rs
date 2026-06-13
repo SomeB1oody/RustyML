@@ -196,7 +196,10 @@ fn dense_two_layer_trained_round_trip() {
     };
 
     let mut model = make_arch();
-    model.compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.compile(
+        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let x: Tensor =
         Array::from_shape_vec((2, 4), vec![0.1f32, 0.2, 0.3, 0.4, -0.1, -0.2, -0.3, -0.4])
@@ -488,7 +491,10 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
 
     // Train a copy to move running stats away from their defaults
     let mut trainable_model = make_arch();
-    trainable_model.compile(SGD::new(0.001, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    trainable_model.compile(
+        SGD::new(0.001, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
     trainable_model.fit(&x_train, &x_train, 8).unwrap();
 
     // Eval-mode prediction uses running_mean / running_var
@@ -524,7 +530,10 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
     };
 
     let mut trainable = make_arch();
-    trainable.compile(SGD::new(0.001, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    trainable.compile(
+        SGD::new(0.001, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
     trainable.fit(&x, &x, 5).unwrap();
     trainable.save_to_path(tmp.path()).unwrap();
 
@@ -658,7 +667,10 @@ fn mixed_model_trained_round_trip() {
     };
 
     let mut model = make_arch();
-    model.compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.compile(
+        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // Consistent batch size; Dropout shape validation is off (empty vec)
     let x: Tensor = Array::from_shape_vec((2, 3), vec![0.5f32, -1.0, 1.5, -0.5, 1.0, -1.5])

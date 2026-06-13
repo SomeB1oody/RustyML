@@ -48,9 +48,7 @@ fn pool_geometry(
         PaddingType::Same => {
             let out_sp: Vec<usize> = (0..r).map(|k| sp[k].div_ceil(strides[k])).collect();
             let pad_before = (0..r)
-                .map(|k| {
-                    (((out_sp[k] - 1) * strides[k] + pool[k]).saturating_sub(sp[k])) / 2
-                })
+                .map(|k| (((out_sp[k] - 1) * strides[k] + pool[k]).saturating_sub(sp[k])) / 2)
                 .collect();
             (out_sp, pad_before)
         }
@@ -121,8 +119,8 @@ where
     R: Send,
     F: Fn(usize) -> R + Sync + Send,
 {
-    let parallel = force_parallel
-        .unwrap_or(bc_total.saturating_mul(work_per_plane) >= POOL_PARALLEL_MIN_OPS);
+    let parallel =
+        force_parallel.unwrap_or(bc_total.saturating_mul(work_per_plane) >= POOL_PARALLEL_MIN_OPS);
     if parallel {
         (0..bc_total).into_par_iter().map(f).collect()
     } else {
@@ -360,8 +358,8 @@ pub(super) fn windowed_pool_backward(
                             let mut in_idx = 0usize;
                             let mut in_bounds = true;
                             for k in 0..r {
-                                let p = (o[k] * strides[k] + w[k]) as isize
-                                    - pad_before[k] as isize;
+                                let p =
+                                    (o[k] * strides[k] + w[k]) as isize - pad_before[k] as isize;
                                 if p < 0 || p as usize >= sp[k] {
                                     in_bounds = false;
                                     break;
@@ -592,7 +590,8 @@ mod tests {
     #[test]
     fn test_windowed_pool_forward_1d_max() {
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
-        let (out, argmax) = windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
         // Output shape must be [1,1,2]
         assert_eq!(out.shape(), &[1, 1, 2]);
         let flat: Vec<f32> = out.iter().copied().collect();
@@ -609,7 +608,8 @@ mod tests {
     fn test_windowed_pool_forward_2d_max() {
         let data =
             ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-        let (out, argmax) = windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 1, 1, 1]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 4.0, epsilon = 1e-6);
@@ -623,7 +623,8 @@ mod tests {
     #[test]
     fn test_windowed_pool_forward_1d_avg() {
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
-        let (out, argmax) = windowed_pool_forward(&data, &[2], &[2], PoolKind::Average, PaddingType::Valid);
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2], &[2], PoolKind::Average, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 1, 2]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 2.0, epsilon = 1e-6);
@@ -636,7 +637,13 @@ mod tests {
     fn test_windowed_pool_forward_2d_avg() {
         let data =
             ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-        let (out, argmax) = windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Average, PaddingType::Valid);
+        let (out, argmax) = windowed_pool_forward(
+            &data,
+            &[2, 2],
+            &[2, 2],
+            PoolKind::Average,
+            PaddingType::Valid,
+        );
         assert_eq!(out.shape(), &[1, 1, 1, 1]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 2.5, epsilon = 1e-6);
@@ -694,8 +701,15 @@ mod tests {
     #[test]
     fn test_windowed_pool_backward_1d_avg_overlapping() {
         let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 3]), vec![1.0f32, 1.0, 1.0]).unwrap();
-        let grad_in =
-            windowed_pool_backward(&grad_out, &[1, 1, 4], &[2], &[1], PoolKind::Average, None, PaddingType::Valid);
+        let grad_in = windowed_pool_backward(
+            &grad_out,
+            &[1, 1, 4],
+            &[2],
+            &[1],
+            PoolKind::Average,
+            None,
+            PaddingType::Valid,
+        );
         assert_eq!(grad_in.shape(), &[1, 1, 4]);
         let flat: Vec<f32> = grad_in.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 0.5, epsilon = 1e-6); // edge
@@ -708,8 +722,15 @@ mod tests {
     #[test]
     fn test_windowed_pool_backward_1d_avg_nonoverlapping() {
         let grad_out = ArrayD::from_shape_vec(IxDyn(&[1, 1, 2]), vec![1.0f32, 1.0]).unwrap();
-        let grad_in =
-            windowed_pool_backward(&grad_out, &[1, 1, 4], &[2], &[2], PoolKind::Average, None, PaddingType::Valid);
+        let grad_in = windowed_pool_backward(
+            &grad_out,
+            &[1, 1, 4],
+            &[2],
+            &[2],
+            PoolKind::Average,
+            None,
+            PaddingType::Valid,
+        );
         assert_eq!(grad_in.shape(), &[1, 1, 4]);
         let flat: Vec<f32> = grad_in.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 0.5, epsilon = 1e-6);
@@ -724,7 +745,8 @@ mod tests {
     #[test]
     fn test_windowed_pool_output_shape_1d() {
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 6]), vec![1.0f32; 6]).unwrap();
-        let (out, _) = windowed_pool_forward(&data, &[3], &[2], PoolKind::Average, PaddingType::Valid);
+        let (out, _) =
+            windowed_pool_forward(&data, &[3], &[2], PoolKind::Average, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 1, 2]);
     }
 
@@ -733,7 +755,8 @@ mod tests {
     fn test_windowed_pool_output_shape_2d_batched() {
         let data =
             ArrayD::from_shape_vec(IxDyn(&[2, 3, 4, 4]), vec![1.0f32; 2 * 3 * 4 * 4]).unwrap();
-        let (out, _) = windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
+        let (out, _) =
+            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
         assert_eq!(out.shape(), &[2, 3, 2, 2]);
     }
 
@@ -744,7 +767,8 @@ mod tests {
     fn test_windowed_pool_forward_2d_max_tie_breaks_to_first() {
         let data =
             ArrayD::from_shape_vec(IxDyn(&[1, 1, 2, 2]), vec![5.0f32, 5.0, 1.0, 2.0]).unwrap();
-        let (out, argmax) = windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
+        let (out, argmax) =
+            windowed_pool_forward(&data, &[2, 2], &[2, 2], PoolKind::Max, PaddingType::Valid);
         assert_eq!(out.shape(), &[1, 1, 1, 1]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 5.0, epsilon = 1e-6);

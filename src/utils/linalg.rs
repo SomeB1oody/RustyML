@@ -5,7 +5,7 @@
 //! implementation instead of carrying near-identical copies
 
 use crate::error::Error;
-use crate::math::matmul::{par_matmul, par_matvec};
+use crate::math::matmul::{gemm_internal, gemv_internal};
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -45,13 +45,13 @@ fn dominant_eigenpair(
     let mut prev_lambda = 0.0;
     for _ in 0..max_iter {
         // Iterate toward the dominant eigenvector
-        let w = par_matvec(matrix, &v);
+        let w = gemv_internal(matrix, &v);
         let w_norm = w.dot(&w).sqrt();
         if w_norm <= f64::EPSILON || !w_norm.is_finite() {
             return Err(Error::not_converged("Power iteration failed to converge"));
         }
         let v_next = &w / w_norm;
-        let lambda = v_next.dot(&par_matvec(matrix, &v_next));
+        let lambda = v_next.dot(&gemv_internal(matrix, &v_next));
         if !lambda.is_finite() {
             return Err(Error::non_finite("power iteration eigenvalue"));
         }
@@ -62,7 +62,7 @@ fn dominant_eigenpair(
         v = v_next;
     }
 
-    let lambda = v.dot(&par_matvec(matrix, &v));
+    let lambda = v.dot(&gemv_internal(matrix, &v));
     if !lambda.is_finite() {
         return Err(Error::non_finite("power iteration eigenvalue"));
     }
@@ -104,7 +104,7 @@ pub(super) fn top_eigenpairs_power_iteration(
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
         // Deflate the extracted component so the next iteration surfaces the next: M = M - lambda v v^T
-        let outer = par_matmul(
+        let outer = gemm_internal(
             &vector.view().insert_axis(Axis(1)),
             &vector.view().insert_axis(Axis(0)),
         );
@@ -158,7 +158,7 @@ pub(super) fn top_eigenpairs_lanczos(
 
     for _ in 0..m {
         // Three-term recurrence: w = A v - alpha v - beta_prev v_prev
-        let mut w = par_matvec(matrix, &v);
+        let mut w = gemv_internal(matrix, &v);
         let alpha = v.dot(&w);
         w.scaled_add(-alpha, &v);
         if let Some(ref vp) = v_prev {

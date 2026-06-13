@@ -2,7 +2,6 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::{
@@ -18,10 +17,10 @@ use crate::neural_network::layers::layer_weight::{LayerWeight, SeparableConv2DLa
 use crate::neural_network::layers::shape_helpers::calculate_output_height_and_weight;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use ndarray::{Array2, Array4, ArrayD, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-
 
 /// A 2D separable convolutional layer
 ///

@@ -7,7 +7,7 @@ pub use super::DistanceCalculationMetric;
 use super::spatial::KdTree;
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, par_matmul};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2, s};
@@ -337,7 +337,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                 for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
                     let projections =
-                        par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                        gemm_internal(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
                     for i in chunk_start..chunk_end {
                         encoded.push(self.predict_one(
                             x.row(i),
@@ -435,7 +435,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
                 for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
                     let projections =
-                        par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                        gemm_internal(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
                     let chunk_results: Result<Vec<usize>, Error> = (chunk_start..chunk_end)
                         .into_par_iter()
                         .map(|i| {

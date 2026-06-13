@@ -2,7 +2,6 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::conv_op_helpers::pad_tensor_2d;
@@ -14,12 +13,12 @@ use crate::neural_network::layers::layer_weight::{DepthwiseConv2DLayerWeight, La
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
 };
-
 
 /// A 2D depthwise convolutional layer for neural networks
 ///
@@ -610,12 +609,11 @@ impl Layer for DepthwiseConv2D {
                 pad_w,
             )
         };
-        let results: Vec<(Array2<f32>, Array2<f32>)> =
-            if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
-                tasks.par_iter().map(run).collect()
-            } else {
-                tasks.iter().map(run).collect()
-            };
+        let results: Vec<(Array2<f32>, Array2<f32>)> = if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+            tasks.par_iter().map(run).collect()
+        } else {
+            tasks.iter().map(run).collect()
+        };
 
         for (&(b, c), (weight_grad, input_grad)) in tasks.iter().zip(results) {
             let mut wg = weight_grads.slice_mut(s![c, 0, .., ..]);

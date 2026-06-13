@@ -154,8 +154,13 @@ impl Layer for MaxPooling1D {
         // Cache the actual input shape and arg-max positions for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
-        let (output, argmax) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Max, self.padding);
+        let (output, argmax) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Max,
+            self.padding,
+        );
         self.argmax = argmax;
         Ok(output)
     }
@@ -167,8 +172,13 @@ impl Layer for MaxPooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        let (output, _) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Max, self.padding);
+        let (output, _) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Max,
+            self.padding,
+        );
         Ok(output)
     }
 

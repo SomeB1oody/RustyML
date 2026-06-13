@@ -10,7 +10,6 @@ use crate::parallel_gates::FUSED_SLICE_PARALLEL_THRESHOLD;
 use rayon::prelude::*;
 use std::borrow::Cow;
 
-
 /// Scales a gradient by `grad_scale`, used to apply clip-by-global-norm before the optimizer step
 ///
 /// Returns a borrow of the original gradient when `grad_scale == 1.0` (the no-clip case), so the

@@ -4,10 +4,10 @@
 //! and parallel paths chosen by data size
 
 use crate::error::Error;
+use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{
     CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS,
 };
-use crate::math::reduction::det_par_fold;
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::ParallelIterator;
 use rayon::prelude::IntoParallelRefMutIterator;
@@ -161,8 +161,9 @@ where
     }
 
     let (_, mean, m2) = match data.as_slice() {
-        Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+        Some(slice) => det_reduce(
             slice,
+            slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
             |block| {
                 block
                     .iter()
@@ -171,6 +172,7 @@ where
             welford_merge,
             (0.0, 0.0, 0.0),
         ),
+        // Non-contiguous storage: plain flat fold
         _ => data
             .iter()
             .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x)),

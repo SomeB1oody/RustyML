@@ -11,7 +11,7 @@ use super::validation::{
 };
 use crate::error::Error;
 use crate::math::hinge_loss;
-use crate::math::matmul::par_matvec;
+use crate::math::matmul::gemv_internal;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
@@ -263,7 +263,7 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            let margins: Array1<f64> = par_matvec(x, weights) + bias;
+            let margins: Array1<f64> = gemv_internal(x, weights) + bias;
             let hinge = hinge_loss(&margins, y);
 
             // Calculate regularization term
@@ -459,7 +459,7 @@ impl LinearSVC {
 
         validate_predict_input(x, weights.len())?;
 
-        let decision = par_matvec(x, weights) + bias;
+        let decision = gemv_internal(x, weights) + bias;
 
         // Check for NaN/Inf in decision values
         if decision.iter().any(|&val| !val.is_finite()) {

@@ -7,8 +7,8 @@ use super::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
 use crate::error::Error;
-use crate::math::matmul::par_matmul;
-use crate::math::reduction::{DET_REDUCE_BLOCK, det_par_fold, det_par_fold_range};
+use crate::math::matmul::gemm_internal;
+use crate::math::reduction::{DET_REDUCE_BLOCK, det_reduce, det_reduce_range};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
@@ -272,18 +272,15 @@ impl KMeans {
             }
             let distances = &min_dists;
 
-            // Deterministic blocked sum above the sum gate; the roulette walk below stays
-            // serial (prefix scan)
-            let total_dist: f64 = if distances.len() >= SUM_F64_PARALLEL_MIN_ELEMS {
-                det_par_fold(
-                    distances,
-                    |block| block.iter().sum::<f64>(),
-                    |a, b| a + b,
-                    0.0,
-                )
-            } else {
-                distances.iter().sum()
-            };
+            // Deterministic blocked sum, on rayon above the sum gate; the roulette walk
+            // below stays serial (prefix scan)
+            let total_dist: f64 = det_reduce(
+                distances,
+                distances.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                |block| block.iter().sum::<f64>(),
+                |a, b| a + b,
+                0.0,
+            );
 
             // All distances zero: fall back to random selection
             if total_dist == 0.0 {
@@ -371,15 +368,12 @@ impl KMeans {
 
         // Main iteration loop
         for i in 0..self.max_iter {
-            new_centroids.fill(0.0);
-            counts.fill(0);
-
             // Squared centroid norms, shared by every sample this iteration
             let centroids = self.centroids.as_ref().unwrap();
             let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
 
             let data_view = data.view();
-            let projections = par_matmul(&data_view, &centroids.t());
+            let projections = gemm_internal(&data_view, &centroids.t());
 
             // Closest cluster center and distance for a single sample
             let compute_assignments = |sample_idx: usize| -> Result<(usize, f64), Error> {
@@ -408,47 +402,50 @@ impl KMeans {
             let results = results?;
 
             // Fold every sample's row into its cluster's running sum, plus counts and
-            // inertia. Above the sum gate (work metric: samples x features; see
-            // benches/RESULTS.md "k-means assign-accumulate") the deterministic blocked
-            // range fold keeps the accumulation order independent of the rayon thread count
+            // inertia, as a deterministic blocked range fold - on rayon above the sum gate
+            // (work metric: samples x features; see benches/RESULTS.md
+            // "k-means assign-accumulate")
             let n_clusters = self.n_clusters;
-            let inertia = if n_samples.saturating_mul(n_features) >= SUM_F64_PARALLEL_MIN_ELEMS
-            {
-                let (sums, block_counts, inertia) = det_par_fold_range(
-                    n_samples,
-                    |range| {
-                        let mut sums = Array2::<f64>::zeros((n_clusters, n_features));
-                        let mut counts = vec![0usize; n_clusters];
-                        let mut inertia = 0.0;
-                        for i in range {
-                            let (cluster, dist) = results[i];
-                            inertia += dist;
-                            sums.row_mut(cluster).add_assign(&data_view.row(i));
-                            counts[cluster] += 1;
-                        }
-                        (sums, counts, inertia)
-                    },
-                    |(mut sums_a, mut counts_a, inertia_a), (sums_b, counts_b, inertia_b)| {
-                        sums_a += &sums_b;
-                        for (a, b) in counts_a.iter_mut().zip(counts_b) {
-                            *a += b;
-                        }
-                        (sums_a, counts_a, inertia_a + inertia_b)
-                    },
-                    (
-                        Array2::<f64>::zeros((n_clusters, n_features)),
-                        vec![0usize; n_clusters],
-                        0.0,
-                    ),
-                );
-                new_centroids.assign(&sums);
-                counts.copy_from_slice(&block_counts);
+            let accumulate_parallel =
+                n_samples.saturating_mul(n_features) >= SUM_F64_PARALLEL_MIN_ELEMS;
+            let (sums, new_counts, inertia) = det_reduce_range(
+                n_samples,
+                accumulate_parallel,
+                |range| {
+                    let mut sums = Array2::<f64>::zeros((n_clusters, n_features));
+                    let mut counts = vec![0usize; n_clusters];
+                    let mut inertia = 0.0;
+                    for i in range {
+                        let (cluster, dist) = results[i];
+                        inertia += dist;
+                        sums.row_mut(cluster).add_assign(&data_view.row(i));
+                        counts[cluster] += 1;
+                    }
+                    (sums, counts, inertia)
+                },
+                |(mut sums_a, mut counts_a, inertia_a), (sums_b, counts_b, inertia_b)| {
+                    sums_a += &sums_b;
+                    for (a, b) in counts_a.iter_mut().zip(counts_b) {
+                        *a += b;
+                    }
+                    (sums_a, counts_a, inertia_a + inertia_b)
+                },
+                (
+                    Array2::<f64>::zeros((n_clusters, n_features)),
+                    vec![0usize; n_clusters],
+                    0.0,
+                ),
+            );
+            new_centroids.assign(&sums);
+            counts.copy_from_slice(&new_counts);
 
-                // The label store is a per-index map (no accumulation order to preserve);
-                // chunking it like the fold keeps the pass cheap for small n
-                labels
-                    .as_slice_mut()
-                    .expect("labels are freshly allocated and contiguous")
+            // The label store is a per-index map (no accumulation order to preserve);
+            // chunking the parallel write like the fold keeps the pass cheap for small n
+            let label_slice = labels
+                .as_slice_mut()
+                .expect("labels are freshly allocated and contiguous");
+            if accumulate_parallel {
+                label_slice
                     .par_chunks_mut(DET_REDUCE_BLOCK)
                     .zip(results.par_chunks(DET_REDUCE_BLOCK))
                     .for_each(|(label_block, result_block)| {
@@ -456,20 +453,11 @@ impl KMeans {
                             *label = cluster;
                         }
                     });
-                inertia
             } else {
-                let mut inertia = 0.0;
-                for (sample_idx, &(cluster_idx, dist)) in results.iter().enumerate() {
-                    labels[sample_idx] = cluster_idx;
-                    inertia += dist;
-
-                    // Accumulate sample contributions to the new centroids
-                    let sample = data.row(sample_idx);
-                    new_centroids.row_mut(cluster_idx).add_assign(&sample);
-                    counts[cluster_idx] += 1;
+                for (label, &(cluster, _)) in label_slice.iter_mut().zip(&results) {
+                    *label = cluster;
                 }
-                inertia
-            };
+            }
 
             #[cfg(feature = "show_progress")]
             {
@@ -590,7 +578,7 @@ impl KMeans {
         validate_predict_input(data, centroids.ncols())?;
 
         let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
-        let projections = par_matmul(data, &centroids.t());
+        let projections = gemm_internal(data, &centroids.t());
 
         // Scan-class gate: n tasks, each an O(k) arg-min scan
         let scan_work = data.nrows().saturating_mul(centroids.nrows());

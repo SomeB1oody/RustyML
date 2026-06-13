@@ -686,7 +686,10 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     let n = 16_384_usize;
     let d = 16_usize;
     let k = 4_usize;
-    assert!(n * d >= 262_144, "dataset must cross the sum-gate work metric");
+    assert!(
+        n * d >= 262_144,
+        "dataset must cross the sum-gate work metric"
+    );
 
     // Four integer-valued blobs at offsets 0/100/200/300, deterministic jitter in 0..13
     let mut v = Vec::with_capacity(n * d);

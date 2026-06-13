@@ -7,11 +7,11 @@
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::Error;
 use crate::math::average_path_length_factor;
+use crate::parallel_gates::TREE_TRAVERSAL_MIN_VISITS;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
-use crate::parallel_gates::TREE_TRAVERSAL_MIN_VISITS;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction

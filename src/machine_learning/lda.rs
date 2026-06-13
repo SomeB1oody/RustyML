@@ -5,7 +5,7 @@
 //! enums
 
 use crate::error::{Context, Error};
-use crate::math::matmul::{par_matmul, par_matvec};
+use crate::math::matmul::{gemm_internal, gemv_internal};
 use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
@@ -53,8 +53,8 @@ impl Solver {
                 Ok(coefficients)
             }
             // The covariance inverse is symmetric, so `means . inv` row c equals `inv * mu_c`
-            Solver::Eigen => Ok(par_matmul(means, &Self::eigen_inverse(cov)?)),
-            Solver::SVD => Ok(par_matmul(means, &Self::svd_pseudo_inverse(cov)?)),
+            Solver::Eigen => Ok(gemm_internal(means, &Self::eigen_inverse(cov)?)),
+            Solver::SVD => Ok(gemm_internal(means, &Self::svd_pseudo_inverse(cov)?)),
         }
     }
 
@@ -200,7 +200,7 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
     }
     u.mapv_inplace(|v| v / beta);
 
-    let mut v = par_matvec(&a.t(), &u);
+    let mut v = gemv_internal(&a.t(), &u);
     let mut alpha = v.dot(&v).sqrt();
     if alpha <= 0.0 {
         return x; // a^T b = 0 leaves no descent direction
@@ -213,14 +213,14 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 
     for _ in 0..max_iter {
         // Advance the bidiagonalization to u_{k+1} and v_{k+1}
-        let mut u_next = par_matvec(a, &v);
+        let mut u_next = gemv_internal(a, &v);
         u_next.scaled_add(-alpha, &u);
         beta = u_next.dot(&u_next).sqrt();
         if beta > 0.0 {
             u_next.mapv_inplace(|val| val / beta);
         }
 
-        let mut v_next = par_matvec(&a.t(), &u_next);
+        let mut v_next = gemv_internal(&a.t(), &u_next);
         v_next.scaled_add(-beta, &v);
         alpha = v_next.dot(&v_next).sqrt();
         if alpha > 0.0 {
@@ -694,7 +694,7 @@ impl LDA {
 
         let n_classes = classes.len();
 
-        let mut scores = par_matmul(x, &coefficients.t());
+        let mut scores = gemm_internal(x, &coefficients.t());
         scores += intercepts;
 
         let predict_sample = |score_row: ArrayView1<f64>| {
@@ -830,7 +830,7 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        let transformed = par_matmul(x, projection);
+        let transformed = gemm_internal(x, projection);
 
         #[cfg(feature = "show_progress")]
         {
@@ -863,7 +863,7 @@ impl LDA {
             .expect("Error computing class mean");
 
         let centered = &class_data - &class_mean;
-        let class_sw = par_matmul(&centered.t(), &centered);
+        let class_sw = gemm_internal(&centered.t(), &centered);
 
         // Fourth power of each centered row norm, summed for the Ledoit-Wolf dispersion term
         let sum_z4 = centered
@@ -877,7 +877,7 @@ impl LDA {
         // Between-class scatter from mean shift
         let mean_diff = &class_mean - overall_mean;
         let mean_diff_col = mean_diff.insert_axis(Axis(1));
-        let class_sb = par_matmul(&mean_diff_col, &mean_diff_col.t()) * (n_class as f64);
+        let class_sb = gemm_internal(&mean_diff_col, &mean_diff_col.t()) * (n_class as f64);
 
         (prior, class_mean, class_sw, class_sb, sum_z4)
     }

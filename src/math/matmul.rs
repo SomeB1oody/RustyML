@@ -1,34 +1,25 @@
-//! Rayon-block-parallel matrix products for `f32`/`f64` ndarray operands
+//! Rayon-block-parallel matrix products for ndarray operands
 //!
 //! Without a BLAS backend, `ndarray`'s `dot` runs on the single-threaded `matrixmultiply`
-//! kernels. [`par_matmul`](crate::math::matmul::par_matmul) keeps those kernels for the inner work (cache blocking + SIMD) and
-//! adds the missing parallelism at exactly one level: large products are split into row or
-//! column blocks across rayon, each block computed by a serial `dot`.
-//! [`par_matvec`](crate::math::matmul::par_matvec) is the
-//! matrix-vector counterpart. Small products fall through to the plain serial `dot`, gated by
-//! the calibrated per-type FLOPs thresholds on [`MatmulElem`](crate::math::matmul::MatmulElem).
+//! kernels. [`gemm`](crate::math::matmul::gemm) keeps those kernels for the inner work (cache
+//! blocking + SIMD) and adds the missing parallelism at exactly one level: large products are
+//! split into row or column blocks across rayon, each block computed by a serial `dot`.
+//! [`gemv`](crate::math::matmul::gemv) is the matrix-vector counterpart. Whether a product is
+//! worth splitting is machine-dependent, so both functions take the crossover as a
+//! `min_parallel_flops` parameter and compare it against the product's estimated FLOPs; pass
+//! `0` to always split, `usize::MAX` to always run serial.
+//! [`gemm_par`](crate::math::matmul::gemm_par) / [`gemv_par`](crate::math::matmul::gemv_par)
+//! are the always-split forms underneath, exposing the per-block size floor instead, for
+//! callers that make their own serial/parallel decision.
 //!
 //! Block splitting never reorders the per-element accumulation over `k`, so the result is
-//! **bitwise identical** to the serial `a.dot(&b)` at any thread count - unlike a k-split
-//! reduction, which would change float summation order and break reproducibility.
-//!
-//! Inside this crate, the neural-network layers use the `f32` instantiation and the
-//! classical-ML/utils modules use `f64`. The serial/parallel crossover differs per element type
-//! (half the SIMD lanes, twice the bytes per element), so the gate thresholds live on
-//! `MatmulElem` as per-type associated constants.
+//! **bitwise identical** to the serial `a.dot(&b)` at any thread count and any threshold -
+//! unlike a k-split reduction, which would change float summation order and break
+//! reproducibility. The threshold is a pure performance knob.
 
 use ndarray::parallel::prelude::IntoParallelIterator;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2, LinalgScalar};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-
-mod private {
-    /// Seals [`MatmulElem`](super::MatmulElem): the splitting strategy and its calibration are
-    /// built around `matrixmultiply`'s `f32`/`f64` kernels, so the trait is not implementable
-    /// outside this crate
-    pub trait Sealed {}
-    impl Sealed for f32 {}
-    impl Sealed for f64 {}
-}
 
 /// Minimum rows (or columns) per parallel block.
 ///
@@ -50,27 +41,35 @@ const PAR_GEMM_MIN_BLOCK: usize = 64;
 /// 8 takes the intersection
 const PAR_GEMV_MIN_BLOCK: usize = 8;
 
-/// Element types [`par_matmul`] / [`par_matvec`] accept, carrying the per-type serial/parallel
-/// crossover thresholds.
+/// This machine's calibrated serial/parallel crossover thresholds for the crate-internal
+/// [`gemm_internal`] / [`gemv_internal`] wrappers, per element type.
 ///
-/// Implemented for `f32` and `f64` only, and sealed: the splitting strategy and its calibration
-/// are specific to `matrixmultiply`'s kernels.
-///
-/// The associated constants are **machine-calibrated defaults**, not semantic contracts: they
-/// were measured on one CPU (provenance on each value) and may be retuned in any release. The
-/// stable guarantees are the ones [`par_matmul`]/[`par_matvec`] document - results
-/// bitwise-equal to the serial `dot` at any thread count, and a standard-layout output
-pub trait MatmulElem: LinalgScalar + Send + Sync + private::Sealed {
+/// The constants are machine-calibrated values measured on one CPU (provenance on each value)
+/// and may be retuned in any release; the public [`gemm`]/[`gemv`] take the threshold as a
+/// parameter instead, so this trait stays crate-internal
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     /// Minimum estimated FLOPs (`2*m*k*n`) before a matmul is worth splitting across rayon
     const PAR_GEMM_MIN_FLOPS: usize;
 
     /// Minimum estimated FLOPs (`2*m*k`) before a matvec is worth splitting across rayon.
     ///
     /// Kept separate from the GEMM gate because a matvec is memory-bound (it streams the whole
-    /// matrix once for O(1) FLOPs per element), so its crossover is a different cost class
+    /// matrix once for O(1) FLOPs per element), so its crossover is a different cost class.
+    /// Only the classical-ML/utils features have matvec call sites, hence the narrower cfg
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     const PAR_GEMV_MIN_FLOPS: usize;
 }
 
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
 impl MatmulElem for f32 {
     /// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see
     /// benches/RESULTS.md: the measured crossover bracket is 2.1M-4.2M FLOPs (square and skinny
@@ -80,9 +79,15 @@ impl MatmulElem for f32 {
     /// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see
     /// benches/RESULTS.md: crossover bracket 131K-524K FLOPs (square/tall/short-wide shapes
     /// agree), gate at the proven-win end
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     const PAR_GEMV_MIN_FLOPS: usize = 524_288;
 }
 
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
 impl MatmulElem for f64 {
     /// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see
     /// benches/RESULTS.md: crossover bracket 524K-1.77M FLOPs (the win at 1.77M is a thin
@@ -93,17 +98,20 @@ impl MatmulElem for f64 {
     /// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see
     /// benches/RESULTS.md: crossover bracket 131K-524K FLOPs, same bracket as `f32` (the
     /// matvec is bandwidth-bound either way), gate at the proven-win end
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     const PAR_GEMV_MIN_FLOPS: usize = 524_288;
 }
 
 /// `C = A @ B` with block-parallel execution for large products.
 ///
 /// Splits the longer output axis (rows of `A`, or columns of `B`) into per-thread blocks and
-/// computes each with the serial `matrixmultiply` kernel; products below the calibrated
-/// per-type FLOPs gate ([`MatmulElem::PAR_GEMM_MIN_FLOPS`]) fall through to a plain `a.dot(&b)`.
-/// Splitting the `m`/`n` axes leaves every output element's `k`-accumulation order untouched,
-/// so the result is **bitwise identical** to the serial product regardless of the thread
-/// count - parallelism here never costs reproducibility.
+/// computes each with the serial `dot` kernel; products whose estimated FLOPs (`2*m*k*n`)
+/// fall below `min_parallel_flops` run as a plain serial `a.dot(&b)` instead. Splitting the
+/// `m`/`n` axes leaves every output element's `k`-accumulation order untouched, so the result
+/// is **bitwise identical** to the serial product at any thread count and any threshold - the
+/// threshold is a pure performance knob: pass the crossover measured on your machine (`cargo
+/// bench --bench parallel_gates` reports it for this crate's machines), `0` to always split,
+/// or `usize::MAX` to always run serial.
 ///
 /// The returned array is guaranteed to be in standard (row-major) layout. (A bare `a.dot(b)`
 /// does not guarantee this: it returns a column-major result when both operands have a row
@@ -113,6 +121,7 @@ impl MatmulElem for f64 {
 ///
 /// - `a` - Left operand with shape (m, k); any storage (owned array, view, transpose)
 /// - `b` - Right operand with shape (k, n); any storage (owned array, view, transpose)
+/// - `min_parallel_flops` - Estimated-FLOPs threshold below which the product runs serial
 ///
 /// # Returns
 ///
@@ -126,22 +135,26 @@ impl MatmulElem for f64 {
 ///
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::math::matmul::par_matmul;
+/// use rustyml::math::matmul::gemm;
 ///
 /// let a = array![[1.0_f64, 2.0], [3.0, 4.0]];
 /// let b = array![[5.0_f64, 6.0], [7.0, 8.0]];
 ///
 /// // Owned arrays by reference...
-/// let c = par_matmul(&a, &b);
+/// let c = gemm(&a, &b, 2_000_000);
 /// assert_eq!(c, array![[19.0, 22.0], [43.0, 50.0]]);
 ///
-/// // ...or views and transposes
-/// let ct = par_matmul(&a.view(), &b.t());
-/// assert_eq!(ct, array![[17.0, 23.0], [39.0, 53.0]]);
+/// // ...or views and transposes; the threshold never changes the bits
+/// let ct = gemm(&a.view(), &b.t(), 0);
+/// assert_eq!(ct, gemm(&a.view(), &b.t(), usize::MAX));
 /// ```
-pub fn par_matmul<T, S1, S2>(a: &ArrayBase<S1, Ix2>, b: &ArrayBase<S2, Ix2>) -> Array2<T>
+pub fn gemm<T, S1, S2>(
+    a: &ArrayBase<S1, Ix2>,
+    b: &ArrayBase<S2, Ix2>,
+    min_parallel_flops: usize,
+) -> Array2<T>
 where
-    T: MatmulElem,
+    T: LinalgScalar + Send + Sync,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -150,20 +163,23 @@ where
     let n = b.ncols();
 
     let flops = 2usize.saturating_mul(m).saturating_mul(k).saturating_mul(n);
-    if flops < T::PAR_GEMM_MIN_FLOPS {
+    if flops < min_parallel_flops {
         return into_standard_layout(a.dot(&b));
     }
 
-    split_matmul(&a, &b, PAR_GEMM_MIN_BLOCK)
+    gemm_par(&a, &b, PAR_GEMM_MIN_BLOCK)
 }
 
 /// `y = A @ x` with block-parallel execution for large matrices.
 ///
-/// The matrix-vector counterpart of [`par_matmul`]: above the calibrated per-type FLOPs gate
-/// ([`MatmulElem::PAR_GEMV_MIN_FLOPS`]) the rows of `A` are split into per-thread blocks, each
-/// computed by ndarray's serial matrix-vector `dot`. Splitting the row axis leaves every output
-/// element's `k`-accumulation order untouched, so the result is **bitwise identical** to the
-/// serial `a.dot(&x)` at any thread count.
+/// The matrix-vector counterpart of [`gemm`]: when the estimated FLOPs (`2*m*k`) reach
+/// `min_parallel_flops`, the rows of `A` are split into per-thread blocks, each computed by
+/// ndarray's serial matrix-vector `dot`. Splitting the row axis leaves every output element's
+/// `k`-accumulation order untouched, so the result is **bitwise identical** to the serial
+/// `a.dot(&x)` at any thread count and any threshold - like [`gemm`]'s, the threshold is a
+/// pure performance knob with the same `0` / `usize::MAX` extremes. A matvec is memory-bound
+/// (it streams the whole matrix once for O(1) FLOPs per element), so its crossover is a
+/// different cost class than a matmul's: calibrate it separately.
 ///
 /// (The blocks deliberately stay on the matrix-vector kernel rather than reusing the
 /// matrix-matrix kernel on a `[k, 1]` operand: ndarray dispatches matrix-vector products to a
@@ -174,6 +190,7 @@ where
 ///
 /// - `a` - Matrix with shape (m, k); any storage (owned array, view, transpose)
 /// - `x` - Vector with length k; any storage
+/// - `min_parallel_flops` - Estimated-FLOPs threshold below which the product runs serial
 ///
 /// # Returns
 ///
@@ -187,21 +204,25 @@ where
 ///
 /// ```rust
 /// use ndarray::array;
-/// use rustyml::math::matmul::par_matvec;
+/// use rustyml::math::matmul::gemv;
 ///
 /// let a = array![[1.0_f64, 2.0], [3.0, 4.0]];
 /// let x = array![10.0_f64, 20.0];
 ///
-/// let y = par_matvec(&a, &x);
+/// let y = gemv(&a, &x, 524_288);
 /// assert_eq!(y, array![50.0, 110.0]);
 ///
 /// // Transposed views work the same way: A^T . x
-/// let yt = par_matvec(&a.t(), &x);
+/// let yt = gemv(&a.t(), &x, 524_288);
 /// assert_eq!(yt, array![70.0, 100.0]);
 /// ```
-pub fn par_matvec<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
+pub fn gemv<T, S1, S2>(
+    a: &ArrayBase<S1, Ix2>,
+    x: &ArrayBase<S2, Ix1>,
+    min_parallel_flops: usize,
+) -> Array1<T>
 where
-    T: MatmulElem,
+    T: LinalgScalar + Send + Sync,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -209,11 +230,39 @@ where
     let (m, k) = a.dim();
 
     let flops = 2usize.saturating_mul(m).saturating_mul(k);
-    if flops < T::PAR_GEMV_MIN_FLOPS {
+    if flops < min_parallel_flops {
         return a.dot(&x);
     }
 
-    split_matvec(&a, &x, PAR_GEMV_MIN_BLOCK)
+    gemv_par(&a, &x, PAR_GEMV_MIN_BLOCK)
+}
+
+/// [`gemm`] with this machine's calibrated crossover for `T` ([`MatmulElem::PAR_GEMM_MIN_FLOPS`])
+/// as the threshold - the crate-internal call form
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub(crate) fn gemm_internal<T, S1, S2>(a: &ArrayBase<S1, Ix2>, b: &ArrayBase<S2, Ix2>) -> Array2<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    gemm(a, b, T::PAR_GEMM_MIN_FLOPS)
+}
+
+/// [`gemv`] with this machine's calibrated crossover for `T` ([`MatmulElem::PAR_GEMV_MIN_FLOPS`])
+/// as the threshold - the crate-internal call form
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) fn gemv_internal<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    gemv(a, x, T::PAR_GEMV_MIN_FLOPS)
 }
 
 /// Element budget for one row-chunk of a tiled product whose full result would be too large
@@ -261,20 +310,61 @@ pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
         < CACHE_RESIDENT_MAX_BYTES
 }
 
-/// The block-parallel product itself, with no FLOPs gate: always splits (when the block size
-/// allows). Kept separate from [`par_matmul`] so the calibration bench can time the split path
-/// against the serial `dot` on either side of the gate, and sweep `min_block`.
+/// `C = A @ B`, always block-parallel: the split form [`gemm`] dispatches to above its FLOPs
+/// threshold, exposed directly for callers that make their own serial/parallel decision.
 ///
-/// Calibration hook only - prefer [`par_matmul`], whose gate keeps small products serial; not
-/// part of the public API and carries no stability guarantee
-#[doc(hidden)]
-pub fn split_matmul<T, S1, S2>(
+/// Splits the longer output axis (rows of `A` when `m >= n`, else columns of `B`) into
+/// per-thread blocks of `max(ceil(axis_len / rayon_threads), min_block)` rows or columns,
+/// each computed by the serial `dot` kernel. When that chunk covers the whole axis - the
+/// input is too small for the requested block floor - the product gracefully degrades to a
+/// single serial `dot`, so calling this on a tiny matrix is safe, just pointless.
+///
+/// `min_block` floors the per-block work: every block's `dot` re-packs the shared operand
+/// (`B` for a row split, `A` for a column split), so blocks must be tall (or wide) enough to
+/// amortize that packing. Measured on f32/f64 (see benches/RESULTS.md), 16-64 sit on a
+/// plateau and 128+ degrades; pass 64 when in doubt - [`gemm`] uses exactly that. Like the
+/// FLOPs threshold, `min_block` is a pure performance knob: splitting only the `m`/`n` axes
+/// leaves every output element's `k`-accumulation order untouched, so the result is
+/// **bitwise identical** to the serial `a.dot(&b)` at any block size and any thread count.
+///
+/// The returned array is guaranteed to be in standard (row-major) layout, like [`gemm`]'s.
+///
+/// # Parameters
+///
+/// - `a` - Left operand with shape (m, k); any storage (owned array, view, transpose)
+/// - `b` - Right operand with shape (k, n); any storage (owned array, view, transpose)
+/// - `min_block` - Minimum rows (or columns) per parallel block
+///
+/// # Returns
+///
+/// - `Array2<T>` - The product with shape (m, n), standard layout
+///
+/// # Panics
+///
+/// - If the inner dimensions disagree (same contract as `dot`)
+///
+/// # Examples
+///
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::matmul::{gemm, gemm_par};
+///
+/// let a = array![[1.0_f64, 2.0], [3.0, 4.0]];
+/// let b = array![[5.0_f64, 6.0], [7.0, 8.0]];
+///
+/// // Always-split form; the block floor never changes the bits
+/// let c = gemm_par(&a, &b, 64);
+/// assert_eq!(c, a.dot(&b));
+/// // gemm with threshold 0 is gemm_par with the default block floor
+/// assert_eq!(c, gemm(&a, &b, 0));
+/// ```
+pub fn gemm_par<T, S1, S2>(
     a: &ArrayBase<S1, Ix2>,
     b: &ArrayBase<S2, Ix2>,
     min_block: usize,
 ) -> Array2<T>
 where
-    T: MatmulElem,
+    T: LinalgScalar + Send + Sync,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -313,20 +403,59 @@ where
     }
 }
 
-/// The block-parallel matvec itself, with no FLOPs gate: always splits (when the block size
-/// allows). Kept separate from [`par_matvec`] so the calibration bench can time the split path
-/// against the serial `dot` on either side of the gate, and sweep `min_block`.
+/// `y = A @ x`, always block-parallel: the split form [`gemv`] dispatches to above its FLOPs
+/// threshold, exposed directly for callers that make their own serial/parallel decision.
 ///
-/// Calibration hook only - prefer [`par_matvec`], whose gate keeps small products serial; not
-/// part of the public API and carries no stability guarantee
-#[doc(hidden)]
-pub fn split_matvec<T, S1, S2>(
+/// Splits the rows of `A` into per-thread blocks of
+/// `max(ceil(m / rayon_threads), min_block)` rows, each computed by ndarray's serial
+/// matrix-vector `dot`. When that chunk covers all rows, the product gracefully degrades to
+/// a single serial `dot`. The blocks deliberately stay on the matrix-vector kernel rather
+/// than reusing the matrix-matrix kernel on a `[k, 1]` operand: ndarray dispatches the two
+/// to different kernels with different accumulation orders, and only the same-kernel split
+/// reproduces `a.dot(&x)` bitwise.
+///
+/// Unlike a GEMM block, a matvec block has no operand re-packing to amortize - `min_block`
+/// only keeps the per-task work above rayon's scheduling overhead - so it can sit far lower
+/// than a GEMM's. Measured on f32/f64 (see benches/RESULTS.md), tall shapes plateau over
+/// 8-64 rows and short-wide ones over 1-16; pass 8 when in doubt - [`gemv`] uses exactly
+/// that. Like the FLOPs threshold, `min_block` is a pure performance knob: splitting only
+/// the row axis leaves every output element's `k`-accumulation order untouched, so the
+/// result is **bitwise identical** to the serial `a.dot(&x)` at any block size and any
+/// thread count.
+///
+/// # Parameters
+///
+/// - `a` - Matrix with shape (m, k); any storage (owned array, view, transpose)
+/// - `x` - Vector with length k; any storage
+/// - `min_block` - Minimum rows per parallel block
+///
+/// # Returns
+///
+/// - `Array1<T>` - The product with length m
+///
+/// # Panics
+///
+/// - If `a`'s column count differs from `x`'s length (same contract as `dot`)
+///
+/// # Examples
+///
+/// ```rust
+/// use ndarray::array;
+/// use rustyml::math::matmul::gemv_par;
+///
+/// let a = array![[1.0_f64, 2.0], [3.0, 4.0]];
+/// let x = array![10.0_f64, 20.0];
+///
+/// let y = gemv_par(&a, &x, 8);
+/// assert_eq!(y, a.dot(&x));
+/// ```
+pub fn gemv_par<T, S1, S2>(
     a: &ArrayBase<S1, Ix2>,
     x: &ArrayBase<S2, Ix1>,
     min_block: usize,
 ) -> Array1<T>
 where
-    T: MatmulElem,
+    T: LinalgScalar + Send + Sync,
     S1: Data<Elem = T>,
     S2: Data<Elem = T>,
 {
@@ -381,13 +510,13 @@ mod tests {
 
     // Bitwise equivalence with the serial product
 
-    /// Row-split path (m >= n, above the FLOP threshold) is bitwise identical to serial dot
+    /// Row-split path (m >= n, forced split) is bitwise identical to serial dot
     #[test]
-    fn par_matmul_row_split_bitwise_equals_serial() {
-        // 2*512*64*256 = 16.8M FLOPs >= threshold, m = 512 > n = 256 -> row split
+    fn gemm_row_split_bitwise_equals_serial() {
+        // m = 512 > n = 256 -> row split (threshold 0 forces the split path)
         let a = random_matrix(512, 64, 1);
         let b = random_matrix(64, 256, 2);
-        let par = par_matmul(&a, &b);
+        let par = gemm(&a, &b, 0);
         let serial = a.dot(&b);
         assert_eq!(par.shape(), serial.shape());
         assert!(
@@ -396,13 +525,13 @@ mod tests {
         );
     }
 
-    /// Column-split path (n > m, above the FLOP threshold) is bitwise identical to serial dot
+    /// Column-split path (n > m, forced split) is bitwise identical to serial dot
     #[test]
-    fn par_matmul_column_split_bitwise_equals_serial() {
-        // 2*64*256*512 = 16.8M FLOPs >= threshold, n = 512 > m = 64 -> column split
+    fn gemm_column_split_bitwise_equals_serial() {
+        // n = 512 > m = 64 -> column split (threshold 0 forces the split path)
         let a = random_matrix(64, 256, 3);
         let b = random_matrix(256, 512, 4);
-        let par = par_matmul(&a, &b);
+        let par = gemm(&a, &b, 0);
         let serial = a.dot(&b);
         assert!(
             par.iter().zip(serial.iter()).all(|(x, y)| x == y),
@@ -410,23 +539,23 @@ mod tests {
         );
     }
 
-    /// Below the FLOP threshold the serial fallback gives exactly a.dot(b)
+    /// With the threshold forced high, the serial fallback gives exactly a.dot(b)
     #[test]
-    fn par_matmul_small_matches_serial() {
+    fn gemm_small_matches_serial() {
         let a = random_matrix(8, 8, 5);
         let b = random_matrix(8, 8, 6);
-        let par = par_matmul(&a, &b);
+        let par = gemm(&a, &b, usize::MAX);
         let serial = a.dot(&b);
         assert!(par.iter().zip(serial.iter()).all(|(x, y)| x == y));
     }
 
     /// Transposed operands (the `x.t().dot(dz)` weight-reduction pattern) match serial
     #[test]
-    fn par_matmul_transposed_operands_match_serial() {
-        // [64, 2048] @ [2048, 64] from transposes: 2*64*2048*64 = 16.8M FLOPs, m == n -> row split
+    fn gemm_transposed_operands_match_serial() {
+        // [64, 2048] @ [2048, 64] from transposes, m == n -> row split (forced)
         let x = random_matrix(2048, 64, 7);
         let dz = random_matrix(2048, 64, 8);
-        let par = par_matmul(&x.t(), &dz);
+        let par = gemm(&x.t(), &dz, 0);
         let serial = x.t().dot(&dz);
         assert!(
             par.iter().zip(serial.iter()).all(|(a, b)| a == b),
@@ -436,11 +565,11 @@ mod tests {
 
     /// The f64 instantiation is bitwise identical to serial dot on both split axes
     #[test]
-    fn par_matmul_f64_bitwise_equals_serial() {
-        // Row split: 2*512*64*256 = 16.8M FLOPs, m > n
+    fn gemm_f64_bitwise_equals_serial() {
+        // Row split: m > n (forced)
         let a = random_matrix_f64(512, 64, 9);
         let b = random_matrix_f64(64, 256, 10);
-        let par = par_matmul(&a, &b);
+        let par = gemm(&a, &b, 0);
         let serial = a.dot(&b);
         assert!(
             par.iter().zip(serial.iter()).all(|(x, y)| x == y),
@@ -450,7 +579,7 @@ mod tests {
         // Column split: n > m
         let a = random_matrix_f64(64, 256, 11);
         let b = random_matrix_f64(256, 512, 12);
-        let par = par_matmul(&a, &b);
+        let par = gemm(&a, &b, 0);
         let serial = a.dot(&b);
         assert!(
             par.iter().zip(serial.iter()).all(|(x, y)| x == y),
@@ -463,15 +592,15 @@ mod tests {
     /// Output is standard layout even when dot would return a column-major result
     /// (both operands with row stride 1, via a length-1 axis)
     #[test]
-    fn par_matmul_normalizes_column_major_dot_output() {
+    fn gemm_normalizes_column_major_dot_output() {
         // [4, 1] (strides (1, 1)) @ [1, 3] with strides (1, 1): ndarray's dot returns
-        // column-major here; par_matmul must hand back standard layout
+        // column-major here; gemm must hand back standard layout
         let a = Array2::<f32>::from_shape_vec((4, 1), vec![1.0, 2.0, 3.0, 4.0]).unwrap();
         let b_owned = Array2::<f32>::from_shape_vec((3, 1), vec![5.0, 6.0, 7.0]).unwrap();
         let b = b_owned.t(); // [1, 3] with strides (1, 1)
         assert_eq!(b.strides(), &[1, 1]);
 
-        let c = par_matmul(&a, &b);
+        let c = gemm(&a, &b, usize::MAX);
         assert!(c.is_standard_layout(), "output must be standard layout");
         let serial = a.dot(&b);
         assert!(c.iter().zip(serial.iter()).all(|(x, y)| x == y));
@@ -479,13 +608,13 @@ mod tests {
 
     // Matrix-vector product
 
-    /// Above the gate (split path) par_matvec is bitwise identical to serial a.dot(&x)
+    /// The split path is bitwise identical to serial a.dot(&x)
     #[test]
-    fn par_matvec_split_bitwise_equals_serial() {
-        // 2*4096*1024 = 8.4M FLOPs >= threshold -> split path
+    fn gemv_split_bitwise_equals_serial() {
+        // threshold 0 forces the split path
         let a = random_matrix(4096, 1024, 13);
         let x = random_matrix(1024, 1, 14).remove_axis(Axis(1));
-        let par = par_matvec(&a, &x);
+        let par = gemv(&a, &x, 0);
         let serial = a.dot(&x);
         assert_eq!(par.len(), serial.len());
         assert!(
@@ -494,22 +623,22 @@ mod tests {
         );
     }
 
-    /// Below the gate the serial fallback gives exactly a.dot(&x)
+    /// With the threshold forced high, the serial fallback gives exactly a.dot(&x)
     #[test]
-    fn par_matvec_small_matches_serial() {
+    fn gemv_small_matches_serial() {
         let a = random_matrix(16, 8, 15);
         let x = random_matrix(8, 1, 16).remove_axis(Axis(1));
-        let par = par_matvec(&a, &x);
+        let par = gemv(&a, &x, usize::MAX);
         let serial = a.dot(&x);
         assert!(par.iter().zip(serial.iter()).all(|(p, s)| p == s));
     }
 
     /// The f64 matvec instantiation matches serial on the split path
     #[test]
-    fn par_matvec_f64_bitwise_equals_serial() {
+    fn gemv_f64_bitwise_equals_serial() {
         let a = random_matrix_f64(4096, 1024, 17);
         let x = random_matrix_f64(1024, 1, 18).remove_axis(Axis(1));
-        let par = par_matvec(&a, &x);
+        let par = gemv(&a, &x, 0);
         let serial = a.dot(&x);
         assert!(
             par.iter().zip(serial.iter()).all(|(p, s)| p == s),
@@ -521,34 +650,34 @@ mod tests {
 
     /// Zero-sized axes produce the empty/zero product without panicking
     #[test]
-    fn par_matmul_zero_sized_axes() {
+    fn gemm_zero_sized_axes() {
         let a = Array2::<f32>::zeros((0, 4));
         let b = Array2::<f32>::zeros((4, 3));
-        let c = par_matmul(&a, &b);
+        let c = gemm(&a, &b, 0);
         assert_eq!(c.shape(), &[0, 3]);
 
         let a = Array2::<f32>::zeros((3, 0));
         let b = Array2::<f32>::zeros((0, 4));
-        let c = par_matmul(&a, &b);
+        let c = gemm(&a, &b, 0);
         assert_eq!(c.shape(), &[3, 4]);
         assert!(c.iter().all(|&x| x == 0.0));
     }
 
     /// 1x1 product
     #[test]
-    fn par_matmul_one_by_one() {
+    fn gemm_one_by_one() {
         let a = Array2::<f32>::from_elem((1, 1), 3.0);
         let b = Array2::<f32>::from_elem((1, 1), 4.0);
-        let c = par_matmul(&a, &b);
+        let c = gemm(&a, &b, 0);
         assert_eq!(c[[0, 0]], 12.0);
     }
 
     /// Mismatched inner dimensions panic, matching `dot`'s contract
     #[test]
     #[should_panic]
-    fn par_matmul_dimension_mismatch_panics() {
+    fn gemm_dimension_mismatch_panics() {
         let a = Array2::<f32>::zeros((2, 3));
         let b = Array2::<f32>::zeros((4, 2));
-        par_matmul(&a, &b);
+        gemm(&a, &b, 0);
     }
 }

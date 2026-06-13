@@ -8,8 +8,8 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::error::{Error, NnError};
-use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
 use rustyml::neural_network::layers::pooling::average_pooling_2d::AveragePooling2D;
 use rustyml::neural_network::layers::pooling::average_pooling_3d::AveragePooling3D;
@@ -165,7 +165,8 @@ fn avg_pool_1d_default_stride_equals_pool_size() {
 /// Forward mean values for a 4x4 input, pool=(2,2), stride=(2,2)
 #[test]
 fn avg_pool_2d_forward_values_pool2x2_stride2x2() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 4, 4), vals)
         .unwrap()
@@ -181,7 +182,8 @@ fn avg_pool_2d_forward_values_pool2x2_stride2x2() {
 /// Forward mean values for a non-square pool=(2,3) and stride=(1,1) on a [1,1,3,5] input
 #[test]
 fn avg_pool_2d_forward_values_nonsquare_pool() {
-    let mut layer = AveragePooling2D::new((2, 3), vec![1, 1, 3, 5], Some((1, 1)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 3), vec![1, 1, 3, 5], Some((1, 1)), PaddingType::Valid).unwrap();
     let vals: Vec<f32> = (0..15).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 3, 5), vals)
         .unwrap()
@@ -199,7 +201,8 @@ fn avg_pool_2d_forward_values_nonsquare_pool() {
 /// Channels are pooled independently in 2D
 #[test]
 fn avg_pool_2d_forward_multi_channel_independence() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 2, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 2), vec![1, 2, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let mut vals = vec![2.0f32; 16];
     vals.extend(vec![4.0f32; 16]);
     let x: Tensor = Array::from_shape_vec((1, 2, 4, 4), vals)
@@ -218,13 +221,15 @@ fn avg_pool_2d_forward_multi_channel_independence() {
 /// predict() produces the same values as forward() for AveragePooling2D
 #[test]
 fn avg_pool_2d_predict_equals_forward() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 4, 4), vals)
         .unwrap()
         .into_dyn();
     let fwd = layer.forward(&x).unwrap();
-    let layer_pred = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let layer_pred =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let pred = layer_pred.predict(&x).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
@@ -235,7 +240,8 @@ fn avg_pool_2d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn avg_pool_2d_backward_before_forward_errors() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let grad: Tensor = Array::ones((1, 1, 2, 2)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -251,10 +257,12 @@ fn avg_pool_2d_backward_before_forward_errors() {
 /// Wrong-rank input to forward/predict errors (3D instead of 4D)
 #[test]
 fn avg_pool_2d_wrong_rank_input_errors() {
-    let mut layer = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let mut layer =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     let bad: Tensor = Array::ones((4, 4, 4)).into_dyn();
     assert!(layer.forward(&bad).is_err());
-    let layer_pred = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let layer_pred =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     assert!(layer_pred.predict(&bad).is_err());
 }
 
@@ -297,7 +305,8 @@ fn avg_pool_2d_constructor_rejects_zero_batch_or_channel() {
 /// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_2d_layer_type_and_output_shape() {
-    let layer = AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
+    let layer =
+        AveragePooling2D::new((2, 2), vec![1, 1, 4, 4], Some((2, 2)), PaddingType::Valid).unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling2D");
     assert_eq!(layer.output_shape(), "(1, 1, 2, 2)");
 }
@@ -315,7 +324,13 @@ fn avg_pool_2d_default_stride_equals_pool_size() {
 /// Forward mean value for a single (2,2,2) window covering the whole [1,1,2,2,2] volume
 #[test]
 fn avg_pool_3d_forward_values_single_window() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 2, 2, 2], Some((1, 1, 1)), PaddingType::Valid).unwrap();
+    let mut layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 2, 2, 2],
+        Some((1, 1, 1)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 2, 2, 2), vals)
         .unwrap()
@@ -328,7 +343,13 @@ fn avg_pool_3d_forward_values_single_window() {
 /// Forward mean values for two depth windows: pool=(2,2,2), stride_d=2 on a [1,1,4,2,2] input
 #[test]
 fn avg_pool_3d_forward_values_two_depth_windows() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 2, 2], Some((2, 1, 1)), PaddingType::Valid).unwrap();
+    let mut layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 2, 2],
+        Some((2, 1, 1)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let vals: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 4, 2, 2), vals)
         .unwrap()
@@ -344,14 +365,25 @@ fn avg_pool_3d_forward_values_two_depth_windows() {
 /// predict() produces the same values as forward() for AveragePooling3D
 #[test]
 fn avg_pool_3d_predict_equals_forward() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 2, 2, 2], Some((1, 1, 1)), PaddingType::Valid).unwrap();
+    let mut layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 2, 2, 2],
+        Some((1, 1, 1)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let vals: Vec<f32> = (0..8).map(|v| v as f32).collect();
     let x: Tensor = Array::from_shape_vec((1, 1, 2, 2, 2), vals)
         .unwrap()
         .into_dyn();
     let fwd = layer.forward(&x).unwrap();
-    let layer_pred =
-        AveragePooling3D::new((2, 2, 2), vec![1, 1, 2, 2, 2], Some((1, 1, 1)), PaddingType::Valid).unwrap();
+    let layer_pred = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 2, 2, 2],
+        Some((1, 1, 1)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let pred = layer_pred.predict(&x).unwrap();
     assert_eq!(fwd.shape(), pred.shape());
     for (a, b) in fwd.iter().zip(pred.iter()) {
@@ -362,7 +394,13 @@ fn avg_pool_3d_predict_equals_forward() {
 /// backward() before forward() returns ForwardPassNotRun for AveragePooling3D
 #[test]
 fn avg_pool_3d_backward_before_forward_errors() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).unwrap();
+    let mut layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4, 4],
+        Some((2, 2, 2)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let grad: Tensor = Array::ones((1, 1, 2, 2, 2)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -378,25 +416,46 @@ fn avg_pool_3d_backward_before_forward_errors() {
 /// Wrong-rank input (4D instead of 5D) errors
 #[test]
 fn avg_pool_3d_wrong_rank_input_errors() {
-    let mut layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).unwrap();
+    let mut layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4, 4],
+        Some((2, 2, 2)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     let bad: Tensor = Array::ones((1, 1, 4, 4)).into_dyn();
     assert!(layer.forward(&bad).is_err());
-    let layer_pred =
-        AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).unwrap();
+    let layer_pred = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4, 4],
+        Some((2, 2, 2)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     assert!(layer_pred.predict(&bad).is_err());
 }
 
 /// Constructor rejects non-5D input_shape
 #[test]
 fn avg_pool_3d_constructor_rejects_wrong_dims() {
-    let result = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4], Some((2, 2, 2)), PaddingType::Valid);
+    let result = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4],
+        Some((2, 2, 2)),
+        PaddingType::Valid,
+    );
     assert!(result.is_err(), "4D input_shape must be rejected");
 }
 
 /// Constructor rejects zero strides
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_stride() {
-    let result = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], Some((0, 2, 2)), PaddingType::Valid);
+    let result = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4, 4],
+        Some((0, 2, 2)),
+        PaddingType::Valid,
+    );
     assert!(result.is_err(), "zero depth stride must be rejected");
 }
 
@@ -404,11 +463,23 @@ fn avg_pool_3d_constructor_rejects_zero_stride() {
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_batch_or_channel() {
     assert!(
-        AveragePooling3D::new((2, 2, 2), vec![0, 1, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).is_err(),
+        AveragePooling3D::new(
+            (2, 2, 2),
+            vec![0, 1, 4, 4, 4],
+            Some((2, 2, 2)),
+            PaddingType::Valid
+        )
+        .is_err(),
         "zero batch dimension must be rejected"
     );
     assert!(
-        AveragePooling3D::new((2, 2, 2), vec![1, 0, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).is_err(),
+        AveragePooling3D::new(
+            (2, 2, 2),
+            vec![1, 0, 4, 4, 4],
+            Some((2, 2, 2)),
+            PaddingType::Valid
+        )
+        .is_err(),
         "zero channel dimension must be rejected"
     );
 }
@@ -416,7 +487,13 @@ fn avg_pool_3d_constructor_rejects_zero_batch_or_channel() {
 /// layer_type() and output_shape() return correct strings
 #[test]
 fn avg_pool_3d_layer_type_and_output_shape() {
-    let layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], Some((2, 2, 2)), PaddingType::Valid).unwrap();
+    let layer = AveragePooling3D::new(
+        (2, 2, 2),
+        vec![1, 1, 4, 4, 4],
+        Some((2, 2, 2)),
+        PaddingType::Valid,
+    )
+    .unwrap();
     assert_eq!(layer.layer_type(), "AveragePooling3D");
     assert_eq!(layer.output_shape(), "(1, 1, 2, 2, 2)");
 }
@@ -424,7 +501,8 @@ fn avg_pool_3d_layer_type_and_output_shape() {
 /// Strides default to pool_size when None is passed for 3D
 #[test]
 fn avg_pool_3d_default_stride_equals_pool_size() {
-    let layer = AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let layer =
+        AveragePooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
     assert_eq!(layer.output_shape(), "(1, 1, 2, 2, 2)");
 }
 

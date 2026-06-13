@@ -13,8 +13,8 @@ use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
 use crate::neural_network::layers::regularization::validation::{
     validate_input_shape, validate_rate,
 };
-use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use crate::neural_network::traits::Layer;
+use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 

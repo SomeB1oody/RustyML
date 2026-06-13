@@ -432,9 +432,9 @@ pub(crate) mod parallel_gates;
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
 ///
 /// ## Parallel Matrix Products ([`math::matmul`])
-/// - `par_matmul` / `par_matvec` - Rayon-block-parallel `f32`/`f64` matrix products with
-///   calibrated serial/parallel switching, bitwise identical to the serial `dot` at any
-///   thread count
+/// - `gemm` / `gemv` - Rayon-block-parallel matrix products with a caller-supplied
+///   serial/parallel FLOPs threshold, bitwise identical to the serial `dot` at any
+///   thread count and any threshold
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)

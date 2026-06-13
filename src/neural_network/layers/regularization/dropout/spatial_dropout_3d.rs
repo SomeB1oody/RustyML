@@ -2,7 +2,6 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
@@ -15,10 +14,10 @@ use crate::neural_network::layers::regularization::validation::{
     validate_input_ndim, validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
+use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
-
 
 /// Spatial dropout layer for 3D data
 ///
@@ -130,11 +129,7 @@ impl Layer for SpatialDropout3D {
         );
 
         // Threshold into a binary mask (parallel above the threshold, sequential otherwise)
-        apply_spatial_dropout_threshold(
-            &mut mask_2d,
-            self.rate,
-            CHEAP_MAP_PARALLEL_THRESHOLD,
-        );
+        apply_spatial_dropout_threshold(&mut mask_2d, self.rate, CHEAP_MAP_PARALLEL_THRESHOLD);
 
         // Broadcast the 2D mask across the spatial dimensions to the 5D input shape
         let mut mask = Tensor::zeros(IxDyn(&[batch_size, channels, depth, height, width]));

@@ -9,8 +9,8 @@ use super::validation::{
     validate_regularization_type, validate_tolerance,
 };
 use crate::error::Error;
-use crate::math::matmul::par_matvec;
-use crate::math::reduction::det_par_fold;
+use crate::math::matmul::gemv_internal;
+use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
@@ -247,7 +247,7 @@ impl LinearRegression {
             n_iter += 1;
 
             // Vectorized prediction
-            predictions.assign(&par_matvec(x, &weights));
+            predictions.assign(&gemv_internal(x, &weights));
             if self.fit_intercept {
                 predictions += intercept;
             }
@@ -255,16 +255,16 @@ impl LinearRegression {
             // Calculate errors once; the same vector feeds both the cost and the gradient
             error_vec.assign(&(&predictions - y));
 
-            // Cost (sum of squared errors) reuses the error vector: SSE = e dot e.
-            // Above the sum gate, the deterministic blocked fold keeps the float result
-            // independent of the rayon thread count
+            // Cost (sum of squared errors) reuses the error vector: SSE = e dot e
             let sse = match error_vec.as_slice() {
-                Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+                Some(slice) => det_reduce(
                     slice,
+                    slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
                     |block| block.iter().map(|v| v * v).sum::<f64>(),
                     |a, b| a + b,
                     0.0,
                 ),
+                // Non-contiguous storage: ndarray's serial kernel
                 _ => error_vec.dot(&error_vec),
             };
 
@@ -293,13 +293,18 @@ impl LinearRegression {
             }
 
             // Gradients via matrix operations
-            let mut weight_gradients = par_matvec(&x.t(), &error_vec) / (n_samples as f64);
+            let mut weight_gradients = gemv_internal(&x.t(), &error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
-                // On the gradient path: same deterministic blocked fold above the sum gate
+                // On the gradient path
                 let error_sum = match error_vec.as_slice() {
-                    Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => {
-                        det_par_fold(slice, |block| block.iter().sum::<f64>(), |a, b| a + b, 0.0)
-                    }
+                    Some(slice) => det_reduce(
+                        slice,
+                        slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                        |block| block.iter().sum::<f64>(),
+                        |a, b| a + b,
+                        0.0,
+                    ),
+                    // Non-contiguous storage: ndarray's serial kernel
                     _ => error_vec.sum(),
                 };
                 error_sum / (n_samples as f64)
@@ -423,7 +428,7 @@ impl LinearRegression {
 
         validate_predict_input(x, coeffs.len())?;
 
-        let mut predictions = par_matvec(x, coeffs);
+        let mut predictions = gemv_internal(x, coeffs);
         if self.fit_intercept {
             predictions += intercept;
         }

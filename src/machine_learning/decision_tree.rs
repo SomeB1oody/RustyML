@@ -6,8 +6,8 @@
 
 use super::validation::{check_is_fitted, preliminary_check, validate_predict_input};
 use crate::error::{Error, TreeError};
-use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
 use crate::math::{entropy, gini, variance};
+use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
@@ -757,15 +757,14 @@ impl DecisionTree {
         // Collect every feature's best candidate, then pick the winner (sort-scan class
         // gate: one copy + sort + scan task per feature over the node's samples)
         let sort_work = indices.len().saturating_mul(self.n_features);
-        let candidates: Vec<(f64, Split, f64)> =
-            if sort_work >= SORT_SCAN_MIN_ELEMS {
-                (0..self.n_features)
-                    .into_par_iter()
-                    .filter_map(process_feature)
-                    .collect()
-            } else {
-                (0..self.n_features).filter_map(process_feature).collect()
-            };
+        let candidates: Vec<(f64, Split, f64)> = if sort_work >= SORT_SCAN_MIN_ELEMS {
+            (0..self.n_features)
+                .into_par_iter()
+                .filter_map(process_feature)
+                .collect()
+        } else {
+            (0..self.n_features).filter_map(process_feature).collect()
+        };
 
         let best = Self::select_best_split(candidates, rng);
         Ok(best.map(|(_score, split, impurity_decrease)| (split, impurity_decrease)))
@@ -1166,8 +1165,7 @@ impl DecisionTree {
         // Use parallel processing only when sample size exceeds threshold
         // Tree-traversal class gate: one root-to-leaf walk per sample
         let visit_work = x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH);
-        let predictions: Result<Vec<f64>, Error> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS
-        {
+        let predictions: Result<Vec<f64>, Error> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS {
             x.axis_iter(Axis(0))
                 .into_par_iter()
                 .map(|row| {

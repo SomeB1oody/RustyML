@@ -5,7 +5,6 @@ use crate::neural_network::Tensor;
 use crate::neural_network::losses::{clip_probabilities, stable_log_softmax_softmax};
 use crate::neural_network::traits::Loss;
 use ndarray::Ix2;
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 /// Sparse Categorical Cross Entropy loss function for multi-class classification
 /// where true labels are integers instead of one-hot vectors
@@ -155,10 +154,12 @@ impl Loss for SparseCategoricalCrossEntropy {
             return Ok(total / batch_size as f32);
         }
 
-        // Probability path
+        // Probability path. Serial sum like the logits path above: a bare rayon `sum`
+        // groups its partials by work-stealing, making the reported loss vary with thread
+        // scheduling, and one indexed `ln` per sample is far too little work to parallelize
         let y_pred_clipped = clip_probabilities(y_pred);
         let total_loss: f32 = class_indices
-            .par_iter()
+            .iter()
             .enumerate()
             .map(|(i, &class_idx)| -y_pred_clipped[[i, class_idx]].ln())
             .sum();

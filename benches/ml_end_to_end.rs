@@ -11,8 +11,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array1, Array2};
 use ndarray_rand::RandomExt;
-use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::SeedableRng;
+use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
 use rustyml::machine_learning::kmeans::KMeans;
 use rustyml::machine_learning::knn::{KNN, WeightingStrategy};
@@ -76,14 +76,8 @@ fn bench_svc_fit(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("svc_fit_rbf_1500x16", |b| {
         b.iter(|| {
-            let mut model = SVC::new(
-                KernelType::RBF { gamma: 0.5 },
-                1.0,
-                1e-3,
-                100,
-                Some(42),
-            )
-            .unwrap();
+            let mut model =
+                SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100, Some(42)).unwrap();
             model.fit(black_box(&x), black_box(&y)).unwrap();
             black_box(model.get_bias());
         })

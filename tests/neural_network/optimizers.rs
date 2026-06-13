@@ -428,9 +428,10 @@ fn adagrad_accepts_valid_hyperparameters() {
 fn identity_dense_initial_mse_is_1_875() {
     let (x, y) = regression_data();
     let mut model = Sequential::new();
-    model
-        .add(identity_dense())
-        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(identity_dense()).compile(
+        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let mse = eval_mse(&model, &x, &y);
     assert_abs_diff_eq!(mse, 1.875_f32, epsilon = 1e-5);
@@ -447,9 +448,10 @@ fn sgd_single_layer_loss_decreases_over_20_epochs() {
     let mut model = Sequential::new();
     // lr=0.1: plain SGD needs lr < 2/lambda_max(Hessian) ~= 2/5.5 ~= 0.36 here to
     // converge (0.5 overshoots and diverges); 0.1 reduces the loss steadily
-    model
-        .add(identity_dense())
-        .compile(SGD::new(0.1, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(identity_dense()).compile(
+        SGD::new(0.1, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let mse_before = eval_mse(&model, &x, &y);
     assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
@@ -518,9 +520,10 @@ fn adagrad_single_layer_loss_decreases_over_20_epochs() {
     let initial_mse = 1.875_f32;
 
     let mut model = Sequential::new();
-    model
-        .add(identity_dense())
-        .compile(AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(identity_dense()).compile(
+        AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let mse_before = eval_mse(&model, &x, &y);
     assert_abs_diff_eq!(mse_before, initial_mse, epsilon = 1e-5);
@@ -591,10 +594,10 @@ fn sgd_two_layer_loss_decreases() {
     let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
 
     let mut model = Sequential::new();
-    model
-        .add(layer1)
-        .add(layer2)
-        .compile(SGD::new(0.05, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(layer1).add(layer2).compile(
+        SGD::new(0.05, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let mse_before = eval_mse(&model, &x, &y);
     model.fit(&x, &y, 50).unwrap();
@@ -648,10 +651,10 @@ fn adagrad_two_layer_loss_decreases() {
     let layer2 = Dense::new(4, 1, Linear::new(), None).unwrap();
 
     let mut model = Sequential::new();
-    model
-        .add(layer1)
-        .add(layer2)
-        .compile(AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(layer1).add(layer2).compile(
+        AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     let mse_before = eval_mse(&model, &x, &y);
     model.fit(&x, &y, 30).unwrap();
@@ -682,9 +685,10 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
     layer.set_weights(w, b).unwrap();
 
     let mut model = Sequential::new();
-    model
-        .add(layer)
-        .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+    model.add(layer).compile(
+        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        MeanSquaredError::new(),
+    );
 
     // initial prediction: y_hat = 2.0
     let pred_before = model.predict(&x).unwrap();

@@ -5,9 +5,9 @@
 //! iteration)
 
 use crate::error::Error;
-use crate::math::matmul::par_matmul;
+use crate::math::matmul::gemm_internal;
+use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
-use crate::math::reduction::det_par_fold;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
@@ -145,7 +145,7 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
         // Extract the leading eigenpairs of the covariance matrix
-        let cov = par_matmul(&x_centered.t(), x_centered) / denom;
+        let cov = gemm_internal(&x_centered.t(), x_centered) / denom;
         let (eigenvalues, eigenvectors) =
             super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
 
@@ -450,7 +450,7 @@ impl PCA {
         }
 
         // Map back to feature space; the GEMM block-parallelizes above its FLOPs gate
-        let mut reconstructed = par_matmul(x, components);
+        let mut reconstructed = gemm_internal(x, components);
         reconstructed += mean;
 
         #[cfg(feature = "show_progress")]
@@ -595,7 +595,7 @@ impl PCA {
         }
 
         // Project into component space; the GEMM block-parallelizes above its FLOPs gate
-        let transformed = par_matmul(&x_centered, &components.t());
+        let transformed = gemm_internal(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]
         {
@@ -640,12 +640,14 @@ impl PCA {
 
         // Sum of squares over centered data
         let sum_sq = match x_centered.as_slice() {
-            Some(slice) if slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS => det_par_fold(
+            Some(slice) => det_reduce(
                 slice,
+                slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
                 |block| block.iter().map(|v| v * v).sum::<f64>(),
                 |a, b| a + b,
                 0.0,
             ),
+            // Non-contiguous storage: plain flat fold
             _ => x_centered.iter().map(|v| v * v).sum::<f64>(),
         };
 

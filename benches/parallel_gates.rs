@@ -14,20 +14,22 @@
 //!
 //! Calibration is machine-specific; the generated report records the CPU and thread count.
 
-use ndarray::{Array1, Array2, IxDyn};
+use ndarray::{Array1, Array2, Axis, IxDyn};
 use ndarray_rand::RandomExt;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
 use ndarray_rand::rand_distr::Uniform;
 use rayon::prelude::*;
-use rustyml::bench_internals::{
-    KdTree, PoolKind, conv_forward_forced, windowed_pool_forward_impl,
-};
-use rustyml::math::matmul::{par_matmul, split_matmul, split_matvec};
-use rustyml::math::reduction::det_par_fold_range;
-use rustyml::types::DistanceCalculationMetric;
+use rustyml::bench_internals::{KdTree, PoolKind, conv_forward_forced, windowed_pool_forward_impl};
+use rustyml::math::matmul::{gemm, gemm_par, gemv_par};
+
+/// Mirrors the crate-internal `MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS` so the strategy
+/// shootouts emulate the production gating (the trait itself is not public)
+const GEMM_F64_GATE: usize = 2_000_000;
+use rustyml::math::reduction::{det_reduce, det_reduce_range};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::PaddingType;
+use rustyml::types::DistanceCalculationMetric;
 use std::fmt::Write as _;
 use std::hint::black_box;
 use std::ops::AddAssign;
@@ -115,7 +117,10 @@ impl Section {
             );
         }
         match self.crossover() {
-            Some((0, hi)) => format!("crossover below {hi} {} (parallel wins everywhere)", self.work_unit),
+            Some((0, hi)) => format!(
+                "crossover below {hi} {} (parallel wins everywhere)",
+                self.work_unit
+            ),
             Some((lo, hi)) => format!("crossover between {lo} and {hi} {}", self.work_unit),
             None => "no crossover observed in this ladder".to_string(),
         }
@@ -178,7 +183,7 @@ fn random_vector_f32(len: usize, seed: u64) -> Array1<f32> {
     Array1::random_using(len, Uniform::new(-1.0, 1.0).unwrap(), &mut rng)
 }
 
-// ---- par_matmul: PAR_GEMM_MIN_FLOPS ----
+// ---- gemm: PAR_GEMM_MIN_FLOPS ----
 
 fn calibrate_par_matmul_flops() -> Section {
     let mut rows = Vec::new();
@@ -190,7 +195,7 @@ fn calibrate_par_matmul_flops() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, 1));
+            black_box(gemm_par(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("square {n}x{n}x{n}"),
@@ -216,7 +221,7 @@ fn calibrate_par_matmul_flops() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, 1));
+            black_box(gemm_par(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("skinny {m}x{k}x{n}"),
@@ -226,14 +231,14 @@ fn calibrate_par_matmul_flops() -> Section {
         });
     }
     Section {
-        title: "par_matmul FLOPs gate (PAR_GEMM_MIN_FLOPS)",
+        title: "gemm FLOPs gate (PAR_GEMM_MIN_FLOPS)",
         work_unit: "FLOPs",
         pick_fastest: false,
         rows,
     }
 }
 
-// ---- par_matmul: PAR_GEMM_MIN_BLOCK ----
+// ---- gemm: PAR_GEMM_MIN_BLOCK ----
 
 fn calibrate_par_matmul_min_block() -> Section {
     let a = random_matrix(2048, 512, 5);
@@ -244,7 +249,7 @@ fn calibrate_par_matmul_min_block() -> Section {
     let mut rows = Vec::new();
     for &blk in &[8usize, 16, 32, 64, 128, 256, 512] {
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, blk));
+            black_box(gemm_par(&a, &b, blk));
         });
         rows.push(Row {
             label: format!("2048x512x512 min_block {blk}"),
@@ -254,7 +259,7 @@ fn calibrate_par_matmul_min_block() -> Section {
         });
     }
     Section {
-        title: "par_matmul block size (PAR_GEMM_MIN_BLOCK)",
+        title: "gemm block size (PAR_GEMM_MIN_BLOCK)",
         work_unit: "rows per block",
         pick_fastest: true,
         rows,
@@ -518,7 +523,7 @@ fn calibrate_par_matmul_flops_f64() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, 1));
+            black_box(gemm_par(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("f64 square {n}x{n}x{n}"),
@@ -540,7 +545,7 @@ fn calibrate_par_matmul_flops_f64() -> Section {
             black_box(a.dot(&b));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, 1));
+            black_box(gemm_par(&a, &b, 1));
         });
         rows.push(Row {
             label: format!("f64 skinny {m}x{k}x{n}"),
@@ -550,7 +555,7 @@ fn calibrate_par_matmul_flops_f64() -> Section {
         });
     }
     Section {
-        title: "f64 par_matmul FLOPs gate (MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS)",
+        title: "f64 gemm FLOPs gate (MatmulElem::<f64>::PAR_GEMM_MIN_FLOPS)",
         work_unit: "FLOPs",
         pick_fastest: false,
         rows,
@@ -566,7 +571,7 @@ fn calibrate_par_matmul_min_block_f64() -> Section {
     let mut rows = Vec::new();
     for &blk in &[8usize, 16, 32, 64, 128, 256, 512] {
         let p = time_per_call_ns(|| {
-            black_box(split_matmul(&a, &b, blk));
+            black_box(gemm_par(&a, &b, blk));
         });
         rows.push(Row {
             label: format!("f64 2048x512x512 min_block {blk}"),
@@ -576,7 +581,7 @@ fn calibrate_par_matmul_min_block_f64() -> Section {
         });
     }
     Section {
-        title: "f64 par_matmul block size (PAR_GEMM_MIN_BLOCK check)",
+        title: "f64 gemm block size (PAR_GEMM_MIN_BLOCK check)",
         work_unit: "rows per block",
         pick_fastest: true,
         rows,
@@ -610,7 +615,7 @@ fn calibrate_par_matvec_flops_f64() -> Section {
             black_box(a.dot(&x));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matvec(&a, &x, 1));
+            black_box(gemv_par(&a, &x, 1));
         });
         rows.push(Row {
             label: format!("f64 matvec {m}x{k}"),
@@ -636,7 +641,7 @@ fn calibrate_par_matvec_flops_f32() -> Section {
             black_box(a.dot(&x));
         });
         let p = time_per_call_ns(|| {
-            black_box(split_matvec(&a, &x, 1));
+            black_box(gemv_par(&a, &x, 1));
         });
         rows.push(Row {
             label: format!("f32 matvec {m}x{k}"),
@@ -657,10 +662,7 @@ fn calibrate_par_matvec_min_block() -> Vec<Section> {
     let mut sections = Vec::new();
     // Tall (the X . w projection) and short-wide (the X^T . e reduction over few features) -
     // the wide case is where a high row floor forfeits parallelism entirely
-    for &(m, k, tag) in &[
-        (262144usize, 64usize, "tall"),
-        (128, 65536, "short-wide"),
-    ] {
+    for &(m, k, tag) in &[(262144usize, 64usize, "tall"), (128, 65536, "short-wide")] {
         let a = random_matrix_f64(m, k, 25);
         let x = random_vector_f64(k, 26);
         let serial = time_per_call_ns(|| {
@@ -669,7 +671,7 @@ fn calibrate_par_matvec_min_block() -> Vec<Section> {
         let mut rows = Vec::new();
         for &blk in &[1usize, 2, 4, 8, 16, 32, 64, 128] {
             let p = time_per_call_ns(|| {
-                black_box(split_matvec(&a, &x, blk));
+                black_box(gemv_par(&a, &x, blk));
             });
             rows.push(Row {
                 label: format!("f64 {tag} {m}x{k} min_block {blk}"),
@@ -839,11 +841,7 @@ fn calibrate_gemm_chunk_budget() -> Vec<Section> {
     ] {
         let x_train = random_matrix_f64(n_train, d, 41);
         let queries = random_matrix_f64(n_query, d, 42);
-        let train_sq: Vec<f64> = x_train
-            .rows()
-            .into_iter()
-            .map(|r| r.dot(&r))
-            .collect();
+        let train_sq: Vec<f64> = x_train.rows().into_iter().map(|r| r.dot(&r)).collect();
 
         // Pre-rewrite baseline: per-query GEMV swarm
         let baseline = time_per_call_ns(|| {
@@ -874,8 +872,11 @@ fn calibrate_gemm_chunk_budget() -> Vec<Section> {
                 let mut nearest: Vec<usize> = Vec::with_capacity(n_query);
                 for start in (0..n_query).step_by(chunk_rows) {
                     let end = (start + chunk_rows).min(n_query);
-                    let proj =
-                        par_matmul(&queries.slice(ndarray::s![start..end, ..]), &x_train.t());
+                    let proj = gemm(
+                        &queries.slice(ndarray::s![start..end, ..]),
+                        &x_train.t(),
+                        GEMM_F64_GATE,
+                    );
                     let chunk: Vec<usize> = (start..end)
                         .into_par_iter()
                         .map(|qi| {
@@ -972,7 +973,7 @@ fn calibrate_pairwise_strategy() -> Section {
 
     // Strategy 2: one-shot block-parallel GEMM + norms identity (the t-SNE exact path)
     let full_gemm = time_per_call_ns(|| {
-        let gram = par_matmul(&x, &x.t());
+        let gram = gemm(&x, &x.t(), GEMM_F64_GATE);
         let rows: Vec<Vec<f64>> = (0..n)
             .into_par_iter()
             .map(|i| {
@@ -1038,7 +1039,11 @@ fn calibrate_tree_traversal() -> Section {
             let mut node = 0usize;
             while node < n_nodes {
                 let (f, thr) = nodes[node];
-                node = if row[f] < thr { 2 * node + 1 } else { 2 * node + 2 };
+                node = if row[f] < thr {
+                    2 * node + 1
+                } else {
+                    2 * node + 2
+                };
             }
             node
         };
@@ -1122,9 +1127,13 @@ fn calibrate_tree_build() -> Section {
             return idx.len();
         }
         // LCG for the random feature/threshold pick
-        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let f = (*rng >> 33) as usize % x.ncols();
-        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let t = ((*rng >> 11) as f64 / (1u64 << 53) as f64) - 0.5;
         let mid = itertools_partition(idx, |&i| x[[i, f]] < t);
         if mid == 0 || mid == idx.len() {
@@ -1224,7 +1233,9 @@ fn calibrate_exp_reduction() -> Section {
     let loss_term = |x: f64, y: f64| x.max(0.0) - x * y + (1.0 + (-x.abs()).exp()).ln();
 
     let mut rows = Vec::new();
-    for &n in &[8_192usize, 16_384, 32_768, 65_536, 131_072, 262_144, 1_048_576] {
+    for &n in &[
+        8_192usize, 16_384, 32_768, 65_536, 131_072, 262_144, 1_048_576,
+    ] {
         let s = time_per_call_ns(|| {
             black_box(
                 logit_slice[..n]
@@ -1235,8 +1246,9 @@ fn calibrate_exp_reduction() -> Section {
             );
         });
         let p = time_per_call_ns(|| {
-            black_box(det_par_fold_range(
+            black_box(det_reduce_range(
                 n,
+                true,
                 |range| {
                     range
                         .map(|i| loss_term(logit_slice[i], label_slice[i]))
@@ -1298,8 +1310,9 @@ fn calibrate_kmeans_accumulate() -> Section {
             black_box((sums, counts, inertia));
         });
         let p = time_per_call_ns(|| {
-            let folded = det_par_fold_range(
+            let folded = det_reduce_range(
                 n,
+                true,
                 |range| {
                     let mut sums = Array2::<f64>::zeros((k, d));
                     let mut counts = vec![0usize; k];
@@ -1333,6 +1346,226 @@ fn calibrate_kmeans_accumulate() -> Section {
     Section {
         title: "k-means assign-accumulate (SUM gate on samples x features)",
         work_unit: "samples x features",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+// ---- f32 -> f64 widening square-sum: SQ_SUM_F32_PARALLEL_MIN_ELEMS (global_grad_norm) ----
+
+/// The clip-by-global-norm reduction: f32 gradients squared and accumulated in f64. Serial
+/// baseline is the production flat chain; the parallel side is the generic deterministic
+/// blocked fold over f32 blocks with f64 partials
+fn calibrate_f32_sq_sum() -> Section {
+    let data = random_vector_f32(4_194_304, 101);
+    let slice = data.as_slice().unwrap();
+
+    let mut rows = Vec::new();
+    for &n in &[
+        32_768usize,
+        65_536,
+        131_072,
+        262_144,
+        524_288,
+        1_048_576,
+        4_194_304,
+    ] {
+        let s = time_per_call_ns(|| {
+            black_box(
+                slice[..n]
+                    .iter()
+                    .map(|&g| (g as f64) * (g as f64))
+                    .sum::<f64>(),
+            );
+        });
+        let p = time_per_call_ns(|| {
+            black_box(det_reduce(
+                &slice[..n],
+                true,
+                |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
+                |a, b| a + b,
+                0.0,
+            ));
+        });
+        rows.push(Row {
+            label: format!("f32 sq-sum (f64 acc), n={n}"),
+            work: n,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "f32 -> f64 square-sum (SQ_SUM_F32_PARALLEL_MIN_ELEMS: grad norm)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+/// DET_REDUCE_BLOCK validation on f32 elements (the constant counts elements, so an f32 block
+/// is half the bytes of the calibrated f64 one - this confirms 16K still sits on the plateau)
+fn calibrate_det_reduce_block_f32() -> Section {
+    let data = random_vector_f32(4_194_304, 102);
+    let slice = data.as_slice().unwrap();
+    let serial = time_per_call_ns(|| {
+        black_box(slice.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>());
+    });
+    let mut rows = Vec::new();
+    for &block in &[4096usize, 8192, 16384, 32768, 65536] {
+        let p = time_per_call_ns(|| {
+            let parts: Vec<f64> = slice
+                .par_chunks(block)
+                .map(|c| c.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>())
+                .collect();
+            black_box(parts.into_iter().fold(0.0, |a, b| a + b));
+        });
+        rows.push(Row {
+            label: format!("4.2M f32 sq-sum, block {block}"),
+            work: block,
+            serial_ns: serial,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "deterministic blocked reduction block size, f32 elements (DET_REDUCE_BLOCK)",
+        work_unit: "elements per block",
+        pick_fastest: true,
+        rows,
+    }
+}
+
+// ---- BatchNorm column statistics: channel-chunked parallel vs serial mean_axis ----
+
+/// One cache line of `f32` per channel chunk, mirroring the production helper
+const BENCH_CHANNEL_CHUNK: usize = 16;
+
+/// Channel-chunked parallel column sums of a standard-layout [M, C] f32 matrix. Each channel
+/// accumulates in row order (bitwise identical to ndarray's serial `sum_axis(Axis(0))`);
+/// parallelism only splits the channel axis, so the task count is C / 16
+fn bench_par_col_sum(x: &Array2<f32>) -> Array1<f32> {
+    let c = x.ncols();
+    let slice = x.as_slice().unwrap();
+    let mut out = Array1::<f32>::zeros(c);
+    out.as_slice_mut()
+        .unwrap()
+        .par_chunks_mut(BENCH_CHANNEL_CHUNK)
+        .enumerate()
+        .for_each(|(g, acc)| {
+            let j0 = g * BENCH_CHANNEL_CHUNK;
+            let width = acc.len();
+            for row in slice.chunks_exact(c) {
+                for (a, &v) in acc.iter_mut().zip(&row[j0..j0 + width]) {
+                    *a += v;
+                }
+            }
+        });
+    out
+}
+
+/// The BatchNorm statistics reduction: per-channel sums over batch x spatial rows. The win is
+/// capped by the channel-chunk task count (C / 16), so narrow-C rungs document where the
+/// parallel path merely ties.
+///
+/// **Negative result, kept as the record of why production uses row blocks instead:** the
+/// channel split preserves the serial per-channel accumulation order (bitwise identical to
+/// `mean_axis`) but loses 2-3x - the serial row-streaming fold is already bandwidth-efficient
+/// and SIMD-wide, and column-chunk tasks break exactly that
+fn calibrate_bn_col_stats() -> Section {
+    let mut rows = Vec::new();
+    for &(m, c) in &[
+        (4_096usize, 64usize),
+        (16_384, 64),
+        (65_536, 64),
+        (524_288, 64),
+        (2_048, 512),
+        (16_384, 512),
+        (262_144, 8),
+    ] {
+        let x = random_matrix(m, c, 103);
+        let s = time_per_call_ns(|| {
+            black_box(x.mean_axis(Axis(0)).unwrap());
+        });
+        let p = time_per_call_ns(|| {
+            let sums = bench_par_col_sum(&x);
+            black_box(sums / m as f32);
+        });
+        rows.push(Row {
+            label: format!("M={m} C={c}"),
+            work: m * c,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "BatchNorm column stats, channel-chunked (negative result; see row-block section)",
+        work_unit: "elements (M x C)",
+        pick_fastest: false,
+        rows,
+    }
+}
+
+/// Row-block deterministic fold for the same per-channel sums: each block streams whole rows
+/// (the same bandwidth-friendly, SIMD-across-channels pattern as the serial fold) into a local
+/// [C] accumulator; block partials merge in block order. Rows per block scale as
+/// DET_REDUCE_BLOCK / C, so the grouping depends only on the input shape, never on scheduling
+fn bench_par_col_sum_rowblock(x: &Array2<f32>) -> Array1<f32> {
+    let (m, c) = x.dim();
+    let slice = x.as_slice().unwrap();
+    let rows_per_block = (16_384usize / c).max(1);
+    let parts: Vec<Array1<f32>> = slice
+        .par_chunks(rows_per_block * c)
+        .map(|chunk| {
+            let mut acc = Array1::<f32>::zeros(c);
+            let acc_slice = acc.as_slice_mut().unwrap();
+            for row in chunk.chunks_exact(c) {
+                for (a, &v) in acc_slice.iter_mut().zip(row) {
+                    *a += v;
+                }
+            }
+            acc
+        })
+        .collect();
+    let mut out = Array1::<f32>::zeros(c);
+    for p in parts {
+        out += &p;
+    }
+    debug_assert_eq!(m * c, slice.len());
+    out
+}
+
+/// The viable BatchNorm stats parallelization (BN_COL_STATS_PARALLEL_MIN_ELEMS): row-block
+/// deterministic fold vs serial mean_axis. Changes the per-channel accumulation grouping
+/// (a versioned behavior change), but is bitwise identical at any thread count
+fn calibrate_bn_col_stats_rowblock() -> Section {
+    let mut rows = Vec::new();
+    for &(m, c) in &[
+        (1_024usize, 64usize),
+        (4_096, 64),
+        (16_384, 64),
+        (65_536, 64),
+        (524_288, 64),
+        (2_048, 512),
+        (16_384, 512),
+        (262_144, 8),
+    ] {
+        let x = random_matrix(m, c, 103);
+        let s = time_per_call_ns(|| {
+            black_box(x.mean_axis(Axis(0)).unwrap());
+        });
+        let p = time_per_call_ns(|| {
+            let sums = bench_par_col_sum_rowblock(&x);
+            black_box(sums / m as f32);
+        });
+        rows.push(Row {
+            label: format!("M={m} C={c}"),
+            work: m * c,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "BatchNorm column stats, row-block fold (BN_COL_STATS_PARALLEL_MIN_ELEMS)",
+        work_unit: "elements (M x C)",
         pick_fastest: false,
         rows,
     }
@@ -1445,6 +1678,10 @@ fn main() {
     sections.push(calibrate_det_reduce_block());
     sections.push(calibrate_exp_reduction());
     sections.push(calibrate_kmeans_accumulate());
+    sections.push(calibrate_f32_sq_sum());
+    sections.push(calibrate_det_reduce_block_f32());
+    sections.push(calibrate_bn_col_stats());
+    sections.push(calibrate_bn_col_stats_rowblock());
     sections.push(calibrate_kd_tree_dims());
 
     for s in &sections {

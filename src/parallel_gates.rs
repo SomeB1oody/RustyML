@@ -48,6 +48,18 @@ pub(crate) const EXP_MAP_PARALLEL_THRESHOLD: usize = 131_072;
 #[cfg(feature = "neural_network")]
 pub(crate) const FUSED_SLICE_PARALLEL_THRESHOLD: usize = 1_000_000;
 
+/// `f32`-elements, `f64`-accumulator square-sum reductions: the clip-by-global-norm gradient
+/// scan, gated per parameter tensor.
+///
+/// Above the gate, callers must use [`crate::math::reduction::det_reduce`] (or its
+/// index-range twin) rather than a bare rayon `sum`/`reduce`, whose scheduling-dependent
+/// grouping makes the float result non-reproducible.
+///
+/// Measured crossover bracket: 32K-64K elements (0.88x at 32K, 1.13x at 64K, 12.7x at 1M);
+/// calibrated 2026-06-12, see benches/RESULTS.md "f32 -> f64 square-sum"
+#[cfg(feature = "neural_network")]
+pub(crate) const SQ_SUM_F32_PARALLEL_MIN_ELEMS: usize = 65_536;
+
 /// Naive (non-im2col) convolution loop nests: the DepthwiseConv2D forward/backward and the
 /// SeparableConv2D depthwise stage, gated on estimated FLOPs
 /// (`2 * batch * channels [* depth_multiplier] * out_h * out_w * kh * kw`).
@@ -108,7 +120,7 @@ pub(crate) const SORT_SCAN_MIN_ELEMS: usize = 8_192;
 /// centroid accumulation).
 ///
 /// Below the gate a parallel reduction cannot win; above it, callers must use
-/// [`crate::math::reduction::det_par_fold`] (or its index-range twin) rather than a bare rayon
+/// [`crate::math::reduction::det_reduce`] (or its index-range twin) rather than a bare rayon
 /// `sum`/`reduce`, whose scheduling-dependent grouping makes the float result non-reproducible.
 ///
 /// Measured crossover bracket: 131K-262K elements (1.24x at 262K, 3.5x at 1M)

@@ -1,6 +1,7 @@
 //! Gated Recurrent Unit (GRU) layer with reset, update, and candidate gates
 
 use crate::error::Error;
+use crate::math::matmul::gemm_internal;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -11,7 +12,6 @@ use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
-use crate::math::matmul::par_matmul;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use ndarray::{Array2, Array3, Axis, concatenate, s};
 
@@ -285,7 +285,7 @@ impl Layer for GRU {
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
 
             // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
-            let rz_raw = par_matmul(
+            let rz_raw = gemm_internal(
                 &h_prev,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
             ) + xw_t.slice(s![.., 0..2 * u])
@@ -298,11 +298,10 @@ impl Layer for GRU {
             let r_h = &r_t * &h_prev;
 
             // Candidate hidden state
-            let h_candidate_raw = par_matmul(
-                &r_h,
-                &self.gates.recurrent_kernel.slice(s![.., 2 * u..]),
-            ) + xw_t.slice(s![.., 2 * u..])
-                + self.gates.bias.slice(s![.., 2 * u..]);
+            let h_candidate_raw =
+                gemm_internal(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
+                    + xw_t.slice(s![.., 2 * u..])
+                    + self.gates.bias.slice(s![.., 2 * u..]);
             let h_candidate = act
                 .forward(&h_candidate_raw.into_dyn())?
                 .into_dimensionality::<ndarray::Ix2>()
@@ -351,7 +350,7 @@ impl Layer for GRU {
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
 
             // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
-            let rz_raw = par_matmul(
+            let rz_raw = gemm_internal(
                 &h_prev,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
             ) + xw_t.slice(s![.., 0..2 * u])
@@ -364,11 +363,10 @@ impl Layer for GRU {
             let r_h = &r_t * &h_prev;
 
             // Candidate hidden state
-            let h_candidate_raw = par_matmul(
-                &r_h,
-                &self.gates.recurrent_kernel.slice(s![.., 2 * u..]),
-            ) + xw_t.slice(s![.., 2 * u..])
-                + self.gates.bias.slice(s![.., 2 * u..]);
+            let h_candidate_raw =
+                gemm_internal(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
+                    + xw_t.slice(s![.., 2 * u..])
+                    + self.gates.bias.slice(s![.., 2 * u..]);
             let h_candidate = act
                 .forward(&h_candidate_raw.into_dyn())?
                 .into_dimensionality::<ndarray::Ix2>()
@@ -437,7 +435,7 @@ impl Layer for GRU {
                 .unwrap();
 
             // Gradient through r_h = r_t .* h_{t-1} (one recurrent matmul shared by both terms)
-            let grad_rh = par_matmul(
+            let grad_rh = gemm_internal(
                 &grad_h_candidate_raw,
                 &self.gates.recurrent_kernel.slice(s![.., 2 * u..]).t(),
             );
@@ -454,7 +452,7 @@ impl Layer for GRU {
             dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_z_raw);
 
             // Gradient w.r.t. the previous hidden state
-            grad_h = par_matmul(
+            grad_h = gemm_internal(
                 &dz_rz_t,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]).t(),
             ) + &grad_h_prev_from_reset
@@ -488,24 +486,27 @@ impl Layer for GRU {
             .expect("contiguous DZ reshape");
 
         // Input-kernel gradient for all 3 gates in one GEMM
-        let grad_kernel = par_matmul(&x_flat.t(), &dz_flat);
+        let grad_kernel = gemm_internal(&x_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Recurrent gradient
         let mut grad_recurrent = Array2::<f32>::zeros((u, 3 * u));
         grad_recurrent
             .slice_mut(s![.., 0..2 * u])
-            .assign(&par_matmul(
+            .assign(&gemm_internal(
                 &h_prev_flat.t(),
                 &dz_flat.slice(s![.., 0..2 * u]),
             ));
         grad_recurrent
             .slice_mut(s![.., 2 * u..])
-            .assign(&par_matmul(&rh_flat.t(), &dz_flat.slice(s![.., 2 * u..])));
+            .assign(&gemm_internal(
+                &rh_flat.t(),
+                &dz_flat.slice(s![.., 2 * u..]),
+            ));
 
         // Input gradient for all 3 gates in one GEMM
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            par_matmul(&dz_flat, &self.gates.kernel.t()),
+            gemm_internal(&dz_flat, &self.gates.kernel.t()),
             (batch, timesteps, feat),
         );
 

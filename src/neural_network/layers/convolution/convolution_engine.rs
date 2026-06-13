@@ -20,13 +20,13 @@
 //! task building its own im2col block and GEMM, writing a disjoint output region. The backward
 //! pass parallelizes over batch items (their weight/bias partials are reduced in batch order, so
 //! results do not depend on the thread count) and routes its two GEMMs through
-//! [`par_matmul`](crate::math::matmul::par_matmul) so a small batch still spreads the
+//! [`gemm_internal`](crate::math::matmul::gemm_internal) so a small batch still spreads the
 //! GEMM work
 
 use super::PaddingType;
 use crate::error::Error;
+use crate::math::matmul::gemm_internal;
 use crate::neural_network::Tensor;
-use crate::math::matmul::par_matmul;
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
@@ -458,14 +458,14 @@ pub(super) fn conv_backward(
         let g_mat = ArrayView2::from_shape((filters, out_plane), g_slice)
             .expect("grad slice matches [F, out_plane]");
 
-        let wg = par_matmul(&g_mat, &col_mat.t()); // [F, Cin*k]
+        let wg = gemm_internal(&g_mat, &col_mat.t()); // [F, Cin*k]
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
         // Input gradient:
-        let dcol = par_matmul(&w_mat.t(), &g_mat); // [Cin*k, out_plane]
+        let dcol = gemm_internal(&w_mat.t(), &g_mat); // [Cin*k, out_plane]
         let dcol = dcol
             .as_slice()
-            .expect("par_matmul result is standard layout");
+            .expect("gemm_internal result is standard layout");
         let mut pad_grad = vec![0.0f32; cin * padded_plane];
         for c in 0..cin {
             let pc = c * padded_plane;

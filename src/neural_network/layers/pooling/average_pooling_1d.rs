@@ -147,8 +147,13 @@ impl Layer for AveragePooling1D {
         // Cache the actual input shape for backward (only the shape is needed for averaging)
         self.forward_input_shape = Some(input.shape().to_vec());
 
-        let (output, _) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average, self.padding);
+        let (output, _) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Average,
+            self.padding,
+        );
         Ok(output)
     }
 
@@ -159,8 +164,13 @@ impl Layer for AveragePooling1D {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        let (output, _) =
-            windowed_pool_forward(input, &[self.pool_size], &[self.stride], PoolKind::Average, self.padding);
+        let (output, _) = windowed_pool_forward(
+            input,
+            &[self.pool_size],
+            &[self.stride],
+            PoolKind::Average,
+            self.padding,
+        );
         Ok(output)
     }
 

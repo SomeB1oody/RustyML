@@ -5,7 +5,7 @@
 //! probabilities to a target perplexity
 
 use crate::error::Error;
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, par_matmul};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
 use crate::{Deserialize, Serialize};
@@ -302,7 +302,7 @@ impl TSNE {
     /// # Performance
     ///
     /// Parallelizes when the pairwise work clears the calibrated class gates (see
-    /// `crate::parallel_gates`); the GEMMs gate themselves inside `par_matmul`
+    /// `crate::parallel_gates`); the GEMMs gate themselves inside `gemm_internal`
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -539,7 +539,8 @@ impl TSNE {
                 let mut conditional = Vec::with_capacity(n_samples);
                 for chunk_start in (0..n_samples).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(n_samples);
-                    let projections = par_matmul(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
+                    let projections =
+                        gemm_internal(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
                     if parallel {
                         let chunk: Vec<(Vec<usize>, Array1<f64>)> = (chunk_start..chunk_end)
                             .into_par_iter()
@@ -757,7 +758,7 @@ impl TSNE {
     fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
         // D[i, j] = ||x_i||^2 + ||x_j||^2 - 2 x_i.x_j
         let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
-        let mut distances = par_matmul(x, &x.t());
+        let mut distances = gemm_internal(x, &x.t());
 
         let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
             let xi_sq = x_sq[i];
@@ -901,7 +902,7 @@ impl TSNE {
         }
 
         let row_sums = w.sum_axis(Axis(1));
-        let weighted_y = par_matmul(&w, y);
+        let weighted_y = gemm_internal(&w, y);
 
         // 4 * (s_i * y_i - (W * Y)_i), assembled with broadcast elementwise ops (O(n * d))
         (y * &row_sums.insert_axis(Axis(1)) - weighted_y) * 4.0
@@ -917,18 +918,19 @@ impl TSNE {
     ) -> f64 {
         let n_samples = p.nrows();
 
-        if parallel {
-            // Per-row terms in parallel, summed sequentially in row order
-            let row_terms: Vec<f64> = (0..n_samples)
-                .into_par_iter()
-                .map(|i| self.kl_divergence_row(p, num, sum_num, i))
-                .collect();
-            row_terms.iter().sum()
-        } else {
-            (0..n_samples)
-                .map(|i| self.kl_divergence_row(p, num, sum_num, i))
-                .sum()
-        }
+        // Deterministic blocked fold over the per-row KL terms: a bare rayon `sum` would
+        // group by scheduling and make even this displayed value thread-count-dependent
+        crate::math::reduction::det_reduce_range(
+            n_samples,
+            parallel,
+            |range| {
+                range
+                    .map(|i| self.kl_divergence_row(p, num, sum_num, i))
+                    .sum::<f64>()
+            },
+            |a, b| a + b,
+            0.0,
+        )
     }
 
     #[cfg(feature = "show_progress")]
