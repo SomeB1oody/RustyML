@@ -28,7 +28,6 @@ pub enum Solver {
     LSQR,
 }
 
-
 impl Solver {
     /// Computes the per-class linear scoring coefficients `Sigma^-1 * mu_c` under this solver
     ///

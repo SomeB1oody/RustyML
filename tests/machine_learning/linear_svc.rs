@@ -458,14 +458,7 @@ fn weights_have_correct_dimensionality() {
 fn fit_intercept_false_bias_stays_zero() {
     // Data centred at origin lets the zero-bias model solve the problem
     let (x, y) = make_separable();
-    let mut model = LinearSVC::new(
-        5000,
-        0.01,
-        RegularizationType::L2(0.1),
-        false,
-        1e-5,
-    )
-    .unwrap();
+    let mut model = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), false, 1e-5).unwrap();
     model.fit(&x, &y).unwrap();
     let bias = model.get_bias().unwrap();
     assert_eq!(

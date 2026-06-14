@@ -394,7 +394,11 @@ fn test_convergence_linear_regression_y_eq_2x_plus_1() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .add(
+            Dense::new(1, 1, Activation::Linear)
+                .unwrap()
+                .with_random_state(0),
+        )
         .compile(
             SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
@@ -415,9 +419,13 @@ fn test_convergence_linear_regression_with_batches() {
     let x = t2(4, 1, vec![1.0, 2.0, 3.0, 4.0]);
     let y = t2(4, 1, vec![3.0, 5.0, 7.0, 9.0]);
 
-    let mut model = Sequential::new();
+    let mut model = Sequential::new_with_seed(0);
     model
-        .add(Dense::new(1, 1, Activation::Linear).unwrap())
+        .add(
+            Dense::new(1, 1, Activation::Linear)
+                .unwrap()
+                .with_random_state(0),
+        )
         .compile(
             SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
@@ -463,11 +471,19 @@ fn test_convergence_2class_softmax_adam() {
     ]);
 
     let mut model = Sequential::new();
-    // Weight init is unseeded; a Tanh hidden layer plus a large epoch budget converges on this
-    // tiny separable problem regardless of the initial weights
+    // Seed the weight init so a pathological draw can't leave the Tanh hidden layer saturated
+    // and the test below the 0.7 probability threshold within the epoch budget
     model
-        .add(Dense::new(2, 8, Activation::Tanh).unwrap())
-        .add(Dense::new(8, 2, Activation::Softmax).unwrap())
+        .add(
+            Dense::new(2, 8, Activation::Tanh)
+                .unwrap()
+                .with_random_state(0),
+        )
+        .add(
+            Dense::new(8, 2, Activation::Softmax)
+                .unwrap()
+                .with_random_state(0),
+        )
         .compile(
             Adam::new(0.01, 0.9, 0.999, 1e-8, 0.0).unwrap(),
             CategoricalCrossEntropy::new(false),

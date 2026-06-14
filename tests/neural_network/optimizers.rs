@@ -659,10 +659,15 @@ fn rmsprop_two_layer_loss_decreases() {
 /// AdaGrad on a 2-layer net (1->4->1): loss falls over 30 epochs
 #[test]
 fn adagrad_two_layer_loss_decreases() {
+    const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new()).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new()).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
+    let layer2 = Dense::new(4, 1, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
 
     let mut model = Sequential::new();
     model.add(layer1).add(layer2).compile(
