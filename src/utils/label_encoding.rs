@@ -81,7 +81,7 @@ where
         }
         None => {
             if labels.is_empty() {
-                1 // Default to at least 1 class for empty input
+                1 // At least 1 class for empty input
             } else {
                 max_label + 1
             }
@@ -118,11 +118,11 @@ where
 ///
 /// let labels = vec!["cat", "dog", "bird", "dog", "cat"];
 /// let (categorical, mapping) = to_categorical_with_mapping(&labels, None).unwrap();
-/// // Classes are indexed in first-seen order.
+/// // Classes are indexed in first-seen order
 /// assert_eq!(mapping["cat"], 0);
 /// assert_eq!(mapping["dog"], 1);
 /// assert_eq!(mapping["bird"], 2);
-/// // "cat" -> column 0, so the first row is one-hot at index 0.
+/// // "cat" -> column 0, so the first row is one-hot at index 0
 /// assert_eq!(categorical.row(0).to_vec(), vec![1.0, 0.0, 0.0]);
 /// ```
 ///
@@ -175,9 +175,9 @@ where
 
 /// Converts one-hot encoded format back to sparse categorical labels
 ///
-/// Inverse of `to_categorical`: each row is reduced to the index of its highest
-/// value, making it suitable for turning model predictions back into class labels;
-/// ties resolve to the first (lowest) index, matching numpy/sklearn/keras `argmax`
+/// Inverse of `to_categorical`. Each row is reduced to the index of its highest
+/// value, which turns model predictions back into class labels. Ties resolve to
+/// the first (lowest) index, matching numpy/sklearn/keras `argmax`
 ///
 /// # Parameters
 ///
@@ -214,8 +214,8 @@ where
         .rows()
         .into_iter()
         .map(|row| {
-            // First-index argmax: strict `>` in `reduce` keeps the earliest column on
-            // ties (unlike `max_by`, which would keep the last), matching `argmax`
+            // First-index argmax: strict `>` keeps the earliest column on ties (unlike
+            // `max_by`, which keeps the last), matching `argmax`
             row.iter()
                 .enumerate()
                 .reduce(|best, cur| if cur.1 > best.1 { cur } else { best })

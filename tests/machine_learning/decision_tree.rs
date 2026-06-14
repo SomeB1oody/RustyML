@@ -11,7 +11,7 @@ use rustyml::machine_learning::{Algorithm, DecisionTree};
 use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
 
-// Helper: a tiny linearly-separable binary dataset; feature 0 is 0.x for class 0
+// A tiny linearly-separable binary dataset; feature 0 is 0.x for class 0
 // and 1.x for class 1, so any default-param tree reaches zero training error
 fn linearly_separable_binary() -> (Array2<f64>, Array1<f64>) {
     let x = array![
@@ -293,7 +293,6 @@ fn test_generate_tree_structure_before_fit_not_fitted() {
 #[test]
 fn test_predict_wrong_n_features_dimension_mismatch() {
     let (x, y) = linearly_separable_binary();
-    // x has 2 features; n_features after fit == 2
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
@@ -400,7 +399,6 @@ fn test_cart_classifier_zero_training_error() {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // After fit, n_features = 2, n_classes = Some(2), root is Some
     assert_eq!(tree.get_n_features(), 2);
     assert_eq!(tree.get_n_classes(), Some(2));
     assert!(tree.get_root().is_some());
@@ -417,11 +415,9 @@ fn test_cart_classifier_zero_training_error() {
 fn test_cart_fit_predict_equals_fit_then_predict() {
     let (x, y) = linearly_separable_binary();
 
-    // fit_predict path
     let mut tree1 = DecisionTree::new(Algorithm::CART, true).unwrap();
     let preds_fp = tree1.fit_predict(&x, &y).unwrap();
 
-    // fit then predict path
     let mut tree2 = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree2.fit(&x, &y).unwrap();
     let preds_sep = tree2.predict(&x).unwrap();
@@ -608,8 +604,7 @@ fn test_predict_proba_pure_leaf_gives_one_hot() {
     let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
     tree.fit(&x, &y).unwrap();
 
-    // With full depth the leaf covering the class-0 region holds a [1.0, 0.0]
-    // distribution
+    // With full depth the leaf covering the class-0 region holds a [1.0, 0.0] distribution
     let probas = tree.predict_proba(&x).unwrap();
 
     // Rows 0-2 are class 0; their probability for class 1 must be 0.0
@@ -698,7 +693,6 @@ fn test_max_depth_1_cannot_perfectly_fit_xor() {
     ];
     let y_xor = array![0.0_f64, 1.0, 1.0, 0.0];
 
-    // depth-1 tree: cannot fit XOR
     let mut tree_shallow = DecisionTree::new(Algorithm::CART, true)
         .unwrap()
         .with_max_depth(1);
@@ -934,7 +928,7 @@ fn test_save_load_round_trip_identical_predictions() {
     let loaded = DecisionTree::load_from_path(&path).expect("load_from_path failed");
     let preds_after = loaded.predict(&x_train).unwrap();
 
-    // Predictions must be bit-for-bit identical (same floating-point values)
+    // Predictions must be bit-for-bit identical
     assert_allclose(&preds_before, &preds_after, 1e-12);
 
     // Held-out test points: x[0] < 0.5 -> class 0, x[0] > 0.5 -> class 1
@@ -1349,7 +1343,7 @@ fn test_save_load_categorical_multiway_round_trip_identical_predictions() {
     original.set_categorical_features(vec![0]);
     original.fit(&x_cat, &y_cat).unwrap();
 
-    // Sanity: the fitted root must be a multi-way categorical node (populated
+    // The fitted root must be a multi-way categorical node (populated
     // children map), otherwise the AHashMap serde branch is not exercised
     assert!(
         original

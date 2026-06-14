@@ -1,9 +1,9 @@
 //! Internal hooks for the `benches/` targets
 //!
-//! **Not part of the public API.** This module is hidden from the documentation and carries no
-//! stability guarantee; it exists only so the calibration bench (`benches/parallel_gates.rs`)
-//! can drive crate-internal kernels with the parallel/serial gate forced to either side.
-//! Production call paths never go through here.
+//! Not part of the public API. This module is hidden from the documentation and carries no
+//! stability guarantee; it exists only so the bench (`benches/parallel_gates.rs`) can drive
+//! crate-internal kernels with the parallel/serial gate forced to either side
+//! Production call paths never go through here
 
 #[cfg(feature = "machine_learning")]
 pub use crate::machine_learning::spatial::KdTree;

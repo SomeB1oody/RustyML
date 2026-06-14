@@ -1,6 +1,6 @@
 //! Classical-ML / utils gates: the f64 elementwise classes (centering, kernel transforms,
 //! arg-min row scans, reference parallel sums) and the deterministic blocked reductions
-//! (block size, exp-heavy log-loss, k-means assign-accumulate, f32->f64 grad-norm square-sum).
+//! (block size, exp-heavy log-loss, k-means assign-accumulate, f32->f64 grad-norm square-sum)
 
 use crate::harness::{
     Row, Section, random_matrix_f64, random_vector_f32, random_vector_f64, time_per_call_ns,
@@ -13,7 +13,7 @@ use rustyml::math::reduction::{det_reduce, det_reduce_range};
 use std::hint::black_box;
 use std::ops::AddAssign;
 
-// ---- f64 elementwise classes (the ML/utils gates) ----
+// f64 elementwise classes (the ML/utils gates)
 
 pub fn calibrate_elementwise_f64() -> Vec<Section> {
     let sizes = [
@@ -116,7 +116,7 @@ pub fn calibrate_elementwise_f64() -> Vec<Section> {
 
     // Parallel f64 sum (reference only: rayon's reduction grouping is scheduling-dependent, so
     // a parallel float sum is not bitwise reproducible - these sites get serialized unless the
-    // win is overwhelming AND a deterministic blocked reduction is used instead)
+    // win is overwhelming and a deterministic blocked reduction is used instead)
     let mut rows = Vec::new();
     for &len in &sizes {
         let buf = random_vector_f64(len, 33);
@@ -144,7 +144,7 @@ pub fn calibrate_elementwise_f64() -> Vec<Section> {
     sections
 }
 
-// ---- deterministic blocked reduction: DET_REDUCE_BLOCK ----
+// deterministic blocked reduction: DET_REDUCE_BLOCK
 
 pub fn calibrate_det_reduce_block() -> Section {
     let data = random_vector_f64(4_194_304, 69);
@@ -176,7 +176,7 @@ pub fn calibrate_det_reduce_block() -> Section {
     }
 }
 
-// ---- exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (math::logistic_loss) ----
+// exp-heavy reduction: EXP_REDUCE_MIN_ELEMS (math::logistic_loss)
 
 /// Per-element work is the numerically stable log-loss term (`exp` + `ln` + a few flops), an
 /// order of magnitude heavier than the cheap sum-of-squares class, so its crossover sits well
@@ -232,7 +232,7 @@ pub fn calibrate_exp_reduction() -> Section {
     }
 }
 
-// ---- k-means assign-accumulate: SUM gate on samples x features ----
+// k-means assign-accumulate: SUM gate on samples x features
 
 /// The per-iteration k-means pass that folds every sample's row into its cluster's centroid sum
 /// (plus counts and inertia). Serial is the production scatter loop; parallel is the
@@ -310,7 +310,7 @@ pub fn calibrate_kmeans_accumulate() -> Section {
     }
 }
 
-// ---- f32 -> f64 widening square-sum: SQ_SUM_F32_PARALLEL_MIN_ELEMS (global_grad_norm) ----
+// f32 -> f64 widening square-sum: SQ_SUM_F32_PARALLEL_MIN_ELEMS (global_grad_norm)
 
 /// The clip-by-global-norm reduction: f32 gradients squared and accumulated in f64. Serial
 /// baseline is the production flat chain; the parallel side is the generic deterministic

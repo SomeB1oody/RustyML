@@ -7,14 +7,14 @@ use crate::neural_network::traits::{Layer, Optimizer};
 /// Adam (Adaptive Moment Estimation) optimizer
 ///
 /// Computes adaptive learning rates from running estimates of the gradient's first and second
-/// moments, with bias correction.
+/// moments, with bias correction
 ///
 /// Its `weight_decay` is **classic coupled L2 regularization**: `weight_decay * param` is added to
 /// the gradient, so the penalty flows through the moment estimates and is rescaled by the adaptive
-/// `1 / (sqrt(v_hat) + epsilon)` denominator. For *decoupled* weight decay — applied straight to
-/// the parameter, generally the better choice with adaptive optimizers — use
+/// `1 / (sqrt(v_hat) + epsilon)` denominator. For *decoupled* weight decay, applied straight to
+/// the parameter and generally the better choice with adaptive optimizers, use
 /// [`AdamW`](crate::neural_network::optimizers::AdamW) instead. With `weight_decay == 0.0` the two
-/// are identical. Like the other optimizers, weight decay (when non-zero) is applied to weight
+/// are identical. As with the other optimizers, weight decay (when non-zero) applies to weight
 /// tensors only, never to biases or normalization scale/shift parameters
 #[derive(Debug)]
 pub struct Adam {
@@ -37,7 +37,7 @@ impl Adam {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`Adam::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`Adam::with_clip_norm`]
     ///
     /// # Returns
     ///
@@ -62,7 +62,7 @@ impl Adam {
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
     /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
-    /// gradient direction.
+    /// gradient direction
     ///
     /// # Parameters
     ///

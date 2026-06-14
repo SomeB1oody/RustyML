@@ -13,8 +13,8 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Fused gate parameters and gradients for recurrent cells
 ///
-/// Packs every gate's weights side by side into single matrices - column blocks in a fixed,
-/// layer-defined gate order (LSTM: `[i | f | g | o]`, GRU: `[r | z | h]`) - so the batched input
+/// Packs every gate's weights side by side into single matrices. Column blocks follow a fixed,
+/// layer-defined gate order (LSTM: `[i | f | g | o]`, GRU: `[r | z | h]`), so the batched input
 /// projection and the per-timestep recurrent projection each run as one large GEMM instead of one
 /// GEMM per gate:
 ///
@@ -106,9 +106,10 @@ impl FusedGates {
         })
     }
 
-    /// Exposes the three fused trainable tensors (kernel, recurrent kernel, bias) and their
-    /// gradients as flat [`ParamGrad`] slices, for the optimizer to update. Returns an empty
-    /// vector if gradients have not been computed yet
+    /// Exposes the 3 fused trainable tensors (kernel, recurrent kernel, bias) and their gradients
+    /// as flat [`ParamGrad`] slices for the optimizer to update
+    ///
+    /// Returns an empty vector if gradients have not been computed yet
     pub fn parameters(&mut self) -> Vec<ParamGrad<'_>> {
         let Self {
             kernel,
@@ -305,7 +306,7 @@ mod tests {
         );
     }
 
-    /// After storing gradients, `parameters()` exposes the three fused tensors
+    /// After storing gradients, `parameters()` exposes the 3 fused tensors
     #[test]
     fn parameters_three_entries_after_gradients() {
         let mut rng = crate::random::make_rng(Some(3));
@@ -326,7 +327,7 @@ mod tests {
         let mut rng = crate::random::make_rng(Some(5));
         let mut gates = FusedGates::new(2, 1, &[0.0, 0.0], &mut rng).unwrap();
 
-        // Values far outside the old +/-5 clamp must be preserved verbatim
+        // Large values must be preserved verbatim (no clipping)
         let grad_kernel = array![[10.0_f32, -100.0], [3.0, 42.0]];
         let grad_recurrent = array![[5.0_f32, -5.0]];
         let grad_bias = array![[8.0_f32, -8.0]];
@@ -373,7 +374,7 @@ mod tests {
     fn project_input_matches_per_timestep_gemm() {
         // x3: [batch=1, timesteps=2, input_dim=2]
         let x3 = Array3::from_shape_vec((1, 2, 2), vec![1.0_f32, 2.0, 3.0, 4.0]).unwrap();
-        // kernel: [2, 4] (two gates, two units each)
+        // kernel: [2, 4] (2 gates, 2 units each)
         let kernel = array![[1.0_f32, 0.0, 2.0, 0.0], [0.0, 1.0, 0.0, 2.0]];
 
         let out = project_input(&kernel, &x3.view());

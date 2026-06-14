@@ -1,5 +1,6 @@
-//! Sequential model for stacking layers into a feedforward network, with training,
-//! prediction, summary, and JSON save/load support
+//! Sequential model that stacks layers into a feedforward network
+//!
+//! Supports training, prediction, summary, and JSON save/load
 
 use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Error, IoError, NnError};
@@ -18,12 +19,11 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-/// A Sequential neural network model for building and training feedforward networks
+/// A sequential neural network model for building and training feedforward networks
 ///
-/// The Sequential model lets you build neural networks by stacking layers in a linear fashion
-/// Each layer feeds its output to the next layer in sequence. The model is suitable for
-/// most feedforward neural network architectures where data flows from input to output
-/// through a series of transformations
+/// Build a network by stacking layers in a linear fashion. Each layer feeds its output to
+/// the next layer in sequence. The model fits most feedforward architectures where data
+/// flows from input to output through a series of transformations
 ///
 /// # Examples
 ///
@@ -96,11 +96,11 @@ impl Default for Sequential {
 
 /// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
 ///
-/// Squared terms accumulate in f64 to limit round-off when summing across many parameters.
-/// Each tensor folds as deterministic blocks (on rayon at or above the calibrated square-sum
-/// gate - a pure performance switch, bitwise identical either way), and the per-tensor totals
-/// merge in the fixed (layer, parameter) order. Layers without gradients contribute nothing;
-/// with no gradients at all the norm is 0.0
+/// Squared terms accumulate in f64 to limit round-off when summing across many parameters;
+/// each tensor folds as deterministic blocks (on rayon at or above the square-sum gate, a
+/// performance switch that is bitwise identical either way), and the per-tensor totals merge
+/// in the fixed (layer, parameter) order. Layers without gradients contribute nothing; with
+/// no gradients at all the norm is 0.0
 fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     let mut sum_sq = 0.0_f64;
     for layer in layers.iter_mut() {
@@ -134,9 +134,9 @@ impl Sequential {
 
     /// Sets the seed governing the fit-time batch shuffle
     ///
-    /// This is a pure setter that only controls the data shuffling order used by
-    /// `fit_with_batches`; it does not reinitialize or otherwise touch the model's layers
-    /// Setting a fixed seed makes the per-epoch shuffle reproducible
+    /// Controls only the data shuffling order used by `fit_with_batches`; it does not
+    /// reinitialize or otherwise touch the model's layers. A fixed seed makes the per-epoch
+    /// shuffle reproducible
     ///
     /// # Parameters
     ///
@@ -150,11 +150,11 @@ impl Sequential {
         self
     }
 
-    /// Sets the learning rate on the compiled optimizer, the entry point for external
-    /// learning-rate scheduling (step decay, warmup, ...) between epochs or batches
+    /// Sets the learning rate on the compiled optimizer
     ///
-    /// Does nothing if the model has not been compiled yet. The optimizer keeps all of its
-    /// accumulated state (momentum buffers, Adam moments, ...) across the change
+    /// The entry point for external learning-rate scheduling (step decay, warmup, ...) between
+    /// epochs or batches. Does nothing if the model has not been compiled yet. The optimizer
+    /// keeps all of its accumulated state (momentum buffers, Adam moments, ...) across the change
     ///
     /// # Parameters
     ///
@@ -269,7 +269,7 @@ impl Sequential {
     /// - `Ok(f32)` - The loss value for this batch
     /// - `Err(Error)` - If training fails
     fn train_batch(&mut self, x: &Tensor, y: &Tensor) -> Result<f32, Error> {
-        // Forward pass - first layer takes input reference, subsequent layers take owned tensors
+        // Forward pass: first layer takes an input reference, later layers take owned tensors
         let mut layers_iter = self.layers.iter_mut();
         let first_layer = layers_iter
             .next()
@@ -332,16 +332,16 @@ impl Sequential {
     /// - `y` - Target tensor containing expected outputs
     /// - `epochs` - Number of training epochs to perform
     ///
+    /// # Returns
+    ///
+    /// - `Result<&mut Self, Error>` - Mutable reference to self after training or an error
+    ///
     /// # Notes
     ///
     /// Each epoch trains on the entire dataset as a single full-batch gradient step (there is only
     /// one batch, so no shuffling happens and the fit-time seed is unused). For mini-batch training
     /// that splits the data into fixed-size batches and reshuffles every epoch, use
-    /// [`fit_with_batches`](Self::fit_with_batches) instead.
-    ///
-    /// # Returns
-    ///
-    /// - `Result<&mut Self, Error>` - Mutable reference to self after training or an error
+    /// [`fit_with_batches`](Self::fit_with_batches)
     ///
     /// # Errors
     ///
@@ -382,10 +382,10 @@ impl Sequential {
         Ok(self)
     }
 
-    /// Trains the model using batch processing
+    /// Trains the model using mini-batch processing
     ///
-    /// Splits data into batches of the specified size for training, automatically printing
-    /// detailed information for each batch by default
+    /// Splits data into batches of the specified size and trains on each in turn. With the
+    /// `show_progress` feature, a progress bar reports the running average loss per epoch
     ///
     /// # Parameters
     ///
@@ -394,16 +394,16 @@ impl Sequential {
     /// - `epochs` - Number of training epochs
     /// - `batch_size` - Size of each training batch
     ///
+    /// # Returns
+    ///
+    /// - `Result<&mut Self, Error>` - Mutable reference to trained model or error
+    ///
     /// # Notes
     ///
     /// The sample order is reshuffled at the start of every epoch; seed it via
     /// [`set_seed`](Self::set_seed) / [`new_with_seed`](Self::new_with_seed) for a reproducible
-    /// shuffle. To train on the whole dataset as a single full-batch gradient
-    /// step per epoch instead (no batching, no shuffling), use [`fit`](Self::fit).
-    ///
-    /// # Returns
-    ///
-    /// - `Result<&mut Self, Error>` - Mutable reference to trained model or error
+    /// shuffle. To train on the whole dataset as a single full-batch gradient step per epoch
+    /// instead (no batching, no shuffling), use [`fit`](Self::fit)
     ///
     /// # Errors
     ///
@@ -466,18 +466,15 @@ impl Sequential {
             "[{elapsed_precise}] {bar:40} {pos}/{len} | Epoch {msg}",
         );
 
-        // Training loop: shuffle each epoch, then process fixed-size batches. Only the progress-bar
-        // bookkeeping is gated on `show_progress`; the shuffle/chunk/train logic is single-source
+        // Shuffle each epoch, then process fixed-size batches; only the progress-bar bookkeeping
+        // is gated on `show_progress`, the shuffle/chunk/train logic is shared
         for epoch in 0..epochs {
-            // Shuffle data at the beginning of each epoch
             indices.shuffle(&mut shuffle_rng);
 
             #[cfg(feature = "show_progress")]
             let (mut epoch_loss, mut batch_count) = (0.0_f32, 0_usize);
 
-            // Process data in batches
             for batch_indices in indices.chunks(batch_size) {
-                // Create batch tensors and train on this batch
                 let (batch_x, batch_y) = create_batch_tensors(x, y, batch_indices)?;
                 let batch_loss = self.train_batch(&batch_x, &batch_y)?;
 
@@ -723,8 +720,8 @@ impl Sequential {
     /// to the current model's layers. The current model must have the same architecture
     /// (same number and types of layers) as the saved model
     ///
-    /// Note: build the model structure first, then call this method to load weights
-    /// After loading, call `compile()` to set the optimizer and loss function
+    /// Build the model structure first, then call this method to load weights. After loading,
+    /// call `compile()` to set the optimizer and loss function
     ///
     /// # Parameters
     ///

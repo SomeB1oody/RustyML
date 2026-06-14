@@ -26,22 +26,22 @@ use crate::neural_network::traits::Layer;
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///
-/// // Create a Sequential model with multiple layers
+/// // Create a Sequential model
 /// let mut model = Sequential::new();
 ///
 /// // Add a GlobalAveragePooling3D layer
 /// model.add(GlobalAveragePooling3D::new());
 ///
-/// // Create test input tensor: [batch_size, channels, depth, height, width]
+/// // Test input tensor: [batch_size, channels, depth, height, width]
 /// let input_data = Array::from_elem(IxDyn(&[2, 4, 8, 8, 8]), 1.0);
 ///
 /// // Forward propagation
 /// let output = model.predict(&input_data).unwrap();
 ///
-/// // Check output shape - should be [2, 4]
+/// // Output shape should be [2, 4]
 /// assert_eq!(output.shape(), &[2, 4]);
 ///
-/// // Since all input values are 1.0, all output values should also be 1.0
+/// // All input values are 1.0, so all output values are 1.0
 /// for b in 0..2 {
 ///     for c in 0..4 {
 ///         assert_relative_eq!(output[[b, c]], 1.0);
@@ -54,8 +54,8 @@ use crate::neural_network::traits::Layer;
 /// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling3D {
-    /// Shape of the input tensor cached during the forward pass (backward only needs
-    /// the shape, not the input values)
+    /// Shape of the input tensor cached during the forward pass; backward only needs the
+    /// shape, not the input values
     input_shape: Vec<usize>,
 }
 
@@ -84,7 +84,7 @@ impl Layer for GlobalAveragePooling3D {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Cache the shape for backward (only the shape is needed)
+        // Backward only needs the shape, not the input values
         self.input_shape = input.shape().to_vec();
 
         let (output, _) = global_pool_forward(input, PoolKind::Average);

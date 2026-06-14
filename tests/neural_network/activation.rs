@@ -1,6 +1,6 @@
 //! Integration tests for the activation layers and the `Activation` enum
 //!
-//! Expected values are derived from the mathematical definitions. Gradient
+//! Expected values come from the mathematical definitions. Gradient
 //! correctness is covered by tests/neural_network/gradient_check.rs, so this
 //! file does not duplicate those backward-value checks. Coverage:
 //!   - forward values, predict() == forward()
@@ -92,9 +92,8 @@ fn relu_backward_before_forward_is_error() {
     );
 }
 
-/// Non-finite input is not rejected: ReLU is pure math (matching the embedded activation).
-/// NaN propagates (matching sigmoid/tanh/softmax and PyTorch/TF/NumPy), +inf passes through,
-/// and -inf maps to 0
+/// Non-finite input is not rejected: ReLU is pure math. NaN propagates,
+/// +inf passes through, and -inf maps to 0
 #[test]
 fn relu_non_finite_input_propagates() {
     let mut layer = ReLU::new();
@@ -181,7 +180,7 @@ fn sigmoid_backward_before_forward_is_error() {
     );
 }
 
-/// NaN input is no longer rejected: it propagates through (sigmoid(NaN) = NaN)
+/// NaN input is not rejected: it propagates through (sigmoid(NaN) = NaN)
 #[test]
 fn sigmoid_nan_input_propagates() {
     let mut layer = Sigmoid::new();
@@ -272,7 +271,7 @@ fn tanh_backward_before_forward_is_error() {
     );
 }
 
-/// Non-finite input is no longer rejected: NaN propagates and tanh saturates ±inf to ±1
+/// Non-finite input is not rejected: NaN propagates and tanh saturates +/-inf to +/-1
 #[test]
 fn tanh_non_finite_input_propagates() {
     let mut layer = Tanh::new();
@@ -392,7 +391,7 @@ fn softmax_1d_input_is_error() {
     );
 }
 
-/// NaN input is no longer rejected: it contaminates the row's normalizer, so the whole row is NaN
+/// NaN input is not rejected: it contaminates the row's normalizer, so the whole row is NaN
 #[test]
 fn softmax_nan_input_propagates() {
     let mut layer = Softmax::new();
@@ -471,7 +470,7 @@ fn linear_backward_before_forward_is_error() {
     );
 }
 
-/// Non-finite input is no longer rejected: Linear is the identity, so NaN/Inf pass straight through
+/// Non-finite input is not rejected: Linear is the identity, so NaN/Inf pass straight through
 #[test]
 fn linear_non_finite_input_propagates() {
     let mut layer = Linear::new();

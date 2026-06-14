@@ -43,7 +43,7 @@ use std::borrow::Cow;
 /// // Batch size=2, 1 input channel, 5x5 pixels
 /// let x = Array4::ones((2, 1, 5, 5)).into_dyn();
 ///
-/// // Create target tensor - assuming we'll have 3 filters with output size 3x3
+/// // Create target tensor - assuming 3 filters with output size 3x3
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
 ///
 /// // Build model: add a Conv2D layer with 3 filters and 3x3 kernel
@@ -102,8 +102,7 @@ pub struct Conv2D {
 impl Conv2D {
     /// Creates a new 2D convolutional layer with the specified parameters
     ///
-    /// Weights are initialized using Xavier (Glorot) uniform initialization
-    /// Biases are initialized to zeros
+    /// Weights are initialized with Xavier (Glorot) uniform initialization; biases are zeros
     ///
     /// # Parameters
     ///
@@ -117,11 +116,11 @@ impl Conv2D {
     ///
     /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
     /// [`Conv2D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv2D::with_random_state`].
+    /// reproducible initialization, set a seed with [`Conv2D::with_random_state`]
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new `Conv2D` layer instance with randomly initialized weights or an error
+    /// - `Result<Self, Error>` - A new `Conv2D` layer with randomly initialized weights, or an error
     ///
     /// # Errors
     ///
@@ -178,9 +177,9 @@ impl Conv2D {
 
     /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// assigning custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///

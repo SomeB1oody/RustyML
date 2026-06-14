@@ -1,7 +1,7 @@
-//! Model-level serialization scaffolding for a Sequential model
+//! Model-level serialization for a Sequential model
 //!
 //! The per-layer weight containers live in
-//! [`layer_weight`](crate::neural_network::layers::layer_weight); this module wraps them with
+//! [`layer_weight`](crate::neural_network::layers::layer_weight). This module wraps them with
 //! layer metadata into a serializable whole-model snapshot and applies loaded weights back onto a
 //! live model
 

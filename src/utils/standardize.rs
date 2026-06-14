@@ -31,8 +31,8 @@ impl StandardizationAxis {
     ///
     /// # Errors
     ///
-    /// - [`Error::InvalidInput`] - If row/column standardization is requested
-    ///   on an array with fewer than 2 dimensions
+    /// - [`Error::InvalidInput`] - If row/column standardization is requested on an
+    ///   array with fewer than 2 dimensions
     fn apply<D>(&self, data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
     where
         D: Dimension,
@@ -118,7 +118,7 @@ where
 }
 
 /// Running (count, mean, sum-of-squared-deviations) statistics for Welford's online
-/// algorithm, which computes mean and variance in a single numerically-stable pass
+/// algorithm, which computes mean and variance in a single numerically stable pass
 type WelfordState = (f64, f64, f64);
 
 /// Folds one value into a Welford accumulator

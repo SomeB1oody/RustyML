@@ -46,7 +46,7 @@ pub type TrainTestSplit<A> = (Array2<f64>, Array2<f64>, Array1<A>, Array1<A>);
 /// use rustyml::utils::train_test_split::train_test_split;
 ///
 /// let x = Array2::from_shape_vec((5, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]).unwrap();
-/// // Integer class labels work just as well as floats.
+/// // Integer class labels work just as well as floats
 /// let y = Array1::from(vec![0, 1, 0, 1, 0]);
 /// let (x_train, x_test, y_train, y_test) = train_test_split(x, y, Some(0.4), Some(42)).unwrap();
 /// ```
@@ -144,7 +144,7 @@ where
 /// use rustyml::utils::train_test_split::train_test_split_stratified;
 ///
 /// let x = Array2::from_shape_vec((6, 1), vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap();
-/// // Three samples per class, so each side keeps both classes.
+/// // 3 samples per class, so each side keeps both classes
 /// let y = Array1::from(vec![0, 0, 0, 1, 1, 1]);
 /// let (x_train, x_test, y_train, y_test) =
 ///     train_test_split_stratified(x, y, Some(0.34), Some(42)).unwrap();

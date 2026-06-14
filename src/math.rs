@@ -229,17 +229,16 @@ pub fn sigmoid(z: f64) -> f64 {
 }
 
 /// Parallel gate for exp-heavy `f64` reductions ([`logistic_loss`]): below this element count
-/// the deterministic blocked fold cannot beat the serial sum.
+/// the deterministic blocked fold cannot beat the serial sum
 ///
-/// Measured on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-12; see benches/RESULTS.md
-/// "exp-heavy f64 reduction": crossover bracket 16K-32K elements (0.96x at 16K, 1.85x at 32K,
-/// 14.3x at 1M). Sits below the cheap-sum gate because each element costs an `exp` plus an `ln`
+/// Crossover bracket is 16K-32K elements (0.96x at 16K, 1.85x at 32K, 14.3x at 1M). Sits below
+/// the cheap-sum gate because each element costs an `exp` plus an `ln`
 const EXP_REDUCE_MIN_ELEMS: usize = 32_768;
 
 /// Calculates the logistic regression loss (log loss)
 ///
 /// This computes the average cross-entropy loss by applying the sigmoid
-/// to raw logits before evaluating the log-likelihood.
+/// to raw logits before evaluating the log-likelihood
 ///
 /// Above a calibrated input size the sum runs as a deterministic blocked parallel reduction
 /// ([`reduction::det_reduce_range`]): the float result is bitwise identical at any rayon
@@ -387,7 +386,7 @@ where
     S1: Data<Elem = f64>,
     S2: Data<Elem = f64>,
 {
-    // Accumulate in a single pass with no intermediate allocation.
+    // Accumulate in a single pass with no intermediate allocation
     let mut sum = 0.0;
     Zip::from(x1).and(x2).for_each(|&a, &b| {
         let d = a - b;

@@ -1,3 +1,5 @@
+//! Prelude re-exporting the common neural network types: tensors, layers, losses, and optimizers
+
 pub use crate::neural_network::Tensor;
 pub use crate::neural_network::layers::activation::*;
 pub use crate::neural_network::layers::convolution::*;

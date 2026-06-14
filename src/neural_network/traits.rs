@@ -21,8 +21,8 @@ pub struct ParamGrad<'a> {
     pub value: &'a mut [f32],
     /// The corresponding gradient data (same length and ordering as `value`)
     pub grad: &'a [f32],
-    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor. `true` for
-    /// weight matrices and conv/recurrent kernels; `false` for biases and normalization
+    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor; `true` for
+    /// weight matrices and conv/recurrent kernels, `false` for biases and normalization
     /// scale/shift (`gamma`/`beta`)
     pub decays: bool,
 }
@@ -49,9 +49,9 @@ impl<'a> ParamGrad<'a> {
 
 /// Defines the interface for neural network layers
 ///
-/// This trait provides the core functionality that all neural network layers must implement,
-/// including forward and backward propagation, plus exposing trainable parameters and their
-/// gradients to the optimizer via [`parameters`](Layer::parameters)
+/// Covers the core functionality that all neural network layers must implement, including
+/// forward and backward propagation, plus exposing trainable parameters and their gradients
+/// to the optimizer via [`parameters`](Layer::parameters)
 pub trait Layer: std::any::Any + Send + Sync {
     /// Performs forward propagation through the layer
     ///
@@ -141,11 +141,10 @@ pub trait Layer: std::any::Any + Send + Sync {
 
     /// Exposes the layer's trainable parameters and their gradients to the optimizer
     ///
-    /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient
-    /// Layers without trainable parameters (or before a backward pass has produced gradients)
-    /// return an empty vector - the default implementation. The order of the returned entries
-    /// must be stable across calls, because step-based optimizers key their per-parameter state
-    /// by position
+    /// Each returned [`ParamGrad`] pairs a parameter tensor's flat data with its gradient. Layers
+    /// without trainable parameters (or before a backward pass has produced gradients) return an
+    /// empty vector - the default implementation. The order of the returned entries must be stable
+    /// across calls, because step-based optimizers key their per-parameter state by position
     ///
     /// # Returns
     ///
@@ -156,9 +155,9 @@ pub trait Layer: std::any::Any + Send + Sync {
 
     /// Returns a borrowing view of all weights in the layer
     ///
-    /// This method provides access to all weight matrices and bias vectors used by the layer.
-    /// Each array is returned as a `Cow::Borrowed` over the layer's live data, so no weights are
-    /// cloned; the same enum doubles as the on-disk weight format (owned when deserialized)
+    /// Provides access to all weight matrices and bias vectors used by the layer. Each array is
+    /// returned as a `Cow::Borrowed` over the layer's live data, so no weights are cloned; the same
+    /// enum doubles as the on-disk weight format (owned when deserialized)
     ///
     /// # Returns
     ///
@@ -173,9 +172,9 @@ pub trait Layer: std::any::Any + Send + Sync {
 
     /// Sets the training mode if the layer is mode-dependent
     ///
-    /// This method allows layers that behave differently during training and inference
-    /// to switch between modes. Layers that don't depend on training mode (like Dense,
-    /// Activation, Pooling layers) can use the default no-op implementation
+    /// Lets layers that behave differently during training and inference switch between
+    /// modes. Layers that don't depend on training mode (Dense, Activation, Pooling) can
+    /// use the default no-op implementation
     ///
     /// Mode-dependent layers (Dropout, BatchNormalization, etc.) override this method to
     /// forward `is_training` to their own `set_training()`. In this crate that override is
@@ -192,8 +191,8 @@ pub trait Layer: std::any::Any + Send + Sync {
 
 /// Defines the interface for loss functions used in neural network training
 ///
-/// This trait provides methods to compute both the loss value and its gradient
-/// with respect to the predicted values
+/// Provides methods to compute both the loss value and its gradient with respect to
+/// the predicted values
 ///
 /// # Averaging convention
 ///
@@ -246,8 +245,7 @@ pub trait Loss {
 
 /// Defines the interface for optimization algorithms
 ///
-/// This trait provides methods to update layer parameters during
-/// the training process
+/// Provides methods to update layer parameters during the training process
 pub trait Optimizer {
     /// Advances the optimizer's global training step
     ///
@@ -291,10 +289,9 @@ pub trait Optimizer {
 
 /// Trait for applying serialized weights to a specific layer type
 ///
-/// This trait is implemented by serializable weight structures to apply
-/// their contained weights to the corresponding layer type. It provides
-/// a uniform interface for weight deserialization and application across
-/// all layer types
+/// Implemented by serializable weight structures to apply their contained weights to the
+/// corresponding layer type. Provides a uniform interface for weight deserialization and
+/// application across all layer types
 ///
 /// # Type Parameters
 ///

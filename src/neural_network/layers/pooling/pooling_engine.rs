@@ -1,17 +1,17 @@
 //! Dimension-generic pooling engine shared by every pooling layer
 //!
-//! All pooling layers (max/average, windowed/global, 1D/2D/3D) reduce to four functions here. The
+//! All pooling layers (max/average, windowed/global, 1D/2D/3D) reduce to 4 functions here. The
 //! spatial rank is derived at run time from `input.ndim() - 2`, so a single implementation serves
-//! every dimensionality; the only per-layer difference is the [`PoolKind`] and how the public
+//! every dimensionality. The only per-layer difference is the [`PoolKind`] and how the public
 //! `pool_size`/`strides` tuples are flattened into slices
 //!
 //! # Layout
 //!
 //! Inputs are `[batch, channels, spatial...]`. Work is parallelized over the `batch * channels`
-//! "channel planes"; each plane is processed as a contiguous `&[f32]` (row-major over the spatial
+//! "channel planes". Each plane is processed as a contiguous `&[f32]` (row-major over the spatial
 //! dimensions) and the results are concatenated in `bc` order into the output buffer. This keeps
-//! the hot path allocation-light and lets the output be built with a single `from_shape_vec`
-//! instead of scalar-indexed writes
+//! the hot path allocation-light and builds the output with a single `from_shape_vec` instead of
+//! scalar-indexed writes
 
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::convolution::PaddingType;
@@ -19,10 +19,11 @@ use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
 /// Estimated total element ops (`bc_total * work_per_plane`) at or above which a pooling pass
-/// runs in parallel. Counting per-plane work rather than plane count keeps the gate meaningful
-/// when a few planes carry large spatial dims (e.g. batch == 1 on a big image) and when many
-/// planes are tiny. Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md: the measured
-/// crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
+/// runs in parallel
+///
+/// Counting per-plane work rather than plane count keeps the gate meaningful when a few planes
+/// carry large spatial dims (e.g. batch == 1 on a big image) and when many planes are tiny. The
+/// measured crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
 /// many-tiny-planes ladders
 const POOL_PARALLEL_MIN_OPS: usize = 12_000;
 
@@ -32,7 +33,7 @@ const POOL_PARALLEL_MIN_OPS: usize = 12_000;
 /// `ceil(in / stride)` and splits the padding evenly with the extra cell on the trailing edge
 /// (`pad_before = pad_total / 2`), matching the convolution engine. Padding cells are virtual:
 /// the forward/backward passes skip out-of-bounds positions, so average pooling divides by the
-/// count of real (in-bounds) elements — Keras's `count_include_pad=False` behavior
+/// count of real (in-bounds) elements, matching Keras `count_include_pad=False` behavior
 fn pool_geometry(
     sp: &[usize],
     pool: &[usize],
@@ -75,7 +76,9 @@ fn row_major_strides(shape: &[usize]) -> Vec<usize> {
 
 /// Advances a multi-index `idx` (row-major, last axis fastest) within bounds `dims`
 ///
-/// Returns `true` while there are more indices, `false` once it wraps back to all-zero (done)
+/// # Returns
+///
+/// - `bool` - `true` while there are more indices, `false` once it wraps back to all-zero
 #[inline]
 fn increment_index(idx: &mut [usize], dims: &[usize]) -> bool {
     for k in (0..idx.len()).rev() {
@@ -103,12 +106,13 @@ fn decode_index(mut flat: usize, dims: &[usize]) -> Vec<usize> {
 
 /// Minimum output positions per forward task: small enough that a `batch * channels == 1` plane
 /// still splits across threads, large enough (~12 us of window reduction) to amortize the rayon
-/// task overhead measured in calibration (see benches/RESULTS.md)
+/// task overhead
 const POOL_MIN_CHUNK_OUT: usize = 1024;
 
-/// Runs `f` for every `bc` in `0..bc_total`, in parallel once the estimated total work
-/// (`bc_total * work_per_plane` element ops) clears the gate, preserving order.
-/// `force_parallel` overrides the gate decision (calibration bench only; production passes `None`)
+/// Runs `f` for every `bc` in `0..bc_total`, preserving order, in parallel once the estimated
+/// total work (`bc_total * work_per_plane` element ops) clears the gate
+///
+/// `force_parallel` overrides the gate decision; production passes `None`
 fn map_planes<R, F>(
     bc_total: usize,
     work_per_plane: usize,
@@ -131,8 +135,11 @@ where
 /// Forward pass for windowed pooling (`MaxPooling{1,2,3}D` / `AveragePooling{1,2,3}D`)
 ///
 /// `pool` and `strides` are the per-spatial-axis window sizes and steps (length = spatial rank)
-/// Returns the pooled tensor and, for [`PoolKind::Max`], the flat per-output arg-max indices into
-/// each input plane (used by [`windowed_pool_backward`]); `None` for averaging
+///
+/// # Returns
+///
+/// The pooled tensor and, for [`PoolKind::Max`], the flat per-output arg-max indices into each
+/// input plane (used by [`windowed_pool_backward`]); `None` for averaging
 pub(super) fn windowed_pool_forward(
     input: &Tensor,
     pool: &[usize],
@@ -143,9 +150,10 @@ pub(super) fn windowed_pool_forward(
     windowed_pool_forward_impl(input, pool, strides, kind, padding, None)
 }
 
-/// `windowed_pool_forward` with an optional override of the parallel/serial gate decision, so
-/// the calibration bench can time both paths on either side of the gate. Reachable outside the
-/// crate only through `bench_internals`
+/// `windowed_pool_forward` with an optional override of the parallel/serial gate decision
+///
+/// `force_parallel` selects the parallel or serial path regardless of the work estimate;
+/// production passes `None`. Reachable outside the crate only through `bench_internals`
 pub fn windowed_pool_forward_impl(
     input: &Tensor,
     pool: &[usize],
@@ -173,7 +181,7 @@ pub fn windowed_pool_forward_impl(
     // One task per (plane, output-position chunk): splitting the output positions lets a single
     // large plane (e.g. batch == 1 with few channels) use every thread, while many planes get one
     // chunk apiece. Every output element is reduced by the same serial loop regardless of the
-    // chunk boundaries, so the result is bitwise independent of the thread count
+    // chunk boundaries, so the result is bitwise-independent of the thread count
     let process_range = |bc: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
         let plane = &in_flat[bc * plane_in..(bc + 1) * plane_in];
         let mut out_chunk = vec![0.0f32; len];
@@ -246,8 +254,8 @@ pub fn windowed_pool_forward_impl(
         .saturating_mul(pool.iter().product::<usize>());
     let parallel = force_parallel.unwrap_or(total_ops >= POOL_PARALLEL_MIN_OPS);
 
-    // Chunk size: enough chunks to feed every thread once the planes alone cannot, but never
-    // chunks so small the task overhead dominates
+    // Chunk size: enough chunks to feed every thread once the planes alone cannot, but never so
+    // small the task overhead dominates
     let chunk_len = if parallel && bc_total > 0 && plane_out > 0 {
         let chunks_per_plane = rayon::current_num_threads().div_ceil(bc_total);
         plane_out.div_ceil(chunks_per_plane).max(POOL_MIN_CHUNK_OUT)
@@ -410,7 +418,12 @@ pub(super) fn windowed_pool_backward(
 /// Forward pass for global pooling (`GlobalMaxPooling{1,2,3}D` / `GlobalAveragePooling{1,2,3}D`)
 ///
 /// Reduces every spatial dimension to one value per channel, producing a `[batch, channels]`
-/// tensor. For [`PoolKind::Max`], returns the flat per-channel arg-max index into each input plane
+/// tensor
+///
+/// # Returns
+///
+/// The pooled tensor and, for [`PoolKind::Max`], the flat per-channel arg-max index into each
+/// input plane; `None` for averaging
 pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Option<Vec<usize>>) {
     let shape = input.shape();
     let (batch, channels) = (shape[0], shape[1]);
@@ -473,7 +486,7 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
 /// Backward pass for global pooling
 ///
 /// `grad_output` has shape `[batch, channels]`. Averaging spreads each gradient evenly over its
-/// channel plane; [`PoolKind::Max`] routes it to the stored arg-max element
+/// channel plane. [`PoolKind::Max`] routes it to the stored arg-max element
 pub(super) fn global_pool_backward(
     grad_output: &Tensor,
     input_shape: &[usize],
@@ -606,7 +619,6 @@ mod tests {
         let data = ArrayD::from_shape_vec(IxDyn(&[1, 1, 4]), vec![3.0f32, 1.0, 4.0, 1.0]).unwrap();
         let (out, argmax) =
             windowed_pool_forward(&data, &[2], &[2], PoolKind::Max, PaddingType::Valid);
-        // Output shape must be [1,1,2]
         assert_eq!(out.shape(), &[1, 1, 2]);
         let flat: Vec<f32> = out.iter().copied().collect();
         assert_abs_diff_eq!(flat[0], 3.0, epsilon = 1e-6);

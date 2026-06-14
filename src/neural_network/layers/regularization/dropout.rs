@@ -1,15 +1,12 @@
 //! Regularization layers (Dropout and SpatialDropout1D/2D/3D) plus the shared
-//! backward, output-shape, and masking helpers they share
+//! backward, output-shape, and masking helpers
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 
-/// Common backward pass shared by all dropout layers
-///
-/// Implements the backward logic used by every dropout variant (Dropout and
-/// SpatialDropout1D/2D/3D)
+/// Common backward pass shared by all dropout variants (Dropout and SpatialDropout1D/2D/3D)
 ///
 /// # Parameters
 ///
@@ -35,7 +32,7 @@ fn dropout_backward(
     layer_name: &'static str,
 ) -> Result<Tensor, Error> {
     if !training || rate == 0.0 {
-        // During inference or zero rate, pass the gradient through unchanged
+        // Inference or zero rate: pass the gradient through unchanged
         return Ok(grad_output.clone());
     }
 
@@ -44,7 +41,6 @@ fn dropout_backward(
         return Ok(Tensor::zeros(grad_output.raw_dim()));
     }
 
-    // Apply the same mask to the gradient
     if let Some(mask) = mask {
         let scale = 1.0 / (1.0 - rate);
         let grad_input = grad_output * mask * scale;
@@ -56,8 +52,8 @@ fn dropout_backward(
 
 /// Common output-shape formatting shared by all dropout layers
 ///
-/// Formats the input shape into a string representation, as the output shape
-/// equals the input shape for every dropout variant
+/// The output shape equals the input shape for every dropout variant, so this formats
+/// the input shape into a string representation
 ///
 /// # Parameters
 ///
@@ -83,8 +79,8 @@ fn dropout_output_shape(input_shape: &[usize]) -> String {
 
 /// Thresholds a random mask into a binary mask, in parallel or sequentially
 ///
-/// Used by all spatial dropout layers to convert a random mask into a binary
-/// mask based on the dropout rate. Larger masks use parallel computation
+/// Used by all spatial dropout layers to convert a random mask into a binary mask based
+/// on the dropout rate. Larger masks use parallel computation
 ///
 /// # Parameters
 ///
@@ -94,7 +90,6 @@ fn dropout_output_shape(input_shape: &[usize]) -> String {
 fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_threshold: usize) {
     let total_elements = mask_2d.len();
 
-    // Use parallel computation for large masks, sequential otherwise
     if total_elements >= parallel_threshold {
         mask_2d.par_mapv_inplace(|x| if x >= rate { 1.0 } else { 0.0 });
     } else {
@@ -103,23 +98,22 @@ fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_thr
 }
 
 /// Applies the per-channel inverted-dropout scale to a `[batch, channels, *spatial]` tensor
-/// without materializing the full mask.
+/// without materializing the full mask
 ///
 /// `channel_mask` holds one binary keep/drop value per `(batch, channel)` in row-major order
 /// (flat index `b * channels + c`), matching the contiguous `spatial`-length segments of a
 /// standard-layout input: segment `i` is `t[i * spatial .. (i + 1) * spatial]` and is scaled by
 /// `channel_mask[i] / (1 - rate)`. Used for both the forward output (`t = input`) and the
-/// backward input-gradient (`t = grad_output`), since both are the same elementwise scale.
+/// backward input-gradient (`t = grad_output`), since both are the same elementwise scale
 ///
-/// Each output element depends only on its own input element and its channel's scalar - there
-/// is no reduction - so the work splits into independent per-segment tasks and the `parallel`
-/// flag (taken from the element-count gate) never changes the result bits. The per-channel
-/// value broadcasts implicitly across the segment, so no input-sized mask is ever built or
-/// stored.
+/// Each output element depends only on its own input element and its channel's scalar (no
+/// reduction), so the work splits into independent per-segment tasks and the `parallel` flag
+/// (taken from the element-count gate) never changes the result bits. The per-channel value
+/// broadcasts implicitly across the segment, so no input-sized mask is ever built or stored
 ///
 /// Bit-identical to the explicit `t * broadcast(mask) * scale`: the mask is binary, so
 /// `(x * 1) * scale == x * (1 * scale)` and `(x * 0) * scale == x * (0 * scale)` both hold
-/// exactly.
+/// exactly
 fn spatial_dropout_scale(
     t: &Tensor,
     channel_mask: &[f32],
@@ -131,7 +125,7 @@ fn spatial_dropout_scale(
     let segment = total / n_segments;
     let scale = 1.0 / (1.0 - rate);
 
-    // Contiguous data lets the segments map onto fixed slices; standardize a non-contiguous view
+    // Contiguous data maps segments onto fixed slices; standardize a non-contiguous view
     let t_std = t.as_standard_layout();
     let src = t_std.as_slice().unwrap();
 
@@ -159,12 +153,14 @@ fn spatial_dropout_scale(
     out
 }
 
-/// Backward pass shared by the spatial-dropout layers: applies the stored per-channel mask to
-/// the gradient with [`spatial_dropout_scale`], without rebuilding a full-size mask.
+/// Backward pass shared by the spatial-dropout layers
+///
+/// Applies the stored per-channel mask to the gradient with [`spatial_dropout_scale`], without
+/// rebuilding a full-size mask
 ///
 /// Mirrors the early-return structure of [`dropout_backward`] (inference / `rate == 0`
 /// pass-through, `rate == 1` zeros, missing-mask error), but the stored `mask` is the small
-/// `[batch, channels]` per-channel mask rather than a full-shape one.
+/// `[batch, channels]` per-channel mask rather than a full-shape one
 fn spatial_dropout_backward(
     grad_output: &Tensor,
     mask: &Option<Tensor>,
@@ -195,8 +191,8 @@ fn spatial_dropout_backward(
 }
 
 /// Dropout layer for neural networks
-// `Dropout` lives in a `dropout` submodule beside the sibling spatial-dropout modules; the
-// repeated name is the intended file layout
+// `Dropout` lives in a `dropout` submodule beside the spatial-dropout modules; the repeated
+// name is the intended file layout
 #[allow(clippy::module_inception)]
 pub mod dropout;
 /// Spatial Dropout layer for 1D data
@@ -218,8 +214,8 @@ mod tests {
 
     /// Each output element of the per-channel scale depends only on its own input element and
     /// its channel's scalar (no reduction), so forcing serial vs parallel must be bitwise
-    /// identical - the gate is a pure performance knob. Covers segments shorter and longer
-    /// than typical chunking and a non-divisor segment count.
+    /// identical: the gate is a pure performance knob. Covers segments shorter and longer than
+    /// typical chunking and a non-divisor segment count
     #[test]
     fn spatial_dropout_scale_parallel_flag_invariant() {
         for &(n_seg, seg) in &[(7usize, 5usize), (64, 256), (33, 4096), (512, 17)] {

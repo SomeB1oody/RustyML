@@ -2,7 +2,7 @@
 //!
 //! Provides the [`DecisionTree`] estimator backed by the ID3, C4.5, and CART
 //! algorithms, along with its node types ([`Node`], [`NodeType`]), the
-//! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters.
+//! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters
 
 use crate::error::{Error, TreeError};
 use crate::machine_learning::validation::{
@@ -22,7 +22,7 @@ use indicatif::ProgressBar;
 /// Assumed average root-to-leaf walk length for the prediction parallel gate
 ///
 /// The fitted tree does not record its depth, so the traversal-work estimate
-/// (`samples x walk length`) uses this fixed stand-in; a grown CART tree on real data
+/// (`samples x walk length`) uses this fixed stand-in. A grown CART tree on real data
 /// typically walks 10-30 nodes per sample
 const DECISION_TREE_ASSUMED_DEPTH: usize = 16;
 
@@ -45,8 +45,8 @@ enum Split {
 /// Canonical string key for a categorical feature value
 ///
 /// Rounds to 6 decimal places so values that are equal in practice map to the same
-/// branch despite minor floating-point noise. The same key is used both to group
-/// samples during training and to route samples in [`Node`]'s `children` at predict time
+/// branch despite minor floating-point noise. The same key groups samples during
+/// training and routes samples in [`Node`]'s `children` at predict time
 fn category_key(value: f64) -> String {
     format!("{}", (value * 1e6).round() / 1e6)
 }
@@ -66,8 +66,7 @@ fn split_information(counts: &[f64], total: f64) -> f64 {
 
 /// Decision tree algorithm types
 ///
-/// Represents the different splitting criteria and impurity measures used in decision
-/// tree construction.
+/// The splitting criteria and impurity measures used in decision tree construction
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Algorithm {
     /// Iterative Dichotomiser 3: information gain (entropy) splitting, classification only
@@ -95,8 +94,8 @@ impl Algorithm {
 
     /// Impurity measure for a classification subset under this algorithm
     ///
-    /// CART uses Gini impurity; ID3 and C4.5 use entropy. (Regression always uses MSE,
-    /// which is independent of the algorithm and handled by the caller.)
+    /// CART uses Gini impurity; ID3 and C4.5 use entropy. Regression always uses MSE,
+    /// which is independent of the algorithm and handled by the caller
     fn classification_impurity(&self, y: &ArrayView1<f64>) -> f64 {
         match self {
             Algorithm::CART => gini(y),
@@ -108,7 +107,7 @@ impl Algorithm {
     /// number of samples on this side of a split
     ///
     /// Equivalent to [`classification_impurity`] (Gini for CART, entropy for ID3/C4.5) but
-    /// driven by running counts, which lets the numeric split search update impurity
+    /// driven by running counts, letting the numeric split search update impurity
     /// incrementally instead of re-scanning the label subset for every candidate threshold
     fn impurity_from_counts(&self, counts: &[f64], n_side: f64) -> f64 {
         match self {
@@ -141,8 +140,8 @@ impl Algorithm {
     /// counts of its partitions
     ///
     /// C4.5 normalizes the gain by split information (gain ratio) to curb the bias toward
-    /// features with many distinct values; ID3 and CART use the raw impurity decrease
-    /// Returns `None` when C4.5's split information is degenerate (~= 0), leaving the
+    /// features with many distinct values; ID3 and CART use the raw impurity decrease. It
+    /// returns `None` when C4.5's split information is degenerate (~= 0), leaving the
     /// caller to skip the split
     fn selection_score(&self, impurity_decrease: f64, counts: &[f64], total: f64) -> Option<f64> {
         match self {
@@ -155,9 +154,9 @@ impl Algorithm {
     }
 }
 
-/// Hyperparameters for controlling decision tree growth and complexity
+/// Hyperparameters controlling decision tree growth and complexity
 ///
-/// These parameters help prevent overfitting and control the tree structure during training.
+/// These parameters help prevent overfitting and shape the tree structure during training
 #[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
     /// Maximum depth of the tree. If `None`, nodes are expanded until all leaves are pure or
@@ -177,8 +176,6 @@ pub struct DecisionTreeParams {
 
 impl Default for DecisionTreeParams {
     /// Default hyperparameters for a decision tree
-    ///
-    /// Provides sensible defaults for a standard decision tree
     ///
     /// # Default Values
     ///
@@ -200,7 +197,7 @@ impl Default for DecisionTreeParams {
 
 /// Type of a node in the decision tree
 ///
-/// Distinguishes between internal decision nodes and leaf nodes that produce predictions.
+/// Distinguishes internal decision nodes from leaf nodes that produce predictions
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum NodeType {
     /// A decision node that splits data based on a feature
@@ -225,7 +222,7 @@ pub enum NodeType {
 
 /// A node in the decision tree structure
 ///
-/// Represents either an internal decision node or a leaf node, with connections to child nodes.
+/// Either an internal decision node or a leaf node, with connections to child nodes
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Node {
     /// The type of this node (Internal or Leaf), containing node-specific data
@@ -313,10 +310,10 @@ impl Node {
 
 /// Decision tree for classification and regression tasks
 ///
-/// Implements ID3, C4.5, and CART algorithms with parallel optimization using rayon.
-/// Supports both classification (with probability estimates) and regression tasks.
-/// The tree is built recursively by selecting the best split at each node based on
-/// impurity measures (Gini, entropy, or MSE) and various stopping criteria.
+/// Implements the ID3, C4.5, and CART algorithms with parallel optimization using rayon,
+/// and supports classification (with probability estimates) and regression. The tree is
+/// built recursively by selecting the best split at each node based on impurity measures
+/// (Gini, entropy, or MSE) and various stopping criteria
 ///
 /// # Examples
 ///
@@ -349,9 +346,9 @@ impl Node {
 /// // Get probability estimates for classification
 /// let probabilities = tree.predict_proba(&x_test).unwrap();
 ///
-/// // Categorical features: mark which columns hold discrete category codes.
+/// // Categorical features: mark which columns hold discrete category codes
 /// // ID3 and C4.5 then split them multi-way (one branch per distinct value),
-/// // which can separate classes a single binary threshold cannot.
+/// // which can separate classes a single binary threshold cannot
 /// let x_cat = array![[0.0], [0.0], [1.0], [1.0], [2.0], [2.0]];
 /// let y_cat = array![0.0, 0.0, 1.0, 1.0, 0.0, 0.0]; // value 1 -> class 1, values 0/2 -> class 0
 ///
@@ -408,17 +405,6 @@ impl DecisionTree {
     ///
     /// `min_samples_leaf` must not exceed `min_samples_split`; because the two are set
     /// independently, that cross-field constraint is checked at [`fit`](Self::fit) time
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{Algorithm, DecisionTree};
-    ///
-    /// let tree = DecisionTree::new(Algorithm::CART, true)
-    ///     .unwrap()
-    ///     .with_max_depth(5)
-    ///     .with_min_samples_split(4)
-    ///     .unwrap()
-    ///     .with_random_state(42);
-    /// ```
     pub fn new(algorithm: Algorithm, is_classifier: bool) -> Result<Self, Error> {
         // Validate algorithm compatibility with task type
         if !is_classifier && !algorithm.supports_regression() {
@@ -531,9 +517,9 @@ impl DecisionTree {
 
     /// Designates which feature columns are categorical
     ///
-    /// Categorical features are split multi-way (one branch per distinct value) by the
-    /// ID3 and C4.5 algorithms. CART always uses binary splits, so it ignores this
-    /// designation. This must be set before calling [`fit`](Self::fit)
+    /// The ID3 and C4.5 algorithms split categorical features multi-way (one branch per
+    /// distinct value), while CART always uses binary splits and ignores this
+    /// designation. Set this before calling [`fit`](Self::fit)
     ///
     /// # Parameters
     ///
@@ -588,8 +574,7 @@ impl DecisionTree {
     {
         preliminary_check(x, Some(y))?;
 
-        // min_samples_leaf and min_samples_split are set independently through the builder, so
-        // their cross-field constraint is enforced here at fit time
+        // Cross-field constraint: the two are set independently through the builder
         if self.params.min_samples_leaf > self.params.min_samples_split {
             return Err(Error::invalid_parameter(
                 "min_samples_leaf",
@@ -643,7 +628,6 @@ impl DecisionTree {
         #[cfg(feature = "show_progress")]
         let estimated_nodes = (1 << (estimated_max_depth + 1)) - 1;
 
-        // Create progress bar for tree building
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -667,7 +651,6 @@ impl DecisionTree {
             &progress_bar,
         )?));
 
-        // Finish progress bar
         #[cfg(feature = "show_progress")]
         progress_bar
             .finish_with_message(format!("{}", self.count_nodes(self.root.as_ref().unwrap())));
@@ -794,8 +777,8 @@ impl DecisionTree {
     /// Numeric features are evaluated as binary threshold splits. Features marked as
     /// categorical are evaluated as multi-way splits for ID3 and C4.5 (CART is always
     /// binary). Selection uses information gain (ID3/CART) or gain ratio (C4.5); the
-    /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule
-    /// Parallelizes when the sort work clears the calibrated sort-scan gate (see
+    /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule. The
+    /// search parallelizes when the sort work clears the calibrated sort-scan gate (see
     /// `crate::parallel_gates`)
     fn find_best_split<S>(
         &self,
@@ -840,10 +823,9 @@ impl DecisionTree {
 
     /// Picks the highest-scoring split candidate, resolving exact-score ties
     ///
-    /// With `rng == None` the last tied candidate wins, which preserves the previous `max_by`
-    /// tie-breaking and makes the parallel path deterministic. With `rng == Some`, a uniformly
-    /// random tied candidate is chosen - seeded, sklearn-style tie-breaking that is active only
-    /// when a local `random_state` or the global seed is set
+    /// With `rng == None` the last tied candidate wins, which makes the parallel path
+    /// deterministic. With `rng == Some`, a uniformly random tied candidate is chosen -
+    /// seeded tie-breaking active only when a local `random_state` or the global seed is set
     fn select_best_split(
         mut candidates: Vec<(f64, Split, f64)>,
         rng: &mut Option<StdRng>,
@@ -870,7 +852,7 @@ impl DecisionTree {
 
     /// Evaluates the best binary numeric split for a single feature
     ///
-    /// Returns `(selection_score, split, impurity_decrease)`, or `None` if no
+    /// Returns `(selection_score, split, impurity_decrease)`, or `None` when no
     /// impurity-reducing threshold exists
     fn evaluate_numeric_split<S>(
         &self,
@@ -951,9 +933,9 @@ impl DecisionTree {
                 consider(pos, imp_left, imp_right, &mut best_score, &mut best);
             }
         } else {
-            // Regression (CART/MSE): maintain running sum and sum of squares for the left side.
-            // Serial sums: this runs inside the per-feature parallel split search, and the
-            // prefix scan below is inherently sequential anyway
+            // Regression (CART/MSE): maintain a running sum and sum of squares for the left side
+            // The sums stay serial: this runs inside the per-feature parallel split search, and
+            // the prefix scan below is inherently sequential anyway
             let total_sum: f64 = order.iter().map(|&(_, idx)| y[idx]).sum();
             let total_sumsq: f64 = order.iter().map(|&(_, idx)| y[idx] * y[idx]).sum();
             let mut left_sum = 0.0;
@@ -996,8 +978,8 @@ impl DecisionTree {
 
     /// Evaluates a multi-way categorical split for a single feature (one branch per value)
     ///
-    /// Returns `(selection_score, split, impurity_decrease)`, or `None` if the feature
-    /// has fewer than two distinct values or the split does not reduce impurity
+    /// Returns `(selection_score, split, impurity_decrease)`, or `None` when the feature
+    /// has fewer than 2 distinct values or the split does not reduce impurity
     fn evaluate_categorical_split<S>(
         &self,
         x: &ArrayBase<S, Ix2>,
@@ -1018,7 +1000,7 @@ impl DecisionTree {
                 .push(idx);
         }
 
-        // A useful split needs at least two distinct values
+        // A useful split needs at least 2 distinct values
         if groups.len() < 2 {
             return None;
         }
@@ -1230,8 +1212,7 @@ impl DecisionTree {
         check_is_fitted(self.root.is_some(), "DecisionTree")?;
         validate_predict_input(x, self.n_features)?;
 
-        // Use parallel processing only when sample size exceeds threshold
-        // Tree-traversal class gate: one root-to-leaf walk per sample
+        // Tree-traversal gate: one root-to-leaf walk per sample
         let visit_work = x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH);
         let predictions: Result<Vec<f64>, Error> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS {
             x.axis_iter(Axis(0))
@@ -1311,7 +1292,6 @@ impl DecisionTree {
 
         let n_classes = self.n_classes.unwrap();
 
-        // Use parallel processing only when sample size exceeds threshold
         let probabilities: Result<Vec<Vec<f64>>, Error> =
             if x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH) >= TREE_TRAVERSAL_MIN_VISITS {
                 x.axis_iter(Axis(0))
@@ -1332,7 +1312,6 @@ impl DecisionTree {
 
         let probabilities = probabilities?;
 
-        // Convert Vec<Vec<f64>> to Array2<f64>
         let mut result = Array2::zeros((x.nrows(), n_classes));
         for (i, proba) in probabilities.iter().enumerate() {
             for (j, &p) in proba.iter().enumerate() {

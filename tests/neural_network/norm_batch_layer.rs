@@ -1,6 +1,6 @@
 //! Integration tests for BatchNormalization and LayerNormalization forward, eval,
 //! running-stats, and error-path behavior. Expected values come from the mathematical
-//! definition. Gradient correctness lives in tests/neural_network/gradient_check.rs
+//! definition; gradient correctness lives in tests/neural_network/gradient_check.rs
 
 use ndarray::ArrayD;
 use rustyml::error::{Error, NnError};
@@ -137,7 +137,7 @@ fn bn_train_output_has_batch_mean_zero_and_var_one() {
             "feature {feat}: batch mean too far from 0, got {mean}"
         );
         // var = sigma^2 / (sigma^2 + eps), which is < 1 but very close to 1;
-        // tolerance 5e-4 is generous enough for eps=1e-5 with typical values
+        // tolerance 5e-4 is generous for eps=1e-5 with typical values
         assert!(
             (var - 1.0).abs() < 5e-4,
             "feature {feat}: batch var too far from 1, got {var}"
@@ -170,7 +170,7 @@ fn bn_running_stats_update_after_one_forward() {
     let input_train = tensor2(vec![2.0f32, 4.0, 6.0, 8.0], 4, 1);
     let mut bn = BatchNormalization::new(vec![4, 1], 0.9, 1e-5).unwrap();
 
-    // Training forward; updates running stats
+    // Training forward updates running stats
     bn.forward(&input_train).unwrap();
 
     // Switch to eval and feed the declared shape [4,1]
@@ -190,7 +190,6 @@ fn bn_running_stats_update_after_one_forward() {
 /// In eval mode, BN normalizes with running_mean and running_var injected via set_weights
 #[test]
 fn bn_eval_uses_running_stats_from_set_weights() {
-    // Layer built for shape [2, 3]
     let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
 
     // Inject known running statistics and trivial gamma/beta
@@ -201,7 +200,6 @@ fn bn_eval_uses_running_stats_from_set_weights() {
     bn.set_weights(gamma, beta, running_mean, running_var)
         .unwrap();
 
-    // Switch to eval mode
     bn.set_training_if_mode_dependent(false);
 
     let input = tensor2(vec![1.0f32, 2.0, 3.0, 5.0, 8.0, 4.0], 2, 3);

@@ -23,11 +23,11 @@ use std::borrow::Cow;
 
 /// A 2D separable convolutional layer
 ///
-/// Implements depthwise separable convolution with a depthwise step followed by a pointwise step
-/// This reduces parameters and computation compared to standard convolution while maintaining
-/// similar performance. Input shape is \[batch_size, channels, height, width\], intermediate
-/// depthwise output shape is \[batch_size, channels * depth_multiplier, height', width'\], and
-/// final output shape is \[batch_size, filters, height', width'\]
+/// Implements depthwise separable convolution with a depthwise step followed by a pointwise step,
+/// this reduces parameters and computation compared to standard convolution while keeping similar
+/// performance. Input shape is \[batch_size, channels, height, width\], intermediate depthwise
+/// output shape is \[batch_size, channels * depth_multiplier, height', width'\], and final output
+/// shape is \[batch_size, filters, height', width'\]
 ///
 /// The separable convolution consists of:
 /// 1. Depthwise convolution: each input channel is convolved with its own set of filters
@@ -42,7 +42,7 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create a simple 4D input tensor: [batch_size, channels, height, width]
+/// // Create a 4D input tensor: [batch_size, channels, height, width]
 /// let x = Array4::ones((2, 3, 32, 32)).into_dyn();
 ///
 /// // Create target tensor
@@ -119,7 +119,7 @@ impl SeparableConv2D {
     /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
     /// [`SeparableConv2D::with_padding`]. Weights are seeded from the global seed or entropy by
     /// default; for reproducible initialization, set a seed with
-    /// [`SeparableConv2D::with_random_state`].
+    /// [`SeparableConv2D::with_random_state`]
     ///
     /// # Returns
     ///
@@ -188,9 +188,9 @@ impl SeparableConv2D {
     /// Sets the seed used to initialize the depthwise/pointwise weights and re-initializes them
     /// deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]),
+    /// this re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
+    /// assigning custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -216,7 +216,7 @@ impl SeparableConv2D {
     /// Xavier/Glorot uniform initialization of the depthwise and pointwise weight tensors
     ///
     /// Both draws share one RNG (threaded depthwise-then-pointwise) so a given seed reproduces the
-    /// exact same pair of tensors.
+    /// exact same pair of tensors
     fn init_weights_arrays(
         filters: usize,
         channels: usize,
@@ -321,7 +321,6 @@ impl SeparableConv2D {
         output
     }
 
-    /// Computes the depthwise convolution for a single batch element
     /// Computes one depthwise output plane for a single (batch item, input channel,
     /// depth-multiplier) combination - the per-task unit of the depthwise stage
     fn compute_depthwise_channel(
@@ -336,7 +335,7 @@ impl SeparableConv2D {
         let (kh_size, kw_size) = self.kernel_size;
         let in_w = input.shape()[3];
 
-        // Direct convolution over the flat channel and kernel buffers - no per-element 4-D dynamic
+        // Direct convolution over the flat channel and kernel buffers, no per-element 4-D dynamic
         // indexing. The output geometry guarantees the kernel window fits, so no boundary clamp is
         // needed
         let channel = input.slice(s![b, c, .., ..]);
@@ -373,7 +372,7 @@ impl SeparableConv2D {
     ///
     /// A 1x1 convolution is a per-position cross-channel matrix multiply, so this delegates to the
     /// shared [`conv_forward`] engine (im2col + gemm) rather than a hand-rolled loop nest. The
-    /// pointwise weights `[filters, C*dm, 1, 1]` are already the engine's flat `[F, Cin, k...]`
+    /// pointwise weights `[filters, C*dm, 1, 1]` already match the engine's flat `[F, Cin, k...]`
     /// layout, and the bias `[1, filters]` is its per-filter `[F]` vector
     fn pointwise_convolve(&self, input: &Tensor) -> Tensor {
         conv_forward(
@@ -416,8 +415,8 @@ impl SeparableConv2D {
     /// Calculates the symmetric zero-padding (total height/width pad) for the depthwise stage
     ///
     /// Returns `(0, 0)` for `Valid` padding. For `Same`, returns the total padding along each
-    /// spatial axis required so a stride-`s` convolution yields the given output size; the
-    /// padding is split with `pad / 2` on the leading edge (see [`pad_tensor_4d_spatial`])
+    /// spatial axis required so a stride-`s` convolution yields the given output size; the padding
+    /// is split with `pad / 2` on the leading edge (see [`pad_tensor_4d_spatial`])
     fn calculate_padding(
         &self,
         input_height: usize,

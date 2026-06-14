@@ -29,7 +29,7 @@ fn test_entropy_empty() {
     assert_abs_diff_eq!(entropy(&labels), 0.0, epsilon = 1e-10);
 }
 
-/// Four uniform classes (p=0.25 each) have entropy 2.0 bits
+/// 4 uniform classes (p=0.25 each) have entropy 2.0 bits
 #[test]
 fn test_entropy_four_uniform_classes() {
     let labels = array![0.0_f64, 1.0, 2.0, 3.0];
@@ -56,7 +56,7 @@ fn test_entropy_non_negative() {
     }
 }
 
-/// Three classes with counts 2:1:1 (p = 0.5, 0.25, 0.25) have entropy 1.5
+/// 3 classes with counts 2:1:1 (p = 0.5, 0.25, 0.25) have entropy 1.5
 #[test]
 fn test_entropy_three_classes_unequal() {
     let labels = array![0.0_f64, 0.0, 1.0, 2.0];
@@ -86,7 +86,7 @@ fn test_gini_empty() {
     assert_abs_diff_eq!(gini(&labels), 0.0, epsilon = 1e-10);
 }
 
-/// Four uniform classes (p=0.25 each) have gini 0.75
+/// 4 uniform classes (p=0.25 each) have gini 0.75
 #[test]
 fn test_gini_four_uniform_classes() {
     let labels = array![0.0_f64, 1.0, 2.0, 3.0];
@@ -114,7 +114,7 @@ fn test_gini_value_range() {
     }
 }
 
-/// Three classes with counts 2:1:1 (p = 0.5, 0.25, 0.25) have gini 0.625
+/// 3 classes with counts 2:1:1 (p = 0.5, 0.25, 0.25) have gini 0.625
 #[test]
 fn test_gini_three_classes_unequal() {
     let labels = array![0.0_f64, 0.0, 1.0, 2.0];
@@ -545,7 +545,7 @@ fn test_logistic_loss_non_negative() {
     assert!(logistic_loss(&logits, &labels) >= 0.0);
 }
 
-/// Three samples average to the mean of two ln(1+e^-1) terms and one ln(2)
+/// 3 samples average to the mean of two ln(1+e^-1) terms and one ln(2)
 #[test]
 fn test_logistic_loss_three_samples() {
     let logits = array![1.0_f64, -1.0, 0.0];

@@ -206,7 +206,6 @@ fn test_fit_produces_two_centers_near_true_means() {
 
     let centers = ms.get_cluster_centers().unwrap();
 
-    // Must discover exactly 2 clusters
     assert_eq!(
         centers.nrows(),
         2,
@@ -383,7 +382,6 @@ fn test_cluster_all_true_never_produces_outlier_label() {
         "cluster_all=true should never produce outlier label {}, got {}",
         n_clusters, preds[0]
     );
-    // Must be a valid cluster index
     assert!(preds[0] < n_clusters);
 }
 
@@ -451,7 +449,6 @@ fn test_n_samples_per_center_sums_equal_seeds_processed() {
     let counts = ms.get_n_samples_per_center().unwrap();
     let centers = ms.get_cluster_centers().unwrap();
 
-    // There must be as many count entries as cluster centers
     assert_eq!(counts.len(), centers.nrows());
 
     // The total number of seed-center assignments must not exceed n_samples (10)
@@ -722,7 +719,6 @@ fn test_save_load_round_trip_identical_predictions() {
     let centers_loaded = loaded.get_cluster_centers().unwrap();
     crate::common::assert_allclose(centers_original, centers_loaded, 1e-15);
 
-    // Clean up temp file
     let _ = std::fs::remove_file(path);
 }
 

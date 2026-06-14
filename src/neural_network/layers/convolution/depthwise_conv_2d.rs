@@ -132,7 +132,7 @@ impl DepthwiseConv2D {
     /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
     /// [`DepthwiseConv2D::with_padding`]. Weights are seeded from the global seed or entropy by
     /// default; for reproducible initialization, set a seed with
-    /// [`DepthwiseConv2D::with_random_state`].
+    /// [`DepthwiseConv2D::with_random_state`]
     ///
     /// # Returns
     ///
@@ -200,9 +200,9 @@ impl DepthwiseConv2D {
 
     /// Sets the seed used to initialize the depthwise weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
-    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]). This
+    /// re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before assigning
+    /// custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -223,7 +223,6 @@ impl DepthwiseConv2D {
         random_state: Option<u64>,
     ) -> Array4<f32> {
         let (kernel_height, kernel_width) = kernel_size;
-        // Xavier (Glorot) uniform init
         let fan = kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
@@ -331,7 +330,7 @@ impl DepthwiseConv2D {
             };
 
         if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
-            // Parallel over (batch item, channel) - a single large image still uses every core
+            // Parallel over (batch item, channel): a single large image still uses every core
             output
                 .axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -380,9 +379,9 @@ impl DepthwiseConv2D {
         let (kh_size, kw_size) = kernel_size;
         let padded_w = padded_input.shape()[1];
 
-        // Direct convolution over the flat contiguous buffers: each output is an in-place
-        // multiply-accumulate over the kernel window, with no per-position temporary array or
-        // view (the output geometry guarantees every window fits, so no bounds guard is needed)
+        // Direct convolution over the flat contiguous buffers: each output is a multiply-accumulate
+        // over the kernel window, with no per-position temporary. The output geometry guarantees
+        // every window fits, so no bounds guard is needed
         let src = padded_input
             .as_slice()
             .expect("padded channel plane is contiguous");
@@ -414,10 +413,11 @@ impl DepthwiseConv2D {
         channel_output
     }
 
-    /// Computes weight and input gradients for a single batch
-    /// Gradients for one `(batch item, channel)` pair: the depthwise channels are independent
-    /// (channel `c` only touches filter `c`), so this is the natural task granularity - a single
-    /// large image parallelizes across its channels even at batch == 1
+    /// Computes weight and input gradients for one `(batch item, channel)` pair
+    ///
+    /// The depthwise channels are independent (channel `c` only touches filter `c`), so this is the
+    /// natural task granularity: a single large image parallelizes across its channels even at
+    /// batch == 1
     #[allow(clippy::too_many_arguments)]
     fn compute_channel_gradients(
         &self,
@@ -458,9 +458,8 @@ impl DepthwiseConv2D {
             .expect("kernel is contiguous after to_owned");
 
         // Single pass over output positions accumulates both gradients directly on the flat
-        // buffers - no strided slices and no per-tap temporary arrays. For each output `(oh, ow)`
-        // the kernel window contributes `src * grad` to the weight gradient and `kernel * grad` to
-        // the padded input gradient at the same offset
+        // buffers. For each output `(oh, ow)` the kernel window contributes `src * grad` to the
+        // weight gradient and `kernel * grad` to the padded input gradient at the same offset
         let mut weight_grad = vec![0.0f32; kh_size * kw_size];
         let mut input_grad_padded = vec![0.0f32; padded_height * padded_width];
         for oh in 0..output_height {
@@ -516,7 +515,6 @@ impl Layer for DepthwiseConv2D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Apply activation backward pass
         let activated = self
             .output_cache
             .take()
@@ -544,7 +542,6 @@ impl Layer for DepthwiseConv2D {
             grad_upstream.shape()[3],
         );
 
-        // Initialize gradients
         let mut weight_grads = Array4::zeros(self.weights.raw_dim());
         let mut bias_grads = Array1::zeros(self.bias.raw_dim());
         let mut input_grads = Array4::zeros((batch_size, channels, input_height, input_width));

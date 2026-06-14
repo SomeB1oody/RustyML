@@ -39,7 +39,7 @@ use crate::neural_network::traits::Layer;
 /// // Forward propagation
 /// let output = model.predict(&x);
 ///
-/// // Output will be probability distributions that sum to 1.0 for each batch
+/// // Output is a probability distribution that sums to 1.0 for each batch
 /// ```
 #[derive(Debug)]
 pub struct Softmax {

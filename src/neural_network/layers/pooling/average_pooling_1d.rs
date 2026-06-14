@@ -60,7 +60,7 @@ use crate::neural_network::traits::Layer;
 /// assert_eq!(output.shape(), &[2, 3, 4]);
 ///
 /// // Verify correctness of pooling results
-/// // For window size of 2 and stride of 2, we expect the average of elements in each window
+/// // For window size of 2 and stride of 2, the average of elements in each window
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         // First window (0,1) -> average should be (0+1)/2 = 0.5
@@ -99,7 +99,7 @@ impl AveragePooling1D {
     /// # Notes
     ///
     /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
-    /// them with [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`].
+    /// them with [`AveragePooling1D::with_stride`] and [`AveragePooling1D::with_padding`]
     ///
     /// # Returns
     ///
@@ -111,7 +111,6 @@ impl AveragePooling1D {
     /// - [`Error::InvalidInput`] if `input_shape` contains non-positive dimensions
     /// - [`Error::InvalidParameter`] if `pool_size` is zero or larger than the input length
     pub fn new(pool_size: usize, input_shape: Vec<usize>) -> Result<Self, Error> {
-        // input validation
         validate_input_shape_dims(&input_shape, 3, "AveragePooling1D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_1d(pool_size, input_shape[2])?;
@@ -157,12 +156,11 @@ impl AveragePooling1D {
 
 impl Layer for AveragePooling1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Cache the actual input shape for backward (only the shape is needed for averaging)
+        // Average pooling only needs the input shape to redistribute gradients in backward
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -177,7 +175,6 @@ impl Layer for AveragePooling1D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }

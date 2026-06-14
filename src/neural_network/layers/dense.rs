@@ -19,8 +19,8 @@ use std::borrow::Cow;
 /// is (batch_size, input_dim) and output shape is (batch_size, output_dim)
 ///
 /// Weights are initialized with Xavier/Glorot initialization and biases start at zeros. During
-/// training, the layer stores intermediate values for backpropagation and supports multiple
-/// optimization algorithms including SGD, Adam, and RMSprop
+/// training, the layer caches intermediate values for backpropagation and supports SGD, Adam,
+/// and RMSprop optimizers
 ///
 /// # Examples
 ///
@@ -31,7 +31,7 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::optimizers::SGD;
 /// use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 ///
-/// // Create input and target tensors, assuming input dimension is 4, output dimension is 3, batch_size = 2
+/// // Create input and target tensors: input dim 4, output dim 3, batch_size 2
 /// let x = Array::ones((2, 4)).into_dyn();
 /// let y = Array::ones((2, 1)).into_dyn();
 ///
@@ -41,13 +41,13 @@ use std::borrow::Cow;
 ///     .add(Dense::new(3, 1, Activation::ReLU).unwrap());
 /// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Print model structure (summary)
+/// // Print model structure
 /// model.summary();
 ///
 /// // Train the model
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
+/// // Run forward prediction
 /// let prediction = model.predict(&x);
 /// println!("Prediction results: {:?}", prediction);
 /// ```
@@ -86,7 +86,7 @@ impl Dense {
     /// # Notes
     ///
     /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`Dense::with_random_state`].
+    /// initialization, set a seed with [`Dense::with_random_state`]
     ///
     /// # Returns
     ///
@@ -126,9 +126,9 @@ impl Dense {
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// assigning custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -181,20 +181,19 @@ impl Dense {
 
 impl Layer for Dense {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 2D
         if input.ndim() != 2 {
             return Err(Error::invalid_input("input tensor is not 2D"));
         }
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Input shape is [batch_size, input_dim]
+        // Cache input [batch_size, input_dim] for the backward pass
         self.input_cache = Some(input_2d.to_owned());
 
         // Linear transform (block-parallel for large products)
         let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
 
-        // Apply activation and cache the activated output for backpropagation
+        // Cache the activated output for backpropagation
         let output = self.activation.forward(&z.into_dyn())?;
         self.output_cache = Some(output.clone());
         Ok(output)
@@ -202,7 +201,6 @@ impl Layer for Dense {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 2D
         if input.ndim() != 2 {
             return Err(Error::invalid_input("input tensor is not 2D"));
         }
@@ -212,7 +210,6 @@ impl Layer for Dense {
         // Linear transform (block-parallel for large products)
         let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
 
-        // Apply activation
         self.activation.forward(&z.into_dyn())
     }
 
@@ -222,7 +219,7 @@ impl Layer for Dense {
             .output_cache
             .take()
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
-        // Guard the activation backward
+        // Upstream gradient must match the cached output shape
         if grad_output.shape() != activated.shape() {
             return Err(Error::shape_mismatch(
                 activated.shape(),
@@ -231,7 +228,7 @@ impl Layer for Dense {
         }
         let grad_upstream = self.activation.backward(&activated, grad_output)?;
 
-        // Gradient as a 2D array with shape [batch_size, output_dim]
+        // Reshape the upstream gradient to 2D [batch_size, output_dim]
         let grad_upstream_2d = grad_upstream
             .into_dimensionality::<ndarray::Ix2>()
             .map_err(|_| {
@@ -249,7 +246,7 @@ impl Layer for Dense {
         // Weight gradients
         let grad_w = gemm_internal(&input.t(), &grad_upstream_2d);
 
-        // Calculate bias gradients by summing over batch dimension
+        // Bias gradients: sum over the batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Store gradients in a contiguous layout for `parameters()`

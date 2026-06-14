@@ -9,9 +9,9 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
 /// Applies the logistic sigmoid to an array. Used by both GRU and LSTM gates
 ///
-/// `1/(1 + e^-x)` is correct and finite for any finite `x` (when `e^-x` overflows to `+inf` the
-/// result is the exact limit `0`), and it saturates to `1`/`0` at `±inf`, so no input clamping is
-/// needed; the only non-finite output comes from a `NaN` input, which propagates
+/// `1/(1 + e^-x)` is finite for any finite `x` (when `e^-x` overflows to `+inf` the result is the
+/// exact limit `0`), and it saturates to `1`/`0` at `+/-inf`, so no input clamping is needed. The
+/// only non-finite output comes from a `NaN` input, which propagates
 #[inline]
 fn apply_sigmoid(arr: Array2<f32>) -> Array2<f32> {
     arr.mapv(|x| 1.0 / (1.0 + (-x).exp()))
@@ -148,7 +148,7 @@ mod tests {
         assert_abs_diff_eq!(output[[0, 0]], 0.0_f32, epsilon = 1e-6);
     }
 
-    /// Output stays finite even for ±inf and huge-magnitude inputs (no clamp needed)
+    /// Output stays finite even for +/-inf and huge-magnitude inputs (no clamp needed)
     #[test]
     fn apply_sigmoid_no_nan_or_inf() {
         let input = array![[

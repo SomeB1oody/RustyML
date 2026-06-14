@@ -859,7 +859,7 @@ where
 ///
 /// let y_true = array![0, 1, 2];
 /// let y_prob = arr2(&[[0.7, 0.2, 0.1], [0.3, 0.3, 0.4], [0.1, 0.5, 0.4]]);
-/// // Every true class is within the two most probable, so top-2 accuracy is 1.0.
+/// // Every true class is within the two most probable, so top-2 accuracy is 1.0
 /// assert!((top_k_accuracy(&y_true, &y_prob, 2) - 1.0).abs() < 1e-12);
 /// ```
 pub fn top_k_accuracy<S1, S2>(

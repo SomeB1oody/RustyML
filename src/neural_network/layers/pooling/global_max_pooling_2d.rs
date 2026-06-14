@@ -13,6 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global max pooling layer for 2D inputs
 ///
 /// Selects the maximum value across the height and width dimensions
+///
 /// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
 /// `[batch_size, channels]`
 ///
@@ -41,7 +42,7 @@ use crate::neural_network::traits::Layer;
 /// // Check output shape - should be [3, 4]
 /// assert_eq!(output.shape(), &[3, 4]);
 ///
-/// // Since all input values are 1.0, all output values should also be 1.0
+/// // Since all input values are 1.0, all output values should also be 1.0 too
 /// for b in 0..3 {
 ///     for c in 0..4 {
 ///         assert_relative_eq!(output[[b, c]], 1.0);

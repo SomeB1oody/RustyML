@@ -3,8 +3,7 @@
 //! Each optimizer's per-parameter math lives here as a single function operating on `&mut [f32]`
 //! parameter data plus `&[f32]` gradients (and any optimizer state slices). Because every layer
 //! exposes its parameters as flat slices via [`Layer::parameters`](crate::neural_network::traits::Layer::parameters),
-//! these kernels work for any parameter shape, replacing the previous per-shape, per-optimizer
-//! state structs and update implementations
+//! these kernels work for any parameter shape
 
 use crate::parallel_gates::FUSED_SLICE_PARALLEL_THRESHOLD;
 use rayon::prelude::*;
@@ -14,6 +13,15 @@ use std::borrow::Cow;
 ///
 /// Returns a borrow of the original gradient when `grad_scale == 1.0` (the no-clip case), so the
 /// common path allocates nothing; only an active clip (`grad_scale < 1.0`) materializes a scaled copy
+///
+/// # Parameters
+///
+/// - `grad` - the gradient slice to scale
+/// - `grad_scale` - the scaling factor; `1.0` means no clipping
+///
+/// # Returns
+///
+/// - `Cow<[f32]>` - a borrow of `grad` when `grad_scale == 1.0`, otherwise an owned scaled copy
 pub fn scaled_grad(grad: &[f32], grad_scale: f32) -> Cow<'_, [f32]> {
     if grad_scale == 1.0 {
         Cow::Borrowed(grad)
@@ -23,6 +31,12 @@ pub fn scaled_grad(grad: &[f32], grad_scale: f32) -> Cow<'_, [f32]> {
 }
 
 /// SGD update: `param -= lr * grad`
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to update in place
+/// - `grad` - the gradient slice
+/// - `lr` - the learning rate
 pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
     if param.len() >= FUSED_SLICE_PARALLEL_THRESHOLD {
         param
@@ -36,13 +50,22 @@ pub fn sgd_step(param: &mut [f32], grad: &[f32], lr: f32) {
     }
 }
 
-/// SGD with (optionally Nesterov) momentum. `velocity` is the per-parameter momentum buffer
+/// SGD with (optionally Nesterov) momentum
 ///
 /// ```text
 /// v = momentum*v + grad
 /// step = if nesterov { grad + momentum*v } else { v }
 /// param -= lr * step
 /// ```
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to update in place
+/// - `grad` - the gradient slice
+/// - `velocity` - the per-parameter momentum buffer, updated in place
+/// - `lr` - the learning rate
+/// - `momentum` - the momentum factor
+/// - `nesterov` - whether to use the Nesterov look-ahead step
 pub fn sgd_momentum_step(
     param: &mut [f32],
     grad: &[f32],
@@ -69,13 +92,20 @@ pub fn sgd_momentum_step(
     }
 }
 
-/// Decoupled (AdamW/SGDW-style) weight decay: shrinks each parameter toward zero by the factor
-/// `(1 - lr * weight_decay)`, independent of the gradient. A no-op when `weight_decay == 0`
+/// Decoupled (AdamW/SGDW-style) weight decay
 ///
-/// Apply this *before* the optimizer's gradient step so the shrink uses the pre-step parameter,
-/// matching the AdamW formulation `θ ← θ - lr*(update + wd*θ)`. "Decoupled" means the penalty acts
-/// directly on the weights rather than being folded into the gradient (where an adaptive optimizer
-/// would rescale it inconsistently)
+/// Shrinks each parameter toward zero by the factor `(1 - lr * weight_decay)`, independent of the
+/// gradient. A no-op when `weight_decay == 0`. Apply this *before* the optimizer's gradient step so
+/// the shrink uses the pre-step parameter, matching the AdamW formulation
+/// `theta <- theta - lr*(update + wd*theta)`. "Decoupled" means the penalty acts directly on the
+/// weights rather than being folded into the gradient (where an adaptive optimizer would rescale it
+/// inconsistently)
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to shrink in place
+/// - `lr` - the learning rate
+/// - `weight_decay` - the decay coefficient; `0` skips the shrink
 pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
     if weight_decay == 0.0 {
         return;
@@ -97,6 +127,16 @@ pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
 /// it flows through Adam's moment estimates and is rescaled by the adaptive denominator (the
 /// classic `Adam(weight_decay=...)` behavior, as opposed to `AdamW`). Only called when
 /// `weight_decay != 0`, so it always allocates the combined buffer
+///
+/// # Parameters
+///
+/// - `grad` - the gradient slice
+/// - `param` - the pre-step parameter slice
+/// - `weight_decay` - the L2 coefficient
+///
+/// # Returns
+///
+/// - `Vec<f32>` - the combined gradient `grad + weight_decay * param`
 pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Vec<f32> {
     grad.iter()
         .zip(param)
@@ -106,13 +146,23 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 
 /// Adam update with bias correction at timestep `t`
 ///
-/// `m`/`v` are the first/second moment buffers for this parameter (same length as `param`)
-///
 /// ```text
 /// m = beta1*m + (1-beta1)*g
 /// v = beta2*v + (1-beta2)*g^2
 /// param -= lr * (m / (1-beta1^t)) / (sqrt(v / (1-beta2^t)) + epsilon)
 /// ```
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to update in place
+/// - `grad` - the gradient slice
+/// - `m` - the first-moment buffer (same length as `param`), updated in place
+/// - `v` - the second-moment buffer (same length as `param`), updated in place
+/// - `lr` - the learning rate
+/// - `beta1` - the first-moment decay rate
+/// - `beta2` - the second-moment decay rate
+/// - `epsilon` - the denominator stabilizer
+/// - `t` - the 1-based timestep used for bias correction
 #[allow(clippy::too_many_arguments)]
 pub fn adam_step(
     param: &mut [f32],
@@ -157,12 +207,19 @@ pub fn adam_step(
 
 /// RMSprop update
 ///
-/// `cache` is the running average of squared gradients for this parameter
-///
 /// ```text
 /// cache = rho*cache + (1-rho)*g^2
 /// param -= lr * g / (sqrt(cache) + epsilon)
 /// ```
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to update in place
+/// - `grad` - the gradient slice
+/// - `cache` - the running average of squared gradients, updated in place
+/// - `rho` - the decay rate for the squared-gradient average
+/// - `lr` - the learning rate
+/// - `epsilon` - the denominator stabilizer
 pub fn rmsprop_step(
     param: &mut [f32],
     grad: &[f32],
@@ -191,12 +248,18 @@ pub fn rmsprop_step(
 
 /// AdaGrad update
 ///
-/// `accumulator` is the running sum of squared gradients for this parameter
-///
 /// ```text
 /// accumulator += g^2
 /// param -= lr * g / (sqrt(accumulator) + epsilon)
 /// ```
+///
+/// # Parameters
+///
+/// - `param` - the parameter slice to update in place
+/// - `grad` - the gradient slice
+/// - `accumulator` - the running sum of squared gradients, updated in place
+/// - `lr` - the learning rate
+/// - `epsilon` - the denominator stabilizer
 pub fn adagrad_step(
     param: &mut [f32],
     grad: &[f32],
@@ -510,8 +573,7 @@ mod tests {
         let expected_param = 1.0_f32 - 0.01_f32 * (-0.5_f32) / (0.25_f32.sqrt() + 1e-8_f32);
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
-    // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: uniform inputs
-    // of length FUSED_SLICE_PARALLEL_THRESHOLD must make the rayon branch produce the documented update
+    // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: length FUSED_SLICE_PARALLEL_THRESHOLD forces the rayon branch
 
     /// Adam parallel path (1024 elements) applies the canonical t=1-from-zero update everywhere
     #[test]

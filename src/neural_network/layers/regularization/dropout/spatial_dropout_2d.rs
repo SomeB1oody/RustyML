@@ -41,7 +41,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Create input tensor (batch_size=32, channels=64, height=28, width=28)
 /// let input = Array4::ones((32, 64, 28, 28)).into_dyn();
 ///
-/// // During training, approximately 20% of channels will be set to 0
+/// // During training, ~20% of channels will be set to 0
 /// let output = spatial_dropout.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -66,14 +66,14 @@ impl SpatialDropout2D {
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor `(batch_size, channels, height, width)`
     ///
-    /// # Notes
-    ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`SpatialDropout2D::with_random_state`].
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - New SpatialDropout2D layer instance or a validation error
+    ///
+    /// # Notes
+    ///
+    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
+    /// set a seed with [`SpatialDropout2D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -93,7 +93,7 @@ impl SpatialDropout2D {
     /// Sets the seed for reproducible mask sampling
     ///
     /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`.
+    /// re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///

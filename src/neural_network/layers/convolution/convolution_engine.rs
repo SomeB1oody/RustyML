@@ -1,9 +1,9 @@
 //! Dimension-generic convolution engine shared by `Conv1D`, `Conv2D`, and `Conv3D`
 //!
-//! A plain convolution is the same operation at every rank - only the number of spatial axes
-//! changes - so one implementation, generic over the spatial rank `R = ndim - 2`, serves all
-//! three layers. The layer wrappers keep their public API, weight storage, activation, and caches;
-//! they delegate just the numeric forward/backward to [`conv_forward`] and [`conv_backward`]
+//! A plain convolution is the same operation at every rank; only the number of spatial axes
+//! changes. One implementation, generic over the spatial rank `R = ndim - 2`, serves all 3
+//! layers. The layer wrappers keep their public API, weight storage, activation, and caches; they
+//! delegate just the numeric forward/backward to [`conv_forward`] and [`conv_backward`]
 //!
 //! # Conventions
 //!
@@ -15,10 +15,10 @@
 //! # Layout
 //!
 //! Tensors are `[batch, channels, spatial...]`; weights are flat row-major `[F, Cin, k...]`. The
-//! forward pass parallelizes over `(batch item, output-position block)` tasks - splitting the
-//! output positions lets a single large image use every core even at `batch == 1` - with each
-//! task building its own im2col block and GEMM, writing a disjoint output region. The backward
-//! pass parallelizes over batch items (their weight/bias partials are reduced in batch order, so
+//! forward pass parallelizes over `(batch item, output-position block)` tasks. Splitting the
+//! output positions lets a single large image use every core even at `batch == 1`, with each task
+//! building its own im2col block and GEMM, writing a disjoint output region. The backward pass
+//! parallelizes over batch items (their weight/bias partials are reduced in batch order, so
 //! results do not depend on the thread count) and routes its two GEMMs through
 //! [`gemm_internal`](crate::math::matmul::gemm_internal) so a small batch still spreads the
 //! GEMM work
@@ -31,15 +31,16 @@ use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
 /// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin*k`) at or above which an engine
-/// pass runs in parallel. Counting FLOPs rather than output elements keeps the gate meaningful
-/// across kernel sizes and channel counts (an output-element count would rate a `7x7x512` and a
-/// `3x3x3` convolution identically). Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md:
-/// the measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
+/// pass runs in parallel
+///
+/// Counting FLOPs rather than output elements keeps the gate meaningful across kernel sizes and
+/// channel counts (an output-element count would rate a `7x7x512` and a `3x3x3` convolution
+/// identically). The measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
 const CONV_PARALLEL_MIN_FLOPS: usize = 4_000_000;
 
-/// Minimum output-position columns per forward task: each task's GEMM re-packs the weight matrix,
-/// so blocks need enough columns to amortize that (set alongside `PAR_GEMM_MIN_BLOCK`, whose
-/// calibrated 16-64 plateau covers the same packing trade-off; see benches/RESULTS.md)
+/// Minimum output-position columns per forward task
+///
+/// Each task's GEMM re-packs the weight matrix, so blocks need enough columns to amortize that
 const CONV_MIN_CHUNK_COLS: usize = 64;
 
 /// Analytic gradients returned by [`conv_backward`]
@@ -87,9 +88,8 @@ where
     }
 }
 
-/// Per-spatial-axis output size, leading padding, and padded size for the given padding mode
-/// Output spatial sizes, per-axis leading padding, and padded spatial sizes — the geometry a
-/// convolution pass needs (`(out_sp, pad_before, padded_sp)`)
+/// Geometry a convolution pass needs: output spatial sizes, per-axis leading padding, and padded
+/// spatial sizes, as `(out_sp, pad_before, padded_sp)`
 type ConvGeometry = (Vec<usize>, Vec<usize>, Vec<usize>);
 
 fn conv_geometry(
@@ -161,6 +161,7 @@ fn build_padded(
 }
 
 /// Inverse of [`build_padded`]: gathers the unpadded `[bc, sp...]` region out of a padded buffer
+///
 /// Used to crop the input-gradient back to the original spatial size after col2im
 fn crop_padded(
     padded: &[f32],
@@ -195,7 +196,8 @@ fn crop_padded(
     out
 }
 
-/// Flat padded-plane offsets for im2col/col2im, laid out `[k_plane, out_plane]`:
+/// Flat padded-plane offsets for im2col/col2im, laid out `[k_plane, out_plane]`
+///
 /// `offsets[kk * out_plane + o]` is the index, within a single padded channel-plane, that output
 /// position `o` reads for kernel tap `kk`. Independent of batch and channel, so it is computed once
 /// and reused for every im2col gather and every col2im scatter
@@ -250,10 +252,11 @@ struct ColContext<'a> {
     offsets: &'a [usize],
 }
 
-/// im2col for one batch item, restricted to the output positions `[c0, c1)`: gathers the padded
-/// data into a `[Cin*k_plane, c1-c0]` row-major matrix whose rows align with the flat weight
-/// matrix `[F, Cin*k_plane]`. Pass the full `[0, out_plane)` range for the whole item; a sub-range
-/// is one forward task's column block
+/// im2col for one batch item, restricted to the output positions `[c0, c1)`
+///
+/// Gathers the padded data into a `[Cin*k_plane, c1-c0]` row-major matrix whose rows align with
+/// the flat weight matrix `[F, Cin*k_plane]`. Pass the full `[0, out_plane)` range for the whole
+/// item; a sub-range is one forward task's column block
 fn build_col_range(ctx: &ColContext, b: usize, c0: usize, c1: usize) -> Vec<f32> {
     let cols = c1 - c0;
     let mut col = vec![0.0f32; ctx.cin * ctx.k_plane * cols];
@@ -283,9 +286,10 @@ pub(super) fn conv_forward(
     conv_forward_impl(input, weights, weight_shape, bias, strides, padding, None)
 }
 
-/// `conv_forward` with an optional override of the parallel/serial gate decision, so the
-/// calibration bench can time both paths on either side of the gate. Reachable outside the crate
-/// only through `bench_internals`
+/// `conv_forward` with an optional override of the parallel/serial gate decision, so a bench can
+/// time both paths on either side of the gate
+///
+/// Reachable outside the crate only through `bench_internals`
 pub fn conv_forward_impl(
     input: &Tensor,
     weights: &[f32],
@@ -461,7 +465,7 @@ pub(super) fn conv_backward(
         let wg = gemm_internal(&g_mat, &col_mat.t()); // [F, Cin*k]
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
-        // Input gradient:
+        // Input gradient
         let dcol = gemm_internal(&w_mat.t(), &g_mat); // [Cin*k, out_plane]
         let dcol = dcol
             .as_slice()

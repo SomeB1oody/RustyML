@@ -21,37 +21,32 @@ use rayon::iter::{
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which forward/backward switch from sequential to parallel.
+/// Total-element count above which forward/backward switch from sequential to parallel
 ///
-/// Mapped by analogy from the calibrated multi-stream (adam-like) elementwise class - the
-/// centering/variance/normalize passes stream several arrays like a fused optimizer step does
-/// (crossover bracket 256K-1M elements) - rather than measured directly on this layer.
-/// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11; see benches/RESULTS.md
+/// The centering/variance/normalize passes stream several arrays like a fused optimizer step
+/// does, so the threshold is mapped from the multi-stream elementwise class (crossover bracket
+/// 256K-1M elements) rather than measured directly on this layer
 const BATCH_NORM_PARALLEL_THRESHOLD: usize = 262_144;
 
 /// Element count (`M x C`) above which the per-channel statistics reductions of **2-D** inputs
-/// (mean, variance, and the backward sums) run as row-block deterministic folds.
+/// (mean, variance, and the backward sums) run as row-block deterministic folds
 ///
-/// Measured on the row-block fold itself (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
-/// 2026-06-12; see benches/RESULTS.md "BatchNorm column stats, row-block fold"): crossover
-/// bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A channel-chunked
-/// alternative that would have preserved the serial accumulation order bitwise measured
-/// 0.3-0.9x everywhere and was rejected (negative-result section in the same report)
+/// Crossover bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A
+/// channel-chunked alternative that would have preserved the serial accumulation order bitwise
+/// measured 0.3-0.9x everywhere and was rejected
 const BN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
-/// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon.
+/// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon
 ///
-/// Measured on the plane fold itself (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
-/// 2026-06-12; see benches/RESULTS.md "BatchNorm plane stats, native-layout fold"): crossover
-/// bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at the
-/// conv-scale 8.4M
+/// Crossover bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at
+/// the conv-scale 8.4M
 const BN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Batch Normalization layer for neural networks
 ///
-/// Normalizes each mini-batch to keep activations centered and scaled, improving
-/// training stability and speed
+/// Normalizes each mini-batch to keep activations centered and scaled, improving training
+/// stability and speed
 ///
 /// # Examples
 ///
@@ -110,10 +105,10 @@ impl BatchNormalization {
     ///   **channel/feature** as dimension 1. The trainable `gamma`/`beta` (and the running
     ///   mean/variance) are per-channel, length `input_shape[1]`. For a 2-D `[batch, features]`
     ///   input this is standard per-feature BN; for a rank > 2 `[batch, channels, *spatial]` input
-    ///   the statistics reduce over batch **and** all spatial positions (true spatial BN, matching
+    ///   the statistics reduce over batch **and** all spatial positions (spatial BN, matching
     ///   Keras/PyTorch), so there is one mean/variance/scale/shift per channel. A 1-D `input_shape`
     ///   (e.g. `vec![4]`) has no channel axis and yields scalar (length-1) parameters broadcast over
-    ///   the whole input; pass `vec![batch, 4]` if you mean "4 features"
+    ///   the whole input; pass `vec![batch, 4]` to mean "4 features"
     /// - `momentum` - Momentum for the moving average of mean and variance (typically 0.9 or 0.99)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
     ///
@@ -195,18 +190,17 @@ impl BatchNormalization {
         Ok(())
     }
 
-    /// Training/inference forward for rank >= 3 inputs, working on the native
-    /// `[batch, channels, *spatial]` layout: the per-channel statistics are plane folds and
-    /// every elementwise pass streams contiguous `[P]` planes, so no channel-last transpose
-    /// copy is ever made. Backward caches (`x_centered`, `x_normalized`) keep the input's
-    /// original shape
+    /// Training/inference forward for rank >= 3 inputs on the native `[batch, channels, *spatial]`
+    /// layout: the per-channel statistics are plane folds and every elementwise pass streams
+    /// contiguous `[P]` planes, so no channel-last transpose copy is ever made. Backward caches
+    /// (`x_centered`, `x_normalized`) keep the input's original shape
     fn forward_spatial(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         let shape = input.shape().to_vec();
         let c = shape[1];
         let p: usize = shape[2..].iter().product();
         let total = input.len();
         if total == 0 {
-            // Degenerate empty input: nothing to normalize (and no caches to write)
+            // Empty input: nothing to normalize, no caches to write
             return Ok(Tensor::zeros(IxDyn(&shape)));
         }
 
@@ -220,8 +214,7 @@ impl BatchNormalization {
             }
         };
 
-        // Samples per channel: batch x spatial, the row count of the folded [M, C] view this
-        // layout-native path replaces
+        // Samples per channel: batch x spatial, the row count of the folded [M, C] view
         let m = (total / c) as f32;
         let elem_parallel = total >= BATCH_NORM_PARALLEL_THRESHOLD;
 
@@ -256,8 +249,7 @@ impl BatchNormalization {
             }
         }
 
-        // Per-channel variance of the centered data; the fused fold avoids the squared-diff
-        // temporary
+        // Per-channel variance of the centered data; the fused fold avoids the squared-diff temp
         let xc_s = x_centered.as_slice().unwrap();
         let batch_var = par_plane_dot(xc_s, xc_s, c, p, stats_parallel, 1.0) / m;
         let std_dev = (&batch_var + self.epsilon).mapv(|v| v.sqrt());
@@ -312,8 +304,8 @@ impl BatchNormalization {
 
     /// One fused pass `((x - running_mean) / sqrt(running_var + eps)) * gamma + beta` streamed
     /// per `[P]` plane of a `[B, C, P]` slice. The per-element operations match the broadcast
-    /// 2-D form exactly, so spatial inference outputs are bitwise identical to the folded
-    /// implementation this replaces; the `parallel` flag never changes the bits
+    /// 2-D form exactly, so spatial inference outputs are bitwise identical to the folded form;
+    /// the `parallel` flag never changes the bits
     fn normalize_with_running_stats(
         &self,
         x: &[f32],
@@ -354,8 +346,8 @@ impl BatchNormalization {
     }
 
     /// Backward for rank >= 3 inputs on the native layout, mirroring [`Self::forward_spatial`]:
-    /// the five per-channel reductions are plane folds and the two elementwise passes stream
-    /// per plane, with no transpose copy of `grad_output` or `grad_input`
+    /// the 5 per-channel reductions are plane folds and the 2 elementwise passes stream per
+    /// plane, with no transpose copy of `grad_output` or `grad_input`
     fn backward_spatial(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         let shape = grad_output.shape().to_vec();
         let c = shape[1];

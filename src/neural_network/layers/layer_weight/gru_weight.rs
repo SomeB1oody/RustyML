@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 /// Weights of a GRU layer
 ///
-/// The three gates are stored fused, gate column blocks in the order `[r | z | h]`
+/// The 3 gates are stored fused, gate column blocks in the order `[r | z | h]`
 /// (reset, update, candidate)
 ///
 /// Stored as [`Cow`] so saving borrows the live layer arrays without cloning, while loading

@@ -18,10 +18,9 @@ const DEGENERATE_DENOM: f64 = 1e-10;
 /// Total scanned-element work (`n * n * d`) at or above which [`silhouette_score`] fills its
 /// pairwise-distance matrix in parallel; below it the serial path is used
 ///
-/// The fill is n tasks of an O(n * d) distance-row scan each, the same cost class as the
-/// crate's calibrated f64 row-scan gate (crossover bracket 65K-262K scanned elements on an
-/// AMD Ryzen 9 9950X, 2026-06-11; see benches/RESULTS.md). The constant is restated here
-/// rather than imported because `metrics` stays a lightweight leaf module
+/// The fill is n tasks of an O(n * d) distance-row scan each, the same cost class as the crate's
+/// calibrated f64 row-scan gate (crossover bracket 65K-262K scanned elements). The constant is
+/// restated here rather than imported because `metrics` stays a lightweight leaf module
 const SILHOUETTE_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Maps each distinct label to a dense index in `0..k` in order of first appearance
@@ -355,8 +354,8 @@ where
 /// samples
 ///
 /// Pairwise distances go through [`DistanceCalculationMetric`], the same dispatch point used by the
-/// estimators, so any of `Euclidean`, `Manhattan`, or `Minkowski(p)` can be used. (Pass
-/// `DistanceCalculationMetric::Euclidean` for the conventional silhouette)
+/// estimators, so any of `Euclidean`, `Manhattan`, or `Minkowski(p)` works. Pass
+/// `DistanceCalculationMetric::Euclidean` for the conventional silhouette
 ///
 /// # Parameters
 ///

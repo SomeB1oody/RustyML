@@ -61,14 +61,14 @@ impl Dropout {
     /// - `rate` - Fraction of the input units to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor
     ///
-    /// # Notes
-    ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`Dropout::with_random_state`].
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - New Dropout layer instance, or a validation error
+    ///
+    /// # Notes
+    ///
+    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
+    /// set a seed with [`Dropout::with_random_state`]
     ///
     /// # Errors
     ///
@@ -88,7 +88,7 @@ impl Dropout {
     /// Sets the seed for reproducible mask sampling
     ///
     /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`.
+    /// re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///

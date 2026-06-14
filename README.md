@@ -23,8 +23,8 @@ Rust with no C/C++ dependencies. It covers the full workflow — from data prepr
 feature engineering, through model training, to evaluation — while leaning on Rust's memory
 safety, fearless concurrency, and zero-cost abstractions.
 
-Everything is organized into six feature-gated modules, so you compile only what you use:
-`machine_learning`, `neural_network`, `utils`, `metrics`, `math`, and a shared `prelude`.
+Everything is organized into five feature-gated modules, so you compile only what you use:
+`machine_learning`, `neural_network`, `utils`, `metrics`, and `math`, plus a shared `prelude`.
 
 ## Highlights
 
@@ -74,7 +74,7 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 // Train a regularization-free linear regression model
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
 
 let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 let y = array![6.0, 9.0, 12.0];
@@ -101,12 +101,12 @@ let y = Array::ones((32, 10)).into_dyn();
 
 let mut model = Sequential::new();
 model
-    .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
-    .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
-    .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
+    .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+    .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+    .add(Dense::new(64, 10, Activation::Softmax).unwrap())
     .compile(
-        Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
-        CategoricalCrossEntropy::new(),
+        Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        CategoricalCrossEntropy::new(false),
     );
 
 model.summary(); // print the architecture
@@ -165,7 +165,7 @@ convolutional/recurrent networks via a Keras-style `Sequential` API.
 - **Recurrent** — `SimpleRNN`, `LSTM`, `GRU`
 - **Regularization** — `Dropout`, `SpatialDropout{1,2,3}D`, `GaussianNoise`, `GaussianDropout`
 - **Normalization** — `BatchNormalization`, `LayerNormalization`, `InstanceNormalization`, `GroupNormalization`
-- **Optimizers** — `SGD` (with momentum), `Adam`, `RMSprop`, `AdaGrad`
+- **Optimizers** — `SGD` (with momentum), `Adam`, `AdamW`, `RMSprop`, `AdaGrad`
 - **Losses** — `MeanSquaredError`, `MeanAbsoluteError`, `BinaryCrossEntropy`, `CategoricalCrossEntropy`, `SparseCategoricalCrossEntropy`
 
 Training supports full-batch (`fit`) and mini-batch (`fit_with_batches`) loops, weight
@@ -178,7 +178,7 @@ Data preprocessing and dimensionality reduction.
 - **Dimensionality reduction** — `PCA` (multiple SVD solvers), `KernelPCA` (RBF / Linear / Poly / Sigmoid / Cosine kernels), `TSNE`
 - **Scaling** — `standardize` (z-score), `normalize` (configurable axis & order)
 - **Label encoding** — `to_categorical`, `to_categorical_with_mapping`, `to_sparse_categorical`
-- **Splitting** — `train_test_split` with a configurable ratio
+- **Splitting** — `train_test_split` and `train_test_split_stratified`, with a configurable ratio
 
 ### `metrics`
 

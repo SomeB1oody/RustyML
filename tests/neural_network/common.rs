@@ -22,7 +22,7 @@ pub fn seeded_rng(seed: u64) -> StdRng {
 /// same thread, so panic-safe cleanup is what makes the isolation hold there
 ///
 /// Always bind the guard to a variable; `GlobalSeedGuard::set(s);` (unbound) drops immediately
-/// and clears the seed before use - hence `#[must_use]`
+/// and clears the seed before use, hence `#[must_use]`
 #[must_use = "bind the guard to a variable; an unbound guard clears the seed immediately"]
 pub struct GlobalSeedGuard;
 

@@ -3,7 +3,7 @@
 
 /// Classifies a layer by its parameter training capability
 ///
-/// Layers fall into three groups: those with trainable parameters (e.g. Dense,
+/// Layers fall into 3 groups: those with trainable parameters (e.g. Dense,
 /// convolutional layers), those whose parameters are frozen, and those with no
 /// parameters at all (e.g. pooling, activation layers)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,8 +54,8 @@ pub use regularization::*;
 /// Such layers rely on the default [`Layer::parameters`] (an empty list, so the optimizer
 /// skips them); this macro supplies the remaining required `param_count` and `get_weights`
 ///
-/// Defined after the `mod` declarations and path-exported via a `pub(in ...) use` re-export,
-/// so callers import it explicitly rather than relying on textual macro ordering:
+/// It is path-exported via a `pub(in ...) use` re-export, so callers import it explicitly
+/// rather than depending on textual macro ordering:
 /// `use crate::neural_network::layers::no_trainable_parameters_layer_functions;`
 ///
 /// The generated `param_count` returns `TrainingParameters::NoTrainable` and `get_weights`

@@ -19,10 +19,10 @@ use std::borrow::Cow;
 
 /// A 3D convolutional layer for neural networks
 ///
-/// Applies a 3D convolution operation to volumetric data such as medical images, 3D models,
-/// or video sequences. Input shape is \[batch_size, channels, depth, height, width\] and
-/// output shape is \[batch_size, filters, output_depth, output_height, output_width\], where
-/// output dimensions depend on input size, kernel size, strides, and padding
+/// Applies a 3D convolution to volumetric data such as medical images, 3D models, or video
+/// sequences. Input shape is \[batch_size, channels, depth, height, width\] and output shape is
+/// \[batch_size, filters, output_depth, output_height, output_width\], where output dimensions
+/// depend on input size, kernel size, strides, and padding
 ///
 /// The dimension-generic convolution math lives in
 /// [`convolution_engine`](crate::neural_network::layers::convolution); this layer holds the
@@ -37,11 +37,11 @@ use std::borrow::Cow;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array5;
 ///
-/// // Create a simple 5D input tensor: [batch_size, channels, depth, height, width]
-/// // Batch size=2, 1 input channel, 8x8x8 voxels
+/// // 5D input tensor: [batch_size, channels, depth, height, width]
+/// // Batch size 2, 1 input channel, 8x8x8 voxels
 /// let x = Array5::ones((2, 1, 8, 8, 8)).into_dyn();
 ///
-/// // Create target tensor - assuming we'll have 3 filters with output size 6x6x6
+/// // Target tensor for 3 filters with output size 6x6x6
 /// let y = Array5::ones((2, 3, 6, 6, 6)).into_dyn();
 ///
 /// // Build model: add a Conv3D layer with 3 filters and 3x3x3 kernel
@@ -59,14 +59,14 @@ use std::borrow::Cow;
 /// // Print model structure
 /// model.summary();
 ///
-/// // Train the model (run a few epochs)
+/// // Train the model for a few epochs
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
+/// // Forward-pass prediction
 /// let prediction = model.predict(&x).unwrap();
 /// println!("3D Convolution layer prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct - should be [2, 3, 6, 6, 6]
+/// // Output shape should be [2, 3, 6, 6, 6]
 /// assert_eq!(prediction.shape(), &[2, 3, 6, 6, 6]);
 /// ```
 #[derive(Debug)]
@@ -112,7 +112,7 @@ impl Conv3D {
     ///
     /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
     /// [`Conv3D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv3D::with_random_state`].
+    /// reproducible initialization, set a seed with [`Conv3D::with_random_state`]
     ///
     /// # Returns
     ///
@@ -171,9 +171,9 @@ impl Conv3D {
 
     /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// assigning custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///
@@ -197,7 +197,6 @@ impl Conv3D {
         random_state: Option<u64>,
     ) -> Array5<f32> {
         let (kd, kh, kw) = kernel_size;
-        // Xavier/Glorot initialization
         let fan_in = channels * kd * kh * kw;
         let fan_out = filters * kd * kh * kw;
         let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
@@ -302,7 +301,6 @@ impl Layer for Conv3D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Activation backward pass
         let activated = self
             .output_cache
             .take()

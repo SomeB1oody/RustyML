@@ -1,21 +1,21 @@
-//! Shared configuration types used across estimators and utilities.
+//! Shared configuration types used across estimators and utilities
 //!
-//! These enums live here, in one place, because they are shared by more than one
-//! module:
-//! - [`RegularizationType`](crate::types::RegularizationType) and [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) - used by the machine
-//!   learning models.
-//! - [`KernelType`](crate::types::KernelType) - used by both [`SVC`](crate::machine_learning::svm::svc::SVC)
-//!   and [`KernelPCA`](crate::utils::kernel_pca::KernelPCA).
+//! These enums live in one place because they are shared by more than one module:
+//! - [`RegularizationType`](crate::types::RegularizationType) and
+//!   [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) are used by the
+//!   machine learning models
+//! - [`KernelType`](crate::types::KernelType) is used by both
+//!   [`SVC`](crate::machine_learning::svm::svc::SVC) and
+//!   [`KernelPCA`](crate::utils::kernel_pca::KernelPCA)
 //!
-//! Each type also carries the behavior that belongs to it (distance / kernel
-//! evaluation) as inherent methods, so consumers share a single implementation
-//! instead of re-matching the enum in every model.
+//! Each type carries its own behavior (distance / kernel evaluation) as inherent
+//! methods, so consumers share a single implementation instead of re-matching the
+//! enum in every model
 
 // Serde derives are only needed where models serialize (machine_learning / utils)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::{Deserialize, Serialize};
-// The batched kernel-matrix path is only compiled for its callers, SVC (machine_learning)
-// and KernelPCA (utils)
+// The batched kernel-matrix path is only compiled for its callers: SVC and KernelPCA
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::math::matmul::gemm_internal;
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
@@ -24,33 +24,33 @@ use ndarray::ArrayView1;
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix2, Zip};
 
-/// Represents different distance calculation methods used in various machine learning algorithms.
+/// Distance calculation methods used across machine learning algorithms
 ///
-/// This enum defines common distance metrics that can be used in clustering algorithms,
-/// nearest neighbor searches, and other applications where distance between points is relevant.
-///
-/// # Variants
-///
-/// - `Euclidean` - Euclidean distance (L2 norm), calculated as the square root of the sum of squared differences between corresponding coordinates.
-/// - `Manhattan` - Manhattan distance (L1 norm), calculated as the sum of absolute differences between corresponding coordinates.
-/// - `Minkowski` - A generalized metric that includes both Euclidean and Manhattan distances as special cases. Requires an additional parameter p (f64).
+/// Defines common distance metrics for clustering algorithms, nearest neighbor
+/// searches, and other applications where distance between points is relevant
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
     derive(Deserialize, Serialize)
 )]
 pub enum DistanceCalculationMetric {
+    /// Euclidean distance (L2 norm): the square root of the sum of squared
+    /// differences between corresponding coordinates
     #[default]
     Euclidean,
+    /// Manhattan distance (L1 norm): the sum of absolute differences between
+    /// corresponding coordinates
     Manhattan,
+    /// Generalized metric with Euclidean and Manhattan as special cases; the
+    /// `f64` is the order parameter `p`
     Minkowski(f64),
 }
 
 impl DistanceCalculationMetric {
-    /// Computes the distance between two vectors under this metric.
+    /// Computes the distance between two vectors under this metric
     ///
-    /// This is the single source of truth for metric dispatch; models such as KNN
-    /// and DBSCAN call it instead of re-implementing the `match` over variants.
+    /// Single source of truth for metric dispatch; models such as KNN and DBSCAN
+    /// call it instead of re-implementing the `match` over variants
     ///
     /// # Parameters
     ///
@@ -80,9 +80,9 @@ impl DistanceCalculationMetric {
     /// metric's order-preserving "comparable" space, where the final root is skipped:
     /// `Euclidean -> t^2`, `Manhattan -> t`, `Minkowski(p) -> t^p`
     ///
-    /// Used by spatial indexes so radius thresholds and per-axis pruning bounds can be compared
-    /// against [`comparable_distance`](Self::comparable_distance) without repeated roots. The
-    /// mapping is monotonic on `t >= 0`, so all ordering decisions are preserved
+    /// Used by spatial indexes so radius thresholds and per-axis pruning bounds can be
+    /// compared against [`comparable_distance`](Self::comparable_distance) without repeated
+    /// roots. The mapping is monotonic on `t >= 0`, so all ordering decisions are preserved
     pub(crate) fn comparable_scalar(&self, t: f64) -> f64 {
         match *self {
             DistanceCalculationMetric::Euclidean => t * t,
@@ -121,56 +121,49 @@ impl DistanceCalculationMetric {
     }
 }
 
-/// Represents different types of regularization techniques used in machine learning models.
+/// Regularization techniques used in machine learning models
 ///
-/// Regularization helps prevent overfitting by adding a penalty term to the model's loss function
-/// during training. This enum defines common regularization approaches that can be applied to
-/// various learning algorithms.
-///
-/// # Variants
-///
-/// - `L1` - L1 regularization (Lasso) that adds the sum of absolute values of parameters
-///   multiplied by the specified coefficient. Promotes sparse solutions by driving some
-///   parameters to exactly zero.
-/// - `L2` - L2 regularization (Ridge) that adds the sum of squared parameter values
-///   multiplied by the specified coefficient. Discourages large parameter values but
-///   typically does not produce sparse solutions.
+/// Regularization helps prevent overfitting by adding a penalty term to the model's
+/// loss function during training. The `f64` in each variant is the penalty coefficient
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
     derive(Deserialize, Serialize)
 )]
 pub enum RegularizationType {
+    /// L1 regularization (Lasso): adds the sum of absolute parameter values times the
+    /// coefficient. Promotes sparse solutions by driving some parameters to exactly zero
     L1(f64),
+    /// L2 regularization (Ridge): adds the sum of squared parameter values times the
+    /// coefficient. Discourages large parameter values but typically does not produce
+    /// sparse solutions
     L2(f64),
 }
 
-/// Kernel function types for Support Vector Machine and Kernel PCA.
-///
-/// # Variants
-/// - `Linear` - Linear kernel: K(x, y) = x*y
-/// - `Poly` - Polynomial kernel: K(x, y) = (gamma*x*y + coef0)^degree
-/// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma*|x-y|^2)
-/// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma*x*y + coef0)
-/// - `Cosine` - Cosine kernel: K(x, y) = (x*y) / (||x|| * ||y||)
+/// Kernel function types for Support Vector Machine and Kernel PCA
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
     derive(Deserialize, Serialize)
 )]
 pub enum KernelType {
+    /// Linear kernel: `K(x, y) = x*y`
     Linear,
+    /// Polynomial kernel: `K(x, y) = (gamma*x*y + coef0)^degree`
     Poly { degree: u32, gamma: f64, coef0: f64 },
+    /// Radial Basis Function kernel: `K(x, y) = exp(-gamma*|x-y|^2)`
     RBF { gamma: f64 },
+    /// Sigmoid kernel: `K(x, y) = tanh(gamma*x*y + coef0)`
     Sigmoid { gamma: f64, coef0: f64 },
+    /// Cosine kernel: `K(x, y) = (x*y) / (||x|| * ||y||)`
     Cosine,
 }
 
 impl KernelType {
-    /// Computes the kernel function value between two vectors.
+    /// Computes the kernel function value between two vectors
     ///
-    /// This is the single source of truth for kernel dispatch, shared by SVC and
-    /// Kernel PCA instead of each re-implementing the `match` over variants.
+    /// Single source of truth for kernel dispatch, shared by SVC and Kernel PCA
+    /// instead of each re-implementing the `match` over variants
     ///
     /// # Parameters
     ///
@@ -182,23 +175,18 @@ impl KernelType {
     /// - `f64` - The kernel function value between `x1` and `x2`
     pub fn compute(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
         match *self {
-            // K(x, y) = x*y
             KernelType::Linear => x1.dot(&x2),
-            // K(x, y) = (gamma*x*y + coef0)^degree
             KernelType::Poly {
                 degree,
                 gamma,
                 coef0,
             } => (gamma * x1.dot(&x2) + coef0).powi(degree as i32),
-            // K(x, y) = exp(-gamma*|x-y|^2)
             KernelType::RBF { gamma } => {
                 let diff = &x1 - &x2;
                 let squared_norm = diff.dot(&diff);
                 (-gamma * squared_norm).exp()
             }
-            // K(x, y) = tanh(gamma*x*y + coef0)
             KernelType::Sigmoid { gamma, coef0 } => (gamma * x1.dot(&x2) + coef0).tanh(),
-            // K(x, y) = (x*y) / (||x|| * ||y||)
             KernelType::Cosine => {
                 let norm_product = (x1.dot(&x1) * x2.dot(&x2)).sqrt();
                 if norm_product <= f64::EPSILON {
@@ -211,12 +199,12 @@ impl KernelType {
     }
 
     /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between two sample
-    /// sets in one shot, routing the dominant cost through a single block-parallel GEMM.
+    /// sets in one shot, routing the dominant cost through a single block-parallel GEMM
     ///
-    /// This is the batched counterpart of [`compute`](Self::compute). Every kernel
-    /// reduces to the cross-Gram matrix `G = X*Y^T` (one rayon-block-parallel,
-    /// cache-blocked matrix multiply via `gemm_internal`) plus a cheap elementwise
-    /// transform over the `[n, m]` result:
+    /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
+    /// cross-Gram matrix `G = X*Y^T` (one rayon-block-parallel, cache-blocked matrix
+    /// multiply via `gemm_internal`) plus a cheap elementwise transform over the
+    /// `[n, m]` result:
     ///
     /// - `Linear`  - `K = G`
     /// - `Poly`    - `K = (gamma*G + coef0)^degree`
@@ -224,14 +212,14 @@ impl KernelType {
     /// - `RBF`     - `K = exp(-gamma*D)`, `D[i,j] = ||x_i||^2 + ||y_j||^2 - 2*G[i,j]`
     /// - `Cosine`  - `K = G / (||x_i||*||y_j||)`
     ///
-    /// SVC's Gram matrix and Kernel PCA's (cross-)kernel matrix both call this
-    /// instead of looping [`compute`](Self::compute) over every pair, turning an
-    /// `n*m` swarm of scalar dot products into one GEMM.
+    /// SVC's Gram matrix and Kernel PCA's (cross-)kernel matrix both call this instead
+    /// of looping [`compute`](Self::compute) over every pair, turning an `n*m` swarm of
+    /// scalar dot products into one GEMM
     ///
     /// The result is numerically equivalent to filling each entry with
-    /// [`compute`](Self::compute) up to floating-point rounding; the `RBF`
-    /// distance is clamped at zero to absorb the tiny negatives that the
-    /// `||x||^2 + ||y||^2 - 2x*y` identity can produce by cancellation.
+    /// [`compute`](Self::compute) up to floating-point rounding; the `RBF` distance is
+    /// clamped at zero to absorb the tiny negatives that the `||x||^2 + ||y||^2 - 2x*y`
+    /// identity can produce by cancellation
     ///
     /// # Parameters
     ///
@@ -278,7 +266,7 @@ impl KernelType {
                 }
             }
             KernelType::RBF { gamma } => {
-                // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y; clamp cancellation negatives before exp.
+                // ||x-y||^2 = ||x||^2 + ||y||^2 - 2x*y; clamp cancellation negatives before exp
                 let x_norm_sq = x.map_axis(Axis(1), |row| row.dot(&row));
                 let y_norm_sq = y.map_axis(Axis(1), |row| row.dot(&row));
                 let transform_row = |mut k_row: ndarray::ArrayViewMut1<f64>, &x_sq: &f64| {
@@ -436,15 +424,15 @@ mod tests {
     // KernelType::compute_matrix (batched)
 
     // The batched GEMM path must agree, entry for entry, with looping `compute`
-    // over every pair - for every kernel variant, including the asymmetric
-    // cross-matrix case `x != y`.
+    // over every pair, for every kernel variant, including the asymmetric
+    // cross-matrix case `x != y`
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_matches_pairwise() {
         use ndarray::Array2;
 
         // Deterministic, varied, non-degenerate rows (no all-zero row, so the
-        // Cosine guard is not the only thing under test).
+        // Cosine guard is not the only thing under test)
         let x = Array2::from_shape_fn((5, 3), |(i, j)| ((i * 3 + j) as f64) * 0.3 - 1.1);
         let y = Array2::from_shape_fn((4, 3), |(i, j)| ((i + 2 * j) as f64) * 0.2 + 0.4);
 
@@ -464,7 +452,7 @@ mod tests {
         ];
 
         for k in kernels {
-            // Symmetric Gram matrix (the SVC / Kernel-PCA-fit case).
+            // Symmetric Gram matrix (the SVC / Kernel-PCA-fit case)
             let gram = k.compute_matrix(&x, &x);
             for i in 0..x.nrows() {
                 for j in 0..x.nrows() {
@@ -476,7 +464,7 @@ mod tests {
                 }
             }
 
-            // Cross matrix (the Kernel-PCA-transform case), x != y.
+            // Cross matrix (the Kernel-PCA-transform case), x != y
             let cross = k.compute_matrix(&x, &y);
             assert_eq!(cross.dim(), (x.nrows(), y.nrows()));
             for i in 0..x.nrows() {
@@ -491,7 +479,7 @@ mod tests {
         }
     }
 
-    // RBF diagonal of a Gram matrix must be exactly 1 (||x_i - x_i||^2 clamps to 0).
+    // RBF diagonal of a Gram matrix must be exactly 1 (||x_i - x_i||^2 clamps to 0)
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_rbf_diagonal_is_one() {
@@ -503,7 +491,7 @@ mod tests {
         }
     }
 
-    // Cosine guard: a zero row yields a full row/column of zeros, matching `compute`.
+    // Cosine guard: a zero row yields a full row/column of zeros, matching `compute`
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_cosine_zero_row_guard() {

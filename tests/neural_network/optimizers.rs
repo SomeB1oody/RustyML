@@ -31,8 +31,7 @@ use rustyml::neural_network::traits::{Layer, Optimizer};
 
 /// Fixed, deterministic (x, y) pair for a tiny 1-input -> 1-output regression
 ///
-/// Target y = 2*x over 4 samples; with identity weights (w=1, b=0) the initial
-/// MSE is 1.875
+/// Target y = 2*x over 4 samples; with identity weights (w=1, b=0) the initial MSE is 1.875
 fn regression_data() -> (Tensor, Tensor) {
     let x = Array::from_shape_vec((4, 1), vec![0.5_f32, 1.0, 1.5, 2.0])
         .unwrap()
@@ -56,7 +55,7 @@ fn identity_dense() -> Dense {
 
 /// MSE loss for `model.predict(x)` against `y`: mean((pred - y)^2)
 ///
-/// Matches MeanSquaredError::compute_loss so the comparison is apples-to-apples
+/// Matches MeanSquaredError::compute_loss so the comparison is like-for-like
 fn eval_mse(model: &Sequential, x: &Tensor, y: &Tensor) -> f32 {
     let pred = model.predict(x).unwrap();
     let diff = &pred - y;
@@ -728,7 +727,7 @@ fn dense_wb(model: &Sequential) -> (f32, f32) {
     }
 }
 
-/// One clipped SGD step on the same w=1, b=0, x=2, y=6 problem as the hand-calc test above.
+/// One clipped SGD step on the same w=1, b=0, x=2, y=6 problem as the hand-calc test above
 /// Unclipped gradients are grad_w=-16, grad_b=-8, so the global norm is sqrt(16^2+8^2)=sqrt(320);
 /// with max_norm=8 every gradient is scaled by 8/sqrt(320), shrinking the +0.16/+0.08 updates by
 /// that single factor (direction preserved, unlike per-element clamping)
@@ -823,7 +822,7 @@ fn new_rejects_invalid_clip_norm() {
 
 // SGD momentum / weight decay / LR scheduling (integration)
 
-/// `set_learning_rate` retunes the step: doubling lr before one SGD step doubles the weight delta.
+/// `set_learning_rate` retunes the step: doubling lr before one SGD step doubles the weight delta
 /// Reuses the w=1, b=0, x=2, y=6 problem (grad_w=-16, grad_b=-8)
 #[test]
 fn set_learning_rate_scales_the_step() {
@@ -854,7 +853,7 @@ fn set_learning_rate_scales_the_step() {
     assert_abs_diff_eq!(b_new, 0.02 * 8.0, epsilon = 1e-5); // 0.16
 }
 
-/// Decoupled weight decay shrinks the parameter by (1 - lr*wd) before the gradient step.
+/// Decoupled weight decay shrinks the parameter by (1 - lr*wd) before the gradient step
 /// With w=1, wd=0.5, lr=0.01: w := 1*(1 - 0.005) - 0.01*(-16) = 0.995 + 0.16 = 1.155
 #[test]
 fn sgd_decoupled_weight_decay_shrinks_param() {
@@ -884,10 +883,10 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
     assert_abs_diff_eq!(b_new, 0.08, epsilon = 1e-5); // b=0, decay no-op
 }
 
-// Weight decay applies to weights only, not biases or normalization gamma/beta.
+// Weight decay applies to weights only, not biases or normalization gamma/beta
 // These run two layers through an identical forward+backward and differ only in `weight_decay`,
 // so any divergence is attributable solely to decay (the gradient values cancel out of the
-// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step).
+// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step)
 
 /// Runs a Dense(2->2, Linear) with fixed weights/bias through one forward + backward (fixed
 /// nonzero upstream gradient) and one SGD step at the given `weight_decay`, returning the
@@ -1046,8 +1045,8 @@ fn adam_equals_adamw_without_weight_decay() {
 }
 
 /// With a non-zero weight_decay the two schemes diverge on the weights (coupled L2 flows through
-/// the moments and the adaptive denominator; decoupled does not), while the bias — excluded from
-/// weight decay either way — updates identically
+/// the moments and the adaptive denominator; decoupled does not), while the bias - excluded from
+/// weight decay either way - updates identically
 #[test]
 fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
     let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();

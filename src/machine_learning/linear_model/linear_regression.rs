@@ -57,13 +57,13 @@ use rayon::prelude::{
 /// // Use the loaded model for predictions
 /// let loaded_predictions = loaded_model.predict(&new_data);
 ///
-/// // Since Clone is implemented, the model can be easily cloned
+/// // Clone is implemented, so the model can be copied
 /// let model_copy = model.clone();
 ///
-/// // Since Debug is implemented, detailed model information can be printed
+/// // Debug is implemented, so model details can be printed
 /// println!("{:?}", model);
 ///
-/// // Clean up: remove the created file
+/// // Clean up the created file
 /// std::fs::remove_file("linear_regression_model.json").unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -134,25 +134,15 @@ impl LinearRegression {
     ///
     /// - `Result<Self, Error>` - a new instance of LinearRegression, or an error if parameters are invalid
     ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, or tolerance is invalid
-    ///
     /// # Notes
     ///
     /// No regularization is applied by default. To add L1/L2 regularization, use the builder
-    /// method below (it returns `Result` because the regularization alpha is validated):
+    /// method [`with_regularization`](Self::with_regularization), which returns `Result`
+    /// because the regularization alpha is validated
     ///
-    /// - [`with_regularization`](Self::with_regularization) - L1 or L2 regularization to prevent overfitting
+    /// # Errors
     ///
-    /// ```
-    /// use rustyml::machine_learning::{LinearRegression, RegularizationType};
-    ///
-    /// let model = LinearRegression::new(true, 0.01, 1000, 1e-6)
-    ///     .unwrap()
-    ///     .with_regularization(RegularizationType::L2(0.1))
-    ///     .unwrap();
-    /// ```
+    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, or tolerance is invalid
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -232,10 +222,10 @@ impl LinearRegression {
     ///
     /// # Performance
     ///
-    /// Parallel computation is used for L1 regularization and gradient updates when the number of
-    /// features clears the calibrated cheap-map gate; the SSE and intercept-gradient sums run as
-    /// deterministic blocked folds above the sum gate (see `crate::parallel_gates`), so results
-    /// are bitwise identical at any thread count
+    /// L1 regularization and gradient updates run in parallel when the feature count clears the
+    /// cheap-map gate. The SSE and intercept-gradient sums use deterministic blocked folds above
+    /// the sum gate (see `crate::parallel_gates`), so results are bitwise identical at any thread
+    /// count
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -259,7 +249,7 @@ impl LinearRegression {
 
         let mut n_iter = 0;
 
-        // Pre-allocate arrays to avoid repeated memory allocation
+        // Pre-allocate to avoid repeated allocation
         let mut predictions = Array1::<f64>::zeros(n_samples);
         let mut error_vec = Array1::<f64>::zeros(n_samples);
 
@@ -330,7 +320,6 @@ impl LinearRegression {
             // Gradients via matrix operations
             let mut weight_gradients = gemv_internal(&x.t(), &error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
-                // On the gradient path
                 let error_sum = match error_vec.as_slice() {
                     Some(slice) => det_reduce(
                         slice,

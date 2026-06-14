@@ -1,8 +1,8 @@
 //! Deterministic fold kernels shared by the normalization layers
 //!
 //! Everything here computes with a fixed, shape-derived grouping and accumulation order, so a
-//! caller's `parallel` flag (or task chunking) only decides whether work runs on rayon — never
-//! the result bits.
+//! caller's `parallel` flag (or task chunking) only decides whether work runs on rayon, never
+//! the result bits
 
 use crate::math::reduction::DET_REDUCE_BLOCK;
 use crate::neural_network::Tensor;
@@ -11,10 +11,11 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use rayon::slice::ParallelSlice;
 use std::ops::Range;
 
-/// Sums one contiguous segment of scaled terms in eight independent lanes combined in a fixed
-/// order (the serial kernel the deterministic folds share). The result depends only on the
-/// segment boundaries, which derive from the input shape, never on scheduling; the lanes keep
-/// the dependency chain short enough to vectorize
+/// Sums one contiguous segment of scaled terms in 8 independent lanes combined in a fixed
+/// order (the serial kernel the deterministic folds share)
+///
+/// The result depends only on the segment boundaries, which derive from the input shape, never
+/// on scheduling. The lanes keep the dependency chain short enough to vectorize
 pub(super) fn segment_sum(seg: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
     let mut chunks = seg.chunks_exact(8);
@@ -32,7 +33,7 @@ pub(super) fn segment_sum(seg: &[f32], scale: f32) -> f32 {
         + tail
 }
 
-/// The product twin of [`segment_sum`]: `sum_i a[i] * b[i] * scale` over two equal-length
+/// The product twin of [`segment_sum`]: `sum_i a[i] * b[i] * scale` over 2 equal-length
 /// contiguous segments
 pub(super) fn segment_dot(a: &[f32], b: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
@@ -53,9 +54,11 @@ pub(super) fn segment_dot(a: &[f32], b: &[f32], scale: f32) -> f32 {
 }
 
 /// The squared-deviation twin of [`segment_dot`] with the deviation fused in:
-/// `sum_i (seg[i] - mean)^2`. Bitwise identical to centering the segment into a buffer and
-/// taking `segment_dot(buf, buf, 1.0)` — the subtraction result is the same f32 whether stored
-/// or kept in a register — so callers can skip the centered temporary
+/// `sum_i (seg[i] - mean)^2`
+///
+/// Bitwise identical to centering the segment into a buffer and taking
+/// `segment_dot(buf, buf, 1.0)`. The subtraction result is the same f32 whether stored or kept
+/// in a register, so callers can skip the centered temporary
 pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
     let mut chunks = seg.chunks_exact(8);
@@ -76,8 +79,8 @@ pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
 }
 
 /// The triple-product sibling of [`segment_dot`]: `sum_i a[i] * b[i] * c[i] * scale` over
-/// three equal-length contiguous segments, left-associated per term so fusing matches the
-/// two-step `(a * b)` -> `segment_dot` composition bit for bit
+/// 3 equal-length contiguous segments, left-associated per term so fusing matches the
+/// 2-step `(a * b)` -> `segment_dot` composition bit for bit
 pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
     let mut chunks_a = a.chunks_exact(8);
@@ -107,8 +110,10 @@ pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
 }
 
 /// Rows per block for the column folds: whole rows, sized so one block holds about
-/// [`DET_REDUCE_BLOCK`] elements. A function of the input shape only, so the (deterministic)
-/// fold grouping never depends on scheduling
+/// [`DET_REDUCE_BLOCK`] elements
+///
+/// A function of the input shape only, so the deterministic fold grouping never depends on
+/// scheduling
 pub(super) fn rows_per_block(c: usize) -> usize {
     (DET_REDUCE_BLOCK / c).max(1)
 }
@@ -148,10 +153,12 @@ fn merge_col_parts(parts: Vec<Vec<f32>>, c: usize) -> Tensor {
 }
 
 /// Per-column sums of scaled terms over a standard-layout `[M, C]` slice:
-/// `out[j] = sum_r x[r, j] * scale`, computed as a row-block deterministic fold. Each block
-/// streams whole rows into a local `[C]` accumulator and block partials merge in block order;
-/// the `parallel` flag only decides whether the blocks run on rayon, never the result bits.
-/// `scale` is applied per term, matching the serial `(x * scale).sum_axis(Axis(0))` form
+/// `out[j] = sum_r x[r, j] * scale`, computed as a row-block deterministic fold
+///
+/// Each block streams whole rows into a local `[C]` accumulator and block partials merge in
+/// block order. The `parallel` flag only decides whether the blocks run on rayon, never the
+/// result bits. `scale` is applied per term, matching the serial `(x * scale).sum_axis(Axis(0))`
+/// form
 pub(super) fn par_col_sum(x: &[f32], c: usize, parallel: bool, scale: f32) -> Tensor {
     let block = rows_per_block(c) * c;
     let parts: Vec<Vec<f32>> = if parallel {
@@ -166,11 +173,12 @@ pub(super) fn par_col_sum(x: &[f32], c: usize, parallel: bool, scale: f32) -> Te
     merge_col_parts(parts, c)
 }
 
-/// Per-column sums of scaled products over two standard-layout `[M, C]` slices:
+/// Per-column sums of scaled products over 2 standard-layout `[M, C]` slices:
 /// `out[j] = sum_r a[r, j] * b[r, j] * scale`, as the same row-block deterministic fold as
-/// [`par_col_sum`] (same flag semantics). Fusing the product into the fold avoids
-/// materializing the `[M, C]` temp the serial `(a * b * scale).sum_axis(Axis(0))` form
-/// requires
+/// [`par_col_sum`] (same flag semantics)
+///
+/// Fusing the product into the fold avoids materializing the `[M, C]` temp the serial
+/// `(a * b * scale).sum_axis(Axis(0))` form requires
 pub(super) fn par_col_dot(a: &[f32], b: &[f32], c: usize, parallel: bool, scale: f32) -> Tensor {
     let block = rows_per_block(c) * c;
     let parts: Vec<Vec<f32>> = if parallel {
@@ -188,7 +196,8 @@ pub(super) fn par_col_dot(a: &[f32], b: &[f32], c: usize, parallel: bool, scale:
 }
 
 /// Folds the logical element range `[start, end)` of channel `ch` into a scalar partial, where
-/// a channel's logical sequence is its `[P]` planes of the `[B, C, P]` slice in batch order.
+/// a channel's logical sequence is its `[P]` planes of the `[B, C, P]` slice in batch order
+///
 /// Plane-crossing ranges chain their per-plane [`segment_sum`] partials in order
 pub(super) fn plane_range_sum(
     x: &[f32],
@@ -210,7 +219,7 @@ pub(super) fn plane_range_sum(
     acc
 }
 
-/// The product twin of [`plane_range_sum`] over two `[B, C, P]` slices of the same shape
+/// The product twin of [`plane_range_sum`] over 2 `[B, C, P]` slices of the same shape
 pub(super) fn plane_range_dot(
     a: &[f32],
     b: &[f32],
@@ -234,9 +243,11 @@ pub(super) fn plane_range_dot(
 
 /// Per-channel sums of scaled terms over a standard-layout `[B, C, P]` slice (channel axis 1,
 /// planes contiguous): `out[ch] = sum_{b,i} x[b, ch, i] * scale`, computed without transposing
-/// to channel-last. Each channel's logical sequence (its planes in batch order) folds in
+/// to channel-last
+///
+/// Each channel's logical sequence (its planes in batch order) folds in
 /// [`DET_REDUCE_BLOCK`]-element blocks whose partials merge in block order, so the grouping
-/// depends only on the shape; the `parallel` flag only decides whether the (channel, block)
+/// depends only on the shape. The `parallel` flag only decides whether the (channel, block)
 /// tasks run on rayon, never the result bits
 pub(super) fn par_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool, scale: f32) -> Tensor {
     if x.is_empty() {
@@ -262,10 +273,11 @@ pub(super) fn par_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool, scale
     Array1::from_vec(out).into_dyn()
 }
 
-/// Per-channel sums of scaled products over two standard-layout `[B, C, P]` slices of the same
+/// Per-channel sums of scaled products over 2 standard-layout `[B, C, P]` slices of the same
 /// shape: `out[ch] = sum_{b,i} a[b, ch, i] * b[b, ch, i] * scale`, with the same block
-/// grouping and flag semantics as [`par_plane_sum`]. Fusing the product into the fold avoids
-/// materializing the elementwise-product temporary
+/// grouping and flag semantics as [`par_plane_sum`]
+///
+/// Fusing the product into the fold avoids materializing the elementwise-product temporary
 pub(super) fn par_plane_dot(
     a: &[f32],
     b: &[f32],

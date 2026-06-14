@@ -12,23 +12,19 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which the group-normalization per-instance row passes run on
-/// rayon.
+/// Total-element count above which the group-normalization per-instance row passes run on rayon
 ///
 /// Each instance (one sample's channel group) is one contiguous row computed entirely inside
-/// one task with fixed-order kernels, so the gate is a pure performance knob: the bits are
-/// identical at any thread count and on either side of the gate. The same fused row-pass
-/// kernel class as LayerNorm's measured `LN_ROW_PARALLEL_MIN_ELEMS` (AMD Ryzen 9 9950X,
-/// 16C/32T, 32 rayon threads, 2026-06-12; see benches/RESULTS.md "LayerNorm fused row pass":
-/// crossover bracket 64K-256K elements), mapped from that measurement rather than calibrated
-/// separately
+/// one task with fixed-order kernels, so the gate is a performance knob: the bits are
+/// identical at any thread count and on either side of the gate. Shares the fused row-pass
+/// kernel class of LayerNorm's `LN_ROW_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K
+/// elements), mapped from that measurement
 const GN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
 
-/// Element count above which the per-channel gamma/beta gradient plane folds run on rayon.
+/// Element count above which the per-channel gamma/beta gradient plane folds run on rayon
 ///
-/// The same plane-fold kernel as BatchNorm's measured `BN_PLANE_STATS_PARALLEL_MIN_ELEMS`
-/// (same machine and date; see benches/RESULTS.md "BatchNorm plane stats, native-layout
-/// fold": crossover bracket 64K-256K elements), mapped from that measurement
+/// Shares the plane-fold kernel of BatchNorm's `BN_PLANE_STATS_PARALLEL_MIN_ELEMS` (crossover
+/// bracket 64K-256K elements), mapped from that measurement
 const GN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Returns the axis permutation that moves `channel_axis` to position 1 (channels-first), keeping
@@ -38,6 +34,15 @@ const GN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 /// `channel_axis` is identical to permuting it channels-first, normalizing, and permuting back. The
 /// channels-first numeric cores assume contiguous `[batch, channel, spatial...]` layout, so the
 /// public methods bracket them with [`to_channels_first`] / [`from_channels_first`]
+///
+/// # Parameters
+///
+/// - `ndim` - number of axes in the tensor
+/// - `channel_axis` - axis to move to position 1
+///
+/// # Returns
+///
+/// - `Vec<usize>` - the axis permutation
 fn channels_first_perm(ndim: usize, channel_axis: usize) -> Vec<usize> {
     let mut perm = Vec::with_capacity(ndim);
     perm.push(0);
@@ -48,7 +53,16 @@ fn channels_first_perm(ndim: usize, channel_axis: usize) -> Vec<usize> {
 
 /// Permutes `input` so the channel axis sits at position 1, returning a contiguous owned array
 ///
-/// For `channel_axis == 1` the input is borrowed unchanged (no copy - the common fast path)
+/// For `channel_axis == 1` the input is borrowed unchanged (no copy, the common fast path)
+///
+/// # Parameters
+///
+/// - `input` - tensor to permute
+/// - `channel_axis` - axis to move to position 1
+///
+/// # Returns
+///
+/// - `Cow<Tensor>` - channels-first array, borrowed when `channel_axis == 1`
 pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, Tensor> {
     if channel_axis == 1 {
         Cow::Borrowed(input)
@@ -68,6 +82,15 @@ pub(super) fn to_channels_first(input: &Tensor, channel_axis: usize) -> Cow<'_, 
 /// returning a contiguous owned array
 ///
 /// A no-op for `channel_axis == 1`
+///
+/// # Parameters
+///
+/// - `output_cf` - channels-first tensor to permute back
+/// - `channel_axis` - axis the channel returns to
+///
+/// # Returns
+///
+/// - `Tensor` - the permuted-back array
 pub(super) fn from_channels_first(output_cf: Tensor, channel_axis: usize) -> Tensor {
     if channel_axis == 1 {
         return output_cf;
@@ -88,12 +111,12 @@ pub(super) fn from_channels_first(output_cf: Tensor, channel_axis: usize) -> Ten
 }
 
 /// Fused per-instance group-normalization forward over a contiguous channels-first slice
-/// viewed as `[num_instances, group_size]` rows (one row = one sample's channel group, a
+/// viewed as `[num_instances, group_size]` rows (one row is one sample's channel group, a
 /// contiguous `channels_per_group * spatial` block): per row, the mean and variance fold with
 /// the fixed-order segment kernels (the deviations square in registers, no centered
 /// temporary), then one streaming sweep writes `x_normalized` and the per-channel affine
 /// output. Rows are independent and each is computed entirely inside one task, so the
-/// `parallel` flag — and the rows-per-task chunking — never changes the result bits
+/// `parallel` flag and the rows-per-task chunking never change the result bits
 #[allow(clippy::too_many_arguments)]
 fn gn_row_forward(
     x: &[f32],
@@ -127,8 +150,8 @@ fn gn_row_forward(
             let mean = segment_sum(x_row, 1.0) / n as f32;
             let var = segment_sq_dev(x_row, mean) / n as f32;
             let inv_std_val = 1.0 / (var + epsilon).sqrt();
-            // The row's channels are contiguous `spatial`-length segments; hoist each
-            // channel's affine scalars over its segment
+            // Row channels are contiguous `spatial`-length segments; hoist each channel's
+            // affine scalars over its segment
             let ch_base = ((row0 + j) % num_groups) * channels_per_group;
             let seg_iter = x_row
                 .chunks_exact(spatial)
@@ -163,10 +186,10 @@ fn gn_row_forward(
 }
 
 /// Fused per-instance group-normalization backward over channels-first slices viewed as
-/// `[num_instances, group_size]` rows: the two per-row reductions fold `g * gamma` per term
+/// `[num_instances, group_size]` rows: the 2 per-row reductions fold `g * gamma` per term
 /// (no `grad_x_normalized` temporary) and one streaming sweep composes the input gradient
 /// with the standard identity
-/// `dx = inv_std * (g * gamma - (sum_g + x_norm * sum_g_xnorm) / group_size)`.
+/// `dx = inv_std * (g * gamma - (sum_g + x_norm * sum_g_xnorm) / group_size)`
 /// Same flag semantics as [`gn_row_forward`]
 #[allow(clippy::too_many_arguments)]
 fn gn_row_backward(
@@ -241,7 +264,7 @@ fn gn_row_backward(
 /// `input` is channels-first `[batch, channels, spatial...]`. Each sample's channels are split
 /// into `num_groups` contiguous groups and normalized within the group. Because a group is a
 /// contiguous `channels_per_group * spatial` block in this layout, the whole op runs as the
-/// fused per-instance row pass [`gn_row_forward`] — no reshape copies or broadcast
+/// fused per-instance row pass [`gn_row_forward`] with no reshape copies or broadcast
 /// temporaries
 ///
 /// Returns `(output, x_normalized, inv_std)`:
@@ -300,7 +323,7 @@ pub(super) fn group_norm_forward_core(
 /// Inverse of [`group_norm_forward_core`]; all arguments are channels-first. The per-channel
 /// parameter gradients are deterministic plane folds over the native `[batch, channels,
 /// spatial]` layout and the input gradient is the fused per-instance row pass
-/// [`gn_row_backward`] — no reshape copies or broadcast temporaries
+/// [`gn_row_backward`] with no reshape copies or broadcast temporaries
 ///
 /// Returns `(grad_input, grad_gamma, grad_beta)` with `grad_input` channels-first and the
 /// parameter gradients shaped `[channels]`

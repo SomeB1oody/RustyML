@@ -1,5 +1,5 @@
 //! Shared calibration harness: the timing loop, the `Row`/`Section` table model that every
-//! calibration produces, and the seeded random-data generators the ladders feed on.
+//! calibration produces, and the seeded random-data generators the ladders feed on
 
 use ndarray::{Array1, Array2};
 use ndarray_rand::RandomExt;
@@ -101,7 +101,7 @@ impl Section {
     }
 
     /// The work bracket where the parallel path starts winning for good: the rung after the
-    /// *last* rung (in work order) whose speedup stays within the noise margin of losing.
+    /// *last* rung (in work order) whose speedup stays within the noise margin of losing
     /// Requiring 1.05x filters ~1.00x ties that would otherwise read as early crossovers
     fn crossover(&self) -> Option<(usize, usize)> {
         let mut sorted: Vec<&Row> = self.rows.iter().collect();

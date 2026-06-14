@@ -258,8 +258,7 @@ impl KdTree {
 
         self.knn_recurse(near, query, k, heap);
 
-        // The far side can only improve the result if its per-axis lower bound is not strictly
-        // worse than the current k-th distance (or the heap is not yet full)
+        // Descend the far side only if its per-axis lower bound is within the current k-th distance (or the heap is not yet full)
         let worst = if heap.len() < k {
             f64::INFINITY
         } else {

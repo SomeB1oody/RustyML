@@ -27,13 +27,12 @@ use ndarray_rand::rand_distr::Normal;
 /// use rustyml::neural_network::traits::Layer;
 /// use ndarray::Array2;
 ///
-/// // Create a GaussianNoise layer with standard deviation of 0.1
+/// // GaussianNoise layer with standard deviation 0.1
 /// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128]).unwrap();
 ///
-/// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, Gaussian noise with stddev=0.1 will be added
+/// // During training, Gaussian noise with stddev=0.1 is added
 /// let output = noise_layer.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -56,14 +55,14 @@ impl GaussianNoise {
     /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
     /// - `input_shape` - Shape of the input tensor
     ///
-    /// # Notes
-    ///
-    /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
-    /// set a seed with [`GaussianNoise::with_random_state`].
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - New GaussianNoise layer instance or a validation error
+    ///
+    /// # Notes
+    ///
+    /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
+    /// set a seed with [`GaussianNoise::with_random_state`]
     ///
     /// # Errors
     ///
@@ -84,7 +83,7 @@ impl GaussianNoise {
     /// Sets the seed for reproducible noise sampling
     ///
     /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`.
+    /// re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -103,7 +102,7 @@ impl GaussianNoise {
 
 impl Layer for GaussianNoise {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` is immutable and already validated in `new()`; only validate the runtime input
+        // `stddev` was validated in `new()`; only the runtime input needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
 
         // During inference or when stddev is 0, pass input through unchanged
@@ -111,7 +110,7 @@ impl Layer for GaussianNoise {
             return Ok(input.clone());
         }
 
-        // Sample mean-0, stddev=self.stddev Gaussian noise and add it to the input
+        // Sample mean-0 Gaussian noise and add it to the input
         let noise = Tensor::random_using(
             input.raw_dim(),
             Normal::new(0.0, self.stddev).unwrap(),
@@ -124,10 +123,10 @@ impl Layer for GaussianNoise {
 
     /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `stddev` is immutable and already validated in `new()`; only validate the runtime input
+        // `stddev` was validated in `new()`; only the runtime input needs checking
         validate_input_shape(input.shape(), &self.input_shape)?;
 
-        // Inference is identity: pass input through unchanged without sampling noise
+        // Inference is identity: pass input through without sampling noise
         Ok(input.clone())
     }
 

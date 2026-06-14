@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 /// Weights of an LSTM layer
 ///
-/// The four gates are stored fused, gate column blocks in the order `[i | f | g | o]`
+/// The 4 gates are stored fused, with gate column blocks in the order `[i | f | g | o]`
 /// (input, forget, cell, output - the Keras LSTM layout)
 ///
 /// Stored as [`Cow`] so saving borrows the live layer arrays without cloning, while loading

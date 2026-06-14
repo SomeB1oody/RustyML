@@ -5,7 +5,7 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::utils::train_test_split::{train_test_split, train_test_split_stratified};
 
-// Happy-path: split shapes
+// Split shapes
 
 /// Default test_size yields 3 test, 7 train rows for 10 samples
 #[test]

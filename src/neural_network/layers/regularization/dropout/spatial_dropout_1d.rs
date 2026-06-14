@@ -22,10 +22,10 @@ use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Spatial Dropout layer for 1D data
+/// Spatial dropout layer for 1D data
 ///
-/// Drops entire channels instead of individual elements, which is effective for
-/// convolutional layers where adjacent positions are correlated. Input shape is
+/// Drops entire channels instead of individual elements, which suits convolutional
+/// layers where adjacent positions are correlated. Input shape is
 /// `(batch_size, channels, length)`
 ///
 /// # Examples
@@ -41,7 +41,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Create input tensor (batch_size=32, channels=64, length=128)
 /// let input = Array3::ones((32, 64, 128)).into_dyn();
 ///
-/// // During training, approximately 20% of channels will be set to 0
+/// // During training, ~20% of channels are set to 0
 /// let output = spatial_dropout.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -66,14 +66,14 @@ impl SpatialDropout1D {
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor `(batch_size, channels, length)`
     ///
-    /// # Notes
-    ///
-    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
-    /// set a seed with [`SpatialDropout1D::with_random_state`].
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - New SpatialDropout1D layer instance or a validation error
+    ///
+    /// # Notes
+    ///
+    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
+    /// set a seed with [`SpatialDropout1D::with_random_state`]
     ///
     /// # Errors
     ///
@@ -93,7 +93,7 @@ impl SpatialDropout1D {
     /// Sets the seed for reproducible mask sampling
     ///
     /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`.
+    /// re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///
@@ -164,7 +164,7 @@ impl Layer for SpatialDropout1D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // `rate` is validated in `new()`; only validate the runtime input here
+        // `rate` is validated in `new()`
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_input_ndim(
             input.ndim(),

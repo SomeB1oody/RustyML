@@ -86,7 +86,6 @@ impl Layer for Linear {
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
         if let Some(input_shape) = &self.input_shape {
-            // Validate gradient output shape
             if grad_output.shape() != input_shape.as_slice() {
                 return Err(Error::shape_mismatch(
                     input_shape.clone(),

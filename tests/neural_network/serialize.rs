@@ -2,8 +2,8 @@
 //!
 //! Each test builds a model (with known injected weights or trained a few steps),
 //! saves and reloads it into a fresh model of the same architecture, and asserts
-//! that predict output matches element-wise (within ~1e-6) across the round-trip;
-//! error paths cover layer-count, layer-type, and weight-shape mismatches (all
+//! that predict output matches element-wise (within ~1e-6) across the round-trip
+//! Error paths cover layer-count, layer-type, and weight-shape mismatches (all
 //! ModelStructureMismatch), a nonexistent file (IoError::Std), and invalid JSON
 //! (IoError::Json)
 
@@ -582,7 +582,6 @@ fn mixed_model_with_dropout_round_trip() {
 
     let model = make_arch();
 
-    // A single sample
     let x: Tensor = Array::from_shape_vec((1, 3), vec![0.5f32, -1.0, 1.5])
         .unwrap()
         .into_dyn();

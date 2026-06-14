@@ -11,7 +11,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 /// Centralizes the "parallelize only for large inputs" dispatch that every model re-implements,
 /// so the mechanism lives in one place. The caller passes the decision rather than a bare item
 /// count, because the right gate compares **total work** (items x per-item cost, e.g.
-/// `n * centers * features`) against the calibrated class threshold - an item count alone rates
+/// `n * centers * features`) against the calibrated class threshold. An item count alone rates
 /// a 2-feature scan the same as a 2000-feature one
 ///
 /// # Parameters
@@ -22,7 +22,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 ///
 /// # Returns
 ///
-/// - `Vec<R>` - The collected results in index order
+/// - `Vec<R>` - Collected results in index order
 #[inline]
 pub(super) fn map_collect<R, F>(n: usize, parallel: bool, f: F) -> Vec<R>
 where
@@ -43,7 +43,6 @@ mod tests {
     /// map_collect returns identical index-ordered output on both the sequential and parallel branches
     #[test]
     fn map_collect_seq_and_par_match_index_order() {
-        // Sequential branch
         let seq: Vec<usize> = map_collect(3, false, |i| i * i);
         assert_eq!(
             seq,
@@ -51,7 +50,6 @@ mod tests {
             "sequential branch must be index-ordered"
         );
 
-        // Parallel branch
         let par: Vec<usize> = map_collect(8, true, |i| i * i);
         assert_eq!(
             par,

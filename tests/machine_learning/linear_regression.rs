@@ -233,7 +233,7 @@ fn fit_inf_in_x_returns_non_finite() {
 #[test]
 fn fit_y_length_mismatch_returns_dimension_mismatch() {
     let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
-    // x has 3 rows but y has 2 elements
+    // 3 rows in x but 2 elements in y
     let x = array![[1.0], [2.0], [3.0]];
     let y = array![1.0, 2.0];
     let result = model.fit(&x, &y);
@@ -250,7 +250,7 @@ fn fit_y_length_mismatch_returns_dimension_mismatch() {
 #[test]
 fn predict_empty_matrix_returns_empty_input() {
     let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
-    // Train on y = 2x + 1
+    // train on y = 2x + 1
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x_train, &y_train).unwrap();
@@ -268,12 +268,12 @@ fn predict_empty_matrix_returns_empty_input() {
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
     let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
-    // Trained on 1 feature
+    // trained on 1 feature
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x_train, &y_train).unwrap();
 
-    // Predict with 2 features (mismatched)
+    // predict with 2 features, mismatched
     let x_wrong = array![[1.0, 2.0]];
     let result = model.predict(&x_wrong);
     assert!(
@@ -323,14 +323,14 @@ fn predict_inf_in_x_returns_non_finite() {
 /// After fit, coefficient ~= 2.0 and intercept ~= 1.0 (tight tolerance)
 #[test]
 fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
-    // Small learning rate and many iterations to ensure gradient descent converges
+    // small learning rate and many iterations so gradient descent converges
     let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
 
-    // Iterative solver reaches the OLS solution (coef 2, intercept 1) to ~1e-3, so assert
-    // within an iterative-solver tolerance rather than exact-OLS precision
+    // iterative solver reaches the OLS solution (coef 2, intercept 1) to ~1e-3, so assert
+    // within iterative-solver tolerance rather than exact-OLS precision
     let coeff = model.get_coefficients().unwrap();
     assert_abs_diff_eq!(coeff[0], 2.0, epsilon = 3e-3);
 
@@ -372,7 +372,7 @@ fn fit_sets_n_iter() {
 #[test]
 fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
     let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10).unwrap();
-    // 6 training points spanning the feature space well
+    // 6 training points spanning the feature space
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![
@@ -427,7 +427,6 @@ fn no_intercept_stored_intercept_is_zero() {
     let y = array![2.0, 4.0, 6.0, 8.0, 10.0];
     model.fit(&x, &y).unwrap();
 
-    // intercept is set to 0.0 when fit_intercept=false
     let intercept = model.get_intercept().unwrap();
     assert_abs_diff_eq!(intercept, 0.0, epsilon = 1e-15);
 }
@@ -492,11 +491,9 @@ fn fit_predict_matches_fit_then_predict() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    // Path 1: fit_predict
     let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
 
-    // Path 2: fit then predict
     let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
     model_b.fit(&x, &y).unwrap();
     let preds_b = model_b.predict(&x).unwrap();
@@ -722,7 +719,7 @@ fn fit_huge_learning_rate_diverges_returns_non_finite() {
     // learning_rate = 1e8 is positive and finite, so the constructor accepts it
     let mut model = LinearRegression::new(true, 1e8, 1000, 1e-10).unwrap();
 
-    // Perfectly clean, finite data: y = 2x + 1 on x = [1..5]
+    // clean, finite data: y = 2x + 1 on x = [1..5]
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
@@ -744,13 +741,13 @@ fn l1_regularization_parallel_branch_recovers_informative_feature() {
     let n_samples = 12usize;
     let n_features = 200usize; // exactly the parallel threshold (>= 200 triggers the branch)
 
-    // Build X deterministically: column 0 = centered signal, columns 1.. = tiny noise
+    // column 0 = centered signal, columns 1.. = tiny noise
     let x = Array2::from_shape_fn((n_samples, n_features), |(i, j)| {
         if j == 0 {
             // centered, varying signal in [-5.5, 5.5]
             (i as f64) - 5.5
         } else {
-            // deterministic, bounded zig-zag noise in {-0.03, ..., 0.03}, uncorrelated with y
+            // bounded zig-zag noise in {-0.03, ..., 0.03}, uncorrelated with y
             0.01 * (((i * 31 + j * 17) % 7) as f64 - 3.0)
         }
     });
@@ -758,7 +755,7 @@ fn l1_regularization_parallel_branch_recovers_informative_feature() {
     // y depends only on column 0: y = 3 * x0 (no intercept needed)
     let y = Array1::from_shape_fn(n_samples, |i| 3.0 * ((i as f64) - 5.5));
 
-    // Very weak L1 so the dominant coefficient is shrunk only slightly; fit_intercept = false
+    // weak L1 so the dominant coefficient is shrunk only slightly; fit_intercept = false
     let mut model = LinearRegression::new(false, 0.01, 20_000, 1e-12)
         .unwrap()
         .with_regularization(RegularizationType::L1(1e-3))
@@ -775,13 +772,13 @@ fn l1_regularization_parallel_branch_recovers_informative_feature() {
     );
 
     let c0 = coeffs[0];
-    // (a) The informative coefficient is substantial and positive (true slope is 3.0)
+    // (a) the informative coefficient is substantial and positive (true slope is 3.0)
     assert!(
         c0 > 1.0,
         "informative coefficient[0] = {c0} should be a large positive value (true slope 3.0)"
     );
 
-    // (b) Every noise coefficient stays small; the 0.5 bound sits above what the bounded
+    // (b) every noise coefficient stays small; the 0.5 bound sits above what the bounded
     // (|x_j| <= 0.03) noise columns can earn yet far below coefficient[0]
     let max_other = coeffs
         .iter()

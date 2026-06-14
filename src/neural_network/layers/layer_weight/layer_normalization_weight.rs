@@ -24,7 +24,7 @@ impl ApplyWeights<LayerNormalization> for LayerNormalizationLayerWeight<'_> {
     ///
     /// # Errors
     ///
-    /// - Returns an error if `gamma` or `beta` does not match the layer's expected parameter shape
+    /// Returns an error if `gamma` or `beta` does not match the layer's expected parameter shape
     fn apply_to_layer(&self, layer: &mut LayerNormalization) -> Result<(), Error> {
         layer.set_weights((*self.gamma).clone(), (*self.beta).clone())?;
         Ok(())

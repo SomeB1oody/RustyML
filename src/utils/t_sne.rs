@@ -1,6 +1,6 @@
 //! t-SNE (t-distributed Stochastic Neighbor Embedding) for dimensionality reduction
 //!
-//! Provides the [`TSNE`] model with PCA or random embedding initialization, early-exaggeration,
+//! Provides the [`TSNE`] model with PCA or random embedding initialization, early exaggeration,
 //! momentum-based gradient descent, and a per-point sigma solver that calibrates conditional
 //! probabilities to a target perplexity
 
@@ -19,6 +19,10 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIter
 /// Returns the resulting probability distribution together with the sigma that achieves the
 /// target perplexity. This is t-SNE's per-point precision calibration, an algorithm-specific
 /// solver, so it lives with the model rather than in `crate::math`
+///
+/// # Returns
+///
+/// - `(Array1<f64>, f64)` - the conditional probability distribution and the calibrated sigma
 fn binary_search_sigma<S>(
     distances: &ArrayBase<S, Ix1>,
     target_perplexity: f64,
@@ -99,9 +103,8 @@ const MIN_Q: f64 = 1e-12;
 /// Strategy for initializing the low-dimensional embedding before optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Init {
-    /// Initialize from the top principal components of the input. This is deterministic and
-    /// gives a stable, well-spread starting layout, so it is the default and ignores
-    /// `random_state`
+    /// Initialize from the top principal components of the input. Deterministic and gives a
+    /// stable, well-spread starting layout, so it is the default and ignores `random_state`
     #[default]
     PCA,
     /// Initialize from small random noise seeded by `random_state`
@@ -115,7 +118,10 @@ pub enum TSNEMethod {
     /// and the repulsive forces are summarized through a space-partitioning tree, giving roughly
     /// `O(n log n)` per iteration. `angle` (theta) in `[0, 1)` trades accuracy for speed, where
     /// larger values are faster and less accurate. Only supports `n_components <= 3`
-    BarnesHut { angle: f64 },
+    BarnesHut {
+        /// Opening angle (theta) in `[0, 1)`; larger is faster and less accurate
+        angle: f64,
+    },
     /// Exact gradient over all pairs, costing `O(n^2)` per iteration. Supports any `n_components`
     Exact,
 }
@@ -207,23 +213,12 @@ impl TSNE {
     /// The gradient method defaults to [`TSNEMethod::BarnesHut`] (with `angle = 0.5`) for
     /// `n_components <= 3` and falls back to [`TSNEMethod::Exact`] otherwise; the embedding is
     /// PCA-initialized and the random path is seeded non-deterministically. Override any of
-    /// these with the builder methods below (`with_method` returns `Result` because Barnes-Hut
+    /// these with the builder methods (`with_method` returns `Result` because Barnes-Hut
     /// requires a valid angle and a low-dimensional embedding):
     ///
     /// - [`with_random_state`](Self::with_random_state) - fixed seed for the random init path
     /// - [`with_init`](Self::with_init) - embedding initialization ([`Init::PCA`] or [`Init::Random`])
     /// - [`with_method`](Self::with_method) - gradient method ([`TSNEMethod::BarnesHut`] or [`TSNEMethod::Exact`])
-    ///
-    /// ```
-    /// use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
-    ///
-    /// let model = TSNE::new(2, 30.0, 200.0, 1000)
-    ///     .unwrap()
-    ///     .with_init(Init::Random)
-    ///     .with_random_state(42)
-    ///     .with_method(TSNEMethod::Exact)
-    ///     .unwrap();
-    /// ```
     pub fn new(
         n_components: usize,
         perplexity: f64,
@@ -255,8 +250,8 @@ impl TSNE {
             return Err(Error::invalid_parameter("n_iter", "must be greater than 0"));
         }
 
-        // Barnes-Hut needs a low-dimensional embedding for the tree, so default to it only
-        // when valid; higher-dimensional embeddings fall back to the exact gradient
+        // Barnes-Hut needs a low-dimensional embedding for the tree, so default to it only when
+        // valid; higher-dimensional embeddings fall back to the exact gradient
         let method = if n_components <= 3 {
             TSNEMethod::BarnesHut { angle: 0.5 }
         } else {
@@ -374,7 +369,6 @@ impl TSNE {
     where
         S: Data<Elem = f64>,
     {
-        // Validate inputs before any heavy computation
         self.validate_input(x)?;
 
         let x_owned = x.to_owned();
@@ -417,14 +411,14 @@ impl TSNE {
         let mut last_kl = 0.0;
 
         for iter in 0..self.n_iter {
-            // Use early exaggeration for the first phase only
+            // Early exaggeration for the first phase only
             let p_use = if iter < exaggeration_iter {
                 &p_exaggerated
             } else {
                 &p
             };
 
-            // Compute Student-t affinities and gradient
+            // Student-t affinities and gradient
             let (num, sum_num) = self.compute_num_matrix(&y, use_parallel);
             let grad = self.compute_gradient(&y, p_use, &num, sum_num, use_parallel);
 
@@ -457,8 +451,8 @@ impl TSNE {
         angle: f64,
     ) -> Result<Array2<f64>, Error> {
         let n_samples = x.nrows();
-        // Scan-class gate: the dominant gated work is the one-off neighbor search, n tasks
-        // of an O(n) projection-row scan each
+        // Scan-class gate: the dominant gated work is the one-off neighbor search, n tasks of an
+        // O(n) projection-row scan each
         let use_parallel = n_samples.saturating_mul(n_samples) >= SCAN_F64_PARALLEL_MIN_ELEMS;
 
         // Sparse symmetric joint probabilities over each point's nearest neighbors
@@ -546,7 +540,7 @@ impl TSNE {
             });
         *y += &*y_incs;
 
-        // Keep embedding centered to avoid drift
+        // Keep the embedding centered to avoid drift
         self.center_embedding(y)
     }
 
@@ -577,7 +571,7 @@ impl TSNE {
                 })
                 .collect();
 
-            // Partial select the k smallest by (distance, index) for a deterministic neighbor set
+            // Partial-select the k smallest by (distance, index) for a deterministic neighbor set
             if dists.len() > k {
                 dists.select_nth_unstable_by(k - 1, |a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
                 dists.truncate(k);
@@ -752,7 +746,7 @@ impl TSNE {
         super::validation::validate_fit_matrix(x)?;
         super::validation::check_min_samples(x, 2, "t-SNE")?;
 
-        // The perplexity bound is t-SNE-specific and stays here
+        // The perplexity bound is t-SNE-specific
         if self.perplexity >= x.nrows() as f64 {
             return Err(Error::invalid_parameter(
                 "perplexity",
@@ -870,7 +864,6 @@ impl TSNE {
 
         let mut p_conditional = Array2::<f64>::zeros((n_samples, n_samples));
         for (i, row) in rows.into_iter().enumerate() {
-            // Assign per-row conditional probabilities
             p_conditional.row_mut(i).assign(&row);
         }
 
@@ -882,7 +875,7 @@ impl TSNE {
         let mut p = Array2::<f64>::zeros((n_samples, n_samples));
         let normalization = 2.0 * n_samples as f64;
 
-        // Average conditional probs to form joint probabilities
+        // Average conditional probabilities to form joint probabilities
         for i in 0..n_samples {
             for j in (i + 1)..n_samples {
                 let val = (p_conditional[[i, j]] + p_conditional[[j, i]]) / normalization;
@@ -1017,7 +1010,7 @@ impl TSNE {
     }
 
     fn center_embedding(&self, y: &mut Array2<f64>) -> Result<(), Error> {
-        // Subtract mean to keep the embedding centered
+        // Subtract the mean to keep the embedding centered
         let mean = y
             .mean_axis(Axis(0))
             .ok_or_else(|| Error::computation("Failed to compute embedding mean"))?;
@@ -1245,8 +1238,8 @@ mod tests {
         // Self / zero-distance entry must be exactly 0 (the `d == 0.0` branch)
         assert_abs_diff_eq!(p[0], 0.0_f64, epsilon = 1e-12);
 
-        // Achieved perplexity = exp(-sum p ln p) must be within tolerance of the target
-        // (looser than the solver's 1e-5 exit bound to absorb accumulated float error)
+        // Achieved perplexity = exp(-sum p ln p) must be within tolerance of the target,
+        // looser than the solver's 1e-5 exit bound to absorb accumulated float error
         let h: f64 = p
             .iter()
             .map(|&v| if v > 1e-10 { -v * v.ln() } else { 0.0 })

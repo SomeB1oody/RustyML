@@ -30,7 +30,7 @@ fn dense_forward(c: &mut Criterion) {
     });
 }
 
-/// Conv2D forward at batch == 1 (the single-sample inference case the engine used to run serial)
+/// Conv2D forward at batch == 1 (single-sample inference)
 fn conv2d_forward_batch1(c: &mut Criterion) {
     let mut layer = Conv2D::new(64, (3, 3), vec![1, 32, 96, 96], (1, 1), Activation::ReLU)
         .unwrap()
@@ -236,10 +236,8 @@ fn spatial_dropout_3d_backward(c: &mut Criterion) {
 }
 
 /// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map),
-/// where the per-channel kernels do direct convolution over flat contiguous buffers (no im2col,
-/// no per-position temporaries). `forward` is the inference cost; `fwd_bwd` is a full train step
-/// (the backward consumes the forward's output cache, so each iteration re-runs the forward), and
-/// `fwd_bwd - forward` approximates the backward cost
+/// where `forward` is the inference cost and `fwd_bwd` re-runs the forward then backward each
+/// iteration, so `fwd_bwd - forward` approximates the backward cost
 fn depthwise_separable_conv(c: &mut Criterion) {
     let mut group = c.benchmark_group("conv_depthwise_separable");
     group.sample_size(30);

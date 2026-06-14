@@ -35,7 +35,7 @@ use ndarray_rand::rand_distr::Normal;
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
 ///
-/// // During training, values will be multiplied by Gaussian noise N(1, sqrt(rate/(1-rate)))
+/// // During training, values are multiplied by Gaussian noise N(1, sqrt(rate/(1-rate)))
 /// let output = gaussian_dropout.forward(&input).unwrap();
 /// ```
 #[derive(Debug)]
@@ -64,7 +64,7 @@ impl GaussianDropout {
     /// # Notes
     ///
     /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
-    /// set a seed with [`GaussianDropout::with_random_state`].
+    /// set a seed with [`GaussianDropout::with_random_state`]
     ///
     /// # Returns
     ///
@@ -90,7 +90,7 @@ impl GaussianDropout {
     /// Sets the seed for reproducible noise sampling
     ///
     /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
-    /// re-seeds it deterministically from `random_state`.
+    /// re-seeds it deterministically from `random_state`
     ///
     /// # Parameters
     ///

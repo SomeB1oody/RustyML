@@ -18,8 +18,8 @@ use ndarray_rand::rand::seq::SliceRandom;
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
-/// A classifier similar to sklearn's LinearSVC, trained using the hinge loss function,
-/// with L1 and L2 regularization for preventing overfitting
+/// A classifier similar to sklearn's LinearSVC, trained with the hinge loss function
+/// and L1 or L2 regularization to prevent overfitting
 ///
 /// # Examples
 ///
@@ -137,14 +137,6 @@ impl LinearSVC {
     /// runs, set a fixed seed after construction with the builder method below:
     ///
     /// - [`with_random_state`](Self::with_random_state) - fixed seed for minibatch shuffling
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{LinearSVC, RegularizationType};
-    ///
-    /// let model = LinearSVC::new(1000, 0.001, RegularizationType::L2(1.0), true, 1e-4)
-    ///     .unwrap()
-    ///     .with_random_state(42);
-    /// ```
     pub fn new(
         max_iter: usize,
         learning_rate: f64,
@@ -152,7 +144,6 @@ impl LinearSVC {
         fit_intercept: bool,
         tol: f64,
     ) -> Result<Self, Error> {
-        // Validate parameters
         validate_max_iterations(max_iter)?;
         validate_learning_rate(learning_rate)?;
         validate_tolerance(tol)?;
@@ -259,13 +250,11 @@ impl LinearSVC {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Validate inputs
         preliminary_check(x, Some(y))?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
 
-        // Initialize weights and bias
         let mut weights = Array1::zeros(n_features);
         let mut bias = 0.0;
 
@@ -281,10 +270,8 @@ impl LinearSVC {
 
         let mut n_iter = 0;
 
-        // Calculate optimal batch size
         let batch_size = Self::calculate_batch_size(n_samples);
 
-        // Define cost calculation closure
         #[allow(unused_variables)]
         let calculate_cost = |x: &ArrayBase<S, Ix2>,
                               y: &Array1<f64>,
@@ -295,7 +282,7 @@ impl LinearSVC {
             let margins: Array1<f64> = gemv_internal(x, weights) + bias;
             let hinge = hinge_loss(&margins, y);
 
-            // Calculate regularization term
+            // Regularization term
             let regularization_term = match penalty {
                 RegularizationType::L2(lambda) => {
                     lambda * weights.iter().map(|&w| w * w).sum::<f64>() / 2.0
@@ -308,7 +295,6 @@ impl LinearSVC {
             hinge + regularization_term
         };
 
-        // Create progress bar for training iterations
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -353,14 +339,13 @@ impl LinearSVC {
                 // Update weights with the averaged hinge-loss gradient (in place, no allocation)
                 weights.scaled_add(self.learning_rate / batch_len, &weight_grad_sum);
 
-                // Apply regularization
                 match self.penalty {
                     RegularizationType::L2(lambda) => {
-                        // L2 regularization: gradient is lambda * weights
+                        // L2 gradient is lambda * weights
                         weights = &weights * (1.0 - self.learning_rate * lambda);
                     }
                     RegularizationType::L1(lambda) => {
-                        // L1 regularization: subgradient update
+                        // L1 subgradient update
                         let l1_grad = weights.mapv(|w| {
                             if w > 0.0 {
                                 1.0
@@ -378,11 +363,11 @@ impl LinearSVC {
                     bias += self.learning_rate * bias_grad_sum / batch_len;
                 }
 
-                // Check for weight explosion early
+                // Catch weight explosion early
                 Self::check_weights_validity(&weights, bias)?;
             }
 
-            // Convergence check: compute mean squared difference
+            // Convergence check: mean squared difference
             let weight_diff = (&weights - &prev_weights)
                 .iter()
                 .map(|&x| x * x)
@@ -397,7 +382,7 @@ impl LinearSVC {
 
             let total_diff = (weight_diff + bias_diff).sqrt();
 
-            // Calculate and display current cost
+            // Compute and display current cost
             #[cfg(feature = "show_progress")]
             if n_iter % 10 == 0 || total_diff < self.tol {
                 let current_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
@@ -412,7 +397,6 @@ impl LinearSVC {
             prev_bias = bias;
         }
 
-        // Finish progress bar with final statistics
         #[cfg(feature = "show_progress")]
         {
             let final_cost = calculate_cost(x, &y_binary, &weights, bias, &self.penalty);
@@ -459,8 +443,8 @@ impl LinearSVC {
 
     /// Calculates the decision function values for each sample
     ///
-    /// Provides raw scores representing the distance to the decision hyperplane,
-    /// where positive values indicate class 1 and negative values indicate class 0
+    /// Raw scores represent the distance to the decision hyperplane: positive values
+    /// indicate class 1 and negative values indicate class 0
     ///
     /// # Parameters
     ///
@@ -479,7 +463,6 @@ impl LinearSVC {
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted, then validate the prediction input
         let weights = self
             .weights
             .as_ref()
@@ -490,7 +473,7 @@ impl LinearSVC {
 
         let decision = gemv_internal(x, weights) + bias;
 
-        // Check for NaN/Inf in decision values
+        // Reject NaN/Inf in decision values
         if decision.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("decision function"));
         }

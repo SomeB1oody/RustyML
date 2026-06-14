@@ -1,19 +1,18 @@
-//! # RustyML - A Comprehensive Machine Learning and Deep Learning Library in Pure Rust
+//! # RustyML - A Machine Learning and Deep Learning Library in Pure Rust
 //!
-//! RustyML is a high-performance machine learning and deep learning library written entirely in Rust,
-//! leveraging Rust's memory safety, concurrency features, and zero-cost abstractions to provide
-//! efficient implementations of classical ML algorithms, neural networks, and data processing utilities.
+//! RustyML is a machine learning and deep learning library written entirely in Rust,
+//! using Rust's memory safety, concurrency features, and zero-cost abstractions to provide
+//! implementations of classical ML algorithms, neural networks, and data processing utilities
 //!
 //! ## Overview
 //!
-//! This crate offers a complete ecosystem for machine learning tasks, from data preprocessing
-//! and feature engineering to model training and evaluation. All implementations are designed
-//! with production use in mind, featuring robust error handling, parallel processing optimization,
-//! and comprehensive input validation.
+//! This crate covers machine learning tasks from data preprocessing and feature engineering
+//! to model training and evaluation. Implementations feature error handling, parallel processing,
+//! and input validation
 //!
 //! ## Architecture
 //!
-//! The library is organized into six main modules, each gated by feature flags:
+//! The library is organized into 5 main modules, each gated by feature flags:
 //!
 //! ### [`machine_learning`]
 //! Classical machine learning algorithms for supervised and unsupervised learning:
@@ -36,8 +35,8 @@
 //! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid, Cosine
 //!
 //! ### [`metrics`]
-//! Comprehensive evaluation metrics for model performance assessment:
-//! - **Regression**: MSE, RMSE, MAE, R² score
+//! Evaluation metrics for model performance assessment:
+//! - **Regression**: MSE, RMSE, MAE, R^2 score
 //! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
 //! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score
 //!
@@ -93,10 +92,10 @@
 //! // Use the loaded model for predictions
 //! let _loaded_predictions = loaded_model.predict(&new_data.view());
 //!
-//! // Since Clone is implemented, the model can be easily cloned
+//! // Clone is implemented
 //! let _model_copy = model.clone();
 //!
-//! // Since Debug is implemented, detailed model information can be printed
+//! // Debug is implemented
 //! println!("{:?}", model);
 //! ```
 //!
@@ -182,43 +181,40 @@
 ))]
 use serde::{Deserialize, Serialize};
 
-/// Shared configuration types (kernels, distance metrics, regularization).
+/// Shared configuration types (kernels, distance metrics, regularization)
 #[cfg(any(feature = "machine_learning", feature = "utils", feature = "metrics"))]
 pub mod types;
 
 #[cfg(feature = "show_progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 
-/// Creates a progress bar with a consistent style across the entire crate.
+/// Creates a progress bar with a consistent style across the crate
 ///
-/// This function provides a unified way to create progress bars for all algorithms
-/// and utilities in the crate. The progress bar will only be created when the
-/// `show_progress` feature is enabled.
+/// The progress bar is only created when the `show_progress` feature is enabled
 ///
 /// # Parameters
 ///
 /// - `total` - The total number of iterations or items to process
-/// - `template` - A custom template string for the progress bar format
-///   Use placeholders: {elapsed_precise}, {bar:40}, {pos}, {len}, {msg}
-///   Example: "\[{elapsed_precise}\] {bar:40} {pos}/{len} | Cost: {msg}"
+/// - `template` - A custom template string for the progress bar format,
+///   using placeholders {elapsed_precise}, {bar:40}, {pos}, {len}, {msg};
+///   example: "\[{elapsed_precise}\] {bar:40} {pos}/{len} | Cost: {msg}"
 ///
 /// # Returns
 ///
-/// - `ProgressBar` - A configured progress bar instance (only when feature is enabled)
+/// - `ProgressBar` - A configured progress bar instance
 ///
-/// # Example Templates
+/// # Notes
 ///
+/// Example templates:
 /// - For iterations with cost: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}"`
 /// - For iterations with loss: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Loss: {msg}"`
 /// - For node counting: `"[{elapsed_precise}] {bar:40} {pos} nodes | Depth: {msg}"`
 /// - For general progress: `"[{elapsed_precise}] {bar:40} {pos}/{len} | Stage: {msg}"`
 ///
-/// # Style
-///
 /// All progress bars use the unified style with:
 /// - Progress characters: `"#>-"` (completed, current, remaining)
 /// - Bar width: 40 characters
-/// - Time display: Precise elapsed time
+/// - Time display: precise elapsed time
 #[cfg(feature = "show_progress")]
 #[allow(dead_code)]
 fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
@@ -232,22 +228,15 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
     progress_bar
 }
 
-/// A macro that generates a getter method for any field.
+/// Generates a public getter method that returns a field by value
 ///
-/// This macro creates a public getter method that returns the value or reference
-/// of the specified field. The generated method includes appropriate documentation
-/// describing the field being accessed.
+/// The generated method includes documentation describing the field being accessed
 ///
 /// # Parameters
 ///
-/// - `$method_name` - The name of the getter method (e.g., get_fit_intercept)
-/// - `$field_name` - The name of the field to access (e.g., fit_intercept)
+/// - `$method_name` - The name of the getter method (e.g. get_fit_intercept)
+/// - `$field_name` - The name of the field to access (e.g. fit_intercept)
 /// - `$return_type` - The return type of the getter method
-///
-/// # Generated Method
-///
-/// The macro generates a method that returns the field value,
-/// with documentation that describes what field is being accessed.
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
@@ -260,21 +249,15 @@ macro_rules! get_field {
     };
 }
 
-/// A macro that generates a public getter method returning a reference to a field.
+/// Generates a public getter method returning an immutable reference to a field
 ///
-/// This macro creates a method that provides immutable reference access to a private field
-/// in a struct, following the Rust convention of getter methods.
+/// The generated method includes documentation describing the field being accessed
 ///
 /// # Parameters
 ///
 /// - `$method_name` - The identifier for the generated getter method name
 /// - `$field_name` - The identifier of the struct field to access
-/// - `$return_type` - The type expression for the return value (typically a reference type like `&Type`)
-///
-/// # Generated Method
-///
-/// The macro generates a method that returns the field value as a reference,
-/// with documentation that describes what field is being accessed
+/// - `$return_type` - The type for the return value (typically a reference type like `&Type`)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
@@ -287,26 +270,25 @@ macro_rules! get_field_as_ref {
     };
 }
 
-/// Macro for generating save_to_path and load_from_path methods for model structs.
+/// Generates `save_to_path` and `load_from_path` methods for model structs
 ///
-/// This macro generates two methods:
-/// - `save_to_path`: Saves the model to a JSON file at the specified path
-/// - `load_from_path`: Loads a model from a JSON file at the specified path
+/// - `save_to_path` - Saves the model to a JSON file at the specified path
+/// - `load_from_path` - Loads a model from a JSON file at the specified path
 ///
 /// # Parameters
 ///
-/// * `$model_type` - The type of the model struct (e.g., LinearRegression, LogisticRegression)
+/// - `$model_type` - The type of the model struct (e.g. LinearRegression, LogisticRegression)
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
-        /// Saves the trained model to a JSON file at the specified path.
+        /// Saves the trained model to a JSON file at the specified path
         ///
-        /// This method serializes the entire model state including coefficients, intercept,
-        /// hyperparameters, and training metadata to JSON format using serde_json.
+        /// Serializes the entire model state including coefficients, intercept,
+        /// hyperparameters, and training metadata to JSON format using serde_json
         ///
         /// # Parameters
         ///
-        /// * `path` - File path where the model will be saved (e.g., "stored_model.json")
+        /// - `path` - File path where the model will be saved (e.g. "stored_model.json")
         ///
         /// # Returns
         ///
@@ -317,27 +299,24 @@ macro_rules! model_save_and_load_methods {
             use std::fs::File;
             use std::io::{BufWriter, Write};
 
-            // Create or overwrite the file
             let file = File::create(path)?;
             let mut writer = BufWriter::new(file);
 
-            // Serialize the model to JSON and write to file
             to_writer_pretty(&mut writer, self)?;
 
-            // Ensure all data is written to disk
             writer.flush()?;
 
             Ok(())
         }
 
-        /// Loads a trained model from a JSON file at the specified path.
+        /// Loads a trained model from a JSON file at the specified path
         ///
-        /// This method deserializes a previously saved model from JSON format,
-        /// restoring all model parameters, hyperparameters, and training state.
+        /// Deserializes a previously saved model from JSON format, restoring all
+        /// model parameters, hyperparameters, and training state
         ///
         /// # Parameters
         ///
-        /// * `path` - File path from which to load the model (e.g., "stored_model.json")
+        /// - `path` - File path from which to load the model (e.g. "stored_model.json")
         ///
         /// # Returns
         ///
@@ -347,10 +326,8 @@ macro_rules! model_save_and_load_methods {
         pub fn load_from_path(path: &str) -> Result<Self, crate::error::Error> {
             use serde_json::from_reader;
 
-            // Open and buffer the file for reading
             let reader = crate::error::IoError::load_in_buf_reader(path)?;
 
-            // Deserialize the model from JSON
             let model: $model_type = from_reader(reader)?;
 
             Ok(model)
@@ -358,14 +335,15 @@ macro_rules! model_save_and_load_methods {
     };
 }
 
-/// Error handling module containing the crate's unified error type and its result alias.
+/// Error handling module containing the crate's unified error type and its result alias
 ///
-/// Every fallible operation returns [`error::RustymlResult<T>`](crate::error::RustymlResult) (an alias for `Result<T, error::Error>`).
-/// [`error::Error`] is structured into category variants and groups domain-specific failures into
+/// Every fallible operation returns [`error::RustymlResult<T>`](crate::error::RustymlResult),
+/// an alias for `Result<T, error::Error>`. [`error::Error`] is structured into category variants
+/// and groups domain-specific failures into
 /// the nested [`error::NnError`], [`error::TreeError`], and [`error::IoError`] sub-enums. Prefer the
-/// smart constructors (`Error::dimension_mismatch`, `Error::invalid_parameter`, …) and
+/// smart constructors (`Error::dimension_mismatch`, `Error::invalid_parameter`, ...) and
 /// [`error::Context::context`] for wrapping foreign errors. See the module docs for the full
-/// category breakdown and conventions.
+/// category breakdown and conventions
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -373,13 +351,13 @@ macro_rules! model_save_and_load_methods {
 ))]
 pub mod error;
 
-/// Crate-wide control of pseudo-random number generation for reproducibility.
+/// Crate-wide control of pseudo-random number generation for reproducibility
 ///
 /// Exposes [`set_global_seed`](random::set_global_seed) / [`clear_global_seed`](random::clear_global_seed)
 /// (re-exported at the crate root) to fix a thread-local global seed. All randomized components
 /// resolve their `random_state: Option<u64>` against this global through a shared entry point, so a
 /// single `set_global_seed` call makes the crate reproducible. See the module docs for the
-/// local-vs-global-vs-entropy resolution rules and the threading contract.
+/// local-vs-global-vs-entropy resolution rules and the threading contract
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -387,7 +365,7 @@ pub mod error;
 ))]
 pub mod random;
 
-/// Re-export of the global-seed controls; canonical home is the [`random`] module.
+/// Re-export of the global-seed controls; canonical home is the [`random`] module
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -396,8 +374,7 @@ pub mod random;
 pub use random::{clear_global_seed, set_global_seed};
 
 /// Crate-internal parallel/serial gate thresholds, one constant per calibrated kernel cost
-/// class (`f32` classes for the neural-network layers, `f64` classes for ML/utils). See
-/// `src/parallel_gates.rs` and `benches/RESULTS.md`
+/// class (`f32` classes for the neural-network layers, `f64` classes for ML/utils)
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -405,20 +382,19 @@ pub use random::{clear_global_seed, set_global_seed};
 ))]
 pub(crate) mod parallel_gates;
 
-/// Module `math` contains mathematical utility functions for statistical operations and model evaluation.
+/// Module `math` contains mathematical utility functions for statistical operations and model evaluation
 ///
-/// This module provides comprehensive mathematical functions essential for machine learning algorithms,
-/// including impurity measures for decision trees, distance calculations for clustering algorithms,
-/// statistical measures for evaluation, and various mathematical utilities for data processing.
+/// Functions include impurity measures for decision trees, distance calculations for clustering,
+/// statistical measures for evaluation, and other utilities for data processing
 ///
 /// # What belongs here
 ///
 /// A function lives in `math` only if it is **(1)** pure and stateless, **(2)**
-/// model-agnostic (it encodes no single algorithm's policy), and **(3)** is — or
-/// plausibly could be — shared by more than one caller. Per-algorithm solvers live
+/// model-agnostic (it encodes no single algorithm's policy), and **(3)** is - or
+/// plausibly could be - shared by more than one caller. Per-algorithm solvers live
 /// next to their model; post-hoc evaluation metrics live in [`crate::metrics`] and
 /// call these primitives; trainable, gradient-aware losses live in
-/// `neural_network::losses`.
+/// `neural_network::losses`
 ///
 /// # Core Functions
 ///
@@ -469,10 +445,9 @@ pub(crate) mod parallel_gates;
 #[cfg(feature = "math")]
 pub mod math;
 
-/// Module `machine_learning` provides implementations of various machine learning algorithms and models.
+/// Module `machine_learning` provides implementations of machine learning algorithms and models
 ///
-/// This module includes a comprehensive collection of supervised and unsupervised learning algorithms
-/// with parallel processing optimization and robust error handling for production use.
+/// Includes supervised and unsupervised learning algorithms with parallel processing and error handling
 ///
 /// # Supervised Learning Algorithms
 ///
@@ -516,10 +491,9 @@ pub mod math;
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
-/// Module `prelude` re-exports the most commonly used types and traits from this crate.
+/// Module `prelude` re-exports the most commonly used types and traits from this crate
 ///
-/// This module provides a single import point for frequently used items from the machine learning library,
-/// enabling quick access to essential components with a single `use` statement.
+/// Provides a single import point for frequently used items through one `use` statement
 ///
 /// # Available Components
 ///
@@ -558,11 +532,10 @@ pub mod machine_learning;
 /// ```
 pub mod prelude;
 
-/// Module `utils` provides a collection of utility functions and data processing tools to support machine learning operations.
+/// Module `utils` provides utility functions and data processing tools for machine learning operations
 ///
-/// This module provides essential data transformation and preprocessing capabilities that complement
-/// the main machine learning algorithms, including dimensionality reduction techniques, data splitting
-/// utilities, and various preprocessing functions.
+/// Covers data transformation and preprocessing that complement the main algorithms, including
+/// dimensionality reduction, data splitting, and other preprocessing functions
 ///
 /// # Dimensionality Reduction Techniques
 ///
@@ -598,17 +571,16 @@ pub mod prelude;
 #[cfg(feature = "utils")]
 pub mod utils;
 
-/// Module `metrics` provides comprehensive evaluation metrics for statistical analysis and machine learning model performance assessment.
+/// Module `metrics` provides evaluation metrics for statistical analysis and model performance assessment
 ///
-/// This module provides a complete collection of evaluation functions and structures for measuring
-/// the performance of machine learning models across regression, classification, and clustering tasks
-/// with robust statistical foundations and optimized implementations.
+/// Contains evaluation functions and structures for measuring model performance across
+/// regression, classification, and clustering tasks
 ///
 /// # Regression Metrics
 /// - **mean_squared_error**: Average of squared differences between predicted and actual values
 /// - **root_mean_squared_error**: Square root of MSE, providing error in original data units
 /// - **mean_absolute_error**: Average magnitude of prediction errors without considering direction
-/// - **r2_score**: Coefficient of determination measuring explained variance (R² score)
+/// - **r2_score**: Coefficient of determination measuring explained variance (R^2 score)
 /// - **explained_variance_score**: Variance of the residuals relative to the data (ignores constant bias)
 /// - **median_absolute_error**: Median of the absolute errors, robust to outliers
 /// - **mean_absolute_percentage_error**: Mean relative error as a fraction of the true values
@@ -622,7 +594,7 @@ pub mod utils;
 /// - Formatted summary generation for detailed performance reporting
 ///
 /// ## MulticlassConfusionMatrix Structure
-/// K×K confusion matrix for multi-class evaluation:
+/// KxK confusion matrix for multi-class evaluation:
 /// - Per-class precision, recall, F1, and support
 /// - Macro / micro / weighted aggregation via the `Average` enum
 /// - `classification_report`-style text summary
@@ -646,29 +618,29 @@ pub mod utils;
 /// - **davies_bouldin_score** / **calinski_harabasz_score**: Internal cluster-validity indices (no ground truth needed)
 ///
 /// # Key Features
-/// - **Robust Input Validation**: Comprehensive error checking with informative messages
+/// - **Input Validation**: Error checking with informative messages
 /// - **Numerical Stability**: Epsilon handling and stable algorithms for edge cases
-/// - **Performance Optimized**: Single-pass calculations and efficient implementations
-/// - **Statistical Rigor**: Theoretically sound implementations with proper mathematical foundations
+/// - **Single-pass calculations**: Efficient implementations
+/// - **Statistical Rigor**: Implementations with sound mathematical foundations
 ///
 /// # Conventions
 ///
-/// - **Panics instead of returning `Result`.** `metrics` is a lightweight leaf module — pure
-///   `array -> scalar` functions pulling only `ndarray` and `ahash` — so, like `ndarray` and
+/// - **Panics instead of returning `Result`**. `metrics` is a lightweight leaf module - pure
+///   `array -> scalar` functions pulling only `ndarray` and `ahash` - so, like `ndarray` and
 ///   `nalgebra` on a dimension mismatch, the metrics panic on precondition violations (mismatched
 ///   lengths, empty input) rather than returning the crate's `Error`. The panic messages mirror
-///   that type's wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency.
-/// - **Arguments are `(y_true, y_pred)`** — ground truth first, matching scikit-learn and the
+///   that type's wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
+/// - **Arguments are `(y_true, y_pred)`** - ground truth first, matching scikit-learn and the
 ///   clustering metrics' `(labels_true, labels_pred)`. The order is irrelevant for the symmetric
 ///   metrics (MSE, MAE, accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and
-///   `roc_auc`.
+///   `roc_auc`
 ///
 /// # Examples
 /// ```rust
 /// use rustyml::metrics::*;
 /// use ndarray::array;
 ///
-/// // Regression evaluation — arguments are (y_true, y_pred)
+/// // Regression evaluation - arguments are (y_true, y_pred)
 /// let y_true = array![2.8, 2.1, 3.3, 4.2];
 /// let y_pred = array![3.0, 2.0, 3.5, 4.1];
 /// let mse = mean_squared_error(&y_true.view(), &y_pred.view());
@@ -688,11 +660,10 @@ pub mod utils;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 
-/// Module `neural_network` provides components for building and training neural networks with flexible architecture design.
+/// Module `neural_network` provides components for building and training neural networks
 ///
-/// This module provides a comprehensive framework for constructing, training, and deploying
-/// neural networks with support for various layer types, optimization algorithms, loss functions,
-/// and model architectures.
+/// A framework for constructing, training, and deploying neural networks with support for
+/// various layer types, optimization algorithms, loss functions, and model architectures
 ///
 /// # Core Components
 ///
@@ -762,8 +733,7 @@ pub mod metrics;
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
 
-/// Internal hooks for the `benches/` targets - not part of the public API, no stability
-/// guarantees. See `src/bench_internals.rs`
+/// Internal hooks for the `benches/` targets - not part of the public API, no stability guarantees
 #[cfg(any(feature = "machine_learning", feature = "neural_network"))]
 #[doc(hidden)]
 pub mod bench_internals;

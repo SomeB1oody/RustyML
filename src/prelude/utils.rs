@@ -1,3 +1,5 @@
+//! Prelude re-exports for the `utils` module: preprocessing, decomposition, and dataset splitting
+
 pub use crate::utils::kernel_pca::{EigenSolver, KernelPCA, KernelType};
 pub use crate::utils::label_encoding::{
     to_categorical, to_categorical_with_mapping, to_sparse_categorical,

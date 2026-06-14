@@ -22,7 +22,7 @@ use std::borrow::Cow;
 /// the last hidden state with shape (batch_size, units). Uses reset, update, and candidate
 /// gates to control information flow and mitigate vanishing gradients
 ///
-/// All three gates are stored fused: the kernels are packed side by side into single matrices
+/// All 3 gates are stored fused: the kernels are packed side by side into single matrices
 /// with column blocks in the order `[reset | update | candidate]` (`[r | z | h]`), so the input
 /// projection and the gradient reductions each run as one GEMM instead of three. Per timestep
 /// the reset and update recurrent projections fuse into one GEMM; only the candidate's recurrent
@@ -75,7 +75,7 @@ pub struct GRU {
     activation: Activation,
 }
 
-/// Per-timestep forward values a [`GRU`] records so its backward pass can recompute the gate
+/// Per-timestep forward values a [`GRU`] records so the backward pass can recompute the gate
 /// gradients without re-running the forward recurrence
 #[derive(Debug)]
 struct GruCaches {
@@ -103,7 +103,7 @@ impl GRU {
     /// # Notes
     ///
     /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`GRU::with_random_state`].
+    /// initialization, set a seed with [`GRU::with_random_state`]
     ///
     /// # Returns
     ///
@@ -131,9 +131,9 @@ impl GRU {
 
     /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs the gate initialization with `random_state`, so call it before assigning custom
-    /// weights or training.
+    /// weights or training
     ///
     /// # Parameters
     ///
@@ -151,7 +151,7 @@ impl GRU {
 
     /// Initializes the fused `[r | z | h]` gate blocks from the given seed
     ///
-    /// One RNG is threaded through all three gate blocks; all biases start at 0.0.
+    /// One RNG is threaded through all 3 gate blocks; all biases start at 0.0
     fn init_gates(
         input_dim: usize,
         units: usize,
@@ -293,7 +293,7 @@ impl GRU {
     ///
     /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden states,
     /// the reset/update gate activations, the candidate, and `r_t .* h_{t-1}`) is recorded;
-    /// `predict` passes `None` and skips both the recording and its clones
+    /// `predict` passes `None` and skips both the recording and the clones
     fn run(
         &self,
         x3: &ArrayView3<f32>,

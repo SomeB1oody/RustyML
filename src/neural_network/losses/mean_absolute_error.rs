@@ -15,7 +15,7 @@ use crate::neural_network::traits::Loss;
 /// use rustyml::neural_network::traits::Loss;
 /// use ndarray::ArrayD;
 ///
-/// // Create sample data
+/// // Sample data
 /// let y_true: Tensor = ArrayD::from_shape_vec(
 ///     vec![4],
 ///     vec![1.0, 2.0, 3.0, 4.0]

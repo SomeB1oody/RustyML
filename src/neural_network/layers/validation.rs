@@ -2,7 +2,7 @@
 
 use crate::error::{Error, NnError};
 
-/// Validates that a weight array being assigned to a layer has the shape the layer expects
+/// Validates that a weight array assigned to a layer has the shape the layer expects
 ///
 /// Layers initialize their weight arrays with the correct shape in `new()`, so loaded or
 /// user-supplied weights must match that shape. This turns a silent corruption (and a later
@@ -10,13 +10,9 @@ use crate::error::{Error, NnError};
 ///
 /// # Parameters
 ///
-/// - `name` - Name of the parameter being set, for the error message, e.g. "weight" or "bias"
-/// - `expected` - The shape the layer currently has for this parameter
-/// - `found` - The shape of the array being assigned
-///
-/// # Returns
-///
-/// - `Ok(())` - The shapes match
+/// - `name` - Name of the parameter being set, used in the error message, e.g. "weight" or "bias"
+/// - `expected` - Shape the layer currently has for this parameter
+/// - `found` - Shape of the array being assigned
 ///
 /// # Errors
 ///

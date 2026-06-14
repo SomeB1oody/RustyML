@@ -33,7 +33,7 @@ use crate::neural_network::traits::Layer;
 /// use ndarray::Array3;
 /// use approx::assert_relative_eq;
 ///
-/// // Create a simple input tensor: [batch_size, channels, length]
+/// // Create an input tensor: [batch_size, channels, length]
 /// // batch_size=2, 3 input channels, 8 elements per channel
 /// let mut input_data = Array3::zeros((2, 3, 8));
 ///
@@ -105,7 +105,7 @@ impl MaxPooling1D {
     /// # Notes
     ///
     /// The stride defaults to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override
-    /// them with [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`].
+    /// them with [`MaxPooling1D::with_stride`] and [`MaxPooling1D::with_padding`]
     ///
     /// # Returns
     ///
@@ -117,7 +117,6 @@ impl MaxPooling1D {
     /// - `Error::InvalidInput` - If `input_shape` contains a zero dimension
     /// - `Error::InvalidParameter` - If `pool_size` is zero or larger than the input length
     pub fn new(pool_size: usize, input_shape: Vec<usize>) -> Result<Self, Error> {
-        // input validation
         validate_input_shape_dims(&input_shape, 3, "MaxPooling1D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_1d(pool_size, input_shape[2])?;
@@ -164,12 +163,11 @@ impl MaxPooling1D {
 
 impl Layer for MaxPooling1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
 
-        // Cache the actual input shape and arg-max positions for the backward pass
+        // Cache input shape and arg-max positions for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, argmax) = windowed_pool_forward(
@@ -183,9 +181,8 @@ impl Layer for MaxPooling1D {
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Inference forward in eval mode, writes no caches. See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }

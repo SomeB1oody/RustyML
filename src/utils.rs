@@ -4,8 +4,7 @@
 //! dimensionality reduction covers PCA, kernel PCA, and t-SNE; dataset splitting
 //! covers train/test partitioning
 
-// `KernelType` lives in the crate-level `types` module (shared with SVC); re-exported
-// here so it is reachable as `utils::KernelType` alongside the kernel-PCA API
+// `KernelType` lives in the crate-level `types` module (shared with SVC); re-exported here so it is reachable as `utils::KernelType` alongside the kernel-PCA API
 pub use crate::types::KernelType;
 
 /// Kernel Principal Component Analysis
@@ -25,11 +24,10 @@ pub mod train_test_split;
 
 /// Internal shared linear-algebra helpers (power iteration) used by the transformers
 mod linalg;
-/// Internal shared input-validation helpers used across the transformers/preprocessors
+/// Internal shared input-validation helpers used across the transformers and preprocessors
 mod validation;
 
-// Explicit re-exports keep the flat `utils::` API surface stable, matching the
-// `machine_learning` convention: a new `pub` item in a submodule no longer silently changes this namespace
+// Explicit re-exports keep the flat `utils::` API surface stable, matching the `machine_learning` convention: a new `pub` item in a submodule no longer silently changes this namespace
 pub use kernel_pca::{EigenSolver, KernelPCA};
 pub use label_encoding::{to_categorical, to_categorical_with_mapping, to_sparse_categorical};
 pub use normalize::{NormalizationAxis, NormalizationOrder, normalize};

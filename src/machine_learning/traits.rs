@@ -1,6 +1,6 @@
 //! Common estimator traits shared by every machine learning model
 //!
-//! These traits give the otherwise independent models a single, uniform contract
+//! These traits give the otherwise independent models a single uniform contract
 //! so that generic code can train and run predictions over any estimator:
 //!
 //! - [`Fit`] - train a model from input data (`(&X, &Y)` for supervised models,
@@ -46,7 +46,7 @@ use std::hash::Hash;
 ///
 /// # Type Parameters
 ///
-/// - `D` - The training data accepted by this estimator
+/// - `D` - the training data accepted by this estimator
 pub trait Fit<D> {
     /// Fits the model to `data`, returning a mutable reference to `self` for chaining
     ///
@@ -58,12 +58,12 @@ pub trait Fit<D> {
 
 /// Runs inference with a fitted estimator
 ///
-/// `X` is the input type - the feature matrix `&ArrayBase<S, Ix2>` for every model -
+/// `X` is the input type, the feature matrix `&ArrayBase<S, Ix2>` for every model,
 /// and [`Predict::Output`] is the prediction type produced by the model
 ///
 /// # Type Parameters
 ///
-/// - `X` - The input accepted by this estimator's `predict`
+/// - `X` - the input accepted by this estimator's `predict`
 pub trait Predict<X> {
     /// The prediction type produced by this estimator
     type Output;
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn fit_and_predict_through_traits() {
-        // Confirms the trait methods forward to the inherent methods (so they do not recurse)
+        // Trait methods forward to the inherent methods, so they do not recurse
         let x = Array2::from_shape_vec((3, 1), vec![1.0, 2.0, 3.0]).unwrap();
         let y = Array1::from_vec(vec![2.0, 4.0, 6.0]);
 

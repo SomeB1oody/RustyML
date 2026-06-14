@@ -1,7 +1,7 @@
 //! DBSCAN density-based clustering
 //!
 //! Provides the [`DBSCAN`] estimator for density-based clustering of arbitrary-shaped
-//! clusters, including `fit`, `predict`, and `fit_predict`
+//! clusters, with `fit`, `predict`, and `fit_predict`
 
 use crate::error::{Context, Error};
 pub use crate::machine_learning::DistanceCalculationMetric;
@@ -15,14 +15,13 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::collections::VecDeque;
 
-/// Feature-count ceiling for using the kd-tree neighbor index. Above this many features the
-/// tree no longer prunes effectively, so the brute-force search is used instead.
+/// Feature-count ceiling for using the kd-tree neighbor index
 ///
-/// Measured on AMD Ryzen 9 9950X, 2026-06-11 (see benches/RESULTS.md): on uniform data
-/// (20k points, k = 8) the kd-tree beats the brute-force scan up to d = 8 (2.6x at d = 8) and
-/// loses from d = 12 on (2.2-2.6x slower), so the ceiling sits at the proven-win end of the
-/// 8-12 bracket. The boundary shifts with data distribution (clustered data favors the tree)
-/// and dataset size, so this is a single-shape calibration, not a universal constant
+/// Above this many features the tree no longer prunes effectively, so the brute-force search
+/// is used instead. On uniform data (20k points, k = 8) the kd-tree beats the brute-force scan
+/// up to d = 8 (2.6x at d = 8) and loses from d = 12 on (2.2-2.6x slower), so the ceiling sits
+/// at the proven-win end of the 8-12 bracket. The boundary shifts with data distribution
+/// (clustered data favors the tree) and dataset size
 const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// DBSCAN (Density-Based Spatial Clustering of Applications with Noise) algorithm implementation
@@ -44,7 +43,7 @@ const DBSCAN_KD_TREE_MAX_DIMS: usize = 8;
 ///     2.0, 2.0,
 /// ]).unwrap();
 ///
-/// // Euclidean distance is the default; advanced users can override it via `with_metric`
+/// // Euclidean distance is the default; override it via `with_metric`
 /// let mut dbscan = DBSCAN::new(0.5, 2).unwrap();
 /// let labels = dbscan.fit_predict(&data).unwrap();
 /// ```
@@ -60,8 +59,8 @@ pub struct DBSCAN {
     labels: Option<Array1<isize>>,
     /// Indices of the training samples identified as core points
     core_sample_indices: Option<Array1<usize>>,
-    /// Core-point coordinates, stored so `predict` needs only the new data rather
-    /// than the original training set
+    /// Core-point coordinates, stored so `predict` needs only the new data, not the
+    /// original training set
     core_points: Option<Array2<f64>>,
     /// Cluster label of each stored core point (parallel to `core_points`)
     core_point_labels: Option<Array1<isize>>,
@@ -100,27 +99,16 @@ impl DBSCAN {
     ///
     /// - `Ok(DBSCAN)` - A new instance with the specified parameters
     ///
+    /// # Notes
+    ///
+    /// The distance metric defaults to Euclidean. To use another metric, override it after
+    /// construction with [`with_metric`](Self::with_metric), which returns `Result` because the
+    /// Minkowski order is validated
+    ///
     /// # Errors
     ///
     /// Returns `Error::InvalidParameter` if `eps` is non-positive or not finite,
     /// or if `min_samples` is 0
-    ///
-    /// # Notes
-    ///
-    /// The distance metric defaults to Euclidean. To use another metric, override it
-    /// after construction with the builder method below (returns `Result` because the
-    /// Minkowski order is validated):
-    ///
-    /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{DBSCAN, DistanceCalculationMetric};
-    ///
-    /// let model = DBSCAN::new(0.5, 5)
-    ///     .unwrap()
-    ///     .with_metric(DistanceCalculationMetric::Manhattan)
-    ///     .unwrap();
-    /// ```
     pub fn new(eps: f64, min_samples: usize) -> Result<Self, Error> {
         if eps <= 0.0 || !eps.is_finite() {
             return Err(Error::invalid_parameter(
@@ -159,10 +147,10 @@ impl DBSCAN {
     ///
     /// # Errors
     ///
-    /// Returns `Error::InvalidParameter` if Minkowski `p` is less than 1 or not finite;
-    /// orders below 1 break the triangle inequality, so they would break the neighborhood test
+    /// Returns `Error::InvalidParameter` if Minkowski `p` is less than 1 or not finite. Orders
+    /// below 1 break the triangle inequality, which would break the neighborhood test
     pub fn with_metric(mut self, metric: DistanceCalculationMetric) -> Result<Self, Error> {
-        // Reject NaN/inf (not finite) and orders below 1, which break the triangle inequality
+        // Reject non-finite orders and orders below 1, which break the triangle inequality
         if let DistanceCalculationMetric::Minkowski(p) = metric
             && (p < 1.0 || !p.is_finite())
         {
@@ -175,7 +163,6 @@ impl DBSCAN {
         Ok(self)
     }
 
-    // Getters
     get_field!(get_epsilon, eps, f64);
     get_field!(get_min_samples, min_samples, usize);
     get_field!(get_metric, metric, DistanceCalculationMetric);
@@ -186,11 +173,11 @@ impl DBSCAN {
         Option<&Array1<usize>>
     );
 
-    /// Find all neighbors of point `p` (points within `eps` distance)
+    /// Finds all neighbors of point `p` (points within `eps` distance)
     ///
     /// When `tree` is provided the query uses the kd-tree (about O(log n) average); otherwise it
-    /// falls back to a brute-force scan (parallel above the calibrated scan-class gate).
-    /// Both paths return indices sorted ascending, so cluster expansion order is identical
+    /// falls back to a brute-force scan (parallel above the calibrated scan-class gate). Both
+    /// paths return indices sorted ascending, so cluster expansion order is identical
     fn region_query<S>(
         &self,
         data: &ArrayBase<S, Ix2>,
@@ -200,7 +187,6 @@ impl DBSCAN {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Bounds check
         if p >= data.nrows() {
             return Err(Error::computation(format!(
                 "Point index {} is out of bounds (max: {})",
@@ -221,13 +207,11 @@ impl DBSCAN {
         let n_samples = data.nrows();
         let scan_work = n_samples.saturating_mul(data.ncols());
         let neighbors: Vec<usize> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
-            // Filter rows within eps in parallel
             (0..n_samples)
                 .into_par_iter()
                 .filter(|&q| self.metric.within(p_row, data.row(q), eps))
                 .collect()
         } else {
-            // Sequential filter for smaller datasets
             (0..n_samples)
                 .filter(|&q| self.metric.within(p_row, data.row(q), eps))
                 .collect()
@@ -265,7 +249,7 @@ impl DBSCAN {
         let n_samples = data.nrows();
 
         // Build a kd-tree once to accelerate the O(n^2) brute-force region queries, except in
-        // high dimensions where the tree no longer prunes effectively (then fall back to brute)
+        // high dimensions where the tree no longer prunes effectively (then fall back to brute force)
         let tree: Option<KdTree> = if data.ncols() <= DBSCAN_KD_TREE_MAX_DIMS {
             Some(KdTree::build(data.view(), self.metric))
         } else {
@@ -287,7 +271,7 @@ impl DBSCAN {
             progress
         };
 
-        // Process each point sequentially; the overall algorithm stays sequential
+        // Process each point sequentially
         for p in 0..n_samples {
             #[cfg(feature = "show_progress")]
             pb.inc(1);
@@ -309,7 +293,7 @@ impl DBSCAN {
             core_samples.insert(p);
             let mut seeds: VecDeque<usize> = neighbors.into_iter().collect();
 
-            // Expand the cluster (still sequential)
+            // Expand the cluster
             while let Some(q) = seeds.pop_front() {
                 // Skip any point already in a cluster; only noise/unvisited points (label -1)
                 // may be absorbed as border points, so an earlier cluster is never stolen from
@@ -360,7 +344,7 @@ impl DBSCAN {
             labels.iter().filter(|&&x| x == -1).count()
         ));
 
-        // Sort the core indices for consistent ordering
+        // Sort the core indices for deterministic ordering
         let mut core_indices: Vec<usize> = core_samples.into_iter().collect();
         core_indices.sort_unstable();
 
@@ -409,7 +393,6 @@ impl DBSCAN {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        // Require a fitted model
         let core_points = self
             .core_points
             .as_ref()

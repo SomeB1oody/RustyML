@@ -68,7 +68,7 @@ where
 /// Validates that the learning rate parameter is positive and finite
 ///
 /// The learning rate controls the step size in gradient descent optimization,
-/// and must be a positive, finite value to ensure proper convergence behavior
+/// so it must be a positive, finite value to ensure proper convergence behavior
 ///
 /// # Parameters
 ///
@@ -123,7 +123,7 @@ pub(super) fn validate_max_iterations(max_iterations: usize) -> Result<(), Error
 ///
 /// The tolerance parameter defines the convergence criterion for iterative algorithms:
 /// training stops when the change in loss between iterations falls below this threshold,
-/// and it must be a positive, finite value to ensure meaningful convergence detection
+/// so it must be a positive, finite value to ensure meaningful convergence detection
 ///
 /// # Parameters
 ///

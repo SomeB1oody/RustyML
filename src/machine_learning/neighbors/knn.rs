@@ -16,20 +16,20 @@ use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::OnceLock;
 
-/// Feature-count ceiling for using the kd-tree neighbor index. Above this many features the
-/// tree no longer prunes effectively, so the brute-force search is used instead.
+/// Feature-count ceiling for using the kd-tree neighbor index
 ///
-/// Measured on AMD Ryzen 9 9950X, 2026-06-11 (see benches/RESULTS.md): on uniform data
-/// (20k points, k = 8) the kd-tree beats the brute-force scan up to d = 8 (2.6x at d = 8) and
-/// loses from d = 12 on (2.2-2.6x slower), so the ceiling sits at the proven-win end of the
-/// 8-12 bracket. The boundary shifts with data distribution (clustered data favors the tree)
-/// and dataset size, so this is a single-shape calibration, not a universal constant
+/// Above this many features the tree no longer prunes effectively, so the brute-force search
+/// is used instead. On uniform data (20k points, k = 8) the kd-tree beats the brute-force scan
+/// up to d = 8 (2.6x at d = 8) and loses from d = 12 on (2.2-2.6x slower), so the ceiling sits
+/// at the proven-win end of the 8-12 bracket. The boundary shifts with data distribution
+/// (clustered data favors the tree) and dataset size, so this is a single-shape calibration,
+/// not a universal constant
 const KNN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// Selects the class with the greatest accumulated score (vote count or summed weight),
 /// breaking ties in favor of the smallest class index
 ///
-/// This makes the prediction deterministic: `AHashMap` iteration order is randomized per
+/// This keeps the prediction deterministic: `AHashMap` iteration order is randomized per
 /// process, so a plain `max_by`/`max_by_key` would resolve tied classes differently across
 /// runs. Tying by the smallest class index matches the conventional scikit-learn behavior
 fn select_top_class<T>(scores: &AHashMap<usize, T>) -> Option<usize>
@@ -88,12 +88,12 @@ pub enum WeightingStrategy {
 ///
 /// // Predict new samples
 /// let x_test = array![
-///     [1.5, 2.5],  // Should be closer to class "A" points
-///     [5.5, 6.5]   // Should be closer to class "B" points
+///     [1.5, 2.5],  // Closer to class "A" points
+///     [5.5, 6.5]   // Closer to class "B" points
 /// ];
 ///
 /// let predictions = knn.predict(&x_test).unwrap();
-/// println!("Predictions: {:?}", predictions);  // Should print ["A", "B"]
+/// println!("Predictions: {:?}", predictions);  // Prints ["A", "B"]
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KNN<T> {
@@ -119,7 +119,7 @@ pub struct KNN<T> {
     /// Lazily-built kd-tree over the training data, accelerating neighbor search in low
     /// dimensions. Derived from `x_train`, so it is not serialized; it is rebuilt on first use
     /// after loading. `Some(None)` records "high-dimensional, use brute force" so the decision
-    /// is made only once
+    /// is made once
     #[serde(skip)]
     tree: OnceLock<Option<KdTree>>,
 }
@@ -162,22 +162,12 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
     ///
     /// # Notes
     ///
-    /// Neighbor votes default to uniform weighting and the Euclidean distance metric.
-    /// Override either with the builder methods below (`with_metric` returns `Result`
-    /// because the Minkowski order is validated):
+    /// Neighbor votes default to uniform weighting and the Euclidean distance
+    /// metric. Override either with the builder methods below (`with_metric` returns
+    /// `Result` because the Minkowski order is validated):
     ///
     /// - [`with_weighting_strategy`](Self::with_weighting_strategy) - uniform or distance-weighted votes
     /// - [`with_metric`](Self::with_metric) - distance metric: Euclidean, Manhattan, or Minkowski
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{KNN, WeightingStrategy, DistanceCalculationMetric};
-    ///
-    /// let model = KNN::<i32>::new(3)
-    ///     .unwrap()
-    ///     .with_weighting_strategy(WeightingStrategy::Distance)
-    ///     .with_metric(DistanceCalculationMetric::Manhattan)
-    ///     .unwrap();
-    /// ```
     pub fn new(k: usize) -> Result<Self, Error> {
         if k == 0 {
             return Err(Error::invalid_parameter("k", "must be greater than 0"));

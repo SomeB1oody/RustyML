@@ -19,6 +19,7 @@ use crate::neural_network::traits::Layer;
 /// 3D average pooling layer
 ///
 /// Computes the mean value over each pooling window across depth, height, and width
+///
 /// Input tensor shape: `[batch_size, channels, depth, height, width]`. Output tensor shape:
 /// `[batch_size, channels, pooled_depth, pooled_height, pooled_width]` where
 /// `pooled_depth = (depth - pool_size_d) / stride_d + 1`,
@@ -97,7 +98,7 @@ impl AveragePooling3D {
     /// # Notes
     ///
     /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`].
+    /// with [`AveragePooling3D::with_strides`] and [`AveragePooling3D::with_padding`]
     ///
     /// # Returns
     ///
@@ -110,7 +111,6 @@ impl AveragePooling3D {
     /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
     ///   spatial size
     pub fn new(pool_size: (usize, usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
-        // input validation
         validate_input_shape_dims(&input_shape, 5, "AveragePooling3D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_3d(pool_size, input_shape[2], input_shape[3], input_shape[4])?;
@@ -156,12 +156,11 @@ impl AveragePooling3D {
 
 impl Layer for AveragePooling3D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }
 
-        // Cache the actual input shape for backward (only the shape is needed for averaging)
+        // Only the shape is needed to redistribute gradients in backward
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, _) = windowed_pool_forward(
@@ -176,7 +175,6 @@ impl Layer for AveragePooling3D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 5D
         if input.ndim() != 5 {
             return Err(Error::invalid_input("input tensor is not 5D"));
         }

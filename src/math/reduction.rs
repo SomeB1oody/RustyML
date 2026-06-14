@@ -8,30 +8,27 @@
 //! sequentially. The grouping depends only on
 //! [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK), never on scheduling or the
 //! `parallel` flag, so the result is **bitwise identical at any thread count, with the flag on
-//! or off**: the flag is a pure performance hint, deciding only whether the blocks run on rayon
-//! or sequentially. (A caller that instead pairs these helpers with some *other* serial kernel
-//! below a size threshold makes that switch part of its own reproducibility surface.)
+//! or off**: the flag is a performance hint, deciding only whether the blocks run on rayon
+//! or sequentially. A caller that instead pairs these helpers with some other serial kernel
+//! below a size threshold makes that switch part of its own reproducibility surface
 //!
 //! [`det_reduce`](crate::math::reduction::det_reduce) folds a slice;
 //! [`det_reduce_range`](crate::math::reduction::det_reduce_range) folds fixed blocks
 //! of an index range instead, for reductions that read several arrays at once or accumulate
-//! something richer than a scalar. Despite the fixed grouping there is
-//! no speed penalty against a bare rayon reduction - measured on the calibration machine the
-//! blocked fold is *faster* below ~64 MB working sets (uniform 16 Ki blocks balance better than
-//! rayon's adaptive splitting) and identical once memory-bandwidth-bound.
+//! something richer than a scalar. The fixed grouping carries no speed penalty against a bare
+//! rayon reduction: the blocked fold is faster below ~64 MB working sets (uniform 16 Ki blocks
+//! balance better than rayon's adaptive splitting) and identical once memory-bandwidth-bound
 
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSlice};
 use std::ops::Range;
 
 /// Fixed reduction block size (elements)
 ///
-/// Calibrated on AMD Ryzen 9 9950X (16C/32T, 32 rayon threads), 2026-06-11 on `f64` elements;
-/// see benches/RESULTS.md: a 4.2M-element sum-of-squares plateaus over 4K-64K-element blocks
-/// (17.4-17.9x) with 16K measured fastest, degrading at 256K (too few blocks to balance).
-/// The constant counts **elements**, not bytes, and is shared by every element type: 16K
-/// `f32` elements (64 KB/block) sit mid-plateau too (validated in the same bench).
-/// Changing this value changes the (deterministic) result grouping, so it is part of the
-/// reproducibility surface - bump it only deliberately
+/// A 4.2M-element sum-of-squares plateaus over 4K-64K-element blocks (17.4-17.9x speedup) with
+/// 16K fastest, degrading at 256K (too few blocks to balance). The constant counts **elements**,
+/// not bytes, and is shared by every element type: 16K `f32` elements (64 KB/block) sit
+/// mid-plateau too. Changing this value changes the (deterministic) result grouping, so it is
+/// part of the reproducibility surface - bump it only deliberately
 pub const DET_REDUCE_BLOCK: usize = 16_384;
 
 /// Folds `slice` with a deterministic, scheduling-independent grouping, on rayon or
@@ -44,7 +41,7 @@ pub const DET_REDUCE_BLOCK: usize = 16_384;
 /// # Parameters
 ///
 /// - `slice` - The values to reduce
-/// - `parallel` - Whether the blocks run on rayon (a pure performance hint)
+/// - `parallel` - Whether the blocks run on rayon (a performance hint)
 /// - `fold_block` - Serial fold over one block
 /// - `merge` - Combines two partial results; applied left-to-right in block order
 /// - `identity` - The fold identity (returned for an empty slice)
@@ -67,7 +64,7 @@ pub const DET_REDUCE_BLOCK: usize = 16_384;
 ///     |a, b| a + b,
 ///     0.0,
 /// );
-/// // The flag is a pure performance hint: serial gives the same bits
+/// // The flag is a performance hint: serial gives the same bits
 /// assert_eq!(
 ///     sum_sq,
 ///     det_reduce(
@@ -117,7 +114,7 @@ where
 /// # Parameters
 ///
 /// - `n` - The exclusive upper bound of the index range
-/// - `parallel` - Whether the blocks run on rayon (a pure performance hint)
+/// - `parallel` - Whether the blocks run on rayon (a performance hint)
 /// - `fold_block` - Serial fold over one block's index range
 /// - `merge` - Combines two partial results; applied left-to-right in block order
 /// - `identity` - The fold identity (returned when `n == 0`)

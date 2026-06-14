@@ -1,8 +1,7 @@
 //! Linear Discriminant Analysis (LDA) for supervised dimensionality reduction and
 //! classification
 //!
-//! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration
-//! enums
+//! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration enums
 
 use crate::error::{Context, Error};
 use crate::math::matmul::{gemm_internal, gemv_internal};
@@ -29,12 +28,13 @@ pub enum Solver {
     LSQR,
 }
 
+
 impl Solver {
     /// Computes the per-class linear scoring coefficients `Sigma^-1 * mu_c` under this solver
     ///
     /// Returns an `(n_classes x n_features)` matrix whose row `c` is the coefficient vector for
     /// class `c`. `Eigen` and `SVD` form a symmetric inverse of the covariance and multiply it by
-    /// the class means; `LSQR` solves each system `Sigma * coef_c = mu_c` directly with the
+    /// the class means. `LSQR` solves each system `Sigma * coef_c = mu_c` directly with the
     /// iterative LSQR method, so it never materializes an explicit inverse
     fn scoring_coefficients(
         &self,
@@ -106,13 +106,13 @@ impl Solver {
     /// `S_b w = lambda * S_w w`, where `cov` is the (shrunk/regularized) within-class
     /// covariance `S_w` and `sb` is the between-class scatter `S_b`
     ///
-    /// A whitening transform keeps every step a *symmetric* eigendecomposition (numerically
-    /// robust): writing `S_w = U diag(d) U^T`, define the whitening `W = U diag(d^{-1/2})`;
-    /// then `A = W^T S_b W` is symmetric and its eigenvectors `v` map back to the discriminant
-    /// directions `w = W v`. This is the correct generalized-eigenvector solution, unlike
-    /// taking singular vectors of the non-symmetric `S_w^{-1} S_b`, whose left singular vectors
-    /// are not the discriminant axes. The result is independent of the covariance-inversion
-    /// `Solver`, which only governs the linear-scoring path used by `predict`
+    /// A whitening transform keeps every step a symmetric eigendecomposition, which is
+    /// numerically robust. Writing `S_w = U diag(d) U^T`, define the whitening
+    /// `W = U diag(d^{-1/2})`. Then `A = W^T S_b W` is symmetric and its eigenvectors `v` map
+    /// back to the discriminant directions `w = W v`. This is the correct generalized-eigenvector
+    /// solution, unlike taking singular vectors of the non-symmetric `S_w^{-1} S_b`, whose left
+    /// singular vectors are not the discriminant axes. The result is independent of the
+    /// covariance-inversion `Solver`, which only governs the linear-scoring path used by `predict`
     fn project(
         cov: &Array2<f64>,
         sb: &Array2<f64>,
@@ -188,6 +188,17 @@ impl Solver {
 /// iteration converges quickly. The method works through a Golub-Kahan bidiagonalization and a
 /// running Givens rotation, never forming an explicit inverse. `max_iter` caps the iterations and
 /// `tol` is the relative residual threshold for early stopping
+///
+/// # Parameters
+///
+/// - `a` - regularized within-class covariance (symmetric positive definite)
+/// - `b` - right-hand side vector
+/// - `max_iter` - maximum number of iterations
+/// - `tol` - relative residual threshold for early stopping
+///
+/// # Returns
+///
+/// - `Array1<f64>` - solution vector `x`
 fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) -> Array1<f64> {
     let n = a.ncols();
     let mut x = Array1::<f64>::zeros(n);
@@ -262,6 +273,17 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 /// dispersion of `S` around its identity target and `b^2` is the estimation error of `S`. A return
 /// of `0` means no shrinkage and `1` means full shrinkage to the target. The inner product used
 /// throughout is the trace inner product normalized by the feature count
+///
+/// # Parameters
+///
+/// - `sw` - pooled within-class scatter
+/// - `sum_z4` - sum over all centered samples of `||z_k||^4`
+/// - `n_samples` - number of samples
+/// - `n_features` - number of features
+///
+/// # Returns
+///
+/// - `f64` - shrinkage intensity `delta` in `[0, 1]`
 fn ledoit_wolf_shrinkage(
     sw: &Array2<f64>,
     sum_z4: f64,
@@ -271,7 +293,7 @@ fn ledoit_wolf_shrinkage(
     let n = n_samples as f64;
     let p = n_features as f64;
 
-    // Identity-target statistics of the maximum-likelihood covariance S = sw / n.
+    // Identity-target statistics of the maximum-likelihood covariance S = sw / n
     // Serial sums: the inputs are n_features x n_features, far below the parallel sum gate
     let sw_frob_sq: f64 = sw.iter().map(|&v| v * v).sum();
     let s_norm_sq = sw_frob_sq / (p * n * n); // ||S||^2
@@ -388,16 +410,6 @@ impl LDA {
     ///
     /// - [`with_solver`](Self::with_solver) - solver strategy for the LDA computation
     /// - [`with_shrinkage`](Self::with_shrinkage) - shrinkage strategy for covariance estimation
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{LDA, Shrinkage, Solver};
-    ///
-    /// let model = LDA::new(2)
-    ///     .unwrap()
-    ///     .with_solver(Solver::SVD)
-    ///     .with_shrinkage(Shrinkage::Manual(0.1))
-    ///     .unwrap();
-    /// ```
     pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(

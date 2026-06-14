@@ -20,10 +20,9 @@ use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIter
 
 /// Mean Shift clustering algorithm
 ///
-/// Mean Shift is a centroid-based clustering algorithm that works by iteratively shifting
-/// data points towards areas of higher density. Each data point moves in the direction of
-/// the mean of points within its current window until convergence. The algorithm does not
-/// require specifying the number of clusters in advance
+/// A centroid-based clustering algorithm that iteratively shifts data points toward areas of
+/// higher density. Each point moves in the direction of the mean of points within its current
+/// window until convergence. The number of clusters need not be specified in advance
 ///
 /// # Examples
 ///
@@ -96,7 +95,7 @@ impl Default for MeanShift {
 impl MeanShift {
     /// Creates a new MeanShift instance with the specified bandwidth
     ///
-    /// `bandwidth` is the dominant hyperparameter; the remaining settings have sensible
+    /// `bandwidth` is the dominant hyperparameter. The remaining settings have sensible
     /// defaults and are tuned afterwards through the builder methods listed in the Notes
     ///
     /// # Parameters
@@ -107,29 +106,19 @@ impl MeanShift {
     ///
     /// - `Result<Self, Error>` - A new MeanShift instance, or an Error
     ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If `bandwidth` is non-positive or not finite
-    ///
     /// # Notes
     ///
     /// Lower-priority settings are configured after construction. The convergence-related
-    /// setters validate their input and return `Result`; the boolean toggles return `Self`:
+    /// setters validate their input and return `Result`. The boolean toggles return `Self`:
     ///
     /// - [`with_max_iter`](Self::with_max_iter) - maximum iterations (default: `300`)
     /// - [`with_tolerance`](Self::with_tolerance) - convergence tolerance (default: `1e-3`)
     /// - [`with_bin_seeding`](Self::with_bin_seeding) - bin-seeding for faster init (default: `false`)
     /// - [`with_cluster_all`](Self::with_cluster_all) - assign all points to clusters (default: `true`)
     ///
-    /// ```
-    /// use rustyml::machine_learning::MeanShift;
+    /// # Errors
     ///
-    /// let model = MeanShift::new(2.0)
-    ///     .unwrap()
-    ///     .with_max_iter(500)
-    ///     .unwrap()
-    ///     .with_bin_seeding(true);
-    /// ```
+    /// - `Error::InvalidParameter` - If `bandwidth` is non-positive or not finite
     pub fn new(bandwidth: f64) -> Result<Self, Error> {
         if bandwidth <= 0.0 || !bandwidth.is_finite() {
             return Err(Error::invalid_parameter(
@@ -173,7 +162,8 @@ impl MeanShift {
         Ok(self)
     }
 
-    /// Enables or disables the bin-seeding initialization strategy (default: `false`).
+    /// Enables or disables the bin-seeding initialization strategy (default: `false`)
+    ///
     /// Setting this to `true` can speed up fitting on large datasets
     pub fn with_bin_seeding(mut self, bin_seeding: bool) -> Self {
         self.bin_seeding = bin_seeding;
@@ -266,8 +256,8 @@ impl MeanShift {
                             let dist_sq = (center_sq + x_norm_sq - 2.0 * proj).max(0.0);
                             (-gamma * dist_sq).exp()
                         });
-                // Serial sum: this runs inside the per-seed parallel loop, where nesting
-                // another parallel reduction only adds scheduling overhead
+                // Serial sum: runs inside the per-seed parallel loop, where nesting another
+                // parallel reduction only adds scheduling overhead
                 let weight_sum = weights.sum();
 
                 let new_center = if weight_sum > 0.0 {
@@ -404,7 +394,7 @@ impl MeanShift {
             find_label,
         );
 
-        // Count how many samples are actually assigned to each cluster center
+        // Count how many samples are assigned to each cluster center
         let mut samples_per_center = vec![0usize; n_clusters];
         for &label in &labels {
             if label < n_clusters {

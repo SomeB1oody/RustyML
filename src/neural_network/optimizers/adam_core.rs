@@ -1,9 +1,9 @@
 //! Shared state and update machinery for the Adam-family optimizers (`Adam`, `AdamW`)
 //!
-//! Both optimizers run identical Adam moment math and bias correction; they differ only in how a
-//! non-zero `weight_decay` enters the update — classic [`Adam`](super::adam::Adam) folds an L2
+//! Both optimizers run identical Adam moment math and bias correction. They differ only in how a
+//! non-zero `weight_decay` enters the update. Classic [`Adam`](super::adam::Adam) folds an L2
 //! penalty into the gradient (coupled), while [`AdamW`](super::adam_w::AdamW) shrinks the
-//! parameter directly (decoupled). That single difference is the `decoupled` flag; everything else
+//! parameter directly (decoupled). That single difference is the `decoupled` flag. Everything else
 //! (hyperparameter validation, clip-norm, the bias-correction timestep, and the lazily-sized
 //! per-parameter moment buffers) lives here once
 

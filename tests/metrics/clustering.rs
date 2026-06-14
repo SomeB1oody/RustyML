@@ -17,7 +17,7 @@ fn test_ari_identical_clustering() {
     assert_abs_diff_eq!(adjusted_rand_index(&labels, &labels), 1.0, epsilon = 1e-12);
 }
 
-/// Canonical pair true=[0,0,1,1,2,2] pred=[0,0,1,2,1,2] gives ARI = 1/6
+/// Canonical pair true=[0,0,1,1,2,2], pred=[0,0,1,2,1,2] gives ARI = 1/6
 #[test]
 fn test_ari_canonical_one_sixth() {
     let t = array![0usize, 0, 1, 1, 2, 2];
@@ -146,12 +146,11 @@ fn test_nmi_range_zero_to_one() {
 fn test_nmi_asymmetric_case() {
     let t = array![0usize, 0, 1, 1];
     let p = array![0usize, 1, 2, 3];
-    let expected = 2.0_f64 / 3.0; // arithmetic mean (sklearn >= 0.22); geometric mean gave 1/sqrt(2)
+    let expected = 2.0_f64 / 3.0; // arithmetic mean (sklearn >= 0.22)
     assert_abs_diff_eq!(normalized_mutual_info(&t, &p), expected, epsilon = 1e-9);
 }
 
-/// Arithmetic-mean NMI equals V-measure exactly (both are MI / ((H_true + H_pred) / 2)), the
-/// consistency that geometric-mean normalization broke
+/// Arithmetic-mean NMI equals V-measure exactly (both are MI / ((H_true + H_pred) / 2))
 #[test]
 fn test_nmi_equals_v_measure() {
     let t = array![0usize, 0, 1, 1, 2, 2];

@@ -15,8 +15,9 @@ fn pool_out_dim(input: usize, pool: usize, stride: usize, padding: PaddingType) 
 /// # Parameters
 ///
 /// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, length]`
-/// - `pool_size` - Size of the pooling/convolutional window
+/// - `pool_size` - Size of the pooling window
 /// - `stride` - Step size for sliding the window across the input
+/// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
@@ -43,6 +44,7 @@ pub(super) fn calculate_output_shape_1d_pooling(
 /// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, height, width]`
 /// - `pool_size` - Size of the pooling window as a tuple (height, width)
 /// - `strides` - Step size for the pooling window as a tuple (height_step, width_step)
+/// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
@@ -71,6 +73,7 @@ pub(super) fn calculate_output_shape_2d_pooling(
 /// - `input_shape` - Shape of the input tensor, in format `[batch_size, channels, depth, height, width]`
 /// - `pool_size` - Size of the pooling window as a tuple (depth, height, width)
 /// - `strides` - Step size for the pooling window as a tuple (depth_step, height_step, width_step)
+/// - `padding` - Padding strategy (Valid or Same)
 ///
 /// # Returns
 ///
@@ -100,7 +103,7 @@ pub(super) fn calculate_output_shape_3d_pooling(
     ]
 }
 
-/// Calculates the output height and width for 2D convolution or pooling operations
+/// Calculate the output height and width for 2D convolution or pooling operations
 ///
 /// Determines the output dimensions from the input dimensions, kernel size, stride, and
 /// padding type. Supports both `Valid` and `Same` padding strategies

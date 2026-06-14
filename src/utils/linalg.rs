@@ -1,8 +1,8 @@
 //! Shared linear-algebra routines for the `utils` transformers
 //!
-//! Provides power-iteration and Lanczos solvers that extract the leading
-//! eigenpairs of a symmetric matrix, so PCA and Kernel PCA share one
-//! implementation instead of carrying near-identical copies
+//! Power-iteration and Lanczos solvers that extract the leading eigenpairs of a
+//! symmetric matrix, so PCA and Kernel PCA share one implementation instead of
+//! carrying near-identical copies
 
 use crate::error::Error;
 use crate::math::matmul::{gemm_internal, gemv_internal};
@@ -12,6 +12,15 @@ use ndarray_rand::rand::{Rng, SeedableRng};
 
 /// Builds a random unit vector of length `n`, falling back to a uniform unit
 /// vector if the random draw is numerically zero
+///
+/// # Parameters
+///
+/// - `n` - Length of the vector
+/// - `rng` - Random number generator for the draw
+///
+/// # Returns
+///
+/// - `Array1<f64>` - Unit vector of length `n`
 fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
     let mut v = Array1::<f64>::from_shape_fn(n, |_| rng.random_range(-1.0..1.0));
     let norm = v.dot(&v).sqrt();
@@ -25,8 +34,17 @@ fn random_unit_vector(n: usize, rng: &mut StdRng) -> Array1<f64> {
 
 /// Computes the dominant eigenpair of a symmetric matrix via power iteration
 ///
-/// Returns the unit eigenvector together with its eigenvalue, estimated as the
-/// Rayleigh quotient `v^T M v`
+/// # Parameters
+///
+/// - `matrix` - Symmetric input matrix
+/// - `rng` - Random number generator for the starting vector
+/// - `max_iter` - Maximum power-iteration steps
+/// - `tol` - Convergence tolerance on the eigenvalue estimate
+///
+/// # Returns
+///
+/// The unit eigenvector together with its eigenvalue, estimated as the Rayleigh
+/// quotient `v^T M v`
 ///
 /// # Errors
 ///
@@ -86,6 +104,11 @@ fn dominant_eigenpair(
 /// - `max_iter` - Maximum power-iteration steps per component
 /// - `tol` - Convergence tolerance on the eigenvalue estimate
 ///
+/// # Returns
+///
+/// The eigenvalues and their parallel unit eigenvectors, in descending
+/// eigenvalue order
+///
 /// # Errors
 ///
 /// - [`Error::NotConverged`] - If any component fails to converge
@@ -103,7 +126,7 @@ pub(super) fn top_eigenpairs_power_iteration(
 
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
-        // Deflate the extracted component so the next iteration surfaces the next: M = M - lambda v v^T
+        // Deflate the extracted component so the next iteration surfaces the next one: M = M - lambda v v^T
         let outer = gemm_internal(
             &vector.view().insert_axis(Axis(1)),
             &vector.view().insert_axis(Axis(0)),
@@ -122,9 +145,8 @@ pub(super) fn top_eigenpairs_power_iteration(
 /// Lanczos builds a Krylov subspace, reduces the problem to a small symmetric
 /// tridiagonal eigenproblem, and maps the leading Ritz pairs back. For the
 /// dominant eigenpairs of a symmetric matrix (such as a centered kernel matrix)
-/// it converges far faster and more stably than deflated power iteration - it is
-/// the pure-Rust counterpart of the symmetric solver ARPACK is built on (a
-/// single Lanczos pass, without implicit restarts)
+/// it converges faster and more stably than deflated power iteration. This is a
+/// single Lanczos pass without implicit restarts
 ///
 /// Eigenpairs come back in descending eigenvalue order as parallel vectors:
 /// `eigenvectors[i]` is the unit eigenvector for `eigenvalues[i]`
@@ -134,6 +156,11 @@ pub(super) fn top_eigenpairs_power_iteration(
 /// - `matrix` - Symmetric input matrix
 /// - `k` - Number of leading eigenpairs to extract
 /// - `seed` - Seed for the random starting vector, making the result deterministic
+///
+/// # Returns
+///
+/// The eigenvalues and their parallel unit eigenvectors, in descending
+/// eigenvalue order
 ///
 /// # Errors
 ///
@@ -165,8 +192,7 @@ pub(super) fn top_eigenpairs_lanczos(
             w.scaled_add(-beta_prev, vp);
         }
 
-        // Full reorthogonalization (repeated once for stability) against every prior
-        // Lanczos vector, keeping the basis numerically orthogonal
+        // Full reorthogonalization against every prior Lanczos vector, repeated once for stability
         for _ in 0..2 {
             for u in lanczos_vectors.iter() {
                 let proj = w.dot(u);
@@ -262,6 +288,13 @@ mod tests {
     }
 
     /// Asserts that (value, vector) is an eigenpair of `a`: A v ~= lambda v, ||v|| ~= 1
+    ///
+    /// # Parameters
+    ///
+    /// - `a` - Symmetric matrix
+    /// - `value` - Candidate eigenvalue
+    /// - `vector` - Candidate eigenvector
+    /// - `tol` - Absolute tolerance for the checks
     fn assert_eigenpair(a: &Array2<f64>, value: f64, vector: &Array1<f64>, tol: f64) {
         let av = a.dot(vector);
         let lv = vector * value;

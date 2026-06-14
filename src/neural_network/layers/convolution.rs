@@ -6,7 +6,7 @@
 /// Padding method used by convolutional and pooling layers
 ///
 /// Determines how the input is padded before the operation is applied. Defaults to
-/// [`PaddingType::Valid`] (no padding).
+/// [`PaddingType::Valid`] (no padding)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaddingType {
     /// No padding is applied; the convolution is computed only where the filter

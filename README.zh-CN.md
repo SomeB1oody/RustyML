@@ -22,8 +22,8 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 它覆盖从数据预处理、特征工程，到模型训练、评估的全流程，同时充分利用 Rust 的内存安全、无畏并发
 和零成本抽象。
 
-整个库被划分为六个由 feature 控制的模块，你只需编译用得上的部分：
-`machine_learning`、`neural_network`、`utils`、`metrics`、`math`，以及共享的 `prelude`。
+整个库被划分为五个由 feature 控制的模块，你只需编译用得上的部分：
+`machine_learning`、`neural_network`、`utils`、`metrics`、`math`，外加一个共享的 `prelude`。
 
 ## 核心亮点
 
@@ -73,7 +73,7 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 // 训练一个不带正则化的线性回归模型
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6, None).unwrap();
+let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
 
 let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 let y = array![6.0, 9.0, 12.0];
@@ -100,12 +100,12 @@ let y = Array::ones((32, 10)).into_dyn();
 
 let mut model = Sequential::new();
 model
-    .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
-    .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
-    .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
+    .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+    .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+    .add(Dense::new(64, 10, Activation::Softmax).unwrap())
     .compile(
-        Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
-        CategoricalCrossEntropy::new(),
+        Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(),
+        CategoricalCrossEntropy::new(false),
     );
 
 model.summary(); // 打印网络结构
@@ -162,7 +162,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 - **循环** - `SimpleRNN`、`LSTM`、`GRU`
 - **正则化** - `Dropout`、`SpatialDropout{1,2,3}D`、`GaussianNoise`、`GaussianDropout`
 - **归一化** - `BatchNormalization`、`LayerNormalization`、`InstanceNormalization`、`GroupNormalization`
-- **优化器** - `SGD`（支持动量）、`Adam`、`RMSprop`、`AdaGrad`
+- **优化器** - `SGD`（支持动量）、`Adam`、`AdamW`、`RMSprop`、`AdaGrad`
 - **损失函数** - `MeanSquaredError`、`MeanAbsoluteError`、`BinaryCrossEntropy`、`CategoricalCrossEntropy`、`SparseCategoricalCrossEntropy`
 
 训练支持全批量（`fit`）与小批量（`fit_with_batches`）循环、权重查看（`get_weights`），
@@ -175,7 +175,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 - **降维** - `PCA`（多种 SVD 求解器）、`KernelPCA`（RBF / Linear / Poly / Sigmoid / Cosine 核）、`TSNE`
 - **缩放** - `standardize`（z-score 标准化）、`normalize`（可配置轴与范数阶数）
 - **标签编码** - `to_categorical`、`to_categorical_with_mapping`、`to_sparse_categorical`
-- **数据划分** - `train_test_split`，比例可配置
+- **数据划分** - `train_test_split` 与 `train_test_split_stratified`，比例可配置
 
 ### `metrics`
 

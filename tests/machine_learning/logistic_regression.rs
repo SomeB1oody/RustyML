@@ -207,7 +207,7 @@ fn fit_inf_in_x_returns_non_finite() {
 fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
     let mut model = LogisticRegression::default();
     let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-    let y = array![0.0, 1.0]; // length 2, x has 3 rows
+    let y = array![0.0, 1.0];
     assert!(
         matches!(model.fit(&x, &y), Err(Error::DimensionMismatch { .. })),
         "expected DimensionMismatch"
@@ -278,12 +278,10 @@ fn predict_proba_before_fit_returns_not_fitted() {
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
     let mut model = LogisticRegression::new(true, 0.1, 500, 1e-6).expect("valid params");
-    // Train on 2-feature data
     let x_train = array![[0.0, 0.0], [0.0, 10.0], [10.0, 0.0], [10.0, 10.0],];
     let y_train = array![0.0, 0.0, 1.0, 1.0];
     model.fit(&x_train, &y_train).expect("fit should succeed");
 
-    // Predict with 3 features -> DimensionMismatch
     let x_wrong = array![[1.0, 2.0, 3.0]];
     assert!(
         matches!(
@@ -472,7 +470,7 @@ fn fit_sets_n_iter() {
 /// L2 regularization produces a smaller feature-weight norm than no regularization
 #[test]
 fn l2_regularization_shrinks_weight_norm() {
-    // Build a simple dataset so gradients are well-defined
+    // Dataset where gradients are well-defined
     let x = array![
         [-4.0, -3.0],
         [-3.0, -4.0],

@@ -8,8 +8,7 @@ use ndarray::Array2;
 use rustyml::error::Error;
 use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
 
-// Small valid dataset (6 points, 2 features) for general tests; perplexity=2.0 < 6
-// passes the n_samples guard
+// Small valid dataset (6 points, 2 features); perplexity=2.0 < 6 passes the n_samples guard
 fn small_data() -> Array2<f64> {
     ndarray::array![
         [0.0, 0.0],

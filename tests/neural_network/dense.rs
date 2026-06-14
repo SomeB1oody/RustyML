@@ -37,16 +37,7 @@ fn t4(a: usize, b: usize, c: usize, d: usize, data: Vec<f32>) -> Tensor {
         .into_dyn()
 }
 
-/// Build a Dense(2 -> 2, Linear) with an injected weight matrix (2x2) and bias (1x2)
-///
-/// # Parameters
-///
-/// - `w_flat` - row-major weight values for the 2x2 matrix
-/// - `b_flat` - bias values for the 1x2 vector
-///
-/// # Returns
-///
-/// - A `Dense` layer with the given weights and bias set
+/// Build a Dense(2 -> 2, Linear) with row-major weight matrix (2x2) and bias (1x2)
 fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
     let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     let w = Array2::from_shape_vec((2, 2), w_flat).unwrap();
@@ -218,8 +209,7 @@ fn dense_backward_before_forward_returns_err() {
     );
 }
 
-/// A wrong-shaped upstream gradient returns ShapeMismatch instead of panicking in the activation
-/// backward / dimensionality conversion
+/// A wrong-shaped upstream gradient returns ShapeMismatch instead of panicking
 #[test]
 fn dense_backward_wrong_grad_shape_returns_err() {
     let mut d = Dense::new(3, 2, Linear::new()).unwrap();
@@ -303,8 +293,7 @@ fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
 
 // Dense - backward restores correct grad shape after forward
 
-/// backward returns a gradient with the same shape as the input (specific values
-/// are covered by gradient_check.rs)
+/// backward returns a gradient matching the input shape (values covered by gradient_check.rs)
 #[test]
 fn dense_backward_output_shape_matches_input() {
     let mut d = Dense::new(2, 3, Linear::new()).unwrap();

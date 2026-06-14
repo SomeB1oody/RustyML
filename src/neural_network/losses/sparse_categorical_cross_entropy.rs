@@ -6,8 +6,8 @@ use crate::neural_network::losses::{clip_probabilities, stable_log_softmax_softm
 use crate::neural_network::traits::Loss;
 use ndarray::Ix2;
 
-/// Sparse Categorical Cross Entropy loss function for multi-class classification
-/// where true labels are integers instead of one-hot vectors
+/// Sparse Categorical Cross Entropy loss for multi-class classification where true labels
+/// are integers instead of one-hot vectors
 ///
 /// # Examples
 ///
@@ -16,11 +16,10 @@ use ndarray::Ix2;
 /// use ndarray::ArrayD;
 /// use rustyml::neural_network::traits::Loss;
 ///
-/// // Create a Sparse Categorical Cross Entropy loss function instance
-/// // (pass `true` for `from_logits` to feed raw logits instead of probabilities)
+/// // Pass `true` for `from_logits` to feed raw logits instead of probabilities
 /// let scce = SparseCategoricalCrossEntropy::new(false);
 ///
-/// // Create sample data - true class labels (as integers) and predicted probabilities
+/// // True class labels (as integers) and predicted probabilities
 /// let y_true = ArrayD::from_shape_vec(
 ///     vec![3, 1],
 ///     vec![0.0, 1.0, 2.0]  // Class indices: 0, 1, 2
@@ -35,11 +34,10 @@ use ndarray::Ix2;
 ///     ]
 /// ).unwrap();
 ///
-/// // Compute the Sparse Categorical Cross Entropy loss
 /// let loss = scce.compute_loss(&y_true, &y_pred).unwrap();
 /// println!("Sparse Categorical Cross Entropy Loss: {:.4}", loss);
 ///
-/// // Compute gradients for backpropagation
+/// // Gradients for backpropagation
 /// let gradients = scce.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients shape: {:?}", gradients.shape());
 /// println!("Gradients: {:?}", gradients);

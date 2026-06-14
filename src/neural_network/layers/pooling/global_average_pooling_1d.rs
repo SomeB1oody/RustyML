@@ -13,8 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global average pooling layer for 1D inputs
 ///
 /// Computes the mean value across the length dimension
-/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
-/// `[batch_size, channels]`
+/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape: `[batch_size, channels]`
 ///
 /// # Examples
 ///
@@ -54,8 +53,7 @@ use crate::neural_network::traits::Layer;
 /// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling1D {
-    /// Shape of the input tensor cached during the forward pass (backward needs
-    /// only the shape, not the input values)
+    /// Shape of the input tensor cached during the forward pass (backward needs only the shape, not the input values)
     input_shape: Vec<usize>,
 }
 
@@ -80,7 +78,6 @@ impl Default for GlobalAveragePooling1D {
 
 impl Layer for GlobalAveragePooling1D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
@@ -94,7 +91,6 @@ impl Layer for GlobalAveragePooling1D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 3D
         if input.ndim() != 3 {
             return Err(Error::invalid_input("input tensor is not 3D"));
         }
@@ -104,7 +100,7 @@ impl Layer for GlobalAveragePooling1D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        // Check that the forward pass has populated the input shape
+        // Forward pass must have populated the input shape
         if self.input_shape.is_empty() {
             return Err(Error::forward_pass_not_run("GlobalAveragePooling1D"));
         }

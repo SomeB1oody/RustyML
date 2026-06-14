@@ -24,7 +24,7 @@ use std::borrow::Cow;
 /// style transfer and generative models
 ///
 /// Instance normalization is group normalization with one group per channel, so it shares the
-/// channels-first `group_norm_forward_core`/`group_norm_backward_core` with `num_groups` set to
+/// channels-first `group_norm_forward_core` / `group_norm_backward_core` with `num_groups` set to
 /// the channel count
 ///
 /// # Examples
@@ -92,7 +92,7 @@ impl InstanceNormalization {
         validate_epsilon(epsilon)?;
 
         // forward/backward permute the channel axis to position 1 and run a channels-first core,
-        // so both channels-first (NCHW) and channels-last (NHWC) work
+        // so both NCHW and NHWC work
 
         // Parameters have the shape of the channel dimension
         let param_shape = if input_shape.len() > channel_axis {
@@ -149,7 +149,7 @@ impl Layer for InstanceNormalization {
         // borrows when channel_axis == 1, and the output is permuted back at the end
         let cf_input = to_channels_first(input, self.channel_axis);
         let input_cf = cf_input.as_ref();
-        // One group per channel makes group normalization equivalent to instance normalization
+        // One group per channel makes group normalization equal to instance normalization
         let num_channels = input_cf.shape()[1];
 
         let (output, x_normalized, inv_std) = group_norm_forward_core(
@@ -167,6 +167,10 @@ impl Layer for InstanceNormalization {
     }
 
     /// Inference forward (eval mode, writes no caches), see [`Layer::predict`]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input shape, dimensionality, or channel axis is invalid
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_shape(input.shape(), &self.input_shape)?;
         validate_min_input_ndim(input.ndim(), 3, "Instance normalization")?;

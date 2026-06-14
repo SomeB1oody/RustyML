@@ -1,7 +1,7 @@
 //! Weight containers for neural network layers
 //!
 //! Defines the [`LayerWeight`](LayerWeight<'a>) enum and the per-layer weight structs it wraps. Each struct holds
-//! its arrays as [`Cow`], so the same type serves both directions: [`Layer::get_weights`] borrows
+//! its arrays as [`Cow`], so one type serves both directions. [`Layer::get_weights`] borrows
 //! the live layer arrays (no clone) for inspection or saving, while loading deserializes into
 //! owned arrays. The enum derives `Serialize`/`Deserialize`, so it is the on-disk weight format
 //!
@@ -55,7 +55,7 @@ pub use simple_rnn_weight::*;
 ///
 /// Each variant corresponds to a specific layer type and holds the matching weight struct. The
 /// `'a` lifetime lets a variant borrow the live layer arrays when inspecting or saving (via
-/// [`Cow`](std::borrow::Cow)); loading deserializes into owned arrays, so the type is used as
+/// [`Cow`](std::borrow::Cow)). Loading deserializes into owned arrays, so the type is used as
 /// `LayerWeight<'static>` on the load path. The `#[serde(tag = "type")]` representation tags each
 /// variant by name, which is the on-disk weight format
 #[derive(Debug, Clone, Serialize, Deserialize)]

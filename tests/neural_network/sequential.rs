@@ -67,7 +67,7 @@ fn test_predict_2d_linear_transform() {
     let w = Array2::from_shape_vec(
         (3, 2),
         vec![
-            1.0_f32, 0.0, // feature 0 contributes to out 0 and out 1
+            1.0_f32, 0.0, // feature 0
             0.0, 1.0, // feature 1
             1.0, 1.0, // feature 2
         ],
@@ -463,8 +463,8 @@ fn test_convergence_2class_softmax_adam() {
     ]);
 
     let mut model = Sequential::new();
-    // Weight init is unseeded, so a Tanh hidden layer plus a generous epoch budget guarantees
-    // convergence on this tiny separable problem regardless of the initial weights
+    // Weight init is unseeded; a Tanh hidden layer plus a large epoch budget converges on this
+    // tiny separable problem regardless of the initial weights
     model
         .add(Dense::new(2, 8, Activation::Tanh).unwrap())
         .add(Dense::new(8, 2, Activation::Softmax).unwrap())

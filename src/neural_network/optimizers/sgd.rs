@@ -43,7 +43,7 @@ impl SGD {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`SGD::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`SGD::with_clip_norm`]
     ///
     /// # Returns
     ///
@@ -76,8 +76,8 @@ impl SGD {
 
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
-    /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
-    /// gradient direction.
+    /// Scales every gradient so the global L2 norm never exceeds `clip_norm`, preserving the
+    /// gradient direction
     ///
     /// # Parameters
     ///
@@ -111,8 +111,8 @@ impl Optimizer for SGD {
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
-            // Decoupled weight decay shrinks the parameter before the gradient step (weights
-            // only; biases and normalization gamma/beta are excluded)
+            // Decoupled weight decay shrinks the parameter before the gradient step (weights only;
+            // biases and normalization gamma/beta excluded)
             if pg.decays {
                 kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
             }

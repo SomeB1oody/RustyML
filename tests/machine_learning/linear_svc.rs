@@ -388,10 +388,8 @@ fn predicts_all_training_samples_correctly_on_separable_data() {
 #[test]
 fn fit_predict_agrees_with_fit_then_predict() {
     let (x, y) = make_separable();
-    // model A uses fit_predict
     let mut model_a = LinearSVC::new(5000, 0.01, RegularizationType::L2(0.1), true, 1e-5).unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
-    // model B uses fit then predict on the same data
     let preds_b = model_a.predict(&x).unwrap();
     assert_eq!(preds_a, preds_b, "fit_predict and fit→predict must agree");
 }
@@ -446,7 +444,6 @@ fn convergence_stops_before_max_iter_on_separable_data() {
 fn weights_have_correct_dimensionality() {
     let model = fit_separable_model();
     let weights = model.get_weights().unwrap();
-    // Training data has 2 features, so the weight vector must have length 2
     assert_eq!(
         weights.len(),
         2,
@@ -465,7 +462,7 @@ fn fit_intercept_false_bias_stays_zero() {
         5000,
         0.01,
         RegularizationType::L2(0.1),
-        false, // no intercept
+        false,
         1e-5,
     )
     .unwrap();

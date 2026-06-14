@@ -1,7 +1,7 @@
 //! Support Vector Classifier (SVC)
 //!
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
-//! Optimization (SMO) algorithm and the kernel types re-exported as [`KernelType`](crate::machine_learning::KernelType)
+//! Optimization (SMO) algorithm, and the kernel types re-exported as [`KernelType`](crate::machine_learning::KernelType)
 
 use crate::error::Error;
 use crate::machine_learning::parallel::map_collect;
@@ -15,11 +15,11 @@ use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
 
-/// Sample-count threshold for switching SVC operations to parallel computation
+/// Support Vector Machine classifier
 ///
-/// Support Vector Machine Classifier
-///
-/// Support Vector Machines (SVM) are supervised learning methods used for classification, regression, and outlier detection. This implementation uses the Sequential Minimal Optimization (SMO) algorithm
+/// Support Vector Machines (SVM) are supervised learning methods used for
+/// classification, regression, and outlier detection. This implementation uses
+/// the Sequential Minimal Optimization (SMO) algorithm
 ///
 /// # Examples
 ///
@@ -124,17 +124,7 @@ impl SVC {
     /// # Notes
     ///
     /// Training is non-deterministic by default. For reproducible runs, set a fixed seed
-    /// after construction with the builder method below:
-    ///
-    /// - [`with_random_state`](Self::with_random_state) - fixed seed for the SMO working-set selection
-    ///
-    /// ```
-    /// use rustyml::machine_learning::{SVC, KernelType};
-    ///
-    /// let model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
-    ///     .unwrap()
-    ///     .with_random_state(42);
-    /// ```
+    /// after construction with [`with_random_state`](Self::with_random_state)
     pub fn new(
         kernel: KernelType,
         regularization_param: f64,
@@ -615,7 +605,6 @@ impl SVC {
             })
             .fold((i2, 0.0), |a, b| if b.1 > a.1 { b } else { a });
 
-        // Return the index of the alpha that maximizes |E1-E2|
         result.0
     }
 
@@ -633,7 +622,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `bool` - `true` if the alpha values were changed, `false` otherwise)
+    /// - `bool` - `true` if the alpha values were changed, `false` otherwise
     #[allow(clippy::too_many_arguments)]
     fn take_step<S>(
         &self,
@@ -721,7 +710,7 @@ impl SVC {
 
         let alpha1_new = alpha1_old + s * (alpha2_old - alpha2_new);
 
-        // Update bias under the u = sum + b convention (compute_error / compute_decision_value add + b)
+        // Update bias under the u = sum + b convention (compute_error / decision_values_batch add + b)
         let b_old = *b;
         let b1 =
             *b - e1 - y1 * (alpha1_new - alpha1_old) * k11 - y2 * (alpha2_new - alpha2_old) * k12;

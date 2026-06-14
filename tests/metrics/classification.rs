@@ -40,7 +40,7 @@ fn cm_new_mixed() {
 #[test]
 fn cm_new_thresholding_at_0_5() {
     // Probabilities >= 0.5 are positive; y_true=[0.9,0.1,0.6,0.4], y_pred=[0.8,0.2,0.3,0.7]
-    // gives TP=1, FP=1, TN=1, FN=1
+    // give TP=1, FP=1, TN=1, FN=1
     let y_true = array![0.9, 0.1, 0.6, 0.4];
     let y_pred = array![0.8, 0.2, 0.3, 0.7];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -114,7 +114,7 @@ fn cm_precision_perfect() {
 
 #[test]
 fn cm_precision_no_positive_predictions() {
-    // tp=0, fp=0 (all predicted negative) -> precision = 0.0 (convention)
+    // tp=0, fp=0 (all predicted negative) -> precision = 0.0 by convention
     let y_true = array![1.0, 0.0];
     let y_pred = array![0.0, 0.0];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -151,7 +151,7 @@ fn cm_specificity_partial() {
 
 #[test]
 fn cm_specificity_no_actual_negatives() {
-    // tn=0, fp=0 (all actual positives) -> specificity = 1.0 (convention)
+    // tn=0, fp=0 (all actual positives) -> specificity = 1.0 by convention
     let y_true = array![1.0, 1.0];
     let y_pred = array![1.0, 0.0];
     let cm = ConfusionMatrix::new(&y_true, &y_pred);
@@ -675,7 +675,7 @@ fn log_loss_zero_prob_clamped() {
 #[test]
 fn log_loss_renormalizes_rows() {
     // Row [2,2] does not sum to 1; sklearn renormalizes to [0.5, 0.5], so the loss for true
-    // class 0 is -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0.
+    // class 0 is -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0
     let y_true = array![0usize];
     let y_prob = arr2(&[[2.0, 2.0]]);
     let expected = 2.0_f64.ln();
@@ -859,7 +859,7 @@ fn top_k_accuracy_label_out_of_range_panics() {
 #[test]
 #[should_panic(expected = "must not contain NaN")]
 fn top_k_accuracy_nan_true_prob_panics() {
-    // A NaN true-class probability used to be miscounted as a hit (n_greater = 0); now rejected
+    // A NaN true-class probability must be rejected, not miscounted as a hit (n_greater = 0)
     let y_true = array![0usize];
     let y_prob = arr2(&[[f64::NAN, 0.9]]);
     let _ = top_k_accuracy(&y_true, &y_prob, 1);

@@ -1,4 +1,4 @@
-//! Layer Normalization layer and its axis configuration, including support for
+//! Layer Normalization layer and its axis configuration, with support for
 //! single-axis and multi-axis (merged) normalization
 
 use super::folds::{
@@ -22,30 +22,27 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which the trailing-axis row passes (per-row statistics +
-/// normalize, and the backward composition) run on rayon.
+/// Total-element count above which the trailing-axis row passes (per-row statistics plus
+/// normalize, and the backward composition) run on rayon
 ///
 /// Each normalization group is one contiguous row computed entirely inside one task with
-/// fixed-order kernels, so the gate is a pure performance knob: the bits are identical at any
-/// thread count and on either side of the gate.
+/// fixed-order kernels, so the gate is a performance knob: the bits are identical at any
+/// thread count and on either side of the gate
 ///
-/// Measured on the fused row pass itself (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
-/// 2026-06-12; see benches/RESULTS.md "LayerNorm fused row pass"): crossover bracket 64K-256K
-/// elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M, fading toward memory bandwidth
-/// (1.2x) at 12.6M
+/// Measured crossover bracket 64K-256K elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M,
+/// fading toward memory bandwidth (1.2x) at 12.6M
 const LN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
 
-/// Element count above which the gamma/beta gradient column folds run on rayon.
+/// Element count above which the gamma/beta gradient column folds run on rayon
 ///
 /// The same row-block fold kernel class as BatchNorm's measured
-/// `BN_COL_STATS_PARALLEL_MIN_ELEMS` (AMD Ryzen 9 9950X, 16C/32T, 32 rayon threads,
-/// 2026-06-12; see benches/RESULTS.md "BatchNorm column stats, row-block fold": crossover
-/// bracket 64K-256K elements), mapped from that measurement rather than calibrated separately
+/// `BN_COL_STATS_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K elements), mapped from that
+/// measurement rather than calibrated separately
 const LN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Axis selection for layer normalization
 ///
-/// Defaults to [`LayerNormalizationAxis::Default`] (normalize along the last dimension).
+/// Defaults to [`LayerNormalizationAxis::Default`] (normalize along the last dimension)
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LayerNormalizationAxis {
     /// Normalize along the last dimension (feature dimension)
@@ -60,7 +57,8 @@ pub enum LayerNormalizationAxis {
 }
 
 /// Validates a `Multiple` axis list against the input rank and returns the merge permutation:
-/// the non-normalized axes (original order) followed by the normalized axes (given order).
+/// the non-normalized axes (original order) followed by the normalized axes (given order)
+///
 /// An identity permutation means the normalized axes already form the trailing contiguous
 /// block, so merging is pure reshape semantics and needs no transpose copy
 fn multiple_axes_perm(ndim: usize, axes: &[usize]) -> Result<Vec<usize>, Error> {
@@ -97,7 +95,7 @@ enum LayoutPlan {
     /// `Multiple` axes that need a genuine permutation before they form a trailing block: one
     /// transpose copy in, the row path on the merged layout, one transpose copy back out
     MergedRows { axes: Vec<usize>, n: usize },
-    /// A non-trailing `Custom` axis: stays on the broadcast ndarray path — its groups are
+    /// A non-trailing `Custom` axis: stays on the broadcast ndarray path. Its groups are
     /// strided mid-axis lanes, and ndarray reduces them in place, so a transpose would add the
     /// two copies the row path exists to avoid
     Strided { axis: usize },
@@ -107,7 +105,7 @@ enum LayoutPlan {
 /// and variance fold with the fixed-order segment kernels, then one streaming sweep writes the
 /// centered, normalized, and scaled-shifted values (plus the row's mean/std into `[R]`
 /// buffers). Rows are independent and each is computed entirely inside one task, so the
-/// `parallel` flag — and the rows-per-task chunking — never changes the result bits
+/// `parallel` flag - and the rows-per-task chunking - never changes the result bits
 #[allow(clippy::too_many_arguments)]
 fn row_forward(
     x: &[f32],
@@ -173,7 +171,7 @@ fn row_forward(
 }
 
 /// The inference twin of [`row_forward`]: identical per-row arithmetic bit for bit, but writes
-/// only the output — the variance folds over the deviations in registers
+/// only the output. The variance folds over the deviations in registers
 /// ([`segment_sq_dev`]) instead of through a centered buffer, and nothing else is allocated
 fn row_predict(
     x: &[f32],
@@ -208,8 +206,8 @@ fn row_predict(
 
 /// Fused per-row backward over standard-layout `[R, N]` slices: the three per-row reductions
 /// (variance-gradient, mean-gradient, and centered sums) fold with the fixed-order segment
-/// kernels — `grad_x_normalized` is fused as `g * gamma` per term instead of materialized —
-/// and one streaming sweep composes the input gradient. Same flag semantics as [`row_forward`]
+/// kernels. `grad_x_normalized` is fused as `g * gamma` per term instead of materialized, and
+/// one streaming sweep composes the input gradient. Same flag semantics as [`row_forward`]
 fn row_backward(
     g: &[f32],
     xc: &[f32],
@@ -263,7 +261,7 @@ fn row_backward(
 ///
 /// Multi-axis layer normalization reduces to single-axis normalization of this merged axis, so the
 /// public methods bracket the row core with this transform and its inverse,
-/// [`unmerge_normalized_axes`] — but only when the permutation is **not** the identity; trailing
+/// [`unmerge_normalized_axes`], but only when the permutation is not the identity. Trailing
 /// in-order axes skip the copies entirely (see [`LayoutPlan`])
 fn merge_normalized_axes(
     input: &Tensor,
@@ -369,7 +367,7 @@ impl LayerNormalization {
     /// # Notes
     ///
     /// Normalization defaults to the last (feature) dimension. Choose a different axis with
-    /// [`LayerNormalization::with_normalized_axis`].
+    /// [`LayerNormalization::with_normalized_axis`]
     ///
     /// # Returns
     ///
@@ -405,7 +403,7 @@ impl LayerNormalization {
     ///
     /// Defaults to [`LayerNormalizationAxis::Default`] (the last dimension). Changing the axis
     /// re-sizes the trainable `gamma`/`beta` parameters to match the new normalized dimension(s),
-    /// so call this before assigning weights or training.
+    /// so call this before assigning weights or training
     ///
     /// # Parameters
     ///
@@ -433,7 +431,7 @@ impl LayerNormalization {
     /// Computes the 1-D `gamma`/`beta` parameter shape for the given input shape and axis selection
     ///
     /// gamma/beta are 1-D over the normalized dimension(s): the axis size for a single axis, or the
-    /// product of the listed axes' sizes for `Multiple` (merged into one axis at runtime).
+    /// product of the listed axes' sizes for `Multiple` (merged into one axis at runtime)
     fn param_shape_for(
         input_shape: &[usize],
         normalized_axis: &LayerNormalizationAxis,
@@ -1073,7 +1071,7 @@ mod tests {
     }
 
     /// The row passes compute each row entirely inside one task with fixed-order kernels, so
-    /// the parallel flag must never change the bits — including rows that straddle task-chunk
+    /// the parallel flag must never change the bits, including rows that straddle task-chunk
     /// boundaries, sub-8 rows, and rows larger than one chunk
     #[test]
     fn row_passes_parallel_flag_invariant() {

@@ -1,10 +1,10 @@
 //! Parallel/serial gate calibration for the neural-network kernels
 //!
 //! Every `*_MIN_FLOPS` / `*_MIN_OPS` / `*_PARALLEL_THRESHOLD` constant in the crate decides when
-//! a pass is worth spreading across rayon. This bench times the **forced-serial** and
-//! **forced-parallel** implementations of each kernel class across a size ladder, prints the
+//! a pass is worth spreading across rayon. This bench times the forced-serial and
+//! forced-parallel implementations of each kernel class across a size ladder, prints the
 //! tables, and rewrites `benches/RESULTS.md` with the measurements and the observed crossovers,
-//! so the constants can be set from data instead of estimates.
+//! so the constants can be set from data instead of estimates
 //!
 //! Run with:
 //!
@@ -12,7 +12,7 @@
 //! cargo bench --bench parallel_gates
 //! ```
 //!
-//! Calibration is machine-specific; the generated report records the CPU and thread count.
+//! Calibration is machine-specific; the generated report records the CPU and thread count
 //!
 //! The calibrations are grouped by kernel family:
 //!
@@ -93,7 +93,6 @@ fn main() {
         s.print();
     }
 
-    // Rewrite the report
     let mut md = String::new();
     let _ = writeln!(md, "# Parallel-gate calibration results\n");
     let _ = writeln!(

@@ -1,7 +1,7 @@
 //! Integration tests for `rustyml::machine_learning::LDA`
 //!
-//! Expected values are derived from the problem design or closed-form
-//! definitions, never from running the model and recording its output
+//! Expected values come from the problem design or closed-form definitions,
+//! never from running the model and recording its output
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -626,7 +626,6 @@ fn test_shrinkage_manual_zero_matches_no_shrinkage() {
     lda_zero.fit(&x, &y).unwrap();
     let out_zero = lda_zero.transform(&x).unwrap();
 
-    // Both paths (None and Manual(0.0)) skip shrinkage, so outputs must agree
     assert_allclose(&out_none, &out_zero, 1e-10);
 }
 
@@ -782,12 +781,11 @@ fn test_save_load_round_trip() {
     let preds_after = lda_loaded.predict(&x).unwrap();
     let proj_after = lda_loaded.transform(&x).unwrap();
 
-    // Predictions must be identical after round-trip
     assert_eq!(
         preds_before, preds_after,
         "predictions must survive JSON round-trip"
     );
-    // Projections must be bit-for-bit identical (same floating-point state)
+    // Projections must survive the round-trip to within floating-point tolerance
     assert_allclose(&proj_before, &proj_after, 1e-12);
 }
 

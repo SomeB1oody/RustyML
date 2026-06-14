@@ -43,7 +43,7 @@ use rustyml::neural_network::traits::Layer;
 
 /// Compares `layer.backward(ones)` against a central finite-difference estimate of d sum(output)/dx
 fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
-    // Analytic input gradient: with L = sum(output), dL/dx = backward(ones)
+    // With L = sum(output), the analytic input gradient is backward(ones)
     let out = layer.forward(x).unwrap();
     let upstream = Tensor::ones(out.raw_dim());
     let analytic = layer.backward(&upstream).unwrap();
@@ -76,7 +76,7 @@ fn check_input_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) {
 
 #[test]
 fn dense_input_gradient_matches_finite_difference() {
-    // Linear activation keeps the layer smooth (no ReLU kink at 0)
+    // Linear activation keeps the layer smooth (no ReLU kink at 0), so finite differences are exact
     let mut dense = Dense::new(3, 2, Linear::new()).unwrap();
     let x = Array::from_shape_vec((4, 3), (0..12).map(|v| 0.1 * v as f32 - 0.5).collect())
         .unwrap()
@@ -98,8 +98,7 @@ fn conv2d_input_gradient_matches_finite_difference() {
 
 #[test]
 fn conv1d_input_gradient_matches_finite_difference() {
-    // Linear activation makes the convolution exactly linear in its input, so the central
-    // finite-difference estimate matches the analytic gradient tightly
+    // Linear activation makes the convolution linear in its input, so finite differences match tightly
     let mut conv = Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let x = Array::from_shape_vec((1, 1, 5), (0..5).map(|v| 0.1 * v as f32 - 0.3).collect())
         .unwrap()
@@ -136,7 +135,7 @@ fn separable_conv2d_input_gradient_matches_finite_difference() {
 #[test]
 fn separable_conv2d_same_padding_input_gradient_matches_finite_difference() {
     // A 3x3 kernel under `Same` adds leading padding; guards that backward accumulates the input
-    // gradient in padded coordinates and strips the padding, consistent with the padded forward pass
+    // gradient in padded coordinates and strips the padding, matching the padded forward pass
     let mut conv = SeparableConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), 1, Linear::new())
         .unwrap()
         .with_padding(PaddingType::Same);
@@ -293,7 +292,7 @@ fn check_weight_gradient(layer: &mut dyn Layer, x: &Tensor, eps: f32, tol: f32) 
             let orig = values[i];
 
             // `parameters()[p_idx].value` is a mutable view into the live weight array, so writing
-            // through it perturbs the actual parameter; the temporary Vec is only a handle
+            // through it perturbs the actual parameter
             layer.parameters()[p_idx].value[i] = orig + eps;
             let l_plus: f32 = layer.forward(x).unwrap().sum();
 
@@ -622,7 +621,7 @@ fn conv3d_same_padding_weight_gradient_matches_finite_difference() {
 }
 
 // SeparableConv2D `Same` padding, depth_multiplier=2, 3x3 (symmetric) kernel. With the 2x2
-// (asymmetric-padding) Same checks above, guards the depthwise zero-padding fix (the stage previously clamped at the border)
+// (asymmetric-padding) Same checks above, guards that the depthwise stage zero-pads at the border
 #[test]
 fn separable_conv2d_same_padding_3x3_dm2_gradients_match_finite_difference() {
     // 3x3 (symmetric padding) + depth_multiplier=2: input and weight gradients together

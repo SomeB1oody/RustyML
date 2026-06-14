@@ -13,8 +13,8 @@ use crate::neural_network::traits::Layer;
 /// Applies `tanh(x)` element-wise to the input tensor, mapping values to (-1, 1) while
 /// preserving the input shape
 ///
-/// The activation math is provided by [`Activation::Tanh`]; this layer only adds
-/// boundary validation and the caching required for backpropagation
+/// The activation math comes from [`Activation::Tanh`]; this layer adds boundary
+/// validation and the caching required for backpropagation
 ///
 /// # Examples
 ///

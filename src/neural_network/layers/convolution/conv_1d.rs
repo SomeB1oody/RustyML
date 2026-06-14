@@ -40,7 +40,7 @@ use std::borrow::Cow;
 /// // Batch size=2, 1 input channel, 10 time steps
 /// let x = Array3::ones((2, 1, 10)).into_dyn();
 ///
-/// // Create target tensor - assuming we'll have 3 filters with output length 8
+/// // Create target tensor - 3 filters with output length 8
 /// let y = Array3::ones((2, 3, 8)).into_dyn();
 ///
 /// // Build model: add a Conv1D layer with 3 filters and kernel size 3
@@ -111,7 +111,7 @@ impl Conv1D {
     ///
     /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
     /// [`Conv1D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
-    /// reproducible initialization, set a seed with [`Conv1D::with_random_state`].
+    /// reproducible initialization, set a seed with [`Conv1D::with_random_state`]
     ///
     /// # Returns
     ///
@@ -170,9 +170,9 @@ impl Conv1D {
 
     /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
-    /// assigning custom weights or training. The bias stays zero-initialized.
+    /// assigning custom weights or training. The bias stays zero-initialized
     ///
     /// # Parameters
     ///

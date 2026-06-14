@@ -1,3 +1,5 @@
+//! Prelude re-exports for evaluation metrics
+
 pub use crate::metrics::{
     Average, ConfusionMatrix, MulticlassConfusionMatrix, accuracy, adjusted_mutual_info,
     adjusted_rand_index, average_precision, calinski_harabasz_score, cohen_kappa,

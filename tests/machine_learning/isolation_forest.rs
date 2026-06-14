@@ -48,7 +48,6 @@ fn test_new_valid_explicit_max_depth_succeeds() {
     assert_eq!(model.get_max_samples(), 64);
     assert_eq!(model.get_max_depth(), 5);
     assert_eq!(model.get_random_state(), Some(99));
-    // not yet fitted
     assert_eq!(model.get_n_features(), 0);
     assert!(model.get_trees().is_none());
 }
@@ -121,7 +120,7 @@ fn test_anomaly_score_before_fit_returns_not_fitted() {
 #[test]
 fn test_fit_empty_data_returns_empty_input() {
     let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x: Array2<f64> = Array2::zeros((0, 2)); // 0 rows
+    let x: Array2<f64> = Array2::zeros((0, 2));
     let err = model.fit(&x).unwrap_err();
     assert!(
         matches!(err, Error::EmptyInput(_)),
@@ -170,7 +169,7 @@ fn test_predict_empty_data_returns_empty_input() {
     let train = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
     model.fit(&train).unwrap();
 
-    let x_empty: Array2<f64> = Array2::zeros((0, 2)); // 0 rows
+    let x_empty: Array2<f64> = Array2::zeros((0, 2));
     let err = model.predict(&x_empty).unwrap_err();
     assert!(
         matches!(err, Error::EmptyInput(_)),
@@ -490,11 +489,11 @@ fn test_fit_and_predict_on_single_sample() {
 #[test]
 fn test_n_features_reflects_training_data_columns() {
     let mut model = IsolationForest::new(10, 20).unwrap().with_random_state(1);
-    assert_eq!(model.get_n_features(), 0); // before fit
+    assert_eq!(model.get_n_features(), 0);
 
     let data = array![[1.0, 2.0, 3.0, 4.0, 5.0]];
     model.fit(&data).unwrap();
-    assert_eq!(model.get_n_features(), 5); // after fit
+    assert_eq!(model.get_n_features(), 5);
 }
 
 // max_samples clamped to nrows
@@ -605,7 +604,6 @@ fn test_save_load_roundtrip_yields_identical_predictions() {
     assert_eq!(loaded.get_max_depth(), model.get_max_depth());
     assert_eq!(loaded.get_n_features(), model.get_n_features());
 
-    // clean up
     let _ = std::fs::remove_file(path);
 }
 
@@ -651,8 +649,8 @@ fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_sa
     model.fit(&data).unwrap();
     let scores = model.predict(&data).unwrap();
 
-    // Path length c(4) is normalised by c(sample_size) = c(4): score = 2^(-c(4)/c(4)) = 0.5.
-    // Normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
+    // Path length c(4) is normalised by c(sample_size) = c(4): score = 2^(-c(4)/c(4)) = 0.5,
+    // normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
     // points as anomalous
     for (i, &s) in scores.iter().enumerate() {
         assert!(

@@ -20,7 +20,7 @@ use rayon::prelude::{
 };
 use std::ops::AddAssign;
 
-/// KMeans clustering algorithm implementation
+/// K-means clustering estimator
 ///
 /// Partitions n observations into k clusters where each observation belongs to
 /// the cluster with the nearest mean (centroid)
@@ -32,8 +32,7 @@ use std::ops::AddAssign;
 /// use ndarray::Array2;
 /// use ndarray_rand::rand::random; // or `use rand::random;`
 ///
-/// // Create a sample dataset with 100 points in 2D space
-/// // The dataset contains 3 distinct clusters
+/// // Sample dataset with 100 points in 2D space, in 3 distinct clusters
 /// let mut data = vec![];
 ///
 /// // First cluster around (2.0, 2.0)
@@ -56,7 +55,7 @@ use std::ops::AddAssign;
 ///
 /// let data = Array2::<f64>::from_shape_vec((100, 2), data).unwrap();
 ///
-/// // Create a KMeans instance with 3 clusters
+/// // KMeans instance with 3 clusters
 /// let mut kmeans = KMeans::new(
 ///     3,    // Number of clusters
 ///     300,  // Maximum iterations
@@ -68,19 +67,19 @@ use std::ops::AddAssign;
 /// // Fit the model to the data
 /// kmeans.fit(&data).unwrap();
 ///
-/// // Get cluster labels for all training samples
+/// // Cluster labels for all training samples
 /// let labels = kmeans.get_labels().unwrap();
 /// println!("Cluster labels: {:?}", labels);
 ///
-/// // Get the computed centroids
+/// // Computed centroids
 /// let centroids = kmeans.get_centroids().unwrap();
 /// println!("Cluster centroids:\n{:?}", centroids);
 ///
-/// // Get the inertia (sum of squared distances to nearest centroid)
+/// // Inertia (sum of squared distances to nearest centroid)
 /// let inertia = kmeans.get_inertia().unwrap();
 /// println!("Inertia: {:.4}", inertia);
 ///
-/// // Get the number of iterations performed
+/// // Number of iterations performed
 /// let n_iter = kmeans.get_actual_iterations().unwrap();
 /// println!("Iterations: {}", n_iter);
 ///
@@ -94,7 +93,7 @@ use std::ops::AddAssign;
 /// let predicted_labels = kmeans.predict(&new_data).unwrap();
 /// println!("Predicted labels for new data: {:?}", predicted_labels);
 ///
-/// // Alternative: fit and predict in one step
+/// // Fit and predict in one step
 /// let mut kmeans2 = KMeans::default(); // Uses default parameters
 /// let labels = kmeans2.fit_predict(&data).unwrap();
 /// println!("Labels from fit_predict: {:?}", labels);
@@ -158,15 +157,7 @@ impl KMeans {
     /// # Notes
     ///
     /// k-means++ initialization is non-deterministic by default. For reproducible runs, set a
-    /// fixed seed after construction with the builder method below:
-    ///
-    /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for centroid initialization
-    ///
-    /// ```
-    /// use rustyml::machine_learning::KMeans;
-    ///
-    /// let model = KMeans::new(3, 300, 1e-4).unwrap().with_random_state(42);
-    /// ```
+    /// fixed seed after construction with [`with_random_state`](Self::with_random_state)
     pub fn new(n_clusters: usize, max_iterations: usize, tolerance: f64) -> Result<Self, Error> {
         if n_clusters == 0 {
             return Err(Error::invalid_parameter(
@@ -250,7 +241,6 @@ impl KMeans {
         let n_samples = data.shape()[0];
         let n_features = data.shape()[1];
 
-        // Initialize cluster centers matrix
         let mut centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
 
         let mut rng = crate::random::make_rng(self.random_state);
@@ -425,9 +415,8 @@ impl KMeans {
             let results = results?;
 
             // Fold every sample's row into its cluster's running sum, plus counts and
-            // inertia, as a deterministic blocked range fold - on rayon above the sum gate
-            // (work metric: samples x features; see benches/RESULTS.md
-            // "k-means assign-accumulate")
+            // inertia, as a deterministic blocked range fold, on rayon above the sum gate
+            // (work metric: samples x features)
             let n_clusters = self.n_clusters;
             let accumulate_parallel =
                 n_samples.saturating_mul(n_features) >= SUM_F64_PARALLEL_MIN_ELEMS;

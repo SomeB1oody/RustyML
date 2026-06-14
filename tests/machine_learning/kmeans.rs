@@ -10,14 +10,14 @@ use rustyml::machine_learning::KMeans;
 
 // Helpers
 
-/// Build three tight, well-separated blobs of 5 points each, centred at (0,0),
+/// Build 3 tight, well-separated blobs of 5 points each, centred at (0,0),
 /// (10,0), (5,10) with per-coordinate offset in [-0.05, +0.05]
 ///
 /// Inter-blob separation (>= 9.9) far exceeds intra-blob spread (<= 0.14), so any
 /// correct k=3 run assigns each blob to one cluster with centroid within 0.1 of the
 /// true mean
 fn three_blob_data() -> Array2<f64> {
-    // 15 rows x 2 columns; tiny deterministic offsets keep blobs tight
+    // 15 rows x 2 columns; deterministic offsets keep blobs tight
     #[rustfmt::skip]
     let data = array![
         // Blob 0: true centre (0.0, 0.0)
@@ -44,11 +44,6 @@ fn three_blob_data() -> Array2<f64> {
 
 /// Verify that all points within each blob share one label and that blobs get
 /// distinct labels
-///
-/// # Parameters
-///
-/// - `labels` - labels produced for `three_blob_data()`
-/// - `blob_size` - number of points per blob (5 for `three_blob_data()`)
 fn assert_blob_structure(labels: &Array1<usize>, blob_size: usize) {
     let n_blobs = labels.len() / blob_size;
     assert_eq!(
@@ -614,8 +609,7 @@ fn load_from_nonexistent_path_is_io_error() {
     );
 }
 
-// Larger-dataset fits (historically the parallel assignment branch; the work-metric
-// gates have since moved, so this is now a plain medium-size correctness check)
+// Larger-dataset fits: a medium-size correctness check on the parallel assignment branch
 
 /// Build 1200 points (3 tight, well-separated blobs of 400 each) with fully
 /// deterministic jitter (no RNG)
@@ -693,7 +687,7 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
         "dataset must cross the sum-gate work metric"
     );
 
-    // Four integer-valued blobs at offsets 0/100/200/300, deterministic jitter in 0..13
+    // 4 integer-valued blobs at offsets 0/100/200/300, deterministic jitter in 0..13
     let mut v = Vec::with_capacity(n * d);
     for i in 0..n {
         for j in 0..d {

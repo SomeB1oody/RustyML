@@ -1,8 +1,7 @@
 //! Principal Component Analysis (PCA)
 //!
 //! Provides the `PCA` model for linear dimensionality reduction and the `SVDSolver`
-//! enum selecting the underlying decomposition strategy (full, randomized, or power
-//! iteration)
+//! enum selecting the underlying decomposition strategy (full, randomized, or power iteration)
 
 use crate::error::Error;
 use crate::math::matmul::gemm_internal;
@@ -16,11 +15,11 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// SVD solver options for Principal Component Analysis
 ///
-/// Selects the decomposition strategy used to compute principal components
-/// For small to mid-sized datasets (typically fewer than 10,000 samples or features),
-/// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
-/// `Randomized` is recommended for speed with good accuracy. `PowerIteration` is recommended
-/// when you need only a few components from very large or memory-constrained problems
+/// Selects the decomposition strategy used to compute principal components. Use `Full` for
+/// small to mid-sized datasets (typically fewer than 10,000 samples or features) when accuracy
+/// matters. Use `Randomized` for large datasets (10,000+ samples or features) when speed
+/// matters. Use `PowerIteration` when you need only a few components from very large or
+/// memory-constrained problems
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum SVDSolver {
     /// Full SVD using deterministic decomposition
@@ -37,8 +36,7 @@ impl SVDSolver {
     /// Computes the top `n_components` principal axes and their singular values from
     /// the centered data, dispatching over the configured solver strategy
     ///
-    /// Returns `(components, singular_values)`, where the principal axes are the rows
-    /// of `components`
+    /// Returns `(components, singular_values)`, where the principal axes are the rows of `components`
     fn compute_components(
         &self,
         x_centered: &Array2<f64>,
@@ -250,12 +248,6 @@ impl PCA {
     /// randomized or power-iteration solver for large data), use the builder method below:
     ///
     /// - [`with_svd_solver`](Self::with_svd_solver) - SVD solver strategy
-    ///
-    /// ```
-    /// use rustyml::utils::pca::{PCA, SVDSolver};
-    ///
-    /// let model = PCA::new(16).unwrap().with_svd_solver(SVDSolver::Randomized(42));
-    /// ```
     pub fn new(n_components: usize) -> Result<Self, Error> {
         if n_components == 0 {
             return Err(Error::invalid_parameter(

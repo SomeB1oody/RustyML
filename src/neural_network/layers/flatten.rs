@@ -10,7 +10,7 @@ use ndarray::IxDyn;
 
 /// Flattens a 3D, 4D, or 5D tensor into a 2D tensor
 ///
-/// This layer reshapes inputs from feature extraction layers into a format suitable for dense layers
+/// Reshapes inputs from feature extraction layers into a format suitable for dense layers
 /// Input shapes are \[batch_size, features, length\], \[batch_size, channels, height, width\], or
 /// \[batch_size, channels, depth, height, width\]. Output shape is always \[batch_size, flattened_features\],
 /// where flattened_features is the product of all dimensions except batch_size
@@ -67,7 +67,6 @@ impl Flatten {
     ///
     /// - `Error::InvalidInput` - If `input_shape` has fewer than 2 dimensions or contains a zero
     pub fn new(input_shape: Vec<usize>) -> Result<Self, Error> {
-        // Validate input shape dimensions
         if input_shape.len() < 2 {
             return Err(Error::invalid_input(format!(
                 "Input shape must have at least 2 dimensions [batch_size, features...], got {}D",
@@ -75,7 +74,6 @@ impl Flatten {
             )));
         }
 
-        // Ensure all dimensions are greater than 0
         for (i, &dim) in input_shape.iter().enumerate() {
             if dim == 0 {
                 return Err(Error::invalid_input(format!(
@@ -96,7 +94,6 @@ impl Flatten {
 
 impl Layer for Flatten {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input dimensions
         let input_shape = input.shape();
         if input_shape.len() < 3 || input_shape.len() > 5 {
             return Err(Error::invalid_input(format!(
@@ -111,7 +108,6 @@ impl Layer for Flatten {
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
 
-        // Reshape to flatten the tensor
         Ok(input
             .to_shape(IxDyn(&[batch_size, flattened_features]))
             .unwrap()
@@ -120,7 +116,6 @@ impl Layer for Flatten {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input dimensions
         let input_shape = input.shape();
         if input_shape.len() < 3 || input_shape.len() > 5 {
             return Err(Error::invalid_input(format!(
@@ -132,7 +127,6 @@ impl Layer for Flatten {
         let batch_size = input_shape[0];
         let flattened_features: usize = input_shape[1..].iter().product();
 
-        // Reshape to flatten the tensor
         Ok(input
             .to_shape(IxDyn(&[batch_size, flattened_features]))
             .unwrap()
@@ -143,7 +137,6 @@ impl Layer for Flatten {
         if let Some(input) = &self.input_cache {
             let input_shape = input.shape().to_vec();
 
-            // Validate gradient output shape
             let expected_grad_shape = [input_shape[0], input_shape[1..].iter().product()];
             if grad_output.shape() != expected_grad_shape {
                 return Err(Error::shape_mismatch(

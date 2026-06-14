@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Applies `max(0, x)` elementwise to the input tensor, keeping the original shape
 /// Common inputs include 2D tensors for dense layers and 4D tensors for convolutional layers
 ///
-/// The activation math is provided by [`Activation::ReLU`]; this layer only adds
+/// The activation math is provided by [`Activation::ReLU`]. This layer only adds
 /// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
@@ -52,7 +52,7 @@ impl ReLU {
     ///
     /// # Returns
     ///
-    /// - `Self` - A new `ReLU` layer instance
+    /// - `Self` - A new `ReLU` layer
     pub fn new() -> Self {
         ReLU { output_cache: None }
     }

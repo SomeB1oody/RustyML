@@ -12,6 +12,14 @@ use ndarray::{Array2, ArrayView1, ArrayViewMut1, Axis, Zip};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Formats a shape slice as a parenthesized tuple, e.g. `"(2, 3)"`
+///
+/// # Parameters
+///
+/// - `shape` - Dimension sizes to format
+///
+/// # Returns
+///
+/// - `String` - The shape rendered as `"(d0, d1, ...)"`
 fn format_shape(shape: &[usize]) -> String {
     format!(
         "({})",
@@ -25,8 +33,13 @@ fn format_shape(shape: &[usize]) -> String {
 
 /// Formats the cached output shape for activation layers
 ///
-/// Returns the shape of the cached tensor, or "Unknown" if nothing has been
-/// cached yet
+/// # Parameters
+///
+/// - `cached_tensor` - The layer's cached output, if any
+///
+/// # Returns
+///
+/// - `String` - The cached tensor's shape, or `"Unknown"` if nothing is cached
 fn format_output_shape(cached_tensor: &Option<Tensor>) -> String {
     match cached_tensor {
         Some(tensor) => format_shape(tensor.shape()),
@@ -56,11 +69,11 @@ const SOFTMAX_EPSILON: f32 = 1e-8;
 
 /// The element-wise activation functions that trainable layers can embed
 ///
-/// Dense, the convolutional layers and the recurrent layers each carry an
-/// `Activation` value instead of a generic activation type parameter. Keeping
-/// the activation as a runtime enum makes the host layers non-generic, which
-/// removes monomorphization bloat and lets weight deserialization downcast every
-/// layer to a single concrete type rather than probing each `Layer<Act>` pairing
+/// Dense, the convolutional layers, and the recurrent layers each carry an
+/// `Activation` value instead of a generic activation type parameter. A runtime
+/// enum keeps the host layers non-generic, which removes monomorphization bloat
+/// and lets weight deserialization downcast every layer to a single concrete type
+/// rather than probing each `Layer<Act>` pairing
 ///
 /// The standalone activation *layers* ([`Linear`], [`ReLU`], [`Sigmoid`], [`Tanh`],
 /// [`Softmax`]) delegate their math here, so this enum is the single source of
@@ -76,13 +89,13 @@ const SOFTMAX_EPSILON: f32 = 1e-8;
 ///    `Layer` impl validates, caches the output, and delegates to this enum - plus a
 ///    `From<NewLayer> for Activation` impl so it works as an `impl Into<Activation>` argument
 ///
-/// The algorithm must live on the enum (not in the layer `impl`s) because the trainable layers
+/// The algorithm lives on the enum, not in the layer `impl`s, because the trainable layers
 /// (Dense, the convolutional layers, the recurrent layers) store an `Activation` *value* and call
 /// these **pure, stateless** methods inside their own forward/backward. A stateful `Layer` impl
 /// (which caches `output` and takes `&mut self`) cannot serve that embedded, value-typed use
-/// without reintroducing a generic activation type parameter or `Box<dyn Layer>` - both removed in the
-/// Step-1 refactor - and would duplicate the algorithm. The standalone structs are therefore thin
-/// wrappers, never the source of truth
+/// without reintroducing a generic activation type parameter or `Box<dyn Layer>`, and would
+/// duplicate the algorithm. The standalone structs are therefore thin wrappers, never the source
+/// of truth
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Activation {
     /// Identity activation, `f(x) = x`
@@ -176,7 +189,6 @@ impl Activation {
                 // ReLU'(z) = 1 where z > 0. Since a = max(0, z), `a > 0` iff `z > 0`
                 let mut grad = grad_output.clone();
                 let relu_grad = |g: &mut f32, &a: &f32| {
-                    // a > 0: ReLU'(z) = 1, gradient passes through unchanged
                     if a <= 0.0 {
                         *g = 0.0;
                     }

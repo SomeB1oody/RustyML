@@ -56,9 +56,9 @@ impl CategoricalCrossEntropy {
     /// # Parameters
     ///
     /// - `from_logits` - If `true`, `y_pred` is interpreted as raw logits and softmax is applied
-    ///   internally (more numerically stable, and the gradient is computed in one fused
-    ///   `softmax(z) - y` step, so the model's last layer should output logits, not probabilities).
-    ///   If `false`, `y_pred` must already be a normalized probability distribution per row
+    ///   internally. This is more numerically stable, and the gradient is computed in one fused
+    ///   `softmax(z) - y` step, so the last layer should output logits, not probabilities. If
+    ///   `false`, `y_pred` must already be a normalized probability distribution per row
     ///
     /// # Returns
     ///
@@ -77,10 +77,10 @@ fn batch_and_classes(t: &Tensor) -> (usize, usize) {
 
 /// Validates that one-hot targets and predictions are non-empty, at least 2D, and shape-compatible
 ///
-/// Categorical cross entropy is an elementwise product reduced over the batch, so the two
-/// tensors must share the same shape, and the batch axis must be non-empty (it is the divisor).
-/// The input must be at least 2D `[batch, classes]`: with a 1D tensor, `shape()[0]` would be the
-/// total element count rather than the batch size, silently rescaling the loss and its gradient
+/// Categorical cross entropy is an elementwise product reduced over the batch, so the two tensors
+/// must share the same shape, and the batch axis must be non-empty (it is the divisor). The input
+/// must be at least 2D `[batch, classes]`: with a 1D tensor, `shape()[0]` would be the total
+/// element count rather than the batch size, which silently rescales the loss and its gradient
 fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.is_empty() {
         return Err(Error::empty_input(

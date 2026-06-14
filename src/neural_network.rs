@@ -3,16 +3,16 @@
 
 use ndarray::ArrayD;
 
-/// Type alias for n-dimensional arrays used as tensors in the neural network
+/// N-dimensional array used as a tensor in the neural network
 pub type Tensor = ArrayD<f32>;
 
-/// Module that contains neural network layer implementations
+/// Neural network layer implementations
 pub mod layers;
-/// Module that contains loss function implementations
+/// Loss function implementations
 pub mod losses;
-/// Module that contains optimization algorithms for neural network training
+/// Optimization algorithms for neural network training
 pub mod optimizers;
-/// Module that contains implementations for sequential model architecture
+/// Sequential model architecture
 pub mod sequential;
-/// Module that defines the trait interfaces for neural network models
+/// Trait interfaces for neural network models
 pub mod traits;

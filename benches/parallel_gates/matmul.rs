@@ -1,6 +1,6 @@
 //! Dense linear-algebra gates: GEMM and GEMV FLOP/block thresholds (f32 and f64), plus the two
 //! GEMM-strategy shootouts (tiled-GEMM chunk budget and the pairwise-distance strategy) that pick
-//! between `gemm`, a GEMV swarm, and per-pair scalar loops.
+//! between `gemm`, a GEMV swarm, and per-pair scalar loops
 
 use crate::harness::{
     Row, Section, random_matrix, random_matrix_f64, random_vector_f32, random_vector_f64,
@@ -282,11 +282,11 @@ pub fn calibrate_par_matvec_min_block() -> Vec<Section> {
 
 pub fn calibrate_gemm_chunk_budget() -> Vec<Section> {
     let mut sections = Vec::new();
-    // KNN-predict-shaped workloads: queries against a training set, distance scan per row.
+    // KNN-predict-shaped workloads: queries against a training set, distance scan per row
     // Baseline ("serial" column) is the pre-rewrite path: one GEMV per query, parallel over
     // queries. The sweep finds the chunk budget for the tiled-GEMM replacement
     // The 50k/200k training sets (~25 MB) fit in the 9950X's 64 MB L3, where the GEMV swarm
-    // re-reads X from cache for free; the 500k set (256 MB) overflows it, the case tiling
+    // re-reads X from cache for free; the 500k set (256 MB) overflows it - the case tiling
     // exists for
     for &(n_train, d, n_query, tag) in &[
         (50_000usize, 64usize, 2048usize, "50k train, d=64"),

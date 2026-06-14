@@ -1,13 +1,13 @@
 //! Normalization-layer statistics gates: the BatchNorm column-stats folds (channel-chunked
 //! negative result and the viable row-block fold), the rank>=3 native-layout plane fold, and the
-//! trailing-axis LayerNorm fused row pass.
+//! trailing-axis LayerNorm fused row pass
 
 use crate::harness::{Row, Section, random_matrix, time_per_call_ns};
 use ndarray::{Array1, Array2, Axis};
 use rayon::prelude::*;
 use std::hint::black_box;
 
-// ---- BatchNorm column statistics: channel-chunked parallel vs serial mean_axis ----
+// BatchNorm column statistics: channel-chunked parallel vs serial mean_axis
 
 /// One cache line of `f32` per channel chunk, mirroring the production helper
 const BENCH_CHANNEL_CHUNK: usize = 16;
@@ -37,7 +37,7 @@ fn bench_par_col_sum(x: &Array2<f32>) -> Array1<f32> {
 
 /// The BatchNorm statistics reduction: per-channel sums over batch x spatial rows. The win is
 /// capped by the channel-chunk task count (C / 16), so narrow-C rungs document where the
-/// parallel path merely ties.
+/// parallel path merely ties
 ///
 /// **Negative result, kept as the record of why production uses row blocks instead:** the
 /// channel split preserves the serial per-channel accumulation order (bitwise identical to
@@ -144,7 +144,7 @@ pub fn calibrate_bn_col_stats_rowblock() -> Section {
     }
 }
 
-// ---- BatchNorm plane statistics (rank >= 3 native layout): BN_PLANE_STATS_PARALLEL_MIN_ELEMS ----
+// BatchNorm plane statistics (rank >= 3 native layout): BN_PLANE_STATS_PARALLEL_MIN_ELEMS
 
 /// Mirrors the production plane fold: per-channel sums over the native `[B, C, P]` layout,
 /// each channel's logical sequence (its planes in batch order) folded in 16K-element blocks
@@ -235,7 +235,7 @@ pub fn calibrate_bn_plane_stats() -> Section {
     }
 }
 
-// ---- LayerNorm fused row pass (trailing axis): LN_ROW_PARALLEL_MIN_ELEMS ----
+// LayerNorm fused row pass (trailing axis): LN_ROW_PARALLEL_MIN_ELEMS
 
 /// Mirrors the production LayerNorm row pass: per row of a `[R, N]` slice, eight-lane mean
 /// and variance folds plus the fused center/normalize/scale-shift sweep writing three

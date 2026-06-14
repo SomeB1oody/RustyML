@@ -1,6 +1,6 @@
 //! Coarse-task tree gates: per-sample tree traversal (DecisionTree/IsolationForest predict),
 //! the per-feature sort-scan of `find_best_split`, parallel isolation-tree construction, and the
-//! kd-tree vs brute-force dimension crossover.
+//! kd-tree vs brute-force dimension crossover
 
 use crate::harness::{Row, Section, random_matrix_f64, time_per_call_ns};
 use ndarray::Array2;
@@ -9,7 +9,7 @@ use rustyml::bench_internals::KdTree;
 use rustyml::types::DistanceCalculationMetric;
 use std::hint::black_box;
 
-// ---- coarse-task classes: tree traversal / sort-scan / tree build ----
+// coarse-task classes: tree traversal / sort-scan / tree build
 
 /// Synthetic decision-tree predict kernel: per-sample root-to-leaf walk over a heap-layout
 /// binary tree (depth 16, ~65K nodes), the same pointer-chasing shape as DecisionTree and
@@ -179,10 +179,10 @@ pub fn calibrate_tree_build() -> Section {
     }
 }
 
-// ---- kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS ----
+// kd-tree vs brute force by dimension: KNN/DBSCAN_KD_TREE_MAX_DIMS
 
 /// The "serial" column is the kd-tree path and the "parallel" column the brute-force scan, so
-/// the crossover reads "the dimension bracket where brute force starts winning for good".
+/// the crossover reads "the dimension bracket where brute force starts winning for good"
 /// Uniform data; clustered data shifts the boundary, so this is a same-distribution comparison,
 /// not a universal constant
 pub fn calibrate_kd_tree_dims() -> Section {

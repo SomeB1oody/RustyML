@@ -26,7 +26,7 @@ use crate::neural_network::traits::Layer;
 /// use ndarray::{Array, IxDyn};
 /// use approx::assert_relative_eq;
 ///
-/// // Create a Sequential model with multiple layers
+/// // Create a Sequential model
 /// let mut model = Sequential::new();
 ///
 /// // Add GlobalMaxPooling3D layer

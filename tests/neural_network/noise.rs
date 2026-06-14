@@ -16,13 +16,13 @@ use rustyml::neural_network::traits::Layer;
 
 // helpers
 
-/// Compute the sample mean of every element in a Tensor
+/// Sample mean of every element in a Tensor
 fn tensor_mean(t: &Tensor) -> f64 {
     let sum: f64 = t.iter().map(|&v| v as f64).sum();
     sum / t.len() as f64
 }
 
-/// Compute the sample standard deviation of every element in a Tensor
+/// Sample standard deviation of every element in a Tensor
 fn tensor_std(t: &Tensor) -> f64 {
     let n = t.len() as f64;
     let mean = tensor_mean(t);
@@ -94,7 +94,7 @@ fn gaussian_noise_predict_is_always_identity() {
         .unwrap()
         .into_dyn();
 
-    // Training flag = true: predict must still be identity
+    // With the training flag set, predict must still be identity
     let mut layer = GaussianNoise::new(1.0, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
     let output = layer.predict(&input).unwrap();
@@ -140,7 +140,6 @@ fn gaussian_noise_training_preserves_mean() {
     let input_val = 2.0f32;
     let stddev = 0.5f32;
 
-    // All-ones input scaled by input_val
     let input = Array::from_shape_vec((N,), vec![input_val; N])
         .unwrap()
         .into_dyn();

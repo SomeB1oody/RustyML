@@ -748,7 +748,7 @@ fn instance_norm_backward_eval_mode_passes_gradient_through() {
 #[test]
 fn group_norm_forward_below_3d_input_errors() {
     let mut gn = GroupNormalization::new(vec![4, 8], 2, 1, 1e-5).unwrap();
-    let input = Array::ones((4, 8)).into_dyn(); // ndim = 2
+    let input = Array::ones((4, 8)).into_dyn();
     let err = gn.forward(&input).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
@@ -762,7 +762,7 @@ fn group_norm_forward_below_3d_input_errors() {
 #[test]
 fn instance_norm_forward_below_3d_input_errors() {
     let mut inn = InstanceNormalization::new(vec![4, 8], 1, 1e-5).unwrap();
-    let input = Array::ones((4, 8)).into_dyn(); // ndim = 2
+    let input = Array::ones((4, 8)).into_dyn();
     let err = inn.forward(&input).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),

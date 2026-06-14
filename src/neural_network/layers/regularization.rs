@@ -14,10 +14,10 @@ pub use dropout::*;
 pub use noise_injection::*;
 pub use normalization::*;
 
-/// Defines a layer-specific `set_training` method for toggling the training mode
+/// Defines a layer-specific `set_training` method for toggling training mode
 ///
-/// The generated method sets the `training` field to `true` (training) or `false` (inference),
-/// which drives behavior in the forward and backward passes
+/// The generated method sets the `training` field to `true` (training) or `false`
+/// (inference). This drives behavior in the forward and backward passes
 macro_rules! mode_dependent_layer_set_training {
     () => {
         /// Sets the training mode for the layer, updating its `training` field

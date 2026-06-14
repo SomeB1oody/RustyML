@@ -22,9 +22,9 @@ use std::borrow::Cow;
 /// the last hidden state with shape (batch_size, units). Uses input, forget, cell, and
 /// output gates to control memory flow and mitigate vanishing gradients
 ///
-/// All four gates are stored fused: the kernels are packed side by side into single matrices
+/// All 4 gates are stored fused: the kernels are packed side by side into single matrices
 /// with column blocks in the order `[input | forget | cell | output]` (`[i | f | g | o]`, the
-/// Keras LSTM layout), so each projection runs as one GEMM instead of four
+/// Keras LSTM layout), so each projection runs as one GEMM instead of 4
 ///
 /// # Examples
 ///
@@ -104,7 +104,7 @@ impl LSTM {
     /// # Notes
     ///
     /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`LSTM::with_random_state`].
+    /// initialization, set a seed with [`LSTM::with_random_state`]
     ///
     /// # Returns
     ///
@@ -132,9 +132,9 @@ impl LSTM {
 
     /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs the gate initialization with `random_state`, so call it before assigning custom
-    /// weights or training.
+    /// weights or training
     ///
     /// # Parameters
     ///
@@ -152,7 +152,7 @@ impl LSTM {
 
     /// Initializes the fused `[i | f | g | o]` gate blocks from the given seed
     ///
-    /// One RNG is threaded through all 4 gate blocks; the forget gate bias starts at 1.0.
+    /// One RNG is threaded through all 4 gate blocks; the forget gate bias starts at 1.0
     fn init_gates(
         input_dim: usize,
         units: usize,
@@ -219,7 +219,7 @@ impl LSTM {
     ///
     /// - `Error::NeuralNetwork(NnError::WeightShape)` - If any provided weight does not match the
     ///   expected per-gate shape
-    #[allow(clippy::too_many_arguments)] // four gates x (kernel, recurrent_kernel, bias)
+    #[allow(clippy::too_many_arguments)] // 4 gates x (kernel, recurrent_kernel, bias)
     pub fn set_gate_weights(
         &mut self,
         input_kernel: Array2<f32>,
@@ -309,7 +309,7 @@ impl LSTM {
     /// [`Layer::forward`] and [`Layer::predict`]
     ///
     /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden/cell
-    /// states, `activation(c_t)`, and the four gate activations) is recorded; `predict` passes
+    /// states, `activation(c_t)`, and the 4 gate activations) is recorded; `predict` passes
     /// `None` and skips both the recording and its clones
     fn run(
         &self,
@@ -482,7 +482,7 @@ impl Layer for LSTM {
             dz_t.slice_mut(s![.., 2 * u..3 * u]).assign(&grad_g_raw);
             dz_t.slice_mut(s![.., 3 * u..4 * u]).assign(&grad_o_raw);
 
-            // Gradient w.r.t. the previous hidden state: one fused GEMM instead of four
+            // Gradient w.r.t. the previous hidden state: one fused GEMM instead of 4
             grad_h = gemm_internal(&dz_t, &self.gates.recurrent_kernel.t());
 
             dz3.index_axis_mut(Axis(1), t).assign(&dz_t);
@@ -491,7 +491,7 @@ impl Layer for LSTM {
             grad_c = grad_c_prev;
         }
 
-        // Batched reductions over all timesteps, one fused GEMM each (were four apiece)
+        // Batched reductions over all timesteps, one fused GEMM each
         let x_flat = x3
             .to_shape((batch * timesteps, feat))
             .expect("contiguous input reshape");

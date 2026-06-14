@@ -338,7 +338,7 @@ fn avg_pool_2d_constructor_rejects_oversized_pool() {
     assert!(result.is_err(), "pool_h > input_h must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension (regression: once only caught at forward)
+/// Constructor rejects a zero batch or channel dimension (regression guard: must fail at construction, not forward)
 #[test]
 fn avg_pool_2d_constructor_rejects_zero_batch_or_channel() {
     assert!(
@@ -481,7 +481,7 @@ fn avg_pool_3d_constructor_rejects_zero_stride() {
     assert!(result.is_err(), "zero depth stride must be rejected");
 }
 
-/// Constructor rejects a zero batch or channel dimension (regression: once only caught at forward)
+/// Constructor rejects a zero batch or channel dimension (regression guard: must fail at construction, not forward)
 #[test]
 fn avg_pool_3d_constructor_rejects_zero_batch_or_channel() {
     assert!(

@@ -3,10 +3,10 @@
 //! Tracks the wall-clock effect of the GEMM/parallelism work (and guards against regressions)
 //! at the level a user sees: whole `fit`/`predict`/`transform` calls. Detailed reports and
 //! saved baselines live under `target/criterion/`; compare across changes with
-//! `cargo bench --bench ml_end_to_end -- --save-baseline <name>` and `-- --baseline <name>`.
+//! `cargo bench --bench ml_end_to_end -- --save-baseline <name>` and `-- --baseline <name>`
 //!
 //! The micro-level serial/parallel crossovers behind the gate constants are calibrated
-//! separately by `cargo bench --bench parallel_gates` (see benches/RESULTS.md).
+//! separately by `cargo bench --bench parallel_gates` (see benches/RESULTS.md)
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array1, Array2};

@@ -5,7 +5,7 @@
 //! - Eval mode: output == input (identity), predict() == forward() in eval mode
 //! - SpatialDropout channel-consistency: whole channel 0 or fully kept and scaled
 //! - Constructor rejects invalid rates
-//! - backward-before-forward -> Err(ForwardPassNotRun)
+//! - backward before forward -> Err(ForwardPassNotRun)
 //! - backward() in eval mode passes gradient through unchanged
 //! - Shape / ndim validation error paths
 

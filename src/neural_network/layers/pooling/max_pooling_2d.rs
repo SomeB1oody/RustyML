@@ -33,16 +33,16 @@ use crate::neural_network::traits::Layer;
 /// use rustyml::neural_network::losses::*;
 /// use ndarray::Array4;
 ///
-/// // Create a simple 4D input tensor: [batch_size, channels, height, width]
-/// // Batch size=2, 3 input channels, 6x6 pixels
+/// // 4D input tensor: [batch_size, channels, height, width]
+/// // batch size 2, 3 input channels, 6x6 pixels
 /// let mut input_data = Array4::zeros((2, 3, 6, 6));
 ///
-/// // Set some specific values so we can predict the max pooling result
+/// // Set specific values so the max pooling result is predictable
 /// for b in 0..2 {
 ///     for c in 0..3 {
 ///         for i in 0..6 {
 ///             for j in 0..6 {
-///                 // Create input data with an easily observable pattern
+///                 // Easily observable pattern
 ///                 input_data[[b, c, i, j]] = (i * j) as f32 + b as f32 * 0.1 + c as f32 * 0.01;
 ///             }
 ///         }
@@ -51,27 +51,22 @@ use crate::neural_network::traits::Layer;
 ///
 /// let x = input_data.clone().into_dyn();
 ///
-/// // Test using MaxPooling2D in a model
 /// let mut model = Sequential::new();
 /// model
 ///     // strides default to pool_size (2, 2) and padding defaults to Valid
 ///     .add(MaxPooling2D::new((2, 2), vec![2, 3, 6, 6]).unwrap())
 ///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
-/// // Create target tensor - corresponding to the pooled shape
+/// // Target tensor matching the pooled shape
 /// let y = Array4::ones((2, 3, 3, 3)).into_dyn();
 ///
-/// // Print model structure
 /// model.summary();
 ///
-/// // Train the model (run a few epochs)
 /// model.fit(&x, &y, 3).unwrap();
 ///
-/// // Use predict for forward propagation prediction
 /// let prediction = model.predict(&x).unwrap();
 /// println!("MaxPooling2D prediction results: {:?}", prediction);
 ///
-/// // Check if output shape is correct
 /// assert_eq!(prediction.shape(), &[2, 3, 3, 3]);
 /// ```
 ///
@@ -105,7 +100,7 @@ impl MaxPooling2D {
     /// # Notes
     ///
     /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`].
+    /// with [`MaxPooling2D::with_strides`] and [`MaxPooling2D::with_padding`]
     ///
     /// # Returns
     ///
@@ -116,7 +111,6 @@ impl MaxPooling2D {
     /// - `Error::InvalidInput` - If `input_shape` is not 4D
     /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension
     pub fn new(pool_size: (usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
-        // input validation
         validate_input_shape_dims(&input_shape, 4, "MaxPooling2D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_2d(pool_size, input_shape[2], input_shape[3])?;
@@ -164,12 +158,11 @@ impl MaxPooling2D {
 
 impl Layer for MaxPooling2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }
 
-        // Cache the actual input shape and arg-max positions for the backward pass
+        // Cache the input shape and arg-max positions for the backward pass
         self.forward_input_shape = Some(input.shape().to_vec());
 
         let (output, argmax) = windowed_pool_forward(
@@ -185,7 +178,6 @@ impl Layer for MaxPooling2D {
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        // Validate input is 4D
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));
         }

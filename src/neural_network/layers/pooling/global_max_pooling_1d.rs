@@ -12,9 +12,8 @@ use crate::neural_network::traits::Layer;
 
 /// Global max pooling layer for 1D inputs
 ///
-/// Selects the maximum value across the length dimension
-/// Input tensor shape: `[batch_size, channels, length]`. Output tensor shape:
-/// `[batch_size, channels]`
+/// Selects the maximum value across the length dimension. Input tensor shape:
+/// `[batch_size, channels, length]`. Output tensor shape: `[batch_size, channels]`
 ///
 /// # Examples
 ///

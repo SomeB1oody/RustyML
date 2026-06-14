@@ -1,6 +1,6 @@
 //! Neural-network forward-kernel gates: the conv engine FLOP gate, the pooling-engine op gate,
 //! and the f32 elementwise classes (cheap maps, exp maps, per-element rng, fused optimizer
-//! updates) that the activation/dropout/optimizer thresholds govern.
+//! updates) that the activation/dropout/optimizer thresholds govern
 
 use crate::harness::{Row, Section, time_per_call_ns};
 use ndarray::{Array1, IxDyn};
@@ -12,7 +12,7 @@ use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::PaddingType;
 use std::hint::black_box;
 
-// ---- conv engine: CONV_PARALLEL_MIN_FLOPS ----
+// conv engine: CONV_PARALLEL_MIN_FLOPS
 
 pub fn calibrate_conv_forward() -> Section {
     let mut rows = Vec::new();
@@ -62,7 +62,7 @@ pub fn calibrate_conv_forward() -> Section {
     }
 }
 
-// ---- pooling engine: POOL_PARALLEL_MIN_OPS ----
+// pooling engine: POOL_PARALLEL_MIN_OPS
 
 pub fn calibrate_pooling() -> Section {
     let mut rows = Vec::new();
@@ -110,7 +110,7 @@ pub fn calibrate_pooling() -> Section {
     }
 }
 
-// ---- elementwise kernel classes: activation / dropout / optimizer thresholds ----
+// elementwise kernel classes: activation / dropout / optimizer thresholds
 
 pub fn calibrate_elementwise() -> Vec<Section> {
     let sizes = [
@@ -258,14 +258,14 @@ pub fn calibrate_elementwise() -> Vec<Section> {
     sections
 }
 
-// ---- spatial-dropout per-channel scale: SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS ----
+// spatial-dropout per-channel scale: SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS
 
 /// The spatial-dropout fused scale: multiply each `(batch, channel)` segment of a
 /// `[batch, channels, *spatial]` tensor by its channel's inverted-dropout factor, in one pass
 /// writing a fresh output (matching the production allocate-per-call). Forced serial vs forced
 /// parallel of the same per-segment scale; each element is independent, so the flag never
 /// changes the bits and the gate is a pure performance knob. The ladder varies the segment
-/// count (`B * C`) and segment length (`spatial`) across the crossover.
+/// count (`B * C`) and segment length (`spatial`) across the crossover
 pub fn calibrate_spatial_dropout_scale() -> Section {
     let mut rows = Vec::new();
     for &(n_seg, seg) in &[

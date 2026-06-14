@@ -83,6 +83,11 @@ pub(super) fn validate_positive_finite(value: f32, param_name: &str) -> Result<(
 /// Validates that a value is non-negative and finite (e.g. `momentum`, `weight_decay`, where 0
 /// disables the feature)
 ///
+/// # Parameters
+///
+/// - `value` - The value to validate
+/// - `param_name` - The name of the parameter (for error messages)
+///
 /// # Errors
 ///
 /// Returns `Error::InvalidParameter` if the value is negative or not finite

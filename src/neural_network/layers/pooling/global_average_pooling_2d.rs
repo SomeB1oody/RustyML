@@ -13,6 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Global average pooling layer for 2D inputs
 ///
 /// Computes the mean value across the height and width dimensions
+///
 /// Input tensor shape: `[batch_size, channels, height, width]`. Output tensor shape:
 /// `[batch_size, channels]`
 ///
@@ -54,8 +55,7 @@ use crate::neural_network::traits::Layer;
 /// Parallel execution is used when `batch_size * channels >= 32`
 #[derive(Debug)]
 pub struct GlobalAveragePooling2D {
-    /// Shape of the input tensor cached during the forward pass (only the shape is
-    /// needed in backward, not the input values)
+    /// Input tensor shape cached during the forward pass (backward needs only the shape, not the values)
     input_shape: Vec<usize>,
 }
 

@@ -87,14 +87,14 @@ impl SimpleRNN {
     /// - `units` - Number of output units
     /// - `activation` - Activation function from the activation module (ReLU, Sigmoid, Tanh, Softmax)
     ///
-    /// # Notes
-    ///
-    /// Weights are seeded from the global seed or entropy by default. For reproducible
-    /// initialization, set a seed with [`SimpleRNN::with_random_state`].
-    ///
     /// # Returns
     ///
     /// - `Result<Self, Error>` - A new SimpleRNN layer instance
+    ///
+    /// # Notes
+    ///
+    /// Weights are seeded from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`SimpleRNN::with_random_state`]
     ///
     /// # Errors
     ///
@@ -125,10 +125,10 @@ impl SimpleRNN {
 
     /// Sets the seed used to initialize the weights and re-initializes them deterministically
     ///
-    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`])
     /// This re-runs the kernel (Xavier/Glorot) and recurrent-kernel (orthogonal) initialization
     /// with `random_state`, so call it before assigning custom weights or training. The bias stays
-    /// zero-initialized.
+    /// zero-initialized
     ///
     /// # Parameters
     ///
@@ -148,7 +148,7 @@ impl SimpleRNN {
     /// Initializes the input kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from a seed
     ///
     /// Both draws share one RNG (kernel first, then recurrent kernel) so a given seed reproduces the
-    /// exact same pair of matrices.
+    /// exact same pair of matrices
     fn init_weights_arrays(
         input_dim: usize,
         units: usize,
@@ -201,13 +201,15 @@ impl SimpleRNN {
     }
 
     /// Batched input projection: `x3 [batch, timesteps, input_dim] @ kernel` for all timesteps in a
-    /// single gemm, returning `[batch, timesteps, units]`. Collapsing the (batch, timesteps) axes
-    /// into one matmul beats `timesteps` separate small gemms on cache/SIMD utilization
+    /// single gemm, returning `[batch, timesteps, units]`
+    ///
+    /// Collapsing the (batch, timesteps) axes into one matmul beats `timesteps` separate small gemms
+    /// on cache/SIMD utilization
     fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
         crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
     }
 
-    /// Runs the recurrence and returns the last hidden state - the shared numeric body of
+    /// Runs the recurrence and returns the last hidden state, the shared numeric body of
     /// [`Layer::forward`] and [`Layer::predict`]
     ///
     /// When `hidden_states` is `Some`, every hidden state (with `h_0 = 0` prepended) is recorded for
@@ -254,14 +256,14 @@ impl Layer for SimpleRNN {
         let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
         let h_last = self.run(&x3, Some(&mut hs))?;
         self.hidden_state_cache = Some(hs);
-        Ok(h_last.into_dyn()) // last timestep's hidden state
+        Ok(h_last.into_dyn())
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-        Ok(self.run(&x3, None)?.into_dyn()) // last timestep's hidden state
+        Ok(self.run(&x3, None)?.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -297,7 +299,6 @@ impl Layer for SimpleRNN {
         let mut grad_h = grad_h_t;
         // backpropagation through time (BPTT)
         for t in (0..timesteps).rev() {
-            // backprop
             let d_z = {
                 let h_t = hs[t + 1].clone().into_dyn();
                 let grad_h_dyn = grad_h.clone().into_dyn();
@@ -336,7 +337,6 @@ impl Layer for SimpleRNN {
             (batch, timesteps, feat),
         );
 
-        // Gradient clipping is no longer applied here
         self.grad_kernel = Some(grad_k);
         self.grad_recurrent_kernel = Some(grad_rk);
         self.grad_bias = Some(grad_b);

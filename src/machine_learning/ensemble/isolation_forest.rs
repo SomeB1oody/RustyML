@@ -1,7 +1,7 @@
 //! Isolation Forest for unsupervised anomaly detection
 //!
 //! Provides the [`IsolationForest`] estimator and its underlying [`IsolationTree`]
-//! node type, which isolate outliers via random feature splits and score samples by
+//! node type. They isolate outliers via random feature splits and score samples by
 //! their average path length across the forest
 
 use crate::error::Error;
@@ -18,10 +18,10 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction
 ///
-/// Backed by the tree-build calibration (benches/RESULTS.md, 9950X, 2026-06-11): a synthetic
-/// ~0.7 us-per-tree build crosses over at 16-32 tasks, i.e. roughly 22 us of total work - one
-/// rayon fork/join. A real iTree build (subsample gather, allocations) costs well over 2.2 us
-/// per tree, so at this gate the parallel path's total work clears the fork cost with margin
+/// A synthetic ~0.7 us-per-tree build crosses over at 16-32 tasks, roughly 22 us of total
+/// work, about one rayon fork/join. A real iTree build (subsample gather, allocations) costs
+/// well over 2.2 us per tree, so at this gate the parallel path's total work clears the fork
+/// cost with margin
 const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 
 /// Average isolation-tree path length for the prediction work estimate, `c(256) ~= 10`
@@ -31,7 +31,7 @@ const ISOLATION_TREE_AVG_PATH: usize = 10;
 /// A node in an isolation tree
 ///
 /// Unlike a decision-tree node, an isolation tree only needs to record where it
-/// split and how many samples ended up unresolved at a leaf, so it has its own
+/// split and how many samples ended up unresolved at a leaf, so it uses this
 /// minimal structure rather than reusing the classification-oriented decision
 /// tree node
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -41,7 +41,7 @@ pub enum IsolationTree {
         /// Number of samples that reached this leaf, used by the average-path-length correction
         size: usize,
     },
-    /// A split node directing samples to one of two children
+    /// A split node directing samples to one of the two children
     Internal {
         /// Index of the feature this node splits on
         feature: usize,
@@ -54,13 +54,12 @@ pub enum IsolationTree {
     },
 }
 
-/// An Isolation Forest implementation for anomaly detection
+/// Isolation Forest for anomaly detection
 ///
-/// Isolation Forest is an unsupervised learning algorithm that detects anomalies by isolating
-/// outliers in the data. The algorithm works by randomly selecting a feature and then randomly
-/// selecting a split value between the maximum and minimum values of the selected feature
-/// Anomalies are more susceptible to isolation and thus have shorter average path lengths in
-/// the trees
+/// An unsupervised algorithm that detects anomalies by isolating outliers in the
+/// data. Each tree randomly selects a feature, then randomly selects a split value between
+/// the minimum and maximum values of that feature. Anomalies are isolated more easily and so
+/// have shorter average path lengths in the trees
 ///
 /// # Examples
 ///
@@ -129,10 +128,6 @@ impl IsolationForest {
     ///
     /// - `Result<Self, Error>` - A new unfitted `IsolationForest` instance
     ///
-    /// # Errors
-    ///
-    /// Returns `Error::InvalidParameter` if `n_estimators` or `max_samples` is 0
-    ///
     /// # Notes
     ///
     /// By default the tree depth is derived as `ceil(log2(max_samples))` and the forest is
@@ -141,15 +136,9 @@ impl IsolationForest {
     /// - [`with_max_depth`](Self::with_max_depth) - maximum depth of each tree (returns `Result`; the depth is validated)
     /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for reproducible forests
     ///
-    /// ```
-    /// use rustyml::machine_learning::IsolationForest;
+    /// # Errors
     ///
-    /// let model = IsolationForest::new(100, 256)
-    ///     .unwrap()
-    ///     .with_max_depth(12)
-    ///     .unwrap()
-    ///     .with_random_state(42);
-    /// ```
+    /// Returns `Error::InvalidParameter` if `n_estimators` or `max_samples` is 0
     pub fn new(n_estimators: usize, max_samples: usize) -> Result<Self, Error> {
         if n_estimators == 0 {
             return Err(Error::invalid_parameter(
@@ -179,8 +168,7 @@ impl IsolationForest {
         })
     }
 
-    /// Overrides the maximum depth of each isolation tree
-    /// (default: `ceil(log2(max_samples))`)
+    /// Overrides the maximum depth of each isolation tree (default: `ceil(log2(max_samples))`)
     ///
     /// # Parameters
     ///
@@ -204,8 +192,7 @@ impl IsolationForest {
         Ok(self)
     }
 
-    /// Sets a fixed RNG seed, making forest construction reproducible
-    /// (default: `None`, non-deterministic)
+    /// Sets a fixed RNG seed, making forest construction reproducible (default: `None`, non-deterministic)
     ///
     /// # Parameters
     ///
@@ -327,7 +314,7 @@ impl IsolationForest {
     where
         S: Data<Elem = f64>,
     {
-        // Stopping criteria: max depth reached or node has only one sample
+        // Stop when max depth is reached or the node has at most one sample
         if current_depth >= self.max_depth || indices.len() <= 1 {
             return Ok(IsolationTree::Leaf {
                 size: indices.len(),
@@ -346,21 +333,20 @@ impl IsolationForest {
             max_val = max_val.max(val);
         }
 
-        // If all values are the same, create a leaf
+        // All values equal: nothing to split on, so make a leaf
         if (max_val - min_val).abs() < 1e-10 {
             return Ok(IsolationTree::Leaf {
                 size: indices.len(),
             });
         }
 
-        // Randomly select a split point between min and max
         let threshold = rng.random_range(min_val..max_val);
 
         let (left_indices, right_indices): (Vec<usize>, Vec<usize>) = indices
             .iter()
             .partition(|&&idx| x[[idx, feature_index]] < threshold);
 
-        // If split results in empty partition, create a leaf
+        // An empty partition means no real split, so make a leaf
         if left_indices.is_empty() || right_indices.is_empty() {
             return Ok(IsolationTree::Leaf {
                 size: indices.len(),
@@ -382,7 +368,7 @@ impl IsolationForest {
     fn path_length(&self, sample: &[f64], node: &IsolationTree, current_depth: usize) -> f64 {
         match node {
             IsolationTree::Leaf { size } => {
-                // Add the average path length adjustment for samples unresolved at this leaf
+                // Add the average-path-length correction for samples unresolved at this leaf
                 current_depth as f64 + average_path_length_factor(*size)
             }
             IsolationTree::Internal {
@@ -436,21 +422,20 @@ impl IsolationForest {
     }
 
     /// Computes the normalized anomaly score for one sample, given a precomputed
-    /// normalization constant `c_n = c(max_samples)`
+    /// normalization constant `c_n = c(sample_size)`
     ///
-    /// Taking `c_n` as a parameter lets batch prediction compute it a single time
-    /// instead of recomputing it for every sample
+    /// Taking `c_n` as a parameter lets batch prediction compute it once instead of
+    /// recomputing it for every sample
     fn normalized_score(&self, sample: &[f64], trees: &[IsolationTree], c_n: f64) -> f64 {
-        // Average path length of the sample across all trees; one term per tree (~10),
-        // far below any parallel reduction gate, and the per-sample batch loop already
-        // parallelizes one level up
+        // Average path length across all trees; one term per tree stays below any parallel
+        // reduction gate, and the per-sample batch loop parallelizes one level up
         let avg_path_length: f64 = trees
             .iter()
             .map(|tree| self.path_length(sample, tree, 0))
             .sum::<f64>()
             / trees.len() as f64;
 
-        // Degenerate sub-sample of size <= 1 makes c(n) = 0
+        // A degenerate sub-sample of size <= 1 makes c(n) = 0
         if c_n <= 0.0 {
             return 1.0;
         }
@@ -489,11 +474,11 @@ impl IsolationForest {
         validate_predict_input(x, self.n_features)?;
 
         // Precompute the normalization constant once for the whole batch; inputs were
-        // validated above, so rows are scored directly without per-sample validation
+        // validated above, so rows are scored without per-sample validation
         let trees = self.trees.as_ref().unwrap();
         let c_n = average_path_length_factor(self.sample_size);
 
-        // Tree-traversal class gate: each sample walks every tree for ~c(psi) nodes
+        // Tree-traversal gate: each sample walks every tree for ~c(psi) nodes
         let visit_work = x
             .nrows()
             .saturating_mul(trees.len())

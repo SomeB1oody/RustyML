@@ -17,7 +17,7 @@ use crate::neural_network::traits::Loss;
 /// // Create an MSE loss function instance
 /// let mse = MeanSquaredError::new();
 ///
-/// // Create sample data - true values and predictions
+/// // Sample data: true values and predictions
 /// let y_true = ArrayD::from_shape_vec(
 ///     vec![3, 1],
 ///     vec![1.0, 2.0, 3.0]

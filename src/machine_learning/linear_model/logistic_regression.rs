@@ -30,9 +30,7 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIter
 /// // Create a logistic regression model
 /// let mut model = LogisticRegression::default();
 ///
-/// // Create some simple training data
-/// // Two features: x1 and x2
-/// // This data represents a simple logical AND function
+/// // Training data with 2 features (x1, x2) for a logical AND function
 /// let x_train = Array2::from_shape_vec((4, 2), vec![
 ///     0.0, 0.0,  // [0,0] -> 0
 ///     0.0, 1.0,  // [0,1] -> 0
@@ -75,11 +73,9 @@ pub struct LogisticRegression {
 impl Default for LogisticRegression {
     /// Creates a logistic regression model with default parameters
     ///
-    /// These defaults work well as a starting point for most binary classification problems
-    ///
     /// # Default Values
     ///
-    /// - `fit_intercept`: `true` - include a bias/intercept term, generally recommended
+    /// - `fit_intercept`: `true` - include a bias/intercept term
     /// - `learning_rate`: `0.01` - a moderate rate giving stable convergence for most problems
     /// - `max_iter`: `100` - maximum number of gradient descent iterations
     /// - `tol`: `1e-4` - convergence tolerance; training stops when the loss change between iterations is smaller than this value
@@ -101,34 +97,23 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `fit_intercept` - Whether to add intercept term (bias)
-    /// - `learning_rate` - Learning rate for gradient descent, must be positive and finite
-    /// - `max_iterations` - Maximum number of iterations, must be greater than 0
-    /// - `tolerance` - Convergence tolerance, stops when loss change is below this value, must be positive and finite
+    /// - `fit_intercept` - whether to add an intercept term (bias)
+    /// - `learning_rate` - learning rate for gradient descent, must be positive and finite
+    /// - `max_iterations` - maximum number of iterations, must be greater than 0
+    /// - `tolerance` - convergence tolerance, stops when the loss change is below this value, must be positive and finite
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - An untrained logistic regression model instance or validation error
-    ///
-    /// # Errors
-    ///
-    /// - `Error::InvalidParameter` - If any parameter is invalid (e.g., non-positive learning rate)
+    /// - `Result<Self, Error>` - an untrained logistic regression model, or a validation error
     ///
     /// # Notes
     ///
-    /// No regularization is applied by default. To add L1/L2 regularization, use the builder
-    /// method below (it returns `Result` because the regularization alpha is validated):
+    /// No regularization is applied by default. To add L1/L2 regularization, use
+    /// [`with_regularization`](Self::with_regularization)
     ///
-    /// - [`with_regularization`](Self::with_regularization) - L1 or L2 regularization to prevent overfitting
+    /// # Errors
     ///
-    /// ```
-    /// use rustyml::machine_learning::{LogisticRegression, RegularizationType};
-    ///
-    /// let model = LogisticRegression::new(true, 0.01, 100, 1e-4)
-    ///     .unwrap()
-    ///     .with_regularization(RegularizationType::L2(0.1))
-    ///     .unwrap();
-    /// ```
+    /// - `Error::InvalidParameter` - if any parameter is invalid (e.g. non-positive learning rate)
     pub fn new(
         fit_intercept: bool,
         learning_rate: f64,
@@ -191,17 +176,17 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `x` - Feature matrix where each row is a sample and each column is a feature
-    /// - `y` - Target variable containing 0 or 1 indicating sample class
+    /// - `x` - feature matrix where each row is a sample and each column is a feature
+    /// - `y` - target variable containing 0 or 1 indicating sample class
     ///
     /// # Returns
     ///
-    /// - `Result<&mut Self, Error>` - A mutable reference to the trained model or error
+    /// - `Result<&mut Self, Error>` - a mutable reference to the trained model, or an error
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If target vector contains values other than 0 or 1
-    /// - `Error::NonFinite` - If numerical issues (NaN/Infinity) occur during training
+    /// - `Error::InvalidInput` - if the target vector contains values other than 0 or 1
+    /// - `Error::NonFinite` - if numerical issues (NaN/Infinity) occur during training
     ///
     /// # Performance
     ///
@@ -217,7 +202,6 @@ impl LogisticRegression {
     where
         S: Data<Elem = f64>,
     {
-        // Preliminary check
         preliminary_check(x, Some(y))?;
 
         // Check target values are binary
@@ -252,7 +236,6 @@ impl LogisticRegression {
         let mut final_cost = prev_cost;
         let mut n_iter = 0;
 
-        // Create progress bar for training iterations
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
@@ -267,8 +250,8 @@ impl LogisticRegression {
         while n_iter < self.max_iter {
             n_iter += 1;
 
-            // Compute linear predictions (the raw logits feed the loss below), then the
-            // sigmoid activations (exp-map class gate: one f64 exp per element)
+            // Linear predictions (the raw logits feed the loss below), then the sigmoid
+            // activations (exp-map class gate: one f64 exp per element)
             let predictions = gemv_internal(&x_train_view, &weights);
             let mut sigmoid_preds = predictions.clone();
             if n_samples >= EXP_MAP_F64_PARALLEL_THRESHOLD {
@@ -312,9 +295,9 @@ impl LogisticRegression {
                 }
             }
 
-            // Calculate the loss at the CURRENT weights (before this step's update), so the
-            // data-loss term (from `predictions = X * weights`) and the regularization penalty
-            // are both evaluated at the same weights instead of mixing pre-update logits with a
+            // Loss at the CURRENT weights (before this step's update), so the data-loss term
+            // (from `predictions = X * weights`) and the regularization penalty are both
+            // evaluated at the same weights instead of mixing pre-update logits with a
             // post-update penalty
             let mut cost = logistic_loss(&predictions, y);
 
@@ -356,7 +339,6 @@ impl LogisticRegression {
                 return Err(Error::non_finite("cost calculation"));
             }
 
-            // Update progress bar with current loss
             #[cfg(feature = "show_progress")]
             {
                 progress_bar.set_message(format!("{:.6}", cost));
@@ -370,7 +352,6 @@ impl LogisticRegression {
             prev_cost = cost;
         }
 
-        // Finish progress bar with final statistics
         #[cfg(feature = "show_progress")]
         let convergence_status = if n_iter < self.max_iter {
             "Converged"
@@ -395,17 +376,17 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `x` - Feature matrix where each row is a sample and each column is a feature (without bias term)
+    /// - `x` - feature matrix where each row is a sample and each column is a feature (without bias term)
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, Error>` - A 1D array containing predicted class labels (0 or 1)
+    /// - `Result<Array1<i32>, Error>` - a 1D array containing predicted class labels (0 or 1)
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted yet
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - If input is empty, dimensions mismatch, or contains invalid values
-    /// - `Error::NonFinite` - If numerical issues occur during probability calculation
+    /// - `Error::NotFitted` - if the model has not been fitted yet
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - if input is empty, dimensions mismatch, or contains invalid values
+    /// - `Error::NonFinite` - if numerical issues occur during probability calculation
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
@@ -422,22 +403,21 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `x` - Feature matrix where each row is a sample and each column is a feature (without the bias term)
+    /// - `x` - feature matrix where each row is a sample and each column is a feature (without the bias term)
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Probability of the positive class for each sample
+    /// - `Result<Array1<f64>, Error>` - probability of the positive class for each sample
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted yet
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - If input is empty, dimensions mismatch, or data contains non-finite values
-    /// - `Error::NonFinite` - If numerical issues occur during probability calculation
+    /// - `Error::NotFitted` - if the model has not been fitted yet
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - if input is empty, dimensions mismatch, or data contains non-finite values
+    /// - `Error::NonFinite` - if numerical issues occur during probability calculation
     pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // Check if model has been fitted
         let weights = self
             .weights
             .as_ref()
@@ -461,7 +441,6 @@ impl LogisticRegression {
             self.sigmoid_decision(x)
         };
 
-        // Check if probabilities contain invalid values
         if probs.iter().any(|&val| !val.is_finite()) {
             return Err(Error::non_finite("probability calculation"));
         }
@@ -473,6 +452,14 @@ impl LogisticRegression {
     ///
     /// `x` must already include the bias column when an intercept was fitted; this
     /// is an internal helper used by [`Self::predict_proba`]
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - feature matrix, including the bias column when an intercept was fitted
+    ///
+    /// # Returns
+    ///
+    /// - `Array1<f64>` - positive-class probability for each sample
     fn sigmoid_decision<S>(&self, x: &ArrayBase<S, Ix2>) -> Array1<f64>
     where
         S: Data<Elem = f64>,
@@ -496,17 +483,17 @@ impl LogisticRegression {
     ///
     /// # Parameters
     ///
-    /// - `train_x` - Training features as a 2D array
-    /// - `train_y` - Target values as a 1D array corresponding to the training samples
+    /// - `train_x` - training features as a 2D array
+    /// - `train_y` - target values as a 1D array corresponding to the training samples
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, Error>` - Predicted class labels for the training samples
+    /// - `Result<Array1<i32>, Error>` - predicted class labels for the training samples
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - If input data does not match expectations
-    /// - `Error::NonFinite` - If numerical issues occur during fitting or prediction
+    /// - `Error::InvalidInput` - if input data does not match expectations
+    /// - `Error::NonFinite` - if numerical issues occur during fitting or prediction
     pub fn fit_predict<S>(
         &mut self,
         train_x: &ArrayBase<S, Ix2>,
@@ -529,12 +516,12 @@ impl LogisticRegression {
 ///
 /// # Parameters
 ///
-/// - `x` - Input feature matrix with shape (n_samples, n_features)
-/// - `degree` - The maximum degree of polynomial features to generate
+/// - `x` - input feature matrix with shape (n_samples, n_features)
+/// - `degree` - the maximum degree of polynomial features to generate
 ///
 /// # Returns
 ///
-/// - `Array2<f64>` - A new feature matrix containing polynomial combinations of the input features with shape (n_samples, n_output_features)
+/// - `Array2<f64>` - a new feature matrix of polynomial combinations of the input features, with shape (n_samples, n_output_features)
 ///
 /// # Examples
 ///
@@ -542,15 +529,14 @@ impl LogisticRegression {
 /// use ndarray::array;
 /// use rustyml::machine_learning::{generate_polynomial_features, LogisticRegression};
 ///
-/// // Example of using polynomial features with logistic regression
-/// // Create a simple dataset for binary classification
+/// // A simple dataset for binary classification
 /// let training_x = array![[0.5, 1.0], [1.0, 2.0], [1.5, 3.0], [2.0, 2.0], [2.5, 1.0]];
 /// let training_y = array![0.0, 0.0, 1.0, 1.0, 0.0];
 ///
 /// // Transform features to polynomial features
 /// let poly_training_x = generate_polynomial_features(&training_x, 2);
 ///
-/// // Create and train a logistic regression model with polynomial features
+/// // Train a logistic regression model with polynomial features
 /// let mut model = LogisticRegression::default();
 /// model.fit(&poly_training_x, &training_y).unwrap();
 /// ```

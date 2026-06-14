@@ -21,7 +21,7 @@ use rustyml::machine_learning::{Algorithm, DecisionTree};
 use rustyml::machine_learning::{KNN, WeightingStrategy};
 use rustyml::machine_learning::{LinearSVC, RegularizationType};
 
-// (1) Error smart constructors
+// Error smart constructors
 
 /// dimension_mismatch builds DimensionMismatch with the expected and found fields set
 #[test]
@@ -177,7 +177,7 @@ fn error_invalid_input_constructor() {
     }
 }
 
-// (2) KernelType::compute - closed-form values for each variant
+// KernelType::compute - closed-form values for each variant
 
 // Linear kernel K(x, y) = x . y; orthogonal [1,0] and [0,1] give 0
 #[test]
@@ -270,7 +270,7 @@ fn kernel_cosine_identical_vector_is_one() {
     assert_abs_diff_eq!(k.compute(x.view(), x.view()), 1.0, epsilon = 1e-12);
 }
 
-// (3) DistanceCalculationMetric::distance - closed-form values
+// DistanceCalculationMetric::distance - closed-form values
 
 // Euclidean distance on the 3-4-5 triangle: sqrt(3^2 + 4^2) = 5
 #[test]
@@ -348,7 +348,7 @@ fn distance_minkowski_p2_equals_euclidean() {
     );
 }
 
-// (4) Fit / Predict traits used generically
+// Fit / Predict traits used generically
 
 /// Train a supervised estimator through the Fit trait, predict through the Predict trait,
 /// and return the number of predictions
@@ -403,7 +403,6 @@ fn generic_fit_trait_with_kmeans_unsupervised() {
     .unwrap();
 
     let mut km = KMeans::new(2, 200, 1e-4).unwrap().with_random_state(42);
-    // Invoke the Fit and Predict traits explicitly
     Fit::fit(&mut km, &data).expect("fit via Fit trait should succeed");
     let labels = Predict::predict(&km, &data).expect("predict via Predict trait should succeed");
     assert_eq!(labels.len(), 6, "should produce one label per sample");
@@ -431,7 +430,7 @@ fn trait_predictions_match_inherent_method_predictions() {
     assert_abs_diff_eq!(preds_trait[0], 13.0, epsilon = 5e-3);
 }
 
-// (5) save_to_path + load_from_path round-trip
+// save_to_path + load_from_path round-trip
 
 /// LinearRegression save then reload yields identical predictions
 #[test]
@@ -491,12 +490,12 @@ fn linear_regression_save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-/// Build three tight, well-separated blobs centred at (0,0), (100,0), (50,100) for the
+/// Build 3 tight, well-separated blobs centred at (0,0), (100,0), (50,100) for the
 /// KMeans save/load round-trip
 ///
 /// # Returns
 ///
-/// - 15x2 matrix of points, five per blob
+/// - 15x2 matrix of points, 5 per blob
 fn three_blob_data_for_round_trip() -> Array2<f64> {
     Array2::from_shape_vec(
         (15, 2),
@@ -560,7 +559,7 @@ fn kmeans_save_load_preserves_hyperparameters() {
     let _ = std::fs::remove_file(path);
 }
 
-// (6) predict() before fit() -> NotFitted
+// predict() before fit() -> NotFitted
 
 /// LinearRegression (supervised): predict before fit returns NotFitted
 #[test]
@@ -634,7 +633,7 @@ fn isolation_forest_default_predict_before_fit_is_not_fitted() {
     );
 }
 
-// (4b) Fit / Predict trait forwarding for the remaining estimators: each test invokes the
+// Fit / Predict trait forwarding for the remaining estimators: each test invokes the
 // traits explicitly to confirm dispatch for every distinct Predict::Output type
 
 /// IsolationForest (unsupervised, Fit<&Array2<f64>>, Predict::Output = Array1<f64>)

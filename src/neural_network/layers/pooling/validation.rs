@@ -60,9 +60,8 @@ pub(super) fn validate_pool_size_1d(pool_size: usize, input_length: usize) -> Re
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
-/// greater than the corresponding input dimension (which would underflow the output-shape
-/// calculation)
+/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension exceeds
+/// the corresponding input dimension (which would underflow the output-shape calculation)
 pub(super) fn validate_pool_size_2d(
     pool_size: (usize, usize),
     input_height: usize,
@@ -87,9 +86,8 @@ pub(super) fn validate_pool_size_2d(
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension is
-/// greater than the corresponding input dimension (which would underflow the output-shape
-/// calculation)
+/// Returns [`Error::InvalidParameter`] if any dimension is 0, or if a pool dimension exceeds
+/// the corresponding input dimension (which would underflow the output-shape calculation)
 pub(super) fn validate_pool_size_3d(
     pool_size: (usize, usize, usize),
     input_depth: usize,

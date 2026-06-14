@@ -42,7 +42,7 @@ impl RMSprop {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`RMSprop::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`RMSprop::with_clip_norm`]
     ///
     /// # Returns
     ///
@@ -76,8 +76,8 @@ impl RMSprop {
 
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
-    /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
-    /// gradient direction.
+    /// `clip_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
+    /// gradient direction
     ///
     /// # Parameters
     ///

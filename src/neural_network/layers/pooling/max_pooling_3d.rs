@@ -99,7 +99,7 @@ impl MaxPooling3D {
     /// # Notes
     ///
     /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`].
+    /// with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`]
     ///
     /// # Returns
     ///

@@ -12,28 +12,28 @@ use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 /// Tolerance for treating a norm as effectively zero
 const NORM_ZERO_THRESHOLD: f64 = 1e-15;
 
-/// Defines the axis along which the normalization is applied
+/// Axis along which normalization is applied
 ///
 /// For arrays with 3 or more dimensions, `Row` and `Column` operate on the last two
 /// axes: `Row` normalizes along axis N-1 (last axis) and `Column` along axis N-2
-/// (second-to-last). This follows the common convention where the last axis is features
+/// (second-to-last). The last axis holds features
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NormalizationAxis {
     /// Normalize each row independently
     ///
-    /// For 2D arrays normalizes each row (samples); for N-D arrays (N>2) normalizes
+    /// For 2D arrays, normalizes each row (samples); for N-D arrays (N>2), normalizes
     /// along the last axis (features). For shape (batch, height, width), along width
     Row,
     /// Normalize each column independently
     ///
-    /// For 2D arrays normalizes each column (features); for N-D arrays (N>2) normalizes
+    /// For 2D arrays, normalizes each column (features); for N-D arrays (N>2), normalizes
     /// along the second-to-last axis. For shape (batch, height, width), along height
     Column,
     /// Normalize the entire array as a single vector
     Global,
 }
 
-/// Defines the order of the norm used for normalization
+/// Order of the norm used for normalization
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NormalizationOrder {
     /// L1 norm (Manhattan norm): sum of absolute values
@@ -54,8 +54,8 @@ pub enum NormalizationOrder {
 /// # Parameters
 ///
 /// - `data` - Input array with arbitrary dimensions and f64 elements
-/// - `axis` - The axis along which to normalize (Row/Column/Global)
-/// - `order` - The norm order to use (L1/L2/Max/Lp)
+/// - `axis` - Axis along which to normalize (Row/Column/Global)
+/// - `order` - Norm order to use (L1/L2/Max/Lp)
 ///
 /// # Returns
 ///
@@ -70,9 +70,9 @@ pub enum NormalizationOrder {
 ///
 /// # Performance
 ///
-/// Row/column normalization runs across lanes in parallel once there are at least
-/// the per-lane scan work clears the calibrated scan-class gate; global normalization
-/// divides in parallel above the cheap-map gate (see `crate::parallel_gates`)
+/// Row/column normalization runs across lanes in parallel once the per-lane scan work
+/// clears the scan-class gate; global normalization divides in parallel above the
+/// cheap-map gate (see `crate::parallel_gates`)
 ///
 /// # Examples
 ///
@@ -82,7 +82,7 @@ pub enum NormalizationOrder {
 ///
 /// let data = array![[3.0, 4.0], [1.0, 2.0]];
 /// let result = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap();
-/// // Each row will have L2 norm = 1
+/// // Each row has L2 norm = 1
 /// ```
 pub fn normalize<S, D>(
     data: &ArrayBase<S, D>,
@@ -147,6 +147,11 @@ where
 ///
 /// Parallelizes across lanes once there are enough of them; each lane is then
 /// processed sequentially, so the two levels never nest
+///
+/// # Errors
+///
+/// - [`Error::InvalidInput`] if `data` has fewer than 2 dimensions
+/// - [`Error::NonFinite`] if a norm computation overflows
 fn normalize_lanes<D>(
     data: &mut Array<f64, D>,
     axis_from_end: usize,
@@ -164,7 +169,7 @@ where
             operation_name
         )));
     }
-    // ndim >= 2 is guaranteed above, so ndim - axis_from_end cannot underflow for axis_from_end in {1, 2}
+    // ndim >= 2 guaranteed above, so ndim - axis_from_end cannot underflow for axis_from_end in {1, 2}
     let axis = Axis(ndim - axis_from_end);
 
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
@@ -185,12 +190,12 @@ where
 impl NormalizationOrder {
     /// Computes this norm over a sequence of values
     ///
-    /// Single source of truth for each variant's norm formula, shared by the global
-    /// and per-lane normalization paths
+    /// Single source for each variant's norm formula, shared by the global and per-lane
+    /// normalization paths
     ///
     /// # Errors
     ///
-    /// - [`Error::NonFinite`] - If the accumulation overflows to a non-finite value
+    /// - [`Error::NonFinite`] if the accumulation overflows to a non-finite value
     fn norm<I>(&self, values: I) -> Result<f64, Error>
     where
         I: Iterator<Item = f64>,
@@ -252,9 +257,9 @@ impl NormalizationAxis {
     ///
     /// # Errors
     ///
-    /// - [`Error::InvalidInput`] - If row/column normalization is requested
-    ///   on an array with fewer than 2 dimensions
-    /// - [`Error::NonFinite`] - If a norm computation overflows
+    /// - [`Error::InvalidInput`] if row/column normalization is requested on an array
+    ///   with fewer than 2 dimensions
+    /// - [`Error::NonFinite`] if a norm computation overflows
     fn apply<D>(&self, data: &mut Array<f64, D>, order: NormalizationOrder) -> Result<(), Error>
     where
         D: Dimension,

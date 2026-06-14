@@ -10,10 +10,10 @@ use crate::neural_network::traits::{Layer, Optimizer};
 /// `weight_decay` is **decoupled**: the parameter is shrunk directly by the factor
 /// `(1 - learning_rate * weight_decay)` before the gradient step, rather than folding an L2 term
 /// into the gradient. The decay therefore does not flow through the moment estimates and is not
-/// rescaled by the adaptive denominator — the formulation of Loshchilov & Hutter, and generally
-/// the better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it is identical
-/// to `Adam`. Weight decay is applied to weight tensors only, never to biases or normalization
-/// scale/shift parameters
+/// rescaled by the adaptive denominator. This is the Loshchilov and Hutter formulation, and the
+/// better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it matches `Adam`
+/// Weight decay is applied to weight tensors only, never to biases or normalization scale/shift
+/// parameters
 #[derive(Debug)]
 pub struct AdamW {
     core: AdamCore,
@@ -36,7 +36,7 @@ impl AdamW {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`AdamW::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`AdamW::with_clip_norm`]
     ///
     /// # Returns
     ///
@@ -61,7 +61,7 @@ impl AdamW {
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
     /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
-    /// gradient direction.
+    /// gradient direction
     ///
     /// # Parameters
     ///

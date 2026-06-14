@@ -8,7 +8,7 @@
 pub mod classification;
 /// Clustering metrics: mutual information (NMI/AMI), adjusted Rand index, and silhouette
 pub mod clustering;
-/// Regression metrics: MSE, RMSE, MAE, R-squared, explained variance, and MAPE
+/// Regression metrics: MSE, RMSE, MAE, R^2, explained variance, and MAPE
 pub mod regression;
 
 pub use classification::{

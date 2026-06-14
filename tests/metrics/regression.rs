@@ -7,7 +7,7 @@ use rustyml::metrics::*;
 
 // mean_squared_error
 
-/// MSE of a four-sample case equals 0.375
+/// MSE of a 4-sample case equals 0.375
 #[test]
 fn test_mse_four_samples() {
     let y_true = array![3.0, -0.5, 2.0, 7.0];
@@ -71,7 +71,7 @@ fn test_mse_empty_panics() {
 
 // root_mean_squared_error
 
-/// RMSE of the four-sample case equals sqrt(MSE) = sqrt(0.375)
+/// RMSE of the 4-sample case equals sqrt(MSE) = sqrt(0.375)
 #[test]
 fn test_rmse_four_samples() {
     let y_true = array![3.0, -0.5, 2.0, 7.0];
@@ -144,7 +144,7 @@ fn test_rmse_empty_panics() {
 
 // mean_absolute_error
 
-/// MAE of the four-sample case equals 0.5
+/// MAE of the 4-sample case equals 0.5
 #[test]
 fn test_mae_four_samples() {
     let y_true = array![3.0, -0.5, 2.0, 7.0];
@@ -240,7 +240,7 @@ fn test_r2_known_fractional() {
     assert_abs_diff_eq!(r2_score(&y_true, &y_pred), 0.75, epsilon = 1e-9);
 }
 
-/// R2 of the four-sample case equals 1 - 1.5/29.1875
+/// R2 of the 4-sample case equals 1 - 1.5/29.1875
 #[test]
 fn test_r2_four_samples() {
     let y_true = array![3.0, -0.5, 2.0, 7.0];
@@ -509,7 +509,7 @@ fn test_medae_empty_panics() {
 
 // mean_absolute_percentage_error
 
-/// MAPE of the standard three-sample case equals 1/6
+/// MAPE of the 3-sample case equals 1/6
 #[test]
 fn test_mape_three_samples() {
     let y_true = array![2.0, 4.0, 5.0];
@@ -533,7 +533,7 @@ fn test_mape_perfect_predictions() {
     );
 }
 
-/// MAPE matches a known two-sample value (0.1)
+/// MAPE matches a known 2-sample value (0.1)
 #[test]
 fn test_mape_two_samples_known() {
     let y_true = array![10.0, 20.0];

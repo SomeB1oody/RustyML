@@ -13,7 +13,7 @@ use crate::neural_network::traits::Layer;
 /// Applies `1 / (1 + e^(-x))` elementwise to the input tensor, squashing values to (0, 1)
 /// while preserving the input shape
 ///
-/// The activation math is provided by [`Activation::Sigmoid`]; this layer only adds
+/// The activation math is provided by [`Activation::Sigmoid`]; this layer adds
 /// boundary validation and the caching required for backpropagation
 ///
 /// # Examples
@@ -70,10 +70,9 @@ impl Layer for Sigmoid {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Apply the logistic sigmoid; large-magnitude inputs saturate to 0/1 by construction
+        // Large-magnitude inputs saturate to 0/1 by construction
         let output = Activation::Sigmoid.forward(input)?;
 
-        // Cache the output for backpropagation
         self.output_cache = Some(output.clone());
 
         Ok(output)
@@ -85,7 +84,7 @@ impl Layer for Sigmoid {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Apply the logistic sigmoid; large-magnitude inputs saturate to 0/1 by construction
+        // Large-magnitude inputs saturate to 0/1 by construction
         Activation::Sigmoid.forward(input)
     }
 

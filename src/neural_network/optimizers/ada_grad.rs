@@ -38,7 +38,7 @@ impl AdaGrad {
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`AdaGrad::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`AdaGrad::with_clip_norm`]
     ///
     /// # Returns
     ///
@@ -65,8 +65,8 @@ impl AdaGrad {
 
     /// Enables clip-by-global-norm gradient clipping (disabled by default)
     ///
-    /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
-    /// gradient direction.
+    /// `clip_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
+    /// gradient direction
     ///
     /// # Parameters
     ///
@@ -85,7 +85,6 @@ impl AdaGrad {
 
 impl Optimizer for AdaGrad {
     fn step(&mut self) {
-        // Rewind to the first parameter
         self.cursor = 0;
     }
 

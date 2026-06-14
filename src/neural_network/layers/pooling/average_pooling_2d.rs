@@ -34,8 +34,8 @@ use crate::neural_network::traits::Layer;
 /// use ndarray::Array4;
 /// use approx::assert_relative_eq;
 ///
-/// // Create a simple input tensor: [batch_size, channels, height, width]
-/// // Batch size=2, 3 input channels, each channel is 4x4 pixels
+/// // Input tensor: [batch_size, channels, height, width]
+/// // Batch size 2, 3 input channels, each channel is 4x4 pixels
 /// let mut input_data = Array4::zeros((2, 3, 4, 4));
 ///
 ///  // Set test data to make average pooling results predictable
@@ -51,7 +51,7 @@ use crate::neural_network::traits::Layer;
 ///
 ///  let x = input_data.clone().into_dyn();
 ///
-///  // Test AveragePooling with Sequential model
+///  // Test AveragePooling with a Sequential model
 ///  let mut model = Sequential::new();
 ///  model
 ///  // strides default to pool_size (2, 2) and padding defaults to Valid
@@ -63,16 +63,16 @@ use crate::neural_network::traits::Layer;
 ///  assert_eq!(output.shape(), &[2, 3, 2, 2]);
 ///
 ///  // Verify correctness of pooling results
-///  // For a 2x2 window with stride 2, we expect the result to be the average of the elements in the window
+///  // For a 2x2 window with stride 2, the result is the average of the window elements
 ///  for b in 0..2 {
 ///     for c in 0..3 {
-///         // First window (0,0), (0,1), (1,0), (1,1) -> average should be (0+1+1+2)/4 = 1.0
+///         // First window (0,0), (0,1), (1,0), (1,1) -> average (0+1+1+2)/4 = 1.0
 ///         assert_relative_eq!(output[[b, c, 0, 0]], 1.0);
-///         // Second window (0,2), (0,3), (1,2), (1,3) -> average should be (2+3+3+4)/4 = 3.0
+///         // Second window (0,2), (0,3), (1,2), (1,3) -> average (2+3+3+4)/4 = 3.0
 ///         assert_relative_eq!(output[[b, c, 0, 1]], 3.0);
-///         // Third window (2,0), (2,1), (3,0), (3,1) -> average should be (2+3+3+4)/4 = 3.0
+///         // Third window (2,0), (2,1), (3,0), (3,1) -> average (2+3+3+4)/4 = 3.0
 ///         assert_relative_eq!(output[[b, c, 1, 0]], 3.0);
-///         // Fourth window (2,2), (2,3), (3,2), (3,3) -> average should be (4+5+5+6)/4 = 5.0
+///         // Fourth window (2,2), (2,3), (3,2), (3,3) -> average (4+5+5+6)/4 = 5.0
 ///         assert_relative_eq!(output[[b, c, 1, 1]], 5.0);
 ///     }
 ///  }
@@ -106,7 +106,7 @@ impl AveragePooling2D {
     /// # Notes
     ///
     /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
-    /// with [`AveragePooling2D::with_strides`] and [`AveragePooling2D::with_padding`].
+    /// with [`AveragePooling2D::with_strides`] and [`AveragePooling2D::with_padding`]
     ///
     /// # Returns
     ///

@@ -1,3 +1,5 @@
+//! Prelude re-exports for the machine learning estimators, traits, and shared enums
+
 pub use crate::machine_learning::traits::{Fit, Predict};
 pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
 
