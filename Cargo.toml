@@ -42,7 +42,7 @@ ahash = { version = "0.8.12", features = ["serde"], optional = true }
 indicatif = { version = "0.18.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.150", optional = true}
-thiserror = { version = "2.0.17", optional = true }
+thiserror = { version = "2.0.18", optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
