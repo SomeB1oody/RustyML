@@ -21,7 +21,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 /// `Full` is recommended for accuracy. For large datasets (10,000+ samples or features),
 /// `Randomized` is recommended for speed with good accuracy. `PowerIteration` is recommended
 /// when you need only a few components from very large or memory-constrained problems
-#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum SVDSolver {
     /// Full SVD using deterministic decomposition
     #[default]

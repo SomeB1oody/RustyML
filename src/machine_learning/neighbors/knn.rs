@@ -48,7 +48,7 @@ where
 }
 
 /// Strategy used for weighting neighbors in the KNN algorithm
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WeightingStrategy {
     /// Each neighbor is weighted equally
     #[default]

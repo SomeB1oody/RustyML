@@ -68,7 +68,7 @@ fn split_information(counts: &[f64], total: f64) -> f64 {
 ///
 /// Represents the different splitting criteria and impurity measures used in decision
 /// tree construction.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Algorithm {
     /// Iterative Dichotomiser 3: information gain (entropy) splitting, classification only
     ID3,
@@ -158,7 +158,7 @@ impl Algorithm {
 /// Hyperparameters for controlling decision tree growth and complexity
 ///
 /// These parameters help prevent overfitting and control the tree structure during training.
-#[derive(Debug, Copy, Clone, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub struct DecisionTreeParams {
     /// Maximum depth of the tree. If `None`, nodes are expanded until all leaves are pure or
     /// contain fewer than `min_samples_split` samples

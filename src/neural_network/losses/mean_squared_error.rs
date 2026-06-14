@@ -36,6 +36,7 @@ use crate::neural_network::traits::Loss;
 /// let gradients = mse.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MeanSquaredError;
 
 impl MeanSquaredError {
@@ -46,12 +47,6 @@ impl MeanSquaredError {
     /// - `MeanSquaredError` - A unit-like loss-function struct
     pub fn new() -> Self {
         Self {}
-    }
-}
-
-impl Default for MeanSquaredError {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

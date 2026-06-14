@@ -56,7 +56,7 @@ fn pool_geometry(
 }
 
 /// The reduction performed over each pooling window
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolKind {
     /// Take the maximum element (records the arg-max for backprop)
     Max,

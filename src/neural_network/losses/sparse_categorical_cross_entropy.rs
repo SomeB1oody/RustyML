@@ -44,6 +44,7 @@ use ndarray::Ix2;
 /// println!("Gradients shape: {:?}", gradients.shape());
 /// println!("Gradients: {:?}", gradients);
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SparseCategoricalCrossEntropy {
     /// When `true`, `y_pred` is treated as raw logits: a stable log-softmax is applied internally
     /// and `compute_grad` returns the fused `(softmax(z) - one_hot(label)) / batch` gradient. When
@@ -65,12 +66,6 @@ impl SparseCategoricalCrossEntropy {
     /// - `SparseCategoricalCrossEntropy` - the configured loss
     pub fn new(from_logits: bool) -> Self {
         Self { from_logits }
-    }
-}
-
-impl Default for SparseCategoricalCrossEntropy {
-    fn default() -> Self {
-        Self::new(false)
     }
 }
 

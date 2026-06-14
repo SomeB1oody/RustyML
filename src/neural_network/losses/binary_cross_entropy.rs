@@ -32,6 +32,7 @@ use crate::neural_network::traits::Loss;
 /// let gradients = bce_loss.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BinaryCrossEntropy;
 
 impl BinaryCrossEntropy {
@@ -42,12 +43,6 @@ impl BinaryCrossEntropy {
     /// - `BinaryCrossEntropy` - a unit-like struct carrying no state
     pub fn new() -> Self {
         Self {}
-    }
-}
-
-impl Default for BinaryCrossEntropy {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

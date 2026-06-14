@@ -17,7 +17,7 @@ use std::cmp::Ordering;
 pub use crate::types::KernelType;
 
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
-#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum EigenSolver {
     /// Exact dense symmetric eigendecomposition via nalgebra; best for small to
     /// mid-sized kernel matrices

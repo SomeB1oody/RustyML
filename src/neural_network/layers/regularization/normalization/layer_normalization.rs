@@ -44,7 +44,7 @@ const LN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
 const LN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Axis selection for layer normalization
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayerNormalizationAxis {
     /// Normalize along the last dimension (feature dimension)
     Default,

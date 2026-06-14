@@ -42,6 +42,7 @@ use crate::neural_network::traits::Loss;
 /// let gradient = loss_fn.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradient shape: {:?}", gradient.shape());
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CategoricalCrossEntropy {
     /// When `true`, `y_pred` is treated as raw logits: the loss applies a numerically stable
     /// log-softmax internally and `compute_grad` returns the fused `(softmax(z) - y) / batch`
@@ -64,12 +65,6 @@ impl CategoricalCrossEntropy {
     /// - `CategoricalCrossEntropy` - the configured loss
     pub fn new(from_logits: bool) -> Self {
         Self { from_logits }
-    }
-}
-
-impl Default for CategoricalCrossEntropy {
-    fn default() -> Self {
-        Self::new(false)
     }
 }
 

@@ -153,7 +153,7 @@ pub enum RegularizationType {
 /// - `RBF` - Radial Basis Function kernel: K(x, y) = exp(-gamma*|x-y|^2)
 /// - `Sigmoid` - Sigmoid kernel: K(x, y) = tanh(gamma*x*y + coef0)
 /// - `Cosine` - Cosine kernel: K(x, y) = (x*y) / (||x|| * ||y||)
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "machine_learning", feature = "utils"),
     derive(Deserialize, Serialize)

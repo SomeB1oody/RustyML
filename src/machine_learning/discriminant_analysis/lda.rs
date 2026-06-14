@@ -17,7 +17,7 @@ use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIter
 /// Selects the numerical method used to derive the per-class linear scoring coefficients from
 /// the shared covariance. The discriminant projection used by `transform` is solver-independent,
 /// so this choice only affects `predict`
-#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum Solver {
     /// Inverts the shared covariance through its SVD pseudo-inverse, then scores with that inverse
     #[default]

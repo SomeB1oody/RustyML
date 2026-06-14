@@ -37,6 +37,7 @@ use crate::neural_network::traits::Loss;
 /// let gradients = mae.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradients: {:?}", gradients);
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MeanAbsoluteError;
 
 impl MeanAbsoluteError {
@@ -47,12 +48,6 @@ impl MeanAbsoluteError {
     /// - `MeanAbsoluteError` - A unit-like struct
     pub fn new() -> Self {
         Self {}
-    }
-}
-
-impl Default for MeanAbsoluteError {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
