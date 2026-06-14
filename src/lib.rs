@@ -25,7 +25,7 @@
 //! ### [`neural_network`]
 //! Complete neural network framework with flexible architecture design:
 //! - **Layers**: Dense, RNN, LSTM, Convolution, Pooling, Dropout
-//! - **Optimizers**: SGD, Adam, RMSProp, AdaGrad
+//! - **Optimizers**: SGD, Adam, AdamW, RMSProp, AdaGrad
 //! - **Loss Functions**: MSE, MAE, Binary/Categorical Cross-Entropy
 //! - **Models**: Sequential architecture for feed-forward networks
 //!
@@ -706,7 +706,8 @@ pub mod metrics;
 ///
 /// ## Optimization Algorithms
 /// - **SGD**: Stochastic Gradient Descent with momentum support
-/// - **Adam**: Adaptive moment estimation optimizer
+/// - **Adam**: Adaptive moment estimation optimizer (classic coupled L2 weight decay)
+/// - **AdamW**: Adam with decoupled weight decay
 /// - **RMSProp**: Root Mean Square Propagation optimizer
 /// - **AdaGrad**: Adaptive gradient algorithm
 ///

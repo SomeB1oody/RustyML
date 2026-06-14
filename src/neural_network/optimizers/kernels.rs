@@ -90,6 +90,20 @@ pub fn apply_weight_decay(param: &mut [f32], lr: f32, weight_decay: f32) {
     }
 }
 
+/// Coupled (classic-Adam) L2 weight decay: returns `grad + weight_decay * param`, evaluated
+/// against the pre-step parameter
+///
+/// Unlike [`apply_weight_decay`]'s decoupled shrink, this folds the penalty into the gradient, so
+/// it flows through Adam's moment estimates and is rescaled by the adaptive denominator (the
+/// classic `Adam(weight_decay=...)` behavior, as opposed to `AdamW`). Only called when
+/// `weight_decay != 0`, so it always allocates the combined buffer
+pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Vec<f32> {
+    grad.iter()
+        .zip(param)
+        .map(|(&g, &p)| g + weight_decay * p)
+        .collect()
+}
+
 /// Adam update with bias correction at timestep `t`
 ///
 /// `m`/`v` are the first/second moment buffers for this parameter (same length as `param`)
@@ -275,6 +289,18 @@ mod tests {
         let mut p2 = vec![3.0_f32];
         apply_weight_decay(&mut p2, 0.1, 0.0); // no-op
         assert_abs_diff_eq!(p2[0], 3.0_f32, epsilon = 1e-9);
+    }
+
+    /// Coupled L2 decay folds `weight_decay * param` into the gradient (used by classic Adam)
+    #[test]
+    fn l2_regularized_grad_adds_weight_decay_times_param() {
+        let grad = vec![1.0_f32, -2.0, 0.0];
+        let param = vec![10.0_f32, 4.0, -6.0];
+        let out = l2_regularized_grad(&grad, &param, 0.1);
+        // g + 0.1 * p
+        assert_abs_diff_eq!(out[0], 1.0 + 1.0, epsilon = 1e-6); // 1 + 0.1*10
+        assert_abs_diff_eq!(out[1], -2.0 + 0.4, epsilon = 1e-6); // -2 + 0.1*4
+        assert_abs_diff_eq!(out[2], 0.0 - 0.6, epsilon = 1e-6); // 0 + 0.1*(-6)
     }
 
     // SGD

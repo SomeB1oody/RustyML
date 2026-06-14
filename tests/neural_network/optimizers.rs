@@ -21,6 +21,7 @@ use rustyml::neural_network::layers::regularization::normalization::batch_normal
 use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 use rustyml::neural_network::optimizers::AdaGrad;
 use rustyml::neural_network::optimizers::Adam;
+use rustyml::neural_network::optimizers::AdamW;
 use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -993,6 +994,124 @@ fn weight_decay_skips_batchnorm_gamma_and_beta() {
     assert!(
         g_plain.iter().any(|&v| (v - 1.0).abs() > 1e-5),
         "gamma should have a non-trivial gradient update"
+    );
+}
+
+// Adam (classic coupled L2 weight decay) vs AdamW (decoupled weight decay)
+
+/// Runs a Dense(2->2, Linear) with fixed weights/bias through one forward + backward (fixed
+/// nonzero upstream gradient) and one step of the given optimizer, returning the resulting
+/// (weights, bias). Generic over the optimizer so Adam and AdamW share the harness
+fn dense_weights_after_one_step<O: Optimizer>(
+    mut opt: O,
+    w0: &Array2<f32>,
+    b0: &Array2<f32>,
+) -> (Array2<f32>, Array2<f32>) {
+    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    layer.set_weights(w0.clone(), b0.clone()).unwrap();
+    let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let _ = layer.forward(&x).unwrap();
+    let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
+        .unwrap()
+        .into_dyn();
+    layer.backward(&grad_out).unwrap();
+
+    opt.step();
+    opt.update(&mut layer, 1.0);
+    match layer.get_weights() {
+        LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
+        _ => panic!("expected Dense weights"),
+    }
+}
+
+/// With `weight_decay == 0.0`, Adam and AdamW are the same algorithm: identical weights and bias
+#[test]
+fn adam_equals_adamw_without_weight_decay() {
+    let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();
+    let b0 = Array::from_shape_vec((1, 2), vec![0.5_f32, -1.5]).unwrap();
+
+    let (w_adam, b_adam) =
+        dense_weights_after_one_step(Adam::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(), &w0, &b0);
+    let (w_adamw, b_adamw) =
+        dense_weights_after_one_step(AdamW::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(), &w0, &b0);
+
+    for (a, w) in w_adam.iter().zip(w_adamw.iter()) {
+        assert_abs_diff_eq!(*a, *w, epsilon = 1e-7);
+    }
+    for (a, w) in b_adam.iter().zip(b_adamw.iter()) {
+        assert_abs_diff_eq!(*a, *w, epsilon = 1e-7);
+    }
+}
+
+/// With a non-zero weight_decay the two schemes diverge on the weights (coupled L2 flows through
+/// the moments and the adaptive denominator; decoupled does not), while the bias — excluded from
+/// weight decay either way — updates identically
+#[test]
+fn adam_l2_and_adamw_decoupled_differ_with_weight_decay() {
+    let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();
+    let b0 = Array::from_shape_vec((1, 2), vec![0.5_f32, -1.5]).unwrap();
+    let wd = 0.5_f32;
+
+    let (w_adam, b_adam) =
+        dense_weights_after_one_step(Adam::new(0.1, 0.9, 0.999, 1e-8, wd).unwrap(), &w0, &b0);
+    let (w_adamw, b_adamw) =
+        dense_weights_after_one_step(AdamW::new(0.1, 0.9, 0.999, 1e-8, wd).unwrap(), &w0, &b0);
+
+    // Weights differ between the two decay schemes
+    assert!(
+        w_adam
+            .iter()
+            .zip(w_adamw.iter())
+            .any(|(a, w)| (a - w).abs() > 1e-5),
+        "coupled (Adam) and decoupled (AdamW) weight decay should produce different weights"
+    );
+    // Bias is excluded from weight decay in both, so it updates identically
+    for (a, w) in b_adam.iter().zip(b_adamw.iter()) {
+        assert_abs_diff_eq!(*a, *w, epsilon = 1e-7);
+    }
+}
+
+/// AdamW drives MSE strictly down on the seeded regression problem (with a non-zero decoupled
+/// weight_decay active)
+#[test]
+fn adamw_single_layer_loss_decreases_over_20_epochs() {
+    let (x, y) = regression_data();
+
+    let mut model = Sequential::new();
+    model.add(identity_dense()).compile(
+        AdamW::new(0.1, 0.9, 0.999, 1e-8, 0.01).unwrap(),
+        MeanSquaredError::new(),
+    );
+
+    let mse_before = eval_mse(&model, &x, &y);
+    model.fit(&x, &y, 20).unwrap();
+    let mse_after = eval_mse(&model, &x, &y);
+    assert!(
+        mse_after < mse_before,
+        "AdamW: loss should decrease; before={mse_before}, after={mse_after}"
+    );
+}
+
+/// AdamW routes through the same validators as Adam: rejects out-of-range betas / negative
+/// weight_decay, accepts valid hyperparameters
+#[test]
+fn adamw_validates_hyperparameters() {
+    assert!(matches!(
+        AdamW::new(0.001, 1.0, 0.999, 1e-8, 0.0),
+        Err(Error::InvalidParameter { .. })
+    ));
+    assert!(matches!(
+        AdamW::new(0.001, 0.9, 0.999, 1e-8, -0.1),
+        Err(Error::InvalidParameter { .. })
+    ));
+    assert!(AdamW::new(0.001, 0.9, 0.999, 1e-8, 0.01).is_ok());
+    assert!(
+        AdamW::new(0.001, 0.9, 0.999, 1e-8, 0.0)
+            .unwrap()
+            .with_clip_norm(1.0)
+            .is_ok()
     );
 }
 

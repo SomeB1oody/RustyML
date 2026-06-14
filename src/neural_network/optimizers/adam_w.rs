@@ -1,28 +1,26 @@
-//! Adam (Adaptive Moment Estimation) optimizer with classic coupled L2 weight decay
+//! AdamW optimizer: Adam with decoupled weight decay
 
 use crate::error::Error;
 use crate::neural_network::optimizers::adam_core::AdamCore;
 use crate::neural_network::traits::{Layer, Optimizer};
 
-/// Adam (Adaptive Moment Estimation) optimizer
+/// AdamW (Adam with decoupled weight decay) optimizer
 ///
-/// Computes adaptive learning rates from running estimates of the gradient's first and second
-/// moments, with bias correction.
-///
-/// Its `weight_decay` is **classic coupled L2 regularization**: `weight_decay * param` is added to
-/// the gradient, so the penalty flows through the moment estimates and is rescaled by the adaptive
-/// `1 / (sqrt(v_hat) + epsilon)` denominator. For *decoupled* weight decay — applied straight to
-/// the parameter, generally the better choice with adaptive optimizers — use
-/// [`AdamW`](crate::neural_network::optimizers::AdamW) instead. With `weight_decay == 0.0` the two
-/// are identical. Like the other optimizers, weight decay (when non-zero) is applied to weight
-/// tensors only, never to biases or normalization scale/shift parameters
+/// Identical adaptive moment math to [`Adam`](crate::neural_network::optimizers::Adam), but its
+/// `weight_decay` is **decoupled**: the parameter is shrunk directly by the factor
+/// `(1 - learning_rate * weight_decay)` before the gradient step, rather than folding an L2 term
+/// into the gradient. The decay therefore does not flow through the moment estimates and is not
+/// rescaled by the adaptive denominator — the formulation of Loshchilov & Hutter, and generally
+/// the better-behaved choice with adaptive optimizers. With `weight_decay == 0.0` it is identical
+/// to `Adam`. Weight decay is applied to weight tensors only, never to biases or normalization
+/// scale/shift parameters
 #[derive(Debug)]
-pub struct Adam {
+pub struct AdamW {
     core: AdamCore,
 }
 
-impl Adam {
-    /// Creates a new Adam optimizer with the specified hyperparameters
+impl AdamW {
+    /// Creates a new AdamW optimizer with the specified hyperparameters
     ///
     /// Validates hyperparameters and initializes internal timestep tracking
     ///
@@ -32,16 +30,17 @@ impl Adam {
     /// - `beta1` - Decay rate for the first moment estimates (typically 0.9)
     /// - `beta2` - Decay rate for the second moment estimates (typically 0.999)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
-    /// - `weight_decay` - Classic coupled L2 weight-decay coefficient folded into the gradient;
-    ///   `0.0` disables it. For decoupled decay use [`AdamW`](crate::neural_network::optimizers::AdamW)
+    /// - `weight_decay` - Decoupled weight-decay coefficient applied directly to the parameters;
+    ///   `0.0` disables it. For classic coupled L2 decay use
+    ///   [`Adam`](crate::neural_network::optimizers::Adam)
     ///
     /// # Notes
     ///
-    /// Gradient clipping is disabled by default. Enable it with [`Adam::with_clip_norm`].
+    /// Gradient clipping is disabled by default. Enable it with [`AdamW::with_clip_norm`].
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - A new Adam optimizer instance or an error
+    /// - `Result<Self, Error>` - A new AdamW optimizer instance or an error
     ///
     /// # Errors
     ///
@@ -55,7 +54,7 @@ impl Adam {
         weight_decay: f32,
     ) -> Result<Self, Error> {
         Ok(Self {
-            core: AdamCore::new(learning_rate, beta1, beta2, epsilon, weight_decay, false)?,
+            core: AdamCore::new(learning_rate, beta1, beta2, epsilon, weight_decay, true)?,
         })
     }
 
@@ -79,7 +78,7 @@ impl Adam {
     }
 }
 
-impl Optimizer for Adam {
+impl Optimizer for AdamW {
     fn clip_norm(&self) -> Option<f32> {
         self.core.clip_norm()
     }
