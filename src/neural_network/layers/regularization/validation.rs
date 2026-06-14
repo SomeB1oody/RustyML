@@ -65,12 +65,20 @@ pub(super) fn validate_min_input_ndim(
     Ok(())
 }
 
-/// Validates that a standard deviation parameter is non-negative
+/// Validates that a standard deviation parameter is non-negative and finite
 pub(super) fn validate_stddev(stddev: f32) -> Result<(), Error> {
     if stddev < 0.0 {
         return Err(Error::invalid_parameter(
             "stddev",
             "Standard deviation cannot be negative",
+        ));
+    }
+    // A non-finite stddev (NaN / +inf) otherwise reaches `Normal::new(..).unwrap()` in the
+    // forward pass, which rejects non-finite std_dev and panics; reject it up front instead
+    if !stddev.is_finite() {
+        return Err(Error::invalid_parameter(
+            "stddev",
+            format!("Standard deviation must be finite, got {}", stddev),
         ));
     }
     Ok(())

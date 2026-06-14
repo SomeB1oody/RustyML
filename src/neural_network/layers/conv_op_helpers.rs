@@ -1,55 +1,7 @@
-//! Convolution-internal helpers: weight-gradient accumulation and 2D/4D zero-padding
+//! Convolution-internal helpers: 2D/4D zero-padding for the depthwise/separable stages
 
 use crate::neural_network::Tensor;
 use ndarray::{Array2, ArrayD, s};
-
-/// Accumulates the weight-gradient sum for a single kernel row during convolution backprop
-///
-/// Sums gradient[b,f,i,j] * input[b,c,i_pos,j_pos] across output columns j, skipping any column
-/// whose mapped input position j_pos = j * stride_1 + w falls outside the input width
-///
-/// # Parameters
-///
-/// - `gradient` - gradient tensor
-/// - `input` - input tensor
-/// - `b` - batch index
-/// - `f` - filter index
-/// - `c` - channel index
-/// - `i` - output row index
-/// - `i_pos` - corresponding row position in the input tensor
-/// - `w` - kernel width index
-/// - `grad_shape` - shape of the gradient tensor
-/// - `input_shape` - shape of the input tensor
-/// - `stride_1` - stride in the width direction
-///
-/// # Returns
-///
-/// - `f32` - accumulated weight-gradient sum for this row
-#[allow(clippy::too_many_arguments)]
-pub(super) fn compute_row_gradient_sum(
-    gradient: &Tensor,
-    input: &Tensor,
-    b: usize,
-    f: usize,
-    c: usize,
-    i: usize,
-    i_pos: usize,
-    w: usize,
-    grad_shape: &[usize],
-    input_shape: &[usize],
-    stride_1: usize,
-) -> f32 {
-    let mut sum = 0.0;
-
-    for j in 0..grad_shape[3] {
-        let j_pos = j * stride_1 + w;
-        if j_pos < input_shape[3] {
-            sum += gradient[[b, f, i, j]] * input[[b, c, i_pos, j_pos]];
-        }
-    }
-
-    sum
-}
 
 /// Zero-pads a 2D tensor symmetrically, with any odd remainder on the trailing (bottom/right) edge
 ///
@@ -128,78 +80,6 @@ mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
     use ndarray::array;
-
-    /// `compute_row_gradient_sum` accumulates gradient * input over in-bounds output columns
-    #[test]
-    fn test_compute_row_gradient_sum_basic() {
-        let gradient: Tensor = array![[[[2.0_f32, 3.0]]]].into_dyn(); // [1,1,1,2]
-        let input: Tensor = array![[[[1.0_f32, 10.0, 100.0, 1000.0]]]].into_dyn(); // [1,1,1,4]
-        let grad_shape = gradient.shape().to_vec();
-        let input_shape = input.shape().to_vec();
-
-        let sum = compute_row_gradient_sum(
-            &gradient,
-            &input,
-            0,
-            0,
-            0,
-            0,
-            0,
-            1, // w (kernel width index)
-            &grad_shape,
-            &input_shape,
-            1, // stride_1
-        );
-        assert_abs_diff_eq!(sum, 320.0_f32, epsilon = 1e-6);
-    }
-
-    /// `compute_row_gradient_sum` maps output columns to input positions via stride_1 and w
-    #[test]
-    fn test_compute_row_gradient_sum_strided() {
-        let gradient: Tensor = array![[[[2.0_f32, 3.0]]]].into_dyn();
-        let input: Tensor = array![[[[1.0_f32, 10.0, 100.0, 1000.0]]]].into_dyn();
-        let grad_shape = gradient.shape().to_vec();
-        let input_shape = input.shape().to_vec();
-
-        let sum = compute_row_gradient_sum(
-            &gradient,
-            &input,
-            0,
-            0,
-            0,
-            0,
-            0,
-            1,
-            &grad_shape,
-            &input_shape,
-            2,
-        );
-        assert_abs_diff_eq!(sum, 3020.0_f32, epsilon = 1e-6);
-    }
-
-    /// `compute_row_gradient_sum` drops any output column whose mapped position exceeds the input width
-    #[test]
-    fn test_compute_row_gradient_sum_drops_out_of_bounds() {
-        let gradient: Tensor = array![[[[2.0_f32, 3.0]]]].into_dyn();
-        let input: Tensor = array![[[[1.0_f32, 10.0]]]].into_dyn(); // width 2
-        let grad_shape = gradient.shape().to_vec();
-        let input_shape = input.shape().to_vec();
-
-        let sum = compute_row_gradient_sum(
-            &gradient,
-            &input,
-            0,
-            0,
-            0,
-            0,
-            0,
-            1,
-            &grad_shape,
-            &input_shape,
-            2,
-        );
-        assert_abs_diff_eq!(sum, 20.0_f32, epsilon = 1e-6);
-    }
 
     /// `pad_tensor_2d` centers the input with even padding and zeros around it
     #[test]

@@ -13,7 +13,7 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array3, Axis, Ix2, Ix3, concatenate, s};
+use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 use std::borrow::Cow;
 
 /// Long Short-Term Memory (LSTM) neural network layer
@@ -64,24 +64,32 @@ pub struct LSTM {
 
     /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
-    /// Cached hidden states h_t for each timestep
-    hidden_cache: Option<Vec<Array2<f32>>>,
-    /// Cached cell states c_t for each timestep
-    cell_cache: Option<Vec<Array2<f32>>>,
-    /// Cached activation(c_t) values for each timestep
-    cell_activated_cache: Option<Vec<Array2<f32>>>,
-
-    /// Cached input gate activations (sigmoid applied) for each timestep
-    i_cache: Option<Vec<Array2<f32>>>,
-    /// Cached forget gate activations (sigmoid applied) for each timestep
-    f_cache: Option<Vec<Array2<f32>>>,
-    /// Cached candidate (cell gate) activations for each timestep
-    g_cache: Option<Vec<Array2<f32>>>,
-    /// Cached output gate activations (sigmoid applied) for each timestep
-    o_cache: Option<Vec<Array2<f32>>>,
+    /// Per-timestep forward values recorded by `forward` for the backward pass (`None` until the
+    /// first training forward; `predict` never sets it)
+    caches: Option<LstmCaches>,
 
     /// Activation applied to the candidate and to the cell state each timestep (Keras-style)
     activation: Activation,
+}
+
+/// Per-timestep forward values an [`LSTM`] records so its backward pass can recompute the gate
+/// gradients without re-running the forward recurrence
+#[derive(Debug)]
+struct LstmCaches {
+    /// Hidden states `h_t`, with `h_0 = 0` prepended (length `timesteps + 1`)
+    hs: Vec<Array2<f32>>,
+    /// Cell states `c_t`, with `c_0 = 0` prepended (length `timesteps + 1`)
+    cs: Vec<Array2<f32>>,
+    /// `activation(c_t)` per timestep
+    cs_activated: Vec<Array2<f32>>,
+    /// Input-gate activations (sigmoid) per timestep
+    i: Vec<Array2<f32>>,
+    /// Forget-gate activations (sigmoid) per timestep
+    f: Vec<Array2<f32>>,
+    /// Candidate (cell-gate) activations per timestep
+    g: Vec<Array2<f32>>,
+    /// Output-gate activations (sigmoid) per timestep
+    o: Vec<Array2<f32>>,
 }
 
 impl LSTM {
@@ -117,13 +125,7 @@ impl LSTM {
             units,
             gates: Self::init_gates(input_dim, units, None)?,
             input_cache: None,
-            hidden_cache: None,
-            cell_cache: None,
-            cell_activated_cache: None,
-            i_cache: None,
-            f_cache: None,
-            g_cache: None,
-            o_cache: None,
+            caches: None,
             activation: activation.into(),
         })
     }
@@ -302,111 +304,31 @@ impl LSTM {
 
         self.set_weights(kernel, recurrent_kernel, bias)
     }
-}
 
-impl Layer for LSTM {
-    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_3d(input)?;
-
-        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
-
-        // Input shape: (batch, timesteps, input_dim)
+    /// Runs the recurrence and returns the last hidden state - the shared numeric body of
+    /// [`Layer::forward`] and [`Layer::predict`]
+    ///
+    /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden/cell
+    /// states, `activation(c_t)`, and the four gate activations) is recorded; `predict` passes
+    /// `None` and skips both the recording and its clones
+    fn run(
+        &self,
+        x3: &ArrayView3<f32>,
+        mut caches: Option<&mut LstmCaches>,
+    ) -> Result<Array2<f32>, Error> {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-        self.input_cache = Some(x3.to_owned());
-
         let u = self.units;
-        let mut h_prev = Array2::<f32>::zeros((batch, u));
-        let mut c_prev = Array2::<f32>::zeros((batch, u));
-
-        // Storage for all timesteps
-        let mut hs = Vec::with_capacity(timesteps + 1);
-        let mut cs = Vec::with_capacity(timesteps + 1);
-        let mut cs_activated = Vec::with_capacity(timesteps);
-        let mut i_vals = Vec::with_capacity(timesteps);
-        let mut f_vals = Vec::with_capacity(timesteps);
-        let mut g_vals = Vec::with_capacity(timesteps);
-        let mut o_vals = Vec::with_capacity(timesteps);
-
-        hs.push(h_prev.clone());
-        cs.push(c_prev.clone());
-
-        // Configurable activation, applied to the candidate and the cell state
         let act = self.activation;
 
-        // Batched fused input projection for all 4 gates
-        let xw = project_input(&self.gates.kernel, &x3);
-
-        for t in 0..timesteps {
-            let xw_t = xw.index_axis(Axis(1), t); // [batch, 4*units]
-
-            // All 4 gate pre-activations in one fused recurrent GEMM
-            let z_all =
-                gemm_internal(&h_prev, &self.gates.recurrent_kernel) + xw_t + &self.gates.bias;
-
-            // Gates use the recurrent activation (sigmoid)
-            let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
-            let f_t = apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned());
-            let g_t = act
-                .forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
-                .into_dimensionality::<Ix2>()
-                .unwrap();
-            let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
-
-            // Update cell state
-            let c_t = &f_t * &c_prev + &i_t * &g_t;
-
-            // Apply the configurable activation to the cell state
-            let c_t_activated = act
-                .forward(&c_t.clone().into_dyn())?
-                .into_dimensionality::<Ix2>()
-                .unwrap();
-
-            // Update hidden state
-            let h_t = &o_t * &c_t_activated;
-
-            // Cache values
-            i_vals.push(i_t);
-            f_vals.push(f_t);
-            g_vals.push(g_t);
-            o_vals.push(o_t);
-            cs.push(c_t.clone());
-            cs_activated.push(c_t_activated);
-            hs.push(h_t.clone());
-
-            h_prev = h_t;
-            c_prev = c_t;
+        let mut h_prev = Array2::<f32>::zeros((batch, u));
+        let mut c_prev = Array2::<f32>::zeros((batch, u));
+        if let Some(c) = caches.as_deref_mut() {
+            c.hs.push(h_prev.clone());
+            c.cs.push(c_prev.clone());
         }
 
-        // Store caches
-        self.hidden_cache = Some(hs);
-        self.cell_cache = Some(cs);
-        self.cell_activated_cache = Some(cs_activated);
-        self.i_cache = Some(i_vals);
-        self.f_cache = Some(f_vals);
-        self.g_cache = Some(g_vals);
-        self.o_cache = Some(o_vals);
-
-        Ok(h_prev.into_dyn())
-    }
-
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
-    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        validate_input_3d(input)?;
-
-        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
-
-        // Input shape: (batch, timesteps, input_dim)
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-
-        let u = self.units;
-        let mut h_prev = Array2::<f32>::zeros((batch, u));
-        let mut c_prev = Array2::<f32>::zeros((batch, u));
-
-        // Configurable activation, applied to the candidate and the cell state
-        let act = self.activation;
-
         // Batched fused input projection for all 4 gates
-        let xw = project_input(&self.gates.kernel, &x3);
+        let xw = project_input(&self.gates.kernel, x3);
 
         for t in 0..timesteps {
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 4*units]
@@ -424,10 +346,8 @@ impl Layer for LSTM {
                 .unwrap();
             let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
 
-            // Update cell state
+            // Update cell state, then apply the configurable activation to it
             let c_t = &f_t * &c_prev + &i_t * &g_t;
-
-            // Apply the configurable activation to the cell state
             let c_t_activated = act
                 .forward(&c_t.clone().into_dyn())?
                 .into_dimensionality::<Ix2>()
@@ -436,11 +356,50 @@ impl Layer for LSTM {
             // Update hidden state
             let h_t = &o_t * &c_t_activated;
 
+            if let Some(c) = caches.as_deref_mut() {
+                c.i.push(i_t);
+                c.f.push(f_t);
+                c.g.push(g_t);
+                c.o.push(o_t);
+                c.cs.push(c_t.clone());
+                c.cs_activated.push(c_t_activated);
+                c.hs.push(h_t.clone());
+            }
+
             h_prev = h_t;
             c_prev = c_t;
         }
 
-        Ok(h_prev.into_dyn())
+        Ok(h_prev)
+    }
+}
+
+impl Layer for LSTM {
+    fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
+        validate_input_3d(input)?;
+        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
+        let timesteps = x3.shape()[1];
+        self.input_cache = Some(x3.to_owned());
+
+        let mut caches = LstmCaches {
+            hs: Vec::with_capacity(timesteps + 1),
+            cs: Vec::with_capacity(timesteps + 1),
+            cs_activated: Vec::with_capacity(timesteps),
+            i: Vec::with_capacity(timesteps),
+            f: Vec::with_capacity(timesteps),
+            g: Vec::with_capacity(timesteps),
+            o: Vec::with_capacity(timesteps),
+        };
+        let h_last = self.run(&x3, Some(&mut caches))?;
+        self.caches = Some(caches);
+        Ok(h_last.into_dyn())
+    }
+
+    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
+        validate_input_3d(input)?;
+        let x3 = input.view().into_dimensionality::<Ix3>().unwrap();
+        Ok(self.run(&x3, None)?.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -459,13 +418,15 @@ impl Layer for LSTM {
         let act = self.activation;
 
         let x3 = take_cache(&mut self.input_cache, "LSTM")?;
-        let hs = take_cache(&mut self.hidden_cache, "LSTM")?;
-        let cs = take_cache(&mut self.cell_cache, "LSTM")?;
-        let cs_activated = take_cache(&mut self.cell_activated_cache, "LSTM")?;
-        let i_vals = take_cache(&mut self.i_cache, "LSTM")?;
-        let f_vals = take_cache(&mut self.f_cache, "LSTM")?;
-        let g_vals = take_cache(&mut self.g_cache, "LSTM")?;
-        let o_vals = take_cache(&mut self.o_cache, "LSTM")?;
+        let LstmCaches {
+            hs,
+            cs,
+            cs_activated,
+            i: i_vals,
+            f: f_vals,
+            g: g_vals,
+            o: o_vals,
+        } = take_cache(&mut self.caches, "LSTM")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];

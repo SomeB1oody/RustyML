@@ -257,3 +257,64 @@ pub fn calibrate_elementwise() -> Vec<Section> {
 
     sections
 }
+
+// ---- spatial-dropout per-channel scale: SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS ----
+
+/// The spatial-dropout fused scale: multiply each `(batch, channel)` segment of a
+/// `[batch, channels, *spatial]` tensor by its channel's inverted-dropout factor, in one pass
+/// writing a fresh output (matching the production allocate-per-call). Forced serial vs forced
+/// parallel of the same per-segment scale; each element is independent, so the flag never
+/// changes the bits and the gate is a pure performance knob. The ladder varies the segment
+/// count (`B * C`) and segment length (`spatial`) across the crossover.
+pub fn calibrate_spatial_dropout_scale() -> Section {
+    let mut rows = Vec::new();
+    for &(n_seg, seg) in &[
+        (64usize, 256usize),
+        (128, 512),
+        (256, 1024),
+        (512, 2048),
+        (256, 16_384),
+        (2_048, 4_096),
+    ] {
+        let total = n_seg * seg;
+        let src = vec![0.5f32; total];
+        // The multiply cost is the same whether a channel is kept or dropped
+        let mask = vec![1.0f32; n_seg];
+        let scale = 1.0 / (1.0 - 0.2);
+        let run = |parallel: bool| {
+            let mut out = vec![0.0f32; total];
+            let task = |((o, x), &m): ((&mut [f32], &[f32]), &f32)| {
+                let factor = m * scale;
+                for (o_elem, &x_elem) in o.iter_mut().zip(x) {
+                    *o_elem = x_elem * factor;
+                }
+            };
+            if parallel {
+                out.par_chunks_mut(seg)
+                    .zip(src.par_chunks(seg))
+                    .zip(mask.par_iter())
+                    .for_each(task);
+            } else {
+                out.chunks_mut(seg)
+                    .zip(src.chunks(seg))
+                    .zip(mask.iter())
+                    .for_each(task);
+            }
+            black_box(out);
+        };
+        let s = time_per_call_ns(|| run(false));
+        let p = time_per_call_ns(|| run(true));
+        rows.push(Row {
+            label: format!("{n_seg}seg x {seg}"),
+            work: total,
+            serial_ns: s,
+            parallel_ns: p,
+        });
+    }
+    Section {
+        title: "spatial-dropout per-channel scale (SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS)",
+        work_unit: "elements",
+        pick_fastest: false,
+        rows,
+    }
+}

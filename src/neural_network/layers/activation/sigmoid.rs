@@ -70,7 +70,7 @@ impl Layer for Sigmoid {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Sigmoid clips the input internally for numerical stability
+        // Apply the logistic sigmoid; large-magnitude inputs saturate to 0/1 by construction
         let output = Activation::Sigmoid.forward(input)?;
 
         // Cache the output for backpropagation
@@ -85,7 +85,7 @@ impl Layer for Sigmoid {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // Sigmoid clips the input internally for numerical stability
+        // Apply the logistic sigmoid; large-magnitude inputs saturate to 0/1 by construction
         Activation::Sigmoid.forward(input)
     }
 

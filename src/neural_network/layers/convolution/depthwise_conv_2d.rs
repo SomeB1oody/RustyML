@@ -272,6 +272,91 @@ impl DepthwiseConv2D {
         Ok(())
     }
 
+    /// Runs the depthwise convolution and activation for `input`, returning the activated output
+    ///
+    /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]; writes no caches. `forward`
+    /// wraps this and records the input/output caches, `predict` returns its result directly. Each
+    /// `(batch item, channel)` is convolved independently into a disjoint output plane, so the
+    /// FLOPs-gated parallel and sequential paths are bitwise identical
+    fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
+        if input.ndim() != 4 {
+            return Err(Error::invalid_input("input tensor is not 4D"));
+        }
+
+        let input_array = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
+
+        let (batch_size, channels, height, width) = (
+            input_array.shape()[0],
+            input_array.shape()[1],
+            input_array.shape()[2],
+            input_array.shape()[3],
+        );
+
+        if channels != self.filters {
+            return Err(Error::dimension_mismatch(self.filters, channels));
+        }
+
+        let output_shape =
+            calculate_output_shape_2d(input.shape(), self.kernel_size, self.strides, &self.padding);
+        let (output_height, output_width) = (output_shape[2], output_shape[3]);
+
+        let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
+
+        let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
+
+        let flops = 2
+            * batch_size
+            * channels
+            * output_height
+            * output_width
+            * self.kernel_size.0
+            * self.kernel_size.1;
+
+        let convolve_into =
+            |b: usize, c: usize, channel_output: &mut ndarray::ArrayViewMut2<f32>| {
+                let input_channel = input_array.slice(s![b, c, .., ..]);
+                let kernel = self.weights.slice(s![c, 0, .., ..]);
+                let result = Self::convolve_channel(
+                    &input_channel,
+                    &kernel,
+                    self.bias[c],
+                    (output_height, output_width),
+                    self.strides,
+                    self.kernel_size,
+                    &self.padding,
+                    pad_h,
+                    pad_w,
+                );
+                channel_output.assign(&result);
+            };
+
+        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+            // Parallel over (batch item, channel) - a single large image still uses every core
+            output
+                .axis_iter_mut(Axis(0))
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(b, mut batch_output)| {
+                    batch_output
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(c, mut channel_output)| {
+                            convolve_into(b, c, &mut channel_output)
+                        });
+                });
+        } else {
+            for b in 0..batch_size {
+                for c in 0..channels {
+                    let mut channel_output = output.slice_mut(s![b, c, .., ..]);
+                    convolve_into(b, c, &mut channel_output);
+                }
+            }
+        }
+
+        self.activation.forward(&output.into_dyn())
+    }
+
     /// Performs depthwise convolution for a single channel
     #[allow(clippy::too_many_arguments)]
     fn convolve_channel(
@@ -292,20 +377,37 @@ impl DepthwiseConv2D {
         };
 
         let (output_height, output_width) = output_shape;
+        let (kh_size, kw_size) = kernel_size;
+        let padded_w = padded_input.shape()[1];
+
+        // Direct convolution over the flat contiguous buffers: each output is an in-place
+        // multiply-accumulate over the kernel window, with no per-position temporary array or
+        // view (the output geometry guarantees every window fits, so no bounds guard is needed)
+        let src = padded_input
+            .as_slice()
+            .expect("padded channel plane is contiguous");
+        let ker = kernel.to_owned();
+        let ker = ker.as_slice().expect("kernel is contiguous after to_owned");
+
         let mut channel_output = Array2::zeros(output_shape);
+        let out = channel_output
+            .as_slice_mut()
+            .expect("output plane is contiguous");
 
         for oh in 0..output_height {
+            let row_base = oh * strides.0 * padded_w;
+            let out_row = oh * output_width;
             for ow in 0..output_width {
-                let start_h = oh * strides.0;
-                let start_w = ow * strides.1;
-                let end_h = start_h + kernel_size.0;
-                let end_w = start_w + kernel_size.1;
-
-                if end_h <= padded_input.shape()[0] && end_w <= padded_input.shape()[1] {
-                    let input_patch = padded_input.slice(s![start_h..end_h, start_w..end_w]);
-                    let conv_result = (&input_patch * kernel).sum();
-                    channel_output[[oh, ow]] = conv_result + bias;
+                let base = row_base + ow * strides.1;
+                let mut sum = bias;
+                for kh in 0..kh_size {
+                    let in_off = base + kh * padded_w;
+                    let k_off = kh * kw_size;
+                    for kw in 0..kw_size {
+                        sum += src[in_off + kw] * ker[k_off + kw];
+                    }
                 }
+                out[out_row + ow] = sum;
             }
         }
 
@@ -330,11 +432,10 @@ impl DepthwiseConv2D {
         pad_h: usize,
         pad_w: usize,
     ) -> (Array2<f32>, Array2<f32>) {
-        let mut weight_grad = Array2::zeros((self.kernel_size.0, self.kernel_size.1));
+        let (kh_size, kw_size) = self.kernel_size;
         // Accumulate the input gradient in PADDED coordinates
         let padded_height = input_height + pad_h;
         let padded_width = input_width + pad_w;
-        let mut input_grad_padded = Array2::zeros((padded_height, padded_width));
 
         let input_channel = input_array.slice(s![batch_idx, c, .., ..]);
         let grad_channel = grad_upstream.slice(s![batch_idx, c, .., ..]);
@@ -344,34 +445,56 @@ impl DepthwiseConv2D {
         } else {
             input_channel.to_owned()
         };
+        let src = padded_input
+            .as_slice()
+            .expect("padded channel plane is contiguous");
+        let grad_owned = grad_channel.to_owned();
+        let grad = grad_owned
+            .as_slice()
+            .expect("grad plane is contiguous after to_owned");
+        let kview = self.weights.slice(s![c, 0, .., ..]).to_owned();
+        let ker = kview
+            .as_slice()
+            .expect("kernel is contiguous after to_owned");
 
-        for kh in 0..self.kernel_size.0 {
-            let h_end = kh + (output_height - 1) * self.strides.0 + 1;
-            for kw in 0..self.kernel_size.1 {
-                let w_end = kw + (output_width - 1) * self.strides.1 + 1;
-
-                // Weight gradient
-                let window =
-                    padded_input.slice(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1]);
-                weight_grad[[kh, kw]] = (&window * &grad_channel).sum();
-
-                // Input gradient
-                let w_val = self.weights[[c, 0, kh, kw]];
-                input_grad_padded
-                    .slice_mut(s![kh..h_end; self.strides.0, kw..w_end; self.strides.1])
-                    .scaled_add(w_val, &grad_channel);
+        // Single pass over output positions accumulates both gradients directly on the flat
+        // buffers - no strided slices and no per-tap temporary arrays. For each output `(oh, ow)`
+        // the kernel window contributes `src * grad` to the weight gradient and `kernel * grad` to
+        // the padded input gradient at the same offset
+        let mut weight_grad = vec![0.0f32; kh_size * kw_size];
+        let mut input_grad_padded = vec![0.0f32; padded_height * padded_width];
+        for oh in 0..output_height {
+            let row_base = oh * self.strides.0 * padded_width;
+            let g_row = oh * output_width;
+            for ow in 0..output_width {
+                let g = grad[g_row + ow];
+                let base = row_base + ow * self.strides.1;
+                for kh in 0..kh_size {
+                    let in_off = base + kh * padded_width;
+                    let k_off = kh * kw_size;
+                    for kw in 0..kw_size {
+                        weight_grad[k_off + kw] += src[in_off + kw] * g;
+                        input_grad_padded[in_off + kw] += ker[k_off + kw] * g;
+                    }
+                }
             }
         }
+        let weight_grad = Array2::from_shape_vec((kh_size, kw_size), weight_grad)
+            .expect("weight gradient length matches the kernel shape");
 
-        // Strip the symmetric padding
+        // Strip the symmetric padding back to the input plane
         let pad_top = pad_h / 2;
         let pad_left = pad_w / 2;
-        let input_grad = input_grad_padded
-            .slice(s![
-                pad_top..pad_top + input_height,
-                pad_left..pad_left + input_width
-            ])
-            .to_owned();
+        let mut input_grad = Array2::zeros((input_height, input_width));
+        let ig = input_grad
+            .as_slice_mut()
+            .expect("input gradient plane is contiguous");
+        for ih in 0..input_height {
+            let src_row = (ih + pad_top) * padded_width + pad_left;
+            let dst_row = ih * input_width;
+            ig[dst_row..dst_row + input_width]
+                .copy_from_slice(&input_grad_padded[src_row..src_row + input_width]);
+        }
 
         (weight_grad, input_grad)
     }
@@ -379,204 +502,17 @@ impl DepthwiseConv2D {
 
 impl Layer for DepthwiseConv2D {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 4 {
-            return Err(Error::invalid_input("input tensor is not 4D"));
-        }
-
+        let activated = self.convolve(input)?;
+        // Cache only after a successful convolution, so a rejected input leaves no partial state
         self.input = Some(input.clone());
         self.input_shape = input.shape().to_vec();
-
-        let input_array = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
-
-        let (batch_size, channels, height, width) = (
-            input_array.shape()[0],
-            input_array.shape()[1],
-            input_array.shape()[2],
-            input_array.shape()[3],
-        );
-
-        if channels != self.filters {
-            return Err(Error::dimension_mismatch(self.filters, channels));
-        }
-
-        let output_shape = calculate_output_shape_2d(
-            &self.input_shape,
-            self.kernel_size,
-            self.strides,
-            &self.padding,
-        );
-        let (_, _, output_height, output_width) = (
-            output_shape[0],
-            output_shape[1],
-            output_shape[2],
-            output_shape[3],
-        );
-
-        let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
-
-        let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
-
-        let flops = 2
-            * batch_size
-            * channels
-            * output_height
-            * output_width
-            * self.kernel_size.0
-            * self.kernel_size.1;
-
-        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
-            // Parallel path
-            output
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(b, mut batch_output)| {
-                    batch_output
-                        .axis_iter_mut(Axis(0))
-                        .into_par_iter()
-                        .enumerate()
-                        .for_each(|(c, mut channel_output)| {
-                            let input_channel = input_array.slice(s![b, c, .., ..]);
-                            let kernel = self.weights.slice(s![c, 0, .., ..]);
-                            let result = Self::convolve_channel(
-                                &input_channel,
-                                &kernel,
-                                self.bias[c],
-                                (output_height, output_width),
-                                self.strides,
-                                self.kernel_size,
-                                &self.padding,
-                                pad_h,
-                                pad_w,
-                            );
-                            channel_output.assign(&result);
-                        });
-                });
-        } else {
-            // Sequential path
-            for b in 0..batch_size {
-                for c in 0..channels {
-                    let input_channel = input_array.slice(s![b, c, .., ..]);
-                    let kernel = self.weights.slice(s![c, 0, .., ..]);
-                    let result = Self::convolve_channel(
-                        &input_channel,
-                        &kernel,
-                        self.bias[c],
-                        (output_height, output_width),
-                        self.strides,
-                        self.kernel_size,
-                        &self.padding,
-                        pad_h,
-                        pad_w,
-                    );
-                    output.slice_mut(s![b, c, .., ..]).assign(&result);
-                }
-            }
-        }
-
-        let output = output.into_dyn();
-
-        let activated = self.activation.forward(&output)?;
         self.output_cache = Some(activated.clone());
         Ok(activated)
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
-        if input.ndim() != 4 {
-            return Err(Error::invalid_input("input tensor is not 4D"));
-        }
-
-        let input_shape = input.shape().to_vec();
-
-        let input_array = input.view().into_dimensionality::<ndarray::Ix4>().unwrap();
-
-        let (batch_size, channels, height, width) = (
-            input_array.shape()[0],
-            input_array.shape()[1],
-            input_array.shape()[2],
-            input_array.shape()[3],
-        );
-
-        if channels != self.filters {
-            return Err(Error::dimension_mismatch(self.filters, channels));
-        }
-
-        let output_shape =
-            calculate_output_shape_2d(&input_shape, self.kernel_size, self.strides, &self.padding);
-        let (_, _, output_height, output_width) = (
-            output_shape[0],
-            output_shape[1],
-            output_shape[2],
-            output_shape[3],
-        );
-
-        let (pad_h, pad_w) = self.calculate_padding(height, width, output_height, output_width);
-
-        let mut output = Array4::zeros((batch_size, channels, output_height, output_width));
-
-        let flops = 2
-            * batch_size
-            * channels
-            * output_height
-            * output_width
-            * self.kernel_size.0
-            * self.kernel_size.1;
-
-        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
-            // Parallel path
-            output
-                .axis_iter_mut(Axis(0))
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(b, mut batch_output)| {
-                    batch_output
-                        .axis_iter_mut(Axis(0))
-                        .into_par_iter()
-                        .enumerate()
-                        .for_each(|(c, mut channel_output)| {
-                            let input_channel = input_array.slice(s![b, c, .., ..]);
-                            let kernel = self.weights.slice(s![c, 0, .., ..]);
-                            let result = Self::convolve_channel(
-                                &input_channel,
-                                &kernel,
-                                self.bias[c],
-                                (output_height, output_width),
-                                self.strides,
-                                self.kernel_size,
-                                &self.padding,
-                                pad_h,
-                                pad_w,
-                            );
-                            channel_output.assign(&result);
-                        });
-                });
-        } else {
-            // Sequential path
-            for b in 0..batch_size {
-                for c in 0..channels {
-                    let input_channel = input_array.slice(s![b, c, .., ..]);
-                    let kernel = self.weights.slice(s![c, 0, .., ..]);
-                    let result = Self::convolve_channel(
-                        &input_channel,
-                        &kernel,
-                        self.bias[c],
-                        (output_height, output_width),
-                        self.strides,
-                        self.kernel_size,
-                        &self.padding,
-                        pad_h,
-                        pad_w,
-                    );
-                    output.slice_mut(s![b, c, .., ..]).assign(&result);
-                }
-            }
-        }
-
-        let output = output.into_dyn();
-
-        let activated = self.activation.forward(&output)?;
-        Ok(activated)
+        self.convolve(input)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {

@@ -41,6 +41,20 @@ pub(crate) const CHEAP_MAP_PARALLEL_THRESHOLD: usize = 4_000_000;
 #[cfg(feature = "neural_network")]
 pub(crate) const EXP_MAP_PARALLEL_THRESHOLD: usize = 131_072;
 
+/// The spatial-dropout per-channel scale: a pure copy-with-scale that multiplies each
+/// `(batch, channel)` segment of a `[batch, channels, *spatial]` tensor by its channel's
+/// inverted-dropout factor. Each element is independent (no reduction), so the gate is a pure
+/// performance knob that never changes the result bits.
+///
+/// This is the cheap-map class: a single multiply per element makes it nearly a pure memory
+/// copy, which one core almost saturates up to ~1M elements, so the parallel path's fork/join
+/// and allocation only pay off well past 1M - the same crossover as
+/// [`CHEAP_MAP_PARALLEL_THRESHOLD`]. Measured crossover bracket 1M-4M elements (0.60x at 1M,
+/// 1.13x at 4M, 2.05x at 8.4M); calibrated 2026-06-13, see benches/RESULTS.md
+/// "spatial-dropout per-channel scale".
+#[cfg(feature = "neural_network")]
+pub(crate) const SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS: usize = 4_194_304;
+
 /// Fused multi-slice `f32` updates: the optimizer kernels' parameter/gradient/moment loops,
 /// which stream several arrays at once.
 ///

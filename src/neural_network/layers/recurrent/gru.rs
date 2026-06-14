@@ -13,7 +13,7 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array2, Array3, Axis, concatenate, s};
+use ndarray::{Array2, Array3, ArrayView3, Axis, concatenate, s};
 use std::borrow::Cow;
 
 /// Gated Recurrent Unit (GRU) neural network layer
@@ -67,20 +67,28 @@ pub struct GRU {
 
     /// Cached input tensor for backward propagation
     input_cache: Option<Array3<f32>>,
-    /// Cached hidden states h_t for each timestep
-    hidden_cache: Option<Vec<Array2<f32>>>,
-
-    /// Cached reset gate activations (sigmoid applied) for each timestep
-    r_cache: Option<Vec<Array2<f32>>>,
-    /// Cached update gate activations (sigmoid applied) for each timestep
-    z_cache: Option<Vec<Array2<f32>>>,
-    /// Cached candidate hidden states (activation applied) for each timestep
-    h_candidate_cache: Option<Vec<Array2<f32>>>,
-    /// Cached r_t .* h_{t-1} values for each timestep
-    rh_cache: Option<Vec<Array2<f32>>>,
+    /// Per-timestep forward values recorded by `forward` for the backward pass (`None` until the
+    /// first training forward; `predict` never sets it)
+    caches: Option<GruCaches>,
 
     /// Activation applied to the candidate hidden state each timestep (Keras-style)
     activation: Activation,
+}
+
+/// Per-timestep forward values a [`GRU`] records so its backward pass can recompute the gate
+/// gradients without re-running the forward recurrence
+#[derive(Debug)]
+struct GruCaches {
+    /// Hidden states `h_t`, with `h_0 = 0` prepended (length `timesteps + 1`)
+    hs: Vec<Array2<f32>>,
+    /// Reset-gate activations (sigmoid) per timestep
+    r: Vec<Array2<f32>>,
+    /// Update-gate activations (sigmoid) per timestep
+    z: Vec<Array2<f32>>,
+    /// Candidate hidden states (activation applied) per timestep
+    h_candidate: Vec<Array2<f32>>,
+    /// `r_t .* h_{t-1}` per timestep (the candidate's recurrent input)
+    rh: Vec<Array2<f32>>,
 }
 
 impl GRU {
@@ -116,11 +124,7 @@ impl GRU {
             units,
             gates: Self::init_gates(input_dim, units, None)?,
             input_cache: None,
-            hidden_cache: None,
-            r_cache: None,
-            z_cache: None,
-            h_candidate_cache: None,
-            rh_cache: None,
+            caches: None,
             activation: activation.into(),
         })
     }
@@ -283,134 +287,96 @@ impl GRU {
 
         self.set_weights(kernel, recurrent_kernel, bias)
     }
+
+    /// Runs the recurrence and returns the last hidden state - the shared numeric body of
+    /// [`Layer::forward`] and [`Layer::predict`]
+    ///
+    /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden states,
+    /// the reset/update gate activations, the candidate, and `r_t .* h_{t-1}`) is recorded;
+    /// `predict` passes `None` and skips both the recording and its clones
+    fn run(
+        &self,
+        x3: &ArrayView3<f32>,
+        mut caches: Option<&mut GruCaches>,
+    ) -> Result<Array2<f32>, Error> {
+        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
+        let u = self.units;
+        let act = self.activation;
+
+        let mut h_prev = Array2::<f32>::zeros((batch, u));
+        if let Some(c) = caches.as_deref_mut() {
+            c.hs.push(h_prev.clone());
+        }
+
+        // Batched fused input projection for all 3 gates
+        let xw = project_input(&self.gates.kernel, x3);
+
+        for t in 0..timesteps {
+            let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
+
+            // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
+            let rz_raw = gemm_internal(
+                &h_prev,
+                &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
+            ) + xw_t.slice(s![.., 0..2 * u])
+                + self.gates.bias.slice(s![.., 0..2 * u]);
+            let rz = apply_sigmoid(rz_raw);
+            let r_t = rz.slice(s![.., 0..u]).to_owned();
+            let z_t = rz.slice(s![.., u..2 * u]).to_owned();
+
+            // r_t .* h_{t-1}, then the candidate hidden state
+            let r_h = &r_t * &h_prev;
+            let h_candidate_raw =
+                gemm_internal(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
+                    + xw_t.slice(s![.., 2 * u..])
+                    + self.gates.bias.slice(s![.., 2 * u..]);
+            let h_candidate = act
+                .forward(&h_candidate_raw.into_dyn())?
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
+
+            // Hidden state update
+            let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
+
+            if let Some(c) = caches.as_deref_mut() {
+                c.r.push(r_t);
+                c.z.push(z_t);
+                c.h_candidate.push(h_candidate);
+                c.rh.push(r_h);
+                c.hs.push(h_t.clone());
+            }
+
+            h_prev = h_t;
+        }
+
+        Ok(h_prev)
+    }
 }
 
 impl Layer for GRU {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
-
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        // Input shape: (batch, timesteps, input_dim)
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
+        let timesteps = x3.shape()[1];
         self.input_cache = Some(x3.to_owned());
 
-        let u = self.units;
-        let mut h_prev = Array2::<f32>::zeros((batch, u));
-
-        // Per-timestep storage for the backward pass
-        let mut hs = Vec::with_capacity(timesteps + 1);
-        let mut r_vals = Vec::with_capacity(timesteps);
-        let mut z_vals = Vec::with_capacity(timesteps);
-        let mut h_candidate_vals = Vec::with_capacity(timesteps);
-        let mut rh_vals = Vec::with_capacity(timesteps);
-
-        hs.push(h_prev.clone());
-
-        // Configurable activation (Copy) applied to the candidate hidden state
-        let act = self.activation;
-
-        // Batched fused input projection for all 3 gates
-        let xw = project_input(&self.gates.kernel, &x3);
-
-        for t in 0..timesteps {
-            let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
-
-            // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
-            let rz_raw = gemm_internal(
-                &h_prev,
-                &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
-            ) + xw_t.slice(s![.., 0..2 * u])
-                + self.gates.bias.slice(s![.., 0..2 * u]);
-            let rz = apply_sigmoid(rz_raw);
-            let r_t = rz.slice(s![.., 0..u]).to_owned();
-            let z_t = rz.slice(s![.., u..2 * u]).to_owned();
-
-            // r_t .* h_{t-1}
-            let r_h = &r_t * &h_prev;
-
-            // Candidate hidden state
-            let h_candidate_raw =
-                gemm_internal(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
-                    + xw_t.slice(s![.., 2 * u..])
-                    + self.gates.bias.slice(s![.., 2 * u..]);
-            let h_candidate = act
-                .forward(&h_candidate_raw.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            // Hidden state update
-            let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
-
-            r_vals.push(r_t);
-            z_vals.push(z_t);
-            h_candidate_vals.push(h_candidate);
-            rh_vals.push(r_h);
-            hs.push(h_t.clone());
-
-            h_prev = h_t;
-        }
-
-        self.hidden_cache = Some(hs);
-        self.r_cache = Some(r_vals);
-        self.z_cache = Some(z_vals);
-        self.h_candidate_cache = Some(h_candidate_vals);
-        self.rh_cache = Some(rh_vals);
-
-        Ok(h_prev.into_dyn())
+        let mut caches = GruCaches {
+            hs: Vec::with_capacity(timesteps + 1),
+            r: Vec::with_capacity(timesteps),
+            z: Vec::with_capacity(timesteps),
+            h_candidate: Vec::with_capacity(timesteps),
+            rh: Vec::with_capacity(timesteps),
+        };
+        let h_last = self.run(&x3, Some(&mut caches))?;
+        self.caches = Some(caches);
+        Ok(h_last.into_dyn())
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
-
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        // (batch, timesteps, input_dim)
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-
-        let u = self.units;
-        let mut h_prev = Array2::<f32>::zeros((batch, u));
-
-        // Configurable activation (Copy) applied to the candidate hidden state
-        let act = self.activation;
-
-        // Batched fused input projection for all 3 gates
-        let xw = project_input(&self.gates.kernel, &x3);
-
-        for t in 0..timesteps {
-            let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
-
-            // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
-            let rz_raw = gemm_internal(
-                &h_prev,
-                &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
-            ) + xw_t.slice(s![.., 0..2 * u])
-                + self.gates.bias.slice(s![.., 0..2 * u]);
-            let rz = apply_sigmoid(rz_raw);
-            let r_t = rz.slice(s![.., 0..u]).to_owned();
-            let z_t = rz.slice(s![.., u..2 * u]).to_owned();
-
-            // r_t .* h_{t-1}
-            let r_h = &r_t * &h_prev;
-
-            // Candidate hidden state
-            let h_candidate_raw =
-                gemm_internal(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
-                    + xw_t.slice(s![.., 2 * u..])
-                    + self.gates.bias.slice(s![.., 2 * u..]);
-            let h_candidate = act
-                .forward(&h_candidate_raw.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            // Hidden state update
-            let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
-
-            h_prev = h_t;
-        }
-
-        Ok(h_prev.into_dyn())
+        Ok(self.run(&x3, None)?.into_dyn())
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
@@ -429,11 +395,13 @@ impl Layer for GRU {
         let act = self.activation;
 
         let x3 = take_cache(&mut self.input_cache, "GRU")?;
-        let hs = take_cache(&mut self.hidden_cache, "GRU")?;
-        let r_vals = take_cache(&mut self.r_cache, "GRU")?;
-        let z_vals = take_cache(&mut self.z_cache, "GRU")?;
-        let h_candidate_vals = take_cache(&mut self.h_candidate_cache, "GRU")?;
-        let rh_vals = take_cache(&mut self.rh_cache, "GRU")?;
+        let GruCaches {
+            hs,
+            r: r_vals,
+            z: z_vals,
+            h_candidate: h_candidate_vals,
+            rh: rh_vals,
+        } = take_cache(&mut self.caches, "GRU")?;
 
         let batch = x3.shape()[0];
         let timesteps = x3.shape()[1];

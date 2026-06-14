@@ -151,8 +151,8 @@ impl Layer for GaussianDropout {
         }
 
         // y = x * noise => dL/dx = dL/dy * noise, reusing the exact draw from the forward pass
-        match self.noise_cache.take() {
-            Some(noise) => Ok(grad_output * &noise),
+        match self.noise_cache.as_ref() {
+            Some(noise) => Ok(grad_output * noise),
             None => Err(Error::forward_pass_not_run("GaussianDropout")),
         }
     }

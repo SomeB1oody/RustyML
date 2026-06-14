@@ -173,6 +173,120 @@ fn instancenorm_forward(c: &mut Criterion) {
     });
 }
 
+/// SpatialDropout1D forward at conv scale (training mode): the per-channel mask is broadcast
+/// across the length dimension to the full [B, C, L] shape
+fn spatial_dropout_1d_forward(c: &mut Criterion) {
+    let mut layer = SpatialDropout1D::new(0.2, vec![32, 64, 4096])
+        .unwrap()
+        .with_random_state(42);
+    let x = Array::from_elem((32, 64, 4096), 0.5f32).into_dyn();
+    c.bench_function("spatial_dropout_1d_forward_32x64x4096", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// SpatialDropout2D forward at conv scale (training mode): the per-channel mask is broadcast
+/// across the spatial dimensions to the full [B, C, H, W] shape
+fn spatial_dropout_2d_forward(c: &mut Criterion) {
+    let mut layer = SpatialDropout2D::new(0.2, vec![32, 64, 64, 64])
+        .unwrap()
+        .with_random_state(42);
+    let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
+    c.bench_function("spatial_dropout_2d_forward_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// SpatialDropout3D forward at conv scale (training mode): the per-channel mask is broadcast
+/// across the spatial dimensions to the full [B, C, D, H, W] shape
+fn spatial_dropout_3d_forward(c: &mut Criterion) {
+    let mut layer = SpatialDropout3D::new(0.2, vec![8, 64, 16, 32, 32])
+        .unwrap()
+        .with_random_state(42);
+    let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
+    c.bench_function("spatial_dropout_3d_forward_8x64x16x32x32", |b| {
+        b.iter(|| black_box(layer.forward(&x).unwrap()))
+    });
+}
+
+/// SpatialDropout2D backward at conv scale: applies the same per-channel mask to the gradient
+fn spatial_dropout_2d_backward(c: &mut Criterion) {
+    let mut layer = SpatialDropout2D::new(0.2, vec![32, 64, 64, 64])
+        .unwrap()
+        .with_random_state(42);
+    let x = Array::from_elem((32, 64, 64, 64), 0.5f32).into_dyn();
+    layer.forward(&x).unwrap();
+    let grad = Array::from_elem((32, 64, 64, 64), 0.3f32).into_dyn();
+    c.bench_function("spatial_dropout_2d_backward_32x64x64x64", |b| {
+        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+    });
+}
+
+/// SpatialDropout3D backward at conv scale
+fn spatial_dropout_3d_backward(c: &mut Criterion) {
+    let mut layer = SpatialDropout3D::new(0.2, vec![8, 64, 16, 32, 32])
+        .unwrap()
+        .with_random_state(42);
+    let x = Array::from_elem((8, 64, 16, 32, 32), 0.5f32).into_dyn();
+    layer.forward(&x).unwrap();
+    let grad = Array::from_elem((8, 64, 16, 32, 32), 0.3f32).into_dyn();
+    c.bench_function("spatial_dropout_3d_backward_8x64x16x32x32", |b| {
+        b.iter(|| black_box(layer.backward(&grad).unwrap()))
+    });
+}
+
+/// DepthwiseConv2D and SeparableConv2D at MobileNet-ish scale (64 channels over a 56x56 map),
+/// where the per-channel kernels do direct convolution over flat contiguous buffers (no im2col,
+/// no per-position temporaries). `forward` is the inference cost; `fwd_bwd` is a full train step
+/// (the backward consumes the forward's output cache, so each iteration re-runs the forward), and
+/// `fwd_bwd - forward` approximates the backward cost
+fn depthwise_separable_conv(c: &mut Criterion) {
+    let mut group = c.benchmark_group("conv_depthwise_separable");
+    group.sample_size(30);
+
+    // DepthwiseConv2D: groups == channels == filters
+    {
+        let mut layer =
+            DepthwiseConv2D::new(64, (3, 3), vec![8, 64, 56, 56], (1, 1), Activation::ReLU)
+                .unwrap()
+                .with_padding(PaddingType::Same)
+                .with_random_state(42);
+        let x = Array::from_elem((8, 64, 56, 56), 0.5f32).into_dyn();
+        let grad = Array::from_elem((8, 64, 56, 56), 0.3f32).into_dyn();
+        group.bench_function("depthwise_forward_8x64x56x56_k3_same", |b| {
+            b.iter(|| black_box(layer.forward(&x).unwrap()))
+        });
+        group.bench_function("depthwise_fwd_bwd_8x64x56x56_k3_same", |b| {
+            b.iter(|| {
+                layer.forward(&x).unwrap();
+                black_box(layer.backward(&grad).unwrap())
+            })
+        });
+    }
+
+    // SeparableConv2D: depthwise (groups == channels) stage then pointwise 1x1, 32 -> 64 filters
+    {
+        let mut layer =
+            SeparableConv2D::new(64, (3, 3), vec![8, 32, 56, 56], (1, 1), 1, Activation::ReLU)
+                .unwrap()
+                .with_padding(PaddingType::Same)
+                .with_random_state(42);
+        let x = Array::from_elem((8, 32, 56, 56), 0.5f32).into_dyn();
+        let grad = Array::from_elem((8, 64, 56, 56), 0.3f32).into_dyn();
+        group.bench_function("separable_forward_8x32x56x56_64f_k3_same", |b| {
+            b.iter(|| black_box(layer.forward(&x).unwrap()))
+        });
+        group.bench_function("separable_fwd_bwd_8x32x56x56_64f_k3_same", |b| {
+            b.iter(|| {
+                layer.forward(&x).unwrap();
+                black_box(layer.backward(&grad).unwrap())
+            })
+        });
+    }
+
+    group.finish();
+}
+
 /// One epoch of MLP training: forward + loss + backward + optimizer across the whole stack
 fn mlp_fit_epoch(c: &mut Criterion) {
     let x = Array::from_elem((512, 256), 0.5f32).into_dyn();
@@ -217,6 +331,12 @@ criterion_group!(
     groupnorm_forward,
     groupnorm_backward,
     instancenorm_forward,
+    spatial_dropout_1d_forward,
+    spatial_dropout_2d_forward,
+    spatial_dropout_3d_forward,
+    spatial_dropout_2d_backward,
+    spatial_dropout_3d_backward,
+    depthwise_separable_conv,
     mlp_fit_epoch
 );
 criterion_main!(benches);

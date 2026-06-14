@@ -6,7 +6,8 @@ use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::no_trainable_parameters_layer_functions;
 use crate::neural_network::layers::regularization::dropout::{
-    apply_spatial_dropout_threshold, dropout_backward, dropout_output_shape,
+    apply_spatial_dropout_threshold, dropout_output_shape, spatial_dropout_backward,
+    spatial_dropout_scale,
 };
 use crate::neural_network::layers::regularization::mode_dependent_layer_set_training;
 use crate::neural_network::layers::regularization::mode_dependent_layer_trait;
@@ -14,7 +15,9 @@ use crate::neural_network::layers::regularization::validation::{
     validate_input_ndim, validate_input_shape, validate_rate,
 };
 use crate::neural_network::traits::Layer;
-use crate::parallel_gates::CHEAP_MAP_PARALLEL_THRESHOLD;
+use crate::parallel_gates::{
+    CHEAP_MAP_PARALLEL_THRESHOLD, SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
+};
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -134,42 +137,27 @@ impl Layer for SpatialDropout3D {
         let shape = input.shape();
         let batch_size = shape[0];
         let channels = shape[1];
-        let depth = shape[2];
-        let height = shape[3];
-        let width = shape[4];
 
-        // Per-channel mask of shape (batch_size, channels)
+        // Per-channel mask of shape (batch_size, channels): one keep/drop value per channel
         let mut mask_2d = Tensor::random_using(
             IxDyn(&[batch_size, channels]),
             Uniform::new(0.0, 1.0).unwrap(),
             &mut self.rng,
         );
 
-        // Threshold into a binary mask (parallel above the threshold, sequential otherwise)
+        // Threshold into a binary keep/drop mask
         apply_spatial_dropout_threshold(&mut mask_2d, self.rate, CHEAP_MAP_PARALLEL_THRESHOLD);
 
-        // Broadcast the 2D mask across the spatial dimensions to the 5D input shape
-        let mut mask = Tensor::zeros(IxDyn(&[batch_size, channels, depth, height, width]));
+        let channel_mask = mask_2d.as_slice().expect("per-channel mask is contiguous");
+        let output = spatial_dropout_scale(
+            input,
+            channel_mask,
+            self.rate,
+            SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
+        );
 
-        for b in 0..batch_size {
-            for c in 0..channels {
-                let mask_value = mask_2d[[b, c]];
-                for d in 0..depth {
-                    for h in 0..height {
-                        for w in 0..width {
-                            mask[[b, c, d, h, w]] = mask_value;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Inverted dropout: scale by 1 / (1 - rate) to preserve the expected value
-        let scale = 1.0 / (1.0 - self.rate);
-        let output = input * &mask * scale;
-
-        // Store mask for backpropagation
-        self.mask = Some(mask);
+        // Store the small per-channel mask for backpropagation
+        self.mask = Some(mask_2d);
 
         Ok(output)
     }
@@ -189,12 +177,13 @@ impl Layer for SpatialDropout3D {
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
-        dropout_backward(
+        spatial_dropout_backward(
             grad_output,
             &self.mask,
             self.training,
             self.rate,
             "SpatialDropout3D",
+            SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
         )
     }
 

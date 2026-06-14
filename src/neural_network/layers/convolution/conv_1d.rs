@@ -300,7 +300,7 @@ impl Layer for Conv1D {
         let input = self
             .input_cache
             .as_ref()
-            .ok_or_else(|| Error::computation("No cached input for backward pass"))?;
+            .ok_or_else(|| Error::forward_pass_not_run("Conv1D"))?;
 
         let grads = conv_backward(
             &grad_upstream,

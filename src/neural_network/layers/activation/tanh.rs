@@ -70,7 +70,7 @@ impl Layer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // tanh(x), with input clamped for numerical stability
+        // Apply tanh; large-magnitude inputs saturate toward -1/+1 by construction
         let output = Activation::Tanh.forward(input)?;
 
         // Cache the activated output for backpropagation
@@ -85,7 +85,7 @@ impl Layer for Tanh {
             return Err(Error::empty_input("input tensor"));
         }
 
-        // tanh(x), with input clamped for numerical stability
+        // Apply tanh; large-magnitude inputs saturate toward -1/+1 by construction
         Activation::Tanh.forward(input)
     }
 

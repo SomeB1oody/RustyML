@@ -4,9 +4,7 @@ use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
-use crate::neural_network::layers::conv_op_helpers::{
-    compute_row_gradient_sum, pad_tensor_4d_spatial,
-};
+use crate::neural_network::layers::conv_op_helpers::pad_tensor_4d_spatial;
 use crate::neural_network::layers::convolution::PaddingType;
 use crate::neural_network::layers::convolution::convolution_engine::{conv_backward, conv_forward};
 use crate::neural_network::layers::convolution::validation::{
@@ -334,32 +332,37 @@ impl SeparableConv2D {
         input: &Tensor,
         output_shape: &[usize],
     ) -> Array2<f32> {
-        let input_shape = input.shape();
-        let mut plane = Array2::zeros((output_shape[2], output_shape[3]));
+        let (out_h, out_w) = (output_shape[2], output_shape[3]);
+        let (kh_size, kw_size) = self.kernel_size;
+        let in_w = input.shape()[3];
 
-        for i in 0..output_shape[2] {
-            let i_base = i * self.strides.0;
+        // Direct convolution over the flat channel and kernel buffers - no per-element 4-D dynamic
+        // indexing. The output geometry guarantees the kernel window fits, so no boundary clamp is
+        // needed
+        let channel = input.slice(s![b, c, .., ..]);
+        let chan_std = channel.as_standard_layout();
+        let src = chan_std
+            .as_slice()
+            .expect("standard-layout channel plane is contiguous");
+        let kview = self.depthwise_weights.slice(s![m, c, .., ..]);
+        let ker = kview.as_slice().expect("depthwise kernel is contiguous");
 
-            for j in 0..output_shape[3] {
-                let j_base = j * self.strides.1;
+        let mut plane = Array2::zeros((out_h, out_w));
+        let out = plane.as_slice_mut().expect("output plane is contiguous");
+        for i in 0..out_h {
+            let row_base = i * self.strides.0 * in_w;
+            let out_row = i * out_w;
+            for j in 0..out_w {
+                let base = row_base + j * self.strides.1;
                 let mut sum = 0.0;
-
-                let max_ki = input_shape[2]
-                    .saturating_sub(i_base)
-                    .min(self.kernel_size.0);
-                let max_kj = input_shape[3]
-                    .saturating_sub(j_base)
-                    .min(self.kernel_size.1);
-
-                for ki in 0..max_ki {
-                    let i_pos = i_base + ki;
-                    for kj in 0..max_kj {
-                        let j_pos = j_base + kj;
-                        sum += input[[b, c, i_pos, j_pos]] * self.depthwise_weights[[m, c, ki, kj]];
+                for ki in 0..kh_size {
+                    let in_off = base + ki * in_w;
+                    let k_off = ki * kw_size;
+                    for kj in 0..kw_size {
+                        sum += src[in_off + kj] * ker[k_off + kj];
                     }
                 }
-
-                plane[[i, j]] = sum;
+                out[out_row + j] = sum;
             }
         }
 
@@ -572,36 +575,39 @@ impl Layer for SeparableConv2D {
             let wg_tasks: Vec<(usize, usize)> = (0..self.depth_multiplier)
                 .flat_map(|m| (0..channels).map(move |c| (m, c)))
                 .collect();
+            let (kh_size, kw_size) = self.kernel_size;
+            let (out_h, out_w) = (depthwise_shape[2], depthwise_shape[3]);
+            let (padded_h, padded_w) = (padded_shape[2], padded_shape[3]);
+            // Weight gradient for one `(m, c)`: a fused pass over output positions accumulating
+            // `padded_input * grad` on flat buffers, summed across the batch (no 4-D indexing)
             let wg_run = |&(m, c): &(usize, usize)| -> Array2<f32> {
-                let mut wg = Array2::zeros((self.kernel_size.0, self.kernel_size.1));
-                let output_channel = c * self.depth_multiplier + m;
-                for h in 0..self.kernel_size.0 {
-                    for w in 0..self.kernel_size.1 {
-                        let mut sum = 0.0;
-                        for b in 0..batch_size {
-                            for i in 0..depthwise_shape[2] {
-                                let i_pos = i * self.strides.0 + h;
-                                if i_pos < padded_shape[2] {
-                                    sum += compute_row_gradient_sum(
-                                        &depthwise_grad,
-                                        padded_input,
-                                        b,
-                                        output_channel,
-                                        c,
-                                        i,
-                                        i_pos,
-                                        w,
-                                        depthwise_shape,
-                                        &padded_shape,
-                                        self.strides.1,
-                                    );
+                let oc = c * self.depth_multiplier + m;
+                let mut wg = vec![0.0f32; kh_size * kw_size];
+                for b in 0..batch_size {
+                    let g = depthwise_grad.slice(s![b, oc, .., ..]);
+                    let g = g.as_standard_layout();
+                    let g = g.as_slice().expect("grad plane is contiguous");
+                    let inp = padded_input.slice(s![b, c, .., ..]);
+                    let inp = inp.as_standard_layout();
+                    let inp = inp.as_slice().expect("padded input plane is contiguous");
+                    for i in 0..out_h {
+                        let row_base = i * self.strides.0 * padded_w;
+                        let g_row = i * out_w;
+                        for j in 0..out_w {
+                            let gv = g[g_row + j];
+                            let base = row_base + j * self.strides.1;
+                            for h in 0..kh_size {
+                                let in_off = base + h * padded_w;
+                                let k_off = h * kw_size;
+                                for w in 0..kw_size {
+                                    wg[k_off + w] += inp[in_off + w] * gv;
                                 }
                             }
                         }
-                        wg[[h, w]] = sum;
                     }
                 }
-                wg
+                Array2::from_shape_vec((kh_size, kw_size), wg)
+                    .expect("weight gradient length matches the kernel shape")
             };
             let wg_results: Vec<Array2<f32>> = if parallel {
                 wg_tasks.par_iter().map(wg_run).collect()
@@ -619,35 +625,36 @@ impl Layer for SeparableConv2D {
             let ig_tasks: Vec<(usize, usize)> = (0..batch_size)
                 .flat_map(|b| (0..channels).map(move |c| (b, c)))
                 .collect();
+            // Input gradient for one `(b, c)`: scatter each output position's `kernel * grad` into
+            // the padded input-gradient plane (the transpose of the forward overlap-add), summed
+            // over the depth multiplier - flat buffers, no per-padded-position gather with modulo
             let ig_run = |&(b, c): &(usize, usize)| -> Array2<f32> {
-                let mut plane = Array2::zeros((padded_shape[2], padded_shape[3]));
-                for i in 0..padded_shape[2] {
-                    for j in 0..padded_shape[3] {
-                        let mut sum = 0.0;
-                        for m in 0..self.depth_multiplier {
-                            let output_channel = c * self.depth_multiplier + m;
-                            for h in 0..self.kernel_size.0 {
-                                for w in 0..self.kernel_size.1 {
-                                    if i >= h && j >= w {
-                                        let grad_i = (i - h) / self.strides.0;
-                                        let grad_j = (j - w) / self.strides.1;
-                                        if grad_i < depthwise_shape[2]
-                                            && grad_j < depthwise_shape[3]
-                                            && (i - h) % self.strides.0 == 0
-                                            && (j - w) % self.strides.1 == 0
-                                        {
-                                            sum += depthwise_grad
-                                                [[b, output_channel, grad_i, grad_j]]
-                                                * self.depthwise_weights[[m, c, h, w]];
-                                        }
-                                    }
+                let mut plane = vec![0.0f32; padded_h * padded_w];
+                for m in 0..self.depth_multiplier {
+                    let oc = c * self.depth_multiplier + m;
+                    let g = depthwise_grad.slice(s![b, oc, .., ..]);
+                    let g = g.as_standard_layout();
+                    let g = g.as_slice().expect("grad plane is contiguous");
+                    let kview = self.depthwise_weights.slice(s![m, c, .., ..]);
+                    let ker = kview.as_slice().expect("depthwise kernel is contiguous");
+                    for i in 0..out_h {
+                        let row_base = i * self.strides.0 * padded_w;
+                        let g_row = i * out_w;
+                        for j in 0..out_w {
+                            let gv = g[g_row + j];
+                            let base = row_base + j * self.strides.1;
+                            for h in 0..kh_size {
+                                let off = base + h * padded_w;
+                                let k_off = h * kw_size;
+                                for w in 0..kw_size {
+                                    plane[off + w] += ker[k_off + w] * gv;
                                 }
                             }
                         }
-                        plane[[i, j]] = sum;
                     }
                 }
-                plane
+                Array2::from_shape_vec((padded_h, padded_w), plane)
+                    .expect("input gradient length matches the padded plane")
             };
             let ig_results: Vec<Array2<f32>> = if parallel {
                 ig_tasks.par_iter().map(ig_run).collect()

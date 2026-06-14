@@ -55,6 +55,20 @@ fn gaussian_noise_positive_stddev_construction_ok() {
     assert!(GaussianNoise::new(0.5, vec![4, 4]).is_ok());
 }
 
+/// A non-finite stddev is rejected at construction with a graceful error, rather than passing
+/// validation and panicking later inside `Normal::new(..).unwrap()` in the forward pass
+#[test]
+fn gaussian_noise_non_finite_stddev_returns_err() {
+    for bad in [f32::NAN, f32::INFINITY] {
+        let result = GaussianNoise::new(bad, vec![4, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected Err(InvalidParameter) for stddev={bad}, got {:?}",
+            result
+        );
+    }
+}
+
 // GaussianNoise: identity paths
 
 /// In eval mode the layer returns a tensor element-wise equal to the input
@@ -568,6 +582,29 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
     let expected = &grad * &output;
     for (got, exp) in grad_input.iter().zip(expected.iter()) {
         assert_abs_diff_eq!(got, exp, epsilon = 1e-6);
+    }
+}
+
+/// backward borrows (does not consume) the cached noise, so calling it twice after a single
+/// forward returns the same gradient both times, matching the idempotent backward of the other
+/// dropout layers
+#[test]
+fn gaussian_dropout_backward_is_idempotent() {
+    let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
+        .unwrap()
+        .into_dyn();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3])
+        .unwrap()
+        .with_random_state(42);
+    layer.forward(&input).unwrap();
+
+    let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
+        .unwrap()
+        .into_dyn();
+    let first = layer.backward(&grad).unwrap();
+    let second = layer.backward(&grad).unwrap();
+    for (a, b) in first.iter().zip(second.iter()) {
+        assert_abs_diff_eq!(a, b, epsilon = 0.0);
     }
 }
 

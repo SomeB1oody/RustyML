@@ -164,6 +164,36 @@ fn depthwise_conv2d_input_gradient_matches_finite_difference() {
 }
 
 #[test]
+fn depthwise_conv2d_same_padding_input_gradient_matches_finite_difference() {
+    // 3x3 `Same` kernel adds leading padding; with depthwise routed through the grouped engine this
+    // guards that the engine pads each channel and crops its input gradient back to the input size
+    let mut conv = DepthwiseConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 2, 4, 4),
+        (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_input_gradient(&mut conv, &x, 1e-3, 2e-2);
+}
+
+#[test]
+fn depthwise_conv2d_same_padding_weight_gradient_matches_finite_difference() {
+    let mut conv = DepthwiseConv2D::new(2, (3, 3), vec![1, 2, 4, 4], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
+    let x = Array::from_shape_vec(
+        (1, 2, 4, 4),
+        (0..32).map(|v| 0.05 * v as f32 - 0.7).collect(),
+    )
+    .unwrap()
+    .into_dyn();
+    check_weight_gradient(&mut conv, &x, 1e-3, 2e-2);
+}
+
+#[test]
 fn simple_rnn_input_gradient_matches_finite_difference() {
     // Multi-timestep + Tanh: fails if BPTT reuses a single stale activation cache, so it guards
     // the per-timestep activation-derivative fix

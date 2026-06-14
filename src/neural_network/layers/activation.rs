@@ -117,7 +117,7 @@ impl Activation {
             Activation::Linear => Ok(z.clone()),
             Activation::ReLU => {
                 let mut out = z.clone();
-                let relu = |x: f32| if x > 0.0 { x } else { 0.0 };
+                let relu = |x: f32| if x <= 0.0 { 0.0 } else { x };
                 if out.len() >= CHEAP_MAP_PARALLEL_THRESHOLD {
                     out.par_mapv_inplace(relu);
                 } else {
@@ -299,13 +299,11 @@ fn softmax_backward(output: &Tensor, grad_output: &Tensor) -> Result<Tensor, Err
     let num_features = shape[ndim - 1];
 
     let output_2d = output
-        .to_owned()
-        .into_shape_with_order((batch_size, num_features))
+        .to_shape((batch_size, num_features))
         .context("Failed to reshape output for backward")?;
 
     let grad_output_2d = grad_output
-        .to_owned()
-        .into_shape_with_order((batch_size, num_features))
+        .to_shape((batch_size, num_features))
         .context("Failed to reshape grad_output for backward")?;
 
     let mut grad_input_2d = Array2::<f32>::zeros((batch_size, num_features));

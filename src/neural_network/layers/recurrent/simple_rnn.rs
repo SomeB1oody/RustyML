@@ -206,74 +206,62 @@ impl SimpleRNN {
     fn project_input(&self, x3: &ndarray::ArrayView3<f32>) -> Array3<f32> {
         crate::neural_network::layers::recurrent::gate::project_input(&self.kernel, x3)
     }
+
+    /// Runs the recurrence and returns the last hidden state - the shared numeric body of
+    /// [`Layer::forward`] and [`Layer::predict`]
+    ///
+    /// When `hidden_states` is `Some`, every hidden state (with `h_0 = 0` prepended) is recorded for
+    /// the backward pass; `predict` passes `None` and skips both the recording and its clones
+    fn run(
+        &self,
+        x3: &ndarray::ArrayView3<f32>,
+        mut hidden_states: Option<&mut Vec<Array2<f32>>>,
+    ) -> Result<Array2<f32>, Error> {
+        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
+        let xw = self.project_input(x3);
+
+        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
+        if let Some(hs) = hidden_states.as_deref_mut() {
+            hs.push(h_prev.clone());
+        }
+
+        // Sequential timestep processing is required for an RNN
+        for t in 0..timesteps {
+            // z = x_t @ W + h_{t-1} @ U + b
+            let z = gemm_internal(&h_prev, &self.recurrent_kernel)
+                + xw.index_axis(Axis(1), t)
+                + &self.bias;
+            let h_t = self
+                .activation
+                .forward(&z.into_dyn())?
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
+            h_prev = h_t;
+            if let Some(hs) = hidden_states.as_deref_mut() {
+                hs.push(h_prev.clone());
+            }
+        }
+        Ok(h_prev)
+    }
 }
 
 impl Layer for SimpleRNN {
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
-
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        // input shape (batch, timesteps, input_dim)
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         self.input_cache = Some(x3.to_owned());
 
-        let xw = self.project_input(&x3);
-
-        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
-        let mut hs = Vec::with_capacity(timesteps + 1);
-        hs.push(h_prev.clone());
-
-        // sequential timestep processing is required for an RNN
-        for t in 0..timesteps {
-            // z = x_t @ W + h_{t-1} @ U + b
-            let z = gemm_internal(&h_prev, &self.recurrent_kernel)
-                + xw.index_axis(Axis(1), t)
-                + &self.bias;
-
-            let h_t = self
-                .activation
-                .forward(&z.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            h_prev = h_t.clone();
-            hs.push(h_prev.clone());
-        }
+        let mut hs = Vec::with_capacity(x3.shape()[1] + 1);
+        let h_last = self.run(&x3, Some(&mut hs))?;
         self.hidden_state_cache = Some(hs);
-        Ok(h_prev.into_dyn()) // last timestep's hidden state
+        Ok(h_last.into_dyn()) // last timestep's hidden state
     }
 
     /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         validate_input_3d(input)?;
-
         let x3 = input.view().into_dimensionality::<ndarray::Ix3>().unwrap();
-
-        // input shape (batch, timesteps, input_dim)
-        let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
-
-        // Batched input projection (see `forward`)
-        let xw = self.project_input(&x3);
-
-        let mut h_prev = Array2::<f32>::zeros((batch, self.units));
-
-        // sequential timestep processing is required for an RNN
-        for t in 0..timesteps {
-            // z = x_t @ W + h_{t-1} @ U + b
-            let z = gemm_internal(&h_prev, &self.recurrent_kernel)
-                + xw.index_axis(Axis(1), t)
-                + &self.bias;
-
-            let h_t = self
-                .activation
-                .forward(&z.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
-
-            h_prev = h_t;
-        }
-        Ok(h_prev.into_dyn()) // last timestep's hidden state
+        Ok(self.run(&x3, None)?.into_dyn()) // last timestep's hidden state
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {

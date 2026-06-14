@@ -86,6 +86,7 @@ fn main() {
     sections.push(normalization::calibrate_bn_col_stats_rowblock());
     sections.push(normalization::calibrate_bn_plane_stats());
     sections.push(normalization::calibrate_ln_row_pass());
+    sections.push(nn_kernels::calibrate_spatial_dropout_scale());
     sections.push(trees::calibrate_kd_tree_dims());
 
     for s in &sections {

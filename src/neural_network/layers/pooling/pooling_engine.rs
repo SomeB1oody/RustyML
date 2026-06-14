@@ -204,7 +204,15 @@ pub fn windowed_pool_forward_impl(
                     let v = plane[in_idx];
                     match kind {
                         PoolKind::Max => {
-                            if v > max_val {
+                            // Propagate NaN: once seen it wins and sticks (matches PyTorch/TF and
+                            // the sibling activations); a bare `v > max_val` would silently drop it
+                            // since NaN is never `>` anything
+                            if v.is_nan() {
+                                if !max_val.is_nan() {
+                                    max_val = v;
+                                    max_idx = in_idx;
+                                }
+                            } else if v > max_val {
                                 max_val = v;
                                 max_idx = in_idx;
                             }
@@ -422,7 +430,13 @@ pub(super) fn global_pool_forward(input: &Tensor, kind: PoolKind) -> (Tensor, Op
                 let mut max_val = f32::NEG_INFINITY;
                 let mut max_idx = 0usize;
                 for (i, &v) in plane.iter().enumerate() {
-                    if v > max_val {
+                    // Propagate NaN (see `windowed_pool_forward`): NaN wins and sticks
+                    if v.is_nan() {
+                        if !max_val.is_nan() {
+                            max_val = v;
+                            max_idx = i;
+                        }
+                    } else if v > max_val {
                         max_val = v;
                         max_idx = i;
                     }

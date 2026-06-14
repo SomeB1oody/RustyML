@@ -92,8 +92,9 @@ fn relu_backward_before_forward_is_error() {
     );
 }
 
-/// Non-finite input is no longer rejected: ReLU is pure math (matching the embedded activation),
-/// so +inf passes through while NaN and -inf (neither > 0) map to 0
+/// Non-finite input is not rejected: ReLU is pure math (matching the embedded activation).
+/// NaN propagates (matching sigmoid/tanh/softmax and PyTorch/TF/NumPy), +inf passes through,
+/// and -inf maps to 0
 #[test]
 fn relu_non_finite_input_propagates() {
     let mut layer = ReLU::new();
@@ -102,7 +103,7 @@ fn relu_non_finite_input_propagates() {
         .forward(&input)
         .expect("forward must not reject non-finite input");
     let v = out.as_slice().expect("contiguous");
-    assert_eq!(v[0], 0.0, "NaN is not > 0, so ReLU maps it to 0");
+    assert!(v[0].is_nan(), "NaN propagates through ReLU");
     assert!(v[1].is_infinite() && v[1] > 0.0, "+inf passes through");
     assert_eq!(v[2], 0.0, "-inf maps to 0");
 }
