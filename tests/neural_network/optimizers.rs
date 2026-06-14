@@ -11,18 +11,20 @@
 //! Gradient correctness lives in gradient_check.rs; per-element kernel math in kernels.rs
 
 use approx::assert_abs_diff_eq;
-use ndarray::Array;
+use ndarray::{Array, Array2, ArrayD};
 use rustyml::error::Error;
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
+use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::losses::mean_squared_error::MeanSquaredError;
 use rustyml::neural_network::optimizers::AdaGrad;
 use rustyml::neural_network::optimizers::Adam;
 use rustyml::neural_network::optimizers::RMSprop;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::neural_network::traits::{Layer, Optimizer};
 
 // Helper: simple regression problem
 
@@ -879,6 +881,119 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
     let (w_new, b_new) = dense_wb(&model);
     assert_abs_diff_eq!(w_new, 0.995 + 0.16, epsilon = 1e-5); // 1.155
     assert_abs_diff_eq!(b_new, 0.08, epsilon = 1e-5); // b=0, decay no-op
+}
+
+// Weight decay applies to weights only, not biases or normalization gamma/beta.
+// These run two layers through an identical forward+backward and differ only in `weight_decay`,
+// so any divergence is attributable solely to decay (the gradient values cancel out of the
+// comparison: weight_decay shrinks `value` by `(1 - lr*wd)` before the same gradient step).
+
+/// Runs a Dense(2->2, Linear) with fixed weights/bias through one forward + backward (fixed
+/// nonzero upstream gradient) and one SGD step at the given `weight_decay`, returning the
+/// resulting (weights, bias). Both decay settings see identical gradients
+fn dense_after_one_sgd_step(
+    w0: &Array2<f32>,
+    b0: &Array2<f32>,
+    lr: f32,
+    weight_decay: f32,
+) -> (Array2<f32>, Array2<f32>) {
+    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
+    layer.set_weights(w0.clone(), b0.clone()).unwrap();
+    let x = Array::from_shape_vec((1, 2), vec![1.0_f32, 2.0])
+        .unwrap()
+        .into_dyn();
+    let _ = layer.forward(&x).unwrap();
+    let grad_out = Array::from_shape_vec((1, 2), vec![0.7_f32, -1.3])
+        .unwrap()
+        .into_dyn();
+    layer.backward(&grad_out).unwrap();
+
+    let mut opt = SGD::new(lr, 0.0, false, weight_decay).unwrap();
+    opt.step();
+    opt.update(&mut layer, 1.0);
+    match layer.get_weights() {
+        LayerWeight::Dense(d) => ((*d.weight).clone(), (*d.bias).clone()),
+        _ => panic!("expected Dense weights"),
+    }
+}
+
+/// Decoupled weight decay shrinks Dense weights but leaves the bias untouched:
+/// `weight_decay = w_plain - lr*wd*w0` (exact, independent of the gradient), while the bias is
+/// byte-identical with and without decay
+#[test]
+fn weight_decay_decays_dense_weights_but_skips_bias() {
+    let w0 = Array::from_shape_vec((2, 2), vec![1.0_f32, -2.0, 3.0, -4.0]).unwrap();
+    let b0 = Array::from_shape_vec((1, 2), vec![0.5_f32, -1.5]).unwrap();
+    let (lr, wd) = (0.1_f32, 0.5_f32);
+
+    let (w_plain, b_plain) = dense_after_one_sgd_step(&w0, &b0, lr, 0.0);
+    let (w_decay, b_decay) = dense_after_one_sgd_step(&w0, &b0, lr, wd);
+
+    // Bias is excluded from weight decay -> identical with and without it
+    for i in 0..2 {
+        assert_abs_diff_eq!(b_decay[[0, i]], b_plain[[0, i]], epsilon = 1e-6);
+    }
+    // Weights are decayed by exactly lr*wd*w0 relative to the no-decay step
+    for i in 0..2 {
+        for j in 0..2 {
+            assert_abs_diff_eq!(
+                w_decay[[i, j]],
+                w_plain[[i, j]] - lr * wd * w0[[i, j]],
+                epsilon = 1e-6
+            );
+        }
+    }
+    // Guard against a vacuous pass: decay must have actually moved the weights
+    assert!(
+        (w_decay[[0, 0]] - w_plain[[0, 0]]).abs() > 1e-4,
+        "weight decay should change the weights"
+    );
+}
+
+/// Runs a BatchNormalization layer (gamma=1, beta=0) through one training forward + backward
+/// (fixed nonzero upstream gradient) and one SGD step at the given `weight_decay`, returning the
+/// resulting (gamma, beta)
+fn batchnorm_gamma_beta_after_one_sgd_step(weight_decay: f32) -> (ArrayD<f32>, ArrayD<f32>) {
+    let mut bn = BatchNormalization::new(vec![2, 3], 0.9, 1e-5).unwrap();
+    bn.set_training_if_mode_dependent(true);
+    let x = Array::from_shape_vec((2, 3), vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0])
+        .unwrap()
+        .into_dyn();
+    let _ = bn.forward(&x).unwrap();
+    let grad_out = Array::from_shape_vec((2, 3), vec![0.5_f32, -0.5, 1.0, -1.0, 0.25, -0.25])
+        .unwrap()
+        .into_dyn();
+    bn.backward(&grad_out).unwrap();
+
+    let mut opt = SGD::new(0.1, 0.0, false, weight_decay).unwrap();
+    opt.step();
+    opt.update(&mut bn, 1.0);
+    match bn.get_weights() {
+        LayerWeight::BatchNormalization(w) => ((*w.gamma).clone(), (*w.beta).clone()),
+        _ => panic!("expected BatchNormalization weights"),
+    }
+}
+
+/// Normalization scale/shift (gamma/beta) are excluded from weight decay: a non-zero
+/// `weight_decay` produces a byte-identical update to no decay at all
+#[test]
+fn weight_decay_skips_batchnorm_gamma_and_beta() {
+    let (g_plain, b_plain) = batchnorm_gamma_beta_after_one_sgd_step(0.0);
+    let (g_decay, b_decay) = batchnorm_gamma_beta_after_one_sgd_step(0.5);
+
+    assert_eq!(g_plain.shape(), g_decay.shape());
+    for (p, d) in g_plain.iter().zip(g_decay.iter()) {
+        assert_abs_diff_eq!(*p, *d, epsilon = 1e-6);
+    }
+    for (p, d) in b_plain.iter().zip(b_decay.iter()) {
+        assert_abs_diff_eq!(*p, *d, epsilon = 1e-6);
+    }
+    // Guard against a vacuous pass: gamma must have actually been updated by the gradient step
+    // (so the "identical" check above is comparing moved values, not two untouched 1.0 arrays)
+    assert!(
+        g_plain.iter().any(|&v| (v - 1.0).abs() > 1e-5),
+        "gamma should have a non-trivial gradient update"
+    );
 }
 
 /// SGD with momentum still drives MSE strictly down on the seeded regression problem

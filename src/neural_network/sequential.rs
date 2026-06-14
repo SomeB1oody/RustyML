@@ -332,6 +332,13 @@ impl Sequential {
     /// - `y` - Target tensor containing expected outputs
     /// - `epochs` - Number of training epochs to perform
     ///
+    /// # Notes
+    ///
+    /// Each epoch trains on the entire dataset as a single full-batch gradient step (there is only
+    /// one batch, so no shuffling happens and the fit-time seed is unused). For mini-batch training
+    /// that splits the data into fixed-size batches and reshuffles every epoch, use
+    /// [`fit_with_batches`](Self::fit_with_batches) instead.
+    ///
     /// # Returns
     ///
     /// - `Result<&mut Self, Error>` - Mutable reference to self after training or an error
@@ -386,6 +393,13 @@ impl Sequential {
     /// - `y` - Target output data tensor
     /// - `epochs` - Number of training epochs
     /// - `batch_size` - Size of each training batch
+    ///
+    /// # Notes
+    ///
+    /// The sample order is reshuffled at the start of every epoch; seed it via
+    /// [`set_seed`](Self::set_seed) / [`new_with_seed`](Self::new_with_seed) for a reproducible
+    /// shuffle. To train on the whole dataset as a single full-batch gradient
+    /// step per epoch instead (no batching, no shuffling), use [`fit`](Self::fit).
     ///
     /// # Returns
     ///
@@ -452,51 +466,39 @@ impl Sequential {
             "[{elapsed_precise}] {bar:40} {pos}/{len} | Epoch {msg}",
         );
 
-        // Training loop
-        #[cfg(feature = "show_progress")]
+        // Training loop: shuffle each epoch, then process fixed-size batches. Only the progress-bar
+        // bookkeeping is gated on `show_progress`; the shuffle/chunk/train logic is single-source
         for epoch in 0..epochs {
             // Shuffle data at the beginning of each epoch
             indices.shuffle(&mut shuffle_rng);
 
-            let mut epoch_loss = 0.0;
-            let mut batch_count = 0;
+            #[cfg(feature = "show_progress")]
+            let (mut epoch_loss, mut batch_count) = (0.0_f32, 0_usize);
 
             // Process data in batches
             for batch_indices in indices.chunks(batch_size) {
-                batch_count += 1;
-
-                // Create batch tensors
+                // Create batch tensors and train on this batch
                 let (batch_x, batch_y) = create_batch_tensors(x, y, batch_indices)?;
-
-                // Train on this batch
                 let batch_loss = self.train_batch(&batch_x, &batch_y)?;
-                epoch_loss += batch_loss;
 
-                // Update progress bar
-                let avg_loss = epoch_loss / batch_count as f32;
-                progress_bar.set_message(format!(
-                    "{}/{} | Avg Loss: {:.6}",
-                    epoch + 1,
-                    epochs,
-                    avg_loss
-                ));
-                progress_bar.inc(1);
+                #[cfg(feature = "show_progress")]
+                {
+                    batch_count += 1;
+                    epoch_loss += batch_loss;
+                    progress_bar.set_message(format!(
+                        "{}/{} | Avg Loss: {:.6}",
+                        epoch + 1,
+                        epochs,
+                        epoch_loss / batch_count as f32
+                    ));
+                    progress_bar.inc(1);
+                }
+                #[cfg(not(feature = "show_progress"))]
+                let _ = batch_loss;
             }
-        }
 
-        #[cfg(not(feature = "show_progress"))]
-        for _ in 0..epochs {
-            // Shuffle data at the beginning of each epoch
-            indices.shuffle(&mut shuffle_rng);
-
-            // Process data in batches
-            for batch_indices in indices.chunks(batch_size) {
-                // Create batch tensors
-                let (batch_x, batch_y) = create_batch_tensors(x, y, batch_indices)?;
-
-                // Train on this batch
-                let _ = self.train_batch(&batch_x, &batch_y)?;
-            }
+            #[cfg(not(feature = "show_progress"))]
+            let _ = epoch;
         }
 
         // Finish progress bar

@@ -125,28 +125,25 @@ impl FusedGates {
             grad_recurrent_kernel.as_ref(),
             grad_bias.as_ref(),
         ) {
-            params.push(ParamGrad {
-                value: kernel
+            params.push(ParamGrad::weight(
+                kernel
                     .as_slice_mut()
                     .expect("fused kernel must be contiguous"),
-                grad: gk
-                    .as_slice()
+                gk.as_slice()
                     .expect("fused kernel gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: recurrent_kernel
+            ));
+            params.push(ParamGrad::weight(
+                recurrent_kernel
                     .as_slice_mut()
                     .expect("fused recurrent kernel must be contiguous"),
-                grad: grk
-                    .as_slice()
+                grk.as_slice()
                     .expect("fused recurrent kernel gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: bias.as_slice_mut().expect("fused bias must be contiguous"),
-                grad: gb
-                    .as_slice()
+            ));
+            params.push(ParamGrad::no_decay(
+                bias.as_slice_mut().expect("fused bias must be contiguous"),
+                gb.as_slice()
                     .expect("fused bias gradient must be contiguous"),
-            });
+            ));
         }
         params
     }

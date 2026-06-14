@@ -374,22 +374,21 @@ impl Layer for SimpleRNN {
             grad_recurrent_kernel.as_ref(),
             grad_bias.as_ref(),
         ) {
-            params.push(ParamGrad {
-                value: kernel.as_slice_mut().expect("kernel must be contiguous"),
-                grad: gk.as_slice().expect("kernel gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: recurrent_kernel
+            params.push(ParamGrad::weight(
+                kernel.as_slice_mut().expect("kernel must be contiguous"),
+                gk.as_slice().expect("kernel gradient must be contiguous"),
+            ));
+            params.push(ParamGrad::weight(
+                recurrent_kernel
                     .as_slice_mut()
                     .expect("recurrent kernel must be contiguous"),
-                grad: grk
-                    .as_slice()
+                grk.as_slice()
                     .expect("recurrent kernel gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: bias.as_slice_mut().expect("bias must be contiguous"),
-                grad: gb.as_slice().expect("bias gradient must be contiguous"),
-            });
+            ));
+            params.push(ParamGrad::no_decay(
+                bias.as_slice_mut().expect("bias must be contiguous"),
+                gb.as_slice().expect("bias gradient must be contiguous"),
+            ));
         }
         params
     }

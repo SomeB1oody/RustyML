@@ -725,26 +725,24 @@ impl Layer for SeparableConv2D {
             pointwise_weight_gradients.as_ref(),
             bias_gradients.as_ref(),
         ) {
-            params.push(ParamGrad {
-                value: depthwise_weights
+            params.push(ParamGrad::weight(
+                depthwise_weights
                     .as_slice_mut()
                     .expect("depthwise weights must be contiguous"),
-                grad: gd
-                    .as_slice()
+                gd.as_slice()
                     .expect("depthwise weight gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: pointwise_weights
+            ));
+            params.push(ParamGrad::weight(
+                pointwise_weights
                     .as_slice_mut()
                     .expect("pointwise weights must be contiguous"),
-                grad: gp
-                    .as_slice()
+                gp.as_slice()
                     .expect("pointwise weight gradient must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: bias.as_slice_mut().expect("bias must be contiguous"),
-                grad: gb.as_slice().expect("bias gradient must be contiguous"),
-            });
+            ));
+            params.push(ParamGrad::no_decay(
+                bias.as_slice_mut().expect("bias must be contiguous"),
+                gb.as_slice().expect("bias gradient must be contiguous"),
+            ));
         }
         params
     }

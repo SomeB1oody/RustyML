@@ -68,8 +68,10 @@ impl Loss for MeanAbsoluteError {
                 1.0 / n
             } else if x < 0.0 {
                 -1.0 / n
-            } else {
+            } else if x == 0.0 {
                 0.0
+            } else {
+                f32::NAN
             }
         });
         Ok(result)

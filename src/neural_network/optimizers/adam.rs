@@ -145,7 +145,10 @@ impl Optimizer for Adam {
             let state = &mut self.states[self.cursor];
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
             // Decoupled (AdamW) weight decay shrinks the parameter before the adaptive step
-            kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            // (weights only; biases and normalization gamma/beta are excluded)
+            if pg.decays {
+                kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            }
             kernels::adam_step(
                 pg.value,
                 &grad,

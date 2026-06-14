@@ -284,14 +284,14 @@ impl Layer for Dense {
         } = self;
         let mut params = Vec::new();
         if let (Some(grad_a), Some(grad_b)) = (grad_weights.as_ref(), grad_bias.as_ref()) {
-            params.push(ParamGrad {
-                value: weights.as_slice_mut().expect("weights must be contiguous"),
-                grad: grad_a.as_slice().expect("grad_weights must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: bias.as_slice_mut().expect("bias must be contiguous"),
-                grad: grad_b.as_slice().expect("grad_bias must be contiguous"),
-            });
+            params.push(ParamGrad::weight(
+                weights.as_slice_mut().expect("weights must be contiguous"),
+                grad_a.as_slice().expect("grad_weights must be contiguous"),
+            ));
+            params.push(ParamGrad::no_decay(
+                bias.as_slice_mut().expect("bias must be contiguous"),
+                grad_b.as_slice().expect("grad_bias must be contiguous"),
+            ));
         }
         params
     }

@@ -117,8 +117,11 @@ impl Optimizer for RMSprop {
                 self.caches[self.cursor] = vec![0.0; pg.value.len()];
             }
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
-            // Decoupled weight decay shrinks the parameter before the adaptive step
-            kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            // Decoupled weight decay shrinks the parameter before the adaptive step (weights
+            // only; biases and normalization gamma/beta are excluded)
+            if pg.decays {
+                kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            }
             kernels::rmsprop_step(
                 pg.value,
                 &grad,

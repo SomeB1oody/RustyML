@@ -111,8 +111,11 @@ impl Optimizer for SGD {
     fn update(&mut self, layer: &mut dyn Layer, grad_scale: f32) {
         for pg in layer.parameters() {
             let grad = kernels::scaled_grad(pg.grad, grad_scale);
-            // Decoupled weight decay shrinks the parameter before the gradient step
-            kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            // Decoupled weight decay shrinks the parameter before the gradient step (weights
+            // only; biases and normalization gamma/beta are excluded)
+            if pg.decays {
+                kernels::apply_weight_decay(pg.value, self.learning_rate, self.weight_decay);
+            }
 
             if self.momentum == 0.0 {
                 kernels::sgd_step(pg.value, &grad, self.learning_rate);

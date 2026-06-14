@@ -111,7 +111,7 @@ impl Loss for CategoricalCrossEntropy {
                 .to_shape((b, c))
                 .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
             let (log_sm, _) = stable_log_softmax_softmax(&logits.view());
-            return Ok(-(&labels.to_owned() * &log_sm).sum() / n);
+            return Ok(-(&labels * &log_sm).sum() / n);
         }
 
         // Probability path
@@ -134,7 +134,7 @@ impl Loss for CategoricalCrossEntropy {
                 .to_shape((b, c))
                 .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
             let (_, sm) = stable_log_softmax_softmax(&logits.view());
-            let grad2d = (&sm - &labels.to_owned()) / n;
+            let grad2d = (&sm - &labels) / n;
             let grad = grad2d
                 .into_shape_with_order(y_pred.raw_dim())
                 .map_err(|e| Error::computation(format!("CCE gradient reshape failed: {e}")))?;

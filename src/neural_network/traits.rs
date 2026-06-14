@@ -12,11 +12,39 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 /// `ParamGrad`s so that optimizers can update any parameter shape with one flat-slice kernel,
 /// instead of every layer/optimizer pair re-implementing the update. `value` and `grad` always
 /// have the same length and the same element ordering
+///
+/// Construct one with [`ParamGrad::weight`] for tensors that decoupled weight decay applies to
+/// (weight matrices, conv/recurrent kernels) and [`ParamGrad::no_decay`] for tensors it skips
+/// (biases and normalization scale/shift `gamma`/`beta`), so the optimizer never has to guess
 pub struct ParamGrad<'a> {
     /// Mutable view of the parameter's contiguous data, updated in place by the optimizer
     pub value: &'a mut [f32],
     /// The corresponding gradient data (same length and ordering as `value`)
     pub grad: &'a [f32],
+    /// Whether decoupled (AdamW/SGDW-style) weight decay applies to this tensor. `true` for
+    /// weight matrices and conv/recurrent kernels; `false` for biases and normalization
+    /// scale/shift (`gamma`/`beta`)
+    pub decays: bool,
+}
+
+impl<'a> ParamGrad<'a> {
+    /// A weight tensor that decoupled weight decay applies to (dense/conv/recurrent kernels)
+    pub fn weight(value: &'a mut [f32], grad: &'a [f32]) -> Self {
+        Self {
+            value,
+            grad,
+            decays: true,
+        }
+    }
+
+    /// A bias or normalization scale/shift (`gamma`/`beta`) tensor that weight decay skips
+    pub fn no_decay(value: &'a mut [f32], grad: &'a [f32]) -> Self {
+        Self {
+            value,
+            grad,
+            decays: false,
+        }
+    }
 }
 
 /// Defines the interface for neural network layers

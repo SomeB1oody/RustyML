@@ -750,14 +750,14 @@ impl Layer for LayerNormalization {
         } = self;
         let mut params = Vec::new();
         if let (Some(grad_a), Some(grad_b)) = (grad_gamma.as_ref(), grad_beta.as_ref()) {
-            params.push(ParamGrad {
-                value: gamma.as_slice_mut().expect("gamma must be contiguous"),
-                grad: grad_a.as_slice().expect("grad_gamma must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: beta.as_slice_mut().expect("beta must be contiguous"),
-                grad: grad_b.as_slice().expect("grad_beta must be contiguous"),
-            });
+            params.push(ParamGrad::no_decay(
+                gamma.as_slice_mut().expect("gamma must be contiguous"),
+                grad_a.as_slice().expect("grad_gamma must be contiguous"),
+            ));
+            params.push(ParamGrad::no_decay(
+                beta.as_slice_mut().expect("beta must be contiguous"),
+                grad_b.as_slice().expect("grad_beta must be contiguous"),
+            ));
         }
         params
     }

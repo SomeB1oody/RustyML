@@ -640,18 +640,18 @@ impl Layer for DepthwiseConv2D {
         } = self;
         let mut params = Vec::new();
         if let (Some(grad_a), Some(grad_b)) = (weight_gradients.as_ref(), bias_gradients.as_ref()) {
-            params.push(ParamGrad {
-                value: weights.as_slice_mut().expect("weights must be contiguous"),
-                grad: grad_a
+            params.push(ParamGrad::weight(
+                weights.as_slice_mut().expect("weights must be contiguous"),
+                grad_a
                     .as_slice()
                     .expect("weight_gradients must be contiguous"),
-            });
-            params.push(ParamGrad {
-                value: bias.as_slice_mut().expect("bias must be contiguous"),
-                grad: grad_b
+            ));
+            params.push(ParamGrad::no_decay(
+                bias.as_slice_mut().expect("bias must be contiguous"),
+                grad_b
                     .as_slice()
                     .expect("bias_gradients must be contiguous"),
-            });
+            ));
         }
         params
     }

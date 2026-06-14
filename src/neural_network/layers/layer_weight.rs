@@ -1,6 +1,6 @@
 //! Weight containers for neural network layers
 //!
-//! Defines the [`LayerWeight`] enum and the per-layer weight structs it wraps. Each struct holds
+//! Defines the [`LayerWeight`](LayerWeight<'a>) enum and the per-layer weight structs it wraps. Each struct holds
 //! its arrays as [`Cow`], so the same type serves both directions: [`Layer::get_weights`] borrows
 //! the live layer arrays (no clone) for inspection or saving, while loading deserializes into
 //! owned arrays. The enum derives `Serialize`/`Deserialize`, so it is the on-disk weight format
