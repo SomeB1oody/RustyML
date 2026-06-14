@@ -37,9 +37,9 @@ use std::borrow::Cow;
 ///
 /// // Build the model
 /// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 3, Activation::ReLU, None).unwrap())
-///     .add(Dense::new(3, 1, Activation::ReLU, None).unwrap());
-/// model.compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+/// model.add(Dense::new(4, 3, Activation::ReLU).unwrap())
+///     .add(Dense::new(3, 1, Activation::ReLU).unwrap());
+/// model.compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure (summary)
 /// model.summary();
@@ -82,8 +82,11 @@ impl Dense {
     /// - `units` - Number of units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation applied to the linear output (any value convertible into
     ///   [`Activation`], e.g. `Activation::ReLU` or a standalone activation layer)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global
-    ///   seed or entropy. See [`crate::random`]
+    ///
+    /// # Notes
+    ///
+    /// Weights are seeded from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`Dense::with_random_state`].
     ///
     /// # Returns
     ///
@@ -96,7 +99,6 @@ impl Dense {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         // Validate that dimensions are greater than zero
         if input_dim == 0 {
@@ -109,25 +111,51 @@ impl Dense {
             return Err(Error::invalid_parameter("units", "must be greater than 0"));
         }
 
-        let limit = (6.0 / (input_dim + units) as f32).sqrt();
-        let mut rng = crate::random::make_rng(random_state);
-        let weights = Array::random_using(
-            (input_dim, units),
-            Uniform::new(-limit, limit).unwrap(),
-            &mut rng,
-        );
-        let bias = Array::zeros((1, units));
         Ok(Self {
             input_dim,
             output_dim: units,
-            weights,
-            bias,
+            weights: Self::init_weights_array(input_dim, units, None),
+            bias: Array::zeros((1, units)),
             input_cache: None,
             output_cache: None,
             grad_weights: None,
             grad_bias: None,
             activation: activation.into(),
         })
+    }
+
+    /// Sets the seed used to initialize the weights and re-initializes them deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
+    /// assigning custom weights or training. The bias stays zero-initialized.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        self.weights =
+            Self::init_weights_array(self.input_dim, self.output_dim, Some(random_state));
+        self
+    }
+
+    /// Xavier/Glorot uniform weight initialization for the given dimensions and seed
+    fn init_weights_array(
+        input_dim: usize,
+        units: usize,
+        random_state: Option<u64>,
+    ) -> Array2<f32> {
+        let limit = (6.0 / (input_dim + units) as f32).sqrt();
+        let mut rng = crate::random::make_rng(random_state);
+        Array::random_using(
+            (input_dim, units),
+            Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
+        )
     }
 
     /// Sets the weights and bias for this layer

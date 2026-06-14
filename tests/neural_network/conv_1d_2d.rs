@@ -22,16 +22,7 @@ use super::common::assert_allclose;
 /// All-ones kernel=3, stride=1, Valid, Linear: each output is a windowed sum
 #[test]
 fn conv1d_all_ones_kernel_windowed_sums() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -51,16 +42,7 @@ fn conv1d_all_ones_kernel_windowed_sums() {
 /// All-ones kernel, stride=2, Valid: selects every other window
 #[test]
 fn conv1d_stride2_windowed_sums() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 6],
-        2,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 6], 2, Linear::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -80,16 +62,7 @@ fn conv1d_stride2_windowed_sums() {
 /// Asymmetric kernel weight=[2, 0, 1], bias=0: output respects tap positions
 #[test]
 fn conv1d_asymmetric_kernel_values() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     // weight shape [filters=1, channels=1, kernel=3]
     let weights = Array3::from_shape_vec((1, 1, 3), vec![2.0f32, 0.0, 1.0]).unwrap();
     let bias = Array2::zeros((1, 1));
@@ -110,16 +83,7 @@ fn conv1d_asymmetric_kernel_values() {
 /// Bias adds a constant to every output element
 #[test]
 fn conv1d_bias_offset_adds_to_every_output() {
-    let mut layer = Conv1D::new(
-        1,
-        2,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 2, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let weights = Array3::from_shape_vec((1, 1, 2), vec![1.0f32, 0.0]).unwrap();
     let bias = Array2::from_elem((1, 1), 5.0f32);
     layer.set_weights(weights, bias).unwrap();
@@ -139,16 +103,7 @@ fn conv1d_bias_offset_adds_to_every_output() {
 /// Two filters share an all-ones kernel but differ in bias, producing independent outputs
 #[test]
 fn conv1d_two_filters_independent_outputs() {
-    let mut layer = Conv1D::new(
-        2,
-        2,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap();
     // weight [2, 1, 2]: filter0=[1,1], filter1=[1,1]; bias [1, 2]: [0, 10]
     let weights = Array3::from_shape_vec((2, 1, 2), vec![1.0f32, 1.0, 1.0, 1.0]).unwrap();
     let bias = Array2::from_shape_vec((1, 2), vec![0.0f32, 10.0]).unwrap();
@@ -174,16 +129,7 @@ fn conv1d_two_filters_independent_outputs() {
 /// ReLU activation clips negative pre-activations to zero
 #[test]
 fn conv1d_relu_activation_clips_negatives() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        ReLU::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, ReLU::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -203,16 +149,9 @@ fn conv1d_relu_activation_clips_negatives() {
 /// Same padding, stride=1: output length stays at input length with symmetric zero padding
 #[test]
 fn conv1d_same_padding_forward_values() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -232,16 +171,9 @@ fn conv1d_same_padding_forward_values() {
 /// Same padding, stride=2: output length is ceil(input_len / stride) with trailing-only pad
 #[test]
 fn conv1d_same_padding_stride2_output_length_and_values() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 6],
-        2,
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 6], 2, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -261,16 +193,7 @@ fn conv1d_same_padding_stride2_output_length_and_values() {
 /// Batch size > 1: identical samples are processed independently and yield identical outputs
 #[test]
 fn conv1d_batch_forward_independent_samples() {
-    let mut layer = Conv1D::new(
-        1,
-        2,
-        vec![2, 1, 4],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 2, vec![2, 1, 4], 1, Linear::new()).unwrap();
     let weights = Array3::from_shape_vec((1, 1, 2), vec![1.0f32, 1.0]).unwrap();
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -293,16 +216,7 @@ fn conv1d_batch_forward_independent_samples() {
 /// input_length == kernel_size produces exactly one output element
 #[test]
 fn conv1d_input_equals_kernel_produces_single_output() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 3],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 3], 1, Linear::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -319,16 +233,7 @@ fn conv1d_input_equals_kernel_produces_single_output() {
 /// Two input channels: the filter sums contributions across both channels
 #[test]
 fn conv1d_two_input_channels_cross_channel_sum() {
-    let mut layer = Conv1D::new(
-        1,
-        2,
-        vec![1, 2, 3],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 2, vec![1, 2, 3], 1, Linear::new()).unwrap();
     // weight [1, 2, 2]: filter 0 channel 0 = [1,1], channel 1 = [2,2]
     let weights = Array3::from_shape_vec((1, 2, 2), vec![1.0f32, 1.0, 2.0, 2.0]).unwrap();
     let bias = Array2::zeros((1, 1));
@@ -351,16 +256,7 @@ fn conv1d_two_input_channels_cross_channel_sum() {
 #[test]
 fn conv1d_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let layer = Conv1D::new(
-        4,
-        2,
-        vec![1, 3, 8],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv1D::new(4, 2, vec![1, 3, 8], 1, Linear::new()).unwrap();
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(28));
 }
 
@@ -368,16 +264,7 @@ fn conv1d_param_count_formula() {
 #[test]
 fn conv1d_param_count_single_channel() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let layer = Conv1D::new(
-        2,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv1D::new(2, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(8));
 }
 
@@ -386,16 +273,7 @@ fn conv1d_param_count_single_channel() {
 /// set_weights with the correct shape succeeds and the forward output reflects it
 #[test]
 fn conv1d_set_weights_correct_shape_succeeds() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
 
     // All-twos weights: output is 2x the windowed sum
     let weights = Array3::from_elem((1, 1, 3), 2.0f32);
@@ -416,16 +294,7 @@ fn conv1d_set_weights_correct_shape_succeeds() {
 /// set_weights with a mismatched weight shape returns a WeightShape error
 #[test]
 fn conv1d_set_weights_mismatched_weight_shape_errors() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
 
     // Wrong weight shape [2, 1, 3] instead of [1, 1, 3]
     let wrong_weights = Array3::zeros((2, 1, 3));
@@ -444,16 +313,7 @@ fn conv1d_set_weights_mismatched_weight_shape_errors() {
 /// set_weights with a mismatched bias shape returns a WeightShape error
 #[test]
 fn conv1d_set_weights_mismatched_bias_shape_errors() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
 
     let weights = Array3::zeros((1, 1, 3));
     // Wrong bias [1, 2] instead of [1, 1]
@@ -473,15 +333,7 @@ fn conv1d_set_weights_mismatched_bias_shape_errors() {
 
 #[test]
 fn conv1d_filters_zero_errors() {
-    let result = Conv1D::new(
-        0,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(0, 3, vec![1, 1, 5], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for filters=0, got {:?}",
@@ -491,15 +343,7 @@ fn conv1d_filters_zero_errors() {
 
 #[test]
 fn conv1d_kernel_size_zero_errors() {
-    let result = Conv1D::new(
-        1,
-        0,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(1, 0, vec![1, 1, 5], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for kernel_size=0, got {:?}",
@@ -509,15 +353,7 @@ fn conv1d_kernel_size_zero_errors() {
 
 #[test]
 fn conv1d_stride_zero_errors() {
-    let result = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        0,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(1, 3, vec![1, 1, 5], 0, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride=0, got {:?}",
@@ -528,7 +364,7 @@ fn conv1d_stride_zero_errors() {
 /// input_shape must be 3D; a 2D shape returns InvalidInput
 #[test]
 fn conv1d_wrong_input_ndim_2d_errors() {
-    let result = Conv1D::new(1, 3, vec![1, 5], 1, PaddingType::Valid, Linear::new(), None);
+    let result = Conv1D::new(1, 3, vec![1, 5], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 2D input_shape, got {:?}",
@@ -539,15 +375,7 @@ fn conv1d_wrong_input_ndim_2d_errors() {
 /// input_shape must be 3D; a 4D shape returns InvalidInput
 #[test]
 fn conv1d_wrong_input_ndim_4d_errors() {
-    let result = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(1, 3, vec![1, 1, 5, 5], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 4D input_shape, got {:?}",
@@ -558,15 +386,7 @@ fn conv1d_wrong_input_ndim_4d_errors() {
 /// input_shape with channels=0 returns InvalidInput
 #[test]
 fn conv1d_zero_input_channels_errors() {
-    let result = Conv1D::new(
-        1,
-        3,
-        vec![1, 0, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(1, 3, vec![1, 0, 5], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for channels=0, got {:?}",
@@ -578,15 +398,7 @@ fn conv1d_zero_input_channels_errors() {
 #[test]
 fn conv1d_input_smaller_than_kernel_errors() {
     // length=2 < kernel=3
-    let result = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 2],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv1D::new(1, 3, vec![1, 1, 2], 1, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput when input length < kernel, got {:?}",
@@ -599,16 +411,7 @@ fn conv1d_input_smaller_than_kernel_errors() {
 /// Passing a 2D tensor to forward() returns InvalidInput
 #[test]
 fn conv1d_forward_wrong_ndim_errors() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let bad_input = Array::zeros((1_usize, 5_usize)).into_dyn();
     let result = layer.forward(&bad_input);
     assert!(
@@ -621,16 +424,7 @@ fn conv1d_forward_wrong_ndim_errors() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv1d_backward_before_forward_errors() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 1_usize, 3_usize)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -648,16 +442,7 @@ fn conv1d_backward_before_forward_errors() {
 /// predict() returns the same values as forward() for a deterministic layer
 #[test]
 fn conv1d_predict_equals_forward() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -675,16 +460,7 @@ fn conv1d_predict_equals_forward() {
 /// predict() returns the same result across repeated calls
 #[test]
 fn conv1d_predict_deterministic() {
-    let mut layer = Conv1D::new(
-        1,
-        3,
-        vec![1, 1, 5],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv1D::new(1, 3, vec![1, 1, 5], 1, Linear::new()).unwrap();
     let weights = Array3::from_elem((1, 1, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -703,16 +479,7 @@ fn conv1d_predict_deterministic() {
 /// get_weights returns Conv1D weights with shape [filters, channels, kernel] and bias [1, filters]
 #[test]
 fn conv1d_get_weights_correct_shapes() {
-    let layer = Conv1D::new(
-        3,
-        5,
-        vec![1, 2, 10],
-        1,
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv1D::new(3, 5, vec![1, 2, 10], 1, Linear::new()).unwrap();
     match layer.get_weights() {
         LayerWeight::Conv1D(w) => {
             assert_eq!(w.weight.shape(), &[3, 2, 5]);
@@ -727,16 +494,7 @@ fn conv1d_get_weights_correct_shapes() {
 /// All-ones 2x2 kernel, 1 channel, Valid, stride=(1,1): each output is a 2x2 windowed sum
 #[test]
 fn conv2d_all_ones_kernel_windowed_sums() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 2, 2), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -760,16 +518,7 @@ fn conv2d_all_ones_kernel_windowed_sums() {
 /// 1x1 kernel acts as a per-element scalar multiply
 #[test]
 fn conv2d_1x1_kernel_scalar_multiply() {
-    let mut layer = Conv2D::new(
-        1,
-        (1, 1),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (1, 1), vec![1, 1, 3, 3], (1, 1), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 1, 1), 2.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -792,16 +541,7 @@ fn conv2d_1x1_kernel_scalar_multiply() {
 /// Bias adds a constant to every output element
 #[test]
 fn conv2d_bias_shifts_all_outputs() {
-    let mut layer = Conv2D::new(
-        1,
-        (1, 1),
-        vec![1, 1, 2, 2],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (1, 1), vec![1, 1, 2, 2], (1, 1), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 1, 1), 1.0f32);
     let bias = Array2::from_elem((1, 1), 3.0f32);
     layer.set_weights(weights, bias).unwrap();
@@ -821,16 +561,7 @@ fn conv2d_bias_shifts_all_outputs() {
 /// stride=(2,2) with Valid padding: output shape is floor((H-k)/s)+1 with strided windows
 #[test]
 fn conv2d_stride2_valid_output_shape_and_values() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (2, 2),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (2, 2), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 2, 2), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -851,16 +582,7 @@ fn conv2d_stride2_valid_output_shape_and_values() {
 /// Two filters with independent weight patterns: all-ones kernel vs top-left-only kernel
 #[test]
 fn conv2d_two_filters_independent_outputs() {
-    let mut layer = Conv2D::new(
-        2,
-        (2, 2),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(2, (2, 2), vec![1, 1, 3, 3], (1, 1), Linear::new()).unwrap();
     // weight [2, 1, 2, 2]: filter0 = [[1,1],[1,1]], filter1 = [[1,0],[0,0]]
     let weights = Array4::from_shape_vec(
         (2, 1, 2, 2),
@@ -894,16 +616,7 @@ fn conv2d_two_filters_independent_outputs() {
 /// ReLU clips negative pre-activations to zero
 #[test]
 fn conv2d_relu_clips_negatives() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 1),
-        vec![1, 1, 3, 1],
-        (1, 1),
-        PaddingType::Valid,
-        ReLU::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 1), vec![1, 1, 3, 1], (1, 1), ReLU::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 2, 1), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -922,31 +635,17 @@ fn conv2d_relu_clips_negatives() {
 #[test]
 fn conv2d_same_padding_output_shapes() {
     // Case 1: stride=(1,1)
-    let mut layer1 = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 5],
-        (1, 1),
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer1 = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let x1 = Array::ones((1, 1, 5, 5)).into_dyn();
     let out1 = layer1.forward(&x1).unwrap();
     assert_eq!(out1.shape(), &[1, 1, 5, 5]);
 
     // Case 2: stride=(2,2): ceil(4/2)=2
-    let mut layer2 = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 4, 4],
-        (2, 2),
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer2 = Conv2D::new(1, (3, 3), vec![1, 1, 4, 4], (2, 2), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let x2 = Array::ones((1, 1, 4, 4)).into_dyn();
     let out2 = layer2.forward(&x2).unwrap();
     assert_eq!(out2.shape(), &[1, 1, 2, 2]);
@@ -955,16 +654,9 @@ fn conv2d_same_padding_output_shapes() {
 /// Same padding with all-ones kernel and input: corners sum 4, edges 6, center 9 ones
 #[test]
 fn conv2d_same_padding_all_ones_values() {
-    let mut layer = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (3, 3), vec![1, 1, 3, 3], (1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let weights = Array4::from_elem((1, 1, 3, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -993,16 +685,7 @@ fn conv2d_same_padding_all_ones_values() {
 #[test]
 fn conv2d_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let layer = Conv2D::new(
-        2,
-        (3, 3),
-        vec![1, 3, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv2D::new(2, (3, 3), vec![1, 3, 5, 5], (1, 1), Linear::new()).unwrap();
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(56));
 }
 
@@ -1010,16 +693,7 @@ fn conv2d_param_count_formula() {
 #[test]
 fn conv2d_param_count_single_filter_single_channel() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     assert_eq!(layer.param_count(), TrainingParameters::Trainable(5));
 }
 
@@ -1028,16 +702,7 @@ fn conv2d_param_count_single_filter_single_channel() {
 /// set_weights with the correct shape succeeds and new weights change the output
 #[test]
 fn conv2d_set_weights_correct_shape_succeeds() {
-    let mut layer = Conv2D::new(
-        1,
-        (1, 1),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (1, 1), vec![1, 1, 3, 3], (1, 1), Linear::new()).unwrap();
     // weight=3.0 with a 1x1 kernel: output is 3 * input
     let weights = Array4::from_elem((1, 1, 1, 1), 3.0f32);
     let bias = Array2::zeros((1, 1));
@@ -1064,16 +729,7 @@ fn conv2d_set_weights_correct_shape_succeeds() {
 /// set_weights with a mismatched weight shape returns a WeightShape error
 #[test]
 fn conv2d_set_weights_mismatched_weight_shape_errors() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     // Wrong weight shape [2,1,2,2] instead of [1,1,2,2]
     let wrong_weights = Array4::zeros((2, 1, 2, 2));
     let bias = Array2::zeros((1, 1));
@@ -1091,16 +747,7 @@ fn conv2d_set_weights_mismatched_weight_shape_errors() {
 /// set_weights with a mismatched bias shape returns a WeightShape error
 #[test]
 fn conv2d_set_weights_mismatched_bias_shape_errors() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     let weights = Array4::zeros((1, 1, 2, 2));
     // Wrong bias [1,3] instead of [1,1]
     let wrong_bias = Array2::zeros((1, 3));
@@ -1119,15 +766,7 @@ fn conv2d_set_weights_mismatched_bias_shape_errors() {
 
 #[test]
 fn conv2d_filters_zero_errors() {
-    let result = Conv2D::new(
-        0,
-        (3, 3),
-        vec![1, 1, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(0, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for filters=0, got {:?}",
@@ -1137,15 +776,7 @@ fn conv2d_filters_zero_errors() {
 
 #[test]
 fn conv2d_kernel_height_zero_errors() {
-    let result = Conv2D::new(
-        1,
-        (0, 3),
-        vec![1, 1, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (0, 3), vec![1, 1, 5, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for kernel height=0, got {:?}",
@@ -1155,15 +786,7 @@ fn conv2d_kernel_height_zero_errors() {
 
 #[test]
 fn conv2d_kernel_width_zero_errors() {
-    let result = Conv2D::new(
-        1,
-        (3, 0),
-        vec![1, 1, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 0), vec![1, 1, 5, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for kernel width=0, got {:?}",
@@ -1173,15 +796,7 @@ fn conv2d_kernel_width_zero_errors() {
 
 #[test]
 fn conv2d_stride_height_zero_errors() {
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 5],
-        (0, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (0, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride height=0, got {:?}",
@@ -1191,15 +806,7 @@ fn conv2d_stride_height_zero_errors() {
 
 #[test]
 fn conv2d_stride_width_zero_errors() {
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 5],
-        (1, 0),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (1, 0), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride width=0, got {:?}",
@@ -1210,15 +817,7 @@ fn conv2d_stride_width_zero_errors() {
 /// input_shape must be 4D; a 3D shape returns InvalidInput
 #[test]
 fn conv2d_wrong_input_ndim_3d_errors() {
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 3D input_shape, got {:?}",
@@ -1229,15 +828,7 @@ fn conv2d_wrong_input_ndim_3d_errors() {
 /// input_shape must be 4D; a 5D shape returns InvalidInput
 #[test]
 fn conv2d_wrong_input_ndim_5d_errors() {
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput for 5D input_shape, got {:?}",
@@ -1249,15 +840,7 @@ fn conv2d_wrong_input_ndim_5d_errors() {
 #[test]
 fn conv2d_input_height_smaller_than_kernel_errors() {
     // height=2 < kernel_h=3
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 2, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 2, 5], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput when height < kernel, got {:?}",
@@ -1269,15 +852,7 @@ fn conv2d_input_height_smaller_than_kernel_errors() {
 #[test]
 fn conv2d_input_width_smaller_than_kernel_errors() {
     // width=2 < kernel_w=3
-    let result = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 2],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    );
+    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 2], (1, 1), Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
         "expected InvalidInput when width < kernel, got {:?}",
@@ -1290,16 +865,7 @@ fn conv2d_input_width_smaller_than_kernel_errors() {
 /// Passing a 3D tensor to forward() returns InvalidInput (4D expected)
 #[test]
 fn conv2d_forward_wrong_ndim_errors() {
-    let mut layer = Conv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 5, 5],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new()).unwrap();
     let bad_input = Array::zeros((1_usize, 1_usize, 5_usize)).into_dyn();
     let result = layer.forward(&bad_input);
     assert!(
@@ -1312,16 +878,7 @@ fn conv2d_forward_wrong_ndim_errors() {
 /// backward() before forward() returns ForwardPassNotRun
 #[test]
 fn conv2d_backward_before_forward_errors() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 1_usize, 3_usize, 3_usize)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -1339,16 +896,7 @@ fn conv2d_backward_before_forward_errors() {
 /// predict() equals forward() for a deterministic layer
 #[test]
 fn conv2d_predict_equals_forward() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 2, 2), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -1367,16 +915,7 @@ fn conv2d_predict_equals_forward() {
 /// predict() returns the same result across repeated calls
 #[test]
 fn conv2d_predict_deterministic() {
-    let mut layer = Conv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap();
     let weights = Array4::from_elem((1, 1, 2, 2), 1.0f32);
     let bias = Array2::zeros((1, 1));
     layer.set_weights(weights, bias).unwrap();
@@ -1396,16 +935,7 @@ fn conv2d_predict_deterministic() {
 /// get_weights returns Conv2D weights with shape [filters, channels, kh, kw] and bias [1, filters]
 #[test]
 fn conv2d_get_weights_correct_shapes() {
-    let layer = Conv2D::new(
-        4,
-        (3, 3),
-        vec![1, 2, 8, 8],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let layer = Conv2D::new(4, (3, 3), vec![1, 2, 8, 8], (1, 1), Linear::new()).unwrap();
     match layer.get_weights() {
         LayerWeight::Conv2D(w) => {
             assert_eq!(w.weight.shape(), &[4, 2, 3, 3]);
@@ -1429,16 +959,7 @@ fn conv1d_valid_output_length_cases() {
         (5, 5, 1, 1),
     ];
     for (len, kernel, stride, expected) in cases {
-        let mut conv = Conv1D::new(
-            1,
-            kernel,
-            vec![1, 1, len],
-            stride,
-            PaddingType::Valid,
-            Linear::new(),
-            None,
-        )
-        .unwrap();
+        let mut conv = Conv1D::new(1, kernel, vec![1, 1, len], stride, Linear::new()).unwrap();
         let x = Array::ones((1, 1, len)).into_dyn();
         let out = conv.forward(&x).unwrap();
         assert_eq!(
@@ -1462,16 +983,9 @@ fn conv1d_same_output_length_cases() {
         (9, 4, 3, 3),
     ];
     for (len, kernel, stride, expected) in cases {
-        let mut conv = Conv1D::new(
-            1,
-            kernel,
-            vec![1, 1, len],
-            stride,
-            PaddingType::Same,
-            Linear::new(),
-            None,
-        )
-        .unwrap();
+        let mut conv = Conv1D::new(1, kernel, vec![1, 1, len], stride, Linear::new())
+            .unwrap()
+            .with_padding(PaddingType::Same);
         let x = Array::ones((1, 1, len)).into_dyn();
         let out = conv.forward(&x).unwrap();
         assert_eq!(
@@ -1497,16 +1011,7 @@ fn conv2d_valid_output_shape_cases() {
         (5, 7, 2, 3, 2, 1, 2, 5),
     ];
     for (h, w, kh, kw, sh, sw, out_h, out_w) in cases {
-        let mut conv = Conv2D::new(
-            1,
-            (kh, kw),
-            vec![1, 1, h, w],
-            (sh, sw),
-            PaddingType::Valid,
-            Linear::new(),
-            None,
-        )
-        .unwrap();
+        let mut conv = Conv2D::new(1, (kh, kw), vec![1, 1, h, w], (sh, sw), Linear::new()).unwrap();
         let x = Array::ones((1, 1, h, w)).into_dyn();
         let out = conv.forward(&x).unwrap();
         assert_eq!(
@@ -1524,16 +1029,7 @@ fn conv2d_valid_output_shape_cases() {
 /// Parallel forward branch (workload batch * filters * out_plane >= 10_000): windowed sums
 #[test]
 fn conv2d_parallel_forward_windowed_sums() {
-    let mut layer = Conv2D::new(
-        2,
-        (2, 2),
-        vec![2, 1, 51, 51],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(2, (2, 2), vec![2, 1, 51, 51], (1, 1), Linear::new()).unwrap();
     // Both filters use an all-ones 2x2 kernel; bias filter0=0, filter1=100
     let weights = Array4::from_elem((2, 1, 2, 2), 1.0f32);
     let bias = Array2::from_shape_vec((1, 2), vec![0.0f32, 100.0]).unwrap();
@@ -1573,16 +1069,7 @@ fn conv2d_parallel_forward_windowed_sums() {
 /// Parallel weight-gradient backward branch (workload >= 10_000): every kernel tap gets 576
 #[test]
 fn conv2d_parallel_weight_grad_constant_count() {
-    let mut layer = Conv2D::new(
-        1,
-        (3, 3),
-        vec![4, 2, 14, 14],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(1, (3, 3), vec![4, 2, 14, 14], (1, 1), Linear::new()).unwrap();
     // Weights do not affect the weight gradient; all-ones, bias 0, for determinism
     let weights = Array4::from_elem((1, 2, 3, 3), 1.0f32);
     let bias = Array2::zeros((1, 1));

@@ -21,7 +21,9 @@ use std::hint::black_box;
 
 /// Dense forward on a batch large enough to engage the block-parallel GEMM
 fn dense_forward(c: &mut Criterion) {
-    let mut layer = Dense::new(784, 512, Activation::ReLU, Some(42)).unwrap();
+    let mut layer = Dense::new(784, 512, Activation::ReLU)
+        .unwrap()
+        .with_random_state(42);
     let x = Array::from_elem((256, 784), 0.5f32).into_dyn();
     c.bench_function("dense_forward_256x784x512", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -30,16 +32,9 @@ fn dense_forward(c: &mut Criterion) {
 
 /// Conv2D forward at batch == 1 (the single-sample inference case the engine used to run serial)
 fn conv2d_forward_batch1(c: &mut Criterion) {
-    let mut layer = Conv2D::new(
-        64,
-        (3, 3),
-        vec![1, 32, 96, 96],
-        (1, 1),
-        PaddingType::Valid,
-        Activation::ReLU,
-        Some(42),
-    )
-    .unwrap();
+    let mut layer = Conv2D::new(64, (3, 3), vec![1, 32, 96, 96], (1, 1), Activation::ReLU)
+        .unwrap()
+        .with_random_state(42);
     let x = Array::from_elem((1, 32, 96, 96), 0.5f32).into_dyn();
     c.bench_function("conv2d_forward_1x32x96x96_64f", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -48,7 +43,9 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
 
 /// LSTM forward: fused-gate projections plus the sequential recurrence
 fn lstm_forward(c: &mut Criterion) {
-    let mut layer = LSTM::new(64, 128, Activation::Tanh, Some(42)).unwrap();
+    let mut layer = LSTM::new(64, 128, Activation::Tanh)
+        .unwrap()
+        .with_random_state(42);
     let x = Array::from_elem((32, 64, 64), 0.5f32).into_dyn();
     c.bench_function("lstm_forward_32x64x64_128u", |b| {
         b.iter(|| black_box(layer.forward(&x).unwrap()))
@@ -89,8 +86,7 @@ fn batchnorm_backward_spatial(c: &mut Criterion) {
 /// LayerNorm forward at transformer scale (Default axis): per-row statistics over the
 /// trailing feature axis
 fn layernorm_forward_default(c: &mut Criterion) {
-    let mut layer =
-        LayerNormalization::new(vec![32, 512, 768], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut layer = LayerNormalization::new(vec![32, 512, 768], 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
@@ -103,8 +99,7 @@ fn layernorm_forward_default(c: &mut Criterion) {
 /// LayerNorm backward at the same scale: per-row gradient composition plus the gamma/beta
 /// column reductions
 fn layernorm_backward_default(c: &mut Criterion) {
-    let mut layer =
-        LayerNormalization::new(vec![32, 512, 768], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut layer = LayerNormalization::new(vec![32, 512, 768], 1e-5).unwrap();
     let x = Array::from_shape_fn((32, 512, 768), |(b, t, d)| {
         ((b * 7 + t * 13 + d * 3) as f32 * 0.137).sin()
     })
@@ -122,12 +117,10 @@ fn layernorm_backward_default(c: &mut Criterion) {
 /// LayerNorm forward with a Multiple (merged trailing axes) configuration at conv scale: the
 /// merged-axis layout transform is the interesting cost here
 fn layernorm_forward_multi(c: &mut Criterion) {
-    let mut layer = LayerNormalization::new(
-        vec![32, 64, 64, 64],
-        LayerNormalizationAxis::Multiple(vec![1, 2, 3]),
-        1e-5,
-    )
-    .unwrap();
+    let mut layer = LayerNormalization::new(vec![32, 64, 64, 64], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2, 3]))
+        .unwrap();
     let x = Array::from_shape_fn((32, 64, 64, 64), |(n, ch, h, w)| {
         ((n * 7 + ch * 13 + h * 3 + w) as f32 * 0.137).sin()
     })
@@ -190,10 +183,18 @@ fn mlp_fit_epoch(c: &mut Criterion) {
         b.iter(|| {
             let mut model = Sequential::new();
             model
-                .add(Dense::new(256, 128, Activation::ReLU, Some(42)).unwrap())
-                .add(Dense::new(128, 10, Activation::Linear, Some(43)).unwrap())
+                .add(
+                    Dense::new(256, 128, Activation::ReLU)
+                        .unwrap()
+                        .with_random_state(42),
+                )
+                .add(
+                    Dense::new(128, 10, Activation::Linear)
+                        .unwrap()
+                        .with_random_state(43),
+                )
                 .compile(
-                    SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+                    SGD::new(0.01, 0.0, false, 0.0).unwrap(),
                     MeanSquaredError::new(),
                 );
             model.fit(&x, &y, 1).unwrap();

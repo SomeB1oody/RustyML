@@ -38,16 +38,12 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 ///
 /// // Add MaxPooling3D layer to the model
-/// model.add(MaxPooling3D::new(
-///     (2, 2, 2),                    // pooling window size: 2x2x2
-///     vec![1, 16, 32, 32, 32],      // input shape: [batch, channels, depth, height, width]
-///     Some((2, 2, 2)),              // stride: move window by 2 in each dimension
-///     PaddingType::Valid,           // no padding
-/// ).unwrap());
+/// // stride defaults to pool_size (2, 2, 2) and padding defaults to Valid
+/// model.add(MaxPooling3D::new((2, 2, 2), vec![1, 16, 32, 32, 32]).unwrap());
 ///
 /// // Compile the model with optimizer and loss function
 /// model.compile(
-///     RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(),    // RMSprop optimizer
+///     RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(),    // RMSprop optimizer
 ///     MeanSquaredError::new()              // Mean Squared Error loss
 /// );
 ///
@@ -95,13 +91,15 @@ pub struct MaxPooling3D {
 impl MaxPooling3D {
     /// Creates a new 3D max pooling layer
     ///
-    /// If `strides` is None, it defaults to `pool_size`
-    ///
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (depth, height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, channels, depth, height, width]`
-    /// - `strides` - Optional strides of the pooling operation
+    ///
+    /// # Notes
+    ///
+    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
+    /// with [`MaxPooling3D::with_strides`] and [`MaxPooling3D::with_padding`].
     ///
     /// # Returns
     ///
@@ -111,29 +109,50 @@ impl MaxPooling3D {
     ///
     /// - `Error::DimensionMismatch` - If `input_shape` is not 5D
     /// - `Error::InvalidInput` - If any dimension of `input_shape` is zero
-    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension, a pool dimension exceeds
-    ///   the corresponding input dimension, or any stride is zero
-    pub fn new(
-        pool_size: (usize, usize, usize),
-        input_shape: Vec<usize>,
-        strides: Option<(usize, usize, usize)>,
-        padding: PaddingType,
-    ) -> Result<Self, Error> {
-        let strides = strides.unwrap_or(pool_size);
-
+    /// - `Error::InvalidParameter` - If `pool_size` has a zero dimension or a pool dimension exceeds
+    ///   the corresponding input dimension
+    pub fn new(pool_size: (usize, usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_input_shape_dims(&input_shape, 5, "MaxPooling3D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_3d(pool_size, input_shape[2], input_shape[3], input_shape[4])?;
-        validate_strides_3d(strides)?;
 
         Ok(MaxPooling3D {
             pool_size,
-            strides,
+            strides: pool_size,
             input_shape,
-            padding,
+            padding: PaddingType::Valid,
             forward_input_shape: None,
             argmax: None,
         })
+    }
+
+    /// Sets the pooling strides (defaults to `pool_size`)
+    ///
+    /// # Parameters
+    ///
+    /// - `strides` - Strides of the pooling operation as (depth, height, width)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error if any stride is zero
+    pub fn with_strides(mut self, strides: (usize, usize, usize)) -> Result<Self, Error> {
+        validate_strides_3d(strides)?;
+        self.strides = strides;
+        Ok(self)
+    }
+
+    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    ///
+    /// # Parameters
+    ///
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_padding(mut self, padding: PaddingType) -> Self {
+        self.padding = padding;
+        self
     }
 }
 

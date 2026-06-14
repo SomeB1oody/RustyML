@@ -36,13 +36,14 @@ impl SGD {
     /// # Parameters
     ///
     /// - `learning_rate` - Step size for parameter updates
-    /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
-    ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
-    ///   disables clipping
     /// - `momentum` - Momentum coefficient (typically 0.9); `0.0` is plain SGD
     /// - `nesterov` - Use Nesterov-accelerated momentum (only meaningful when `momentum > 0`)
     /// - `weight_decay` - Decoupled (SGDW-style) weight-decay coefficient applied directly to the
     ///   parameters; `0.0` disables it
+    ///
+    /// # Notes
+    ///
+    /// Gradient clipping is disabled by default. Enable it with [`SGD::with_clip_norm`].
     ///
     /// # Returns
     ///
@@ -50,18 +51,15 @@ impl SGD {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `learning_rate` is not positive and finite, `clip_norm` is
-    ///   `Some` value that is not positive and finite, or `momentum`/`weight_decay` is negative or
-    ///   not finite
+    /// - `Error::InvalidParameter` - If `learning_rate` is not positive and finite, or
+    ///   `momentum`/`weight_decay` is negative or not finite
     pub fn new(
         learning_rate: f32,
-        clip_norm: Option<f32>,
         momentum: f32,
         nesterov: bool,
         weight_decay: f32,
     ) -> Result<Self, Error> {
         validate_learning_rate(learning_rate)?;
-        validate_clip_norm(clip_norm)?;
         validate_non_negative_finite(momentum, "momentum")?;
         validate_non_negative_finite(weight_decay, "weight_decay")?;
 
@@ -70,10 +68,29 @@ impl SGD {
             momentum,
             nesterov,
             weight_decay,
-            clip_norm,
+            clip_norm: None,
             velocities: Vec::new(),
             cursor: 0,
         })
+    }
+
+    /// Enables clip-by-global-norm gradient clipping (disabled by default)
+    ///
+    /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
+    /// gradient direction.
+    ///
+    /// # Parameters
+    ///
+    /// - `clip_norm` - Clip-by-global-norm threshold; must be positive and finite
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated optimizer, or an error if `clip_norm` is not positive
+    ///   and finite
+    pub fn with_clip_norm(mut self, clip_norm: f32) -> Result<Self, Error> {
+        validate_clip_norm(Some(clip_norm))?;
+        self.clip_norm = Some(clip_norm);
+        Ok(self)
     }
 }
 

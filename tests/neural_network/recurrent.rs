@@ -19,7 +19,7 @@ use rustyml::neural_network::traits::Layer;
 /// SimpleRNN forward over 1 timestep, 1 unit with Tanh yields tanh(0.5)
 #[test]
 fn simple_rnn_forward_1step_1unit_tanh() {
-    let mut rnn = SimpleRNN::new(1, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(1, 1, Tanh::new()).unwrap();
 
     let kernel = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::from_elem((1, 1), 0.5_f32);
@@ -39,7 +39,7 @@ fn simple_rnn_forward_1step_1unit_tanh() {
 /// SimpleRNN over 2 timesteps threads hidden state between steps (Tanh)
 #[test]
 fn simple_rnn_forward_2step_tanh_state_threading() {
-    let mut rnn = SimpleRNN::new(1, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(1, 1, Tanh::new()).unwrap();
 
     let kernel = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::from_elem((1, 1), 1.0_f32);
@@ -60,7 +60,7 @@ fn simple_rnn_forward_2step_tanh_state_threading() {
 /// SimpleRNN with ReLU passes a positive pre-activation through unchanged
 #[test]
 fn simple_rnn_forward_relu_positive() {
-    let mut rnn = SimpleRNN::new(1, 1, ReLU::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(1, 1, ReLU::new()).unwrap();
 
     let kernel = Array2::from_elem((1, 1), 0.5_f32);
     let rk = Array2::from_elem((1, 1), 0.5_f32);
@@ -78,7 +78,7 @@ fn simple_rnn_forward_relu_positive() {
 /// SimpleRNN with ReLU clips a negative pre-activation to exactly 0
 #[test]
 fn simple_rnn_relu_negative_preactivation_is_zero() {
-    let mut rnn = SimpleRNN::new(1, 1, ReLU::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(1, 1, ReLU::new()).unwrap();
 
     let kernel = Array2::from_elem((1, 1), -1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -96,7 +96,7 @@ fn simple_rnn_relu_negative_preactivation_is_zero() {
 /// SimpleRNN output shape is (batch, units) regardless of timestep count
 #[test]
 fn simple_rnn_output_shape_batch3_units2() {
-    let mut rnn = SimpleRNN::new(4, 2, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(4, 2, Tanh::new()).unwrap();
     // 3 batches, 5 timesteps, 4 input features
     let x = Array::zeros((3, 5, 4)).into_dyn();
     let out = rnn.forward(&x).unwrap();
@@ -106,7 +106,7 @@ fn simple_rnn_output_shape_batch3_units2() {
 /// SimpleRNN predict() matches forward() element-wise in eval mode
 #[test]
 fn simple_rnn_predict_equals_forward() {
-    let mut rnn = SimpleRNN::new(2, 3, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 3, Tanh::new()).unwrap();
 
     let kernel = Array2::from_shape_vec((2, 3), vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6]).unwrap();
     let rk = Array2::from_shape_vec((3, 3), vec![0.1, 0.0, -0.1, 0.0, 0.2, 0.0, -0.1, 0.0, 0.1])
@@ -133,7 +133,7 @@ fn simple_rnn_predict_equals_forward() {
 /// SimpleRNN constructor rejects input_dim=0
 #[test]
 fn simple_rnn_new_rejects_zero_input_dim() {
-    let err = SimpleRNN::new(0, 3, Tanh::new(), None).unwrap_err();
+    let err = SimpleRNN::new(0, 3, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -143,7 +143,7 @@ fn simple_rnn_new_rejects_zero_input_dim() {
 /// SimpleRNN constructor rejects units=0
 #[test]
 fn simple_rnn_new_rejects_zero_units() {
-    let err = SimpleRNN::new(2, 0, Tanh::new(), None).unwrap_err();
+    let err = SimpleRNN::new(2, 0, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -153,7 +153,7 @@ fn simple_rnn_new_rejects_zero_units() {
 /// SimpleRNN forward rejects a non-3D input (2D tensor)
 #[test]
 fn simple_rnn_forward_rejects_2d_input() {
-    let mut rnn = SimpleRNN::new(2, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 1, Tanh::new()).unwrap();
     let x = Array::zeros((4, 2)).into_dyn(); // 2D, not 3D
     let err = rnn.forward(&x).unwrap_err();
     assert!(
@@ -165,7 +165,7 @@ fn simple_rnn_forward_rejects_2d_input() {
 /// SimpleRNN forward rejects a 1D input
 #[test]
 fn simple_rnn_forward_rejects_1d_input() {
-    let mut rnn = SimpleRNN::new(2, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 1, Tanh::new()).unwrap();
     let x = Array::zeros(4).into_dyn(); // 1D
     let err = rnn.forward(&x).unwrap_err();
     assert!(
@@ -177,7 +177,7 @@ fn simple_rnn_forward_rejects_1d_input() {
 /// SimpleRNN backward before forward returns ForwardPassNotRun
 #[test]
 fn simple_rnn_backward_before_forward_errors() {
-    let mut rnn = SimpleRNN::new(2, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 1, Tanh::new()).unwrap();
     let grad = Array::ones((1, 1)).into_dyn();
     let err = rnn.backward(&grad).unwrap_err();
     assert!(
@@ -196,7 +196,7 @@ fn simple_rnn_backward_before_forward_errors() {
 /// layout (regression test for a latent `IncompatibleLayout` panic)
 #[test]
 fn simple_rnn_backward_units_one_multi_feature_reshapes() {
-    let mut rnn = SimpleRNN::new(2, 1, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 1, Tanh::new()).unwrap();
     let x = Array::from_elem((1, 2, 2), 0.5_f32).into_dyn();
     rnn.forward(&x).unwrap();
     let grad = Array::ones((1, 1)).into_dyn();
@@ -207,7 +207,7 @@ fn simple_rnn_backward_units_one_multi_feature_reshapes() {
 /// SimpleRNN set_weights rejects a kernel with wrong shape
 #[test]
 fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
-    let mut rnn = SimpleRNN::new(2, 3, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 3, Tanh::new()).unwrap();
     // kernel should be (2,3); (3,2) is passed
     let bad_kernel = Array2::zeros((3, 2));
     let rk = Array2::zeros((3, 3));
@@ -224,7 +224,7 @@ fn simple_rnn_set_weights_wrong_kernel_shape_errors() {
 /// LSTM forward over 1 timestep, 1 unit with Tanh and forget bias = 1.0
 #[test]
 fn lstm_forward_1step_1unit_tanh() {
-    let mut lstm = LSTM::new(1, 1, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(1, 1, Tanh::new()).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -260,8 +260,8 @@ fn lstm_forward_1step_1unit_tanh() {
 #[test]
 fn lstm_forget_bias_is_one_not_zero() {
     // Two LSTMs: one with forget_bias=1.0 (default path), one with 0.0
-    let mut lstm_correct = LSTM::new(1, 1, Tanh::new(), None).unwrap();
-    let mut lstm_zero_forget = LSTM::new(1, 1, Tanh::new(), None).unwrap();
+    let mut lstm_correct = LSTM::new(1, 1, Tanh::new()).unwrap();
+    let mut lstm_zero_forget = LSTM::new(1, 1, Tanh::new()).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -317,7 +317,7 @@ fn lstm_forget_bias_is_one_not_zero() {
 /// LSTM over 2 timesteps threads cell state from t=0 into t=1
 #[test]
 fn lstm_forward_2step_cell_state_threads_through() {
-    let mut lstm = LSTM::new(1, 1, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(1, 1, Tanh::new()).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -354,7 +354,7 @@ fn lstm_forward_2step_cell_state_threads_through() {
 /// LSTM output shape is (batch=2, units=3)
 #[test]
 fn lstm_output_shape_batch2_units3() {
-    let mut lstm = LSTM::new(4, 3, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(4, 3, Tanh::new()).unwrap();
     let x = Array::zeros((2, 5, 4)).into_dyn();
     let out = lstm.forward(&x).unwrap();
     assert_eq!(out.shape(), &[2, 3]);
@@ -363,7 +363,7 @@ fn lstm_output_shape_batch2_units3() {
 /// LSTM predict() matches forward() in eval mode
 #[test]
 fn lstm_predict_equals_forward() {
-    let mut lstm = LSTM::new(2, 2, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(2, 2, Tanh::new()).unwrap();
 
     // Non-trivial weights so both paths exercise the same computation
     let kernel = Array2::from_shape_vec((2, 2), vec![0.3, -0.3, 0.2, -0.2]).unwrap();
@@ -406,7 +406,7 @@ fn lstm_predict_equals_forward() {
 /// LSTM constructor rejects input_dim=0
 #[test]
 fn lstm_new_rejects_zero_input_dim() {
-    let err = LSTM::new(0, 3, Tanh::new(), None).unwrap_err();
+    let err = LSTM::new(0, 3, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -416,7 +416,7 @@ fn lstm_new_rejects_zero_input_dim() {
 /// LSTM constructor rejects units=0
 #[test]
 fn lstm_new_rejects_zero_units() {
-    let err = LSTM::new(2, 0, Tanh::new(), None).unwrap_err();
+    let err = LSTM::new(2, 0, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -426,7 +426,7 @@ fn lstm_new_rejects_zero_units() {
 /// LSTM forward rejects a non-3D input (2D tensor)
 #[test]
 fn lstm_forward_rejects_2d_input() {
-    let mut lstm = LSTM::new(2, 1, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(2, 1, Tanh::new()).unwrap();
     let x = Array::zeros((4, 2)).into_dyn();
     let err = lstm.forward(&x).unwrap_err();
     assert!(
@@ -438,7 +438,7 @@ fn lstm_forward_rejects_2d_input() {
 /// LSTM backward before forward returns ForwardPassNotRun
 #[test]
 fn lstm_backward_before_forward_errors() {
-    let mut lstm = LSTM::new(2, 1, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(2, 1, Tanh::new()).unwrap();
     let grad = Array::ones((1, 1)).into_dyn();
     let err = lstm.backward(&grad).unwrap_err();
     assert!(
@@ -453,7 +453,7 @@ fn lstm_backward_before_forward_errors() {
 /// LSTM set_weights with wrong kernel shape returns NnError::WeightShape
 #[test]
 fn lstm_set_weights_wrong_shape_errors() {
-    let mut lstm = LSTM::new(2, 3, Tanh::new(), None).unwrap();
+    let mut lstm = LSTM::new(2, 3, Tanh::new()).unwrap();
 
     let good_k = Array2::zeros((2, 3));
     let good_rk = Array2::zeros((3, 3));
@@ -488,7 +488,7 @@ fn lstm_set_weights_wrong_shape_errors() {
 /// GRU forward over 1 timestep, 1 unit with Tanh
 #[test]
 fn gru_forward_1step_1unit_tanh() {
-    let mut gru = GRU::new(1, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -519,7 +519,7 @@ fn gru_forward_1step_1unit_tanh() {
 /// GRU over 2 timesteps blends previous hidden state through the update gate
 #[test]
 fn gru_forward_2step_hidden_state_blending() {
-    let mut gru = GRU::new(1, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -553,7 +553,7 @@ fn gru_forward_2step_hidden_state_blending() {
 /// GRU update gate z~=0 leaves the hidden state at h_prev (here 0)
 #[test]
 fn gru_update_gate_zero_leaves_hidden_unchanged() {
-    let mut gru = GRU::new(1, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k_zero = Array2::zeros((1, 1));
     let k_neg = Array2::from_elem((1, 1), -20.0_f32); // drives z_t ~= 0
@@ -588,7 +588,7 @@ fn gru_update_gate_zero_leaves_hidden_unchanged() {
 /// GRU update gate z~=1 replaces the hidden state with the candidate tanh(1.0)
 #[test]
 fn gru_update_gate_one_replaces_hidden_with_candidate() {
-    let mut gru = GRU::new(1, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(1, 1, Tanh::new()).unwrap();
 
     let k_one = Array2::from_elem((1, 1), 1.0_f32);
     let k_large = Array2::from_elem((1, 1), 20.0_f32); // drives z_t ~= 1
@@ -625,7 +625,7 @@ fn gru_update_gate_one_replaces_hidden_with_candidate() {
 /// GRU output shape is (batch=2, units=4)
 #[test]
 fn gru_output_shape_batch2_units4() {
-    let mut gru = GRU::new(3, 4, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(3, 4, Tanh::new()).unwrap();
     let x = Array::zeros((2, 5, 3)).into_dyn();
     let out = gru.forward(&x).unwrap();
     assert_eq!(out.shape(), &[2, 4]);
@@ -634,7 +634,7 @@ fn gru_output_shape_batch2_units4() {
 /// GRU predict() matches forward() element-wise
 #[test]
 fn gru_predict_equals_forward() {
-    let mut gru = GRU::new(2, 3, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 3, Tanh::new()).unwrap();
 
     let k = Array2::from_shape_vec((2, 3), vec![0.1, -0.2, 0.3, -0.4, 0.5, -0.6]).unwrap();
     let rk = Array2::from_shape_vec((3, 3), vec![0.1, 0.0, -0.1, 0.0, 0.2, 0.0, -0.1, 0.0, 0.1])
@@ -673,7 +673,7 @@ fn gru_predict_equals_forward() {
 /// GRU constructor rejects input_dim=0
 #[test]
 fn gru_new_rejects_zero_input_dim() {
-    let err = GRU::new(0, 3, Tanh::new(), None).unwrap_err();
+    let err = GRU::new(0, 3, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -683,7 +683,7 @@ fn gru_new_rejects_zero_input_dim() {
 /// GRU constructor rejects units=0
 #[test]
 fn gru_new_rejects_zero_units() {
-    let err = GRU::new(2, 0, Tanh::new(), None).unwrap_err();
+    let err = GRU::new(2, 0, Tanh::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got: {err:?}"
@@ -693,7 +693,7 @@ fn gru_new_rejects_zero_units() {
 /// GRU forward rejects a non-3D input (2D tensor)
 #[test]
 fn gru_forward_rejects_2d_input() {
-    let mut gru = GRU::new(2, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 1, Tanh::new()).unwrap();
     let x = Array::zeros((4, 2)).into_dyn();
     let err = gru.forward(&x).unwrap_err();
     assert!(
@@ -705,7 +705,7 @@ fn gru_forward_rejects_2d_input() {
 /// GRU forward rejects a 4D input
 #[test]
 fn gru_forward_rejects_4d_input() {
-    let mut gru = GRU::new(2, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 1, Tanh::new()).unwrap();
     let x = Array::zeros((1, 2, 3, 4)).into_dyn();
     let err = gru.forward(&x).unwrap_err();
     assert!(
@@ -717,7 +717,7 @@ fn gru_forward_rejects_4d_input() {
 /// GRU backward before forward returns ForwardPassNotRun
 #[test]
 fn gru_backward_before_forward_errors() {
-    let mut gru = GRU::new(2, 1, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 1, Tanh::new()).unwrap();
     let grad = Array::ones((1, 1)).into_dyn();
     let err = gru.backward(&grad).unwrap_err();
     assert!(
@@ -729,7 +729,7 @@ fn gru_backward_before_forward_errors() {
 /// GRU set_weights with wrong recurrent_kernel shape returns NnError::WeightShape
 #[test]
 fn gru_set_weights_wrong_shape_errors() {
-    let mut gru = GRU::new(2, 3, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 3, Tanh::new()).unwrap();
 
     let good_k = Array2::zeros((2, 3));
     let good_rk = Array2::zeros((3, 3));
@@ -761,7 +761,7 @@ fn gru_set_weights_wrong_shape_errors() {
 /// SimpleRNN accepts Activation enum values, not just concrete activation structs
 #[test]
 fn simple_rnn_accepts_activation_enum_tanh() {
-    let mut rnn = SimpleRNN::new(1, 1, Activation::Tanh, None).unwrap();
+    let mut rnn = SimpleRNN::new(1, 1, Activation::Tanh).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -779,7 +779,7 @@ fn simple_rnn_accepts_activation_enum_tanh() {
 /// LSTM accepts Activation enum
 #[test]
 fn lstm_accepts_activation_enum_tanh() {
-    let mut lstm = LSTM::new(1, 1, Activation::Tanh, None).unwrap();
+    let mut lstm = LSTM::new(1, 1, Activation::Tanh).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -812,7 +812,7 @@ fn lstm_accepts_activation_enum_tanh() {
 /// GRU accepts Activation enum
 #[test]
 fn gru_accepts_activation_enum_tanh() {
-    let mut gru = GRU::new(1, 1, Activation::Tanh, None).unwrap();
+    let mut gru = GRU::new(1, 1, Activation::Tanh).unwrap();
 
     let k = Array2::from_elem((1, 1), 1.0_f32);
     let rk = Array2::zeros((1, 1));
@@ -843,7 +843,7 @@ fn gru_accepts_activation_enum_tanh() {
 /// SimpleRNN: two forward passes with the same weights and input are bit-identical
 #[test]
 fn simple_rnn_forward_is_deterministic() {
-    let mut rnn = SimpleRNN::new(2, 2, Tanh::new(), None).unwrap();
+    let mut rnn = SimpleRNN::new(2, 2, Tanh::new()).unwrap();
 
     let k = Array2::from_shape_vec((2, 2), vec![0.3, -0.1, 0.2, -0.4]).unwrap();
     let rk = Array2::from_shape_vec((2, 2), vec![0.1, 0.0, 0.0, 0.2]).unwrap();
@@ -863,7 +863,7 @@ fn simple_rnn_forward_is_deterministic() {
 /// GRU: two forward passes with the same weights are bit-identical
 #[test]
 fn gru_forward_is_deterministic() {
-    let mut gru = GRU::new(2, 2, Tanh::new(), None).unwrap();
+    let mut gru = GRU::new(2, 2, Tanh::new()).unwrap();
 
     let k = Array2::from_shape_vec((2, 2), vec![0.3, -0.1, 0.2, -0.4]).unwrap();
     let rk = Array2::from_shape_vec((2, 2), vec![0.1, 0.0, 0.0, 0.2]).unwrap();
@@ -897,7 +897,7 @@ fn gru_forward_is_deterministic() {
 #[test]
 fn simple_rnn_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let rnn = SimpleRNN::new(3, 2, Tanh::new(), None).unwrap();
+    let rnn = SimpleRNN::new(3, 2, Tanh::new()).unwrap();
     // 3*2 + 2*2 + 2 = 6 + 4 + 2 = 12
     assert_eq!(rnn.param_count(), TrainingParameters::Trainable(12));
 }
@@ -906,7 +906,7 @@ fn simple_rnn_param_count_formula() {
 #[test]
 fn gru_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let gru = GRU::new(3, 2, Tanh::new(), None).unwrap();
+    let gru = GRU::new(3, 2, Tanh::new()).unwrap();
     // 3 * (3*2 + 2*2 + 2) = 3 * 12 = 36
     assert_eq!(gru.param_count(), TrainingParameters::Trainable(36));
 }
@@ -915,7 +915,7 @@ fn gru_param_count_formula() {
 #[test]
 fn lstm_param_count_formula() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let lstm = LSTM::new(3, 2, Tanh::new(), None).unwrap();
+    let lstm = LSTM::new(3, 2, Tanh::new()).unwrap();
     // 4 * (3*2 + 2*2 + 2) = 4 * 12 = 48
     assert_eq!(lstm.param_count(), TrainingParameters::Trainable(48));
 }

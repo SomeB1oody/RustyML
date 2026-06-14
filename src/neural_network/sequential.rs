@@ -43,10 +43,10 @@ use std::io::{BufWriter, Write};
 /// // Build a neural network
 /// let mut model = Sequential::new();
 /// model
-///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap())
-///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax).unwrap())
+///     .compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Display model structure
 /// model.summary();
@@ -60,15 +60,15 @@ use std::io::{BufWriter, Write};
 /// // Create a new model with the same architecture
 /// let mut new_model = Sequential::new();
 /// new_model
-///     .add(Dense::new(784, 128, Activation::ReLU, None).unwrap())
-///     .add(Dense::new(128, 64, Activation::ReLU, None).unwrap())
-///     .add(Dense::new(64, 10, Activation::Softmax, None).unwrap());
+///     .add(Dense::new(784, 128, Activation::ReLU).unwrap())
+///     .add(Dense::new(128, 64, Activation::ReLU).unwrap())
+///     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
 ///
 /// // Load weights from file
 /// new_model.load_from_path("model.json").unwrap();
 ///
 /// // Compile before using (required for training, optional for prediction)
-/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+/// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Make predictions with loaded model
 /// let predictions = new_model.predict(&x).unwrap();

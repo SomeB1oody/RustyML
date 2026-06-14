@@ -44,9 +44,12 @@ const LN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
 const LN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
 
 /// Axis selection for layer normalization
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Defaults to [`LayerNormalizationAxis::Default`] (normalize along the last dimension).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LayerNormalizationAxis {
     /// Normalize along the last dimension (feature dimension)
+    #[default]
     Default,
     /// Normalize along a single custom specified axis
     Custom(usize),
@@ -319,7 +322,7 @@ fn unmerge_normalized_axes(
 /// use ndarray::Array2;
 ///
 /// // Create a LayerNormalization layer
-/// let mut ln = LayerNormalization::new(vec![32, 128], LayerNormalizationAxis::Default, 1e-5).unwrap();
+/// let mut ln = LayerNormalization::new(vec![32, 128], 1e-5).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -361,8 +364,12 @@ impl LayerNormalization {
     /// # Parameters
     ///
     /// - `input_shape` - Shape of the input tensor
-    /// - `normalized_axis` - Axis along which to normalize
     /// - `epsilon` - Small constant for numerical stability (typically 1e-5)
+    ///
+    /// # Notes
+    ///
+    /// Normalization defaults to the last (feature) dimension. Choose a different axis with
+    /// [`LayerNormalization::with_normalized_axis`].
     ///
     /// # Returns
     ///
@@ -370,32 +377,78 @@ impl LayerNormalization {
     ///
     /// # Errors
     ///
-    /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite, or if a
-    ///   `Multiple` axis list is empty, contains a duplicate, or has an out-of-bounds axis
-    pub fn new(
-        input_shape: Vec<usize>,
-        normalized_axis: LayerNormalizationAxis,
-        epsilon: f32,
-    ) -> Result<Self, Error> {
+    /// - `Error::invalid_parameter` - If `epsilon` is not positive or not finite
+    pub fn new(input_shape: Vec<usize>, epsilon: f32) -> Result<Self, Error> {
         validate_epsilon(epsilon)?;
 
-        // gamma/beta are 1-D over the normalized dimension(s): the axis size for a single axis, or
-        // the product of the listed axes' sizes for Multiple (merged into one axis at runtime)
-        let param_shape = match &normalized_axis {
-            LayerNormalizationAxis::Default => {
-                if input_shape.is_empty() {
-                    vec![1]
-                } else {
-                    vec![input_shape[input_shape.len() - 1]]
-                }
-            }
-            LayerNormalizationAxis::Custom(axis) => {
-                if input_shape.len() > *axis {
-                    vec![input_shape[*axis]]
-                } else {
-                    vec![1]
-                }
-            }
+        let normalized_axis = LayerNormalizationAxis::Default;
+        let param_shape = Self::param_shape_for(&input_shape, &normalized_axis)?;
+        let param_shape_ndarray = param_shape.as_slice();
+
+        Ok(LayerNormalization {
+            epsilon,
+            normalized_axis,
+            input_shape,
+            gamma: Tensor::ones(param_shape_ndarray),
+            beta: Tensor::zeros(param_shape_ndarray),
+            training: true,
+            x_normalized: None,
+            x_centered: None,
+            mean: None,
+            std_dev: None,
+            grad_gamma: None,
+            grad_beta: None,
+        })
+    }
+
+    /// Sets the axis (or axes) along which to normalize
+    ///
+    /// Defaults to [`LayerNormalizationAxis::Default`] (the last dimension). Changing the axis
+    /// re-sizes the trainable `gamma`/`beta` parameters to match the new normalized dimension(s),
+    /// so call this before assigning weights or training.
+    ///
+    /// # Parameters
+    ///
+    /// - `normalized_axis` - Axis selection along which to normalize
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or a validation error
+    ///
+    /// # Errors
+    ///
+    /// - `Error::invalid_parameter` - If a `Multiple` axis list is empty, contains a duplicate, or
+    ///   has an out-of-bounds axis
+    pub fn with_normalized_axis(
+        mut self,
+        normalized_axis: LayerNormalizationAxis,
+    ) -> Result<Self, Error> {
+        let param_shape = Self::param_shape_for(&self.input_shape, &normalized_axis)?;
+        self.gamma = Tensor::ones(param_shape.as_slice());
+        self.beta = Tensor::zeros(param_shape.as_slice());
+        self.normalized_axis = normalized_axis;
+        Ok(self)
+    }
+
+    /// Computes the 1-D `gamma`/`beta` parameter shape for the given input shape and axis selection
+    ///
+    /// gamma/beta are 1-D over the normalized dimension(s): the axis size for a single axis, or the
+    /// product of the listed axes' sizes for `Multiple` (merged into one axis at runtime).
+    fn param_shape_for(
+        input_shape: &[usize],
+        normalized_axis: &LayerNormalizationAxis,
+    ) -> Result<Vec<usize>, Error> {
+        match normalized_axis {
+            LayerNormalizationAxis::Default => Ok(if input_shape.is_empty() {
+                vec![1]
+            } else {
+                vec![input_shape[input_shape.len() - 1]]
+            }),
+            LayerNormalizationAxis::Custom(axis) => Ok(if input_shape.len() > *axis {
+                vec![input_shape[*axis]]
+            } else {
+                vec![1]
+            }),
             LayerNormalizationAxis::Multiple(axes) => {
                 if axes.is_empty() {
                     return Err(Error::invalid_parameter(
@@ -420,26 +473,9 @@ impl LayerNormalization {
                         ));
                     }
                 }
-                vec![axes.iter().map(|&a| input_shape[a]).product()]
+                Ok(vec![axes.iter().map(|&a| input_shape[a]).product()])
             }
-        };
-
-        let param_shape_ndarray = param_shape.as_slice();
-
-        Ok(LayerNormalization {
-            epsilon,
-            normalized_axis,
-            input_shape,
-            gamma: Tensor::ones(param_shape_ndarray),
-            beta: Tensor::zeros(param_shape_ndarray),
-            training: true,
-            x_normalized: None,
-            x_centered: None,
-            mean: None,
-            std_dev: None,
-            grad_gamma: None,
-            grad_beta: None,
-        })
+        }
     }
 
     mode_dependent_layer_set_training!();
@@ -1106,8 +1142,7 @@ mod tests {
         let gamma = Array1::from_shape_fn(n, |j| 1.5 - 0.01 * j as f32);
         let beta = Array1::from_shape_fn(n, |j| -0.75 + 0.02 * j as f32);
 
-        let mut ln =
-            LayerNormalization::new(vec![r, n], LayerNormalizationAxis::Default, 1e-5).unwrap();
+        let mut ln = LayerNormalization::new(vec![r, n], 1e-5).unwrap();
         ln.set_weights(gamma.clone().into_dyn(), beta.clone().into_dyn())
             .unwrap();
         let out = ln.forward(&x).unwrap();
@@ -1139,14 +1174,11 @@ mod tests {
         let x3 = make_tensor(data.clone(), &[b, h, w]);
         let x2 = make_tensor(data, &[b, n]);
 
-        let mut ln_multi = LayerNormalization::new(
-            vec![b, h, w],
-            LayerNormalizationAxis::Multiple(vec![1, 2]),
-            1e-5,
-        )
-        .unwrap();
-        let mut ln_default =
-            LayerNormalization::new(vec![b, n], LayerNormalizationAxis::Default, 1e-5).unwrap();
+        let mut ln_multi = LayerNormalization::new(vec![b, h, w], 1e-5)
+            .unwrap()
+            .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1, 2]))
+            .unwrap();
+        let mut ln_default = LayerNormalization::new(vec![b, n], 1e-5).unwrap();
 
         let out_multi = ln_multi.forward(&x3).unwrap();
         let out_default = ln_default.forward(&x2).unwrap();
@@ -1191,17 +1223,14 @@ mod tests {
             .collect();
         let x = make_tensor(data, &[d0, d1, d2]);
 
-        let mut ln_multi = LayerNormalization::new(
-            vec![d0, d1, d2],
-            LayerNormalizationAxis::Multiple(axes.clone()),
-            1e-5,
-        )
-        .unwrap();
+        let mut ln_multi = LayerNormalization::new(vec![d0, d1, d2], 1e-5)
+            .unwrap()
+            .with_normalized_axis(LayerNormalizationAxis::Multiple(axes.clone()))
+            .unwrap();
         let out_multi = ln_multi.forward(&x).unwrap();
 
         let (merged, perm, permuted_shape) = merge_normalized_axes(&x, &axes).unwrap();
-        let mut ln_default =
-            LayerNormalization::new(vec![d1, n], LayerNormalizationAxis::Default, 1e-5).unwrap();
+        let mut ln_default = LayerNormalization::new(vec![d1, n], 1e-5).unwrap();
         let expected =
             unmerge_normalized_axes(ln_default.forward(&merged).unwrap(), &perm, &permuted_shape);
 

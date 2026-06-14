@@ -28,7 +28,7 @@ use ndarray_rand::rand_distr::Normal;
 /// use ndarray::Array2;
 ///
 /// // Create a GaussianNoise layer with standard deviation of 0.1
-/// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128], None).unwrap();
+/// let mut noise_layer = GaussianNoise::new(0.1, vec![32, 128]).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -55,7 +55,11 @@ impl GaussianNoise {
     ///
     /// - `stddev` - Standard deviation of the Gaussian noise, must be non-negative
     /// - `input_shape` - Shape of the input tensor
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see crate::random)
+    ///
+    /// # Notes
+    ///
+    /// The noise RNG is seeded from the global seed or entropy by default. For reproducible noise,
+    /// set a seed with [`GaussianNoise::with_random_state`].
     ///
     /// # Returns
     ///
@@ -64,14 +68,10 @@ impl GaussianNoise {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `stddev` is negative
-    pub fn new(
-        stddev: f32,
-        input_shape: Vec<usize>,
-        random_state: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(stddev: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_stddev(stddev)?;
 
-        let rng = crate::random::make_rng(random_state);
+        let rng = crate::random::make_rng(None);
 
         Ok(GaussianNoise {
             stddev,
@@ -79,6 +79,23 @@ impl GaussianNoise {
             training: true,
             rng,
         })
+    }
+
+    /// Sets the seed for reproducible noise sampling
+    ///
+    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
+    /// re-seeds it deterministically from `random_state`.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for the layer's random number generator
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        self.rng = crate::random::make_rng(Some(random_state));
+        self
     }
 
     mode_dependent_layer_set_training!();

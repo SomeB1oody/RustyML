@@ -32,7 +32,7 @@ use ndarray::IxDyn;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Flatten::new(vec![2, 3, 4, 4]).unwrap())
-///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // View model structure
 /// model.summary();

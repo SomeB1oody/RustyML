@@ -45,15 +45,13 @@ use std::borrow::Cow;
 ///     (2, 2),                  // kernel_size
 ///     vec![1, 3, 4, 4],        // input shape [batch_size, channels, height, width]
 ///     (1, 1),                  // strides
-///     PaddingType::Valid,      // padding
-///     Activation::ReLU, // activation
-///     None,                    // random_state
+///     Activation::ReLU,        // activation
 /// ).unwrap();
 ///
 /// // Add layer and compile model
 /// model
 ///     .add(depthwise_layer)
-///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
+///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Create test input data: [batch_size, channels, height, width]
 /// let batch_size = 1;
@@ -127,9 +125,14 @@ impl DepthwiseConv2D {
     /// - `kernel_size` - Size of the convolution kernel as (height, width)
     /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
     /// - `strides` - Stride of the convolution as (height_stride, width_stride)
-    /// - `padding` - Padding strategy (Valid or Same)
     /// - `activation` - Activation function applied to the output (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
+    ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
+    /// [`DepthwiseConv2D::with_padding`]. Weights are seeded from the global seed or entropy by
+    /// default; for reproducible initialization, set a seed with
+    /// [`DepthwiseConv2D::with_random_state`].
     ///
     /// # Returns
     ///
@@ -146,9 +149,7 @@ impl DepthwiseConv2D {
         kernel_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: (usize, usize),
-        padding: PaddingType,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
@@ -164,24 +165,14 @@ impl DepthwiseConv2D {
             ));
         }
 
-        let (kernel_height, kernel_width) = kernel_size;
-
-        // Xavier (Glorot) uniform init
-        let fan = kernel_height * kernel_width;
-        let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
-        let mut rng = crate::random::make_rng(random_state);
-        let weights = Array4::random_using(
-            (filters, 1, kernel_height, kernel_width),
-            Uniform::new(-weight_bound, weight_bound).unwrap(),
-            &mut rng,
-        );
+        let weights = Self::init_weights_array(filters, kernel_size, None);
         let bias = Array1::zeros(filters);
 
         Ok(Self {
             filters,
             kernel_size,
             strides,
-            padding,
+            padding: PaddingType::Valid,
             weights,
             bias,
             activation: activation.into(),
@@ -191,6 +182,56 @@ impl DepthwiseConv2D {
             weight_gradients: None,
             bias_gradients: None,
         })
+    }
+
+    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    ///
+    /// # Parameters
+    ///
+    /// - `padding` - Padding strategy (Valid or Same)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_padding(mut self, padding: PaddingType) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Sets the seed used to initialize the depthwise weights and re-initializes them deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
+    /// assigning custom weights or training. The bias stays zero-initialized.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        self.weights = Self::init_weights_array(self.filters, self.kernel_size, Some(random_state));
+        self
+    }
+
+    /// Xavier/Glorot uniform initialization of the \[filters, 1, kh, kw\] depthwise weight tensor
+    fn init_weights_array(
+        filters: usize,
+        kernel_size: (usize, usize),
+        random_state: Option<u64>,
+    ) -> Array4<f32> {
+        let (kernel_height, kernel_width) = kernel_size;
+        // Xavier (Glorot) uniform init
+        let fan = kernel_height * kernel_width;
+        let weight_bound = (6.0 / (fan + fan) as f32).sqrt();
+        let mut rng = crate::random::make_rng(random_state);
+        Array4::random_using(
+            (filters, 1, kernel_height, kernel_width),
+            Uniform::new(-weight_bound, weight_bound).unwrap(),
+            &mut rng,
+        )
     }
 
     /// Calculates padding dimensions for Same padding mode

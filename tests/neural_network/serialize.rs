@@ -13,7 +13,6 @@ use rustyml::error::{Error, IoError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
-use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
@@ -27,9 +26,7 @@ use rustyml::neural_network::layers::regularization::Dropout;
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
-use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
-    LayerNormalization, LayerNormalizationAxis,
-};
+use rustyml::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization;
 use rustyml::neural_network::losses::MeanSquaredError;
 use rustyml::neural_network::optimizers::SGD;
 use rustyml::neural_network::sequential::Sequential;
@@ -73,7 +70,7 @@ fn round_trip(
 fn dense_identity_weights_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_identity");
 
-    let mut layer = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
     let w = Array::from_shape_vec((2, 2), vec![1.0f32, 0.0, 0.0, 1.0]).unwrap();
     let b = Array::zeros((1, 2));
     layer.set_weights(w, b).unwrap();
@@ -97,7 +94,7 @@ fn dense_identity_weights_value_check_and_round_trip() {
         &model,
         || {
             let mut m = Sequential::new();
-            m.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+            m.add(Dense::new(2, 2, Linear::new()).unwrap());
             m
         },
         tmp.path(),
@@ -112,7 +109,7 @@ fn dense_identity_weights_value_check_and_round_trip() {
 fn dense_scaled_identity_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_scaled");
 
-    let mut layer = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(2, 2, Linear::new()).unwrap();
     let w = Array::from_shape_vec((2, 2), vec![2.0f32, 0.0, 0.0, 2.0]).unwrap();
     let b = Array::from_shape_vec((1, 2), vec![1.0f32, 1.0]).unwrap();
     layer.set_weights(w, b).unwrap();
@@ -136,7 +133,7 @@ fn dense_scaled_identity_value_check_and_round_trip() {
         &model,
         || {
             let mut m = Sequential::new();
-            m.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+            m.add(Dense::new(2, 2, Linear::new()).unwrap());
             m
         },
         tmp.path(),
@@ -150,7 +147,7 @@ fn dense_scaled_identity_value_check_and_round_trip() {
 fn dense_zero_weights_bias_only_value_check_and_round_trip() {
     let tmp = TempFile::new("dense_zero_w");
 
-    let mut layer = Dense::new(2, 3, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(2, 3, Linear::new()).unwrap();
     let w = Array::zeros((2, 3));
     let b = Array::from_shape_vec((1, 3), vec![0.5f32, -0.5, 1.0]).unwrap();
     layer.set_weights(w, b).unwrap();
@@ -174,7 +171,7 @@ fn dense_zero_weights_bias_only_value_check_and_round_trip() {
         &model,
         || {
             let mut m = Sequential::new();
-            m.add(Dense::new(2, 3, Linear::new(), None).unwrap());
+            m.add(Dense::new(2, 3, Linear::new()).unwrap());
             m
         },
         tmp.path(),
@@ -190,14 +187,14 @@ fn dense_two_layer_trained_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Dense::new(4, 3, Linear::new(), None).unwrap())
-            .add(Dense::new(3, 2, Linear::new(), None).unwrap());
+        m.add(Dense::new(4, 3, Linear::new()).unwrap())
+            .add(Dense::new(3, 2, Linear::new()).unwrap());
         m
     };
 
     let mut model = make_arch();
     model.compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -223,18 +220,7 @@ fn conv1d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(
-            Conv1D::new(
-                2,
-                2,
-                vec![1, 1, 5],
-                1,
-                PaddingType::Valid,
-                Linear::new(),
-                None,
-            )
-            .unwrap(),
-        );
+        m.add(Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap());
         m
     };
 
@@ -257,18 +243,7 @@ fn conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(
-            Conv2D::new(
-                2,
-                (2, 2),
-                vec![1, 1, 4, 4],
-                (1, 1),
-                PaddingType::Valid,
-                Linear::new(),
-                None,
-            )
-            .unwrap(),
-        );
+        m.add(Conv2D::new(2, (2, 2), vec![1, 1, 4, 4], (1, 1), Linear::new()).unwrap());
         m
     };
 
@@ -294,18 +269,7 @@ fn conv3d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(
-            Conv3D::new(
-                2,
-                (2, 2, 2),
-                vec![1, 1, 3, 3, 3],
-                (1, 1, 1),
-                PaddingType::Valid,
-                Linear::new(),
-                None,
-            )
-            .unwrap(),
-        );
+        m.add(Conv3D::new(2, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap());
         m
     };
 
@@ -331,18 +295,7 @@ fn depthwise_conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(
-            DepthwiseConv2D::new(
-                2,
-                (2, 2),
-                vec![1, 2, 4, 4],
-                (1, 1),
-                PaddingType::Valid,
-                Linear::new(),
-                None,
-            )
-            .unwrap(),
-        );
+        m.add(DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap());
         m
     };
 
@@ -368,19 +321,7 @@ fn separable_conv2d_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(
-            SeparableConv2D::new(
-                2,
-                (2, 2),
-                vec![1, 2, 4, 4],
-                (1, 1),
-                PaddingType::Valid,
-                1,
-                Linear::new(),
-                None,
-            )
-            .unwrap(),
-        );
+        m.add(SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap());
         m
     };
 
@@ -406,7 +347,7 @@ fn simple_rnn_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(SimpleRNN::new(2, 3, Tanh::new(), None).unwrap());
+        m.add(SimpleRNN::new(2, 3, Tanh::new()).unwrap());
         m
     };
 
@@ -429,7 +370,7 @@ fn lstm_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(LSTM::new(2, 3, Tanh::new(), None).unwrap());
+        m.add(LSTM::new(2, 3, Tanh::new()).unwrap());
         m
     };
 
@@ -452,7 +393,7 @@ fn gru_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(GRU::new(2, 3, Tanh::new(), None).unwrap());
+        m.add(GRU::new(2, 3, Tanh::new()).unwrap());
         m
     };
 
@@ -492,7 +433,7 @@ fn batch_normalization_trained_round_trip_preserves_running_stats() {
     // Train a copy to move running stats away from their defaults
     let mut trainable_model = make_arch();
     trainable_model.compile(
-        SGD::new(0.001, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.001, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     trainable_model.fit(&x_train, &x_train, 8).unwrap();
@@ -531,7 +472,7 @@ fn batch_normalization_predict_is_deterministic_after_round_trip() {
 
     let mut trainable = make_arch();
     trainable.compile(
-        SGD::new(0.001, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.001, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     trainable.fit(&x, &x, 5).unwrap();
@@ -553,7 +494,7 @@ fn layer_normalization_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap());
+        m.add(LayerNormalization::new(vec![2, 4], 1e-5).unwrap());
         m
     };
 
@@ -632,10 +573,10 @@ fn mixed_model_with_dropout_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Dense::new(3, 4, Linear::new(), None).unwrap())
+        m.add(Dense::new(3, 4, Linear::new()).unwrap())
             // empty input_shape => Dropout's shape validator is skipped at runtime
-            .add(Dropout::new(0.3, vec![], None).unwrap())
-            .add(Dense::new(4, 2, Linear::new(), None).unwrap());
+            .add(Dropout::new(0.3, vec![]).unwrap())
+            .add(Dense::new(4, 2, Linear::new()).unwrap());
         m
     };
 
@@ -660,15 +601,15 @@ fn mixed_model_trained_round_trip() {
 
     let make_arch = || {
         let mut m = Sequential::new();
-        m.add(Dense::new(3, 4, Linear::new(), None).unwrap())
-            .add(Dropout::new(0.3, vec![], None).unwrap())
-            .add(Dense::new(4, 2, Linear::new(), None).unwrap());
+        m.add(Dense::new(3, 4, Linear::new()).unwrap())
+            .add(Dropout::new(0.3, vec![]).unwrap())
+            .add(Dense::new(4, 2, Linear::new()).unwrap());
         m
     };
 
     let mut model = make_arch();
     model.compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -693,7 +634,7 @@ fn mixed_model_trained_round_trip() {
 #[test]
 fn load_from_nonexistent_file_gives_io_error() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+    model.add(Dense::new(2, 2, Linear::new()).unwrap());
 
     let result =
         model.load_from_path("/tmp/this_file_definitely_does_not_exist_rustyml_99999.json");
@@ -710,7 +651,7 @@ fn load_from_invalid_json_gives_json_error() {
     std::fs::write(tmp.path(), b"{ this is not valid json !!!").unwrap();
 
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+    model.add(Dense::new(2, 2, Linear::new()).unwrap());
 
     let result = model.load_from_path(tmp.path());
     match result {
@@ -726,14 +667,14 @@ fn load_layer_count_mismatch_gives_structure_error() {
 
     // Save a 1-layer model
     let mut model_1 = Sequential::new();
-    model_1.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+    model_1.add(Dense::new(2, 2, Linear::new()).unwrap());
     model_1.save_to_path(tmp.path()).unwrap();
 
     // Try to load into a 2-layer model
     let mut model_2 = Sequential::new();
     model_2
-        .add(Dense::new(2, 2, Linear::new(), None).unwrap())
-        .add(Dense::new(2, 2, Linear::new(), None).unwrap());
+        .add(Dense::new(2, 2, Linear::new()).unwrap())
+        .add(Dense::new(2, 2, Linear::new()).unwrap());
 
     let result = model_2.load_from_path(tmp.path());
     match result {
@@ -748,22 +689,11 @@ fn load_layer_type_mismatch_gives_structure_error() {
     let tmp = TempFile::new("type_mismatch");
 
     let mut dense_model = Sequential::new();
-    dense_model.add(Dense::new(3, 3, Linear::new(), None).unwrap());
+    dense_model.add(Dense::new(3, 3, Linear::new()).unwrap());
     dense_model.save_to_path(tmp.path()).unwrap();
 
     let mut conv_model = Sequential::new();
-    conv_model.add(
-        Conv1D::new(
-            2,
-            2,
-            vec![1, 1, 5],
-            1,
-            PaddingType::Valid,
-            Linear::new(),
-            None,
-        )
-        .unwrap(),
-    );
+    conv_model.add(Conv1D::new(2, 2, vec![1, 1, 5], 1, Linear::new()).unwrap());
 
     let result = conv_model.load_from_path(tmp.path());
     match result {
@@ -778,11 +708,11 @@ fn load_weight_shape_mismatch_gives_structure_error() {
     let tmp = TempFile::new("shape_mismatch");
 
     let mut model_small = Sequential::new();
-    model_small.add(Dense::new(2, 2, Linear::new(), None).unwrap());
+    model_small.add(Dense::new(2, 2, Linear::new()).unwrap());
     model_small.save_to_path(tmp.path()).unwrap();
 
     let mut model_big = Sequential::new();
-    model_big.add(Dense::new(3, 3, Linear::new(), None).unwrap());
+    model_big.add(Dense::new(3, 3, Linear::new()).unwrap());
 
     let result = model_big.load_from_path(tmp.path());
     match result {

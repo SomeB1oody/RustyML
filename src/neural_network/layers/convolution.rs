@@ -3,13 +3,15 @@
 //! Re-exports the 1D/2D/3D, depthwise, and separable convolution layers, and
 //! defines the [`PaddingType`] used to control spatial padding
 
-/// Padding method used by convolutional layers
+/// Padding method used by convolutional and pooling layers
 ///
-/// Determines how the input is padded before convolution is applied
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Determines how the input is padded before the operation is applied. Defaults to
+/// [`PaddingType::Valid`] (no padding).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaddingType {
     /// No padding is applied; the convolution is computed only where the filter
     /// fully overlaps the input, producing an output with reduced dimensions
+    #[default]
     Valid,
 
     /// Zeros are added around the input borders so the output keeps the same

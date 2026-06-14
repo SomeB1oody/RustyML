@@ -58,12 +58,10 @@ use std::borrow::Cow;
 ///         (3, 3),                      // Kernel size
 ///         vec![2, 3, 32, 32],          // Input shape
 ///         (1, 1),                      // Stride
-///         PaddingType::Same,           // Same padding
 ///         1,                           // Depth multiplier
-///         Activation::ReLU, // ReLU activation
-///         None,                        // random_state
-///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+///         Activation::ReLU,            // ReLU activation
+///     ).unwrap().with_padding(PaddingType::Same)) // Same padding
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// model.summary();
 /// model.fit(&x, &y, 3).unwrap();
@@ -115,10 +113,15 @@ impl SeparableConv2D {
     /// - `kernel_size` - Size of the depthwise convolution kernel as (height, width)
     /// - `input_shape` - Shape of the input tensor as \[batch_size, channels, height, width\]
     /// - `strides` - Stride values for the convolution as (vertical, horizontal)
-    /// - `padding` - Type of padding to apply (`Valid` or `Same`)
     /// - `depth_multiplier` - Number of depthwise convolution filters per input channel
     /// - `activation` - Activation applied to the output (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see crate::random)
+    ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
+    /// [`SeparableConv2D::with_padding`]. Weights are seeded from the global seed or entropy by
+    /// default; for reproducible initialization, set a seed with
+    /// [`SeparableConv2D::with_random_state`].
     ///
     /// # Returns
     ///
@@ -131,16 +134,13 @@ impl SeparableConv2D {
     /// - `Error::InvalidParameter` - If `depth_multiplier` is 0
     /// - `Error::InvalidInput` - If `input_shape` is not 4D or has 0 channels
     /// - `Error::InvalidInput` - If input dimensions are smaller than kernel size
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         filters: usize,
         kernel_size: (usize, usize),
         input_shape: Vec<usize>,
         strides: (usize, usize),
-        padding: PaddingType,
         depth_multiplier: usize,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_filters(filters)?;
         validate_kernel_size_2d(kernel_size)?;
@@ -149,7 +149,83 @@ impl SeparableConv2D {
         validate_input_shape_2d(&input_shape, kernel_size)?;
 
         let channels = input_shape[1];
+        let (depthwise_weights, pointwise_weights) =
+            Self::init_weights_arrays(filters, channels, kernel_size, depth_multiplier, None);
+        let bias = Array2::zeros((1, filters));
 
+        Ok(SeparableConv2D {
+            filters,
+            kernel_size,
+            strides,
+            padding: PaddingType::Valid,
+            depth_multiplier,
+            depthwise_weights,
+            pointwise_weights,
+            bias,
+            activation: activation.into(),
+            output_cache: None,
+            input_cache: None,
+            depthwise_output_cache: None,
+            input_shape,
+            depthwise_weight_gradients: None,
+            pointwise_weight_gradients: None,
+            bias_gradients: None,
+        })
+    }
+
+    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    ///
+    /// # Parameters
+    ///
+    /// - `padding` - Type of padding to apply (`Valid` or `Same`)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_padding(mut self, padding: PaddingType) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Sets the seed used to initialize the depthwise/pointwise weights and re-initializes them
+    /// deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
+    /// assigning custom weights or training. The bias stays zero-initialized.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        let channels = self.input_shape[1];
+        let (depthwise_weights, pointwise_weights) = Self::init_weights_arrays(
+            self.filters,
+            channels,
+            self.kernel_size,
+            self.depth_multiplier,
+            Some(random_state),
+        );
+        self.depthwise_weights = depthwise_weights;
+        self.pointwise_weights = pointwise_weights;
+        self
+    }
+
+    /// Xavier/Glorot uniform initialization of the depthwise and pointwise weight tensors
+    ///
+    /// Both draws share one RNG (threaded depthwise-then-pointwise) so a given seed reproduces the
+    /// exact same pair of tensors.
+    fn init_weights_arrays(
+        filters: usize,
+        channels: usize,
+        kernel_size: (usize, usize),
+        depth_multiplier: usize,
+        random_state: Option<u64>,
+    ) -> (Array4<f32>, Array4<f32>) {
         // Xavier init for the depthwise weights
         let depthwise_fan_in = kernel_size.0 * kernel_size.1;
         let depthwise_fan_out = depth_multiplier * kernel_size.0 * kernel_size.1;
@@ -173,26 +249,7 @@ impl SeparableConv2D {
             &mut rng,
         );
 
-        let bias = Array2::zeros((1, filters));
-
-        Ok(SeparableConv2D {
-            filters,
-            kernel_size,
-            strides,
-            padding,
-            depth_multiplier,
-            depthwise_weights,
-            pointwise_weights,
-            bias,
-            activation: activation.into(),
-            output_cache: None,
-            input_cache: None,
-            depthwise_output_cache: None,
-            input_shape,
-            depthwise_weight_gradients: None,
-            pointwise_weight_gradients: None,
-            bias_gradients: None,
-        })
+        (depthwise_weights, pointwise_weights)
     }
 
     /// Calculates the output shape of the separable convolutional layer

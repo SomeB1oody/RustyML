@@ -44,7 +44,7 @@ fn regression_data() -> (Tensor, Tensor) {
 ///
 /// Gives a known starting loss of 1.875 on the regression_data() problem
 fn identity_dense() -> Dense {
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     layer.set_weights(w, b).unwrap();
@@ -65,7 +65,7 @@ fn eval_mse(model: &Sequential, x: &Tensor, y: &Tensor) -> f32 {
 
 #[test]
 fn sgd_rejects_zero_learning_rate() {
-    let err = SGD::new(0.0, None, 0.0, false, 0.0).unwrap_err();
+    let err = SGD::new(0.0, 0.0, false, 0.0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {:?}",
@@ -75,7 +75,7 @@ fn sgd_rejects_zero_learning_rate() {
 
 #[test]
 fn sgd_rejects_negative_learning_rate() {
-    let err = SGD::new(-0.1, None, 0.0, false, 0.0).unwrap_err();
+    let err = SGD::new(-0.1, 0.0, false, 0.0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {:?}",
@@ -85,7 +85,7 @@ fn sgd_rejects_negative_learning_rate() {
 
 #[test]
 fn sgd_rejects_infinite_learning_rate() {
-    let err = SGD::new(f32::INFINITY, None, 0.0, false, 0.0).unwrap_err();
+    let err = SGD::new(f32::INFINITY, 0.0, false, 0.0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {:?}",
@@ -95,7 +95,7 @@ fn sgd_rejects_infinite_learning_rate() {
 
 #[test]
 fn sgd_rejects_nan_learning_rate() {
-    let err = SGD::new(f32::NAN, None, 0.0, false, 0.0).unwrap_err();
+    let err = SGD::new(f32::NAN, 0.0, false, 0.0).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {:?}",
@@ -105,10 +105,10 @@ fn sgd_rejects_nan_learning_rate() {
 
 #[test]
 fn sgd_accepts_valid_learning_rate() {
-    assert!(SGD::new(0.01, None, 0.0, false, 0.0).is_ok());
-    assert!(SGD::new(1.0, None, 0.0, false, 0.0).is_ok());
+    assert!(SGD::new(0.01, 0.0, false, 0.0).is_ok());
+    assert!(SGD::new(1.0, 0.0, false, 0.0).is_ok());
     // smallest positive finite f32
-    assert!(SGD::new(f32::MIN_POSITIVE, None, 0.0, false, 0.0).is_ok());
+    assert!(SGD::new(f32::MIN_POSITIVE, 0.0, false, 0.0).is_ok());
 }
 
 // Adam - constructor validation
@@ -116,7 +116,7 @@ fn sgd_accepts_valid_learning_rate() {
 #[test]
 fn adam_rejects_zero_learning_rate() {
     assert!(matches!(
-        Adam::new(0.0, 0.9, 0.999, 1e-8, None, 0.0),
+        Adam::new(0.0, 0.9, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -124,7 +124,7 @@ fn adam_rejects_zero_learning_rate() {
 #[test]
 fn adam_rejects_negative_learning_rate() {
     assert!(matches!(
-        Adam::new(-1e-3, 0.9, 0.999, 1e-8, None, 0.0),
+        Adam::new(-1e-3, 0.9, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -132,7 +132,7 @@ fn adam_rejects_negative_learning_rate() {
 #[test]
 fn adam_rejects_inf_learning_rate() {
     assert!(matches!(
-        Adam::new(f32::INFINITY, 0.9, 0.999, 1e-8, None, 0.0),
+        Adam::new(f32::INFINITY, 0.9, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -140,7 +140,7 @@ fn adam_rejects_inf_learning_rate() {
 #[test]
 fn adam_rejects_nan_learning_rate() {
     assert!(matches!(
-        Adam::new(f32::NAN, 0.9, 0.999, 1e-8, None, 0.0),
+        Adam::new(f32::NAN, 0.9, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -148,14 +148,14 @@ fn adam_rejects_nan_learning_rate() {
 /// beta1 = 0.0 (inclusive lower bound) is accepted
 #[test]
 fn adam_accepts_beta1_zero() {
-    assert!(Adam::new(0.001, 0.0, 0.999, 1e-8, None, 0.0).is_ok());
+    assert!(Adam::new(0.001, 0.0, 0.999, 1e-8, 0.0).is_ok());
 }
 
 /// beta1 = 1.0 (exclusive upper bound) is rejected
 #[test]
 fn adam_rejects_beta1_one() {
     assert!(matches!(
-        Adam::new(0.001, 1.0, 0.999, 1e-8, None, 0.0),
+        Adam::new(0.001, 1.0, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -163,7 +163,7 @@ fn adam_rejects_beta1_one() {
 #[test]
 fn adam_rejects_beta1_greater_than_one() {
     assert!(matches!(
-        Adam::new(0.001, 1.1, 0.999, 1e-8, None, 0.0),
+        Adam::new(0.001, 1.1, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -171,7 +171,7 @@ fn adam_rejects_beta1_greater_than_one() {
 #[test]
 fn adam_rejects_beta1_negative() {
     assert!(matches!(
-        Adam::new(0.001, -0.1, 0.999, 1e-8, None, 0.0),
+        Adam::new(0.001, -0.1, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -179,7 +179,7 @@ fn adam_rejects_beta1_negative() {
 #[test]
 fn adam_rejects_beta1_nan() {
     assert!(matches!(
-        Adam::new(0.001, f32::NAN, 0.999, 1e-8, None, 0.0),
+        Adam::new(0.001, f32::NAN, 0.999, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -187,14 +187,14 @@ fn adam_rejects_beta1_nan() {
 /// beta2 = 0.0 (inclusive lower bound) is accepted
 #[test]
 fn adam_accepts_beta2_zero() {
-    assert!(Adam::new(0.001, 0.9, 0.0, 1e-8, None, 0.0).is_ok());
+    assert!(Adam::new(0.001, 0.9, 0.0, 1e-8, 0.0).is_ok());
 }
 
 /// beta2 = 1.0 (exclusive upper bound) is rejected
 #[test]
 fn adam_rejects_beta2_one() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, 1.0, 1e-8, None, 0.0),
+        Adam::new(0.001, 0.9, 1.0, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -202,7 +202,7 @@ fn adam_rejects_beta2_one() {
 #[test]
 fn adam_rejects_beta2_nan() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, f32::NAN, 1e-8, None, 0.0),
+        Adam::new(0.001, 0.9, f32::NAN, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -210,7 +210,7 @@ fn adam_rejects_beta2_nan() {
 #[test]
 fn adam_rejects_epsilon_zero() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, 0.0, None, 0.0),
+        Adam::new(0.001, 0.9, 0.999, 0.0, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -218,7 +218,7 @@ fn adam_rejects_epsilon_zero() {
 #[test]
 fn adam_rejects_epsilon_negative() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, -1e-8, None, 0.0),
+        Adam::new(0.001, 0.9, 0.999, -1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -226,7 +226,7 @@ fn adam_rejects_epsilon_negative() {
 #[test]
 fn adam_rejects_epsilon_nan() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, f32::NAN, None, 0.0),
+        Adam::new(0.001, 0.9, 0.999, f32::NAN, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -234,16 +234,16 @@ fn adam_rejects_epsilon_nan() {
 #[test]
 fn adam_rejects_epsilon_inf() {
     assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, f32::INFINITY, None, 0.0),
+        Adam::new(0.001, 0.9, 0.999, f32::INFINITY, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
 
 #[test]
 fn adam_accepts_valid_hyperparameters() {
-    assert!(Adam::new(0.001, 0.9, 0.999, 1e-8, None, 0.0).is_ok());
+    assert!(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).is_ok());
     // typical alternative: small beta1
-    assert!(Adam::new(0.01, 0.5, 0.9, 1e-6, None, 0.0).is_ok());
+    assert!(Adam::new(0.01, 0.5, 0.9, 1e-6, 0.0).is_ok());
 }
 
 // RMSprop - constructor validation
@@ -251,7 +251,7 @@ fn adam_accepts_valid_hyperparameters() {
 #[test]
 fn rmsprop_rejects_zero_learning_rate() {
     assert!(matches!(
-        RMSprop::new(0.0, 0.9, 1e-8, None, 0.0),
+        RMSprop::new(0.0, 0.9, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -259,7 +259,7 @@ fn rmsprop_rejects_zero_learning_rate() {
 #[test]
 fn rmsprop_rejects_negative_learning_rate() {
     assert!(matches!(
-        RMSprop::new(-0.01, 0.9, 1e-8, None, 0.0),
+        RMSprop::new(-0.01, 0.9, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -267,7 +267,7 @@ fn rmsprop_rejects_negative_learning_rate() {
 #[test]
 fn rmsprop_rejects_inf_learning_rate() {
     assert!(matches!(
-        RMSprop::new(f32::INFINITY, 0.9, 1e-8, None, 0.0),
+        RMSprop::new(f32::INFINITY, 0.9, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -275,7 +275,7 @@ fn rmsprop_rejects_inf_learning_rate() {
 #[test]
 fn rmsprop_rejects_nan_learning_rate() {
     assert!(matches!(
-        RMSprop::new(f32::NAN, 0.9, 1e-8, None, 0.0),
+        RMSprop::new(f32::NAN, 0.9, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -283,14 +283,14 @@ fn rmsprop_rejects_nan_learning_rate() {
 /// rho = 0.0 (inclusive lower bound of [0, 1)) is accepted
 #[test]
 fn rmsprop_accepts_rho_zero() {
-    assert!(RMSprop::new(0.01, 0.0, 1e-8, None, 0.0).is_ok());
+    assert!(RMSprop::new(0.01, 0.0, 1e-8, 0.0).is_ok());
 }
 
 /// rho = 1.0 (exclusive upper bound) is rejected
 #[test]
 fn rmsprop_rejects_rho_one() {
     assert!(matches!(
-        RMSprop::new(0.01, 1.0, 1e-8, None, 0.0),
+        RMSprop::new(0.01, 1.0, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -298,7 +298,7 @@ fn rmsprop_rejects_rho_one() {
 #[test]
 fn rmsprop_rejects_rho_greater_than_one() {
     assert!(matches!(
-        RMSprop::new(0.01, 1.5, 1e-8, None, 0.0),
+        RMSprop::new(0.01, 1.5, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -306,7 +306,7 @@ fn rmsprop_rejects_rho_greater_than_one() {
 #[test]
 fn rmsprop_rejects_rho_negative() {
     assert!(matches!(
-        RMSprop::new(0.01, -0.5, 1e-8, None, 0.0),
+        RMSprop::new(0.01, -0.5, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -314,7 +314,7 @@ fn rmsprop_rejects_rho_negative() {
 #[test]
 fn rmsprop_rejects_rho_nan() {
     assert!(matches!(
-        RMSprop::new(0.01, f32::NAN, 1e-8, None, 0.0),
+        RMSprop::new(0.01, f32::NAN, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -322,7 +322,7 @@ fn rmsprop_rejects_rho_nan() {
 #[test]
 fn rmsprop_rejects_epsilon_zero() {
     assert!(matches!(
-        RMSprop::new(0.01, 0.9, 0.0, None, 0.0),
+        RMSprop::new(0.01, 0.9, 0.0, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -330,7 +330,7 @@ fn rmsprop_rejects_epsilon_zero() {
 #[test]
 fn rmsprop_rejects_epsilon_nan() {
     assert!(matches!(
-        RMSprop::new(0.01, 0.9, f32::NAN, None, 0.0),
+        RMSprop::new(0.01, 0.9, f32::NAN, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -338,15 +338,15 @@ fn rmsprop_rejects_epsilon_nan() {
 #[test]
 fn rmsprop_rejects_epsilon_inf() {
     assert!(matches!(
-        RMSprop::new(0.01, 0.9, f32::INFINITY, None, 0.0),
+        RMSprop::new(0.01, 0.9, f32::INFINITY, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
 
 #[test]
 fn rmsprop_accepts_valid_hyperparameters() {
-    assert!(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).is_ok());
-    assert!(RMSprop::new(0.01, 0.95, 1e-5, None, 0.0).is_ok());
+    assert!(RMSprop::new(0.001, 0.9, 1e-8, 0.0).is_ok());
+    assert!(RMSprop::new(0.01, 0.95, 1e-5, 0.0).is_ok());
 }
 
 // AdaGrad - constructor validation
@@ -354,7 +354,7 @@ fn rmsprop_accepts_valid_hyperparameters() {
 #[test]
 fn adagrad_rejects_zero_learning_rate() {
     assert!(matches!(
-        AdaGrad::new(0.0, 1e-8, None, 0.0),
+        AdaGrad::new(0.0, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -362,7 +362,7 @@ fn adagrad_rejects_zero_learning_rate() {
 #[test]
 fn adagrad_rejects_negative_learning_rate() {
     assert!(matches!(
-        AdaGrad::new(-0.01, 1e-8, None, 0.0),
+        AdaGrad::new(-0.01, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -370,7 +370,7 @@ fn adagrad_rejects_negative_learning_rate() {
 #[test]
 fn adagrad_rejects_inf_learning_rate() {
     assert!(matches!(
-        AdaGrad::new(f32::INFINITY, 1e-8, None, 0.0),
+        AdaGrad::new(f32::INFINITY, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -378,7 +378,7 @@ fn adagrad_rejects_inf_learning_rate() {
 #[test]
 fn adagrad_rejects_nan_learning_rate() {
     assert!(matches!(
-        AdaGrad::new(f32::NAN, 1e-8, None, 0.0),
+        AdaGrad::new(f32::NAN, 1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -386,7 +386,7 @@ fn adagrad_rejects_nan_learning_rate() {
 #[test]
 fn adagrad_rejects_epsilon_zero() {
     assert!(matches!(
-        AdaGrad::new(0.01, 0.0, None, 0.0),
+        AdaGrad::new(0.01, 0.0, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -394,7 +394,7 @@ fn adagrad_rejects_epsilon_zero() {
 #[test]
 fn adagrad_rejects_epsilon_negative() {
     assert!(matches!(
-        AdaGrad::new(0.01, -1e-8, None, 0.0),
+        AdaGrad::new(0.01, -1e-8, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -402,7 +402,7 @@ fn adagrad_rejects_epsilon_negative() {
 #[test]
 fn adagrad_rejects_epsilon_nan() {
     assert!(matches!(
-        AdaGrad::new(0.01, f32::NAN, None, 0.0),
+        AdaGrad::new(0.01, f32::NAN, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
@@ -410,15 +410,15 @@ fn adagrad_rejects_epsilon_nan() {
 #[test]
 fn adagrad_rejects_epsilon_inf() {
     assert!(matches!(
-        AdaGrad::new(0.01, f32::INFINITY, None, 0.0),
+        AdaGrad::new(0.01, f32::INFINITY, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
 }
 
 #[test]
 fn adagrad_accepts_valid_hyperparameters() {
-    assert!(AdaGrad::new(0.01, 1e-8, None, 0.0).is_ok());
-    assert!(AdaGrad::new(0.001, 1e-5, None, 0.0).is_ok());
+    assert!(AdaGrad::new(0.01, 1e-8, 0.0).is_ok());
+    assert!(AdaGrad::new(0.001, 1e-5, 0.0).is_ok());
 }
 
 // Known initial-loss sanity check
@@ -429,7 +429,7 @@ fn identity_dense_initial_mse_is_1_875() {
     let (x, y) = regression_data();
     let mut model = Sequential::new();
     model.add(identity_dense()).compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -449,7 +449,7 @@ fn sgd_single_layer_loss_decreases_over_20_epochs() {
     // lr=0.1: plain SGD needs lr < 2/lambda_max(Hessian) ~= 2/5.5 ~= 0.36 here to
     // converge (0.5 overshoots and diverges); 0.1 reduces the loss steadily
     model.add(identity_dense()).compile(
-        SGD::new(0.1, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.1, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -473,7 +473,7 @@ fn adam_single_layer_loss_decreases_over_20_epochs() {
 
     let mut model = Sequential::new();
     model.add(identity_dense()).compile(
-        Adam::new(0.1, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
+        Adam::new(0.1, 0.9, 0.999, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -497,7 +497,7 @@ fn rmsprop_single_layer_loss_decreases_over_20_epochs() {
 
     let mut model = Sequential::new();
     model.add(identity_dense()).compile(
-        RMSprop::new(0.1, 0.9, 1e-8, None, 0.0).unwrap(),
+        RMSprop::new(0.1, 0.9, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -521,7 +521,7 @@ fn adagrad_single_layer_loss_decreases_over_20_epochs() {
 
     let mut model = Sequential::new();
     model.add(identity_dense()).compile(
-        AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(),
+        AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -549,12 +549,16 @@ fn adam_two_layer_loss_decreases_and_buffers_allocated_correctly() {
     // and never flakes on a pathological Xavier init
     const SEED: u64 = 0;
     let build_model = || -> Sequential {
-        let layer1 = Dense::new(1, 4, Linear::new(), Some(SEED)).unwrap();
-        let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
+        let layer1 = Dense::new(1, 4, Linear::new())
+            .unwrap()
+            .with_random_state(SEED);
+        let layer2 = Dense::new(4, 1, Linear::new())
+            .unwrap()
+            .with_random_state(SEED);
 
         let mut model = Sequential::new_with_seed(SEED);
         model.add(layer1).add(layer2).compile(
-            Adam::new(0.05, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
+            Adam::new(0.05, 0.9, 0.999, 1e-8, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
         model
@@ -590,12 +594,16 @@ fn sgd_two_layer_loss_decreases() {
     const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new(), Some(SEED)).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
+    let layer2 = Dense::new(4, 1, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
 
     let mut model = Sequential::new();
     model.add(layer1).add(layer2).compile(
-        SGD::new(0.05, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.05, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -619,12 +627,16 @@ fn rmsprop_two_layer_loss_decreases() {
     const SEED: u64 = 0;
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new(), Some(SEED)).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new(), Some(SEED)).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
+    let layer2 = Dense::new(4, 1, Linear::new())
+        .unwrap()
+        .with_random_state(SEED);
 
     let mut model = Sequential::new();
     model.add(layer1).add(layer2).compile(
-        RMSprop::new(0.01, 0.9, 1e-8, None, 0.0).unwrap(),
+        RMSprop::new(0.01, 0.9, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -647,12 +659,12 @@ fn rmsprop_two_layer_loss_decreases() {
 fn adagrad_two_layer_loss_decreases() {
     let (x, y) = regression_data();
 
-    let layer1 = Dense::new(1, 4, Linear::new(), None).unwrap();
-    let layer2 = Dense::new(4, 1, Linear::new(), None).unwrap();
+    let layer1 = Dense::new(1, 4, Linear::new()).unwrap();
+    let layer2 = Dense::new(4, 1, Linear::new()).unwrap();
 
     let mut model = Sequential::new();
     model.add(layer1).add(layer2).compile(
-        AdaGrad::new(0.5, 1e-8, None, 0.0).unwrap(),
+        AdaGrad::new(0.5, 1e-8, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -681,12 +693,12 @@ fn sgd_one_step_weight_update_matches_hand_calculation() {
     // w=1, b=0  ->  y_hat=2,  loss=(2-6)^2/1 = 16
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     layer.set_weights(w, b).unwrap();
 
     let mut model = Sequential::new();
     model.add(layer).compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -728,13 +740,16 @@ fn clip_by_global_norm_scales_sgd_step() {
 
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     layer.set_weights(w, b).unwrap();
 
     let max_norm = 8.0_f32;
     let mut model = Sequential::new();
     model.add(layer).compile(
-        SGD::new(0.01, Some(max_norm), 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0)
+            .unwrap()
+            .with_clip_norm(max_norm)
+            .unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -762,12 +777,15 @@ fn clip_by_global_norm_above_norm_is_noop() {
 
     let w = Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     let b = Array::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     layer.set_weights(w, b).unwrap();
 
     let mut model = Sequential::new();
     model.add(layer).compile(
-        SGD::new(0.01, Some(100.0), 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0)
+            .unwrap()
+            .with_clip_norm(100.0)
+            .unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -778,21 +796,26 @@ fn clip_by_global_norm_above_norm_is_noop() {
     assert_abs_diff_eq!(b_new, 0.08_f32, epsilon = 1e-5);
 }
 
-/// The `clip_norm` constructor argument rejects non-positive or non-finite thresholds, accepts a
-/// valid positive one, and accepts `None` (clipping disabled)
+/// `with_clip_norm` rejects non-positive or non-finite thresholds and accepts a valid positive one;
+/// constructing without it leaves clipping disabled
 #[test]
 fn new_rejects_invalid_clip_norm() {
     for bad in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
         assert!(
             matches!(
-                SGD::new(0.01, Some(bad), 0.0, false, 0.0),
+                SGD::new(0.01, 0.0, false, 0.0).unwrap().with_clip_norm(bad),
                 Err(Error::InvalidParameter { .. })
             ),
-            "clip_norm Some({bad}) should be rejected"
+            "clip_norm {bad} should be rejected"
         );
     }
-    assert!(SGD::new(0.01, Some(5.0), 0.0, false, 0.0).is_ok());
-    assert!(SGD::new(0.01, None, 0.0, false, 0.0).is_ok());
+    assert!(
+        SGD::new(0.01, 0.0, false, 0.0)
+            .unwrap()
+            .with_clip_norm(5.0)
+            .is_ok()
+    );
+    assert!(SGD::new(0.01, 0.0, false, 0.0).is_ok());
 }
 
 // SGD momentum / weight decay / LR scheduling (integration)
@@ -807,7 +830,7 @@ fn set_learning_rate_scales_the_step() {
     let y = Array::from_shape_vec((1, 1), vec![6.0_f32])
         .unwrap()
         .into_dyn();
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     layer
         .set_weights(
             Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap(),
@@ -817,7 +840,7 @@ fn set_learning_rate_scales_the_step() {
 
     let mut model = Sequential::new();
     model.add(layer).compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     model.set_learning_rate(0.02); // double the configured 0.01
@@ -838,7 +861,7 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
     let y = Array::from_shape_vec((1, 1), vec![6.0_f32])
         .unwrap()
         .into_dyn();
-    let mut layer = Dense::new(1, 1, Linear::new(), None).unwrap();
+    let mut layer = Dense::new(1, 1, Linear::new()).unwrap();
     layer
         .set_weights(
             Array::from_shape_vec((1, 1), vec![1.0_f32]).unwrap(),
@@ -848,7 +871,7 @@ fn sgd_decoupled_weight_decay_shrinks_param() {
 
     let mut model = Sequential::new();
     model.add(layer).compile(
-        SGD::new(0.01, None, 0.0, false, 0.5).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.5).unwrap(),
         MeanSquaredError::new(),
     );
     model.fit(&x, &y, 1).unwrap();
@@ -864,7 +887,7 @@ fn sgd_momentum_loss_decreases() {
     let (x, y) = regression_data();
     let mut model = Sequential::new();
     model.add(identity_dense()).compile(
-        SGD::new(0.05, None, 0.9, true, 0.0).unwrap(),
+        SGD::new(0.05, 0.9, true, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     let before = eval_mse(&model, &x, &y);
@@ -880,15 +903,15 @@ fn sgd_momentum_loss_decreases() {
 #[test]
 fn new_rejects_negative_momentum_and_weight_decay() {
     assert!(matches!(
-        SGD::new(0.01, None, -0.1, false, 0.0),
+        SGD::new(0.01, -0.1, false, 0.0),
         Err(Error::InvalidParameter { .. })
     ));
     assert!(matches!(
-        SGD::new(0.01, None, 0.0, false, -0.1),
+        SGD::new(0.01, 0.0, false, -0.1),
         Err(Error::InvalidParameter { .. })
     ));
     assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, 1e-8, None, -0.1),
+        Adam::new(0.001, 0.9, 0.999, 1e-8, -0.1),
         Err(Error::InvalidParameter { .. })
     ));
 }

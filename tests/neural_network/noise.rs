@@ -35,7 +35,7 @@ fn tensor_std(t: &Tensor) -> f64 {
 /// Negative stddev returns Err(InvalidParameter) rather than panicking
 #[test]
 fn gaussian_noise_negative_stddev_returns_err() {
-    let result = GaussianNoise::new(-0.1, vec![4, 4], None);
+    let result = GaussianNoise::new(-0.1, vec![4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected Err(InvalidParameter) for negative stddev, got {:?}",
@@ -46,13 +46,13 @@ fn gaussian_noise_negative_stddev_returns_err() {
 /// stddev = 0 is accepted at construction
 #[test]
 fn gaussian_noise_zero_stddev_construction_ok() {
-    assert!(GaussianNoise::new(0.0, vec![4, 4], None).is_ok());
+    assert!(GaussianNoise::new(0.0, vec![4, 4]).is_ok());
 }
 
 /// Positive stddev is accepted at construction
 #[test]
 fn gaussian_noise_positive_stddev_construction_ok() {
-    assert!(GaussianNoise::new(0.5, vec![4, 4], None).is_ok());
+    assert!(GaussianNoise::new(0.5, vec![4, 4]).is_ok());
 }
 
 // GaussianNoise: identity paths
@@ -65,7 +65,7 @@ fn gaussian_noise_eval_mode_is_identity() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(1.0, vec![2, 3], None).unwrap();
+    let mut layer = GaussianNoise::new(1.0, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let output = layer.forward(&input).unwrap();
@@ -81,7 +81,7 @@ fn gaussian_noise_predict_is_always_identity() {
         .into_dyn();
 
     // Training flag = true: predict must still be identity
-    let mut layer = GaussianNoise::new(1.0, vec![2, 3], None).unwrap();
+    let mut layer = GaussianNoise::new(1.0, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
     let output = layer.predict(&input).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
@@ -95,7 +95,7 @@ fn gaussian_noise_predict_equals_forward_in_eval_mode() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(0.5, vec![3, 4], None).unwrap();
+    let mut layer = GaussianNoise::new(0.5, vec![3, 4]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let forward_out = layer.forward(&input).unwrap();
@@ -110,7 +110,7 @@ fn gaussian_noise_zero_stddev_training_is_identity() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(0.0, vec![3], None).unwrap();
+    let mut layer = GaussianNoise::new(0.0, vec![3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let output = layer.forward(&input).unwrap();
@@ -131,7 +131,7 @@ fn gaussian_noise_training_preserves_mean() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(stddev, vec![N], None).unwrap();
+    let mut layer = GaussianNoise::new(stddev, vec![N]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let output = layer.forward(&input).unwrap();
@@ -155,7 +155,7 @@ fn gaussian_noise_training_noise_std_matches_stddev() {
             .unwrap()
             .into_dyn();
 
-        let mut layer = GaussianNoise::new(stddev, vec![N], None).unwrap();
+        let mut layer = GaussianNoise::new(stddev, vec![N]).unwrap();
         layer.set_training_if_mode_dependent(true);
 
         let output = layer.forward(&input).unwrap();
@@ -181,7 +181,7 @@ fn gaussian_noise_training_can_produce_negative_values() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(5.0, vec![N], None).unwrap();
+    let mut layer = GaussianNoise::new(5.0, vec![N]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let output = layer.forward(&input).unwrap();
@@ -202,7 +202,7 @@ fn gaussian_noise_training_consecutive_calls_differ() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(0.5, vec![N], None).unwrap();
+    let mut layer = GaussianNoise::new(0.5, vec![N]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let out1 = layer.forward(&input).unwrap();
@@ -220,7 +220,7 @@ fn gaussian_noise_training_consecutive_calls_differ() {
 /// forward() with a shape-mismatched input returns Err(ShapeMismatch)
 #[test]
 fn gaussian_noise_forward_shape_mismatch_returns_err() {
-    let mut layer = GaussianNoise::new(0.1, vec![4, 4], None).unwrap();
+    let mut layer = GaussianNoise::new(0.1, vec![4, 4]).unwrap();
     // Supply a [3, 3] tensor to a layer expecting [4, 4]
     let wrong_input: Tensor = Array::from_shape_vec((3, 3), vec![1.0f32; 9])
         .unwrap()
@@ -237,7 +237,7 @@ fn gaussian_noise_forward_shape_mismatch_returns_err() {
 /// predict() with a shape-mismatched input returns Err(ShapeMismatch)
 #[test]
 fn gaussian_noise_predict_shape_mismatch_returns_err() {
-    let layer = GaussianNoise::new(0.1, vec![4, 4], None).unwrap();
+    let layer = GaussianNoise::new(0.1, vec![4, 4]).unwrap();
     let wrong_input: Tensor = Array::from_shape_vec((3, 3), vec![1.0f32; 9])
         .unwrap()
         .into_dyn();
@@ -253,7 +253,7 @@ fn gaussian_noise_predict_shape_mismatch_returns_err() {
 /// Empty input_shape is a wildcard: any tensor shape is accepted
 #[test]
 fn gaussian_noise_empty_input_shape_accepts_any_tensor() {
-    let mut layer = GaussianNoise::new(0.1, vec![], None).unwrap();
+    let mut layer = GaussianNoise::new(0.1, vec![]).unwrap();
     // Supply tensors of completely different shapes - both should succeed
     let a: Tensor = Array::from_shape_vec((5,), vec![1.0f32; 5])
         .unwrap()
@@ -271,14 +271,14 @@ fn gaussian_noise_empty_input_shape_accepts_any_tensor() {
 
 #[test]
 fn gaussian_noise_layer_type_and_output_shape() {
-    let layer = GaussianNoise::new(0.3, vec![32, 128], None).unwrap();
+    let layer = GaussianNoise::new(0.3, vec![32, 128]).unwrap();
     assert_eq!(layer.layer_type(), "GaussianNoise");
     assert_eq!(layer.output_shape(), "(32, 128)");
 }
 
 #[test]
 fn gaussian_noise_empty_input_shape_output_shape_unknown() {
-    let layer = GaussianNoise::new(0.3, vec![], None).unwrap();
+    let layer = GaussianNoise::new(0.3, vec![]).unwrap();
     assert_eq!(layer.output_shape(), "Unknown");
 }
 
@@ -289,7 +289,7 @@ fn gaussian_noise_empty_input_shape_output_shape_unknown() {
 /// rate = 1.0 is rejected: the valid interval [0, 1) excludes 1.0
 #[test]
 fn gaussian_dropout_rate_one_returns_err() {
-    let result = GaussianDropout::new(1.0, vec![4, 4], None);
+    let result = GaussianDropout::new(1.0, vec![4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected Err(InvalidParameter) for rate=1.0, got {:?}",
@@ -300,7 +300,7 @@ fn gaussian_dropout_rate_one_returns_err() {
 /// rate > 1.0 is rejected
 #[test]
 fn gaussian_dropout_rate_above_one_returns_err() {
-    let result = GaussianDropout::new(1.5, vec![4, 4], None);
+    let result = GaussianDropout::new(1.5, vec![4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected Err(InvalidParameter) for rate=1.5, got {:?}",
@@ -311,7 +311,7 @@ fn gaussian_dropout_rate_above_one_returns_err() {
 /// Negative rate is rejected
 #[test]
 fn gaussian_dropout_negative_rate_returns_err() {
-    let result = GaussianDropout::new(-0.1, vec![4, 4], None);
+    let result = GaussianDropout::new(-0.1, vec![4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected Err(InvalidParameter) for rate=-0.1, got {:?}",
@@ -322,13 +322,13 @@ fn gaussian_dropout_negative_rate_returns_err() {
 /// rate = 0.0 is accepted at construction
 #[test]
 fn gaussian_dropout_rate_zero_construction_ok() {
-    assert!(GaussianDropout::new(0.0, vec![4, 4], None).is_ok());
+    assert!(GaussianDropout::new(0.0, vec![4, 4]).is_ok());
 }
 
 /// rate = 0.999 is accepted (just below 1.0)
 #[test]
 fn gaussian_dropout_rate_near_one_construction_ok() {
-    assert!(GaussianDropout::new(0.999, vec![4, 4], None).is_ok());
+    assert!(GaussianDropout::new(0.999, vec![4, 4]).is_ok());
 }
 
 // GaussianDropout: identity paths
@@ -341,7 +341,7 @@ fn gaussian_dropout_eval_mode_is_identity() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.5, vec![2, 3], None).unwrap();
+    let mut layer = GaussianDropout::new(0.5, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let output = layer.forward(&input).unwrap();
@@ -356,7 +356,7 @@ fn gaussian_dropout_predict_is_always_identity() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.3, vec![2, 3], None).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3]).unwrap();
     layer.set_training_if_mode_dependent(true);
     let output = layer.predict(&input).unwrap();
     crate::common::assert_allclose(&output, &input, 1e-6f32);
@@ -370,7 +370,7 @@ fn gaussian_dropout_predict_equals_forward_in_eval_mode() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.4, vec![3, 4], None).unwrap();
+    let mut layer = GaussianDropout::new(0.4, vec![3, 4]).unwrap();
     layer.set_training_if_mode_dependent(false);
 
     let forward_out = layer.forward(&input).unwrap();
@@ -385,7 +385,7 @@ fn gaussian_dropout_rate_zero_training_is_identity() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.0, vec![3], None).unwrap();
+    let mut layer = GaussianDropout::new(0.0, vec![3]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let output = layer.forward(&input).unwrap();
@@ -406,7 +406,7 @@ fn gaussian_dropout_training_preserves_mean() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(rate, vec![N], None).unwrap();
+    let mut layer = GaussianDropout::new(rate, vec![N]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let output = layer.forward(&input).unwrap();
@@ -437,7 +437,7 @@ fn gaussian_dropout_training_noise_std_matches_formula() {
             .unwrap()
             .into_dyn();
 
-        let mut layer = GaussianDropout::new(rate, vec![N], None).unwrap();
+        let mut layer = GaussianDropout::new(rate, vec![N]).unwrap();
         layer.set_training_if_mode_dependent(true);
 
         let output = layer.forward(&input).unwrap();
@@ -462,7 +462,7 @@ fn gaussian_dropout_training_consecutive_calls_differ() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.5, vec![N], None).unwrap();
+    let mut layer = GaussianDropout::new(0.5, vec![N]).unwrap();
     layer.set_training_if_mode_dependent(true);
 
     let out1 = layer.forward(&input).unwrap();
@@ -480,7 +480,7 @@ fn gaussian_dropout_training_consecutive_calls_differ() {
 /// forward() with a shape-mismatched input returns Err(ShapeMismatch)
 #[test]
 fn gaussian_dropout_forward_shape_mismatch_returns_err() {
-    let mut layer = GaussianDropout::new(0.3, vec![4, 4], None).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![4, 4]).unwrap();
     let wrong_input: Tensor = Array::from_shape_vec((3, 3), vec![1.0f32; 9])
         .unwrap()
         .into_dyn();
@@ -496,7 +496,7 @@ fn gaussian_dropout_forward_shape_mismatch_returns_err() {
 /// predict() with a shape-mismatched input returns Err(ShapeMismatch)
 #[test]
 fn gaussian_dropout_predict_shape_mismatch_returns_err() {
-    let layer = GaussianDropout::new(0.3, vec![4, 4], None).unwrap();
+    let layer = GaussianDropout::new(0.3, vec![4, 4]).unwrap();
     let wrong_input: Tensor = Array::from_shape_vec((3, 3), vec![1.0f32; 9])
         .unwrap()
         .into_dyn();
@@ -512,7 +512,7 @@ fn gaussian_dropout_predict_shape_mismatch_returns_err() {
 /// Empty input_shape is a wildcard: any tensor shape is accepted
 #[test]
 fn gaussian_dropout_empty_input_shape_accepts_any_tensor() {
-    let mut layer = GaussianDropout::new(0.3, vec![], None).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![]).unwrap();
     let a: Tensor = Array::from_shape_vec((5,), vec![1.0f32; 5])
         .unwrap()
         .into_dyn();
@@ -532,7 +532,7 @@ fn gaussian_dropout_backward_without_forward_errors() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
-    let mut layer = GaussianDropout::new(0.3, vec![2, 3], None).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3]).unwrap();
 
     let result = layer.backward(&grad);
     assert!(
@@ -552,7 +552,9 @@ fn gaussian_dropout_backward_multiplies_by_forward_noise() {
     let input: Tensor = Array::from_shape_vec((2, 3), vec![1.0f32; 6])
         .unwrap()
         .into_dyn();
-    let mut layer = GaussianDropout::new(0.3, vec![2, 3], Some(42)).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3])
+        .unwrap()
+        .with_random_state(42);
 
     // With input = ones, output = ones * noise = noise
     let output = layer.forward(&input).unwrap();
@@ -576,7 +578,7 @@ fn gaussian_dropout_backward_inference_is_passthrough() {
     let grad: Tensor = Array::from_shape_vec((2, 3), vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0])
         .unwrap()
         .into_dyn();
-    let mut layer = GaussianDropout::new(0.3, vec![2, 3], None).unwrap();
+    let mut layer = GaussianDropout::new(0.3, vec![2, 3]).unwrap();
     layer.set_training(false);
 
     let grad_input = layer.backward(&grad).unwrap();
@@ -589,14 +591,14 @@ fn gaussian_dropout_backward_inference_is_passthrough() {
 
 #[test]
 fn gaussian_dropout_layer_type_and_output_shape() {
-    let layer = GaussianDropout::new(0.3, vec![32, 128], None).unwrap();
+    let layer = GaussianDropout::new(0.3, vec![32, 128]).unwrap();
     assert_eq!(layer.layer_type(), "GaussianDropout");
     assert_eq!(layer.output_shape(), "(32, 128)");
 }
 
 #[test]
 fn gaussian_dropout_empty_input_shape_output_shape_unknown() {
-    let layer = GaussianDropout::new(0.3, vec![], None).unwrap();
+    let layer = GaussianDropout::new(0.3, vec![]).unwrap();
     assert_eq!(layer.output_shape(), "Unknown");
 }
 
@@ -610,7 +612,7 @@ fn gaussian_noise_mode_switching_routes_correctly() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianNoise::new(2.0, vec![N], None).unwrap();
+    let mut layer = GaussianNoise::new(2.0, vec![N]).unwrap();
 
     // Eval mode is the identity
     layer.set_training_if_mode_dependent(false);
@@ -637,7 +639,7 @@ fn gaussian_dropout_mode_switching_routes_correctly() {
         .unwrap()
         .into_dyn();
 
-    let mut layer = GaussianDropout::new(0.5, vec![N], None).unwrap();
+    let mut layer = GaussianDropout::new(0.5, vec![N]).unwrap();
 
     // Eval mode is the identity
     layer.set_training_if_mode_dependent(false);
@@ -660,7 +662,7 @@ fn gaussian_dropout_mode_switching_routes_correctly() {
 /// noise does not depend on x, d(y)/dx = 1, so the upstream gradient returns unchanged
 #[test]
 fn gaussian_noise_backward_passes_gradient_through_unchanged() {
-    let mut layer = GaussianNoise::new(1.0, vec![2, 3], None).unwrap();
+    let mut layer = GaussianNoise::new(1.0, vec![2, 3]).unwrap();
     // Realistic call order: a training-mode forward first, then backward
     layer.set_training_if_mode_dependent(true);
     let x: Tensor = Array::from_elem((2, 3), 1.0f32).into_dyn();

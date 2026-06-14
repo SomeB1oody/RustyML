@@ -52,11 +52,9 @@ use std::borrow::Cow;
 ///         (3, 3, 3),                 // Kernel size
 ///         vec![2, 1, 8, 8, 8],       // Input shape
 ///         (1, 1, 1),                 // Stride
-///         PaddingType::Valid,        // No padding
-///         Activation::ReLU, // ReLU activation
-///         None,                      // random_state
+///         Activation::ReLU,          // ReLU activation
 ///     ).unwrap())
-///     .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+///     .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print model structure
 /// model.summary();
@@ -108,9 +106,13 @@ impl Conv3D {
     /// - `kernel_size` - Size of the convolution kernel as (depth, height, width)
     /// - `input_shape` - Expected input shape as \[batch_size, channels, depth, height, width\]
     /// - `strides` - Stride values as (depth_stride, height_stride, width_stride)
-    /// - `padding` - Padding type (`Valid` or `Same`)
     /// - `activation` - Activation applied to the convolution output (e.g. ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see [`crate::random`])
+    ///
+    /// # Notes
+    ///
+    /// Padding defaults to [`PaddingType::Valid`]; choose [`PaddingType::Same`] with
+    /// [`Conv3D::with_padding`]. Weights are seeded from the global seed or entropy by default; for
+    /// reproducible initialization, set a seed with [`Conv3D::with_random_state`].
     ///
     /// # Returns
     ///
@@ -126,9 +128,7 @@ impl Conv3D {
         kernel_size: (usize, usize, usize),
         input_shape: Vec<usize>,
         strides: (usize, usize, usize),
-        padding: PaddingType,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_filters(filters)?;
         validate_kernel_size_3d(kernel_size)?;
@@ -136,27 +136,14 @@ impl Conv3D {
         validate_input_shape_3d(&input_shape, kernel_size)?;
 
         let channels = input_shape[1];
-        let (kd, kh, kw) = kernel_size;
-
-        // Xavier/Glorot initialization
-        let fan_in = channels * kd * kh * kw;
-        let fan_out = filters * kd * kh * kw;
-        let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
-
-        let mut rng = crate::random::make_rng(random_state);
-        let weights = Array5::random_using(
-            (filters, channels, kd, kh, kw),
-            Uniform::new(-limit, limit).unwrap(),
-            &mut rng,
-        );
-
+        let weights = Self::init_weights_array(filters, channels, kernel_size, None);
         let bias = Array2::zeros((1, filters));
 
         Ok(Conv3D {
             filters,
             kernel_size,
             strides,
-            padding,
+            padding: PaddingType::Valid,
             weights,
             bias,
             activation: activation.into(),
@@ -166,6 +153,60 @@ impl Conv3D {
             weight_gradients: None,
             bias_gradients: None,
         })
+    }
+
+    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    ///
+    /// # Parameters
+    ///
+    /// - `padding` - Padding type (`Valid` or `Same`)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_padding(mut self, padding: PaddingType) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// Sets the seed used to initialize the filter weights and re-initializes them deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs Xavier/Glorot uniform initialization with `random_state`, so call it before
+    /// assigning custom weights or training. The bias stays zero-initialized.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        let channels = self.input_shape[1];
+        self.weights =
+            Self::init_weights_array(self.filters, channels, self.kernel_size, Some(random_state));
+        self
+    }
+
+    /// Xavier/Glorot uniform initialization of the \[filters, channels, kd, kh, kw\] weight tensor
+    fn init_weights_array(
+        filters: usize,
+        channels: usize,
+        kernel_size: (usize, usize, usize),
+        random_state: Option<u64>,
+    ) -> Array5<f32> {
+        let (kd, kh, kw) = kernel_size;
+        // Xavier/Glorot initialization
+        let fan_in = channels * kd * kh * kw;
+        let fan_out = filters * kd * kh * kw;
+        let limit = (6.0 / (fan_in + fan_out) as f32).sqrt();
+        let mut rng = crate::random::make_rng(random_state);
+        Array5::random_using(
+            (filters, channels, kd, kh, kw),
+            Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
+        )
     }
 
     /// Calculates the output shape for 3D convolution

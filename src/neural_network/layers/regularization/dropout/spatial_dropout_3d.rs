@@ -33,7 +33,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array5;
 ///
 /// // Create a SpatialDropout3D layer with 20% dropout rate
-/// let mut spatial_dropout = SpatialDropout3D::new(0.2, vec![32, 64, 16, 28, 28], None).unwrap();
+/// let mut spatial_dropout = SpatialDropout3D::new(0.2, vec![32, 64, 16, 28, 28]).unwrap();
 ///
 /// // Create input tensor (batch_size=32, channels=64, depth=16, height=28, width=28)
 /// let input = Array5::ones((32, 64, 16, 28, 28)).into_dyn();
@@ -62,7 +62,11 @@ impl SpatialDropout3D {
     ///
     /// - `rate` - Dropout rate, fraction of channels to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor `(batch_size, channels, depth, height, width)`
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy (see [`crate::random`])
+    ///
+    /// # Notes
+    ///
+    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
+    /// set a seed with [`SpatialDropout3D::with_random_state`].
     ///
     /// # Returns
     ///
@@ -71,11 +75,7 @@ impl SpatialDropout3D {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
-    pub fn new(
-        rate: f32,
-        input_shape: Vec<usize>,
-        random_state: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_rate(rate, "Dropout rate")?;
 
         Ok(SpatialDropout3D {
@@ -83,8 +83,25 @@ impl SpatialDropout3D {
             input_shape,
             mask: None,
             training: true,
-            rng: crate::random::make_rng(random_state),
+            rng: crate::random::make_rng(None),
         })
+    }
+
+    /// Sets the seed for reproducible mask sampling
+    ///
+    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
+    /// re-seeds it deterministically from `random_state`.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for the layer's random number generator
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        self.rng = crate::random::make_rng(Some(random_state));
+        self
     }
 
     mode_dependent_layer_set_training!();

@@ -44,8 +44,8 @@ use std::borrow::Cow;
 ///
 /// // Create GRU layer with 4 input features, 3 units, Tanh activation
 /// let mut model = Sequential::new();
-/// model.add(GRU::new(4, 3, Activation::Tanh, None).unwrap())
-///      .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+/// model.add(GRU::new(4, 3, Activation::Tanh).unwrap())
+///      .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Train the model
 /// model.fit(&input, &target, 10).unwrap();
@@ -91,7 +91,11 @@ impl GRU {
     /// - `input_dim` - Dimensionality of input features (number of features per timestep)
     /// - `units` - Number of GRU units/neurons in the layer (determines output dimensionality)
     /// - `activation` - Activation layer from the activation module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
+    ///
+    /// # Notes
+    ///
+    /// Weights are seeded from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`GRU::with_random_state`].
     ///
     /// # Returns
     ///
@@ -104,18 +108,13 @@ impl GRU {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
-
-        // 1 RNG threaded through all three gate blocks
-        let mut rng = crate::random::make_rng(random_state);
 
         Ok(Self {
             input_dim,
             units,
-            // Gate blocks [r | z | h], all biases start at 0.0
-            gates: FusedGates::new(input_dim, units, &[0.0, 0.0, 0.0], &mut rng)?,
+            gates: Self::init_gates(input_dim, units, None)?,
             input_cache: None,
             hidden_cache: None,
             r_cache: None,
@@ -124,6 +123,38 @@ impl GRU {
             rh_cache: None,
             activation: activation.into(),
         })
+    }
+
+    /// Sets the seed used to initialize the gate weights and re-initializes them deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs the gate initialization with `random_state`, so call it before assigning custom
+    /// weights or training.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        // Dimensions were validated in `new`, so re-initialization cannot fail
+        self.gates = Self::init_gates(self.input_dim, self.units, Some(random_state))
+            .expect("GRU dimensions were validated in new()");
+        self
+    }
+
+    /// Initializes the fused `[r | z | h]` gate blocks from the given seed
+    ///
+    /// One RNG is threaded through all three gate blocks; all biases start at 0.0.
+    fn init_gates(
+        input_dim: usize,
+        units: usize,
+        random_state: Option<u64>,
+    ) -> Result<FusedGates, Error> {
+        let mut rng = crate::random::make_rng(random_state);
+        FusedGates::new(input_dim, units, &[0.0, 0.0, 0.0], &mut rng)
     }
 
     /// Sets the fused weights for this GRU layer

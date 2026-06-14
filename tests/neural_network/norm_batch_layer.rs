@@ -369,7 +369,7 @@ fn bn_training_and_eval_modes_produce_different_outputs() {
 /// LayerNormalization::new returns Err(InvalidParameter) for epsilon <= 0
 #[test]
 fn ln_constructor_rejects_zero_epsilon() {
-    let result = LayerNormalization::new(vec![4, 3], LayerNormalizationAxis::Default, 0.0);
+    let result = LayerNormalization::new(vec![4, 3], 0.0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -380,7 +380,7 @@ fn ln_constructor_rejects_zero_epsilon() {
 /// LayerNormalization::new returns Err(InvalidParameter) for negative epsilon
 #[test]
 fn ln_constructor_rejects_negative_epsilon() {
-    let result = LayerNormalization::new(vec![4, 3], LayerNormalizationAxis::Default, -1e-5);
+    let result = LayerNormalization::new(vec![4, 3], -1e-5);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -391,8 +391,9 @@ fn ln_constructor_rejects_negative_epsilon() {
 /// LayerNormalization::new with Multiple([]) returns Err(InvalidParameter)
 #[test]
 fn ln_constructor_rejects_multiple_empty_axes() {
-    let result =
-        LayerNormalization::new(vec![4, 3], LayerNormalizationAxis::Multiple(vec![]), 1e-5);
+    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -404,11 +405,9 @@ fn ln_constructor_rejects_multiple_empty_axes() {
 /// (axis 2 against input_shape [4,3] of ndim 2)
 #[test]
 fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
-    let result = LayerNormalization::new(
-        vec![4, 3],
-        LayerNormalizationAxis::Multiple(vec![0, 2]),
-        1e-5,
-    );
+    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 2]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -419,11 +418,9 @@ fn ln_constructor_rejects_multiple_out_of_bounds_axis() {
 /// LayerNormalization::new with Multiple(axes) rejects a duplicate axis (e.g. [0, 0])
 #[test]
 fn ln_constructor_rejects_multiple_duplicate_axes() {
-    let result = LayerNormalization::new(
-        vec![4, 3],
-        LayerNormalizationAxis::Multiple(vec![0, 0]),
-        1e-5,
-    );
+    let result = LayerNormalization::new(vec![4, 3], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 0]));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -441,8 +438,7 @@ fn ln_default_each_sample_has_mean_zero_and_var_one() {
         2.0, -2.0, 0.0, 4.0, // row 1: mean=1, var=5
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 4]);
@@ -469,8 +465,7 @@ fn ln_default_forward_concrete_values() {
         2.0, -2.0, 0.0, 4.0, // row 1
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
 
@@ -500,8 +495,10 @@ fn ln_custom_axis0_concrete_values() {
     // rows=3, cols=2; normalize across rows for each column (axis=0)
     let data = vec![1.0f32, 4.0, 3.0, 2.0, 5.0, 6.0];
     let input = tensor2(data, 3, 2);
-    let mut ln =
-        LayerNormalization::new(vec![3, 2], LayerNormalizationAxis::Custom(0), 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![3, 2], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Custom(0))
+        .unwrap();
 
     let output = ln.forward(&input).unwrap();
 
@@ -529,8 +526,10 @@ fn ln_custom_axis0_concrete_values() {
 fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
     let data: Vec<f32> = (0..15).map(|v| v as f32 * 1.3 - 4.0).collect();
     let input = tensor2(data, 5, 3);
-    let mut ln =
-        LayerNormalization::new(vec![5, 3], LayerNormalizationAxis::Custom(0), 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![5, 3], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Custom(0))
+        .unwrap();
 
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[5, 3]);
@@ -555,12 +554,10 @@ fn ln_custom_axis0_each_column_has_mean_zero_and_var_one() {
 fn ln_multiple_axes_output_has_mean_zero_and_var_one() {
     let data: Vec<f32> = (0..12).map(|i| 0.5 * i as f32 - 2.75).collect();
     let input = tensor2(data, 3, 4);
-    let mut ln = LayerNormalization::new(
-        vec![3, 4],
-        LayerNormalizationAxis::Multiple(vec![0, 1]),
-        1e-5,
-    )
-    .unwrap();
+    let mut ln = LayerNormalization::new(vec![3, 4], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
+        .unwrap();
 
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[3, 4]);
@@ -583,12 +580,10 @@ fn ln_multiple_single_axis_on_3d_input() {
     let shape = vec![2, 3, 4];
     let input = ArrayD::from_shape_vec(shape.clone(), data).unwrap();
 
-    let mut ln = LayerNormalization::new(
-        vec![2, 3, 4],
-        LayerNormalizationAxis::Multiple(vec![1]),
-        1e-5,
-    )
-    .unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 3, 4], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![1]))
+        .unwrap();
 
     let output = ln.forward(&input).unwrap();
     assert_eq!(output.shape(), &[2, 3, 4]);
@@ -618,8 +613,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
         1.0, 2.0, 3.0, 4.0, // non-constant row
     ];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
 
     let output = ln.forward(&input).unwrap();
 
@@ -654,8 +648,7 @@ fn ln_default_constant_row_is_finite_and_zero() {
 fn ln_predict_equals_forward() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
 
     // Run forward first (writes caches)
     let out_forward = ln.forward(&input).unwrap();
@@ -671,8 +664,7 @@ fn ln_predict_equals_forward() {
 #[test]
 fn ln_set_weights_custom_gamma_beta() {
     let input = tensor2(vec![0.0f32, 4.0], 1, 2);
-    let mut ln =
-        LayerNormalization::new(vec![1, 2], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![1, 2], 1e-5).unwrap();
 
     let gamma = tensor1(vec![3.0f32, 3.0]);
     let beta = tensor1(vec![10.0f32, 10.0]);
@@ -693,8 +685,7 @@ fn ln_set_weights_custom_gamma_beta() {
 /// LN set_weights rejects a wrong gamma shape ([3] against expected [4])
 #[test]
 fn ln_set_weights_rejects_wrong_gamma_shape() {
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
     let bad_gamma = tensor1(vec![1.0f32, 1.0, 1.0]); // [3] instead of [4]
     let beta = tensor1(vec![0.0f32; 4]);
     let result = ln.set_weights(bad_gamma, beta);
@@ -713,8 +704,7 @@ fn ln_set_weights_rejects_wrong_gamma_shape() {
 /// LN forward rejects input whose shape ([3, 4]) differs from the declared [2, 4]
 #[test]
 fn ln_forward_rejects_wrong_input_shape() {
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
     let wrong = tensor2(vec![1.0f32; 12], 3, 4);
     let result = ln.forward(&wrong);
     assert!(
@@ -731,8 +721,7 @@ fn ln_forward_rejects_wrong_input_shape() {
 fn ln_mode_switch_does_not_change_forward_output() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
 
     // Training mode output
     let out_train = ln.forward(&input).unwrap();
@@ -752,8 +741,7 @@ fn ln_mode_switch_does_not_change_forward_output() {
 fn ln_predict_equals_forward_in_eval_mode() {
     let data = vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0];
     let input = tensor2(data, 2, 4);
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
     ln.set_training_if_mode_dependent(false);
 
     let out_forward = ln.forward(&input).unwrap();
@@ -769,12 +757,10 @@ fn ln_predict_equals_forward_in_eval_mode() {
 fn ln_multiple_valid_axes_forward_succeeds() {
     let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let input = tensor2(data, 3, 4);
-    let mut ln = LayerNormalization::new(
-        vec![3, 4],
-        LayerNormalizationAxis::Multiple(vec![0, 1]),
-        1e-5,
-    )
-    .unwrap();
+    let mut ln = LayerNormalization::new(vec![3, 4], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Multiple(vec![0, 1]))
+        .unwrap();
     let result = ln.forward(&input);
     assert!(
         result.is_ok(),
@@ -804,8 +790,7 @@ fn bn_backward_before_forward_errors() {
 /// LayerNormalization::backward called before any forward returns ForwardPassNotRun
 #[test]
 fn ln_backward_before_forward_errors() {
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
     let grad = tensor2(vec![1.0f32; 8], 2, 4);
     let err = ln.backward(&grad).unwrap_err();
     assert!(
@@ -823,7 +808,10 @@ fn ln_backward_before_forward_errors() {
 /// LN Custom(axis) with axis >= input.ndim() is rejected at forward time with InvalidParameter
 #[test]
 fn ln_custom_axis_out_of_bounds_forward_errors() {
-    let mut ln = LayerNormalization::new(vec![4], LayerNormalizationAxis::Custom(5), 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![4], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Custom(5))
+        .unwrap();
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]); // ndim = 1, axis 5 is out of bounds
     let result = ln.forward(&input);
     assert!(
@@ -836,7 +824,10 @@ fn ln_custom_axis_out_of_bounds_forward_errors() {
 /// LN Custom(axis) out-of-bounds is also rejected by predict() with InvalidParameter
 #[test]
 fn ln_custom_axis_out_of_bounds_predict_errors() {
-    let ln = LayerNormalization::new(vec![4], LayerNormalizationAxis::Custom(5), 1e-5).unwrap();
+    let ln = LayerNormalization::new(vec![4], 1e-5)
+        .unwrap()
+        .with_normalized_axis(LayerNormalizationAxis::Custom(5))
+        .unwrap();
     let input = tensor1(vec![1.0f32, 2.0, 3.0, 4.0]); // ndim = 1, axis 5 is out of bounds
     let result = ln.predict(&input);
     assert!(
@@ -849,7 +840,7 @@ fn ln_custom_axis_out_of_bounds_predict_errors() {
 /// LN Default on a 0-dim (scalar) tensor is rejected at forward time with InvalidInput
 #[test]
 fn ln_default_scalar_input_forward_errors() {
-    let mut ln = LayerNormalization::new(vec![], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![], 1e-5).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
     let result = ln.forward(&scalar);
     assert!(
@@ -862,7 +853,7 @@ fn ln_default_scalar_input_forward_errors() {
 /// LN Default on a 0-dim (scalar) tensor is also rejected by predict() with InvalidInput
 #[test]
 fn ln_default_scalar_input_predict_errors() {
-    let ln = LayerNormalization::new(vec![], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let ln = LayerNormalization::new(vec![], 1e-5).unwrap();
     let scalar = ArrayD::from_shape_vec(vec![], vec![3.0f32]).unwrap(); // 0-dim tensor
     let result = ln.predict(&scalar);
     assert!(
@@ -895,8 +886,7 @@ fn bn_backward_eval_mode_passes_gradient_through() {
 /// LayerNormalization::backward in eval mode returns grad_output unchanged (bit-exact)
 #[test]
 fn ln_backward_eval_mode_passes_gradient_through() {
-    let mut ln =
-        LayerNormalization::new(vec![2, 4], LayerNormalizationAxis::Default, 1e-5).unwrap();
+    let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
     ln.set_training_if_mode_dependent(false);
 
     let input = tensor2(vec![1.0f32, 3.0, 5.0, 7.0, 2.0, -2.0, 0.0, 4.0], 2, 4);

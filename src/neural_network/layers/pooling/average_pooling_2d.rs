@@ -54,13 +54,9 @@ use crate::neural_network::traits::Layer;
 ///  // Test AveragePooling with Sequential model
 ///  let mut model = Sequential::new();
 ///  model
-///  .add(AveragePooling2D::new(
-///  (2, 2),           // Pooling window size
-///  vec![2, 3, 4, 4], // Input shape
-///  Some((2, 2)),     // Strides (optional, defaults to pool_size if None)
-///  PaddingType::Valid,
-///  ).unwrap())
-///  .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+///  // strides default to pool_size (2, 2) and padding defaults to Valid
+///  .add(AveragePooling2D::new((2, 2), vec![2, 3, 4, 4]).unwrap())
+///  .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 ///  // Output shape should be [2, 3, 2, 2]
 ///  let output = model.predict(&x).unwrap();
@@ -102,13 +98,15 @@ pub struct AveragePooling2D {
 impl AveragePooling2D {
     /// Creates a new 2D average pooling layer
     ///
-    /// If `strides` is None, it defaults to `pool_size`
-    ///
     /// # Parameters
     ///
     /// - `pool_size` - Size of the pooling window as (height, width)
     /// - `input_shape` - Input tensor shape `[batch_size, channels, height, width]`
-    /// - `strides` - Optional strides of the pooling operation as (height, width)
+    ///
+    /// # Notes
+    ///
+    /// Strides default to `pool_size` and padding defaults to [`PaddingType::Valid`]. Override them
+    /// with [`AveragePooling2D::with_strides`] and [`AveragePooling2D::with_padding`].
     ///
     /// # Returns
     ///
@@ -119,28 +117,49 @@ impl AveragePooling2D {
     /// - [`Error::DimensionMismatch`] if `input_shape` is not 4D
     /// - [`Error::InvalidInput`] if any `input_shape` dimension is zero
     /// - [`Error::InvalidParameter`] if `pool_size` has a zero dimension or exceeds the input
-    ///   spatial size, or any stride is zero
-    pub fn new(
-        pool_size: (usize, usize),
-        input_shape: Vec<usize>,
-        strides: Option<(usize, usize)>,
-        padding: PaddingType,
-    ) -> Result<Self, Error> {
-        let strides = strides.unwrap_or(pool_size);
-
+    ///   spatial size
+    pub fn new(pool_size: (usize, usize), input_shape: Vec<usize>) -> Result<Self, Error> {
         // input validation
         validate_input_shape_dims(&input_shape, 4, "AveragePooling2D")?;
         validate_all_dims_positive(&input_shape)?;
         validate_pool_size_2d(pool_size, input_shape[2], input_shape[3])?;
-        validate_strides_2d(strides)?;
 
         Ok(AveragePooling2D {
             pool_size,
-            strides,
+            strides: pool_size,
             input_shape,
-            padding,
+            padding: PaddingType::Valid,
             forward_input_shape: None,
         })
+    }
+
+    /// Sets the pooling strides (defaults to `pool_size`)
+    ///
+    /// # Parameters
+    ///
+    /// - `strides` - Strides of the pooling operation as (height, width)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated layer, or an error if any stride is zero
+    pub fn with_strides(mut self, strides: (usize, usize)) -> Result<Self, Error> {
+        validate_strides_2d(strides)?;
+        self.strides = strides;
+        Ok(self)
+    }
+
+    /// Sets the padding mode (defaults to [`PaddingType::Valid`])
+    ///
+    /// # Parameters
+    ///
+    /// - `padding` - `Valid` (no padding) or `Same` (pad so the output covers the input)
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_padding(mut self, padding: PaddingType) -> Self {
+        self.padding = padding;
+        self
     }
 }
 

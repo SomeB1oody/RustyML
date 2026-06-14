@@ -20,16 +20,7 @@ use crate::common::assert_allclose;
 /// filters=0 must be rejected with InvalidParameter
 #[test]
 fn conv3d_new_rejects_zero_filters() {
-    let err = Conv3D::new(
-        0,
-        (2, 2, 2),
-        vec![1, 1, 4, 4, 4],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = Conv3D::new(0, (2, 2, 2), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -40,16 +31,7 @@ fn conv3d_new_rejects_zero_filters() {
 #[test]
 fn conv3d_new_rejects_zero_kernel_dimension() {
     // Second kernel dimension is 0
-    let err = Conv3D::new(
-        2,
-        (2, 0, 2),
-        vec![1, 1, 4, 4, 4],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = Conv3D::new(2, (2, 0, 2), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -59,16 +41,7 @@ fn conv3d_new_rejects_zero_kernel_dimension() {
 /// A zero in the stride tuple must be rejected with InvalidParameter
 #[test]
 fn conv3d_new_rejects_zero_stride() {
-    let err = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 1, 4, 4, 4],
-        (1, 0, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = Conv3D::new(2, (2, 2, 2), vec![1, 1, 4, 4, 4], (1, 0, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter, got {err:?}"
@@ -83,9 +56,7 @@ fn conv3d_new_rejects_non_5d_input_shape() {
         (2, 2, 2),
         vec![1, 1, 4, 4], // only 4 dims
         (1, 1, 1),
-        PaddingType::Valid,
         Linear::new(),
-        None,
     )
     .unwrap_err();
     assert!(
@@ -102,9 +73,7 @@ fn conv3d_new_rejects_zero_input_dimension() {
         (2, 2, 2),
         vec![1, 0, 4, 4, 4], // channels = 0
         (1, 1, 1),
-        PaddingType::Valid,
         Linear::new(),
-        None,
     )
     .unwrap_err();
     assert!(
@@ -118,16 +87,8 @@ fn conv3d_new_rejects_zero_input_dimension() {
 /// Valid padding forward output shape is [1, 2, 3, 3, 3] for input [1,1,4,4,4], kernel (2,2,2)
 #[test]
 fn conv3d_forward_output_shape_valid_padding() {
-    let mut conv = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 1, 4, 4, 4],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(2, (2, 2, 2), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new()).unwrap();
     let x = Array::ones((1_usize, 1, 4, 4, 4)).into_dyn();
     let out = conv.forward(&x).unwrap();
     assert_eq!(
@@ -140,16 +101,9 @@ fn conv3d_forward_output_shape_valid_padding() {
 /// Same padding forward output shape equals ceil(input / stride): [1, 2, 4, 4, 4] here
 #[test]
 fn conv3d_forward_output_shape_same_padding() {
-    let mut conv = Conv3D::new(
-        2,
-        (3, 3, 3),
-        vec![1, 1, 4, 4, 4],
-        (1, 1, 1),
-        PaddingType::Same,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv = Conv3D::new(2, (3, 3, 3), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let x = Array::ones((1_usize, 1, 4, 4, 4)).into_dyn();
     let out = conv.forward(&x).unwrap();
     assert_eq!(
@@ -162,16 +116,8 @@ fn conv3d_forward_output_shape_same_padding() {
 /// Stride-2 Valid forward output shape is [2, 1, 2, 2, 2] for input [2,1,5,5,5], kernel (3,3,3)
 #[test]
 fn conv3d_forward_output_shape_stride2_valid() {
-    let mut conv = Conv3D::new(
-        1,
-        (3, 3, 3),
-        vec![2, 1, 5, 5, 5],
-        (2, 2, 2),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(1, (3, 3, 3), vec![2, 1, 5, 5, 5], (2, 2, 2), Linear::new()).unwrap();
     let x = Array::ones((2_usize, 1, 5, 5, 5)).into_dyn();
     let out = conv.forward(&x).unwrap();
     assert_eq!(
@@ -186,16 +132,8 @@ fn conv3d_forward_output_shape_stride2_valid() {
 /// All-ones 2x2x2 kernel sums the 8-element window: forward output matches the hand calculation
 #[test]
 fn conv3d_known_weight_forward_values() {
-    let mut conv = Conv3D::new(
-        1,
-        (2, 2, 2),
-        vec![1, 1, 3, 3, 3],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(1, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
 
     // All weights 1, bias 0
     let w = Array5::ones((1_usize, 1, 2, 2, 2));
@@ -227,16 +165,8 @@ fn conv3d_known_weight_forward_values() {
 /// predict() returns identical values to forward() (Conv3D has no train/eval difference)
 #[test]
 fn conv3d_predict_equals_forward() {
-    let mut conv = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 1, 3, 3, 3],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(2, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
 
     let x = Array::from_shape_vec(
         (1_usize, 1, 3, 3, 3),
@@ -255,16 +185,8 @@ fn conv3d_predict_equals_forward() {
 /// Calling backward before forward must return NeuralNetwork(ForwardPassNotRun)
 #[test]
 fn conv3d_backward_before_forward_errors() {
-    let mut conv = Conv3D::new(
-        1,
-        (2, 2, 2),
-        vec![1, 1, 3, 3, 3],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(1, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 1, 2, 2, 2)).into_dyn();
     let err = conv.backward(&grad).unwrap_err();
     assert!(
@@ -276,16 +198,8 @@ fn conv3d_backward_before_forward_errors() {
 /// A non-5D input to forward() must return InvalidInput
 #[test]
 fn conv3d_forward_rejects_non_5d_input() {
-    let mut conv = Conv3D::new(
-        1,
-        (2, 2, 2),
-        vec![1, 1, 3, 3, 3],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(1, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
     let x_4d = Array::ones((1_usize, 1, 3, 3)).into_dyn(); // 4D
     let err = conv.forward(&x_4d).unwrap_err();
     assert!(
@@ -303,9 +217,7 @@ fn conv3d_new_rejects_input_smaller_than_kernel() {
         (3, 3, 3),
         vec![1, 1, 2, 4, 4], // depth = 2 < kernel depth 3
         (1, 1, 1),
-        PaddingType::Valid,
         Linear::new(),
-        None,
     )
     .unwrap_err();
     assert!(
@@ -323,9 +235,7 @@ fn conv3d_forward_rejects_input_smaller_than_kernel() {
         (3, 3, 3),
         vec![1, 1, 5, 5, 5], // declared shape is valid (>= kernel)
         (1, 1, 1),
-        PaddingType::Valid,
         Linear::new(),
-        None,
     )
     .unwrap();
     // Feed a genuinely smaller tensor at runtime: depth 2 < kernel depth 3
@@ -340,16 +250,8 @@ fn conv3d_forward_rejects_input_smaller_than_kernel() {
 /// set_weights with wrong shape must return NeuralNetwork(WeightShape)
 #[test]
 fn conv3d_set_weights_shape_mismatch_errors() {
-    let mut conv = Conv3D::new(
-        1,
-        (2, 2, 2),
-        vec![1, 1, 3, 3, 3],
-        (1, 1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        Conv3D::new(1, (2, 2, 2), vec![1, 1, 3, 3, 3], (1, 1, 1), Linear::new()).unwrap();
     // Layer expects weights [1,1,2,2,2]; supply [2,1,2,2,2]
     let wrong_w = Array5::zeros((2_usize, 1, 2, 2, 2));
     let b = Array2::zeros((1_usize, 1));
@@ -366,16 +268,7 @@ fn conv3d_set_weights_shape_mismatch_errors() {
 #[test]
 fn depthwise_conv2d_new_rejects_filters_not_equal_channels() {
     // input_shape has 2 channels, but 3 filters are requested
-    let err = DepthwiseConv2D::new(
-        3,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = DepthwiseConv2D::new(3, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for filters != channels, got {err:?}"
@@ -391,9 +284,7 @@ fn depthwise_conv2d_forward_rejects_wrong_channels() {
         (2, 2),
         vec![1, 2, 4, 4], // declared with 2 channels == filters
         (1, 1),
-        PaddingType::Valid,
         Linear::new(),
-        None,
     )
     .unwrap();
     // Feed a tensor with 3 channels instead of 2
@@ -408,16 +299,7 @@ fn depthwise_conv2d_forward_rejects_wrong_channels() {
 /// filters=0 must be rejected
 #[test]
 fn depthwise_conv2d_new_rejects_zero_filters() {
-    let err = DepthwiseConv2D::new(
-        0,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = DepthwiseConv2D::new(0, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for filters=0, got {err:?}"
@@ -427,16 +309,7 @@ fn depthwise_conv2d_new_rejects_zero_filters() {
 /// A zero kernel dimension must be rejected
 #[test]
 fn depthwise_conv2d_new_rejects_zero_kernel_dimension() {
-    let err = DepthwiseConv2D::new(
-        2,
-        (0, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err = DepthwiseConv2D::new(2, (0, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for kernel_size.0=0, got {err:?}"
@@ -448,16 +321,8 @@ fn depthwise_conv2d_new_rejects_zero_kernel_dimension() {
 /// Each channel convolves only its own input: all-ones kernel gives 4.0, zero kernel gives 0.0
 #[test]
 fn depthwise_conv2d_channel_independence() {
-    let mut conv = DepthwiseConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 3, 3], (1, 1), Linear::new()).unwrap();
 
     // Channel 0 kernel = all 1s; channel 1 kernel stays zero
     let mut w = Array4::<f32>::zeros((2, 1, 2, 2));
@@ -500,16 +365,8 @@ fn depthwise_conv2d_channel_independence() {
 /// Channel 0 output does not change when channel 1 input changes (no cross-channel bleed)
 #[test]
 fn depthwise_conv2d_cross_channel_no_bleed() {
-    let mut conv = DepthwiseConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 3, 3], (1, 1), Linear::new()).unwrap();
 
     // Channel 0 kernel = [[1,0],[0,0]] (only top-left); channel 1 kernel = all zeros
     let mut w = Array4::<f32>::zeros((2, 1, 2, 2));
@@ -563,16 +420,8 @@ fn depthwise_conv2d_cross_channel_no_bleed() {
 /// Single-channel 2x2 kernel [[1,2],[3,4]] with bias 0.5 over input 1..=9 matches hand calculation
 #[test]
 fn depthwise_conv2d_known_weight_single_channel() {
-    let mut conv = DepthwiseConv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(1, (2, 2), vec![1, 1, 3, 3], (1, 1), Linear::new()).unwrap();
 
     // Kernel: [[1,2],[3,4]], bias 0.5
     let mut w = Array4::<f32>::zeros((1, 1, 2, 2));
@@ -604,16 +453,8 @@ fn depthwise_conv2d_known_weight_single_channel() {
 
 #[test]
 fn depthwise_conv2d_predict_equals_forward() {
-    let mut conv = DepthwiseConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap();
 
     let x = Array::from_shape_vec(
         (1_usize, 2, 4, 4),
@@ -632,16 +473,8 @@ fn depthwise_conv2d_predict_equals_forward() {
 /// backward before forward must return ForwardPassNotRun
 #[test]
 fn depthwise_conv2d_backward_before_forward_errors() {
-    let mut conv = DepthwiseConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 2, 3, 3)).into_dyn();
     let err = conv.backward(&grad).unwrap_err();
     assert!(
@@ -653,16 +486,8 @@ fn depthwise_conv2d_backward_before_forward_errors() {
 /// set_weights with wrong weight shape must return NeuralNetwork(WeightShape)
 #[test]
 fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
-    let mut conv = DepthwiseConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap();
     // Layer expects weights [2,1,2,2]; supply [3,1,2,2]
     let wrong_w = Array4::<f32>::zeros((3, 1, 2, 2));
     let bias = Array1::<f32>::zeros(2);
@@ -678,17 +503,8 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
 /// filters=0 must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_filters() {
-    let err = SeparableConv2D::new(
-        0,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err =
+        SeparableConv2D::new(0, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for filters=0, got {err:?}"
@@ -698,17 +514,8 @@ fn separable_conv2d_new_rejects_zero_filters() {
 /// depth_multiplier=0 must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_depth_multiplier() {
-    let err = SeparableConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        0,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err =
+        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 0, Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for depth_multiplier=0, got {err:?}"
@@ -718,17 +525,8 @@ fn separable_conv2d_new_rejects_zero_depth_multiplier() {
 /// Zero kernel dimension must be rejected
 #[test]
 fn separable_conv2d_new_rejects_zero_kernel() {
-    let err = SeparableConv2D::new(
-        2,
-        (2, 0),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap_err();
+    let err =
+        SeparableConv2D::new(2, (2, 0), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap_err();
     assert!(
         matches!(err, Error::InvalidParameter { .. }),
         "expected InvalidParameter for kernel_size.1=0, got {err:?}"
@@ -743,10 +541,8 @@ fn separable_conv2d_new_rejects_non_4d_input_shape() {
         (2, 2),
         vec![1, 2, 4], // only 3 dims
         (1, 1),
-        PaddingType::Valid,
         1,
         Linear::new(),
-        None,
     )
     .unwrap_err();
     assert!(
@@ -760,17 +556,8 @@ fn separable_conv2d_new_rejects_non_4d_input_shape() {
 /// depth_multiplier=1, filters=1, 1 input channel: forward output shape is [1, 1, 2, 2]
 #[test]
 fn separable_conv2d_output_shape_dm1() {
-    let mut conv = SeparableConv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(1, (2, 2), vec![1, 1, 3, 3], (1, 1), 1, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 1, 3, 3)).into_dyn();
     let out = conv.forward(&x).unwrap();
     assert_eq!(
@@ -783,17 +570,8 @@ fn separable_conv2d_output_shape_dm1() {
 /// depth_multiplier=2, 2 input channels, 4 output filters: forward output shape is [1, 4, 2, 2]
 #[test]
 fn separable_conv2d_output_shape_dm2() {
-    let mut conv = SeparableConv2D::new(
-        4,
-        (2, 2),
-        vec![1, 2, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        2,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(4, (2, 2), vec![1, 2, 3, 3], (1, 1), 2, Linear::new()).unwrap();
     let x = Array::ones((1_usize, 2, 3, 3)).into_dyn();
     let out = conv.forward(&x).unwrap();
     assert_eq!(
@@ -808,17 +586,8 @@ fn separable_conv2d_output_shape_dm2() {
 /// Identity 1x1 depthwise and pointwise kernels with zero bias reproduce the input exactly
 #[test]
 fn separable_conv2d_identity_reproduces_input() {
-    let mut conv = SeparableConv2D::new(
-        1,
-        (1, 1),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(1, (1, 1), vec![1, 1, 3, 3], (1, 1), 1, Linear::new()).unwrap();
 
     // depthwise_weights: [dm=1, channels=1, 1, 1] -> 1.0
     let dw = Array4::<f32>::ones((1, 1, 1, 1));
@@ -848,17 +617,8 @@ fn separable_conv2d_identity_reproduces_input() {
 /// Depthwise [[1,0],[0,1]] then pointwise scale-by-2 plus bias 1 over input 1..=9 matches by hand
 #[test]
 fn separable_conv2d_known_weight_forward_values() {
-    let mut conv = SeparableConv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(1, (2, 2), vec![1, 1, 3, 3], (1, 1), 1, Linear::new()).unwrap();
 
     // depthwise: [[1,0],[0,1]] picks up (i,j) and (i+1,j+1)
     let mut dw = Array4::<f32>::zeros((1, 1, 2, 2));
@@ -892,17 +652,9 @@ fn separable_conv2d_known_weight_forward_values() {
 /// (regression - the old boundary-clipping code returned the unpadded 3x3 sum 45 at [0,0])
 #[test]
 fn separable_conv2d_same_padding_zero_pads_depthwise() {
-    let mut conv = SeparableConv2D::new(
-        1,
-        (3, 3),
-        vec![1, 1, 3, 3],
-        (1, 1),
-        PaddingType::Same,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv = SeparableConv2D::new(1, (3, 3), vec![1, 1, 3, 3], (1, 1), 1, Linear::new())
+        .unwrap()
+        .with_padding(PaddingType::Same);
 
     // depthwise: 3x3 all-ones box filter; pointwise: identity (scale by 1); bias 0
     let dw = Array4::<f32>::from_elem((1, 1, 3, 3), 1.0);
@@ -937,17 +689,8 @@ fn separable_conv2d_same_padding_zero_pads_depthwise() {
 
 #[test]
 fn separable_conv2d_predict_equals_forward() {
-    let mut conv = SeparableConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap();
 
     let x = Array::from_shape_vec(
         (1_usize, 2, 4, 4),
@@ -966,17 +709,8 @@ fn separable_conv2d_predict_equals_forward() {
 /// backward before forward must return ForwardPassNotRun
 #[test]
 fn separable_conv2d_backward_before_forward_errors() {
-    let mut conv = SeparableConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap();
     let grad = Array::ones((1_usize, 2, 3, 3)).into_dyn();
     let err = conv.backward(&grad).unwrap_err();
     assert!(
@@ -988,17 +722,8 @@ fn separable_conv2d_backward_before_forward_errors() {
 /// set_weights with wrong depthwise shape must return NeuralNetwork(WeightShape)
 #[test]
 fn separable_conv2d_set_weights_shape_mismatch_errors() {
-    let mut conv = SeparableConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4, 4],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap();
     // depthwise_weights should be [dm=1, channels=2, 2, 2]; supply wrong dm=3
     let bad_dw = Array4::<f32>::zeros((3, 2, 2, 2));
     let ok_pw = Array4::<f32>::zeros((2, 2, 1, 1));
@@ -1015,17 +740,8 @@ fn separable_conv2d_set_weights_shape_mismatch_errors() {
 /// depth_multiplier=2 yields two scaled copies; filter 0 reproduces input, filter 1 is 2x input
 #[test]
 fn separable_conv2d_depth_multiplier_2_forward_values() {
-    let mut conv = SeparableConv2D::new(
-        2,
-        (1, 1),
-        vec![1, 1, 2, 2],
-        (1, 1),
-        PaddingType::Valid,
-        2,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(2, (1, 1), vec![1, 1, 2, 2], (1, 1), 2, Linear::new()).unwrap();
 
     // depthwise_weights shape [dm=2, channels=1, 1, 1]
     let mut dw = Array4::<f32>::zeros((2, 1, 1, 1));
@@ -1068,16 +784,8 @@ fn separable_conv2d_depth_multiplier_2_forward_values() {
 /// All-ones 2x2 kernel over a [1,1,40,40] ramp crosses the parallel threshold and sums correctly
 #[test]
 fn depthwise_conv2d_parallel_windowed_sums() {
-    let mut conv = DepthwiseConv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 40, 40],
-        (1, 1),
-        PaddingType::Valid,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        DepthwiseConv2D::new(1, (2, 2), vec![1, 1, 40, 40], (1, 1), Linear::new()).unwrap();
     // All-ones 2x2 kernel, zero bias
     let w = Array4::<f32>::from_elem((1, 1, 2, 2), 1.0);
     let bias = Array1::<f32>::zeros(1);
@@ -1106,17 +814,8 @@ fn depthwise_conv2d_parallel_windowed_sums() {
 /// A [1,1,72,72] ramp crosses both parallel thresholds; final out = 8*oh + 8*ow + 9
 #[test]
 fn separable_conv2d_parallel_windowed_sums() {
-    let mut conv = SeparableConv2D::new(
-        1,
-        (2, 2),
-        vec![1, 1, 72, 72],
-        (1, 1),
-        PaddingType::Valid,
-        1,
-        Linear::new(),
-        None,
-    )
-    .unwrap();
+    let mut conv =
+        SeparableConv2D::new(1, (2, 2), vec![1, 1, 72, 72], (1, 1), 1, Linear::new()).unwrap();
 
     // depthwise: all-ones 2x2; pointwise: scale by 2; bias 1.0
     let dw = Array4::<f32>::from_elem((1, 1, 2, 2), 1.0);

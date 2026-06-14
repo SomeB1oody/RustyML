@@ -39,8 +39,8 @@ use std::borrow::Cow;
 /// // Build model: one SimpleRnn layer with Tanh activation
 /// let mut model = Sequential::new();
 /// model
-/// .add(SimpleRNN::new(4, 3, Activation::Tanh, None).unwrap())
-/// .compile(RMSprop::new(0.001, 0.9, 1e-8, None, 0.0).unwrap(), MeanSquaredError::new());
+/// .add(SimpleRNN::new(4, 3, Activation::Tanh).unwrap())
+/// .compile(RMSprop::new(0.001, 0.9, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
 ///
 /// // Print structure
 /// model.summary();
@@ -86,7 +86,11 @@ impl SimpleRNN {
     /// - `input_dim` - Size of each input sample
     /// - `units` - Number of output units
     /// - `activation` - Activation function from the activation module (ReLU, Sigmoid, Tanh, Softmax)
-    /// - `random_state` - Optional seed for reproducible initialization; falls back to the global seed or entropy. See crate::random
+    ///
+    /// # Notes
+    ///
+    /// Weights are seeded from the global seed or entropy by default. For reproducible
+    /// initialization, set a seed with [`SimpleRNN::with_random_state`].
     ///
     /// # Returns
     ///
@@ -99,23 +103,10 @@ impl SimpleRNN {
         input_dim: usize,
         units: usize,
         activation: impl Into<Activation>,
-        random_state: Option<u64>,
     ) -> Result<Self, Error> {
         validate_recurrent_dimensions(input_dim, units)?;
 
-        let mut rng = crate::random::make_rng(random_state);
-
-        // Xavier/Glorot initialization for input kernel
-        let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
-        let kernel = Array::random_using(
-            (input_dim, units),
-            Uniform::new(-limit, limit).unwrap(),
-            &mut rng,
-        );
-
-        // Orthogonal initialization for recurrent kernel to maintain gradient flow
-        let recurrent_kernel = orthogonal_init(units, &mut rng);
-
+        let (kernel, recurrent_kernel) = Self::init_weights_arrays(input_dim, units, None);
         let bias = Array::zeros((1, units));
         Ok(SimpleRNN {
             input_dim,
@@ -130,6 +121,53 @@ impl SimpleRNN {
             grad_bias: None,
             activation: activation.into(),
         })
+    }
+
+    /// Sets the seed used to initialize the weights and re-initializes them deterministically
+    ///
+    /// By default the weights are seeded from the global seed or entropy (see [`crate::random`]).
+    /// This re-runs the kernel (Xavier/Glorot) and recurrent-kernel (orthogonal) initialization
+    /// with `random_state`, so call it before assigning custom weights or training. The bias stays
+    /// zero-initialized.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for weight initialization
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        let (kernel, recurrent_kernel) =
+            Self::init_weights_arrays(self.input_dim, self.units, Some(random_state));
+        self.kernel = kernel;
+        self.recurrent_kernel = recurrent_kernel;
+        self
+    }
+
+    /// Initializes the input kernel (Xavier/Glorot) and recurrent kernel (orthogonal) from a seed
+    ///
+    /// Both draws share one RNG (kernel first, then recurrent kernel) so a given seed reproduces the
+    /// exact same pair of matrices.
+    fn init_weights_arrays(
+        input_dim: usize,
+        units: usize,
+        random_state: Option<u64>,
+    ) -> (Array2<f32>, Array2<f32>) {
+        let mut rng = crate::random::make_rng(random_state);
+
+        // Xavier/Glorot initialization for input kernel
+        let limit = (6.0_f32 / (input_dim + units) as f32).sqrt();
+        let kernel = Array::random_using(
+            (input_dim, units),
+            Uniform::new(-limit, limit).unwrap(),
+            &mut rng,
+        );
+
+        // Orthogonal initialization for recurrent kernel to maintain gradient flow
+        let recurrent_kernel = orthogonal_init(units, &mut rng);
+
+        (kernel, recurrent_kernel)
     }
 
     /// Sets the weights for this layer

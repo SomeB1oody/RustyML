@@ -48,7 +48,7 @@ fn t4(a: usize, b: usize, c: usize, d: usize, data: Vec<f32>) -> Tensor {
 ///
 /// - A `Dense` layer with the given weights and bias set
 fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
-    let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     let w = Array2::from_shape_vec((2, 2), w_flat).unwrap();
     let b = Array2::from_shape_vec((1, 2), b_flat).unwrap();
     d.set_weights(w, b).unwrap();
@@ -59,7 +59,7 @@ fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
 
 #[test]
 fn dense_new_rejects_zero_input_dim() {
-    let result = Dense::new(0, 4, Linear::new(), None);
+    let result = Dense::new(0, 4, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for input_dim=0, got {:?}",
@@ -69,7 +69,7 @@ fn dense_new_rejects_zero_input_dim() {
 
 #[test]
 fn dense_new_rejects_zero_units() {
-    let result = Dense::new(4, 0, Linear::new(), None);
+    let result = Dense::new(4, 0, Linear::new());
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for units=0, got {:?}",
@@ -79,7 +79,7 @@ fn dense_new_rejects_zero_units() {
 
 #[test]
 fn dense_new_accepts_valid_dims() {
-    Dense::new(3, 5, Linear::new(), None).unwrap();
+    Dense::new(3, 5, Linear::new()).unwrap();
 }
 
 // Dense - param_count
@@ -88,7 +88,7 @@ fn dense_new_accepts_valid_dims() {
 #[test]
 fn dense_param_count_2x2() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let d = Dense::new(2, 2, Linear::new()).unwrap();
     // 2*2 weights + 2 bias = 6
     assert_eq!(d.param_count(), TrainingParameters::Trainable(6));
 }
@@ -96,7 +96,7 @@ fn dense_param_count_2x2() {
 #[test]
 fn dense_param_count_3x5() {
     use rustyml::neural_network::layers::TrainingParameters;
-    let d = Dense::new(3, 5, Linear::new(), None).unwrap();
+    let d = Dense::new(3, 5, Linear::new()).unwrap();
     // 3*5 weights + 5 bias = 20
     assert_eq!(d.param_count(), TrainingParameters::Trainable(20));
 }
@@ -136,7 +136,7 @@ fn dense_forward_known_weights_and_bias() {
 /// ReLU activation clamps negative pre-activations to zero
 #[test]
 fn dense_forward_relu_zeroes_negative_preactivations() {
-    let mut d = Dense::new(2, 2, ReLU::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, ReLU::new()).unwrap();
     let w = Array2::from_shape_vec((2, 2), vec![1.0, -1.0, 1.0, -1.0]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.0, 0.0]).unwrap();
     d.set_weights(w, b).unwrap();
@@ -152,7 +152,7 @@ fn dense_forward_relu_zeroes_negative_preactivations() {
 /// Forward on a 3 -> 2 Linear layer with a single-row input
 #[test]
 fn dense_forward_3_to_2_linear_single_row() {
-    let mut d = Dense::new(3, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(3, 2, Linear::new()).unwrap();
     let w = Array2::from_shape_vec((3, 2), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.0, 1.0]).unwrap();
     d.set_weights(w, b).unwrap();
@@ -180,7 +180,7 @@ fn dense_predict_equals_forward() {
 
 #[test]
 fn dense_forward_rejects_non_2d_input_1d() {
-    let mut d = Dense::new(3, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(3, 2, Linear::new()).unwrap();
     let x = Array::from_vec(vec![1.0_f32, 2.0, 3.0]).into_dyn();
     let result = d.forward(&x);
     assert!(
@@ -192,7 +192,7 @@ fn dense_forward_rejects_non_2d_input_1d() {
 
 #[test]
 fn dense_forward_rejects_non_2d_input_3d() {
-    let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     let x = t3(1, 2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     let result = d.forward(&x);
     assert!(
@@ -204,7 +204,7 @@ fn dense_forward_rejects_non_2d_input_3d() {
 
 #[test]
 fn dense_backward_before_forward_returns_err() {
-    let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     // no forward called yet
     let grad = t2(1, 2, vec![1.0, 1.0]);
     let result = d.backward(&grad);
@@ -222,7 +222,7 @@ fn dense_backward_before_forward_returns_err() {
 /// backward / dimensionality conversion
 #[test]
 fn dense_backward_wrong_grad_shape_returns_err() {
-    let mut d = Dense::new(3, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(3, 2, Linear::new()).unwrap();
     // Valid forward establishes the cached 2D output of shape [1, 2]
     let x = t2(1, 3, vec![1.0, 2.0, 3.0]);
     d.forward(&x).unwrap();
@@ -240,7 +240,7 @@ fn dense_backward_wrong_grad_shape_returns_err() {
 
 #[test]
 fn dense_set_weights_wrong_weight_shape_returns_err() {
-    let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     // correct shape is (2,2); supply (3,2) which should fail
     let w_bad = Array2::from_shape_vec((3, 2), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
     let b_ok = Array2::from_shape_vec((1, 2), vec![0.0, 0.0]).unwrap();
@@ -257,7 +257,7 @@ fn dense_set_weights_wrong_weight_shape_returns_err() {
 
 #[test]
 fn dense_set_weights_wrong_bias_shape_returns_err() {
-    let mut d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 2, Linear::new()).unwrap();
     let w_ok = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, 0.0, 1.0]).unwrap();
     // correct bias shape is (1,2); supply (1,3) which should fail
     let b_bad = Array2::from_shape_vec((1, 3), vec![0.0, 0.0, 0.0]).unwrap();
@@ -276,7 +276,7 @@ fn dense_set_weights_wrong_bias_shape_returns_err() {
 
 #[test]
 fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
-    let mut d = Dense::new(3, 4, Linear::new(), None).unwrap();
+    let mut d = Dense::new(3, 4, Linear::new()).unwrap();
     // inject known weights so exact values can be asserted too
     let w = Array2::from_shape_vec(
         (3, 4),
@@ -307,7 +307,7 @@ fn dense_get_weights_returns_dense_variant_with_correct_shapes() {
 /// are covered by gradient_check.rs)
 #[test]
 fn dense_backward_output_shape_matches_input() {
-    let mut d = Dense::new(2, 3, Linear::new(), None).unwrap();
+    let mut d = Dense::new(2, 3, Linear::new()).unwrap();
     let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
     let out = d.forward(&x).unwrap();
     let ones = Tensor::ones(out.raw_dim());
@@ -323,7 +323,7 @@ fn dense_backward_output_shape_matches_input() {
 
 #[test]
 fn dense_layer_type_is_dense() {
-    let d = Dense::new(2, 2, Linear::new(), None).unwrap();
+    let d = Dense::new(2, 2, Linear::new()).unwrap();
     assert_eq!(d.layer_type(), "Dense");
 }
 
@@ -554,7 +554,7 @@ fn flatten_layer_type_is_flatten() {
 /// get_weights returns a LayerWeight::Dense, not Empty or another variant
 #[test]
 fn dense_get_weights_is_dense_variant() {
-    let d = Dense::new(2, 3, Linear::new(), None).unwrap();
+    let d = Dense::new(2, 3, Linear::new()).unwrap();
     assert!(
         matches!(d.get_weights(), LayerWeight::Dense(_)),
         "Dense must expose LayerWeight::Dense"

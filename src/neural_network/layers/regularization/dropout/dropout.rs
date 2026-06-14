@@ -31,7 +31,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// use ndarray::Array2;
 ///
 /// // Create a Dropout layer with 50% dropout rate
-/// let mut dropout = Dropout::new(0.5, vec![32, 128], None).unwrap();
+/// let mut dropout = Dropout::new(0.5, vec![32, 128]).unwrap();
 ///
 /// // Create input tensor
 /// let input = Array2::ones((32, 128)).into_dyn();
@@ -60,7 +60,11 @@ impl Dropout {
     ///
     /// - `rate` - Fraction of the input units to drop (between 0 and 1)
     /// - `input_shape` - Shape of the input tensor
-    /// - `random_state` - Optional seed for reproducible masks; falls back to the global seed or entropy. See `crate::random`
+    ///
+    /// # Notes
+    ///
+    /// The mask RNG is seeded from the global seed or entropy by default. For reproducible masks,
+    /// set a seed with [`Dropout::with_random_state`].
     ///
     /// # Returns
     ///
@@ -69,11 +73,7 @@ impl Dropout {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `rate` is not between 0 and 1
-    pub fn new(
-        rate: f32,
-        input_shape: Vec<usize>,
-        random_state: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(rate: f32, input_shape: Vec<usize>) -> Result<Self, Error> {
         validate_rate(rate, "Dropout rate")?;
 
         Ok(Dropout {
@@ -81,8 +81,25 @@ impl Dropout {
             input_shape,
             mask: None,
             training: true,
-            rng: crate::random::make_rng(random_state),
+            rng: crate::random::make_rng(None),
         })
+    }
+
+    /// Sets the seed for reproducible mask sampling
+    ///
+    /// By default the RNG is seeded from the global seed or entropy (see [`crate::random`]). This
+    /// re-seeds it deterministically from `random_state`.
+    ///
+    /// # Parameters
+    ///
+    /// - `random_state` - Seed for the layer's random number generator
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - The updated layer
+    pub fn with_random_state(mut self, random_state: u64) -> Self {
+        self.rng = crate::random::make_rng(Some(random_state));
+        self
     }
 
     mode_dependent_layer_set_training!();

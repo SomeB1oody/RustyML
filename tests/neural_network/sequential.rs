@@ -27,7 +27,7 @@ fn t2(rows: usize, cols: usize, data: Vec<f32>) -> Tensor {
 /// Dense(2->2, Linear) with identity weights and zero bias returns the input unchanged
 #[test]
 fn test_predict_identity_weights_linear_dense() {
-    let mut dense = Dense::new(2, 2, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(2, 2, Activation::Linear).unwrap();
     let w = Array2::from_shape_vec((2, 2), vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -45,7 +45,7 @@ fn test_predict_identity_weights_linear_dense() {
 /// Dense(1->1, Linear) applies the scalar affine map 2*x + 1
 #[test]
 fn test_predict_scalar_affine() {
-    let mut dense = Dense::new(1, 1, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
     let w = Array2::from_shape_vec((1, 1), vec![2.0_f32]).unwrap();
     let b = Array2::from_shape_vec((1, 1), vec![1.0_f32]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -62,7 +62,7 @@ fn test_predict_scalar_affine() {
 /// Dense(3->2, Linear) applies a known linear transform to one input row
 #[test]
 fn test_predict_2d_linear_transform() {
-    let mut dense = Dense::new(3, 2, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(3, 2, Activation::Linear).unwrap();
     // weights shape (in=3, out=2)
     let w = Array2::from_shape_vec(
         (3, 2),
@@ -90,12 +90,12 @@ fn test_predict_2d_linear_transform() {
 /// Two stacked Linear Dense layers chain correctly: first projects, second sums both inputs
 #[test]
 fn test_predict_two_layer_stack() {
-    let mut d1 = Dense::new(3, 2, Activation::Linear, None).unwrap();
+    let mut d1 = Dense::new(3, 2, Activation::Linear).unwrap();
     let w1 = Array2::from_shape_vec((3, 2), vec![1.0_f32, 0.0, 0.0, 1.0, 0.0, 0.0]).unwrap();
     let b1 = Array2::from_shape_vec((1, 2), vec![0.0_f32, 0.0]).unwrap();
     d1.set_weights(w1, b1).unwrap();
 
-    let mut d2 = Dense::new(2, 1, Activation::Linear, None).unwrap();
+    let mut d2 = Dense::new(2, 1, Activation::Linear).unwrap();
     let w2 = Array2::from_shape_vec((2, 1), vec![1.0_f32, 1.0]).unwrap();
     let b2 = Array2::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     d2.set_weights(w2, b2).unwrap();
@@ -113,7 +113,7 @@ fn test_predict_two_layer_stack() {
 /// Dense(1->3, Softmax) on a zero pre-activation yields the uniform distribution [1/3, 1/3, 1/3]
 #[test]
 fn test_predict_dense_softmax_equal_input() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax, None).unwrap();
+    let mut dense = Dense::new(1, 3, Activation::Softmax).unwrap();
     let w = Array2::from_shape_vec((1, 3), vec![1.0_f32, 2.0, 3.0]).unwrap();
     let b = Array2::from_shape_vec((1, 3), vec![0.0_f32, 0.0, 0.0]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -138,7 +138,7 @@ fn test_predict_dense_softmax_equal_input() {
 /// Dense(1->3, Softmax) with all-zero weights ignores the input and stays uniform
 #[test]
 fn test_predict_dense_softmax_known_probs() {
-    let mut dense = Dense::new(1, 3, Activation::Softmax, None).unwrap();
+    let mut dense = Dense::new(1, 3, Activation::Softmax).unwrap();
     let w: Array2<f32> = Array2::zeros((1, 3));
     let b: Array2<f32> = Array2::zeros((1, 3));
     dense.set_weights(w, b).unwrap();
@@ -160,7 +160,7 @@ fn test_predict_dense_softmax_known_probs() {
 /// predict() produces the same values as an eval-mode forward pass for a Linear Dense layer
 #[test]
 fn test_predict_equals_forward_eval_mode() {
-    let mut dense = Dense::new(2, 2, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(2, 2, Activation::Linear).unwrap();
     let w = Array2::from_shape_vec((2, 2), vec![0.5_f32, 0.0, 0.0, 0.5]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![1.0_f32, -1.0]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -183,7 +183,7 @@ fn test_predict_equals_forward_eval_mode() {
 /// Two back-to-back predict() calls on the same input produce identical tensors
 #[test]
 fn test_predict_is_deterministic() {
-    let mut dense = Dense::new(3, 2, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(3, 2, Activation::Linear).unwrap();
     let w = Array2::from_shape_vec((3, 2), vec![0.1_f32, 0.2, 0.3, 0.4, 0.5, 0.6]).unwrap();
     let b = Array2::from_shape_vec((1, 2), vec![0.01_f32, -0.02]).unwrap();
     dense.set_weights(w, b).unwrap();
@@ -204,8 +204,8 @@ fn test_predict_is_deterministic() {
 fn test_summary_does_not_panic() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(4, 8, Activation::ReLU, None).unwrap())
-        .add(Dense::new(8, 2, Activation::Softmax, None).unwrap());
+        .add(Dense::new(4, 8, Activation::ReLU).unwrap())
+        .add(Dense::new(8, 2, Activation::Softmax).unwrap());
     model.summary();
 }
 
@@ -215,7 +215,7 @@ fn test_summary_does_not_panic() {
 #[test]
 fn test_fit_before_compile_returns_not_compiled() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear, None).unwrap());
+    model.add(Dense::new(2, 1, Activation::Linear).unwrap());
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
     let y = t2(2, 1, vec![1.0, 0.0]);
     assert!(
@@ -232,7 +232,7 @@ fn test_fit_before_compile_returns_not_compiled() {
 fn test_fit_empty_model_returns_empty_model_error() {
     let mut model = Sequential::new();
     model.compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
     let x = t2(2, 2, vec![1.0, 0.0, 0.0, 1.0]);
@@ -263,9 +263,9 @@ fn test_predict_empty_model_returns_empty_model_error() {
 fn test_fit_empty_x_returns_empty_input_error() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(2, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -282,9 +282,9 @@ fn test_fit_empty_x_returns_empty_input_error() {
 fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(2, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -300,7 +300,7 @@ fn test_fit_batch_size_mismatch_returns_dimension_mismatch() {
 #[test]
 fn test_predict_empty_x_returns_empty_input_error() {
     let mut model = Sequential::new();
-    model.add(Dense::new(2, 1, Activation::Linear, None).unwrap());
+    model.add(Dense::new(2, 1, Activation::Linear).unwrap());
 
     let x: Tensor = Array::zeros((0, 2)).into_dyn();
     let err = model.predict(&x).unwrap_err();
@@ -315,9 +315,9 @@ fn test_predict_empty_x_returns_empty_input_error() {
 fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(2, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -338,9 +338,9 @@ fn test_fit_with_batches_zero_batch_size_returns_invalid_parameter() {
 fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(2, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -362,14 +362,14 @@ fn test_fit_with_batches_batch_size_exceeds_samples_returns_invalid_parameter() 
 /// Training for 0 epochs leaves the weights identical to before the call
 #[test]
 fn test_fit_zero_epochs_unchanged_weights() {
-    let mut dense = Dense::new(1, 1, Activation::Linear, None).unwrap();
+    let mut dense = Dense::new(1, 1, Activation::Linear).unwrap();
     let w = Array2::from_shape_vec((1, 1), vec![3.0_f32]).unwrap();
     let b = Array2::from_shape_vec((1, 1), vec![0.0_f32]).unwrap();
     dense.set_weights(w, b).unwrap();
 
     let mut model = Sequential::new();
     model.add(dense).compile(
-        SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+        SGD::new(0.01, 0.0, false, 0.0).unwrap(),
         MeanSquaredError::new(),
     );
 
@@ -394,9 +394,9 @@ fn test_convergence_linear_regression_y_eq_2x_plus_1() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -417,9 +417,9 @@ fn test_convergence_linear_regression_with_batches() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -466,10 +466,10 @@ fn test_convergence_2class_softmax_adam() {
     // Weight init is unseeded, so a Tanh hidden layer plus a generous epoch budget guarantees
     // convergence on this tiny separable problem regardless of the initial weights
     model
-        .add(Dense::new(2, 8, Activation::Tanh, None).unwrap())
-        .add(Dense::new(8, 2, Activation::Softmax, None).unwrap())
+        .add(Dense::new(2, 8, Activation::Tanh).unwrap())
+        .add(Dense::new(8, 2, Activation::Softmax).unwrap())
         .compile(
-            Adam::new(0.01, 0.9, 0.999, 1e-8, None, 0.0).unwrap(),
+            Adam::new(0.01, 0.9, 0.999, 1e-8, 0.0).unwrap(),
             CategoricalCrossEntropy::new(false),
         );
 
@@ -504,9 +504,9 @@ fn test_predict_deterministic_after_training() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(2, 2, Activation::Linear, None).unwrap())
+        .add(Dense::new(2, 2, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -525,9 +525,9 @@ fn test_predict_deterministic_after_training() {
 fn test_fit_returns_mutable_self() {
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 
@@ -547,9 +547,9 @@ fn test_fit_with_batches_full_batch_equivalent() {
 
     let mut model = Sequential::new();
     model
-        .add(Dense::new(1, 1, Activation::Linear, None).unwrap())
+        .add(Dense::new(1, 1, Activation::Linear).unwrap())
         .compile(
-            SGD::new(0.01, None, 0.0, false, 0.0).unwrap(),
+            SGD::new(0.01, 0.0, false, 0.0).unwrap(),
             MeanSquaredError::new(),
         );
 

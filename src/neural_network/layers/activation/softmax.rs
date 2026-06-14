@@ -34,7 +34,7 @@ use crate::neural_network::traits::Layer;
 /// let mut model = Sequential::new();
 /// model
 ///     .add(Softmax::new())
-///     .compile(SGD::new(0.01, None, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
+///     .compile(SGD::new(0.01, 0.0, false, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
 ///
 /// // Forward propagation
 /// let output = model.predict(&x);

@@ -21,7 +21,7 @@ use super::common::assert_allclose;
 /// MaxPooling1D forward output for pool=2, stride=2 on a single channel
 #[test]
 fn max_pooling_1d_forward_values_pool2_stride2() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4]).unwrap();
 
     let x = Array::from_shape_vec((1, 1, 4), vec![3.0f32, 1.0, 4.0, 1.0])
         .unwrap()
@@ -39,7 +39,10 @@ fn max_pooling_1d_forward_values_pool2_stride2() {
 /// MaxPooling1D forward output for pool=3, stride=1 (overlapping windows)
 #[test]
 fn max_pooling_1d_forward_values_pool3_stride1() {
-    let mut layer = MaxPooling1D::new(3, vec![1, 1, 6], Some(1), PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(3, vec![1, 1, 6])
+        .unwrap()
+        .with_stride(1)
+        .unwrap();
 
     let x = Array::from_shape_vec((1, 1, 6), vec![0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0])
         .unwrap()
@@ -57,7 +60,7 @@ fn max_pooling_1d_forward_values_pool3_stride1() {
 /// MaxPooling1D pools each of two channels independently
 #[test]
 fn max_pooling_1d_forward_values_two_channels() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 2, 6], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 2, 6]).unwrap();
 
     let data: Vec<f32> = vec![
         // ch0
@@ -80,7 +83,7 @@ fn max_pooling_1d_forward_values_two_channels() {
 /// MaxPooling1D pools each batch element independently
 #[test]
 fn max_pooling_1d_forward_values_batch() {
-    let mut layer = MaxPooling1D::new(2, vec![2, 1, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![2, 1, 4]).unwrap();
 
     let data: Vec<f32> = vec![
         // batch 0, ch 0
@@ -103,7 +106,7 @@ fn max_pooling_1d_forward_values_batch() {
 
 #[test]
 fn max_pooling_1d_predict_equals_forward() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 1, 6], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 1, 6]).unwrap();
 
     let data: Vec<f32> = vec![1.0, 5.0, 2.0, 4.0, 3.0, 6.0];
     let x = Array::from_shape_vec((1, 1, 6), data).unwrap().into_dyn();
@@ -119,7 +122,10 @@ fn max_pooling_1d_predict_equals_forward() {
 /// output_shape reports the pooled spatial length as "(1, 2, 4)"
 #[test]
 fn max_pooling_1d_output_shape_string() {
-    let layer = MaxPooling1D::new(2, vec![1, 2, 8], Some(2), PaddingType::Valid).unwrap();
+    let layer = MaxPooling1D::new(2, vec![1, 2, 8])
+        .unwrap()
+        .with_stride(2)
+        .unwrap();
     let s = layer.output_shape();
     assert_eq!(s, "(1, 2, 4)");
 }
@@ -135,7 +141,7 @@ fn max_pooling_1d_output_shape_unknown_before_forward() {
 
 #[test]
 fn max_pooling_1d_err_pool_size_zero() {
-    let result = MaxPooling1D::new(0, vec![1, 1, 4], None, PaddingType::Valid);
+    let result = MaxPooling1D::new(0, vec![1, 1, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for pool_size=0, got {:?}",
@@ -145,7 +151,7 @@ fn max_pooling_1d_err_pool_size_zero() {
 
 #[test]
 fn max_pooling_1d_err_pool_size_larger_than_input() {
-    let result = MaxPooling1D::new(5, vec![1, 1, 4], None, PaddingType::Valid);
+    let result = MaxPooling1D::new(5, vec![1, 1, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for pool_size > input length, got {:?}",
@@ -155,7 +161,7 @@ fn max_pooling_1d_err_pool_size_larger_than_input() {
 
 #[test]
 fn max_pooling_1d_err_stride_zero() {
-    let result = MaxPooling1D::new(2, vec![1, 1, 4], Some(0), PaddingType::Valid);
+    let result = MaxPooling1D::new(2, vec![1, 1, 4]).unwrap().with_stride(0);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride=0, got {:?}",
@@ -166,7 +172,7 @@ fn max_pooling_1d_err_stride_zero() {
 #[test]
 fn max_pooling_1d_err_wrong_ndim() {
     // input_shape must be 3D; 2D yields DimensionMismatch
-    let result = MaxPooling1D::new(2, vec![1, 4], None, PaddingType::Valid);
+    let result = MaxPooling1D::new(2, vec![1, 4]);
     assert!(
         matches!(result, Err(Error::DimensionMismatch { .. })),
         "expected DimensionMismatch for 2D input_shape, got {:?}",
@@ -178,7 +184,7 @@ fn max_pooling_1d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_1d_backward_before_forward_err() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4]).unwrap();
     let grad = Array::ones((1, 1, 2)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -195,7 +201,7 @@ fn max_pooling_1d_backward_before_forward_err() {
 
 #[test]
 fn max_pooling_1d_forward_wrong_ndim_err() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4]).unwrap();
     // Pass a 2D tensor instead of 3D
     let x = Array::ones((1, 4)).into_dyn();
     let result = layer.forward(&x);
@@ -211,7 +217,7 @@ fn max_pooling_1d_forward_wrong_ndim_err() {
 /// MaxPooling2D forward output for a 4x4 input with pool=(2,2), stride=(2,2)
 #[test]
 fn max_pooling_2d_forward_values_4x4_pool2x2() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4]).unwrap();
 
     let data: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 4, 4), data)
@@ -230,8 +236,10 @@ fn max_pooling_2d_forward_values_4x4_pool2x2() {
 /// MaxPooling2D forward output for a 4x4 input with pool=(2,2), stride=(1,1)
 #[test]
 fn max_pooling_2d_forward_values_stride1() {
-    let mut layer =
-        MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], Some((1, 1)), PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4])
+        .unwrap()
+        .with_strides((1, 1))
+        .unwrap();
 
     let data: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 4, 4), data)
@@ -251,7 +259,7 @@ fn max_pooling_2d_forward_values_stride1() {
 /// MaxPooling2D pools each of two channels independently when pool equals the spatial dims
 #[test]
 fn max_pooling_2d_forward_values_two_channels() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 2, 2, 2], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 2, 2, 2]).unwrap();
 
     let data: Vec<f32> = (0..8).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 2, 2, 2), data)
@@ -271,7 +279,7 @@ fn max_pooling_2d_forward_values_two_channels() {
 
 #[test]
 fn max_pooling_2d_predict_equals_forward() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4]).unwrap();
 
     let data: Vec<f32> = (0..16).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 4, 4), data)
@@ -289,7 +297,7 @@ fn max_pooling_2d_predict_equals_forward() {
 /// output_shape reports the pooled 2D shape as "(1, 3, 3, 3)"
 #[test]
 fn max_pooling_2d_output_shape_string() {
-    let layer = MaxPooling2D::new((2, 2), vec![1, 3, 6, 6], None, PaddingType::Valid).unwrap();
+    let layer = MaxPooling2D::new((2, 2), vec![1, 3, 6, 6]).unwrap();
     assert_eq!(layer.output_shape(), "(1, 3, 3, 3)");
 }
 
@@ -297,7 +305,7 @@ fn max_pooling_2d_output_shape_string() {
 
 #[test]
 fn max_pooling_2d_err_pool_size_zero_height() {
-    let result = MaxPooling2D::new((0, 2), vec![1, 1, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling2D::new((0, 2), vec![1, 1, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -307,7 +315,7 @@ fn max_pooling_2d_err_pool_size_zero_height() {
 
 #[test]
 fn max_pooling_2d_err_pool_size_zero_width() {
-    let result = MaxPooling2D::new((2, 0), vec![1, 1, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling2D::new((2, 0), vec![1, 1, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -317,7 +325,7 @@ fn max_pooling_2d_err_pool_size_zero_width() {
 
 #[test]
 fn max_pooling_2d_err_pool_larger_than_height() {
-    let result = MaxPooling2D::new((5, 2), vec![1, 1, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling2D::new((5, 2), vec![1, 1, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for pool > height, got {:?}",
@@ -327,7 +335,7 @@ fn max_pooling_2d_err_pool_larger_than_height() {
 
 #[test]
 fn max_pooling_2d_err_pool_larger_than_width() {
-    let result = MaxPooling2D::new((2, 5), vec![1, 1, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling2D::new((2, 5), vec![1, 1, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for pool > width, got {:?}",
@@ -337,7 +345,9 @@ fn max_pooling_2d_err_pool_larger_than_width() {
 
 #[test]
 fn max_pooling_2d_err_stride_zero() {
-    let result = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], Some((0, 1)), PaddingType::Valid);
+    let result = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4])
+        .unwrap()
+        .with_strides((0, 1));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride=0, got {:?}",
@@ -349,13 +359,13 @@ fn max_pooling_2d_err_stride_zero() {
 fn max_pooling_2d_err_zero_batch_or_channel() {
     // Regression: a zero batch/channel dimension once passed new() and only failed at forward;
     // validate_all_dims_positive now rejects it as InvalidInput
-    let zero_batch = MaxPooling2D::new((2, 2), vec![0, 1, 4, 4], None, PaddingType::Valid);
+    let zero_batch = MaxPooling2D::new((2, 2), vec![0, 1, 4, 4]);
     assert!(
         matches!(zero_batch, Err(Error::InvalidInput(_))),
         "expected InvalidInput for batch=0, got {:?}",
         zero_batch
     );
-    let zero_channel = MaxPooling2D::new((2, 2), vec![1, 0, 4, 4], None, PaddingType::Valid);
+    let zero_channel = MaxPooling2D::new((2, 2), vec![1, 0, 4, 4]);
     assert!(
         matches!(zero_channel, Err(Error::InvalidInput(_))),
         "expected InvalidInput for channel=0, got {:?}",
@@ -366,7 +376,7 @@ fn max_pooling_2d_err_zero_batch_or_channel() {
 #[test]
 fn max_pooling_2d_err_wrong_ndim() {
     // input_shape must be 4D; 3D yields DimensionMismatch
-    let result = MaxPooling2D::new((2, 2), vec![1, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling2D::new((2, 2), vec![1, 4, 4]);
     assert!(
         matches!(result, Err(Error::DimensionMismatch { .. })),
         "expected DimensionMismatch for 3D input_shape, got {:?}",
@@ -378,7 +388,7 @@ fn max_pooling_2d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_2d_backward_before_forward_err() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4]).unwrap();
     let grad = Array::ones((1, 1, 2, 2)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -395,7 +405,7 @@ fn max_pooling_2d_backward_before_forward_err() {
 
 #[test]
 fn max_pooling_2d_forward_wrong_ndim_err() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 4, 4]).unwrap();
     // Pass a 3D tensor instead of 4D
     let x = Array::ones((1, 4, 4)).into_dyn();
     let result = layer.forward(&x);
@@ -411,8 +421,7 @@ fn max_pooling_2d_forward_wrong_ndim_err() {
 /// MaxPooling3D over a single window covering the whole 2x2x2 volume
 #[test]
 fn max_pooling_3d_forward_values_2x2x2_full_window() {
-    let mut layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 1, 2, 2, 2], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 2, 2, 2]).unwrap();
 
     let data: Vec<f32> = (0..8).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 2, 2, 2), data)
@@ -431,8 +440,7 @@ fn max_pooling_3d_forward_values_2x2x2_full_window() {
 /// MaxPooling3D forward output for a 4x4x4 volume with pool=(2,2,2), stride=(2,2,2)
 #[test]
 fn max_pooling_3d_forward_values_4x4x4_pool2x2x2() {
-    let mut layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
 
     let data: Vec<f32> = (0..64).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 4, 4, 4), data)
@@ -453,8 +461,7 @@ fn max_pooling_3d_forward_values_4x4x4_pool2x2x2() {
 
 #[test]
 fn max_pooling_3d_predict_equals_forward() {
-    let mut layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
 
     let data: Vec<f32> = (0..64).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 4, 4, 4), data)
@@ -472,8 +479,7 @@ fn max_pooling_3d_predict_equals_forward() {
 /// output_shape reports the pooled 3D shape as "(1, 2, 2, 2, 2)"
 #[test]
 fn max_pooling_3d_output_shape_string() {
-    let layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 2, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let layer = MaxPooling3D::new((2, 2, 2), vec![1, 2, 4, 4, 4]).unwrap();
     assert_eq!(layer.output_shape(), "(1, 2, 2, 2, 2)");
 }
 
@@ -481,7 +487,7 @@ fn max_pooling_3d_output_shape_string() {
 
 #[test]
 fn max_pooling_3d_err_pool_size_zero() {
-    let result = MaxPooling3D::new((0, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling3D::new((0, 2, 2), vec![1, 1, 4, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -491,7 +497,7 @@ fn max_pooling_3d_err_pool_size_zero() {
 
 #[test]
 fn max_pooling_3d_err_pool_larger_than_depth() {
-    let result = MaxPooling3D::new((5, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling3D::new((5, 2, 2), vec![1, 1, 4, 4, 4]);
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for pool > depth, got {:?}",
@@ -501,12 +507,9 @@ fn max_pooling_3d_err_pool_larger_than_depth() {
 
 #[test]
 fn max_pooling_3d_err_stride_zero() {
-    let result = MaxPooling3D::new(
-        (2, 2, 2),
-        vec![1, 1, 4, 4, 4],
-        Some((0, 2, 2)),
-        PaddingType::Valid,
-    );
+    let result = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4])
+        .unwrap()
+        .with_strides((0, 2, 2));
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter for stride=0, got {:?}",
@@ -516,13 +519,13 @@ fn max_pooling_3d_err_stride_zero() {
 
 #[test]
 fn max_pooling_3d_err_zero_batch_or_channel() {
-    let zero_batch = MaxPooling3D::new((2, 2, 2), vec![0, 1, 4, 4, 4], None, PaddingType::Valid);
+    let zero_batch = MaxPooling3D::new((2, 2, 2), vec![0, 1, 4, 4, 4]);
     assert!(
         matches!(zero_batch, Err(Error::InvalidInput(_))),
         "expected InvalidInput for batch=0, got {:?}",
         zero_batch
     );
-    let zero_channel = MaxPooling3D::new((2, 2, 2), vec![1, 0, 4, 4, 4], None, PaddingType::Valid);
+    let zero_channel = MaxPooling3D::new((2, 2, 2), vec![1, 0, 4, 4, 4]);
     assert!(
         matches!(zero_channel, Err(Error::InvalidInput(_))),
         "expected InvalidInput for channel=0, got {:?}",
@@ -533,7 +536,7 @@ fn max_pooling_3d_err_zero_batch_or_channel() {
 #[test]
 fn max_pooling_3d_err_wrong_ndim() {
     // input_shape must be 5D; 4D yields DimensionMismatch
-    let result = MaxPooling3D::new((2, 2, 2), vec![1, 4, 4, 4], None, PaddingType::Valid);
+    let result = MaxPooling3D::new((2, 2, 2), vec![1, 4, 4, 4]);
     assert!(
         matches!(result, Err(Error::DimensionMismatch { .. })),
         "expected DimensionMismatch for 4D input_shape, got {:?}",
@@ -545,8 +548,7 @@ fn max_pooling_3d_err_wrong_ndim() {
 
 #[test]
 fn max_pooling_3d_backward_before_forward_err() {
-    let mut layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
     let grad = Array::ones((1, 1, 2, 2, 2)).into_dyn();
     let result = layer.backward(&grad);
     assert!(
@@ -563,8 +565,7 @@ fn max_pooling_3d_backward_before_forward_err() {
 
 #[test]
 fn max_pooling_3d_forward_wrong_ndim_err() {
-    let mut layer =
-        MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling3D::new((2, 2, 2), vec![1, 1, 4, 4, 4]).unwrap();
     // Pass a 4D tensor instead of 5D
     let x = Array::ones((1, 1, 4, 4)).into_dyn();
     let result = layer.forward(&x);
@@ -895,7 +896,7 @@ fn global_max_pooling_3d_forward_wrong_ndim_err() {
 /// MaxPooling1D picks the algebraically largest value, not the largest absolute value
 #[test]
 fn max_pooling_1d_forward_negative_values() {
-    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling1D::new(2, vec![1, 1, 4]).unwrap();
 
     let x = Array::from_shape_vec((1, 1, 4), vec![-3.0f32, -1.0, -4.0, -2.0])
         .unwrap()
@@ -915,7 +916,7 @@ fn max_pooling_1d_forward_negative_values() {
 /// MaxPooling2D forward output when height and width pool to different sizes
 #[test]
 fn max_pooling_2d_forward_non_square_spatial() {
-    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 2, 4], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 2, 4]).unwrap();
 
     let data: Vec<f32> = (0..8).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, 1, 2, 4), data)
@@ -938,8 +939,7 @@ fn max_pooling_2d_forward_non_square_spatial() {
 #[test]
 fn max_pooling_2d_parallel_planes_forward_distinct_maxima() {
     let channels = 32; // bc_total = 1 * 32 = 32, exactly the parallel threshold
-    let mut layer =
-        MaxPooling2D::new((2, 2), vec![1, channels, 2, 2], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, channels, 2, 2]).unwrap();
 
     // Row-major fill 0..(1*32*2*2) = 0..128; channel c owns [4c, 4c+1, 4c+2, 4c+3]
     let data: Vec<f32> = (0..(channels * 4)).map(|v| v as f32).collect();
@@ -962,8 +962,7 @@ fn max_pooling_2d_parallel_planes_forward_distinct_maxima() {
 #[test]
 fn max_pooling_2d_parallel_planes_backward_routes_per_plane() {
     let channels = 32; // bc_total = 32, parallel branch
-    let mut layer =
-        MaxPooling2D::new((2, 2), vec![1, channels, 2, 2], None, PaddingType::Valid).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, channels, 2, 2]).unwrap();
 
     let data: Vec<f32> = (0..(channels * 4)).map(|v| v as f32).collect();
     let x = Array::from_shape_vec((1, channels, 2, 2), data)
@@ -996,8 +995,11 @@ fn max_pooling_2d_parallel_planes_backward_routes_per_plane() {
 /// in-bounds cells (padding is virtual). For a 3x3 input, pool 2x2, stride 2: output is 2x2
 #[test]
 fn max_pool_2d_same_padding_3x3() {
-    let mut layer =
-        MaxPooling2D::new((2, 2), vec![1, 1, 3, 3], Some((2, 2)), PaddingType::Same).unwrap();
+    let mut layer = MaxPooling2D::new((2, 2), vec![1, 1, 3, 3])
+        .unwrap()
+        .with_strides((2, 2))
+        .unwrap()
+        .with_padding(PaddingType::Same);
     let x = Array::from_shape_vec((1, 1, 3, 3), (1..=9).map(|v| v as f32).collect())
         .unwrap()
         .into_dyn();

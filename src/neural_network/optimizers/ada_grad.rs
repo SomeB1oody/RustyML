@@ -33,11 +33,12 @@ impl AdaGrad {
     ///
     /// - `learning_rate` - Initial step size for parameter updates (typically 0.01)
     /// - `epsilon` - Small constant for numerical stability (typically 1e-8)
-    /// - `clip_norm` - Optional clip-by-global-norm threshold; `Some(max_norm)` scales every
-    ///   gradient so the global L2 norm never exceeds `max_norm` (preserving direction), `None`
-    ///   disables clipping
     /// - `weight_decay` - Decoupled (AdamW-style) weight-decay coefficient applied directly to the
     ///   parameters; `0.0` disables it
+    ///
+    /// # Notes
+    ///
+    /// Gradient clipping is disabled by default. Enable it with [`AdaGrad::with_clip_norm`].
     ///
     /// # Returns
     ///
@@ -46,17 +47,10 @@ impl AdaGrad {
     /// # Errors
     ///
     /// - `Error::InvalidParameter` - If `learning_rate` or `epsilon` is not positive and finite,
-    ///   `clip_norm` is `Some` value that is not positive and finite, or `weight_decay` is negative
-    ///   or not finite
-    pub fn new(
-        learning_rate: f32,
-        epsilon: f32,
-        clip_norm: Option<f32>,
-        weight_decay: f32,
-    ) -> Result<Self, Error> {
+    ///   or `weight_decay` is negative or not finite
+    pub fn new(learning_rate: f32, epsilon: f32, weight_decay: f32) -> Result<Self, Error> {
         validate_positive_finite(learning_rate, "learning_rate")?;
         validate_positive_finite(epsilon, "epsilon")?;
-        validate_clip_norm(clip_norm)?;
         validate_non_negative_finite(weight_decay, "weight_decay")?;
 
         Ok(Self {
@@ -64,9 +58,28 @@ impl AdaGrad {
             epsilon,
             accumulators: Vec::new(),
             cursor: 0,
-            clip_norm,
+            clip_norm: None,
             weight_decay,
         })
+    }
+
+    /// Enables clip-by-global-norm gradient clipping (disabled by default)
+    ///
+    /// `max_norm` scales every gradient so the global L2 norm never exceeds it, preserving the
+    /// gradient direction.
+    ///
+    /// # Parameters
+    ///
+    /// - `clip_norm` - Clip-by-global-norm threshold; must be positive and finite
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated optimizer, or an error if `clip_norm` is not positive
+    ///   and finite
+    pub fn with_clip_norm(mut self, clip_norm: f32) -> Result<Self, Error> {
+        validate_clip_norm(Some(clip_norm))?;
+        self.clip_norm = Some(clip_norm);
+        Ok(self)
     }
 }
 

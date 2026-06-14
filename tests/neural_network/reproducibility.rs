@@ -1,7 +1,7 @@
 //! Integration tests for the reproducibility / RNG API
 //!
-//! Exercises the public seeding surface: per-layer `random_state: Option<u64>` on
-//! constructors, the thread-local global seed (`set_global_seed` / `clear_global_seed`),
+//! Exercises the public seeding surface: per-layer seeding via `with_random_state` on
+//! layers, the thread-local global seed (`set_global_seed` / `clear_global_seed`),
 //! and the `Sequential` fit-time shuffle seed (`new_with_seed` / `set_seed`)
 //!
 //! Equal seeds yield byte-identical output, so the "same" assertions use zero epsilon; the
@@ -41,9 +41,13 @@ fn max_abs_diff(a: &Tensor, b: &Tensor) -> f32 {
         .fold(0.0_f32, f32::max)
 }
 
-/// Build a tiny `Dense(4 -> 3, ReLU)` with the given `random_state`
+/// Build a tiny `Dense(4 -> 3, ReLU)`, applying `seed` via `with_random_state` when `Some`
 fn dense_4_3(seed: Option<u64>) -> Dense {
-    Dense::new(4, 3, Activation::ReLU, seed).expect("Dense::new(4,3) must succeed")
+    let dense = Dense::new(4, 3, Activation::ReLU).expect("Dense::new(4,3) must succeed");
+    match seed {
+        Some(s) => dense.with_random_state(s),
+        None => dense,
+    }
 }
 
 // 1. same_seed_same_init
@@ -146,9 +150,13 @@ fn training_reproducible() {
         let mut model = Sequential::new_with_seed(42);
         model
             .add(dense_4_3(Some(7)))
-            .add(Dense::new(3, 1, Activation::Linear, Some(11)).unwrap())
+            .add(
+                Dense::new(3, 1, Activation::Linear)
+                    .unwrap()
+                    .with_random_state(11),
+            )
             .compile(
-                SGD::new(0.05, None, 0.0, false, 0.0).unwrap(),
+                SGD::new(0.05, 0.0, false, 0.0).unwrap(),
                 MeanSquaredError::new(),
             );
         // batch_size < n_samples => the seeded per-epoch shuffle is actually used
@@ -177,8 +185,8 @@ fn global_seed_advances_between_unseeded_draws() {
 
     let (p_first, p_second) = {
         let _seed = GlobalSeedGuard::set(2024);
-        let first = Dense::new(4, 3, Activation::Linear, None).unwrap(); // sub-seed #1 from the global
-        let second = Dense::new(4, 3, Activation::Linear, None).unwrap(); // sub-seed #2, must differ
+        let first = Dense::new(4, 3, Activation::Linear).unwrap(); // sub-seed #1 from the global
+        let second = Dense::new(4, 3, Activation::Linear).unwrap(); // sub-seed #2, must differ
         (first.predict(&x).unwrap(), second.predict(&x).unwrap())
         // `_seed` clears the global here, before the assertion below
     };
@@ -200,14 +208,14 @@ fn cleared_global_seed_unseeded_layers_differ() {
 
     // Set a global, build one unseeded layer from it (matches the reproducibility setup)
     let guard = GlobalSeedGuard::set(777);
-    let _seeded_from_global = Dense::new(4, 3, Activation::Linear, None).unwrap();
+    let _seeded_from_global = Dense::new(4, 3, Activation::Linear).unwrap();
     // Clear the global so subsequent unseeded layers fall back to entropy. Dropping the guard
     // already calls clear_global_seed; the explicit call below is an idempotent reaffirmation
     drop(guard);
     rustyml::clear_global_seed(); // explicit: no global seed is installed
 
-    let a = Dense::new(4, 3, Activation::Linear, None).unwrap();
-    let b = Dense::new(4, 3, Activation::Linear, None).unwrap();
+    let a = Dense::new(4, 3, Activation::Linear).unwrap();
+    let b = Dense::new(4, 3, Activation::Linear).unwrap();
     let pa = a.predict(&x).unwrap();
     let pb = b.predict(&x).unwrap();
 
