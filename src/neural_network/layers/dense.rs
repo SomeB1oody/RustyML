@@ -190,7 +190,7 @@ impl Layer for Dense {
         // Cache input [batch_size, input_dim] for the backward pass
         self.input_cache = Some(input_2d.to_owned());
 
-        // Linear transform (block-parallel for large products)
+        // Linear transform (parallel for large products)
         let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
 
         // Cache the activated output for backpropagation
@@ -207,7 +207,7 @@ impl Layer for Dense {
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Linear transform (block-parallel for large products)
+        // Linear transform (parallel for large products)
         let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
 
         self.activation.forward(&z.into_dyn())

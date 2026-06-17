@@ -199,10 +199,10 @@ impl KernelType {
     }
 
     /// Computes the full kernel matrix `K[i, j] = K(x_i, y_j)` between two sample
-    /// sets in one shot, routing the dominant cost through a single block-parallel GEMM
+    /// sets in one shot, routing the dominant cost through a single parallel GEMM
     ///
     /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
-    /// cross-Gram matrix `G = X*Y^T` (one rayon-block-parallel, cache-blocked matrix
+    /// cross-Gram matrix `G = X*Y^T` (one rayon-parallel, cache-blocked matrix
     /// multiply via `gemm_internal`) plus a cheap elementwise transform over the
     /// `[n, m]` result:
     ///

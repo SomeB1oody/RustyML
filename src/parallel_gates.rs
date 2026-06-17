@@ -11,8 +11,8 @@
 //! widths are calibrated separately
 //!
 //! The engine-specific gates stay with their engines, because their work metrics are
-//! engine-specific rather than class-shared: `MatmulElem::{PAR_GEMM_MIN_FLOPS,
-//! PAR_GEMV_MIN_FLOPS}` and the block/tiling constants (`crate::math::matmul`),
+//! engine-specific rather than class-shared: `MatmulElem::{GEMM_RAYON_MIN_FLOPS,
+//! GEMV_RAYON_MIN_FLOPS}` and the tiling constants (`crate::math::matmul`),
 //! `CONV_PARALLEL_MIN_FLOPS`/`CONV_MIN_CHUNK_COLS` (im2col+GEMM engine),
 //! `POOL_PARALLEL_MIN_OPS`/`POOL_MIN_CHUNK_OUT` (pooling engine), and
 //! `BATCH_NORM_PARALLEL_THRESHOLD` (a per-layer analogy mapping). `metrics` keeps its

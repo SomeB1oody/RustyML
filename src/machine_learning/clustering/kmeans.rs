@@ -210,7 +210,7 @@ impl KMeans {
     ///
     /// Ranks centroids by `||c_j||^2 - 2 x.c_j`, which orders identically to the squared
     /// distance (the `||x||^2` term is constant per sample). The projections for all samples
-    /// come from one block-parallel GEMM, so per-sample work is a plain scan
+    /// come from one parallel GEMM, so per-sample work is a plain scan
     fn argmin_centroid(proj_row: ArrayView1<f64>, centroid_sq_norms: &Array1<f64>) -> usize {
         let mut min_cluster = 0;
         let mut min_val = f64::MAX;
@@ -340,7 +340,7 @@ impl KMeans {
     ///
     /// # Performance
     ///
-    /// The per-iteration assignment runs as one block-parallel GEMM; the arg-min scan
+    /// The per-iteration assignment runs as one parallel GEMM; the arg-min scan
     /// parallelizes above the calibrated scan-class gate, and the centroid accumulation
     /// runs as a deterministic blocked fold above the sum gate (see
     /// `crate::parallel_gates`), so results are bitwise identical at any thread count

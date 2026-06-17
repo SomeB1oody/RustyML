@@ -3,7 +3,7 @@
 //! Every `*_MIN_FLOPS` / `*_MIN_OPS` / `*_PARALLEL_THRESHOLD` constant in the crate decides when
 //! a pass is worth spreading across rayon. This bench times the forced-serial and
 //! forced-parallel implementations of each kernel class across a size ladder, prints the
-//! tables, and rewrites `benches/RESULTS.md` with the measurements and the observed crossovers,
+//! tables, and rewrites `benches/calibrations/RESULTS.md` with the measurements and the observed crossovers,
 //! so the constants can be set from data instead of estimates
 //!
 //! Run with:
@@ -17,14 +17,12 @@
 //! The calibrations are grouped by kernel family:
 //!
 //! - [`harness`]: the timing loop, the `Row`/`Section` table model, and the random-data generators
-//! - [`matmul`]: GEMM/GEMV FLOP and block gates plus the GEMM-strategy shootouts
 //! - [`nn_kernels`]: conv/pooling engines and the f32 elementwise classes
 //! - [`ml_kernels`]: f64 elementwise classes and the deterministic blocked reductions
 //! - [`trees`]: tree traversal/sort-scan/build and the kd-tree dimension crossover
 //! - [`normalization`]: BatchNorm and LayerNorm statistics folds
 
 mod harness;
-mod matmul;
 mod ml_kernels;
 mod nn_kernels;
 mod normalization;
@@ -59,21 +57,14 @@ fn main() {
     let threads = rayon::current_num_threads();
     println!("calibrating parallel gates (rayon threads: {threads}) ...");
 
+    // Note: the GEMM/GEMV FLOP-and-block gate calibrations were removed when the matmul backend
+    // moved to the `gemm` crate, which decides serial-vs-parallel by problem size itself.
     let mut sections = vec![
-        matmul::calibrate_par_matmul_flops(),
-        matmul::calibrate_par_matmul_min_block(),
         nn_kernels::calibrate_conv_forward(),
         nn_kernels::calibrate_pooling(),
     ];
     sections.extend(nn_kernels::calibrate_elementwise());
-    sections.push(matmul::calibrate_par_matmul_flops_f64());
-    sections.push(matmul::calibrate_par_matmul_min_block_f64());
-    sections.push(matmul::calibrate_par_matvec_flops_f32());
-    sections.push(matmul::calibrate_par_matvec_flops_f64());
-    sections.extend(matmul::calibrate_par_matvec_min_block());
     sections.extend(ml_kernels::calibrate_elementwise_f64());
-    sections.extend(matmul::calibrate_gemm_chunk_budget());
-    sections.push(matmul::calibrate_pairwise_strategy());
     sections.push(trees::calibrate_tree_traversal());
     sections.push(trees::calibrate_sort_scan());
     sections.push(trees::calibrate_tree_build());
@@ -120,7 +111,7 @@ fn main() {
          (use `-- --save-baseline <name>` / `-- --baseline <name>` to compare across changes)."
     );
 
-    let path = std::path::Path::new("benches/RESULTS.md");
-    std::fs::write(path, md).expect("write benches/RESULTS.md");
+    let path = std::path::Path::new("benches/calibrations/RESULTS.md");
+    std::fs::write(path, md).expect("write benches/calibrations/RESULTS.md");
     println!("\nwrote {}", path.display());
 }

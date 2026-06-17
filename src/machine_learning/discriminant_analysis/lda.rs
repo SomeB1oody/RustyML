@@ -719,7 +719,7 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Scores through one block-parallel GEMM; the per-row label pick parallelizes when the
+    /// Scores through one parallel GEMM; the per-row label pick parallelizes when the
     /// total scan work clears the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where

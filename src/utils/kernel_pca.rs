@@ -290,7 +290,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate; the scans and
+    /// The kernel-matrix GEMM runs parallel above its FLOPs gate; the scans and
     /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
@@ -319,7 +319,7 @@ impl KernelPCA {
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate; the scans and
+    /// The kernel-matrix GEMM runs parallel above its FLOPs gate; the scans and
     /// centering parallelize above the calibrated class gates (see `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where

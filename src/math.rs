@@ -1,13 +1,13 @@
 //! Free math and statistics functions: variances, distances, losses, and impurity measures,
-//! plus the block-parallel matrix products in [`matmul`](crate::math::matmul)
+//! plus the `gemm`-crate-backed matrix products in [`matmul`](crate::math::matmul)
 //!
 //! Each function returns a plain value and may panic on malformed input rather than returning a
 //! `Result`. The module covers regression statistics (SST, SSE, variance, standard deviation),
 //! distance metrics, classification losses, decision-tree impurity (gini, entropy), and the
 //! isolation-forest path-length correction
 
-/// Rayon-block-parallel matrix products (`gemm`, `gemv`) with a caller-supplied
-/// serial/parallel FLOPs threshold
+/// Matrix products backed by the `gemm` crate (crate-internal `gemm_internal` / `gemv_internal`),
+/// parallelized on the rayon pool for large products
 pub mod matmul;
 
 /// Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) whose

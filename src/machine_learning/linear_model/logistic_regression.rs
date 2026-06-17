@@ -190,7 +190,7 @@ impl LogisticRegression {
     ///
     /// # Performance
     ///
-    /// The per-iteration logits and gradient run as block-parallel GEMVs above their FLOPs
+    /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs
     /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
     /// above its exp-reduction gate (see [`crate::math::logistic_loss`]), so results are
     /// bitwise identical at any thread count

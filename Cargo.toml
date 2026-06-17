@@ -13,6 +13,7 @@ documentation = "https://docs.rs/crate/rustyml"
 categories = ["mathematics", "science", "algorithms"]
 
 autotests = false
+autobenches = false
 
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
@@ -24,7 +25,7 @@ utils = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:s
 # Comprehensive evaluation metrics for model performance assessment
 metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
-math = ["dep:ndarray", "dep:ahash", "dep:rayon"]
+math = ["dep:ndarray", "dep:ahash", "dep:rayon", "dep:gemm"]
 # Enables `machine_learning` and `neural_network`
 default = ["machine_learning", "neural_network"]
 # full access to all modules in the crate
@@ -43,6 +44,7 @@ indicatif = { version = "0.18.4", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
 serde_json = { version = "1.0.150", optional = true}
 thiserror = { version = "2.0.18", optional = true }
+gemm = { version = "0.19.0", features = ["rayon"], optional = true }
 
 [dev-dependencies]
 approx = "0.5.1"
@@ -73,23 +75,41 @@ name = "math"
 path = "tests/math.rs"
 required-features = ["math"]
 
-# Parallel/serial gate calibration
-[[bench]]
-name = "parallel_gates"
-harness = false
-required-features = ["machine_learning", "neural_network"]
 
-# End-to-end criterion benchmarks over the public API, for performance-regression tracking
+# End-to-end criterion benchmarks over the public neural-network API
 [[bench]]
 name = "nn_end_to_end"
+path = "benches/benchmarks/nn_end_to_end.rs"
 harness = false
 required-features = ["neural_network"]
 
 # End-to-end criterion benchmarks over the classical-ML/utils public API
 [[bench]]
 name = "ml_end_to_end"
+path = "benches/benchmarks/ml_end_to_end.rs"
 harness = false
 required-features = ["machine_learning", "utils"]
+
+# Kernel-level GEMM shape sweep through Dense::forward
+[[bench]]
+name = "matmul_kernels"
+path = "benches/benchmarks/matmul_kernels.rs"
+harness = false
+required-features = ["neural_network"]
+
+# Parallel/serial gate calibration for the conv/pooling/normalization/tree/elementwise kernels
+[[bench]]
+name = "parallel_gates"
+path = "benches/calibrations/parallel_gates/main.rs"
+harness = false
+required-features = ["machine_learning", "neural_network"]
+
+# gemm-crate serial-vs-rayon crossover calibration (GEMM and GEMV)
+[[bench]]
+name = "gemm_calibrate"
+path = "benches/calibrations/gemm_calibrate.rs"
+harness = false
+required-features = ["math"]
 
 [profile.dev]
 opt-level = 0

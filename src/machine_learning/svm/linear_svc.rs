@@ -240,7 +240,7 @@ impl LinearSVC {
     ///
     /// # Performance
     ///
-    /// The full-batch cost GEMV runs block-parallel above its FLOPs gate; the per-batch
+    /// The full-batch cost GEMV runs parallel above its FLOPs gate; the per-batch
     /// gradient accumulation is sequential so the f64 result is reproducible
     pub fn fit<S>(
         &mut self,

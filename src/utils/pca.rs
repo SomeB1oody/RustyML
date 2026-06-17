@@ -322,7 +322,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The covariance/projection GEMMs run block-parallel above their FLOPs gates; centering
+    /// The covariance/projection GEMMs run parallel above their FLOPs gates; centering
     /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
     /// `crate::parallel_gates`)
     pub fn fit<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
@@ -352,8 +352,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The projection GEMM runs block-parallel above a FLOPs gate (bitwise identical to the
-    /// serial product at any thread count)
+    /// The projection GEMM runs on the `gemm` backend (parallelized for large products)
     pub fn transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -380,7 +379,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The covariance/projection GEMMs run block-parallel above their FLOPs gates; centering
+    /// The covariance/projection GEMMs run parallel above their FLOPs gates; centering
     /// and the variance reduction parallelize above the calibrated cheap-map/sum gates (see
     /// `crate::parallel_gates`)
     pub fn fit_transform<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
@@ -431,8 +430,7 @@ impl PCA {
     ///
     /// # Performance
     ///
-    /// The reconstruction GEMM runs block-parallel above a FLOPs gate (bitwise identical to
-    /// the serial product at any thread count)
+    /// The reconstruction GEMM runs on the `gemm` backend (parallelized for large products)
     pub fn inverse_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -464,7 +462,7 @@ impl PCA {
             progress_bar.set_message("Reconstructing data");
         }
 
-        // Map back to feature space; the GEMM block-parallelizes above its FLOPs gate
+        // Map back to feature space; the GEMM parallelizes above its FLOPs gate
         let mut reconstructed = gemm_internal(x, components);
         reconstructed += mean;
 
@@ -609,7 +607,7 @@ impl PCA {
             progress_bar.set_message("Projecting data");
         }
 
-        // Project into component space; the GEMM block-parallelizes above its FLOPs gate
+        // Project into component space; the GEMM parallelizes above its FLOPs gate
         let transformed = gemm_internal(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]

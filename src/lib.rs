@@ -407,10 +407,12 @@ pub(crate) mod parallel_gates;
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
 ///
-/// ## Parallel Matrix Products ([`math::matmul`])
-/// - `gemm` / `gemv` - Rayon-block-parallel matrix products with a caller-supplied
-///   serial/parallel FLOPs threshold, bitwise identical to the serial `dot` at any
-///   thread count and any threshold
+/// ## Matrix Products ([`math::matmul`])
+/// - Crate-internal GEMM/GEMV backed by the [`gemm`](https://docs.rs/gemm) crate: runtime-
+///   dispatched SIMD kernels, parallelized on the rayon pool for large products. Results are
+///   correct to floating-point rounding and run-to-run deterministic; GEMM is additionally
+///   bitwise identical across thread counts (GEMV is not). See the module docs for the full
+///   reproducibility contract
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)

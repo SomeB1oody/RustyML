@@ -231,7 +231,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// The kernel-matrix GEMM runs block-parallel above its FLOPs gate, and the error-cache
+    /// The kernel-matrix GEMM runs parallel above its FLOPs gate, and the error-cache
     /// initialization parallelizes above the calibrated scan-class gate; the SMO inner loops
     /// are sequential so the optimization trajectory is reproducible
     pub fn fit<S>(
@@ -406,7 +406,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// The decision values come from one batched kernel-matrix GEMM (block-parallel above
+    /// The decision values come from one batched kernel-matrix GEMM (parallel above
     /// its FLOPs gate)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
@@ -465,7 +465,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// The decision values come from one batched kernel-matrix GEMM (block-parallel above
+    /// The decision values come from one batched kernel-matrix GEMM (parallel above
     /// its FLOPs gate)
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
