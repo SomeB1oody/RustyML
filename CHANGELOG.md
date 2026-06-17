@@ -5,6 +5,13 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [v0.12.0] - 2026-06-16 (UTC-7)
+### Changed
+- **Breaking: model persistence switched from JSON to a compact binary format (`postcard`).** `save_to_path`/`load_from_path` on every classical-ML model, `PCA`/`KernelPCA`, and `Sequential` now write and read [postcard](https://docs.rs/postcard/) instead of `serde_json`. On a fitted `KMeans` the on-disk size drops ~5x; float-heavy models compress further. **Old `.json` model files can no longer be loaded** — re-save any persisted models. The public method signatures are unchanged; only the byte format differs (a `.bin` extension is now suggested in docs/examples). `serde_json` is dropped as a dependency in favor of `postcard`.
+- **Breaking: `IoError::Json(serde_json::Error)` renamed to `IoError::Serialization(postcard::Error)`** to match the new backend. Code matching on `IoError::Json` must switch to `IoError::Serialization`.
+- `LayerWeight`'s on-disk representation changed from serde's internally tagged form (`#[serde(tag = "type")]`) to the default externally tagged form, required because postcard is a non-self-describing format. Affects only the serialized bytes, not the Rust enum or any code using it.
+- Removed the now-unused `IoError::load_in_buf_reader` helper (the binary load path reads the whole file via `std::fs::read`).
+
 ## [v0.12.0] - 2026-06-14 (UTC-7)
 ### Added
 - **`AdamW` optimizer** (`neural_network::optimizers::AdamW`): Adam with decoupled weight decay, shrinking the parameter by `(1 - learning_rate * weight_decay)` before the gradient step (Loshchilov & Hutter) instead of folding it into the gradient — generally the better choice with adaptive optimizers. Honors the same weights-only exclusion and `with_clip_norm` builder as the other optimizers.

@@ -56,10 +56,9 @@ pub use simple_rnn_weight::*;
 /// Each variant corresponds to a specific layer type and holds the matching weight struct. The
 /// `'a` lifetime lets a variant borrow the live layer arrays when inspecting or saving (via
 /// [`Cow`](std::borrow::Cow)). Loading deserializes into owned arrays, so the type is used as
-/// `LayerWeight<'static>` on the load path. The `#[serde(tag = "type")]` representation tags each
-/// variant by name, which is the on-disk weight format
+/// `LayerWeight<'static>` on the load path. The enum uses serde's default (externally tagged)
+/// representation, which the non-self-describing postcard binary format requires
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
 pub enum LayerWeight<'a> {
     /// Weights for dense (fully connected) layers
     Dense(DenseLayerWeight<'a>),

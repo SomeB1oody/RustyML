@@ -1,6 +1,6 @@
 //! Sequential model that stacks layers into a feedforward network
 //!
-//! Supports training, prediction, summary, and JSON save/load
+//! Supports training, prediction, summary, and binary save/load
 
 use super::traits::{Layer, Loss, Optimizer};
 use crate::error::{Error, IoError, NnError};
@@ -14,7 +14,6 @@ use crate::neural_network::layers::serialize_model::{
 use crate::parallel_gates::SQ_SUM_F32_PARALLEL_MIN_ELEMS;
 use ndarray::Axis;
 use ndarray_rand::rand::seq::SliceRandom;
-use serde_json::{from_reader, to_writer_pretty};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -55,7 +54,7 @@ use std::io::{BufWriter, Write};
 /// model.fit(&x, &y, 10).unwrap();
 ///
 /// // Save model weights to file
-/// model.save_to_path("model.json").unwrap();
+/// model.save_to_path("model.bin").unwrap();
 ///
 /// // Create a new model with the same architecture
 /// let mut new_model = Sequential::new();
@@ -65,7 +64,7 @@ use std::io::{BufWriter, Write};
 ///     .add(Dense::new(64, 10, Activation::Softmax).unwrap());
 ///
 /// // Load weights from file
-/// new_model.load_from_path("model.json").unwrap();
+/// new_model.load_from_path("model.bin").unwrap();
 ///
 /// // Compile before using (required for training, optional for prediction)
 /// new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
@@ -75,7 +74,7 @@ use std::io::{BufWriter, Write};
 /// println!("Predictions shape: {:?}", predictions.shape());
 ///
 /// // Clean up: remove the created file
-/// std::fs::remove_file("model.json").unwrap();
+/// std::fs::remove_file("model.bin").unwrap();
 /// ```
 pub struct Sequential {
     /// All layers in the model
@@ -656,15 +655,16 @@ impl Sequential {
         weights
     }
 
-    /// Saves the model architecture and weights to a JSON file at the specified path
+    /// Saves the model architecture and weights to a binary file at the specified path
     ///
     /// Serializes the model structure including layer types, configurations,
-    /// and all trainable parameters (weights and biases) to JSON format. Note that the
-    /// optimizer and loss function are not saved and must be reconfigured after loading
+    /// and all trainable parameters (weights and biases) to a compact binary format using
+    /// postcard. Note that the optimizer and loss function are not saved and must be
+    /// reconfigured after loading
     ///
     /// # Parameters
     ///
-    /// - `path` - File path where the model will be saved (e.g., "stored_model.json"). Accepts
+    /// - `path` - File path where the model will be saved (e.g., "stored_model.bin"). Accepts
     ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
@@ -674,7 +674,7 @@ impl Sequential {
     /// # Errors
     ///
     /// - `Error::Io(IoError::Std)` - File creation or write operation failed
-    /// - `Error::Io(IoError::Json)` - Serialization to JSON failed
+    /// - `Error::Io(IoError::Serialization)` - Serialization failed
     pub fn save_to_path(
         &self,
         path: impl AsRef<std::path::Path>,
@@ -701,12 +701,15 @@ impl Sequential {
             layers: serializable_layers,
         };
 
+        // Serialize the model to the compact postcard binary format
+        let bytes = postcard::to_allocvec(&serializable_model)?;
+
         // Create or overwrite the file
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
 
-        // Serialize the model to JSON and write to file
-        to_writer_pretty(&mut writer, &serializable_model)?;
+        // Write the serialized bytes to file
+        writer.write_all(&bytes)?;
 
         // Ensure all data is written to disk
         writer.flush()?;
@@ -714,7 +717,7 @@ impl Sequential {
         Ok(())
     }
 
-    /// Loads model weights from a JSON file and applies them to the current model
+    /// Loads model weights from a binary file and applies them to the current model
     ///
     /// Deserializes weights from a previously saved model file and applies them
     /// to the current model's layers. The current model must have the same architecture
@@ -725,7 +728,7 @@ impl Sequential {
     ///
     /// # Parameters
     ///
-    /// - `path` - File path from which to load the weights (e.g., "stored_model.json"). Accepts
+    /// - `path` - File path from which to load the weights (e.g., "stored_model.bin"). Accepts
     ///   anything convertible to a `Path` (`&str`, `String`, `Path`, `PathBuf`, ...)
     ///
     /// # Returns
@@ -735,18 +738,18 @@ impl Sequential {
     /// # Errors
     ///
     /// - `Error::Io(IoError::Std)` - File not found or read operation failed
-    /// - `Error::Io(IoError::Json)` - Deserialization from JSON failed
+    /// - `Error::Io(IoError::Serialization)` - Deserialization failed
     /// - `Error::Io(IoError::ModelStructureMismatch)` - The current model's structure (layer count, a layer
     ///   type at some position, or a weight shape) does not match the saved model
     pub fn load_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
     ) -> crate::error::RustymlResult<()> {
-        // Open and buffer the file for reading
-        let reader = IoError::load_in_buf_reader(path)?;
+        // Read the whole file into memory
+        let bytes = std::fs::read(path)?;
 
-        // Deserialize the model from JSON
-        let serializable_model: SerializableSequential<'static> = from_reader(reader)?;
+        // Deserialize the model from the postcard binary format
+        let serializable_model: SerializableSequential<'static> = postcard::from_bytes(&bytes)?;
 
         // Verify layer count matches
         if serializable_model.layers.len() != self.layers.len() {

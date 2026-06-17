@@ -84,10 +84,10 @@
 //! let _predictions = model.predict(&new_data.view());
 //!
 //! // Save the trained model to a file
-//! model.save_to_path("linear_regression_model.json").unwrap();
+//! model.save_to_path("linear_regression_model.bin").unwrap();
 //!
 //! // Load the model from the file
-//! let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
+//! let loaded_model = LinearRegression::load_from_path("linear_regression_model.bin").unwrap();
 //!
 //! // Use the loaded model for predictions
 //! let _loaded_predictions = loaded_model.predict(&new_data.view());
@@ -139,7 +139,7 @@
 //! model.fit(&x, &y, 10).unwrap();
 //!
 //! // Save model weights to file
-//! model.save_to_path("model.json").unwrap();
+//! model.save_to_path("model.bin").unwrap();
 //!
 //! // Create a new model with the same architecture
 //! let mut new_model = Sequential::new();
@@ -149,7 +149,7 @@
 //!     .add(Dense::new(64, 10, Softmax::new()).unwrap());
 //!
 //! // Load weights from file
-//! new_model.load_from_path("model.json").unwrap();
+//! new_model.load_from_path("model.bin").unwrap();
 //!
 //! // Compile before using (required for training, optional for prediction)
 //! new_model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), CategoricalCrossEntropy::new(false));
@@ -272,8 +272,8 @@ macro_rules! get_field_as_ref {
 
 /// Generates `save_to_path` and `load_from_path` methods for model structs
 ///
-/// - `save_to_path` - Saves the model to a JSON file at the specified path
-/// - `load_from_path` - Loads a model from a JSON file at the specified path
+/// - `save_to_path` - Saves the model to a binary file at the specified path
+/// - `load_from_path` - Loads a model from a binary file at the specified path
 ///
 /// # Parameters
 ///
@@ -281,54 +281,53 @@ macro_rules! get_field_as_ref {
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
-        /// Saves the trained model to a JSON file at the specified path
+        /// Saves the trained model to a binary file at the specified path
         ///
         /// Serializes the entire model state including coefficients, intercept,
-        /// hyperparameters, and training metadata to JSON format using serde_json
+        /// hyperparameters, and training metadata to a compact binary format using postcard
         ///
         /// # Parameters
         ///
-        /// - `path` - File path where the model will be saved (e.g. "stored_model.json")
+        /// - `path` - File path where the model will be saved (e.g. "stored_model.bin")
         ///
         /// # Returns
         ///
         /// - `Ok(())` - Model successfully saved to file
-        /// - `Err(Error::Io)` - File creation/write failed, or serialization to JSON failed
+        /// - `Err(Error::Io)` - File creation/write failed, or serialization failed
         pub fn save_to_path(&self, path: &str) -> Result<(), crate::error::Error> {
-            use serde_json::to_writer_pretty;
             use std::fs::File;
             use std::io::{BufWriter, Write};
+
+            let bytes = postcard::to_allocvec(self)?;
 
             let file = File::create(path)?;
             let mut writer = BufWriter::new(file);
 
-            to_writer_pretty(&mut writer, self)?;
+            writer.write_all(&bytes)?;
 
             writer.flush()?;
 
             Ok(())
         }
 
-        /// Loads a trained model from a JSON file at the specified path
+        /// Loads a trained model from a binary file at the specified path
         ///
-        /// Deserializes a previously saved model from JSON format, restoring all
+        /// Deserializes a previously saved model from the postcard binary format, restoring all
         /// model parameters, hyperparameters, and training state
         ///
         /// # Parameters
         ///
-        /// - `path` - File path from which to load the model (e.g. "stored_model.json")
+        /// - `path` - File path from which to load the model (e.g. "stored_model.bin")
         ///
         /// # Returns
         ///
         /// - `Ok(Self)` - Successfully loaded model instance
-        /// - `Err(Error::Io)` - File not found/read failed, or deserialization from JSON failed
+        /// - `Err(Error::Io)` - File not found/read failed, or deserialization failed
         ///   (invalid format or corrupted data)
         pub fn load_from_path(path: &str) -> Result<Self, crate::error::Error> {
-            use serde_json::from_reader;
+            let bytes = std::fs::read(path)?;
 
-            let reader = crate::error::IoError::load_in_buf_reader(path)?;
-
-            let model: $model_type = from_reader(reader)?;
+            let model: $model_type = postcard::from_bytes(&bytes)?;
 
             Ok(model)
         }

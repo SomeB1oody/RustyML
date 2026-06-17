@@ -33,9 +33,6 @@
 //!
 //! [`Error`](crate::error::Error) is `#[non_exhaustive]`; match with a trailing `_` arm to stay forward-compatible
 
-use std::fs::File;
-use std::io::BufReader;
-
 /// The unified error type for all fallible RustyML operations
 ///
 /// See the [module documentation](crate::error) for the category breakdown and conventions
@@ -200,10 +197,10 @@ impl From<std::io::Error> for Error {
     }
 }
 
-/// Lets `?` lift a raw [`serde_json::Error`] directly into [`Error`] (as [`IoError::Json`])
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Io(IoError::Json(e))
+/// Lets `?` lift a raw [`postcard::Error`] directly into [`Error`] (as [`IoError::Serialization`])
+impl From<postcard::Error> for Error {
+    fn from(e: postcard::Error) -> Self {
+        Self::Io(IoError::Serialization(e))
     }
 }
 
@@ -263,25 +260,15 @@ pub enum IoError {
     #[error("I/O error: {0}")]
     Std(#[from] std::io::Error),
 
-    /// A JSON serialization or deserialization error
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    /// A binary serialization or deserialization error (postcard format)
+    #[error("serialization error: {0}")]
+    Serialization(#[from] postcard::Error),
 
     /// The model being loaded does not match the saved model: a different number of layers, a
     /// different layer type at some position, or a weight whose shape does not match the target
     /// layer's configured shape
     #[error("model structure mismatch: {0}")]
     ModelStructureMismatch(String),
-}
-
-impl IoError {
-    /// Opens `path` and wraps it in a [`BufReader`], returning the raw [`std::io::Error`] on
-    /// failure (callers in `Error`-returning functions receive it as [`Error::Io`] via `?`)
-    pub fn load_in_buf_reader(
-        path: impl AsRef<std::path::Path>,
-    ) -> std::io::Result<BufReader<File>> {
-        Ok(BufReader::new(File::open(path)?))
-    }
 }
 
 /// An alias for `Result<T, `[`Error`]`>`

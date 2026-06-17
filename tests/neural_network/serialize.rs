@@ -4,8 +4,8 @@
 //! saves and reloads it into a fresh model of the same architecture, and asserts
 //! that predict output matches element-wise (within ~1e-6) across the round-trip
 //! Error paths cover layer-count, layer-type, and weight-shape mismatches (all
-//! ModelStructureMismatch), a nonexistent file (IoError::Std), and invalid JSON
-//! (IoError::Json)
+//! ModelStructureMismatch), a nonexistent file (IoError::Std), and corrupt binary
+//! data (IoError::Serialization)
 
 use crate::common::assert_allclose;
 use ndarray::Array;
@@ -643,19 +643,19 @@ fn load_from_nonexistent_file_gives_io_error() {
     }
 }
 
-/// Invalid JSON gives Error::Io(IoError::Json)
+/// Corrupt binary data gives Error::Io(IoError::Serialization)
 #[test]
-fn load_from_invalid_json_gives_json_error() {
-    let tmp = TempFile::new("invalid_json");
-    std::fs::write(tmp.path(), b"{ this is not valid json !!!").unwrap();
+fn load_from_invalid_data_gives_serialization_error() {
+    let tmp = TempFile::new("invalid_data");
+    std::fs::write(tmp.path(), b"\xff\xff\xff not valid postcard data").unwrap();
 
     let mut model = Sequential::new();
     model.add(Dense::new(2, 2, Linear::new()).unwrap());
 
     let result = model.load_from_path(tmp.path());
     match result {
-        Err(Error::Io(IoError::Json(_))) => {}
-        other => panic!("expected IoError::Json, got {:?}", other),
+        Err(Error::Io(IoError::Serialization(_))) => {}
+        other => panic!("expected IoError::Serialization, got {:?}", other),
     }
 }
 

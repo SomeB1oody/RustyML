@@ -33,7 +33,7 @@ Everything is organized into five feature-gated modules, so you compile only wha
 - **Broad algorithm coverage** — classical supervised/unsupervised learning, anomaly detection, and a full neural-network framework.
 - **Unified, structured error handling** — every fallible call returns `RustymlResult<T>`; errors are grouped into clear category variants instead of opaque strings.
 - **Reproducible by design** — a single `set_global_seed` call makes every randomized component deterministic.
-- **Model persistence** — save and load trained models and network weights as JSON via [Serde](https://serde.rs/).
+- **Model persistence** — save and load trained models and network weights as compact binary via [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
 - **Rich evaluation metrics** — regression, classification (binary & multiclass), and clustering, mirroring scikit-learn conventions.
 - **Modular features** — pull in just `metrics`, just `math`, the `default` learning stack, or the `full` crate.
 
@@ -84,8 +84,8 @@ let predictions = model.predict(&x).unwrap();
 println!("{:?}", predictions);
 
 // Persist and reload the trained model
-model.save_to_path("linear_regression.json").unwrap();
-let restored = LinearRegression::load_from_path("linear_regression.json").unwrap();
+model.save_to_path("linear_regression.bin").unwrap();
+let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap();
 ```
 
 ### Neural Networks
@@ -116,7 +116,7 @@ let predictions = model.predict(&x).unwrap();
 println!("Predictions shape: {:?}", predictions.shape());
 
 // Save the trained weights, then load them into a fresh model
-model.save_to_path("model.json").unwrap();
+model.save_to_path("model.bin").unwrap();
 ```
 
 ### Evaluating a Model
@@ -139,7 +139,7 @@ println!("F1 score: {:.3}", cm.f1_score());
 ### `machine_learning`
 
 Classical supervised and unsupervised algorithms, all with parallel-processing optimization,
-input validation, and JSON persistence.
+input validation, and binary persistence.
 
 | Category | Algorithms |
 |----------|------------|
@@ -169,7 +169,7 @@ convolutional/recurrent networks via a Keras-style `Sequential` API.
 - **Losses** — `MeanSquaredError`, `MeanAbsoluteError`, `BinaryCrossEntropy`, `CategoricalCrossEntropy`, `SparseCategoricalCrossEntropy`
 
 Training supports full-batch (`fit`) and mini-batch (`fit_with_batches`) loops, weight
-inspection (`get_weights`), and JSON serialization (`save_to_path` / `load_from_path`).
+inspection (`get_weights`), and binary serialization (`save_to_path` / `load_from_path`).
 
 ### `utils`
 

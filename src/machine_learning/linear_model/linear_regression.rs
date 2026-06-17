@@ -49,10 +49,10 @@ use rayon::prelude::{
 /// let predictions = model.predict(&new_data);
 ///
 /// // Save the trained model to a file
-/// model.save_to_path("linear_regression_model.json").unwrap();
+/// model.save_to_path("linear_regression_model.bin").unwrap();
 ///
 /// // Load the model from the file
-/// let loaded_model = LinearRegression::load_from_path("linear_regression_model.json").unwrap();
+/// let loaded_model = LinearRegression::load_from_path("linear_regression_model.bin").unwrap();
 ///
 /// // Use the loaded model for predictions
 /// let loaded_predictions = loaded_model.predict(&new_data);
@@ -64,7 +64,7 @@ use rayon::prelude::{
 /// println!("{:?}", model);
 ///
 /// // Clean up the created file
-/// std::fs::remove_file("linear_regression_model.json").unwrap();
+/// std::fs::remove_file("linear_regression_model.bin").unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LinearRegression {
