@@ -11,9 +11,14 @@
 //! ```
 //! harness = false: prints a table to stdout.
 
-use ndarray::Array2;
+use ndarray::parallel::prelude::IntoParallelIterator;
+use ndarray::{Array2, Axis};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::hint::black_box;
 use std::time::Instant;
+
+/// Minimum rows per block for the row-split path (mirrors `matmul::PAR_ROWSPLIT_MIN_BLOCK`).
+const PAR_ROWSPLIT_MIN_BLOCK: usize = 8;
 
 fn time_ns<F: FnMut()>(mut f: F) -> f64 {
     for _ in 0..8 {
@@ -81,6 +86,50 @@ macro_rules! gemm_crate {
 gemm_crate!(gemm_crate_f32, f32);
 gemm_crate!(gemm_crate_f64, f64);
 
+/// Row-split over rayon, each block a serial `gemm` call (mirrors `matmul::gemm_rowsplit`).
+/// The block kernel runs directly on the row-block view (no copy), exactly like the real code.
+macro_rules! gemm_rowsplit {
+    ($name:ident, $t:ty) => {
+        fn $name(a: &Array2<$t>, b: &Array2<$t>) -> Array2<$t> {
+            let (m, n) = (a.nrows(), b.ncols());
+            let k = a.ncols();
+            let threads = rayon::current_num_threads();
+            let chunk = m.div_ceil(threads.max(1)).max(PAR_ROWSPLIT_MIN_BLOCK);
+            let mut out = Array2::<$t>::zeros((m, n));
+            if chunk >= m {
+                let (as_, bs) = (a.strides(), b.strides());
+                unsafe {
+                    gemm::gemm(
+                        m, n, k, out.as_mut_ptr(), 1, n as isize, false,
+                        a.as_ptr(), as_[1], as_[0], b.as_ptr(), bs[1], bs[0],
+                        0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                    );
+                }
+                return out;
+            }
+            let bv = b.view();
+            out.axis_chunks_iter_mut(Axis(0), chunk)
+                .into_par_iter()
+                .zip(a.axis_chunks_iter(Axis(0), chunk).into_par_iter())
+                .for_each(|(mut c_blk, a_blk)| {
+                    let mb = a_blk.nrows();
+                    let (as_, bs) = (a_blk.strides(), bv.strides());
+                    let (cs0, cs1) = (c_blk.strides()[0], c_blk.strides()[1]);
+                    unsafe {
+                        gemm::gemm(
+                            mb, n, k, c_blk.as_mut_ptr(), cs1, cs0, false,
+                            a_blk.as_ptr(), as_[1], as_[0], bv.as_ptr(), bs[1], bs[0],
+                            0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                        );
+                    }
+                });
+            out
+        }
+    };
+}
+gemm_rowsplit!(gemm_rowsplit_f32, f32);
+gemm_rowsplit!(gemm_rowsplit_f64, f64);
+
 fn rand_f32(r: usize, c: usize, s: u64) -> Array2<f32> {
     Array2::from_shape_fn((r, c), |(i, j)| {
         (((s as f64) * 0.731 + (i * c + j) as f64 * 0.618).sin() * 43758.5).fract() as f32 - 0.5
@@ -113,8 +162,14 @@ fn main() {
         ("sq_512", 512, 512, 512),
         ("lstm_32x128x512", 32, 128, 512),
         ("lstm_32x64x512", 32, 64, 512),
-        ("mlp_512x256x128", 512, 256, 128),
-        ("mlp_512x128x10", 512, 128, 10),
+        // MLP training-loop GEMMs (the 0.86x regression): the three ~33.5M-flop products per step.
+        ("mlp_fwd_512x256x128", 512, 256, 128), // L1 forward          n=128
+        ("mlp_dx_512x128x256", 512, 128, 256),  // L1 grad-input dX    n=256
+        ("mlp_dw_256x512x128", 256, 512, 128),  // L1 grad-weight dW   n=128
+        ("mlp_512x128x10", 512, 128, 10),        // L2 (small/thin)
+        // medium-band ladder around the 33.5M point, to find the row-split <-> column-par crossover
+        ("med_512x512x128", 512, 512, 128),     // 67M    n=128
+        ("med_512x512x256", 512, 512, 256),     // 134M   n=256
         ("dense_256x784x512", 256, 784, 512),
     ];
 
@@ -125,18 +180,20 @@ fn main() {
     for dtype in ["f32", "f64"] {
         // serial_mm: ndarray dot; g_none: gemm serial; g_par: gemm on rayon. The threshold that
         // matters is the g_none -> g_par crossover (same kernel, only rayon dispatch differs).
+        // serial_mm: ndarray dot; gnone: gemm serial; grow: rayon row-split of serial gemm blocks
+        // (HEAD-style); gpar: gemm-crate column parallel. Best of {gnone,grow,gpar} per row marked.
         println!(
-            "\n{:<20} {:>12} {:>10} {:>10} {:>10} {:>10}",
+            "\n{:<22} {:>12} {:>10} {:>10} {:>10} {:>10}  best",
             format!("shape ({dtype})"),
             "flops",
             "serial_us",
             "gnone_us",
+            "grow_us",
             "gpar_us",
-            "none/par"
         );
         for &(label, m, k, n) in shapes {
             let flops = 2 * m * k * n;
-            let (serial, gn, gp) = if dtype == "f32" {
+            let (serial, gn, gr, gp) = if dtype == "f32" {
                 let a = rand_f32(m, k, 1);
                 let b = rand_f32(k, n, 2);
                 (
@@ -145,6 +202,9 @@ fn main() {
                     }),
                     time_ns(|| {
                         black_box(gemm_crate_f32(&a, &b, none));
+                    }),
+                    time_ns(|| {
+                        black_box(gemm_rowsplit_f32(&a, &b));
                     }),
                     time_ns(|| {
                         black_box(gemm_crate_f32(&a, &b, rayon_par));
@@ -161,16 +221,26 @@ fn main() {
                         black_box(gemm_crate_f64(&a, &b, none));
                     }),
                     time_ns(|| {
+                        black_box(gemm_rowsplit_f64(&a, &b));
+                    }),
+                    time_ns(|| {
                         black_box(gemm_crate_f64(&a, &b, rayon_par));
                     }),
                 )
             };
+            let best = if gn <= gr && gn <= gp {
+                "gnone"
+            } else if gr <= gp {
+                "grow"
+            } else {
+                "gpar"
+            };
             println!(
-                "{label:<20} {flops:>12} {:>10.3} {:>10.3} {:>10.3} {:>10.2}",
+                "{label:<22} {flops:>12} {:>10.3} {:>10.3} {:>10.3} {:>10.3}  {best}",
                 serial / 1e3,
                 gn / 1e3,
+                gr / 1e3,
                 gp / 1e3,
-                gn / gp
             );
         }
     }

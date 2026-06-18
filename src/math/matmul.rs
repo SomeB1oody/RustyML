@@ -8,10 +8,12 @@
 //!
 //! - **GEMM** (`gemm_internal`) picks parallelism by shape (like HEAD's `gemm_par`, adapted to the
 //!   backend). Below `MatmulElem::GEMM_RAYON_MIN_FLOPS` it runs one serial call (the per-call rayon
-//!   dispatch would dominate the tiny products in tight loops - RNN/LSTM timesteps). For a wide
-//!   output it hands the whole product to the `gemm` crate, which parallelizes over the columns
-//!   `n` on the global rayon pool. For a **thin** output (`n < threads`) the backend's column
-//!   parallelism can't feed the threads, so it splits the rows itself (`gemm_rowsplit`).
+//!   dispatch would dominate the tiny products in tight loops - RNN/LSTM timesteps). Above it the
+//!   split follows the longer axis: when `m >= n` *and* the columns are too few to feed the pool
+//!   (fewer than ~16 per thread) it splits the rows itself (`gemm_rowsplit`), because the `gemm`
+//!   crate only parallelizes over the columns `n` and that starves on thin/medium-tall outputs
+//!   (matvecs, training-loop GEMMs); otherwise (wide `n`, or many columns) it hands the whole
+//!   product to the `gemm` crate to parallelize over `n` on the pool.
 //! - **GEMV** (`gemv_internal`) is the `n == 1` case: the `gemm` crate never parallelizes a matvec,
 //!   so above `MatmulElem::GEMV_RAYON_MIN_FLOPS` it always takes the row split (a matvec is
 //!   bandwidth-bound, so the lower gate reflects that extra cores help almost immediately).
@@ -24,13 +26,13 @@
 //! All paths are **run-to-run deterministic on a fixed machine, build, and thread count**. Beyond
 //! that the two products differ:
 //!
-//! - **The wide-output GEMM path (the `gemm` crate) is bitwise identical across thread counts**
-//!   (`Parallelism::None` vs `Rayon(n)` for any `n`), because it parallelizes over the output
-//!   columns rather than splitting the `k`-reduction, so no element's accumulation order changes
-//!   with the thread count. Verified, including thin-`k`, by the
+//! - **The `n > m` GEMM path (handed to the `gemm` crate) is bitwise identical across thread
+//!   counts** (`Parallelism::None` vs `Rayon(n)` for any `n`), because it parallelizes over the
+//!   output columns rather than splitting the `k`-reduction, so no element's accumulation order
+//!   changes with the thread count. Verified, including thin-`k`, by the
 //!   `gemm_kernel_*_thread_count_independent` tests.
-//! - **The row-split path (GEMV, and thin-`n` GEMM) is only numerically reproducible, not bitwise,
-//!   across thread counts.** Each block is a `gemm` call with a different `m`, and the kernel's
+//! - **The row-split path (GEMV, and the `m >= n` GEMM) is only numerically reproducible, not
+//!   bitwise, across thread counts.** Each block is a `gemm` call with a different `m`, and the kernel's
 //!   internal `k`-blocking can depend on `m`, so the per-row `k`-accumulation is regrouped at the
 //!   rounding level (still run-to-run deterministic at a fixed thread count, just not bit-identical
 //!   between, say, 8 and 16 threads).
@@ -76,6 +78,19 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
     feature = "utils"
 ))]
 const PAR_ROWSPLIT_MIN_BLOCK: usize = 8;
+
+/// Columns-per-thread below which the `gemm` crate's column parallelism starves
+///
+/// The backend parallelizes a GEMM only over its output columns `n`. With fewer than this many
+/// columns per rayon thread the column tasks are too granular to fill the pool, so `gemm_internal`
+/// splits the rows itself instead (for `m >= n`). Calibrated by `benches/gemm_calibrate`: at 32
+/// threads the crossover sits around `n = 512` (16 columns/thread)
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+const GEMM_COLPAR_MIN_COLS_PER_THREAD: usize = 16;
 
 /// Element types the crate-internal matmul wrappers accept, plus each type's parallelism crossovers
 ///
@@ -240,9 +255,11 @@ where
 ///
 /// - below `MatmulElem::GEMM_RAYON_MIN_FLOPS`: one serial `gemm` call (the per-call rayon dispatch
 ///   would dominate the tiny products in tight loops, e.g. RNN/LSTM timesteps);
-/// - thin output (`n < threads`): the backend's column parallelism can't feed the threads, so
-///   split the rows ourselves via [`gemm_rowsplit`] (matvecs, tall-skinny GEMMs);
-/// - otherwise: hand the whole product to the `gemm` crate, which parallelizes over `n`.
+/// - `m >= n` and few columns (`n < GEMM_COLPAR_MIN_COLS_PER_THREAD * threads`): split the rows
+///   ourselves via `gemm_rowsplit`, since the backend only parallelizes over `n` and that starves
+///   when the columns are too few to feed the pool (matvecs, tall-skinny, training-loop GEMMs);
+/// - otherwise (wide `n > m`, or many columns): hand the whole product to the `gemm` crate, which
+///   parallelizes over the columns and packs `B` only once.
 ///
 /// # Panics
 ///
@@ -266,12 +283,13 @@ where
     );
 
     let flops = 2usize.saturating_mul(m).saturating_mul(k).saturating_mul(n);
+    let threads = rayon::current_num_threads();
     if flops < T::GEMM_RAYON_MIN_FLOPS {
         gemm_kernel(a, b, gemm::Parallelism::None)
-    } else if n < rayon::current_num_threads() {
+    } else if m >= n && n < threads.saturating_mul(GEMM_COLPAR_MIN_COLS_PER_THREAD) {
         gemm_rowsplit(a, b)
     } else {
-        gemm_kernel(a, b, gemm::Parallelism::Rayon(rayon::current_num_threads()))
+        gemm_kernel(a, b, gemm::Parallelism::Rayon(threads))
     }
 }
 
@@ -301,9 +319,7 @@ where
         x.len()
     );
 
-    // Treat the vector as a single-column matrix and reuse the GEMM paths; a matvec is always
-    // "thin" (n == 1), so above the gate it takes the row split. The GEMV gate is lower than the
-    // GEMM one because the bandwidth-bound matvec benefits from extra cores almost immediately.
+    // Treat the vector as a single-column matrix and reuse the GEMM paths
     let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
     let flops = 2usize.saturating_mul(m).saturating_mul(k);
     let prod = if flops < T::GEMV_RAYON_MIN_FLOPS {
