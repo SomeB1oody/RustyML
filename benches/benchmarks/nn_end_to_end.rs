@@ -41,6 +41,41 @@ fn conv2d_forward_batch1(c: &mut Criterion) {
     });
 }
 
+/// Conv2D forward + backward across two batch regimes, where `fwd_bwd - forward` approximates the
+/// backward cost. The backward pass parallelizes over the batch and runs a per-item im2col + two
+/// GEMMs; at this scale each per-item GEMM is itself large enough to fork rayon, so the two regimes
+/// probe the batch-vs-GEMM parallelism split:
+/// - batch 16 < 32 threads: the batch axis alone cannot fill the pool
+/// - batch 32 == threads: the batch axis fills the pool, leaving no slack for an inner GEMM fork
+fn conv2d_backward(c: &mut Criterion) {
+    let mut group = c.benchmark_group("conv2d_backward");
+    group.sample_size(10);
+    for &batch in &[16usize, 32usize] {
+        let mut layer = Conv2D::new(
+            64,
+            (3, 3),
+            vec![batch, 32, 64, 64],
+            (1, 1),
+            Activation::ReLU,
+        )
+        .unwrap()
+        .with_padding(PaddingType::Same)
+        .with_random_state(42);
+        let x = Array::from_elem((batch, 32, 64, 64), 0.5f32).into_dyn();
+        let grad = Array::from_elem((batch, 64, 64, 64), 0.3f32).into_dyn();
+        group.bench_function(format!("conv2d_forward_{batch}x32x64x64_64f"), |b| {
+            b.iter(|| black_box(layer.forward(&x).unwrap()))
+        });
+        group.bench_function(format!("conv2d_fwd_bwd_{batch}x32x64x64_64f"), |b| {
+            b.iter(|| {
+                layer.forward(&x).unwrap();
+                black_box(layer.backward(&grad).unwrap())
+            })
+        });
+    }
+    group.finish();
+}
+
 /// LSTM forward: fused-gate projections plus the sequential recurrence
 fn lstm_forward(c: &mut Criterion) {
     let mut layer = LSTM::new(64, 128, Activation::Tanh)
@@ -320,6 +355,7 @@ criterion_group!(
     benches,
     dense_forward,
     conv2d_forward_batch1,
+    conv2d_backward,
     lstm_forward,
     batchnorm_forward_spatial,
     batchnorm_backward_spatial,

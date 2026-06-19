@@ -1,7 +1,7 @@
 //! Long Short-Term Memory (LSTM) recurrent layer with input, forget, cell, and output gates
 
 use crate::error::Error;
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -335,7 +335,7 @@ impl LSTM {
 
             // All 4 gate pre-activations in one fused recurrent GEMM
             let z_all =
-                gemm_internal(&h_prev, &self.gates.recurrent_kernel) + xw_t + &self.gates.bias;
+                gemm_par_auto(&h_prev, &self.gates.recurrent_kernel) + xw_t + &self.gates.bias;
 
             // Gates use the recurrent activation (sigmoid); the candidate uses `act`
             let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
@@ -483,7 +483,7 @@ impl Layer for LSTM {
             dz_t.slice_mut(s![.., 3 * u..4 * u]).assign(&grad_o_raw);
 
             // Gradient w.r.t. the previous hidden state: one fused GEMM instead of 4
-            grad_h = gemm_internal(&dz_t, &self.gates.recurrent_kernel.t());
+            grad_h = gemm_par_auto(&dz_t, &self.gates.recurrent_kernel.t());
 
             dz3.index_axis_mut(Axis(1), t).assign(&dz_t);
 
@@ -506,12 +506,12 @@ impl Layer for LSTM {
             .to_shape((batch * timesteps, 4 * u))
             .expect("contiguous DZ reshape");
 
-        let grad_kernel = gemm_internal(&x_flat.t(), &dz_flat);
-        let grad_recurrent = gemm_internal(&h_prev_flat.t(), &dz_flat);
+        let grad_kernel = gemm_par_auto(&x_flat.t(), &dz_flat);
+        let grad_recurrent = gemm_par_auto(&h_prev_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            gemm_internal(&dz_flat, &self.gates.kernel.t()),
+            gemm_par_auto(&dz_flat, &self.gates.kernel.t()),
             (batch, timesteps, feat),
         );
 

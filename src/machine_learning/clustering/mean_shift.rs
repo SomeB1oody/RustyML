@@ -9,7 +9,7 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
@@ -647,7 +647,7 @@ where
         let mut distances: Vec<f64> = Vec::new();
         for chunk_start in (0..n_samples).step_by(chunk_rows) {
             let chunk_end = (chunk_start + chunk_rows).min(n_samples);
-            let projections = gemm_internal(
+            let projections = gemm_par_auto(
                 &x_samples.slice(s![chunk_start..chunk_end, ..]),
                 &x_samples.t(),
             );

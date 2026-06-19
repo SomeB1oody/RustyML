@@ -1,7 +1,7 @@
 //! Dense (fully connected) layer: a linear transform followed by an optional activation
 
 use crate::error::Error;
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -191,7 +191,7 @@ impl Layer for Dense {
         self.input_cache = Some(input_2d.to_owned());
 
         // Linear transform (parallel for large products)
-        let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
+        let z = gemm_par_auto(&input_2d, &self.weights) + &self.bias;
 
         // Cache the activated output for backpropagation
         let output = self.activation.forward(&z.into_dyn())?;
@@ -208,7 +208,7 @@ impl Layer for Dense {
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
         // Linear transform (parallel for large products)
-        let z = gemm_internal(&input_2d, &self.weights) + &self.bias;
+        let z = gemm_par_auto(&input_2d, &self.weights) + &self.bias;
 
         self.activation.forward(&z.into_dyn())
     }
@@ -244,7 +244,7 @@ impl Layer for Dense {
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
         // Weight gradients
-        let grad_w = gemm_internal(&input.t(), &grad_upstream_2d);
+        let grad_w = gemm_par_auto(&input.t(), &grad_upstream_2d);
 
         // Bias gradients: sum over the batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -254,7 +254,7 @@ impl Layer for Dense {
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
         // Gradient w.r.t. the input
-        let grad_input = gemm_internal(&grad_upstream_2d, &self.weights.t());
+        let grad_input = gemm_par_auto(&grad_upstream_2d, &self.weights.t());
 
         Ok(grad_input.into_dyn())
     }

@@ -15,7 +15,7 @@ use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
 use rustyml::machine_learning::{
-    KMeans, KNN, KernelType, LogisticRegression, SVC, WeightingStrategy,
+    KMeans, KNN, KernelType, LDA, LogisticRegression, SVC, Solver, WeightingStrategy,
 };
 use rustyml::types::DistanceCalculationMetric;
 use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
@@ -38,6 +38,60 @@ fn bench_kmeans_fit(c: &mut Criterion) {
             black_box(model.get_inertia());
         })
     });
+}
+
+/// KMeans fit at high cluster count (k = 256, 128 features, 4k samples): a small sample count
+/// keeps the assignment GEMM modest so the per-iteration centroid-averaging step - which fires one
+/// rayon job per centroid - is a visible fraction. Stresses the nested per-centroid parallelism in
+/// the cluster-mean update
+fn bench_kmeans_fit_high_k(c: &mut Criterion) {
+    let x = random_matrix(4_096, 128, 11);
+    let mut group = c.benchmark_group("kmeans_high_k");
+    group.sample_size(20);
+    group.bench_function("kmeans_fit_4096x128_k256_30it", |b| {
+        b.iter(|| {
+            let mut model = KMeans::new(256, 30, 1e-4).unwrap().with_random_state(42);
+            model.fit(black_box(&x)).unwrap();
+            black_box(model.get_inertia());
+        })
+    });
+    group.finish();
+}
+
+/// LDA fit across two parallelism regimes. The fit parallelizes the per-class scatter statistics
+/// over the *classes*, but the current parallel decision keys off the total data size; each class
+/// task runs a `[d, n_class] x [n_class, d]` scatter GEMM that can itself fork. The two configs
+/// separate the regimes:
+/// - few classes + high-dim: only a 3-wide class fan (far below the core count), so the class axis
+///   alone cannot fill the pool while each per-class GEMM is large - probes idle cores + the
+///   parallel branch's whole-matrix clone
+/// - many classes + moderate dim: a 64-wide class fan (above the core count) where each per-class
+///   GEMM still clears the GEMM parallel gate - probes the "class axis fills the pool while the
+///   inner GEMM also forks" nesting case
+fn bench_lda_fit(c: &mut Criterion) {
+    let mut group = c.benchmark_group("lda_fit");
+    group.sample_size(20);
+
+    // (label, n_classes, n_features, samples_per_class, n_components). Dimensions are kept modest
+    // (d <= 128) so the per-class scatter GEMMs - the parallel section - dominate over the O(d^3)
+    // eigendecomposition, which would otherwise mask the parallelism signal.
+    let configs: &[(&str, usize, usize, usize, usize)] = &[
+        ("lda_fit_few_classes_4c_128f_64000n", 4, 128, 16_000, 3),
+        ("lda_fit_many_classes_64c_96f_25600n", 64, 96, 400, 16),
+    ];
+    for &(label, n_classes, n_features, per_class, n_components) in configs {
+        let n_samples = n_classes * per_class;
+        let x = random_matrix(n_samples, n_features, 9);
+        let y: Array1<i32> = Array1::from_iter((0..n_samples).map(|i| (i % n_classes) as i32));
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                let mut model = LDA::new(n_components).unwrap().with_solver(Solver::SVD);
+                model.fit(black_box(&x), black_box(&y)).unwrap();
+                black_box(&model);
+            })
+        });
+    }
+    group.finish();
 }
 
 /// KNN predict on the brute-force Euclidean path (64 features > the kd-tree ceiling):
@@ -153,6 +207,8 @@ fn bench_tsne_exact(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_kmeans_fit,
+    bench_kmeans_fit_high_k,
+    bench_lda_fit,
     bench_knn_predict,
     bench_svc_fit,
     bench_logistic_fit,

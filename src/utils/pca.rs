@@ -4,7 +4,7 @@
 //! enum selecting the underlying decomposition strategy (full, randomized, or power iteration)
 
 use crate::error::Error;
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
@@ -144,7 +144,7 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
         // Extract the leading eigenpairs of the covariance matrix
-        let cov = gemm_internal(&x_centered.t(), x_centered) / denom;
+        let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
         let (eigenvalues, eigenvectors) =
             super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
 
@@ -463,7 +463,7 @@ impl PCA {
         }
 
         // Map back to feature space; the GEMM parallelizes above its FLOPs gate
-        let mut reconstructed = gemm_internal(x, components);
+        let mut reconstructed = gemm_par_auto(x, components);
         reconstructed += mean;
 
         #[cfg(feature = "show_progress")]
@@ -608,7 +608,7 @@ impl PCA {
         }
 
         // Project into component space; the GEMM parallelizes above its FLOPs gate
-        let transformed = gemm_internal(&x_centered, &components.t());
+        let transformed = gemm_par_auto(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]
         {

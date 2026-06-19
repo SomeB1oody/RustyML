@@ -5,7 +5,7 @@
 //! routines
 
 use crate::error::Error;
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
@@ -518,7 +518,7 @@ impl KernelPCA {
 
         // Project onto the eigenvectors
         let scales = Self::compute_scaling_factors(eigenvalues)?;
-        let mut projected = gemm_internal(&kernel_matrix, eigenvectors);
+        let mut projected = gemm_par_auto(&kernel_matrix, eigenvectors);
         for (idx, scale) in scales.iter().enumerate() {
             projected.column_mut(idx).mapv_inplace(|val| val * scale);
         }

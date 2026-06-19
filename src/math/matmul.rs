@@ -1,12 +1,12 @@
 //! Matrix products for ndarray operands, backed by the [`gemm`](https://docs.rs/gemm) crate
 //!
-//! The crate-internal `gemm_internal` / `gemv_internal` wrappers run every product on the
+//! The crate-internal `gemm_par_auto` / `gemv_internal` wrappers run every product on the
 //! `gemm` crate's kernels - runtime-dispatched to the widest available SIMD (AVX-512 / AVX2+FMA /
 //! NEON), packing each operand once and sharing it across threads, with special cases for skinny
 //! shapes. They differ in how parallelism is obtained, because the two products have different
 //! cost classes:
 //!
-//! - **GEMM** (`gemm_internal`) picks parallelism by shape (like HEAD's `gemm_par`, adapted to the
+//! - **GEMM** (`gemm_par_auto`) picks parallelism by shape (like HEAD's `gemm_par`, adapted to the
 //!   backend). Below `MatmulElem::gemm_rayon_min_flops` it runs one serial call (the per-call rayon
 //!   dispatch would dominate the tiny products in tight loops - RNN/LSTM timesteps). Above it the
 //!   split follows the longer axis: when `m >= n` *and* the columns are too few to feed the pool
@@ -84,7 +84,7 @@ tunable_gate! {
     ///
     /// The backend parallelizes a GEMM only over its output columns `n`. With fewer than this many
     /// columns per rayon thread the column tasks are too granular to fill the pool, so
-    /// `gemm_internal` splits the rows itself instead (for `m >= n`). Calibrated by
+    /// `gemm_par_auto` splits the rows itself instead (for `m >= n`). Calibrated by
     /// `benches/gemm_calibrate`: at 32 threads the crossover sits around `n = 512` (16
     /// columns/thread). Override via [`crate::tuning::matmul`]
     #[cfg(any(
@@ -98,7 +98,7 @@ tunable_gate! {
 
 /// Element types the crate-internal matmul wrappers accept, plus each type's parallelism crossovers
 ///
-/// Bounding `gemm_internal` / `gemv_internal` on this trait restricts them to the types the
+/// Bounding `gemm_par_auto` / `gemv_internal` on this trait restricts them to the types the
 /// `gemm` crate supports here (`f32`, `f64`), so the backend's "unsupported type" panic is
 /// unreachable. The `Send + Sync` bound lets `gemv_internal` split its rows across rayon
 #[cfg(any(
@@ -107,7 +107,7 @@ tunable_gate! {
     feature = "utils"
 ))]
 pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
-    /// Estimated-FLOPs (`2*m*k*n`) at or above which `gemm_internal` lets the `gemm` kernel run
+    /// Estimated-FLOPs (`2*m*k*n`) at or above which `gemm_par_auto` lets the `gemm` kernel run
     /// across the rayon pool; below it the kernel runs serially to skip the per-call dispatch that
     /// dominates the tiny GEMMs in tight loops (RNN/LSTM timesteps, small dense layers)
     ///
@@ -296,19 +296,48 @@ where
     out
 }
 
-/// `C = A @ B`, computed by the `gemm` crate
+/// Shape-aware *parallel* GEMM strategy (no serial/parallel gate): the product is always spread
+/// across the pool, splitting whichever axis the backend leaves serial
 ///
-/// `A` is `(m, k)`, `B` is `(k, n)`; the result is a freshly allocated, standard-layout `(m, n)`
-/// array. Any storage works (owned, view, transpose, slice). Parallelism is chosen by shape, like
-/// HEAD's `gemm_par`, but adapted to the backend (which parallelizes over `n` itself):
-///
-/// - below `MatmulElem::gemm_rayon_min_flops`: one serial `gemm` call (the per-call rayon dispatch
-///   would dominate the tiny products in tight loops, e.g. RNN/LSTM timesteps);
 /// - `m >= n` and few columns (`n < gemm_colpar_min_cols_per_thread() * threads`): split the rows
 ///   ourselves via `gemm_rowsplit`, since the backend only parallelizes over `n` and that starves
 ///   when the columns are too few to feed the pool (matvecs, tall-skinny, training-loop GEMMs);
 /// - otherwise (wide `n > m`, or many columns): hand the whole product to the `gemm` crate, which
 ///   parallelizes over the columns and packs `B` only once.
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+fn gemm_par_strategy<T, S1, S2>(a: &ArrayBase<S1, Ix2>, b: &ArrayBase<S2, Ix2>) -> Array2<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    let (m, _k) = a.dim();
+    let n = b.ncols();
+    let threads = rayon::current_num_threads();
+    if m >= n && n < threads.saturating_mul(gemm_colpar_min_cols_per_thread()) {
+        gemm_rowsplit(a, b)
+    } else {
+        gemm_kernel(a, b, gemm::Parallelism::Rayon(threads))
+    }
+}
+
+/// `C = A @ B` with explicit parallelism control, both arms on the `gemm` crate's kernels
+///
+/// `A` is `(m, k)`, `B` is `(k, n)`; the result is a freshly allocated, standard-layout `(m, n)`
+/// array. Any storage works (owned, view, transpose, slice).
+///
+/// - `parallel == false`: one serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
+///   SIMD kernel, just on one thread (faster than ndarray's `matrixmultiply` `.dot()`). Use this to
+///   force a product serial from inside an already-parallel region, so it does not fork rayon again
+///   (nested parallelism / oversubscription).
+/// - `parallel == true`: the shape-aware parallel strategy ([`gemm_par_strategy`]).
+///
+/// Callers that want the work-size gate to make the serial-vs-parallel choice should use
+/// [`gemm_par_auto`] instead.
 ///
 /// # Panics
 ///
@@ -318,7 +347,11 @@ where
     feature = "neural_network",
     feature = "utils"
 ))]
-pub(crate) fn gemm_internal<T, S1, S2>(a: &ArrayBase<S1, Ix2>, b: &ArrayBase<S2, Ix2>) -> Array2<T>
+pub(crate) fn gemm_par_switch<T, S1, S2>(
+    a: &ArrayBase<S1, Ix2>,
+    b: &ArrayBase<S2, Ix2>,
+    parallel: bool,
+) -> Array2<T>
 where
     T: MatmulElem,
     S1: Data<Elem = T>,
@@ -328,18 +361,41 @@ where
     let (kb, n) = b.dim();
     assert_eq!(
         k, kb,
-        "gemm_internal: inner dimensions disagree (a is {m}x{k}, b is {kb}x{n})",
+        "gemm_par_switch: inner dimensions disagree (a is {m}x{k}, b is {kb}x{n})",
     );
-
-    let flops = 2usize.saturating_mul(m).saturating_mul(k).saturating_mul(n);
-    let threads = rayon::current_num_threads();
-    if flops < T::gemm_rayon_min_flops() {
-        gemm_kernel(a, b, gemm::Parallelism::None)
-    } else if m >= n && n < threads.saturating_mul(gemm_colpar_min_cols_per_thread()) {
-        gemm_rowsplit(a, b)
+    if parallel {
+        gemm_par_strategy(a, b)
     } else {
-        gemm_kernel(a, b, gemm::Parallelism::Rayon(threads))
+        gemm_kernel(a, b, gemm::Parallelism::None)
     }
+}
+
+/// `C = A @ B`, parallelized automatically by estimated FLOPs and shape
+///
+/// Below `MatmulElem::gemm_rayon_min_flops` the product runs serial (the per-call rayon dispatch
+/// would dominate the tiny products in tight loops, e.g. RNN/LSTM timesteps); at or above it the
+/// shape-aware parallel strategy ([`gemm_par_strategy`]) takes over. This is the entry for callers
+/// that have no opinion on parallelism and want the gate to decide; [`gemm_par_switch`] is the
+/// entry for callers that must control it explicitly.
+///
+/// # Panics
+///
+/// - If `A`'s column count differs from `B`'s row count
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils"
+))]
+pub(crate) fn gemm_par_auto<T, S1, S2>(a: &ArrayBase<S1, Ix2>, b: &ArrayBase<S2, Ix2>) -> Array2<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    let (m, k) = a.dim();
+    let n = b.ncols();
+    let flops = 2usize.saturating_mul(m).saturating_mul(k).saturating_mul(n);
+    gemm_par_switch(a, b, flops >= T::gemm_rayon_min_flops())
 }
 
 /// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::gemv_rayon_min_flops`
@@ -483,48 +539,48 @@ mod tests {
 
     // correctness vs an independent referenc
 
-    /// gemm_internal matches the naive product for f32, on both the serial (< gate) and
+    /// gemm_par_auto matches the naive product for f32, on both the serial (< gate) and
     /// rayon (>= gate) shapes (f32 gate is 8M FLOPs)
     #[test]
-    fn gemm_internal_matches_reference_f32() {
+    fn gemm_par_auto_matches_reference_f32() {
         for &(m, k, n) in &[
             (17usize, 23usize, 19usize),
             (128, 96, 128), /* 3.1M, serial */
         ] {
             let a = rand_f32(m, k, 1);
             let b = rand_f32(k, n, 2);
-            assert_close_f32(&gemm_internal(&a, &b), &naive(&a, &b), 1e-2);
+            assert_close_f32(&gemm_par_auto(&a, &b), &naive(&a, &b), 1e-2);
         }
         // Rayon path (256x300x256 ~ 39M FLOPs >= 8M): cross-check against ndarray's own dot
         let a = rand_f32(256, 300, 3);
         let b = rand_f32(300, 256, 4);
-        assert_close_f32(&gemm_internal(&a, &b), &a.dot(&b), 1e-2);
+        assert_close_f32(&gemm_par_auto(&a, &b), &a.dot(&b), 1e-2);
     }
 
-    /// gemm_internal matches the reference for f64, serial and rayon shapes (f64 gate is 1M)
+    /// gemm_par_auto matches the reference for f64, serial and rayon shapes (f64 gate is 1M)
     #[test]
-    fn gemm_internal_matches_reference_f64() {
+    fn gemm_par_auto_matches_reference_f64() {
         for &(m, k, n) in &[
             (17usize, 23usize, 19usize),
             (64, 64, 64), /* 524K, serial */
         ] {
             let a = rand_f64(m, k, 1);
             let b = rand_f64(k, n, 2);
-            assert_close_f64(&gemm_internal(&a, &b), &naive(&a, &b), 1e-9);
+            assert_close_f64(&gemm_par_auto(&a, &b), &naive(&a, &b), 1e-9);
         }
         // Rayon path (128x128x128 ~ 4.2M >= 1M)
         let a = rand_f64(128, 128, 3);
         let b = rand_f64(128, 128, 4);
-        assert_close_f64(&gemm_internal(&a, &b), &a.dot(&b), 1e-9);
+        assert_close_f64(&gemm_par_auto(&a, &b), &a.dot(&b), 1e-9);
     }
 
     /// Transposed and non-contiguous (sliced) operands feed the right strides to the kernel
     #[test]
-    fn gemm_internal_strided_operands() {
+    fn gemm_par_auto_strided_operands() {
         // A^T . B (the weight-gradient pattern): a is [k, m], a.t() is [m, k]
         let a = rand_f64(40, 24, 5);
         let b = rand_f64(40, 18, 6);
-        let got = gemm_internal(&a.t(), &b);
+        let got = gemm_par_auto(&a.t(), &b);
         let want = naive(&a.t().to_owned(), &b);
         assert_close_f64(&got, &want, 1e-9);
 
@@ -533,7 +589,7 @@ mod tests {
         let b = rand_f64(30, 40, 8);
         let a_sl = a.slice(s![..;2, ..]); // [20, 30], row stride 60
         let b_sl = b.slice(s![.., ..;2]); // [30, 20], col stride 2
-        let got = gemm_internal(&a_sl, &b_sl);
+        let got = gemm_par_auto(&a_sl, &b_sl);
         let want = naive(&a_sl.to_owned(), &b_sl.to_owned());
         assert_close_f64(&got, &want, 1e-9);
     }
@@ -541,15 +597,15 @@ mod tests {
     /// Thin-output GEMM (`n < threads`, above the gate) takes the row-split path - check it is
     /// correct against an independent product.
     #[test]
-    fn gemm_internal_thin_output_rowsplit() {
+    fn gemm_par_auto_thin_output_rowsplit() {
         // f64: 4096*64*4*2 = 2.1M >= 1M gate, n=4 thin -> row split
         let a = rand_f64(4096, 64, 61);
         let b = rand_f64(64, 4, 62);
-        assert_close_f64(&gemm_internal(&a, &b), &a.dot(&b), 1e-9);
+        assert_close_f64(&gemm_par_auto(&a, &b), &a.dot(&b), 1e-9);
         // f32: 16384*64*4*2 = 8.4M >= 8M gate, n=4 thin -> row split
         let a = rand_f32(16384, 64, 63);
         let b = rand_f32(64, 4, 64);
-        assert_close_f32(&gemm_internal(&a, &b), &a.dot(&b), 1e-2);
+        assert_close_f32(&gemm_par_auto(&a, &b), &a.dot(&b), 1e-2);
     }
 
     // the reproducibility guard: bitwise thread-count independence
@@ -599,11 +655,11 @@ mod tests {
 
     /// Running the same product twice is bitwise identical (run-to-run determinism).
     #[test]
-    fn gemm_internal_run_to_run_deterministic() {
+    fn gemm_par_auto_run_to_run_deterministic() {
         let a = rand_f64(200, 200, 21);
         let b = rand_f64(200, 200, 22);
-        let c1 = gemm_internal(&a, &b);
-        let c2 = gemm_internal(&a, &b);
+        let c1 = gemm_par_auto(&a, &b);
+        let c2 = gemm_par_auto(&a, &b);
         assert!(
             c1.iter()
                 .zip(c2.iter())
@@ -672,27 +728,27 @@ mod tests {
     // degenerate shapes
 
     #[test]
-    fn gemm_internal_edge_cases() {
+    fn gemm_par_auto_edge_cases() {
         // zero-sized axes
         let a = Array2::<f64>::zeros((0, 4));
         let b = Array2::<f64>::zeros((4, 3));
-        assert_eq!(gemm_internal(&a, &b).shape(), &[0, 3]);
+        assert_eq!(gemm_par_auto(&a, &b).shape(), &[0, 3]);
         let a = Array2::<f64>::zeros((3, 0));
         let b = Array2::<f64>::zeros((0, 4));
-        let c = gemm_internal(&a, &b);
+        let c = gemm_par_auto(&a, &b);
         assert_eq!(c.shape(), &[3, 4]);
         assert!(c.iter().all(|&x| x == 0.0));
         // 1x1
         let a = Array2::<f64>::from_elem((1, 1), 3.0);
         let b = Array2::<f64>::from_elem((1, 1), 4.0);
-        assert_eq!(gemm_internal(&a, &b)[[0, 0]], 12.0);
+        assert_eq!(gemm_par_auto(&a, &b)[[0, 0]], 12.0);
     }
 
     #[test]
     #[should_panic]
-    fn gemm_internal_dimension_mismatch_panics() {
+    fn gemm_par_auto_dimension_mismatch_panics() {
         let a = Array2::<f64>::zeros((2, 3));
         let b = Array2::<f64>::zeros((4, 2));
-        let _ = gemm_internal(&a, &b);
+        let _ = gemm_par_auto(&a, &b);
     }
 }

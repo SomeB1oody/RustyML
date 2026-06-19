@@ -5,7 +5,7 @@
 //! probabilities to a target perplexity
 
 use crate::error::Error;
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
@@ -364,7 +364,7 @@ impl TSNE {
     /// # Performance
     ///
     /// Parallelizes when the pairwise work clears the calibrated class gates (see
-    /// `crate::parallel_gates`); the GEMMs gate themselves inside `gemm_internal`
+    /// `crate::parallel_gates`); the GEMMs gate themselves inside `gemm_par_auto`
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -602,7 +602,7 @@ impl TSNE {
                 for chunk_start in (0..n_samples).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(n_samples);
                     let projections =
-                        gemm_internal(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
+                        gemm_par_auto(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
                     if parallel {
                         let chunk: Vec<(Vec<usize>, Array1<f64>)> = (chunk_start..chunk_end)
                             .into_par_iter()
@@ -818,7 +818,7 @@ impl TSNE {
     fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
         // D[i, j] = ||x_i||^2 + ||x_j||^2 - 2 x_i.x_j
         let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
-        let mut distances = gemm_internal(x, &x.t());
+        let mut distances = gemm_par_auto(x, &x.t());
 
         let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
             let xi_sq = x_sq[i];
@@ -961,7 +961,7 @@ impl TSNE {
         }
 
         let row_sums = w.sum_axis(Axis(1));
-        let weighted_y = gemm_internal(&w, y);
+        let weighted_y = gemm_par_auto(&w, y);
 
         // 4 * (s_i * y_i - (W * Y)_i), assembled with broadcast elementwise ops (O(n * d))
         (y * &row_sums.insert_axis(Axis(1)) - weighted_y) * 4.0

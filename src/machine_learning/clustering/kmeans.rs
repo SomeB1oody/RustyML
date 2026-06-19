@@ -7,12 +7,14 @@ use crate::error::Error;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 use crate::math::reduction::{DET_REDUCE_BLOCK, det_reduce, det_reduce_range};
 use crate::math::squared_euclidean_distance_row;
-use crate::parallel_gates::{scan_f64_parallel_min_elems, sum_f64_parallel_min_elems};
+use crate::parallel_gates::{
+    cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems, sum_f64_parallel_min_elems,
+};
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -386,7 +388,7 @@ impl KMeans {
             let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
 
             let data_view = data.view();
-            let projections = gemm_internal(&data_view, &centroids.t());
+            let projections = gemm_par_auto(&data_view, &centroids.t());
 
             // Closest cluster center and distance for a single sample
             let compute_assignments = |sample_idx: usize| -> Result<(usize, f64), Error> {
@@ -488,17 +490,26 @@ impl KMeans {
             prev_inertia = Some(inertia);
             iter_count = i + 1;
 
-            // Average each cluster center in parallel
-            new_centroids
-                .outer_iter_mut()
-                .into_par_iter()
-                .enumerate()
-                .for_each(|(idx, mut centroid_row)| {
-                    if counts[idx] > 0 {
-                        let count_f = counts[idx] as f64;
-                        centroid_row.par_mapv_inplace(|x| x / count_f);
-                    }
-                });
+            // Average each cluster center
+            let avg_work = self.n_clusters.saturating_mul(n_features);
+            let avg_centroid = |idx: usize, mut centroid_row: ArrayViewMut1<f64>| {
+                if counts[idx] > 0 {
+                    let count_f = counts[idx] as f64;
+                    centroid_row.mapv_inplace(|x| x / count_f);
+                }
+            };
+            if avg_work >= cheap_map_f64_parallel_threshold() {
+                new_centroids
+                    .outer_iter_mut()
+                    .into_par_iter()
+                    .enumerate()
+                    .for_each(|(idx, centroid_row)| avg_centroid(idx, centroid_row));
+            } else {
+                new_centroids
+                    .outer_iter_mut()
+                    .enumerate()
+                    .for_each(|(idx, centroid_row)| avg_centroid(idx, centroid_row));
+            }
 
             // For each empty cluster, seed it with the point furthest from its assigned centroid
             for (cluster_idx, &count) in counts.iter().enumerate() {
@@ -590,7 +601,7 @@ impl KMeans {
         validate_predict_input(data, centroids.ncols())?;
 
         let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
-        let projections = gemm_internal(data, &centroids.t());
+        let projections = gemm_par_auto(data, &centroids.t());
 
         // Scan-class gate: n tasks, each an O(k) arg-min scan
         let scan_work = data.nrows().saturating_mul(centroids.nrows());

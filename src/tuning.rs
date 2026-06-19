@@ -83,7 +83,7 @@ macro_rules! fwd {
 /// product is parallelized; they are calibrated **per dtype** (`f32` and `f64` have different
 /// optimal values - the single threshold the `gemm` crate exposes cannot capture this, which is
 /// why these live here). `colpar_min_cols_per_thread` is the columns-per-thread floor below which
-/// `gemm_internal` splits rows itself instead of using the backend's column parallelism.
+/// `gemm_par_auto` splits rows itself instead of using the backend's column parallelism.
 /// `chunk_elems` and `cache_resident_max_bytes` size the tiled-product path (the latter is the
 /// natural knob to match a machine's actual L3 cache).
 #[cfg(feature = "math")]

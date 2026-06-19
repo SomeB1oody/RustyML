@@ -183,7 +183,7 @@ pub fn project_input(kernel: &Array2<f32>, x3: &ArrayView3<f32>) -> Array3<f32> 
         .to_shape((batch * timesteps, input_dim))
         .expect("contiguous [batch*timesteps, input_dim] reshape");
     reshape_2d_to_3d(
-        crate::math::matmul::gemm_internal(&x2, kernel),
+        crate::math::matmul::gemm_par_auto(&x2, kernel),
         (batch, timesteps, width),
     )
 }

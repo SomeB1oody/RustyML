@@ -5,7 +5,7 @@
 //! carrying near-identical copies
 
 use crate::error::Error;
-use crate::math::matmul::{gemm_internal, gemv_internal};
+use crate::math::matmul::{gemm_par_auto, gemv_internal};
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -127,7 +127,7 @@ pub(super) fn top_eigenpairs_power_iteration(
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
         // Deflate the extracted component so the next iteration surfaces the next one: M = M - lambda v v^T
-        let outer = gemm_internal(
+        let outer = gemm_par_auto(
             &vector.view().insert_axis(Axis(1)),
             &vector.view().insert_axis(Axis(0)),
         );

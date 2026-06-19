@@ -17,7 +17,7 @@
 use crate::{Deserialize, Serialize};
 // The batched kernel-matrix path is only compiled for its callers: SVC and KernelPCA
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
-use crate::math::matmul::gemm_internal;
+use crate::math::matmul::gemm_par_auto;
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use ndarray::ArrayView1;
@@ -203,7 +203,7 @@ impl KernelType {
     ///
     /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
     /// cross-Gram matrix `G = X*Y^T` (one rayon-parallel, cache-blocked matrix
-    /// multiply via `gemm_internal`) plus a cheap elementwise transform over the
+    /// multiply via `gemm_par_auto`) plus a cheap elementwise transform over the
     /// `[n, m]` result:
     ///
     /// - `Linear`  - `K = G`
@@ -239,7 +239,7 @@ impl KernelType {
         S1: Data<Elem = f64> + Sync,
         S2: Data<Elem = f64> + Sync,
     {
-        let mut k = gemm_internal(x, &y.t());
+        let mut k = gemm_par_auto(x, &y.t());
         let elems = k.len();
 
         match *self {

@@ -6,7 +6,7 @@
 //! distance metrics, classification losses, decision-tree impurity (gini, entropy), and the
 //! isolation-forest path-length correction
 
-/// Matrix products backed by the `gemm` crate (crate-internal `gemm_internal` / `gemv_internal`),
+/// Matrix products backed by the `gemm` crate (crate-internal `gemm_par_auto` / `gemv_internal`),
 /// parallelized on the rayon pool for large products
 pub mod matmul;
 
