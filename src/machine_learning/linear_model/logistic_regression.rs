@@ -12,7 +12,7 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::gemv_internal;
 use crate::math::{logistic_loss, sigmoid};
-use crate::parallel_gates::EXP_MAP_F64_PARALLEL_THRESHOLD;
+use crate::parallel_gates::exp_map_f64_parallel_threshold;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -254,7 +254,7 @@ impl LogisticRegression {
             // activations (exp-map class gate: one f64 exp per element)
             let predictions = gemv_internal(&x_train_view, &weights);
             let mut sigmoid_preds = predictions.clone();
-            if n_samples >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+            if n_samples >= exp_map_f64_parallel_threshold() {
                 sigmoid_preds.par_mapv_inplace(sigmoid);
             } else {
                 sigmoid_preds.mapv_inplace(sigmoid);
@@ -468,7 +468,7 @@ impl LogisticRegression {
         let mut predictions = gemv_internal(x, weights);
 
         // Apply sigmoid with conditional parallelization (mutate in place; exp-map class)
-        if predictions.len() >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+        if predictions.len() >= exp_map_f64_parallel_threshold() {
             predictions.par_mapv_inplace(sigmoid);
         } else {
             predictions.mapv_inplace(sigmoid);

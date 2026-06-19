@@ -15,7 +15,7 @@ use crate::neural_network::layers::layer_weight::{LayerWeight, SeparableConv2DLa
 use crate::neural_network::layers::shape_helpers::calculate_output_height_and_weight;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
+use crate::parallel_gates::naive_conv_parallel_min_flops;
 use ndarray::{Array2, Array4, ArrayD, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -308,7 +308,7 @@ impl SeparableConv2D {
             let m = oc % self.depth_multiplier;
             self.compute_depthwise_channel(b, c, m, conv_input, &output_shape)
         };
-        let results: Vec<Array2<f32>> = if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+        let results: Vec<Array2<f32>> = if flops >= naive_conv_parallel_min_flops() {
             tasks.par_iter().map(run).collect()
         } else {
             tasks.iter().map(run).collect()
@@ -567,7 +567,7 @@ impl Layer for SeparableConv2D {
                 * depthwise_shape[3]
                 * self.kernel_size.0
                 * self.kernel_size.1;
-            let parallel = bwd_flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS;
+            let parallel = bwd_flops >= naive_conv_parallel_min_flops();
 
             // Depthwise weight gradients
             let mut depthwise_weight_grads = Array4::zeros(self.depthwise_weights.dim());

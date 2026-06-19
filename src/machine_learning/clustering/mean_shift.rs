@@ -11,7 +11,7 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::math::squared_euclidean_distance_row;
-use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip, s};
@@ -238,7 +238,7 @@ impl MeanShift {
             .len()
             .saturating_mul(n_samples)
             .saturating_mul(n_features)
-            >= SCAN_F64_PARALLEL_MIN_ELEMS;
+            >= scan_f64_parallel_min_elems();
 
         // Mean shift on a single seed
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
@@ -390,7 +390,7 @@ impl MeanShift {
             .saturating_mul(x.ncols());
         let labels = map_collect(
             n_samples,
-            label_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            label_work >= scan_f64_parallel_min_elems(),
             find_label,
         );
 
@@ -473,7 +473,7 @@ impl MeanShift {
             .saturating_mul(x.ncols());
         let labels = map_collect(
             n_samples,
-            label_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            label_work >= scan_f64_parallel_min_elems(),
             find_nearest,
         );
 
@@ -522,7 +522,7 @@ impl MeanShift {
         let n_features = x.shape()[1];
 
         // Calculate min for each feature (scan-class gate: d tasks of an O(n) column scan)
-        let scan_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let scan_parallel = n_samples.saturating_mul(n_features) >= scan_f64_parallel_min_elems();
         let col_min = |j: usize| {
             let col = x.column(j);
             col.fold(f64::INFINITY, |a, &b| a.min(b))

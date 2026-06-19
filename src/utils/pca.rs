@@ -6,7 +6,7 @@
 use crate::error::Error;
 use crate::math::matmul::gemm_internal;
 use crate::math::reduction::det_reduce;
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
@@ -628,7 +628,7 @@ impl PCA {
     /// Centers data in place by subtracting the mean (cheap-map class gate on the total
     /// element count)
     fn center_data(x: &mut Array2<f64>, mean: &Array1<f64>) {
-        if x.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+        if x.len() >= cheap_map_f64_parallel_threshold() {
             let mean = mean.to_owned();
             x.axis_iter_mut(Axis(0))
                 .into_par_iter()
@@ -655,7 +655,7 @@ impl PCA {
         let sum_sq = match x_centered.as_slice() {
             Some(slice) => det_reduce(
                 slice,
-                slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                slice.len() >= sum_f64_parallel_min_elems(),
                 |block| block.iter().map(|v| v * v).sum::<f64>(),
                 |a, b| a + b,
                 0.0,

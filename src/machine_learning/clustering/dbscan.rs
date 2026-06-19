@@ -8,7 +8,7 @@ pub use crate::machine_learning::DistanceCalculationMetric;
 use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::spatial::KdTree;
 use crate::machine_learning::validation::{preliminary_check, validate_predict_input};
-use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::AHashSet;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix2};
@@ -206,7 +206,7 @@ impl DBSCAN {
         // Brute-force fallback
         let n_samples = data.nrows();
         let scan_work = n_samples.saturating_mul(data.ncols());
-        let neighbors: Vec<usize> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+        let neighbors: Vec<usize> = if scan_work >= scan_f64_parallel_min_elems() {
             (0..n_samples)
                 .into_par_iter()
                 .filter(|&q| self.metric.within(p_row, data.row(q), eps))
@@ -417,7 +417,7 @@ impl DBSCAN {
             .saturating_mul(core_points.ncols());
         let predictions = map_collect(
             new_data.nrows(),
-            scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS,
+            scan_work >= scan_f64_parallel_min_elems(),
             |i| {
                 let row = new_data.row(i);
                 let mut min_dist = f64::MAX;

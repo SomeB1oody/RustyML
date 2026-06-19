@@ -21,27 +21,39 @@ use rayon::iter::{
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which forward/backward switch from sequential to parallel
-///
-/// The centering/variance/normalize passes stream several arrays like a fused optimizer step
-/// does, so the threshold is mapped from the multi-stream elementwise class (crossover bracket
-/// 256K-1M elements) rather than measured directly on this layer
-const BATCH_NORM_PARALLEL_THRESHOLD: usize = 262_144;
+tunable_gate! {
+    /// Total-element count above which forward/backward switch from sequential to parallel
+    ///
+    /// The centering/variance/normalize passes stream several arrays like a fused optimizer step
+    /// does, so the threshold is mapped from the multi-stream elementwise class (crossover bracket
+    /// 256K-1M elements) rather than measured directly on this layer
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) BATCH_NORM_PARALLEL_THRESHOLD => batch_norm_parallel_threshold / set_batch_norm_parallel_threshold = 262_144
+}
 
-/// Element count (`M x C`) above which the per-channel statistics reductions of **2-D** inputs
-/// (mean, variance, and the backward sums) run as row-block deterministic folds
-///
-/// Crossover bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A
-/// channel-chunked alternative that would have preserved the serial accumulation order bitwise
-/// measured 0.3-0.9x everywhere and was rejected
-const BN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Element count (`M x C`) above which the per-channel statistics reductions of **2-D** inputs
+    /// (mean, variance, and the backward sums) run as row-block deterministic folds
+    ///
+    /// Crossover bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A
+    /// channel-chunked alternative that would have preserved the serial accumulation order bitwise
+    /// measured 0.3-0.9x everywhere and was rejected
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) BN_COL_STATS_PARALLEL_MIN_ELEMS => bn_col_stats_parallel_min_elems / set_bn_col_stats_parallel_min_elems = 262_144
+}
 
-/// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
-/// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon
-///
-/// Crossover bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at
-/// the conv-scale 8.4M
-const BN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
+    /// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon
+    ///
+    /// Crossover bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at
+    /// the conv-scale 8.4M
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) BN_PLANE_STATS_PARALLEL_MIN_ELEMS => bn_plane_stats_parallel_min_elems / set_bn_plane_stats_parallel_min_elems = 262_144
+}
 
 /// Batch Normalization layer for neural networks
 ///
@@ -216,13 +228,13 @@ impl BatchNormalization {
 
         // Samples per channel: batch x spatial, the row count of the folded [M, C] view
         let m = (total / c) as f32;
-        let elem_parallel = total >= BATCH_NORM_PARALLEL_THRESHOLD;
+        let elem_parallel = total >= batch_norm_parallel_threshold();
 
         if !self.training {
             return Ok(self.normalize_with_running_stats(x, &shape, c, p, elem_parallel));
         }
 
-        let stats_parallel = total >= BN_PLANE_STATS_PARALLEL_MIN_ELEMS;
+        let stats_parallel = total >= bn_plane_stats_parallel_min_elems();
         let batch_mean = par_plane_sum(x, c, p, stats_parallel, 1.0) / m;
 
         // Center per plane
@@ -383,8 +395,8 @@ impl BatchNormalization {
         let xc_s = x_centered.as_slice().unwrap();
 
         let m = (total / c) as f32;
-        let stats_parallel = total >= BN_PLANE_STATS_PARALLEL_MIN_ELEMS;
-        let elem_parallel = total >= BATCH_NORM_PARALLEL_THRESHOLD;
+        let stats_parallel = total >= bn_plane_stats_parallel_min_elems();
+        let elem_parallel = total >= batch_norm_parallel_threshold();
 
         // Gradients for gamma and beta: fused plane folds (no product temporary)
         self.grad_gamma = Some(par_plane_dot(g, xn_s, c, p, stats_parallel, 1.0));
@@ -485,7 +497,7 @@ impl Layer for BatchNormalization {
             // The folded input is [M, C] for everything except the 1-D scalar-parameter
             // branch, which keeps the serial ndarray path (and its 0-d statistics shapes)
             let use_col_fold = input.ndim() == 2;
-            let col_stats_parallel = total_elements >= BN_COL_STATS_PARALLEL_MIN_ELEMS;
+            let col_stats_parallel = total_elements >= bn_col_stats_parallel_min_elems();
             let channels = if use_col_fold { input.shape()[1] } else { 1 };
 
             // Mean across the batch dimension (axis 0): a row-block deterministic fold, on
@@ -498,7 +510,7 @@ impl Layer for BatchNormalization {
             };
 
             // Center the data
-            let x_centered = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
+            let x_centered = if total_elements >= batch_norm_parallel_threshold() {
                 let mut x_centered = Tensor::zeros(input.raw_dim());
                 x_centered
                     .as_slice_mut()
@@ -528,7 +540,7 @@ impl Layer for BatchNormalization {
 
             // Normalize
             let std_dev = (&batch_var + self.epsilon).mapv(|x| x.sqrt());
-            let x_normalized = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
+            let x_normalized = if total_elements >= batch_norm_parallel_threshold() {
                 // Parallel normalization
                 let mut x_normalized = Tensor::zeros(x_centered.raw_dim());
 
@@ -552,7 +564,7 @@ impl Layer for BatchNormalization {
             };
 
             // Scale and shift
-            let output = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
+            let output = if total_elements >= batch_norm_parallel_threshold() {
                 // Parallel scale and shift
                 let mut output = Tensor::zeros(x_normalized.raw_dim());
 
@@ -619,7 +631,7 @@ impl Layer for BatchNormalization {
                     std_input.as_slice().unwrap()
                 }
             };
-            let parallel = input.len() >= BATCH_NORM_PARALLEL_THRESHOLD;
+            let parallel = input.len() >= batch_norm_parallel_threshold();
             return Ok(self.normalize_with_running_stats(x, &shape, c, p, parallel));
         }
 
@@ -668,7 +680,7 @@ impl Layer for BatchNormalization {
         // 1-D (scalar-parameter) inputs keep the serial ndarray path and its 0-d statistics
         // shapes
         let use_col_fold = grad_output.ndim() == 2;
-        let col_stats_parallel = total_elements >= BN_COL_STATS_PARALLEL_MIN_ELEMS;
+        let col_stats_parallel = total_elements >= bn_col_stats_parallel_min_elems();
 
         // Compute gradients for gamma and beta: fused row-block folds (no [M, C] product
         // temp), on rayon above the column-stats gate
@@ -687,7 +699,7 @@ impl Layer for BatchNormalization {
         self.grad_beta = Some(grad_beta);
 
         // Compute gradient with respect to normalized input
-        let grad_x_normalized = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
+        let grad_x_normalized = if total_elements >= batch_norm_parallel_threshold() {
             // Parallel computation
             let mut grad_x_norm = Tensor::zeros(grad_output.raw_dim());
             grad_x_norm
@@ -736,7 +748,7 @@ impl Layer for BatchNormalization {
         let grad_mean = grad_mean_1 + grad_mean_2;
 
         // Compute gradient with respect to input
-        let grad_input = if total_elements >= BATCH_NORM_PARALLEL_THRESHOLD {
+        let grad_input = if total_elements >= batch_norm_parallel_threshold() {
             // Parallel computation
             let mut grad_inp = Tensor::zeros(grad_output.raw_dim());
             grad_inp

@@ -11,7 +11,7 @@ use crate::neural_network::layers::layer_weight::LayerWeight;
 use crate::neural_network::layers::serialize_model::{
     LayerInfo, SerializableLayer, SerializableSequential, apply_weights_to_layer,
 };
-use crate::parallel_gates::SQ_SUM_F32_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::sq_sum_f32_parallel_min_elems;
 use ndarray::Axis;
 use ndarray_rand::rand::seq::SliceRandom;
 use std::collections::HashMap;
@@ -106,7 +106,7 @@ fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
         for pg in layer.parameters() {
             sum_sq += det_reduce(
                 pg.grad,
-                pg.grad.len() >= SQ_SUM_F32_PARALLEL_MIN_ELEMS,
+                pg.grad.len() >= sq_sum_f32_parallel_min_elems(),
                 |block| block.iter().map(|&g| (g as f64) * (g as f64)).sum::<f64>(),
                 |a, b| a + b,
                 0.0,

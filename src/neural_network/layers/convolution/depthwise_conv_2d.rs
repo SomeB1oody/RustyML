@@ -13,7 +13,7 @@ use crate::neural_network::layers::layer_weight::{DepthwiseConv2DLayerWeight, La
 use crate::neural_network::layers::shape_helpers::calculate_output_shape_2d;
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use crate::parallel_gates::NAIVE_CONV_PARALLEL_MIN_FLOPS;
+use crate::parallel_gates::naive_conv_parallel_min_flops;
 use ndarray::{Array1, Array2, Array4, ArrayView2, ArrayViewD, Axis, s};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use rayon::iter::{
@@ -329,7 +329,7 @@ impl DepthwiseConv2D {
                 channel_output.assign(&result);
             };
 
-        if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+        if flops >= naive_conv_parallel_min_flops() {
             // Parallel over (batch item, channel): a single large image still uses every core
             output
                 .axis_iter_mut(Axis(0))
@@ -584,7 +584,7 @@ impl Layer for DepthwiseConv2D {
                 pad_w,
             )
         };
-        let results: Vec<(Array2<f32>, Array2<f32>)> = if flops >= NAIVE_CONV_PARALLEL_MIN_FLOPS {
+        let results: Vec<(Array2<f32>, Array2<f32>)> = if flops >= naive_conv_parallel_min_flops() {
             tasks.par_iter().map(run).collect()
         } else {
             tasks.iter().map(run).collect()

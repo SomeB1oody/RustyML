@@ -7,7 +7,7 @@
 //! cost classes:
 //!
 //! - **GEMM** (`gemm_internal`) picks parallelism by shape (like HEAD's `gemm_par`, adapted to the
-//!   backend). Below `MatmulElem::GEMM_RAYON_MIN_FLOPS` it runs one serial call (the per-call rayon
+//!   backend). Below `MatmulElem::gemm_rayon_min_flops` it runs one serial call (the per-call rayon
 //!   dispatch would dominate the tiny products in tight loops - RNN/LSTM timesteps). Above it the
 //!   split follows the longer axis: when `m >= n` *and* the columns are too few to feed the pool
 //!   (fewer than ~16 per thread) it splits the rows itself (`gemm_rowsplit`), because the `gemm`
@@ -15,7 +15,7 @@
 //!   (matvecs, training-loop GEMMs); otherwise (wide `n`, or many columns) it hands the whole
 //!   product to the `gemm` crate to parallelize over `n` on the pool.
 //! - **GEMV** (`gemv_internal`) is the `n == 1` case: the `gemm` crate never parallelizes a matvec,
-//!   so above `MatmulElem::GEMV_RAYON_MIN_FLOPS` it always takes the row split (a matvec is
+//!   so above `MatmulElem::gemv_rayon_min_flops` it always takes the row split (a matvec is
 //!   bandwidth-bound, so the lower gate reflects that extra cores help almost immediately).
 //!
 //! Because everything runs on the global rayon pool, these calls also compose safely inside a
@@ -79,18 +79,22 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 ))]
 const PAR_ROWSPLIT_MIN_BLOCK: usize = 8;
 
-/// Columns-per-thread below which the `gemm` crate's column parallelism starves
-///
-/// The backend parallelizes a GEMM only over its output columns `n`. With fewer than this many
-/// columns per rayon thread the column tasks are too granular to fill the pool, so `gemm_internal`
-/// splits the rows itself instead (for `m >= n`). Calibrated by `benches/gemm_calibrate`: at 32
-/// threads the crossover sits around `n = 512` (16 columns/thread)
-#[cfg(any(
-    feature = "machine_learning",
-    feature = "neural_network",
-    feature = "utils"
-))]
-const GEMM_COLPAR_MIN_COLS_PER_THREAD: usize = 16;
+tunable_gate! {
+    /// Columns-per-thread below which the `gemm` crate's column parallelism starves
+    ///
+    /// The backend parallelizes a GEMM only over its output columns `n`. With fewer than this many
+    /// columns per rayon thread the column tasks are too granular to fill the pool, so
+    /// `gemm_internal` splits the rows itself instead (for `m >= n`). Calibrated by
+    /// `benches/gemm_calibrate`: at 32 threads the crossover sits around `n = 512` (16
+    /// columns/thread). Override via [`crate::tuning::matmul`]
+    #[cfg(any(
+        feature = "machine_learning",
+        feature = "neural_network",
+        feature = "utils"
+    ))]
+    pub(crate) GEMM_COLPAR_MIN_COLS_PER_THREAD
+        => gemm_colpar_min_cols_per_thread / set_gemm_colpar_min_cols_per_thread = 16
+}
 
 /// Element types the crate-internal matmul wrappers accept, plus each type's parallelism crossovers
 ///
@@ -108,8 +112,9 @@ pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     /// dominates the tiny GEMMs in tight loops (RNN/LSTM timesteps, small dense layers)
     ///
     /// Calibrated by `benches/gemm_calibrate`. `f32`'s wider SIMD makes its serial kernel
-    /// relatively faster, so its in-loop crossover sits higher than `f64`'s
-    const GEMM_RAYON_MIN_FLOPS: usize;
+    /// relatively faster, so its in-loop crossover sits higher than `f64`'s. The value is a
+    /// runtime gate (per dtype), overridable via [`crate::tuning::matmul`]
+    fn gemm_rayon_min_flops() -> usize;
 
     /// Estimated-FLOPs (`2*m*k`) at or above which `gemv_internal` splits the matvec's rows
     /// across rayon (each block a serial `gemm` call); below it it runs one serial call
@@ -119,7 +124,45 @@ pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     /// far lower than the GEMM one - extra cores add memory bandwidth, which the bandwidth-bound
     /// matvec can use almost immediately
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
-    const GEMV_RAYON_MIN_FLOPS: usize;
+    fn gemv_rayon_min_flops() -> usize;
+}
+
+tunable_gate! {
+    /// `f32` GEMM rayon-crossover FLOPs (`<f32 as MatmulElem>::gemm_rayon_min_flops`). Set higher
+    /// than the isolated ~4M crossover because the f32 products in this band are RNN/LSTM timestep
+    /// GEMMs called in a tight loop
+    #[cfg(any(
+        feature = "machine_learning",
+        feature = "neural_network",
+        feature = "utils"
+    ))]
+    pub(crate) GEMM_RAYON_MIN_FLOPS_F32
+        => gemm_rayon_min_flops_f32 / set_gemm_rayon_min_flops_f32 = 8_000_000
+}
+
+tunable_gate! {
+    /// `f64` GEMM rayon-crossover FLOPs (`<f64 as MatmulElem>::gemm_rayon_min_flops`)
+    #[cfg(any(
+        feature = "machine_learning",
+        feature = "neural_network",
+        feature = "utils"
+    ))]
+    pub(crate) GEMM_RAYON_MIN_FLOPS_F64
+        => gemm_rayon_min_flops_f64 / set_gemm_rayon_min_flops_f64 = 1_000_000
+}
+
+tunable_gate! {
+    /// `f32` GEMV rayon-crossover FLOPs (`<f32 as MatmulElem>::gemv_rayon_min_flops`)
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    pub(crate) GEMV_RAYON_MIN_FLOPS_F32
+        => gemv_rayon_min_flops_f32 / set_gemv_rayon_min_flops_f32 = 524_288
+}
+
+tunable_gate! {
+    /// `f64` GEMV rayon-crossover FLOPs (`<f64 as MatmulElem>::gemv_rayon_min_flops`)
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    pub(crate) GEMV_RAYON_MIN_FLOPS_F64
+        => gemv_rayon_min_flops_f64 / set_gemv_rayon_min_flops_f64 = 524_288
 }
 
 #[cfg(any(
@@ -128,11 +171,13 @@ pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     feature = "utils"
 ))]
 impl MatmulElem for f32 {
-    // Isolated crossover is ~4M, but set higher because the f32 products that land in this band
-    // are RNN/LSTM timestep GEMMs called in a tight loop
-    const GEMM_RAYON_MIN_FLOPS: usize = 8_000_000;
+    fn gemm_rayon_min_flops() -> usize {
+        gemm_rayon_min_flops_f32()
+    }
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
-    const GEMV_RAYON_MIN_FLOPS: usize = 524_288;
+    fn gemv_rayon_min_flops() -> usize {
+        gemv_rayon_min_flops_f32()
+    }
 }
 
 #[cfg(any(
@@ -141,9 +186,13 @@ impl MatmulElem for f32 {
     feature = "utils"
 ))]
 impl MatmulElem for f64 {
-    const GEMM_RAYON_MIN_FLOPS: usize = 1_000_000;
+    fn gemm_rayon_min_flops() -> usize {
+        gemm_rayon_min_flops_f64()
+    }
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
-    const GEMV_RAYON_MIN_FLOPS: usize = 524_288;
+    fn gemv_rayon_min_flops() -> usize {
+        gemv_rayon_min_flops_f64()
+    }
 }
 
 /// One `gemm`-crate call producing a fresh standard-layout `[m, n]` array: `C = A @ B`
@@ -253,9 +302,9 @@ where
 /// array. Any storage works (owned, view, transpose, slice). Parallelism is chosen by shape, like
 /// HEAD's `gemm_par`, but adapted to the backend (which parallelizes over `n` itself):
 ///
-/// - below `MatmulElem::GEMM_RAYON_MIN_FLOPS`: one serial `gemm` call (the per-call rayon dispatch
+/// - below `MatmulElem::gemm_rayon_min_flops`: one serial `gemm` call (the per-call rayon dispatch
 ///   would dominate the tiny products in tight loops, e.g. RNN/LSTM timesteps);
-/// - `m >= n` and few columns (`n < GEMM_COLPAR_MIN_COLS_PER_THREAD * threads`): split the rows
+/// - `m >= n` and few columns (`n < gemm_colpar_min_cols_per_thread() * threads`): split the rows
 ///   ourselves via `gemm_rowsplit`, since the backend only parallelizes over `n` and that starves
 ///   when the columns are too few to feed the pool (matvecs, tall-skinny, training-loop GEMMs);
 /// - otherwise (wide `n > m`, or many columns): hand the whole product to the `gemm` crate, which
@@ -284,16 +333,16 @@ where
 
     let flops = 2usize.saturating_mul(m).saturating_mul(k).saturating_mul(n);
     let threads = rayon::current_num_threads();
-    if flops < T::GEMM_RAYON_MIN_FLOPS {
+    if flops < T::gemm_rayon_min_flops() {
         gemm_kernel(a, b, gemm::Parallelism::None)
-    } else if m >= n && n < threads.saturating_mul(GEMM_COLPAR_MIN_COLS_PER_THREAD) {
+    } else if m >= n && n < threads.saturating_mul(gemm_colpar_min_cols_per_thread()) {
         gemm_rowsplit(a, b)
     } else {
         gemm_kernel(a, b, gemm::Parallelism::Rayon(threads))
     }
 }
 
-/// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::GEMV_RAYON_MIN_FLOPS`
+/// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::gemv_rayon_min_flops`
 ///
 /// `A` is `(m, k)`, `x` has length `k`; the result has length `m`. Because the `gemm` crate does
 /// not parallelize a matrix-vector product (`n == 1`) on its own, large matvecs are parallelized
@@ -322,7 +371,7 @@ where
     // Treat the vector as a single-column matrix and reuse the GEMM paths
     let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
     let flops = 2usize.saturating_mul(m).saturating_mul(k);
-    let prod = if flops < T::GEMV_RAYON_MIN_FLOPS {
+    let prod = if flops < T::gemv_rayon_min_flops() {
         gemm_kernel(a, &x_col, gemm::Parallelism::None)
     } else {
         gemm_rowsplit(a, &x_col)
@@ -330,35 +379,40 @@ where
     prod.index_axis_move(Axis(1), 0)
 }
 
-/// Element budget for one row-chunk of a tiled product whose full result would be too large
-/// to materialize at once (e.g. KNN's `[n_query, n_train]` projections or t-SNE's pairwise
-/// blocks): `chunk_rows = GEMM_CHUNK_ELEMS / row_len`, clamped to `[16, 4096]` rows
-///
-/// Tiling only pays when the shared operand overflows the cache (see `cache_resident`); there
-/// bigger chunks are strictly better, so the budget caps the transient chunk buffer at 256 MB of
-/// `f64` rather than chasing the asymptote
-const GEMM_CHUNK_ELEMS: usize = 33_554_432;
+tunable_gate! {
+    /// Element budget for one row-chunk of a tiled product whose full result would be too large
+    /// to materialize at once (e.g. KNN's `[n_query, n_train]` projections or t-SNE's pairwise
+    /// blocks): `chunk_rows = gemm_chunk_elems() / row_len`, clamped to `[16, 4096]` rows
+    ///
+    /// Tiling only pays when the shared operand overflows the cache (see `cache_resident`); there
+    /// bigger chunks are strictly better, so the budget caps the transient chunk buffer at 256 MB
+    /// of `f64` rather than chasing the asymptote. Overridable via [`crate::tuning::matmul`]
+    pub(crate) GEMM_CHUNK_ELEMS => gemm_chunk_elems / set_gemm_chunk_elems = 33_554_432
+}
 
-/// Rows per chunk when tiling a product with `row_len`-wide output rows under
-/// [`GEMM_CHUNK_ELEMS`]
+/// Rows per chunk when tiling a product with `row_len`-wide output rows under `gemm_chunk_elems`
 ///
 /// Crate-internal tiling policy; not part of the public API and carries no stability guarantee
 #[doc(hidden)]
 pub fn gemm_chunk_rows(row_len: usize) -> usize {
-    (GEMM_CHUNK_ELEMS / row_len.max(1)).clamp(16, 4096)
+    (gemm_chunk_elems() / row_len.max(1)).clamp(16, 4096)
 }
 
-/// Matrix size below which repeated row-GEMV sweeps over a shared matrix stay cache-resident,
-/// making a per-row GEMV swarm faster than a tiled GEMM
-///
-/// When many tasks each compute `X . v` against the same `X`, the whole of `X` is re-read per
-/// task - free while `X` fits in the shared L3, but a DRAM re-stream once it overflows, where a
-/// tiled GEMM (which streams `X` once per chunk) wins instead. The constant sits at a typical
-/// L3 size; the band around it is uncalibrated
-const CACHE_RESIDENT_MAX_BYTES: usize = 64 * 1024 * 1024;
+tunable_gate! {
+    /// Matrix size (bytes) below which repeated row-GEMV sweeps over a shared matrix stay
+    /// cache-resident, making a per-row GEMV swarm faster than a tiled GEMM
+    ///
+    /// When many tasks each compute `X . v` against the same `X`, the whole of `X` is re-read per
+    /// task - free while `X` fits in the shared L3, but a DRAM re-stream once it overflows, where a
+    /// tiled GEMM (which streams `X` once per chunk) wins instead. The default sits at a typical
+    /// L3 size; the band around it is uncalibrated. Overridable via [`crate::tuning::matmul`] - the
+    /// natural knob to match a machine's actual L3
+    pub(crate) CACHE_RESIDENT_MAX_BYTES
+        => cache_resident_max_bytes / set_cache_resident_max_bytes = 64 * 1024 * 1024
+}
 
 /// Whether an `[rows, cols]` matrix of `T` is small enough to treat as cache-resident for
-/// repeated row-GEMV sweeps (see [`CACHE_RESIDENT_MAX_BYTES`])
+/// repeated row-GEMV sweeps (see `cache_resident_max_bytes`)
 ///
 /// Crate-internal strategy policy; not part of the public API and carries no stability
 /// guarantee
@@ -366,7 +420,7 @@ const CACHE_RESIDENT_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
     rows.saturating_mul(cols)
         .saturating_mul(std::mem::size_of::<T>())
-        < CACHE_RESIDENT_MAX_BYTES
+        < cache_resident_max_bytes()
 }
 
 #[cfg(all(
@@ -427,7 +481,7 @@ mod tests {
         }
     }
 
-    // ---- correctness vs an independent reference ----
+    // correctness vs an independent referenc
 
     /// gemm_internal matches the naive product for f32, on both the serial (< gate) and
     /// rayon (>= gate) shapes (f32 gate is 8M FLOPs)
@@ -498,7 +552,7 @@ mod tests {
         assert_close_f32(&gemm_internal(&a, &b), &a.dot(&b), 1e-2);
     }
 
-    // ---- the reproducibility guard: bitwise thread-count independence ----
+    // the reproducibility guard: bitwise thread-count independence
 
     /// The gemm kernel is bitwise identical whether run serially or across any thread count.
     /// This is the property the module relies on for thread-count-independent results; if a
@@ -557,7 +611,7 @@ mod tests {
         );
     }
 
-    // ---- gemv ----
+    // gemv
 
     /// gemv_internal matches the reference for both the serial and the row-split path
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
@@ -615,7 +669,7 @@ mod tests {
         );
     }
 
-    // ---- degenerate shapes ----
+    // degenerate shapes
 
     #[test]
     fn gemm_internal_edge_cases() {

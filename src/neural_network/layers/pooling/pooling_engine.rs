@@ -18,14 +18,18 @@ use crate::neural_network::layers::convolution::PaddingType;
 use ndarray::{ArrayD, IxDyn};
 use rayon::prelude::*;
 
-/// Estimated total element ops (`bc_total * work_per_plane`) at or above which a pooling pass
-/// runs in parallel
-///
-/// Counting per-plane work rather than plane count keeps the gate meaningful when a few planes
-/// carry large spatial dims (e.g. batch == 1 on a big image) and when many planes are tiny. The
-/// measured crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
-/// many-tiny-planes ladders
-const POOL_PARALLEL_MIN_OPS: usize = 12_000;
+tunable_gate! {
+    /// Estimated total element ops (`bc_total * work_per_plane`) at or above which a pooling pass
+    /// runs in parallel
+    ///
+    /// Counting per-plane work rather than plane count keeps the gate meaningful when a few planes
+    /// carry large spatial dims (e.g. batch == 1 on a big image) and when many planes are tiny. The
+    /// measured crossover bracket is 4.1K-12.3K window taps on both the few-large-planes and
+    /// many-tiny-planes ladders
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) POOL_PARALLEL_MIN_OPS => pool_parallel_min_ops / set_pool_parallel_min_ops = 12_000
+}
 
 /// Per-spatial-axis pooling output sizes and leading padding for a given padding mode
 ///
@@ -123,8 +127,8 @@ where
     R: Send,
     F: Fn(usize) -> R + Sync + Send,
 {
-    let parallel =
-        force_parallel.unwrap_or(bc_total.saturating_mul(work_per_plane) >= POOL_PARALLEL_MIN_OPS);
+    let parallel = force_parallel
+        .unwrap_or(bc_total.saturating_mul(work_per_plane) >= pool_parallel_min_ops());
     if parallel {
         (0..bc_total).into_par_iter().map(f).collect()
     } else {
@@ -252,7 +256,7 @@ pub fn windowed_pool_forward_impl(
     let total_ops = bc_total
         .saturating_mul(plane_out)
         .saturating_mul(pool.iter().product::<usize>());
-    let parallel = force_parallel.unwrap_or(total_ops >= POOL_PARALLEL_MIN_OPS);
+    let parallel = force_parallel.unwrap_or(total_ops >= pool_parallel_min_ops());
 
     // Chunk size: enough chunks to feed every thread once the planes alone cannot, but never so
     // small the task overhead dominates

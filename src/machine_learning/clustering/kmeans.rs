@@ -10,7 +10,7 @@ use crate::machine_learning::validation::{
 use crate::math::matmul::gemm_internal;
 use crate::math::reduction::{DET_REDUCE_BLOCK, det_reduce, det_reduce_range};
 use crate::math::squared_euclidean_distance_row;
-use crate::parallel_gates::{SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{scan_f64_parallel_min_elems, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
@@ -249,7 +249,7 @@ impl KMeans {
         let first_center_idx = rng.random_range(0..n_samples);
         centroids.row_mut(0).assign(&data.row(first_center_idx));
 
-        let init_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let init_parallel = n_samples.saturating_mul(n_features) >= scan_f64_parallel_min_elems();
         let mut min_dists: Vec<f64> = if init_parallel {
             data.outer_iter()
                 .into_par_iter()
@@ -289,7 +289,7 @@ impl KMeans {
             // below stays serial (prefix scan)
             let total_dist: f64 = det_reduce(
                 distances,
-                distances.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                distances.len() >= sum_f64_parallel_min_elems(),
                 |block| block.iter().sum::<f64>(),
                 |a, b| a + b,
                 0.0,
@@ -403,7 +403,7 @@ impl KMeans {
             // Scan-class gate: n tasks, each an O(k) arg-min scan plus an O(d) exact distance
             let scan_work = n_samples.saturating_mul(self.n_clusters + n_features);
             let results: Result<Vec<(usize, f64)>, Error> =
-                if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+                if scan_work >= scan_f64_parallel_min_elems() {
                     (0..n_samples)
                         .into_par_iter()
                         .map(compute_assignments)
@@ -419,7 +419,7 @@ impl KMeans {
             // (work metric: samples x features)
             let n_clusters = self.n_clusters;
             let accumulate_parallel =
-                n_samples.saturating_mul(n_features) >= SUM_F64_PARALLEL_MIN_ELEMS;
+                n_samples.saturating_mul(n_features) >= sum_f64_parallel_min_elems();
             let (sums, new_counts, inertia) = det_reduce_range(
                 n_samples,
                 accumulate_parallel,
@@ -594,7 +594,7 @@ impl KMeans {
 
         // Scan-class gate: n tasks, each an O(k) arg-min scan
         let scan_work = data.nrows().saturating_mul(centroids.nrows());
-        let labels: Vec<usize> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+        let labels: Vec<usize> = if scan_work >= scan_f64_parallel_min_elems() {
             (0..data.nrows())
                 .into_par_iter()
                 .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms))

@@ -6,7 +6,7 @@
 use crate::error::Error;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{
-    CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS, SUM_F64_PARALLEL_MIN_ELEMS,
+    cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems, sum_f64_parallel_min_elems,
 };
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::iter::ParallelIterator;
@@ -163,7 +163,7 @@ where
     let (_, mean, m2) = match data.as_slice() {
         Some(slice) => det_reduce(
             slice,
-            slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+            slice.len() >= sum_f64_parallel_min_elems(),
             |block| {
                 block
                     .iter()
@@ -180,7 +180,7 @@ where
     let std_dev = (m2 / n + epsilon * epsilon).sqrt();
 
     // Cheap-map class gate for the transform pass
-    if data.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+    if data.len() >= cheap_map_f64_parallel_threshold() {
         data.par_mapv_inplace(|x| (x - mean) / std_dev);
     } else {
         data.mapv_inplace(|x| (x - mean) / std_dev);
@@ -235,7 +235,7 @@ where
     };
 
     // Scan-class gate: one O(lane) Welford pass + map per lane, so the work is the element count
-    if data_len >= SCAN_F64_PARALLEL_MIN_ELEMS {
+    if data_len >= scan_f64_parallel_min_elems() {
         lanes.par_iter_mut().for_each(process);
     } else {
         lanes.iter_mut().for_each(process);

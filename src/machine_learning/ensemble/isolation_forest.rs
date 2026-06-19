@@ -9,7 +9,7 @@ use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
 use crate::math::average_path_length_factor;
-use crate::parallel_gates::TREE_TRAVERSAL_MIN_VISITS;
+use crate::parallel_gates::tree_traversal_min_visits;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
@@ -483,7 +483,7 @@ impl IsolationForest {
             .nrows()
             .saturating_mul(trees.len())
             .saturating_mul(ISOLATION_TREE_AVG_PATH);
-        let scores: Vec<f64> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS {
+        let scores: Vec<f64> = if visit_work >= tree_traversal_min_visits() {
             x.axis_iter(Axis(0))
                 .into_par_iter()
                 .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))

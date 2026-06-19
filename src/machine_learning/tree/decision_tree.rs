@@ -9,7 +9,7 @@ use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
 use crate::math::{entropy, gini, variance};
-use crate::parallel_gates::{SORT_SCAN_MIN_ELEMS, TREE_TRAVERSAL_MIN_VISITS};
+use crate::parallel_gates::{sort_scan_min_elems, tree_traversal_min_visits};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
@@ -808,7 +808,7 @@ impl DecisionTree {
         // Collect every feature's best candidate, then pick the winner (sort-scan class
         // gate: one copy + sort + scan task per feature over the node's samples)
         let sort_work = indices.len().saturating_mul(self.n_features);
-        let candidates: Vec<(f64, Split, f64)> = if sort_work >= SORT_SCAN_MIN_ELEMS {
+        let candidates: Vec<(f64, Split, f64)> = if sort_work >= sort_scan_min_elems() {
             (0..self.n_features)
                 .into_par_iter()
                 .filter_map(process_feature)
@@ -1214,7 +1214,7 @@ impl DecisionTree {
 
         // Tree-traversal gate: one root-to-leaf walk per sample
         let visit_work = x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH);
-        let predictions: Result<Vec<f64>, Error> = if visit_work >= TREE_TRAVERSAL_MIN_VISITS {
+        let predictions: Result<Vec<f64>, Error> = if visit_work >= tree_traversal_min_visits() {
             x.axis_iter(Axis(0))
                 .into_par_iter()
                 .map(|row| {
@@ -1293,7 +1293,8 @@ impl DecisionTree {
         let n_classes = self.n_classes.unwrap();
 
         let probabilities: Result<Vec<Vec<f64>>, Error> =
-            if x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH) >= TREE_TRAVERSAL_MIN_VISITS {
+            if x.nrows().saturating_mul(DECISION_TREE_ASSUMED_DEPTH) >= tree_traversal_min_visits()
+            {
                 x.axis_iter(Axis(0))
                     .into_par_iter()
                     .map(|row| {

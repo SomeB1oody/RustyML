@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::math::matmul::gemm_internal;
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use rayon::prelude::{
@@ -365,8 +365,8 @@ impl KernelPCA {
 
         // Per-class gates over the [n, n] kernel matrix
         let kernel_elems = n_samples.saturating_mul(n_samples);
-        let scan_parallel = kernel_elems >= SCAN_F64_PARALLEL_MIN_ELEMS;
-        let map_parallel = kernel_elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
+        let scan_parallel = kernel_elems >= scan_f64_parallel_min_elems();
+        let map_parallel = kernel_elems >= cheap_map_f64_parallel_threshold();
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -473,8 +473,8 @@ impl KernelPCA {
 
         // Per-class gates over the [n_query, n_fit] cross-kernel matrix
         let kernel_elems = x.nrows().saturating_mul(x_fit.nrows());
-        let scan_parallel = kernel_elems >= SCAN_F64_PARALLEL_MIN_ELEMS;
-        let map_parallel = kernel_elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
+        let scan_parallel = kernel_elems >= scan_f64_parallel_min_elems();
+        let map_parallel = kernel_elems >= cheap_map_f64_parallel_threshold();
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {

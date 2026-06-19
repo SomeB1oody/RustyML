@@ -30,13 +30,17 @@ use crate::neural_network::Tensor;
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
-/// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin*k`) at or above which an engine
-/// pass runs in parallel
-///
-/// Counting FLOPs rather than output elements keeps the gate meaningful across kernel sizes and
-/// channel counts (an output-element count would rate a `7x7x512` and a `3x3x3` convolution
-/// identically). The measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
-const CONV_PARALLEL_MIN_FLOPS: usize = 4_000_000;
+tunable_gate! {
+    /// Minimum estimated GEMM FLOPs (`2 * batch * F * out_plane * Cin*k`) at or above which an engine
+    /// pass runs in parallel
+    ///
+    /// Counting FLOPs rather than output elements keeps the gate meaningful across kernel sizes and
+    /// channel counts (an output-element count would rate a `7x7x512` and a `3x3x3` convolution
+    /// identically). The measured crossover bracket at batch == 1 is 2.1M-8.3M FLOPs
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) CONV_PARALLEL_MIN_FLOPS => conv_parallel_min_flops / set_conv_parallel_min_flops = 4_000_000
+}
 
 /// Minimum output-position columns per forward task
 ///
@@ -362,7 +366,7 @@ pub fn conv_forward_impl(
         .saturating_mul(filters)
         .saturating_mul(out_plane)
         .saturating_mul(k_total);
-    let parallel = force_parallel.unwrap_or(gemm_flops >= CONV_PARALLEL_MIN_FLOPS);
+    let parallel = force_parallel.unwrap_or(gemm_flops >= conv_parallel_min_flops());
 
     let mut out3 = Array3::<f32>::zeros((batch, filters, out_plane));
     if parallel {
@@ -495,7 +499,7 @@ pub(super) fn conv_backward(
         .saturating_mul(filters)
         .saturating_mul(out_plane)
         .saturating_mul(k_total);
-    let parallel = gemm_flops >= CONV_PARALLEL_MIN_FLOPS;
+    let parallel = gemm_flops >= conv_parallel_min_flops();
     let per_b = map_indexed(batch, parallel, process_b);
 
     // Reduce the per-batch partials in batch order (weight/bias sum across the batch axis)

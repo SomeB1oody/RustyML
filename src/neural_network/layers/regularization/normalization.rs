@@ -12,20 +12,28 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which the group-normalization per-instance row passes run on rayon
-///
-/// Each instance (one sample's channel group) is one contiguous row computed entirely inside
-/// one task with fixed-order kernels, so the gate is a performance knob: the bits are
-/// identical at any thread count and on either side of the gate. Shares the fused row-pass
-/// kernel class of LayerNorm's `LN_ROW_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K
-/// elements), mapped from that measurement
-const GN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Total-element count above which the group-normalization per-instance row passes run on rayon
+    ///
+    /// Each instance (one sample's channel group) is one contiguous row computed entirely inside
+    /// one task with fixed-order kernels, so the gate is a performance knob: the bits are
+    /// identical at any thread count and on either side of the gate. Shares the fused row-pass
+    /// kernel class of LayerNorm's `LN_ROW_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K
+    /// elements), mapped from that measurement
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) GN_ROW_PARALLEL_MIN_ELEMS => gn_row_parallel_min_elems / set_gn_row_parallel_min_elems = 262_144
+}
 
-/// Element count above which the per-channel gamma/beta gradient plane folds run on rayon
-///
-/// Shares the plane-fold kernel of BatchNorm's `BN_PLANE_STATS_PARALLEL_MIN_ELEMS` (crossover
-/// bracket 64K-256K elements), mapped from that measurement
-const GN_PLANE_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Element count above which the per-channel gamma/beta gradient plane folds run on rayon
+    ///
+    /// Shares the plane-fold kernel of BatchNorm's `BN_PLANE_STATS_PARALLEL_MIN_ELEMS` (crossover
+    /// bracket 64K-256K elements), mapped from that measurement
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) GN_PLANE_STATS_PARALLEL_MIN_ELEMS => gn_plane_stats_parallel_min_elems / set_gn_plane_stats_parallel_min_elems = 262_144
+}
 
 /// Returns the axis permutation that moves `channel_axis` to position 1 (channels-first), keeping
 /// the batch axis at 0 and the spatial axes in their original relative order
@@ -296,7 +304,7 @@ pub(super) fn group_norm_forward_core(
     // The row pass needs contiguous data; a borrowed channel_axis == 1 input may be any view
     let input_std = input.as_standard_layout();
     let x = input_std.as_slice().unwrap();
-    let parallel = total >= GN_ROW_PARALLEL_MIN_ELEMS;
+    let parallel = total >= gn_row_parallel_min_elems();
 
     let mut x_normalized = Tensor::zeros(IxDyn(&shape));
     let mut output = Tensor::zeros(IxDyn(&shape));
@@ -355,12 +363,12 @@ pub(super) fn group_norm_backward_core(
     let gamma_s = gamma.as_slice().unwrap();
 
     // Parameter gradients: per-channel plane folds over the native [B, C, P] layout
-    let plane_parallel = total >= GN_PLANE_STATS_PARALLEL_MIN_ELEMS;
+    let plane_parallel = total >= gn_plane_stats_parallel_min_elems();
     let grad_beta = par_plane_sum(g, channels, spatial, plane_parallel, 1.0);
     let grad_gamma = par_plane_dot(g, xn, channels, spatial, plane_parallel, 1.0);
 
     // Input gradient: fused per-instance row pass
-    let row_parallel = total >= GN_ROW_PARALLEL_MIN_ELEMS;
+    let row_parallel = total >= gn_row_parallel_min_elems();
     let mut grad_input = Tensor::zeros(IxDyn(&shape));
     gn_row_backward(
         g,

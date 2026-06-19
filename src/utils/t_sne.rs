@@ -7,7 +7,7 @@
 use crate::error::Error;
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_internal};
 use crate::math::squared_euclidean_distance_row;
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip, s};
@@ -385,7 +385,8 @@ impl TSNE {
     fn optimize_exact(&self, x: &Array2<f64>, mut y: Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_samples = x.nrows();
         // Cheap-map class gate over the [n, n] matrices this path fills each iteration
-        let use_parallel = n_samples.saturating_mul(n_samples) >= CHEAP_MAP_F64_PARALLEL_THRESHOLD;
+        let use_parallel =
+            n_samples.saturating_mul(n_samples) >= cheap_map_f64_parallel_threshold();
 
         // Precompute distances and convert them to joint probabilities
         let distances = self.pairwise_squared_distances(x, use_parallel);
@@ -453,7 +454,7 @@ impl TSNE {
         let n_samples = x.nrows();
         // Scan-class gate: the dominant gated work is the one-off neighbor search, n tasks of an
         // O(n) projection-row scan each
-        let use_parallel = n_samples.saturating_mul(n_samples) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let use_parallel = n_samples.saturating_mul(n_samples) >= scan_f64_parallel_min_elems();
 
         // Sparse symmetric joint probabilities over each point's nearest neighbors
         let adj = self.neighbor_probabilities(x, use_parallel);

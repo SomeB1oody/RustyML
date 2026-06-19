@@ -22,23 +22,31 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::slice::{ParallelSlice, ParallelSliceMut};
 use std::borrow::Cow;
 
-/// Total-element count above which the trailing-axis row passes (per-row statistics plus
-/// normalize, and the backward composition) run on rayon
-///
-/// Each normalization group is one contiguous row computed entirely inside one task with
-/// fixed-order kernels, so the gate is a performance knob: the bits are identical at any
-/// thread count and on either side of the gate
-///
-/// Measured crossover bracket 64K-256K elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M,
-/// fading toward memory bandwidth (1.2x) at 12.6M
-const LN_ROW_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Total-element count above which the trailing-axis row passes (per-row statistics plus
+    /// normalize, and the backward composition) run on rayon
+    ///
+    /// Each normalization group is one contiguous row computed entirely inside one task with
+    /// fixed-order kernels, so the gate is a performance knob: the bits are identical at any
+    /// thread count and on either side of the gate
+    ///
+    /// Measured crossover bracket 64K-256K elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M,
+    /// fading toward memory bandwidth (1.2x) at 12.6M
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) LN_ROW_PARALLEL_MIN_ELEMS => ln_row_parallel_min_elems / set_ln_row_parallel_min_elems = 262_144
+}
 
-/// Element count above which the gamma/beta gradient column folds run on rayon
-///
-/// The same row-block fold kernel class as BatchNorm's measured
-/// `BN_COL_STATS_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K elements), mapped from that
-/// measurement rather than calibrated separately
-const LN_COL_STATS_PARALLEL_MIN_ELEMS: usize = 262_144;
+tunable_gate! {
+    /// Element count above which the gamma/beta gradient column folds run on rayon
+    ///
+    /// The same row-block fold kernel class as BatchNorm's measured
+    /// `BN_COL_STATS_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K elements), mapped from that
+    /// measurement rather than calibrated separately
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) LN_COL_STATS_PARALLEL_MIN_ELEMS => ln_col_stats_parallel_min_elems / set_ln_col_stats_parallel_min_elems = 262_144
+}
 
 /// Axis selection for layer normalization
 ///
@@ -565,7 +573,7 @@ impl LayerNormalization {
             }
         };
 
-        let parallel = total >= LN_ROW_PARALLEL_MIN_ELEMS;
+        let parallel = total >= ln_row_parallel_min_elems();
         let mut x_centered = Tensor::zeros(IxDyn(&shape));
         let mut x_normalized = Tensor::zeros(IxDyn(&shape));
         let mut output = Tensor::zeros(IxDyn(&shape));
@@ -608,7 +616,7 @@ impl LayerNormalization {
                 std_input.as_slice().unwrap()
             }
         };
-        let parallel = input.len() >= LN_ROW_PARALLEL_MIN_ELEMS;
+        let parallel = input.len() >= ln_row_parallel_min_elems();
         let mut output = Tensor::zeros(IxDyn(&shape));
         row_predict(
             x,
@@ -658,11 +666,11 @@ impl LayerNormalization {
         let std_s = std_dev.as_slice().unwrap();
 
         // Gradients for gamma and beta: fused column folds over [R, N] (no product temporary)
-        let col_parallel = total >= LN_COL_STATS_PARALLEL_MIN_ELEMS;
+        let col_parallel = total >= ln_col_stats_parallel_min_elems();
         self.grad_gamma = Some(par_col_dot(g, xn_s, n, col_parallel, 1.0));
         self.grad_beta = Some(par_col_sum(g, n, col_parallel, 1.0));
 
-        let row_parallel = total >= LN_ROW_PARALLEL_MIN_ELEMS;
+        let row_parallel = total >= ln_row_parallel_min_elems();
         let mut grad_input = Tensor::zeros(IxDyn(&shape));
         row_backward(
             g,

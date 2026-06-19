@@ -8,7 +8,7 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_tolerance,
 };
-use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::scan_f64_parallel_min_elems;
 pub use crate::types::KernelType;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
@@ -267,7 +267,7 @@ impl SVC {
 
         // Initialize error cache
         let error_cache_parallel =
-            n_samples.saturating_mul(n_samples) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+            n_samples.saturating_mul(n_samples) >= scan_f64_parallel_min_elems();
         let error_cache = map_collect(n_samples, error_cache_parallel, |i| {
             self.compute_error(i, &alphas, &kernel_matrix, y, b)
         });

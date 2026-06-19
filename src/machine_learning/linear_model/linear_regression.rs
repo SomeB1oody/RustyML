@@ -11,7 +11,7 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::gemv_internal;
 use crate::math::reduction::det_reduce;
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SUM_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
 use rayon::prelude::{
@@ -284,7 +284,7 @@ impl LinearRegression {
             let sse = match error_vec.as_slice() {
                 Some(slice) => det_reduce(
                     slice,
-                    slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                    slice.len() >= sum_f64_parallel_min_elems(),
                     |block| block.iter().map(|v| v * v).sum::<f64>(),
                     |a, b| a + b,
                     0.0,
@@ -323,7 +323,7 @@ impl LinearRegression {
                 let error_sum = match error_vec.as_slice() {
                     Some(slice) => det_reduce(
                         slice,
-                        slice.len() >= SUM_F64_PARALLEL_MIN_ELEMS,
+                        slice.len() >= sum_f64_parallel_min_elems(),
                         |block| block.iter().sum::<f64>(),
                         |a, b| a + b,
                         0.0,
@@ -350,7 +350,7 @@ impl LinearRegression {
                 Some(RegularizationType::L1(alpha)) => {
                     let alpha_val = *alpha;
                     // Cheap-map class: at realistic feature counts this stays serial
-                    if n_features >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+                    if n_features >= cheap_map_f64_parallel_threshold() {
                         let weights_slice = weights.as_slice().unwrap();
                         let gradients_slice = weight_gradients.as_slice_mut().unwrap();
 

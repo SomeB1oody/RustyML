@@ -228,12 +228,16 @@ pub fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
-/// Parallel gate for exp-heavy `f64` reductions ([`logistic_loss`]): below this element count
-/// the deterministic blocked fold cannot beat the serial sum
-///
-/// Crossover bracket is 16K-32K elements (0.96x at 16K, 1.85x at 32K, 14.3x at 1M). Sits below
-/// the cheap-sum gate because each element costs an `exp` plus an `ln`
-const EXP_REDUCE_MIN_ELEMS: usize = 32_768;
+tunable_gate! {
+    /// Parallel gate for exp-heavy `f64` reductions ([`logistic_loss`]): below this element count
+    /// the deterministic blocked fold cannot beat the serial sum
+    ///
+    /// Crossover bracket is 16K-32K elements (0.96x at 16K, 1.85x at 32K, 14.3x at 1M). Sits below
+    /// the cheap-sum gate because each element costs an `exp` plus an `ln`
+    ///
+    /// Overridable via [`crate::tuning`]
+    pub(crate) EXP_REDUCE_MIN_ELEMS => exp_reduce_min_elems / set_exp_reduce_min_elems = 32_768
+}
 
 /// Calculates the logistic regression loss (log loss)
 ///
@@ -289,7 +293,7 @@ where
     let total_loss = match (logits.as_slice(), actual_labels.as_slice()) {
         (Some(x), Some(y)) => reduction::det_reduce_range(
             x.len(),
-            x.len() >= EXP_REDUCE_MIN_ELEMS,
+            x.len() >= exp_reduce_min_elems(),
             |range| range.map(|i| loss_term(x[i], y[i])).sum::<f64>(),
             |a, b| a + b,
             0.0,

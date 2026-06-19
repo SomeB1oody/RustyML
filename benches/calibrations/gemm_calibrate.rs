@@ -100,9 +100,25 @@ macro_rules! gemm_rowsplit {
                 let (as_, bs) = (a.strides(), b.strides());
                 unsafe {
                     gemm::gemm(
-                        m, n, k, out.as_mut_ptr(), 1, n as isize, false,
-                        a.as_ptr(), as_[1], as_[0], b.as_ptr(), bs[1], bs[0],
-                        0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                        m,
+                        n,
+                        k,
+                        out.as_mut_ptr(),
+                        1,
+                        n as isize,
+                        false,
+                        a.as_ptr(),
+                        as_[1],
+                        as_[0],
+                        b.as_ptr(),
+                        bs[1],
+                        bs[0],
+                        0.0,
+                        1.0,
+                        false,
+                        false,
+                        false,
+                        gemm::Parallelism::None,
                     );
                 }
                 return out;
@@ -117,9 +133,25 @@ macro_rules! gemm_rowsplit {
                     let (cs0, cs1) = (c_blk.strides()[0], c_blk.strides()[1]);
                     unsafe {
                         gemm::gemm(
-                            mb, n, k, c_blk.as_mut_ptr(), cs1, cs0, false,
-                            a_blk.as_ptr(), as_[1], as_[0], bv.as_ptr(), bs[1], bs[0],
-                            0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                            mb,
+                            n,
+                            k,
+                            c_blk.as_mut_ptr(),
+                            cs1,
+                            cs0,
+                            false,
+                            a_blk.as_ptr(),
+                            as_[1],
+                            as_[0],
+                            bv.as_ptr(),
+                            bs[1],
+                            bs[0],
+                            0.0,
+                            1.0,
+                            false,
+                            false,
+                            false,
+                            gemm::Parallelism::None,
                         );
                     }
                 });
@@ -166,10 +198,10 @@ fn main() {
         ("mlp_fwd_512x256x128", 512, 256, 128), // L1 forward          n=128
         ("mlp_dx_512x128x256", 512, 128, 256),  // L1 grad-input dX    n=256
         ("mlp_dw_256x512x128", 256, 512, 128),  // L1 grad-weight dW   n=128
-        ("mlp_512x128x10", 512, 128, 10),        // L2 (small/thin)
+        ("mlp_512x128x10", 512, 128, 10),       // L2 (small/thin)
         // medium-band ladder around the 33.5M point, to find the row-split <-> column-par crossover
-        ("med_512x512x128", 512, 512, 128),     // 67M    n=128
-        ("med_512x512x256", 512, 512, 256),     // 134M   n=256
+        ("med_512x512x128", 512, 512, 128), // 67M    n=128
+        ("med_512x512x256", 512, 512, 256), // 134M   n=256
         ("dense_256x784x512", 256, 784, 512),
     ];
 

@@ -334,6 +334,90 @@ macro_rules! model_save_and_load_methods {
     };
 }
 
+/// Generates a runtime-tunable `usize` parallelism gate: a private atomic backing store plus a
+/// `pub(crate)` getter and setter
+///
+/// Replaces a `const` gate threshold with an [`AtomicUsize`](std::sync::atomic::AtomicUsize)
+/// initialized to the same default, so the value can be overridden at runtime without a
+/// recompile. Every leading attribute (`#[cfg(...)]`, doc comments) is applied to all three
+/// generated items, so a gate keeps the exact feature-gating of the constant it replaces. The
+/// hot-path read is a single `Relaxed` load - the gate only selects a strategy, never changes a
+/// result, so no stronger ordering is needed. The public [`crate::tuning`] facade wraps the
+/// generated setters into one discoverable surface
+///
+/// # Syntax
+///
+/// `[attrs..] [vis] STORE => getter / setter = default`, where the attributes (docs and any
+/// `#[cfg(...)]`) and the visibility are optional, `STORE` is the static's name, and `=>` / `/`
+/// are just separators.
+///
+/// # Usage and expansion
+///
+/// This invocation:
+///
+/// ```ignore
+/// tunable_gate! {
+///     /// Docs for the gate.
+///     #[cfg(feature = "neural_network")]
+///     pub(crate) SOME_GATE => some_gate / set_some_gate = 65_536
+/// }
+/// ```
+///
+/// expands to (every leading attribute is applied to all three items, so the gate keeps the
+/// exact docs and feature-gating of the constant it replaces):
+///
+/// ```ignore
+/// /// Docs for the gate.
+/// #[cfg(feature = "neural_network")]
+/// static SOME_GATE: AtomicUsize = AtomicUsize::new(65_536);
+///
+/// /// Docs for the gate.
+/// #[cfg(feature = "neural_network")]
+/// #[doc(hidden)]
+/// pub(crate) fn some_gate() -> usize { SOME_GATE.load(Relaxed) }
+///
+/// /// Docs for the gate.
+/// #[cfg(feature = "neural_network")]
+/// #[doc(hidden)]
+/// pub(crate) fn set_some_gate(value: usize) { SOME_GATE.store(value, Relaxed); }
+/// ```
+///
+/// Call sites read the gate through `some_gate()` instead of the old `SOME_GATE` constant; the
+/// public [`crate::tuning`] facade wraps `set_some_gate` into one discoverable surface.
+#[allow(unused_macros)]
+macro_rules! tunable_gate {
+    (
+        $(#[$attr:meta])*
+        $vis:vis $store:ident => $get:ident / $set:ident = $default:expr
+    ) => {
+        $(#[$attr])*
+        static $store: ::std::sync::atomic::AtomicUsize =
+            ::std::sync::atomic::AtomicUsize::new($default);
+
+        $(#[$attr])*
+        #[doc(hidden)]
+        $vis fn $get() -> usize {
+            $store.load(::std::sync::atomic::Ordering::Relaxed)
+        }
+
+        $(#[$attr])*
+        #[doc(hidden)]
+        $vis fn $set(value: usize) {
+            $store.store(value, ::std::sync::atomic::Ordering::Relaxed);
+        }
+    };
+}
+
+/// Runtime overrides for the crate's parallel/serial gate thresholds; see the module docs
+#[cfg(any(
+    feature = "machine_learning",
+    feature = "neural_network",
+    feature = "utils",
+    feature = "metrics",
+    feature = "math"
+))]
+pub mod tuning;
+
 /// Error handling module containing the crate's unified error type and its result alias
 ///
 /// Every fallible operation returns [`error::RustymlResult<T>`](crate::error::RustymlResult),

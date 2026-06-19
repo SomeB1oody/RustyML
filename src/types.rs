@@ -19,7 +19,7 @@ use crate::{Deserialize, Serialize};
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::math::matmul::gemm_internal;
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, EXP_MAP_F64_PARALLEL_THRESHOLD};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use ndarray::ArrayView1;
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix2, Zip};
@@ -251,7 +251,7 @@ impl KernelType {
             } => {
                 let degree = degree as i32;
                 let f = |v: f64| (gamma * v + coef0).powi(degree);
-                if elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+                if elems >= cheap_map_f64_parallel_threshold() {
                     k.par_mapv_inplace(f);
                 } else {
                     k.mapv_inplace(f);
@@ -259,7 +259,7 @@ impl KernelType {
             }
             KernelType::Sigmoid { gamma, coef0 } => {
                 let f = |v: f64| (gamma * v + coef0).tanh();
-                if elems >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+                if elems >= exp_map_f64_parallel_threshold() {
                     k.par_mapv_inplace(f);
                 } else {
                     k.mapv_inplace(f);
@@ -276,7 +276,7 @@ impl KernelType {
                     });
                 };
                 let zip = Zip::from(k.rows_mut()).and(&x_norm_sq);
-                if elems >= EXP_MAP_F64_PARALLEL_THRESHOLD {
+                if elems >= exp_map_f64_parallel_threshold() {
                     zip.par_for_each(transform_row);
                 } else {
                     zip.for_each(transform_row);
@@ -296,7 +296,7 @@ impl KernelType {
                     });
                 };
                 let zip = Zip::from(k.rows_mut()).and(&x_norm_sq);
-                if elems >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+                if elems >= cheap_map_f64_parallel_threshold() {
                     zip.par_for_each(transform_row);
                 } else {
                     zip.for_each(transform_row);

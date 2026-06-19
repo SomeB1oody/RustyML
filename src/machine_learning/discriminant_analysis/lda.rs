@@ -5,7 +5,7 @@
 
 use crate::error::{Context, Error};
 use crate::math::matmul::{gemm_internal, gemv_internal};
-use crate::parallel_gates::SCAN_F64_PARALLEL_MIN_ELEMS;
+use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
@@ -524,7 +524,7 @@ impl LDA {
         let n_samples = x.nrows();
         let n_features = x.ncols();
         // Decide execution mode from sample count
-        let use_parallel = n_samples.saturating_mul(n_features) >= SCAN_F64_PARALLEL_MIN_ELEMS;
+        let use_parallel = n_samples.saturating_mul(n_features) >= scan_f64_parallel_min_elems();
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -772,7 +772,7 @@ impl LDA {
 
         // Scan-class gate: n tasks, each an O(classes) best-score scan
         let scan_work = x.nrows().saturating_mul(n_classes);
-        let predictions: Vec<i32> = if scan_work >= SCAN_F64_PARALLEL_MIN_ELEMS {
+        let predictions: Vec<i32> = if scan_work >= scan_f64_parallel_min_elems() {
             // Parallel label pick over the score rows
             #[cfg(feature = "show_progress")]
             let pb = progress_bar.clone();

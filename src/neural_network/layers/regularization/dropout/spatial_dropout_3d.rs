@@ -16,7 +16,7 @@ use crate::neural_network::layers::regularization::validation::{
 };
 use crate::neural_network::traits::Layer;
 use crate::parallel_gates::{
-    CHEAP_MAP_PARALLEL_THRESHOLD, SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
+    cheap_map_parallel_threshold, spatial_dropout_scale_parallel_min_elems,
 };
 use ndarray::IxDyn;
 use ndarray_rand::rand::rngs::StdRng;
@@ -146,14 +146,14 @@ impl Layer for SpatialDropout3D {
         );
 
         // Threshold into a binary keep/drop mask
-        apply_spatial_dropout_threshold(&mut mask_2d, self.rate, CHEAP_MAP_PARALLEL_THRESHOLD);
+        apply_spatial_dropout_threshold(&mut mask_2d, self.rate, cheap_map_parallel_threshold());
 
         let channel_mask = mask_2d.as_slice().expect("per-channel mask is contiguous");
         let output = spatial_dropout_scale(
             input,
             channel_mask,
             self.rate,
-            SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
+            spatial_dropout_scale_parallel_min_elems(),
         );
 
         // Store the small per-channel mask for backpropagation
@@ -183,7 +183,7 @@ impl Layer for SpatialDropout3D {
             self.training,
             self.rate,
             "SpatialDropout3D",
-            SPATIAL_DROPOUT_SCALE_PARALLEL_MIN_ELEMS,
+            spatial_dropout_scale_parallel_min_elems(),
         )
     }
 

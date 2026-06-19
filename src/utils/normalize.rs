@@ -5,7 +5,7 @@
 //! selecting the axis and norm (L1, L2, Max, or Lp)
 
 use crate::error::Error;
-use crate::parallel_gates::{CHEAP_MAP_F64_PARALLEL_THRESHOLD, SCAN_F64_PARALLEL_MIN_ELEMS};
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -132,7 +132,7 @@ where
 
     if norm > NORM_ZERO_THRESHOLD {
         // Cheap-map class gate
-        if data.len() >= CHEAP_MAP_F64_PARALLEL_THRESHOLD {
+        if data.len() >= cheap_map_f64_parallel_threshold() {
             data.par_mapv_inplace(|x| x / norm);
         } else {
             data.mapv_inplace(|x| x / norm);
@@ -180,7 +180,7 @@ where
     };
 
     // Scan-class gate: one O(lane) norm + map per lane, so the work is the element count
-    if data_len >= SCAN_F64_PARALLEL_MIN_ELEMS {
+    if data_len >= scan_f64_parallel_min_elems() {
         lanes.par_iter_mut().try_for_each(process)
     } else {
         lanes.iter_mut().try_for_each(process)
