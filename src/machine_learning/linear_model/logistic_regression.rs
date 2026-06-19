@@ -10,9 +10,9 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::math::matmul::gemv_internal;
+use crate::math::matmul::gemv_par_auto;
 use crate::math::{logistic_loss, sigmoid};
-use crate::parallel_gates::exp_map_f64_parallel_threshold;
+use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -252,7 +252,7 @@ impl LogisticRegression {
 
             // Linear predictions (the raw logits feed the loss below), then the sigmoid
             // activations (exp-map class gate: one f64 exp per element)
-            let predictions = gemv_internal(&x_train_view, &weights);
+            let predictions = gemv_par_auto(&x_train_view, &weights);
             let mut sigmoid_preds = predictions.clone();
             if n_samples >= exp_map_f64_parallel_threshold() {
                 sigmoid_preds.par_mapv_inplace(sigmoid);
@@ -262,7 +262,7 @@ impl LogisticRegression {
 
             let errors = &sigmoid_preds - y;
 
-            let mut gradients = gemv_internal(&x_train_view.t(), &errors) / n_samples as f64;
+            let mut gradients = gemv_par_auto(&x_train_view.t(), &errors) / n_samples as f64;
 
             // Check for numerical issues in gradients
             if gradients.iter().any(|&val| !val.is_finite()) {
@@ -465,7 +465,7 @@ impl LogisticRegression {
         S: Data<Elem = f64>,
     {
         let weights = self.weights.as_ref().unwrap();
-        let mut predictions = gemv_internal(x, weights);
+        let mut predictions = gemv_par_auto(x, weights);
 
         // Apply sigmoid with conditional parallelization (mutate in place; exp-map class)
         if predictions.len() >= exp_map_f64_parallel_threshold() {
@@ -562,16 +562,27 @@ where
     // Result matrix, without a constant-term column
     let mut result = Array2::<f64>::zeros((n_samples, n_output_features));
 
-    // Copy the original (first-order) features, processing samples in parallel
-    result
-        .axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(i, mut row)| {
-            for j in 0..n_features {
-                row[j] = x[[i, j]];
-            }
-        });
+    // Copy the original (first-order) features
+    if n_samples.saturating_mul(n_features) >= cheap_map_f64_parallel_threshold() {
+        result
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                for j in 0..n_features {
+                    row[j] = x[[i, j]];
+                }
+            });
+    } else {
+        result
+            .axis_iter_mut(Axis(0))
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                for j in 0..n_features {
+                    row[j] = x[[i, j]];
+                }
+            });
+    }
 
     // For degree >= 2, add the higher-order features
     if degree >= 2 {
@@ -597,18 +608,33 @@ where
                 let current_col = *col_idx;
                 *col_idx += 1;
 
-                // Process all samples in parallel
-                result
-                    .axis_iter_mut(Axis(0))
-                    .into_par_iter()
-                    .enumerate()
-                    .for_each(|(i, mut row)| {
-                        let mut value = 1.0;
-                        for &feat_idx in combination.iter() {
-                            value *= x[[i, feat_idx]];
-                        }
-                        row[current_col] = value;
-                    });
+                // Cheap-map class
+                if result.nrows().saturating_mul(combination.len())
+                    >= cheap_map_f64_parallel_threshold()
+                {
+                    result
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .enumerate()
+                        .for_each(|(i, mut row)| {
+                            let mut value = 1.0;
+                            for &feat_idx in combination.iter() {
+                                value *= x[[i, feat_idx]];
+                            }
+                            row[current_col] = value;
+                        });
+                } else {
+                    result
+                        .axis_iter_mut(Axis(0))
+                        .enumerate()
+                        .for_each(|(i, mut row)| {
+                            let mut value = 1.0;
+                            for &feat_idx in combination.iter() {
+                                value *= x[[i, feat_idx]];
+                            }
+                            row[current_col] = value;
+                        });
+                }
                 return;
             }
 

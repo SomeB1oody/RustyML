@@ -8,6 +8,7 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_tolerance,
 };
+use crate::math::matmul::gemv_par_switch;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 pub use crate::types::KernelType;
 use crate::{Deserialize, Serialize};
@@ -204,7 +205,8 @@ impl SVC {
     {
         let coef = alphas * support_vector_labels;
         let kernel_matrix = self.kernel.compute_matrix(x, support_vectors);
-        let mut decision_values = kernel_matrix.dot(&coef);
+        // Serial gemm-crate matvec
+        let mut decision_values = gemv_par_switch(&kernel_matrix, &coef, false);
         decision_values += bias;
         decision_values
     }

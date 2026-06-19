@@ -9,7 +9,7 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::math::matmul::gemv_internal;
+use crate::math::matmul::gemv_par_auto;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
@@ -272,7 +272,7 @@ impl LinearRegression {
             n_iter += 1;
 
             // Vectorized prediction
-            predictions.assign(&gemv_internal(x, &weights));
+            predictions.assign(&gemv_par_auto(x, &weights));
             if self.fit_intercept {
                 predictions += intercept;
             }
@@ -318,7 +318,7 @@ impl LinearRegression {
             }
 
             // Gradients via matrix operations
-            let mut weight_gradients = gemv_internal(&x.t(), &error_vec) / (n_samples as f64);
+            let mut weight_gradients = gemv_par_auto(&x.t(), &error_vec) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
                 let error_sum = match error_vec.as_slice() {
                     Some(slice) => det_reduce(
@@ -452,7 +452,7 @@ impl LinearRegression {
 
         validate_predict_input(x, coeffs.len())?;
 
-        let mut predictions = gemv_internal(x, coeffs);
+        let mut predictions = gemv_par_auto(x, coeffs);
         if self.fit_intercept {
             predictions += intercept;
         }

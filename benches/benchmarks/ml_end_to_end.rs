@@ -15,7 +15,8 @@ use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
 use rustyml::machine_learning::{
-    KMeans, KNN, KernelType, LDA, LogisticRegression, SVC, Solver, WeightingStrategy,
+    KMeans, KNN, KernelType, LDA, LogisticRegression, MeanShift, SVC, Solver, WeightingStrategy,
+    generate_polynomial_features,
 };
 use rustyml::types::DistanceCalculationMetric;
 use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
@@ -138,6 +139,51 @@ fn bench_svc_fit(c: &mut Criterion) {
     group.finish();
 }
 
+/// SVC predict on a fitted RBF model: batched kernel matrix + the decision-value GEMV
+/// (`[n_query, n_sv] x [n_sv]`). The model is fit once outside the timing loop so the measured
+/// work is the prediction path - the kernel evaluation plus the batched matvec that A1 reroutes
+/// from ndarray `.dot()` to the gemm-crate backend
+fn bench_svc_predict(c: &mut Criterion) {
+    let x = random_matrix(1500, 16, 4);
+    let y: Array1<f64> = Array1::from_iter(
+        x.rows()
+            .into_iter()
+            .map(|r| if r.sum() > 0.0 { 1.0 } else { -1.0 }),
+    );
+    let mut model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
+        .unwrap()
+        .with_random_state(42);
+    model.fit(&x, &y).unwrap();
+
+    let queries = random_matrix(2000, 16, 14);
+    let mut group = c.benchmark_group("svc_predict");
+    group.sample_size(20);
+    group.bench_function("svc_predict_2000q_rbf_1500x16", |b| {
+        b.iter(|| {
+            black_box(model.predict(black_box(&queries)).unwrap());
+        })
+    });
+    group.finish();
+}
+
+/// MeanShift fit: one task per seed (all samples are seeds by default), each running RBF-weighted
+/// updates whose per-iteration cost is two matvecs over the full sample matrix. With seeds far
+/// above the core count the seed axis fills the pool, so A3 forces those inner matvecs serial via
+/// the gemm-crate backend - this bench tracks that nested-matvec path end to end
+fn bench_mean_shift_fit(c: &mut Criterion) {
+    let x = random_matrix(1500, 16, 12);
+    let mut group = c.benchmark_group("mean_shift");
+    group.sample_size(10);
+    group.bench_function("mean_shift_fit_1500x16_bw3", |b| {
+        b.iter(|| {
+            let mut model = MeanShift::new(3.0).unwrap().with_max_iter(20).unwrap();
+            model.fit(black_box(&x)).unwrap();
+            black_box(&model);
+        })
+    });
+    group.finish();
+}
+
 /// Logistic regression fit: per-iteration GEMV + sigmoid map over 50k x 64
 fn bench_logistic_fit(c: &mut Criterion) {
     let x = random_matrix(50_000, 64, 5);
@@ -154,6 +200,28 @@ fn bench_logistic_fit(c: &mut Criterion) {
             black_box(model.get_actual_iterations());
         })
     });
+}
+
+/// generate_polynomial_features: the expansion forks one rayon job per output monomial column.
+/// The small config (degree 3 over 12 features = hundreds of monomials, few samples) is dominated
+/// by that repeated per-monomial fork-join overhead - B1 gates the maps to run serial below the
+/// cheap-map threshold. The large degree-1 config keeps the first-order copy on the parallel path
+/// (its `n_samples * n_features` work clears the gate) to guard that path against a regression
+fn bench_poly_features(c: &mut Criterion) {
+    let mut group = c.benchmark_group("poly_features");
+    group.sample_size(20);
+
+    let x_small = random_matrix(2_000, 12, 21);
+    group.bench_function("poly_features_2000x12_deg3", |b| {
+        b.iter(|| black_box(generate_polynomial_features(black_box(&x_small), 3)))
+    });
+
+    let x_large = random_matrix(400_000, 12, 22);
+    group.bench_function("poly_features_400000x12_deg1", |b| {
+        b.iter(|| black_box(generate_polynomial_features(black_box(&x_large), 1)))
+    });
+
+    group.finish();
 }
 
 /// PCA fit + transform: covariance GEMM (power-iteration solver) and projection GEMM
@@ -211,7 +279,10 @@ criterion_group!(
     bench_lda_fit,
     bench_knn_predict,
     bench_svc_fit,
+    bench_svc_predict,
+    bench_mean_shift_fit,
     bench_logistic_fit,
+    bench_poly_features,
     bench_pca_fit_transform,
     bench_kernel_pca,
     bench_tsne_exact

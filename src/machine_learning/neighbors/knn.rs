@@ -9,7 +9,7 @@ use crate::machine_learning::spatial::KdTree;
 use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_switch};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2, s};
@@ -498,7 +498,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
         encoded_results.map(|encoded_preds| {
             Array1::from(
                 encoded_preds
-                    .into_par_iter()
+                    .into_iter()
                     .map(|idx| idx_to_label[idx].clone())
                     .collect::<Vec<_>>(),
             )
@@ -569,7 +569,8 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     let projections = match precomputed {
                         Some(p) => p,
                         None => {
-                            projections_owned = x_train.dot(&x);
+                            // Forced serial
+                            projections_owned = gemv_par_switch(&x_train, &x, false);
                             projections_owned.view()
                         }
                     };

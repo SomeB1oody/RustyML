@@ -9,7 +9,9 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto};
+use crate::math::matmul::{
+    cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_auto, gemv_par_switch,
+};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
@@ -240,6 +242,9 @@ impl MeanShift {
             .saturating_mul(n_features)
             >= scan_f64_parallel_min_elems();
 
+        // When the seed axis alone fills the pool, force each per-seed matvec serial so it does not fork rayon again
+        let serial_gemv = use_parallel && seeds.len() >= rayon::current_num_threads();
+
         // Mean shift on a single seed
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
             let mut center = x.row(seed_idx).to_owned();
@@ -248,7 +253,11 @@ impl MeanShift {
             loop {
                 // RBF weights for every point via the squared-norm identity
                 let center_sq = center.dot(&center);
-                let projections = x.dot(&center);
+                let projections = if serial_gemv {
+                    gemv_par_switch(x, &center, false)
+                } else {
+                    gemv_par_auto(x, &center)
+                };
                 let weights: Array1<f64> =
                     Zip::from(&projections)
                         .and(&x_sq)
@@ -256,12 +265,16 @@ impl MeanShift {
                             let dist_sq = (center_sq + x_norm_sq - 2.0 * proj).max(0.0);
                             (-gamma * dist_sq).exp()
                         });
-                // Serial sum: runs inside the per-seed parallel loop, where nesting another
-                // parallel reduction only adds scheduling overhead
+                // Serial sum
                 let weight_sum = weights.sum();
 
                 let new_center = if weight_sum > 0.0 {
-                    x.t().dot(&weights) / weight_sum
+                    let weighted_sum = if serial_gemv {
+                        gemv_par_switch(&x.t(), &weights, false)
+                    } else {
+                        gemv_par_auto(&x.t(), &weights)
+                    };
+                    weighted_sum / weight_sum
                 } else {
                     Array1::zeros(n_features)
                 };

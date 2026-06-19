@@ -1,6 +1,6 @@
 //! Matrix products for ndarray operands, backed by the [`gemm`](https://docs.rs/gemm) crate
 //!
-//! The crate-internal `gemm_par_auto` / `gemv_internal` wrappers run every product on the
+//! The crate-internal `gemm_par_auto` / `gemv_par_auto` wrappers run every product on the
 //! `gemm` crate's kernels - runtime-dispatched to the widest available SIMD (AVX-512 / AVX2+FMA /
 //! NEON), packing each operand once and sharing it across threads, with special cases for skinny
 //! shapes. They differ in how parallelism is obtained, because the two products have different
@@ -14,7 +14,7 @@
 //!   crate only parallelizes over the columns `n` and that starves on thin/medium-tall outputs
 //!   (matvecs, training-loop GEMMs); otherwise (wide `n`, or many columns) it hands the whole
 //!   product to the `gemm` crate to parallelize over `n` on the pool.
-//! - **GEMV** (`gemv_internal`) is the `n == 1` case: the `gemm` crate never parallelizes a matvec,
+//! - **GEMV** (`gemv_par_auto`) is the `n == 1` case: the `gemm` crate never parallelizes a matvec,
 //!   so above `MatmulElem::gemv_rayon_min_flops` it always takes the row split (a matvec is
 //!   bandwidth-bound, so the lower gate reflects that extra cores help almost immediately).
 //!
@@ -98,9 +98,9 @@ tunable_gate! {
 
 /// Element types the crate-internal matmul wrappers accept, plus each type's parallelism crossovers
 ///
-/// Bounding `gemm_par_auto` / `gemv_internal` on this trait restricts them to the types the
+/// Bounding `gemm_par_auto` / `gemv_par_auto` on this trait restricts them to the types the
 /// `gemm` crate supports here (`f32`, `f64`), so the backend's "unsupported type" panic is
-/// unreachable. The `Send + Sync` bound lets `gemv_internal` split its rows across rayon
+/// unreachable. The `Send + Sync` bound lets `gemv_par_auto` split its rows across rayon
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -116,7 +116,7 @@ pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     /// runtime gate (per dtype), overridable via [`crate::tuning::matmul`]
     fn gemm_rayon_min_flops() -> usize;
 
-    /// Estimated-FLOPs (`2*m*k`) at or above which `gemv_internal` splits the matvec's rows
+    /// Estimated-FLOPs (`2*m*k`) at or above which `gemv_par_auto` splits the matvec's rows
     /// across rayon (each block a serial `gemm` call); below it it runs one serial call
     ///
     /// A matvec is memory-bound and the `gemm` crate does not parallelize `n == 1` on its own, so
@@ -398,19 +398,45 @@ where
     gemm_par_switch(a, b, flops >= T::gemm_rayon_min_flops())
 }
 
-/// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::gemv_rayon_min_flops`
+/// Parallel matvec strategy: split `A`'s rows into per-thread blocks, each computed by a serial
+/// `gemm` call ([`gemm_rowsplit`])
 ///
-/// `A` is `(m, k)`, `x` has length `k`; the result has length `m`. Because the `gemm` crate does
-/// not parallelize a matrix-vector product (`n == 1`) on its own, large matvecs are parallelized
-/// here by splitting `A`'s rows into per-thread blocks, each computed by a serial `gemm` call -
-/// this gives the bandwidth-bound matvec the extra cores' memory bandwidth. Small matvecs run as
-/// one serial call.
+/// The `gemm` crate never parallelizes a matrix-vector product (`n == 1`) on its own, so this is
+/// how a large matvec is given the extra cores' memory bandwidth. No gate - callers route here only
+/// once they've decided to parallelize ([`gemv_par_auto`] gates by FLOPs, [`gemv_par_switch`] takes
+/// the choice explicitly). The GEMV analogue of [`gemm_par_strategy`].
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+fn gemv_par_strategy<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    // Treat the vector as a single-column matrix and reuse the row-split GEMM path
+    let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
+    gemm_rowsplit(a, &x_col).index_axis_move(Axis(1), 0)
+}
+
+/// `y = A @ x` with explicit parallelism control (the GEMV analogue of [`gemm_par_switch`])
+///
+/// `A` is `(m, k)`, `x` has length `k`; the result has length `m`.
+/// - `parallel == false`: one serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
+///   SIMD kernel, just on one thread (faster than ndarray's `.dot()`). Use this to force a matvec
+///   serial from inside an already-parallel region so it does not fork rayon again (nested
+///   parallelism / oversubscription).
+/// - `parallel == true`: the row-split strategy ([`gemv_par_strategy`]).
+///
+/// Callers that want the work-size gate to make the choice should use [`gemv_par_auto`] instead.
 ///
 /// # Panics
 ///
 /// - If `A`'s column count differs from `x`'s length
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
-pub(crate) fn gemv_internal<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
+pub(crate) fn gemv_par_switch<T, S1, S2>(
+    a: &ArrayBase<S1, Ix2>,
+    x: &ArrayBase<S2, Ix1>,
+    parallel: bool,
+) -> Array1<T>
 where
     T: MatmulElem,
     S1: Data<Elem = T>,
@@ -420,19 +446,39 @@ where
     assert_eq!(
         k,
         x.len(),
-        "gemv_internal: inner dimensions disagree (a is {m}x{k}, x has length {})",
+        "gemv_par_switch: inner dimensions disagree (a is {m}x{k}, x has length {})",
         x.len()
     );
-
-    // Treat the vector as a single-column matrix and reuse the GEMM paths
-    let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
-    let flops = 2usize.saturating_mul(m).saturating_mul(k);
-    let prod = if flops < T::gemv_rayon_min_flops() {
-        gemm_kernel(a, &x_col, gemm::Parallelism::None)
+    if parallel {
+        gemv_par_strategy(a, x)
     } else {
-        gemm_rowsplit(a, &x_col)
-    };
-    prod.index_axis_move(Axis(1), 0)
+        // Treat the vector as a single-column matrix and run one serial gemm call
+        let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
+        gemm_kernel(a, &x_col, gemm::Parallelism::None).index_axis_move(Axis(1), 0)
+    }
+}
+
+/// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::gemv_rayon_min_flops`
+///
+/// `A` is `(m, k)`, `x` has length `k`; the result has length `m`. Below the gate the product runs
+/// as one serial `gemm` call; at or above it [`gemv_par_strategy`] splits `A`'s rows across rayon,
+/// giving the bandwidth-bound matvec the extra cores' memory bandwidth. This is the entry for
+/// callers that have no opinion on parallelism and want the gate to decide; [`gemv_par_switch`] is
+/// the entry for callers that must control it explicitly.
+///
+/// # Panics
+///
+/// - If `A`'s column count differs from `x`'s length
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) fn gemv_par_auto<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
+where
+    T: MatmulElem,
+    S1: Data<Elem = T>,
+    S2: Data<Elem = T>,
+{
+    let (m, k) = a.dim();
+    let flops = 2usize.saturating_mul(m).saturating_mul(k);
+    gemv_par_switch(a, x, flops >= T::gemv_rayon_min_flops())
 }
 
 tunable_gate! {
@@ -669,15 +715,15 @@ mod tests {
 
     // gemv
 
-    /// gemv_internal matches the reference for both the serial and the row-split path
+    /// gemv_par_auto matches the reference for both the serial and the row-split path
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
-    fn gemv_internal_matches_reference() {
+    fn gemv_par_auto_matches_reference() {
         // small (< 524K FLOPs -> serial) and large (>= 524K -> rayon row split)
         for &(m, k) in &[(40usize, 24usize), (8192, 64) /* 1M, row split */] {
             let a = rand_f64(m, k, 31);
             let x = Array1::from_shape_fn(k, |i| ((i as f64) * 0.37).sin());
-            let got = gemv_internal(&a, &x);
+            let got = gemv_par_auto(&a, &x);
             let want = a.dot(&x);
             assert_eq!(got.len(), want.len());
             for (g, w) in got.iter().zip(want.iter()) {
@@ -693,12 +739,12 @@ mod tests {
     /// the way GEMM is.
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
-    fn gemv_internal_rowsplit_matches_serial_numerically() {
+    fn gemv_par_auto_rowsplit_matches_serial_numerically() {
         let m = 8192; // 8192*64*2 ~ 1M >= the 524K gate -> row-split path
         let k = 64;
         let a = rand_f64(m, k, 41);
         let x = Array1::from_shape_fn(k, |i| ((i as f64) * 0.59).sin());
-        let split = gemv_internal(&a, &x);
+        let split = gemv_par_auto(&a, &x);
         let serial = gemm_kernel(&a, &x.view().insert_axis(Axis(1)), gemm::Parallelism::None)
             .index_axis_move(Axis(1), 0);
         assert_eq!(split.len(), serial.len());
@@ -713,11 +759,11 @@ mod tests {
     /// GEMV is run-to-run deterministic at a fixed thread count (same chunks -> same result).
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
-    fn gemv_internal_run_to_run_deterministic() {
+    fn gemv_par_auto_run_to_run_deterministic() {
         let a = rand_f64(8192, 64, 51);
         let x = Array1::from_shape_fn(64, |i| ((i as f64) * 0.23).sin());
-        let y1 = gemv_internal(&a, &x);
-        let y2 = gemv_internal(&a, &x);
+        let y1 = gemv_par_auto(&a, &x);
+        let y2 = gemv_par_auto(&a, &x);
         assert!(
             y1.iter()
                 .zip(y2.iter())

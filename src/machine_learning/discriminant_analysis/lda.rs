@@ -4,7 +4,7 @@
 //! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration enums
 
 use crate::error::{Context, Error};
-use crate::math::matmul::{gemm_par_auto, gemm_par_switch, gemv_internal};
+use crate::math::matmul::{gemm_par_auto, gemm_par_switch, gemv_par_auto};
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
@@ -211,7 +211,7 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
     }
     u.mapv_inplace(|v| v / beta);
 
-    let mut v = gemv_internal(&a.t(), &u);
+    let mut v = gemv_par_auto(&a.t(), &u);
     let mut alpha = v.dot(&v).sqrt();
     if alpha <= 0.0 {
         return x; // a^T b = 0 leaves no descent direction
@@ -224,14 +224,14 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 
     for _ in 0..max_iter {
         // Advance the bidiagonalization to u_{k+1} and v_{k+1}
-        let mut u_next = gemv_internal(a, &v);
+        let mut u_next = gemv_par_auto(a, &v);
         u_next.scaled_add(-alpha, &u);
         beta = u_next.dot(&u_next).sqrt();
         if beta > 0.0 {
             u_next.mapv_inplace(|val| val / beta);
         }
 
-        let mut v_next = gemv_internal(&a.t(), &u_next);
+        let mut v_next = gemv_par_auto(&a.t(), &u_next);
         v_next.scaled_add(-beta, &v);
         alpha = v_next.dot(&v_next).sqrt();
         if alpha > 0.0 {
