@@ -162,6 +162,50 @@ macro_rules! gemm_rowsplit {
 gemm_rowsplit!(gemm_rowsplit_f32, f32);
 gemm_rowsplit!(gemm_rowsplit_f64, f64);
 
+/// Row-split capped at `max_blocks` rayon tasks (instead of `current_num_threads()`). GEMV is
+/// bandwidth-bound, so its speedup plateaus once enough cores saturate memory bandwidth; this lets
+/// the calibration sweep the block count to find that knee (C2: cap the GEMV split).
+macro_rules! gemm_rowsplit_cap {
+    ($name:ident, $t:ty) => {
+        fn $name(a: &Array2<$t>, b: &Array2<$t>, max_blocks: usize) -> Array2<$t> {
+            let (m, n) = (a.nrows(), b.ncols());
+            let k = a.ncols();
+            let blocks = rayon::current_num_threads().min(max_blocks).max(1);
+            let chunk = m.div_ceil(blocks).max(PAR_ROWSPLIT_MIN_BLOCK);
+            let mut out = Array2::<$t>::zeros((m, n));
+            if chunk >= m {
+                let (as_, bs) = (a.strides(), b.strides());
+                unsafe {
+                    gemm::gemm(
+                        m, n, k, out.as_mut_ptr(), 1, n as isize, false,
+                        a.as_ptr(), as_[1], as_[0], b.as_ptr(), bs[1], bs[0],
+                        0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                    );
+                }
+                return out;
+            }
+            let bv = b.view();
+            out.axis_chunks_iter_mut(Axis(0), chunk)
+                .into_par_iter()
+                .zip(a.axis_chunks_iter(Axis(0), chunk).into_par_iter())
+                .for_each(|(mut c_blk, a_blk)| {
+                    let mb = a_blk.nrows();
+                    let (as_, bs) = (a_blk.strides(), bv.strides());
+                    let (cs0, cs1) = (c_blk.strides()[0], c_blk.strides()[1]);
+                    unsafe {
+                        gemm::gemm(
+                            mb, n, k, c_blk.as_mut_ptr(), cs1, cs0, false,
+                            a_blk.as_ptr(), as_[1], as_[0], bv.as_ptr(), bs[1], bs[0],
+                            0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                        );
+                    }
+                });
+            out
+        }
+    };
+}
+gemm_rowsplit_cap!(gemm_rowsplit_cap_f64, f64);
+
 fn rand_f32(r: usize, c: usize, s: u64) -> Array2<f32> {
     Array2::from_shape_fn((r, c), |(i, j)| {
         (((s as f64) * 0.731 + (i * c + j) as f64 * 0.618).sin() * 43758.5).fract() as f32 - 0.5
@@ -277,30 +321,49 @@ fn main() {
         }
     }
 
-    // GEMV (n = 1): memory-bound, so the None -> Rayon crossover sits lower than for GEMM.
+    // GEMV (n = 1): the `gemm` crate never parallelizes a matvec, so the only parallel option is the
+    // row split (`gemv_par_strategy`). The decision that matters is gnone (serial, one gemm call =
+    // `gemv_par_switch(false)`) vs grow (row-split = `gemv_par_switch(true)`). The current gate keys
+    // on raw flops `2*m*k`, but the splittable axis is `m`: short-output shapes (small `m`, large
+    // `k`) clear the flop gate yet split into tiny-work blocks. This sweep finds the real `m`-driven
+    // crossover. `none/row > 1` means the row split wins (belongs on the parallel path).
+    let _ = rayon_par; // GEMV has no useful column-parallel variant; keep the GEMM section's binding
     let gemv_shapes: &[(&str, usize, usize)] = &[
-        ("gv_256x256", 256, 256),
-        ("gv_512x512", 512, 512),
-        ("gv_1024x1024", 1024, 1024),
-        ("gv_1500x1500", 1500, 1500), // kernel_pca / svc eigensolver matvec
-        ("gv_2048x2048", 2048, 2048),
-        ("gv_4096x4096", 4096, 4096),
-        ("gv_50000x64", 50_000, 64), // logistic predict
-        ("gv_64x50000", 64, 50_000), // logistic gradient (X^T . e)
-        ("gv_500000x64", 500_000, 64),
+        // tall regime (k = 64): sweep m to find where the row split starts to pay
+        ("tall_k64_m1k", 1_000, 64),
+        ("tall_k64_m2k", 2_000, 64),
+        ("tall_k64_m5k", 5_000, 64),
+        ("tall_k64_m10k", 10_000, 64),
+        ("tall_k64_m50k", 50_000, 64), // logistic predict
+        ("tall_k64_m200k", 200_000, 64),
+        ("tall_k64_m500k", 500_000, 64),
+        // short-output regime (k = 50000): sweep m - does the split EVER beat serial here?
+        ("short_k50k_m64", 64, 50_000), // logistic / linear_reg gradient (X^T . e)
+        ("short_k50k_m128", 128, 50_000),
+        ("short_k50k_m256", 256, 50_000),
+        ("short_k50k_m512", 512, 50_000),
+        ("short_k50k_m1k", 1_024, 50_000),
+        ("short_k50k_m2k", 2_048, 50_000),
+        // mid / square real call shapes
+        ("svc_2000x750", 2_000, 750), // svc decision_values_batch
+        ("sq_512", 512, 512),
+        ("sq_1024", 1_024, 1_024),
+        ("sq_1500", 1_500, 1_500), // kernel_pca / svc eigensolver matvec
+        ("sq_2048", 2_048, 2_048),
     ];
     for dtype in ["f32", "f64"] {
         println!(
-            "\n{:<20} {:>12} {:>10} {:>10} {:>10}",
+            "\n{:<20} {:>12} {:>8} {:>10} {:>10} {:>10}  best",
             format!("GEMV ({dtype})"),
             "flops",
+            "m",
             "gnone_us",
-            "gpar_us",
-            "none/par"
+            "grow_us",
+            "none/row",
         );
         for &(label, m, k) in gemv_shapes {
             let flops = 2 * m * k;
-            let (gn, gp) = if dtype == "f32" {
+            let (gn, gr) = if dtype == "f32" {
                 let a = rand_f32(m, k, 1);
                 let b = rand_f32(k, 1, 2);
                 (
@@ -308,7 +371,7 @@ fn main() {
                         black_box(gemm_crate_f32(&a, &b, none));
                     }),
                     time_ns(|| {
-                        black_box(gemm_crate_f32(&a, &b, rayon_par));
+                        black_box(gemm_rowsplit_f32(&a, &b));
                     }),
                 )
             } else {
@@ -319,16 +382,53 @@ fn main() {
                         black_box(gemm_crate_f64(&a, &b, none));
                     }),
                     time_ns(|| {
-                        black_box(gemm_crate_f64(&a, &b, rayon_par));
+                        black_box(gemm_rowsplit_f64(&a, &b));
                     }),
                 )
             };
+            let best = if gn <= gr { "gnone" } else { "grow" };
             println!(
-                "{label:<20} {flops:>12} {:>10.3} {:>10.3} {:>10.2}",
+                "{label:<20} {flops:>12} {m:>8} {:>10.3} {:>10.3} {:>10.2}  {best}",
                 gn / 1e3,
-                gp / 1e3,
-                gn / gp
+                gr / 1e3,
+                gn / gr
             );
         }
+    }
+
+    // C2 - GEMV row-split block-count sweep (f64): how many rayon blocks before bandwidth
+    // saturates? Each column is the row-split capped at that many blocks; `1` is serial. The knee
+    // (where adding blocks stops helping) is the bandwidth-saturation core count - capping the real
+    // gemv_par_strategy there would shed fork overhead the extra blocks only add.
+    let caps: &[usize] = &[1, 2, 4, 8, 16, 32];
+    let cap_shapes: &[(&str, usize, usize)] = &[
+        ("tall_k64_m50k", 50_000, 64),
+        ("tall_k64_m500k", 500_000, 64),
+        ("short_k50k_m256", 256, 50_000),
+        ("svc_2000x750", 2_000, 750),
+        ("sq_1500", 1_500, 1_500),
+    ];
+    print!("\n{:<18} {:>10}", "GEMV cap (f64)", "");
+    for c in caps {
+        print!(" {:>9}", format!("b{c}_us"));
+    }
+    println!("   best_b");
+    for &(label, m, k) in cap_shapes {
+        let a = rand_f64(m, k, 1);
+        let b = rand_f64(k, 1, 2);
+        let mut times = Vec::with_capacity(caps.len());
+        for &cap in caps {
+            times.push(time_ns(|| {
+                black_box(gemm_rowsplit_cap_f64(&a, &b, cap));
+            }));
+        }
+        let best_i = (0..times.len())
+            .min_by(|&x, &y| times[x].partial_cmp(&times[y]).unwrap())
+            .unwrap();
+        print!("{label:<18} {:>10}", "");
+        for t in &times {
+            print!(" {:>9.3}", t / 1e3);
+        }
+        println!("   b{}", caps[best_i]);
     }
 }
