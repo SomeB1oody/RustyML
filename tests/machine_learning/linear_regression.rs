@@ -731,15 +731,15 @@ fn fit_huge_learning_rate_diverges_returns_non_finite() {
     );
 }
 
-// L1 regularization parallel branch (n_features >= 200)
-// At 200 features L1 uses rayon paths; column 0 carries the signal (y=3*x0), the rest is noise
+// L1 regularization with many features (n_features = 200)
+// Column 0 carries the signal (y=3*x0), the remaining 199 columns are noise
 
-/// L1 regularization with >=200 features hits the parallel L1 branch; the one informative
-/// feature (column 0, y = 3*x0) ends up with the dominant coefficient over the noise columns
+/// L1 regularization with 200 features: the one informative feature (column 0, y = 3*x0)
+/// ends up with the dominant coefficient over the noise columns
 #[test]
-fn l1_regularization_parallel_branch_recovers_informative_feature() {
+fn l1_regularization_many_features_recovers_informative_feature() {
     let n_samples = 12usize;
-    let n_features = 200usize; // exactly the parallel threshold (>= 200 triggers the branch)
+    let n_features = 200usize;
 
     // column 0 = centered signal, columns 1.. = tiny noise
     let x = Array2::from_shape_fn((n_samples, n_features), |(i, j)| {
@@ -762,7 +762,7 @@ fn l1_regularization_parallel_branch_recovers_informative_feature() {
         .unwrap();
     model
         .fit(&x, &y)
-        .expect("fit with >=200 features and L1 should succeed");
+        .expect("fit with 200 features and L1 should succeed");
 
     let coeffs = model.get_coefficients().unwrap();
     assert_eq!(

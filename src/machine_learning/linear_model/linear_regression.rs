@@ -11,12 +11,9 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::gemv_par_auto;
 use crate::math::reduction::det_reduce;
-use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
+use crate::parallel_gates::sum_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
 
 /// Linear regression model implementation
 ///
@@ -349,25 +346,13 @@ impl LinearRegression {
                 None => {}
                 Some(RegularizationType::L1(alpha)) => {
                     let alpha_val = *alpha;
-                    // Cheap-map class: at realistic feature counts this stays serial
-                    if n_features >= cheap_map_f64_parallel_threshold() {
-                        let weights_slice = weights.as_slice().unwrap();
-                        let gradients_slice = weight_gradients.as_slice_mut().unwrap();
-
-                        gradients_slice
-                            .par_iter_mut()
-                            .zip(weights_slice.par_iter())
-                            .for_each(|(grad, w)| {
-                                *grad += alpha_val * w.signum();
-                            });
-                    } else {
-                        weight_gradients
-                            .iter_mut()
-                            .zip(weights.iter())
-                            .for_each(|(grad, w)| {
-                                *grad += alpha_val * w.signum();
-                            });
-                    }
+                    // L1 sub-gradient
+                    weight_gradients
+                        .iter_mut()
+                        .zip(weights.iter())
+                        .for_each(|(grad, w)| {
+                            *grad += alpha_val * w.signum();
+                        });
                 }
                 Some(RegularizationType::L2(alpha)) => {
                     // d/dw [(alpha/2) * ||w||^2] = alpha * w, matching the cost term above

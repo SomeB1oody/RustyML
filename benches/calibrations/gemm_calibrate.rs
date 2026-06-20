@@ -177,9 +177,25 @@ macro_rules! gemm_rowsplit_cap {
                 let (as_, bs) = (a.strides(), b.strides());
                 unsafe {
                     gemm::gemm(
-                        m, n, k, out.as_mut_ptr(), 1, n as isize, false,
-                        a.as_ptr(), as_[1], as_[0], b.as_ptr(), bs[1], bs[0],
-                        0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                        m,
+                        n,
+                        k,
+                        out.as_mut_ptr(),
+                        1,
+                        n as isize,
+                        false,
+                        a.as_ptr(),
+                        as_[1],
+                        as_[0],
+                        b.as_ptr(),
+                        bs[1],
+                        bs[0],
+                        0.0,
+                        1.0,
+                        false,
+                        false,
+                        false,
+                        gemm::Parallelism::None,
                     );
                 }
                 return out;
@@ -194,9 +210,25 @@ macro_rules! gemm_rowsplit_cap {
                     let (cs0, cs1) = (c_blk.strides()[0], c_blk.strides()[1]);
                     unsafe {
                         gemm::gemm(
-                            mb, n, k, c_blk.as_mut_ptr(), cs1, cs0, false,
-                            a_blk.as_ptr(), as_[1], as_[0], bv.as_ptr(), bs[1], bs[0],
-                            0.0, 1.0, false, false, false, gemm::Parallelism::None,
+                            mb,
+                            n,
+                            k,
+                            c_blk.as_mut_ptr(),
+                            cs1,
+                            cs0,
+                            false,
+                            a_blk.as_ptr(),
+                            as_[1],
+                            as_[0],
+                            bv.as_ptr(),
+                            bs[1],
+                            bs[0],
+                            0.0,
+                            1.0,
+                            false,
+                            false,
+                            false,
+                            gemm::Parallelism::None,
                         );
                     }
                 });
