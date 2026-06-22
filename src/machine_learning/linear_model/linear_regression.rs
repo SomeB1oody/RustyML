@@ -13,7 +13,22 @@ use crate::math::matmul::gemv_par_auto;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::sum_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
-use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2};
+use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
+
+/// Optimization strategy used to fit [`LinearRegression`]
+///
+/// `GradientDescent` is the iterative default and supports L1, L2, or no regularization.
+/// `Normal` is the closed-form normal-equation (ridge) solution computed via an SVD least
+/// squares: it is exact and hyperparameter-free (no learning rate / iteration count) but
+/// supports only no regularization or L2 (ridge); L1 has no closed form
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum Solver {
+    /// Iterative gradient descent (supports L1, L2, or no regularization)
+    GradientDescent,
+    /// Closed-form normal-equation / ridge solution via SVD least squares (no regularization
+    /// or L2 only)
+    Normal,
+}
 
 /// Linear regression model implementation
 ///
@@ -81,6 +96,8 @@ pub struct LinearRegression {
     n_iter: Option<usize>,
     /// Regularization type and strength
     regularization_type: Option<RegularizationType>,
+    /// Optimization strategy (gradient descent or closed-form normal equation)
+    solver: Solver,
 }
 
 impl Default for LinearRegression {
@@ -110,6 +127,7 @@ impl Default for LinearRegression {
             tol: 1e-5,
             n_iter: None,
             regularization_type: None,
+            solver: Solver::GradientDescent,
         }
     }
 }
@@ -160,7 +178,26 @@ impl LinearRegression {
             tol: tolerance,
             n_iter: None,
             regularization_type: None,
+            solver: Solver::GradientDescent,
         })
+    }
+
+    /// Selects the optimization strategy (default: [`Solver::GradientDescent`])
+    ///
+    /// [`Solver::Normal`] computes the exact closed-form normal-equation (ridge) solution and
+    /// ignores the learning rate, iteration count, and tolerance. It supports only no
+    /// regularization or L2; pairing it with L1 makes [`fit`](Self::fit) return an error
+    ///
+    /// # Parameters
+    ///
+    /// - `solver` - the optimization strategy to use
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_solver(mut self, solver: Solver) -> Self {
+        self.solver = solver;
+        self
     }
 
     /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
@@ -197,6 +234,7 @@ impl LinearRegression {
     );
     get_field_as_ref!(get_coefficients, coefficients, Option<&Array1<f64>>);
     get_field!(get_intercept, intercept, Option<f64>);
+    get_field!(get_solver, solver, Solver);
 
     /// Fits the linear regression model using gradient descent
     ///
@@ -232,6 +270,11 @@ impl LinearRegression {
         S: Data<Elem = f64>,
     {
         preliminary_check(x, Some(y))?;
+
+        // Closed-form path
+        if self.solver == Solver::Normal {
+            return self.fit_normal(x, y);
+        }
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -274,7 +317,7 @@ impl LinearRegression {
                 predictions += intercept;
             }
 
-            // Calculate errors once; the same vector feeds both the cost and the gradient
+            // Calculate errors once
             error_vec.assign(&(&predictions - y));
 
             // Cost (sum of squared errors) reuses the error vector: SSE = e dot e
@@ -406,6 +449,69 @@ impl LinearRegression {
         Ok(self)
     }
 
+    /// Fits the model with the closed-form normal-equation (ridge) solution
+    ///
+    /// Minimizes the same objective as the gradient-descent path,
+    /// `(1/2n)||Xw + b - y||^2 + (alpha/2)||w||^2`, whose minimizer satisfies the ridge normal
+    /// equations with effective penalty `lambda = n * alpha`. When `fit_intercept` is set, the
+    /// features and target are mean-centered so the intercept is not penalized, and the
+    /// intercept is recovered as `mean(y) - mean(x) . w`. The system is solved via an SVD least
+    /// squares on the augmented design `[Xc; sqrt(lambda) I]`, which yields the minimum-norm
+    /// solution even when `X^T X` is singular (e.g. collinear or wide data)
+    fn fit_normal<S>(
+        &mut self,
+        x: &ArrayBase<S, Ix2>,
+        y: &ArrayBase<S, Ix1>,
+    ) -> Result<&mut Self, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        let n_samples = x.nrows();
+
+        // The penalty matches the GD objective
+        let ridge_lambda = match &self.regularization_type {
+            None => 0.0,
+            Some(RegularizationType::L2(alpha)) => *alpha * n_samples as f64,
+            Some(RegularizationType::L1(_)) => {
+                return Err(Error::invalid_input(
+                    "the Normal solver does not support L1 regularization (no closed form); \
+                     use Solver::GradientDescent",
+                ));
+            }
+        };
+
+        // Center features and target when fitting an intercept (keeps the intercept unpenalized)
+        let (x_design, y_target, x_means, y_mean) = if self.fit_intercept {
+            let x_means = x
+                .mean_axis(Axis(0))
+                .ok_or_else(|| Error::empty_input("feature matrix"))?;
+            let y_mean = y.sum() / n_samples as f64;
+            let xc = &x.to_owned() - &x_means;
+            let yc = y.mapv(|v| v - y_mean);
+            (xc, yc, Some(x_means), y_mean)
+        } else {
+            (x.to_owned(), y.to_owned(), None, 0.0)
+        };
+
+        let weights = solve_ridge_lstsq(&x_design, &y_target, ridge_lambda)?;
+
+        let intercept = match &x_means {
+            Some(x_means) => y_mean - x_means.dot(&weights),
+            None => 0.0,
+        };
+
+        if weights.iter().any(|v| !v.is_finite()) || !intercept.is_finite() {
+            return Err(Error::non_finite("closed-form solution"));
+        }
+
+        self.coefficients = Some(weights);
+        self.intercept = Some(intercept);
+        // Closed form: no iterative steps
+        self.n_iter = Some(0);
+
+        Ok(self)
+    }
+
     /// Makes predictions using the trained model
     ///
     /// Applies the learned coefficients and intercept to the provided feature matrix
@@ -478,5 +584,104 @@ impl LinearRegression {
         self.predict(x)
     }
 
+    /// Returns the coefficient of determination R² of the prediction on `(x, y)`
+    ///
+    /// `R² = 1 - SS_res / SS_tot`, where `SS_res = Σ(y_i - ŷ_i)²` is the residual sum of
+    /// squares and `SS_tot = Σ(y_i - ȳ)²` is the total sum of squares. The best possible
+    /// score is `1.0`; a model that always predicts the mean of `y` scores `0.0`, and an
+    /// arbitrarily worse model scores negative. The degenerate constant-target case matches
+    /// scikit-learn's `r2_score`: when `SS_tot == 0`, the score is `1.0` if the fit is perfect
+    /// (`SS_res == 0`) and `0.0` otherwise
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Input features with samples as rows and features as columns
+    /// - `y` - True target values aligned with the rows of `x`
+    ///
+    /// # Returns
+    ///
+    /// - `Result<f64, Error>` - The R² score
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If inputs are empty or mismatched
+    /// - `Error::NonFinite` - If `x` or `y` contain NaN or infinite values
+    pub fn score<S>(&self, x: &ArrayBase<S, Ix2>, y: &ArrayBase<S, Ix1>) -> Result<f64, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        // `predict` validates the model is fitted and that `x` is non-empty and finite
+        let predictions = self.predict(x)?;
+
+        if y.len() != predictions.len() {
+            return Err(Error::dimension_mismatch(predictions.len(), y.len()));
+        }
+        if y.iter().any(|v| !v.is_finite()) {
+            return Err(Error::non_finite("target vector"));
+        }
+
+        let y_mean = y.sum() / y.len() as f64;
+        let mut ss_res = 0.0;
+        let mut ss_tot = 0.0;
+        for (yi, pi) in y.iter().zip(predictions.iter()) {
+            ss_res += (yi - pi).powi(2);
+            ss_tot += (yi - y_mean).powi(2);
+        }
+
+        // Constant-target handling matches scikit-learn's r2_score
+        let r2 = if ss_tot != 0.0 {
+            1.0 - ss_res / ss_tot
+        } else if ss_res == 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+        Ok(r2)
+    }
+
     model_save_and_load_methods!(LinearRegression);
+}
+
+/// Solves the ridge least-squares problem `min ||x w - y||^2 + ridge_lambda ||w||^2`
+///
+/// Stacks the design as `[x; sqrt(ridge_lambda) I]` with target `[y; 0]` and solves the
+/// resulting least-squares system with an SVD, which yields the minimum-norm solution even
+/// when `x` is rank-deficient (collinear or wide). `ridge_lambda == 0` reduces to ordinary
+/// least squares
+fn solve_ridge_lstsq(
+    x: &Array2<f64>,
+    y: &Array1<f64>,
+    ridge_lambda: f64,
+) -> Result<Array1<f64>, Error> {
+    let n = x.nrows();
+    let p = x.ncols();
+    let extra = if ridge_lambda > 0.0 { p } else { 0 };
+    let total_rows = n + extra;
+
+    // Augmented design matrix D and target t
+    let mut d = nalgebra::DMatrix::<f64>::zeros(total_rows, p);
+    for i in 0..n {
+        for j in 0..p {
+            d[(i, j)] = x[[i, j]];
+        }
+    }
+    if extra > 0 {
+        let s = ridge_lambda.sqrt();
+        for j in 0..p {
+            d[(n + j, j)] = s;
+        }
+    }
+    let mut t = nalgebra::DVector::<f64>::zeros(total_rows);
+    for (i, &yi) in y.iter().enumerate() {
+        t[i] = yi;
+    }
+
+    // SVD least-squares solve
+    let svd = nalgebra::linalg::SVD::new(d, true, true);
+    let solution = svd
+        .solve(&t, 1e-12)
+        .map_err(|e| Error::computation(format!("closed-form least squares failed: {e}")))?;
+
+    Ok(Array1::from_iter(solution.iter().copied()))
 }

@@ -137,6 +137,12 @@ impl LogisticRegression {
 
     /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
     ///
+    /// The penalty is added to the **mean** log-loss as `alpha * R(w)` (with `R = ||w||_1`
+    /// for L1 and `R = 0.5 * ||w||^2` for L2), i.e. it is *not* divided by the sample count.
+    /// This matches scikit-learn's SGD convention and keeps the effective strength of a given
+    /// `alpha` consistent across sample sizes and with [`LinearRegression`](crate::machine_learning::LinearRegression).
+    /// The intercept is never penalized
+    ///
     /// # Parameters
     ///
     /// - `regularization` - the regularization variant and strength ([`RegularizationType::L1`] or [`RegularizationType::L2`])
@@ -284,21 +290,18 @@ impl LogisticRegression {
                             } else {
                                 0.0
                             };
-                            gradients[i] += regularization_strength * sign / n_samples as f64;
+                            gradients[i] += regularization_strength * sign;
                         }
                     }
                     RegularizationType::L2(regularization_strength) => {
                         for i in start_idx..n_features {
-                            gradients[i] += regularization_strength * weights[i] / n_samples as f64;
+                            gradients[i] += regularization_strength * weights[i];
                         }
                     }
                 }
             }
 
-            // Loss at the CURRENT weights (before this step's update), so the data-loss term
-            // (from `predictions = X * weights`) and the regularization penalty are both
-            // evaluated at the same weights instead of mixing pre-update logits with a
-            // post-update penalty
+            // Loss at the CURRENT weights (before this step's update)
             let mut cost = logistic_loss(&predictions, y);
 
             if let Some(reg_type) = &self.regularization_type {
@@ -308,11 +311,11 @@ impl LogisticRegression {
                     RegularizationType::L1(regularization_strength) => {
                         let l1_penalty: f64 =
                             weights.slice(s![start_idx..]).mapv(|w| w.abs()).sum();
-                        cost += regularization_strength * l1_penalty / n_samples as f64;
+                        cost += regularization_strength * l1_penalty;
                     }
                     RegularizationType::L2(regularization_strength) => {
                         let l2_penalty: f64 = weights.slice(s![start_idx..]).mapv(|w| w * w).sum();
-                        cost += regularization_strength * l2_penalty / (2.0 * n_samples as f64);
+                        cost += regularization_strength * l2_penalty / 2.0;
                     }
                 }
             }

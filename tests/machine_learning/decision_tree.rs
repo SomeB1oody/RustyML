@@ -1181,13 +1181,14 @@ fn test_min_impurity_decrease_prunes_root_split_at_half() {
     }
 }
 
-/// min_samples_leaf rejects the single best split when it would create a too-small
-/// leaf (size-1 leaf with min_samples_leaf=2 collapses the node instead)
+/// min_samples_leaf constrains the split SEARCH (scikit-learn semantics: a split is
+/// only considered if it leaves at least min_samples_leaf samples in each branch), so an
+/// impurity-optimal split with a too-small child is skipped in favour of the best valid
+/// split rather than collapsing the node entirely
 #[test]
-fn test_min_samples_leaf_rejects_too_small_leaf_split() {
+fn test_min_samples_leaf_constrains_split_search() {
     let x = array![[0.0_f64], [1.0_f64], [2.0_f64], [3.0_f64]];
     let y = array![0.0_f64, 0.0, 0.0, 1.0];
-    let probe = array![[3.0_f64]];
 
     // Default min_samples_leaf = 1: best split kept, lone class-1 sample separated
     let mut tree_allow = DecisionTree::new(Algorithm::CART, true).unwrap();
@@ -1196,22 +1197,32 @@ fn test_min_samples_leaf_rejects_too_small_leaf_split() {
         !root_is_leaf(&tree_allow),
         "with min_samples_leaf=1 the size-3/size-1 split must be taken"
     );
-    let pred_allow = tree_allow.predict(&probe).unwrap();
+    let pred_allow = tree_allow.predict(&array![[3.0_f64]]).unwrap();
     assert_abs_diff_eq!(pred_allow[0], 1.0, epsilon = 1e-9);
 
-    // min_samples_leaf = 2: the only impurity-reducing best split makes a size-1
-    // leaf and is rejected, collapsing the node to a majority-class-0 leaf
-    let mut tree_reject = DecisionTree::new(Algorithm::CART, true)
+    // min_samples_leaf = 2: the impurity-optimal split (threshold 2.5) would leave a
+    // size-1 leaf, so it is NOT considered. The tree instead takes the best split whose
+    // children both have >= 2 samples (threshold 1.5) - it must not collapse to a single
+    // leaf, which would discard a usable split.
+    let mut tree_constrained = DecisionTree::new(Algorithm::CART, true)
         .unwrap()
         .with_min_samples_leaf(2)
         .unwrap();
-    tree_reject.fit(&x, &y).unwrap();
+    tree_constrained.fit(&x, &y).unwrap();
     assert!(
-        root_is_leaf(&tree_reject),
-        "with min_samples_leaf=2 the size-1-leaf split must be rejected, collapsing to a leaf"
+        !root_is_leaf(&tree_constrained),
+        "min_samples_leaf must constrain the split search, not suppress all splits"
     );
-    let pred_reject = tree_reject.predict(&probe).unwrap();
-    assert_abs_diff_eq!(pred_reject[0], 0.0, epsilon = 1e-9);
+    let root = tree_constrained.get_root().unwrap();
+    match &root.node_type {
+        NodeType::Internal { threshold, .. } => {
+            assert_abs_diff_eq!(*threshold, 1.5, epsilon = 1e-9);
+        }
+        _ => panic!("root must be an internal split node"),
+    }
+    // Both children honour min_samples_leaf=2: the left branch {x=0,1} is pure class 0
+    let pred_left = tree_constrained.predict(&array![[0.0_f64]]).unwrap();
+    assert_abs_diff_eq!(pred_left[0], 0.0, epsilon = 1e-9);
 }
 
 /// min_samples_split stops recursion at an internal node, yielding a strictly
@@ -1418,4 +1429,89 @@ fn global_seed_makes_none_tree_tie_breaking_reproducible() {
         "two random_state=None trees fit under the same global seed must be identical"
     );
     // _guard clears the global seed here (and on any panic above)
+}
+
+// min_samples_leaf must constrain the split SEARCH, not merely reject the final pick
+
+/// A high-impurity-reduction split that isolates a single sample must not crowd out a
+/// valid split whose children both satisfy min_samples_leaf. Regression: the
+/// variance-optimal split isolates the lone large value (x=5) into a 1-sample child;
+/// with min_samples_leaf=2 the tree must still make a valid split (e.g. at 3.5) rather
+/// than collapsing to a single constant-prediction leaf.
+#[test]
+fn min_samples_leaf_does_not_suppress_a_valid_numeric_split() {
+    let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let y = array![10.0, 10.0, 10.0, 10.0, 1000.0];
+    let mut tree = DecisionTree::new(Algorithm::CART, false)
+        .unwrap()
+        .with_min_samples_leaf(2)
+        .unwrap();
+    tree.fit(&x, &y).unwrap();
+
+    // The root must be a split node, not a leaf
+    let root = tree.get_root().expect("fitted tree must have a root");
+    assert!(
+        matches!(root.node_type, NodeType::Internal { .. }),
+        "root must be a split node; min_samples_leaf wrongly suppressed all numeric splits"
+    );
+
+    // A correct tree places x=1 in the low-value region (mean 10); the buggy single-leaf
+    // tree predicts the global mean (208) for every input
+    let pred_low = tree.predict(&array![[1.0]]).unwrap()[0];
+    assert_abs_diff_eq!(pred_low, 10.0, epsilon = 1.0);
+}
+
+/// A multi-way categorical split must not be discarded just because one rare category
+/// has fewer than min_samples_leaf samples. Feature 0 is categorical: category 0 -> class
+/// 0 (x3), category 1 -> class 1 (x3), category 2 -> class 0 (x1, rare). With
+/// min_samples_leaf=2 the rare category must not throw away the whole split.
+#[test]
+fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
+    let x = array![[0.0], [0.0], [0.0], [1.0], [1.0], [1.0], [2.0]];
+    let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+    let mut tree = DecisionTree::new(Algorithm::ID3, true)
+        .unwrap()
+        .with_min_samples_leaf(2)
+        .unwrap();
+    tree.set_categorical_features(vec![0]);
+    tree.fit(&x, &y).unwrap();
+
+    let root = tree.get_root().expect("fitted tree must have a root");
+    assert!(
+        matches!(root.node_type, NodeType::Internal { .. }),
+        "root must be a categorical split node; the rare category wrongly suppressed it"
+    );
+
+    // Category 1 is pure class 1; a single-leaf fallback would predict the global
+    // majority (class 0) and get this wrong
+    let pred = tree.predict(&array![[1.0]]).unwrap()[0];
+    assert_abs_diff_eq!(pred, 1.0, epsilon = 1e-9);
+}
+
+// min_impurity_decrease must use scikit-learn's N_t/N_total node-weight scaling
+
+/// scikit-learn scales the node-local weighted impurity decrease by N_t/N_total before
+/// comparing to min_impurity_decrease. Regression tree: the root (N=8) splits at 4.5; the
+/// left child {x=1..4} has a local impurity decrease of 25, but scaled by 4/8 it is 12.5.
+/// With min_impurity_decrease = 20, the scaled rule rejects the left child's split (12.5 < 20)
+/// whereas the unscaled rule would accept it (25 >= 20), so x=1 and x=4 must share one leaf.
+#[test]
+fn min_impurity_decrease_uses_sklearn_node_weight_scaling() {
+    let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0], [7.0], [8.0]];
+    let y = array![0.0, 0.0, 10.0, 10.0, 100.0, 100.0, 100.0, 100.0];
+    let mut tree = DecisionTree::new(Algorithm::CART, false)
+        .unwrap()
+        .with_min_impurity_decrease(20.0)
+        .unwrap();
+    tree.fit(&x, &y).unwrap();
+
+    // Left child {1,2,3,4} must NOT split: x=1 and x=4 fall in the same leaf (mean 5)
+    let p1 = tree.predict(&array![[1.0]]).unwrap()[0];
+    let p4 = tree.predict(&array![[4.0]]).unwrap()[0];
+    assert_abs_diff_eq!(p1, 5.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(p4, 5.0, epsilon = 1e-9);
+
+    // The root split DID happen: the right group predicts 100
+    let p8 = tree.predict(&array![[8.0]]).unwrap()[0];
+    assert_abs_diff_eq!(p8, 100.0, epsilon = 1e-9);
 }

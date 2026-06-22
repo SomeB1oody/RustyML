@@ -769,3 +769,145 @@ fn decision_function_applies_nonzero_fitted_bias() {
         );
     }
 }
+
+// squared-hinge loss option
+
+use rustyml::machine_learning::Loss;
+
+/// 120 deterministic, linearly-separable samples (enough rows that training spans several
+/// minibatches per epoch)
+fn make_separable_n(n: usize) -> (Array2<f64>, Array1<f64>) {
+    let mut x = Array2::zeros((n, 2));
+    let mut y = Array1::zeros(n);
+    for i in 0..n {
+        let class = (i % 2) as f64;
+        let s = if class == 1.0 { 1.5 } else { -1.5 };
+        x[[i, 0]] = s + (i as f64 * 0.01).sin() * 0.2;
+        x[[i, 1]] = (i as f64 * 0.017).cos() * 0.5;
+        y[i] = class;
+    }
+    (x, y)
+}
+
+/// Mean squared-hinge loss + (λ/2)||w||² for y ∈ {-1,+1}
+fn squared_hinge_objective(
+    x: &Array2<f64>,
+    y_pm1: &Array1<f64>,
+    w: &Array1<f64>,
+    b: f64,
+    lambda: f64,
+) -> f64 {
+    let n = x.nrows() as f64;
+    let mut loss = 0.0;
+    for i in 0..x.nrows() {
+        let margin = x.row(i).dot(w) + b;
+        let s = (1.0 - y_pm1[i] * margin).max(0.0);
+        loss += s * s;
+    }
+    loss / n + 0.5 * lambda * w.dot(w)
+}
+
+/// Reference full-batch GD that minimizes (1/n)Σ max(0,1-y·m)² + (λ/2)||w||², using the
+/// independently-derived squared-hinge gradient d/dw = -2·max(0,1-y·m)·y·x
+fn reference_squared_hinge_svm(
+    x: &Array2<f64>,
+    y_pm1: &Array1<f64>,
+    lambda: f64,
+    lr: f64,
+    iters: usize,
+) -> (Array1<f64>, f64) {
+    let n = x.nrows();
+    let d = x.ncols();
+    let mut w = Array1::<f64>::zeros(d);
+    let mut b = 0.0;
+    for _ in 0..iters {
+        let mut gw = Array1::<f64>::zeros(d);
+        let mut gb = 0.0;
+        for i in 0..n {
+            let margin = x.row(i).dot(&w) + b;
+            let s = 1.0 - y_pm1[i] * margin;
+            if s > 0.0 {
+                gw.scaled_add(-2.0 * s * y_pm1[i], &x.row(i));
+                gb -= 2.0 * s * y_pm1[i];
+            }
+        }
+        gw /= n as f64;
+        gb /= n as f64;
+        gw.scaled_add(lambda, &w);
+        w.scaled_add(-lr, &gw);
+        b -= lr * gb;
+    }
+    (w, b)
+}
+
+/// Default loss is Hinge; with_loss sets SquaredHinge
+#[test]
+fn loss_default_is_hinge_and_builder_sets_squared() {
+    assert_eq!(LinearSVC::default().get_loss(), Loss::Hinge);
+    let m = LinearSVC::default().with_loss(Loss::SquaredHinge);
+    assert_eq!(m.get_loss(), Loss::SquaredHinge);
+}
+
+/// SquaredHinge still classifies perfectly separable data correctly
+#[test]
+fn squared_hinge_classifies_separable_data() {
+    let (x, y) = make_separable();
+    let mut model = LinearSVC::new(10_000, 0.01, RegularizationType::L2(0.01), true, 1e-6)
+        .unwrap()
+        .with_loss(Loss::SquaredHinge);
+    model.fit(&x, &y).unwrap();
+    let preds = model.predict(&x).unwrap();
+    let truth = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    for (i, (&p, &t)) in preds.iter().zip(truth.iter()).enumerate() {
+        assert_eq!(p, t, "sample {i}: expected {t}, got {p}");
+    }
+}
+
+/// Hinge and squared-hinge are different objectives, so they yield different weights
+#[test]
+fn squared_hinge_differs_from_hinge() {
+    let (x, y) = make_separable_n(120);
+    let train = |loss| {
+        let mut m = LinearSVC::new(20_000, 0.02, RegularizationType::L2(0.1), true, 1e-10)
+            .unwrap()
+            .with_loss(loss)
+            .with_random_state(0);
+        m.fit(&x, &y).unwrap();
+        m.get_weights().unwrap().clone()
+    };
+    let w_hinge = train(Loss::Hinge);
+    let w_sq = train(Loss::SquaredHinge);
+    assert_ne!(w_hinge, w_sq, "the two losses must yield different weights");
+}
+
+/// Ground truth: with SquaredHinge, LinearSVC minimizes the squared-hinge objective,
+/// reaching essentially the same value as an independent reference solver. A wrong
+/// gradient would converge elsewhere and miss the reference optimum.
+#[test]
+fn squared_hinge_minimizes_its_objective() {
+    let (x, y01) = make_separable_n(120);
+    let y_pm1 = y01.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
+    let lambda = 0.5;
+
+    let (w_ref, b_ref) = reference_squared_hinge_svm(&x, &y_pm1, lambda, 0.02, 60_000);
+    let j_ref = squared_hinge_objective(&x, &y_pm1, &w_ref, b_ref, lambda);
+
+    let mut model = LinearSVC::new(60_000, 0.02, RegularizationType::L2(lambda), true, 1e-12)
+        .unwrap()
+        .with_loss(Loss::SquaredHinge)
+        .with_random_state(0);
+    model.fit(&x, &y01).unwrap();
+    let j_svc = squared_hinge_objective(
+        &x,
+        &y_pm1,
+        model.get_weights().unwrap(),
+        model.get_bias().unwrap(),
+        lambda,
+    );
+
+    assert!(
+        j_svc <= j_ref + 0.05,
+        "squared-hinge objective {j_svc:.6} is far from the reference optimum {j_ref:.6}; \
+         the squared-hinge gradient is likely wrong"
+    );
+}

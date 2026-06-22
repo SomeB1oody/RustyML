@@ -14,7 +14,7 @@ use rayon::prelude::{
 };
 use std::cmp::Ordering;
 
-pub use crate::types::KernelType;
+pub use crate::types::{Gamma, KernelType};
 
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -122,10 +122,10 @@ impl EigenSolver {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA, KernelType};
+/// use rustyml::utils::kernel_pca::{EigenSolver, Gamma, KernelPCA, KernelType};
 /// use ndarray::array;
 ///
-/// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2).unwrap();
+/// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: Gamma::Value(0.1) }, 2).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// kpca.fit(&x).unwrap();
 /// let projected = kpca.transform(&x).unwrap();
@@ -164,8 +164,13 @@ impl Default for KernelPCA {
     /// - `n_components` - 2
     /// - `eigen_solver` - `EigenSolver::Dense`
     fn default() -> Self {
-        KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 2)
-            .expect("Default KernelPCA parameters should be valid")
+        KernelPCA::new(
+            KernelType::RBF {
+                gamma: Gamma::Value(0.1),
+            },
+            2,
+        )
+        .expect("Default KernelPCA parameters should be valid")
     }
 }
 
@@ -384,6 +389,11 @@ impl KernelPCA {
             progress_bar.set_message("Computing kernel matrix");
         }
 
+        // Resolve a data-dependent gamma (Scale/Auto) to a concrete value
+        let x_mean = x.mean().unwrap_or(0.0);
+        let x_variance = x.iter().map(|&v| (v - x_mean).powi(2)).sum::<f64>() / x.len() as f64;
+        self.kernel = self.kernel.resolve_gamma(x.ncols(), x_variance)?;
+
         // Build the training kernel (Gram) matrix
         let mut kernel_matrix = self.kernel.compute_matrix(x, x);
         Self::validate_kernel_matrix(&kernel_matrix, scan_parallel)?;
@@ -547,13 +557,10 @@ impl KernelPCA {
                         "Poly kernel degree must be greater than 0",
                     ));
                 }
-                if !gamma.is_finite() || gamma <= 0.0 {
+                if !gamma.explicit_is_positive() {
                     return Err(Error::invalid_parameter(
                         "gamma",
-                        format!(
-                            "Poly kernel gamma must be positive and finite, got {}",
-                            gamma
-                        ),
+                        format!("Poly kernel gamma must be positive and finite, got {gamma:?}"),
                     ));
                 }
                 if !coef0.is_finite() {
@@ -565,22 +572,19 @@ impl KernelPCA {
                 Ok(())
             }
             KernelType::RBF { gamma } => {
-                if !gamma.is_finite() || gamma <= 0.0 {
+                if !gamma.explicit_is_positive() {
                     return Err(Error::invalid_parameter(
                         "gamma",
-                        format!(
-                            "RBF kernel gamma must be positive and finite, got {}",
-                            gamma
-                        ),
+                        format!("RBF kernel gamma must be positive and finite, got {gamma:?}"),
                     ));
                 }
                 Ok(())
             }
             KernelType::Sigmoid { gamma, coef0 } => {
-                if !gamma.is_finite() {
+                if !gamma.explicit_is_finite() {
                     return Err(Error::invalid_parameter(
                         "gamma",
-                        format!("Sigmoid kernel gamma must be finite, got {}", gamma),
+                        format!("Sigmoid kernel gamma must be finite, got {gamma:?}"),
                     ));
                 }
                 if !coef0.is_finite() {

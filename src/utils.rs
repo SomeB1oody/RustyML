@@ -5,7 +5,7 @@
 //! covers train/test partitioning
 
 // `KernelType` lives in the crate-level `types` module (shared with SVC); re-exported here so it is reachable as `utils::KernelType` alongside the kernel-PCA API
-pub use crate::types::KernelType;
+pub use crate::types::{Gamma, KernelType};
 
 /// Kernel Principal Component Analysis
 pub mod kernel_pca;

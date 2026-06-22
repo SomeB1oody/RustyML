@@ -659,3 +659,108 @@ fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_sa
         );
     }
 }
+
+/// `predict` must accept inputs whose rows are not contiguous in memory (e.g. a
+/// transposed view) instead of panicking inside `as_slice().unwrap()`
+#[test]
+fn predict_handles_non_contiguous_input() {
+    // Train on ordinary contiguous data
+    let train = array![[0.0, 0.0], [0.1, 0.1], [0.2, -0.1], [5.0, 5.0], [-4.0, 4.0]];
+    let mut model = IsolationForest::new(20, 8).unwrap().with_random_state(1);
+    model.fit(&train).unwrap();
+
+    // A (features, samples) array transposed to (samples, features) has non-contiguous rows
+    let ft = array![[0.0, 0.1, 5.0], [0.0, 0.1, 5.0]]; // shape (2, 3)
+    let x = ft.t(); // shape (3, 2); rows stride across memory, so they are not contiguous
+    assert!(
+        x.row(0).as_slice().is_none(),
+        "test setup: transposed rows must be non-contiguous to exercise the bug"
+    );
+
+    let result = model.predict(&x);
+    assert!(
+        result.is_ok(),
+        "predict must handle non-contiguous input without panicking, got {result:?}"
+    );
+    assert_eq!(result.unwrap().len(), 3, "one score per input row");
+}
+
+// predict_labels: contamination-based {-1, +1} outlier classification
+
+/// A single obvious outlier among a tight inlier cluster is flagged -1, inliers +1.
+/// With contamination 0.1 on 10 samples, exactly ceil(1.0)=1 sample is flagged.
+#[test]
+fn predict_labels_flags_obvious_outlier() {
+    let x = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.05, 0.15],
+        [0.15, 0.05],
+        [0.1, 0.1],
+        [10.0, 10.0] // obvious outlier
+    ];
+    let mut model = IsolationForest::new(100, 256)
+        .unwrap()
+        .with_random_state(42);
+    model.fit(&x).unwrap();
+
+    let labels = model.predict_labels(&x, 0.1).unwrap();
+    let n_out = labels.iter().filter(|&&l| l == -1).count();
+    assert_eq!(
+        n_out, 1,
+        "contamination 0.1 on 10 samples flags exactly 1 outlier"
+    );
+    assert_eq!(labels[9], -1, "the far point must be the flagged outlier");
+    for i in 0..9 {
+        assert_eq!(labels[i], 1, "inlier {i} must be labelled +1");
+    }
+}
+
+/// The number of flagged outliers equals ceil(contamination * n) when scores are
+/// well-separated (continuous isolation scores make ties negligible)
+#[test]
+fn predict_labels_count_matches_contamination() {
+    let mut flat = Vec::new();
+    for i in 0..20 {
+        let v = i as f64;
+        flat.push(v.sin());
+        flat.push(v.cos() * 3.0);
+    }
+    let x = Array2::from_shape_vec((20, 2), flat).unwrap();
+    let mut model = IsolationForest::new(100, 256).unwrap().with_random_state(7);
+    model.fit(&x).unwrap();
+
+    let labels = model.predict_labels(&x, 0.25).unwrap();
+    let n_out = labels.iter().filter(|&&l| l == -1).count();
+    assert_eq!(
+        n_out, 5,
+        "ceil(0.25 * 20) = 5 outliers expected, got {n_out}"
+    );
+    // every label is exactly -1 or +1
+    for &l in labels.iter() {
+        assert!(l == -1 || l == 1, "label {l} not in {{-1, +1}}");
+    }
+}
+
+/// contamination outside (0.0, 0.5] (or non-finite) is rejected
+#[test]
+fn predict_labels_rejects_invalid_contamination() {
+    let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [0.1, 0.1]];
+    let mut model = IsolationForest::new(10, 8).unwrap().with_random_state(1);
+    model.fit(&x).unwrap();
+    for bad in [0.0, -0.1, 0.51, 1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                model.predict_labels(&x, bad),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "contamination={bad} must be rejected"
+        );
+    }
+    // a valid contamination still works
+    assert!(model.predict_labels(&x, 0.25).is_ok());
+}

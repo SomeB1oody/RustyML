@@ -473,28 +473,87 @@ impl IsolationForest {
         check_is_fitted(self.trees.is_some(), "IsolationForest")?;
         validate_predict_input(x, self.n_features)?;
 
-        // Precompute the normalization constant once for the whole batch; inputs were
-        // validated above, so rows are scored without per-sample validation
+        // Precompute the normalization constant once for the whole batch
         let trees = self.trees.as_ref().unwrap();
         let c_n = average_path_length_factor(self.sample_size);
 
-        // Tree-traversal gate: each sample walks every tree for ~c(psi) nodes
+        // Tree-traversal gate
         let visit_work = x
             .nrows()
             .saturating_mul(trees.len())
             .saturating_mul(ISOLATION_TREE_AVG_PATH);
+
+        let score_row = |row: ndarray::ArrayView1<f64>| match row.as_slice() {
+            Some(slice) => self.normalized_score(slice, trees, c_n),
+            None => self.normalized_score(&row.to_vec(), trees, c_n),
+        };
         let scores: Vec<f64> = if visit_work >= tree_traversal_min_visits() {
             x.axis_iter(Axis(0))
                 .into_par_iter()
-                .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))
+                .map(score_row)
                 .collect()
         } else {
-            x.axis_iter(Axis(0))
-                .map(|row| self.normalized_score(row.as_slice().unwrap(), trees, c_n))
-                .collect()
+            x.axis_iter(Axis(0)).map(score_row).collect()
         };
 
         Ok(Array1::from_vec(scores))
+    }
+
+    /// Classifies each sample as an inlier (`+1`) or outlier (`-1`) using a contamination rate
+    ///
+    /// `contamination` is the expected proportion of outliers in `x`. The
+    /// `ceil(contamination * n_samples)` highest-scoring samples (see [`predict`](Self::predict))
+    /// are labelled `-1` (outlier) and the rest `+1` (inlier). Ties at the threshold score are
+    /// all labelled `-1`, so at least `ceil(contamination * n_samples)` samples are flagged.
+    /// This mirrors scikit-learn's `IsolationForest.predict`, except the threshold is taken on
+    /// the provided batch `x` rather than stored from the training data
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Input data matrix where each row is a sample
+    /// - `contamination` - Expected proportion of outliers, in `(0.0, 0.5]`
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<i32>, Error>` - Per-sample labels: `-1` for outliers, `+1` for inliers
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `contamination` is not finite or not in `(0.0, 0.5]`
+    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
+    ///   propagated from [`predict`](Self::predict)
+    pub fn predict_labels<S>(
+        &self,
+        x: &ArrayBase<S, Ix2>,
+        contamination: f64,
+    ) -> Result<Array1<i32>, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        if !contamination.is_finite() || contamination <= 0.0 || contamination > 0.5 {
+            return Err(Error::invalid_parameter(
+                "contamination",
+                format!("must be in (0.0, 0.5], got {contamination}"),
+            ));
+        }
+
+        // Anomaly scores in [0, 1]; higher means more anomalous. `predict` validates input.
+        let scores = self.predict(x)?;
+        let n = scores.len();
+
+        // Flag the ceil(contamination * n) highest-scoring samples (at least 1)
+        let n_outliers = (((n as f64) * contamination).ceil() as usize).clamp(1, n);
+
+        // Threshold = the n_outliers-th largest score (smallest score still flagged), found by
+        // quickselect at ascending index `n - n_outliers`
+        let mut sorted: Vec<f64> = scores.to_vec();
+        let kth = n - n_outliers;
+        sorted.select_nth_unstable_by(kth, |a, b| {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let threshold = sorted[kth];
+
+        Ok(scores.mapv(|s| if s >= threshold { -1 } else { 1 }))
     }
 
     /// Trains the model on the dataset and immediately predicts anomaly scores

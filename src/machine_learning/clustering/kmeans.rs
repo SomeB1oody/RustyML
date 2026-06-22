@@ -106,7 +106,7 @@ pub struct KMeans {
     n_clusters: usize,
     /// Maximum number of iterations for a single run
     max_iter: usize,
-    /// Tolerance for declaring convergence
+    /// Convergence tolerance
     tol: f64,
     /// Optional seed for random number generation
     random_state: Option<u64>,
@@ -146,7 +146,7 @@ impl KMeans {
     ///
     /// - `n_clusters` - Number of clusters to form (must be greater than 0)
     /// - `max_iterations` - Maximum number of iterations for the algorithm (must be greater than 0)
-    /// - `tolerance` - Convergence tolerance; the algorithm stops when centroids move less than this value
+    /// - `tolerance` - Convergence tolerance
     ///
     /// # Returns
     ///
@@ -363,6 +363,19 @@ impl KMeans {
 
         self.init_centroids(data)?;
 
+        // the mean per-feature (population) variance of the data scaled by `tol`
+        let feature_means = data
+            .mean_axis(Axis(0))
+            .ok_or_else(|| Error::empty_input("data"))?;
+        let mean_feature_variance = (0..n_features)
+            .map(|j| {
+                let m = feature_means[j];
+                data.column(j).iter().map(|&v| (v - m).powi(2)).sum::<f64>() / n_samples as f64
+            })
+            .sum::<f64>()
+            / n_features as f64;
+        let tol_scaled = mean_feature_variance * self.tol;
+
         let mut labels = Array1::<usize>::zeros(n_samples);
         let mut prev_inertia: Option<f64> = None;
         let mut iter_count = 0;
@@ -479,17 +492,6 @@ impl KMeans {
                 progress_bar.inc(1);
             }
 
-            // Check convergence condition
-            if let Some(prev) = prev_inertia
-                && (prev - inertia).abs() < self.tol * prev.max(self.tol)
-            {
-                iter_count = i + 1;
-                self.inertia = Some(inertia);
-                break;
-            }
-            prev_inertia = Some(inertia);
-            iter_count = i + 1;
-
             // Average each cluster center
             let avg_work = self.n_clusters.saturating_mul(n_features);
             let avg_centroid = |idx: usize, mut centroid_row: ArrayViewMut1<f64>| {
@@ -543,6 +545,23 @@ impl KMeans {
                             .assign(&self.centroids.as_ref().unwrap().row(cluster_idx));
                     }
                 }
+            }
+
+            // Centroid shift
+            let current_centroids = self.centroids.as_ref().unwrap();
+            let center_shift: f64 = (0..self.n_clusters)
+                .map(|k| {
+                    squared_euclidean_distance_row(&current_centroids.row(k), &new_centroids.row(k))
+                })
+                .sum();
+
+            prev_inertia = Some(inertia);
+            iter_count = i + 1;
+
+            // Converged when the centroids move no more than the variance-scaled tolerance
+            if center_shift <= tol_scaled {
+                self.inertia = Some(inertia);
+                break;
             }
 
             // Install the new centroids and recycle the previous buffer for the next iteration

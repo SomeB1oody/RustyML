@@ -9,7 +9,7 @@ use rustyml::machine_learning::IsolationForest;
 use rustyml::machine_learning::KMeans;
 use rustyml::machine_learning::LinearRegression;
 use rustyml::machine_learning::traits::{Fit, Predict};
-use rustyml::types::{DistanceCalculationMetric, KernelType};
+use rustyml::types::{DistanceCalculationMetric, Gamma, KernelType};
 
 use crate::common::assert_allclose;
 use rustyml::machine_learning::DBSCAN;
@@ -200,7 +200,9 @@ fn kernel_linear_general_is_eleven() {
 // RBF kernel K(x, y) = exp(-gamma * ||x - y||^2); same vector gives exp(0) = 1
 #[test]
 fn kernel_rbf_same_vector_is_one() {
-    let k = KernelType::RBF { gamma: 1.0 };
+    let k = KernelType::RBF {
+        gamma: Gamma::Value(1.0),
+    };
     let x = array![1.0_f64, 0.0];
     assert_abs_diff_eq!(k.compute(x.view(), x.view()), 1.0, epsilon = 1e-12);
 }
@@ -208,7 +210,9 @@ fn kernel_rbf_same_vector_is_one() {
 // RBF kernel on orthonormal [1,0] and [0,1]: ||diff||^2 = 2, so K = exp(-2)
 #[test]
 fn kernel_rbf_orthonormal_pair_is_exp_minus_two() {
-    let k = KernelType::RBF { gamma: 1.0 };
+    let k = KernelType::RBF {
+        gamma: Gamma::Value(1.0),
+    };
     let x1 = array![1.0_f64, 0.0];
     let x2 = array![0.0_f64, 1.0];
     let expected = (-2.0_f64).exp();
@@ -221,7 +225,7 @@ fn kernel_rbf_orthonormal_pair_is_exp_minus_two() {
 fn kernel_poly_degree2_orthogonal_is_zero() {
     let k = KernelType::Poly {
         degree: 2,
-        gamma: 1.0,
+        gamma: Gamma::Value(1.0),
         coef0: 0.0,
     };
     let x1 = array![1.0_f64, 0.0];
@@ -234,7 +238,7 @@ fn kernel_poly_degree2_orthogonal_is_zero() {
 fn kernel_poly_degree2_with_coef0_one() {
     let k = KernelType::Poly {
         degree: 2,
-        gamma: 1.0,
+        gamma: Gamma::Value(1.0),
         coef0: 1.0,
     };
     let x = array![1.0_f64, 1.0];
@@ -245,7 +249,7 @@ fn kernel_poly_degree2_with_coef0_one() {
 #[test]
 fn kernel_sigmoid_unit_vector_is_tanh_one() {
     let k = KernelType::Sigmoid {
-        gamma: 1.0,
+        gamma: Gamma::Value(1.0),
         coef0: 0.0,
     };
     let x = array![1.0_f64, 0.0];

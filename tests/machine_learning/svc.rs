@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::{KernelType, SVC};
+use rustyml::machine_learning::{Gamma, KernelType, SVC};
 
 // helpers
 
@@ -137,9 +137,16 @@ fn new_rejects_zero_max_iter() {
 /// Valid parameters succeed and getters echo them back
 #[test]
 fn new_valid_parameters_round_trip() {
-    let svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 2.0, 1e-3, 500)
-        .expect("valid params must succeed")
-        .with_random_state(7);
+    let svc = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2.0,
+        1e-3,
+        500,
+    )
+    .expect("valid params must succeed")
+    .with_random_state(7);
 
     assert_abs_diff_eq!(svc.get_regularization_parameter(), 2.0, epsilon = 1e-10);
     assert_abs_diff_eq!(svc.get_tolerance(), 1e-3, epsilon = 1e-12);
@@ -381,9 +388,16 @@ fn actual_iterations_in_valid_range() {
 #[test]
 fn rbf_kernel_classifies_concentric_rings_perfectly() {
     let (x, y) = concentric_rings_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 5000)
-        .unwrap()
-        .with_random_state(42);
+    let mut svc = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        10.0,
+        1e-3,
+        5000,
+    )
+    .unwrap()
+    .with_random_state(42);
     svc.fit(&x, &y)
         .expect("fit must succeed on concentric rings");
 
@@ -400,9 +414,16 @@ fn rbf_kernel_classifies_concentric_rings_perfectly() {
 #[test]
 fn sign_consistency_rbf_kernel() {
     let (x, y) = concentric_rings_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 10.0, 1e-3, 2000)
-        .unwrap()
-        .with_random_state(42);
+    let mut svc = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        10.0,
+        1e-3,
+        2000,
+    )
+    .unwrap()
+    .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let df = svc
@@ -429,12 +450,14 @@ fn all_kernels_fit_and_predict_without_error() {
         KernelType::Linear,
         KernelType::Poly {
             degree: 2,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 1.0,
         },
-        KernelType::RBF { gamma: 0.5 },
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
         KernelType::Sigmoid {
-            gamma: 0.1,
+            gamma: Gamma::Value(0.1),
             coef0: 0.0,
         },
         KernelType::Cosine,
@@ -472,7 +495,7 @@ fn poly_kernel_classifies_separable_data_correctly() {
     let mut svc = SVC::new(
         KernelType::Poly {
             degree: 2,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 1.0,
         },
         10.0,
@@ -524,14 +547,28 @@ fn cosine_kernel_zero_vector_does_not_panic() {
 fn same_seed_produces_identical_results() {
     let (x, y) = linearly_separable_data();
 
-    let mut svc1 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
-        .unwrap()
-        .with_random_state(42);
+    let mut svc1 = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        5.0,
+        1e-3,
+        1000,
+    )
+    .unwrap()
+    .with_random_state(42);
     svc1.fit(&x, &y).expect("first fit must succeed");
 
-    let mut svc2 = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
-        .unwrap()
-        .with_random_state(42);
+    let mut svc2 = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        5.0,
+        1e-3,
+        1000,
+    )
+    .unwrap()
+    .with_random_state(42);
     svc2.fit(&x, &y).expect("second fit must succeed");
 
     // predictions must be identical
@@ -582,9 +619,16 @@ fn fit_predict_agrees_with_fit_then_predict() {
 #[test]
 fn save_load_round_trip_yields_identical_predictions() {
     let (x, y) = linearly_separable_data();
-    let mut svc = SVC::new(KernelType::RBF { gamma: 0.5 }, 5.0, 1e-3, 1000)
-        .unwrap()
-        .with_random_state(42);
+    let mut svc = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        5.0,
+        1e-3,
+        1000,
+    )
+    .unwrap()
+    .with_random_state(42);
     svc.fit(&x, &y).expect("fit must succeed");
 
     let original_preds = svc.predict(&x).expect("predict must succeed before save");
@@ -698,7 +742,7 @@ fn sigmoid_kernel_sign_consistency() {
     let (x, y) = linearly_separable_data();
     let mut svc = SVC::new(
         KernelType::Sigmoid {
-            gamma: 0.1,
+            gamma: Gamma::Value(0.1),
             coef0: 0.0,
         },
         5.0,
@@ -765,4 +809,93 @@ fn decision_function_and_bias_match_closed_form_linear_kernel() {
     assert_abs_diff_eq!(df[0], -1.0, epsilon = 1e-2); // SV on the -1 margin
     assert_abs_diff_eq!(df[1], 1.0, epsilon = 1e-2); // SV on the +1 margin
     assert_abs_diff_eq!(df[2], 0.0, epsilon = 1e-2); // decision boundary
+}
+
+// data-dependent gamma (Scale / Auto)
+
+/// RBF `Gamma::Scale` is resolved at fit time to 1/(n_features * X.var()) and produces the
+/// same model as constructing the kernel with that explicit value
+#[test]
+fn rbf_gamma_scale_resolves_and_matches_explicit_equivalent() {
+    let x = Array2::from_shape_vec(
+        (6, 2),
+        vec![
+            0.0, 0.0, 0.5, 0.2, 0.1, 0.4, // class -1
+            3.0, 3.0, 3.2, 2.8, 2.9, 3.1, // class +1
+        ],
+    )
+    .unwrap();
+    let y = array![-1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+
+    // Expected scale gamma: X.var() is the population variance of all matrix entries
+    let n_features = x.ncols() as f64;
+    let mean = x.iter().sum::<f64>() / x.len() as f64;
+    let var = x.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / x.len() as f64;
+    let expected_gamma = 1.0 / (n_features * var);
+
+    let mut scale_model = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Scale,
+        },
+        1.0,
+        1e-3,
+        200,
+    )
+    .unwrap()
+    .with_random_state(0);
+    scale_model.fit(&x, &y).unwrap();
+
+    // After fit, gamma is a resolved Value approximately equal to the scale formula
+    let resolved_gamma = match scale_model.get_kernel() {
+        KernelType::RBF {
+            gamma: Gamma::Value(g),
+        } => g,
+        other => panic!("expected resolved RBF Value after fit, got {other:?}"),
+    };
+    assert_abs_diff_eq!(resolved_gamma, expected_gamma, epsilon = 1e-9);
+
+    // A model built with the exact resolved gamma must predict identically
+    let mut explicit_model = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(resolved_gamma),
+        },
+        1.0,
+        1e-3,
+        200,
+    )
+    .unwrap()
+    .with_random_state(0);
+    explicit_model.fit(&x, &y).unwrap();
+
+    assert_eq!(
+        scale_model.predict(&x).unwrap(),
+        explicit_model.predict(&x).unwrap(),
+        "Scale must behave identically to its resolved explicit gamma"
+    );
+}
+
+/// RBF `Gamma::Auto` is resolved at fit time to exactly 1/n_features
+#[test]
+fn rbf_gamma_auto_resolves_to_inverse_n_features() {
+    let x = Array2::from_shape_vec(
+        (4, 3),
+        vec![
+            0.0, 0.0, 0.0, 0.1, 0.2, 0.1, // class -1
+            3.0, 3.0, 3.0, 3.1, 2.9, 3.0, // class +1
+        ],
+    )
+    .unwrap();
+    let y = array![-1.0, -1.0, 1.0, 1.0];
+
+    let mut model = SVC::new(KernelType::RBF { gamma: Gamma::Auto }, 1.0, 1e-3, 200)
+        .unwrap()
+        .with_random_state(0);
+    model.fit(&x, &y).unwrap();
+
+    match model.get_kernel() {
+        KernelType::RBF {
+            gamma: Gamma::Value(g),
+        } => assert_abs_diff_eq!(g, 1.0 / 3.0, epsilon = 1e-12),
+        other => panic!("expected resolved RBF Value, got {other:?}"),
+    }
 }

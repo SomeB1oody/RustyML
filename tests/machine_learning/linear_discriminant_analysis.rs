@@ -64,7 +64,7 @@ fn accuracy(predicted: &Array1<i32>, true_labels: &Array1<i32>) -> f64 {
 #[test]
 fn test_new_default_values() {
     let lda = LDA::new(2).expect("default construction should succeed");
-    assert_eq!(lda.get_n_components(), 2);
+    assert_eq!(lda.get_n_components(), Some(2));
     assert_eq!(lda.get_solver(), Solver::SVD);
     assert!(lda.get_shrinkage().is_none());
     // Pre-fit getters return None
@@ -77,7 +77,9 @@ fn test_new_default_values() {
 #[test]
 fn test_default_impl() {
     let lda = LDA::default();
-    assert_eq!(lda.get_n_components(), 2);
+    // The default is now `None` (auto): the component count is resolved at fit time to
+    // min(n_classes - 1, n_features)
+    assert_eq!(lda.get_n_components(), None);
     assert_eq!(lda.get_solver(), Solver::SVD);
     assert!(lda.get_shrinkage().is_none());
 }
@@ -803,7 +805,7 @@ fn test_save_load_preserves_hyperparameters() {
     lda.save_to_path(path).unwrap();
     let loaded = LDA::load_from_path(path).unwrap();
 
-    assert_eq!(loaded.get_n_components(), 1);
+    assert_eq!(loaded.get_n_components(), Some(1));
     assert_eq!(loaded.get_solver(), Solver::Eigen);
     assert_eq!(loaded.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
 }
@@ -896,4 +898,154 @@ fn test_fit_predict_large_separable_parallel_paths() {
         1.0,
         "linearly-separable 3-class data must be classified perfectly on the parallel path"
     );
+}
+
+// Auto n_components (default = None): the cap is min(n_classes-1, n_features), applied
+// automatically so the default model fits any valid dataset (binary included)
+
+/// `LDA::default()` must fit binary data: the previous default (n_components=2) wrongly
+/// errored because the cap for 2 classes is 1. The corrected default auto-caps to 1.
+#[test]
+fn test_default_fits_binary_data_via_auto_n_components() {
+    let (x, y) = make_two_class_1d();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y)
+        .expect("default LDA must fit binary data via auto n_components");
+    let transformed = lda.transform(&x).unwrap();
+    assert_eq!(
+        transformed.ncols(),
+        1,
+        "binary LDA must auto-project to min(n_classes-1, n_features)=1 component"
+    );
+}
+
+/// The auto default also caps correctly for multiclass: 3 classes, 2 features ->
+/// min(2, 2) = 2 components
+#[test]
+fn test_default_auto_caps_multiclass_components() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y).unwrap();
+    let transformed = lda.transform(&x).unwrap();
+    assert_eq!(
+        transformed.ncols(),
+        2,
+        "3-class/2-feature LDA caps to 2 components"
+    );
+}
+
+// decision_function (per-class discriminant scores) and predict_proba (softmax posteriors)
+
+/// Helper: index of the max element in a 1D view
+fn argmax(row: ndarray::ArrayView1<f64>) -> usize {
+    let mut best_j = 0;
+    let mut best = f64::NEG_INFINITY;
+    for (j, &v) in row.iter().enumerate() {
+        if v > best {
+            best = v;
+            best_j = j;
+        }
+    }
+    best_j
+}
+
+/// decision_function returns an (n_samples, n_classes) matrix whose per-row argmax equals
+/// the label that predict returns
+#[test]
+fn test_decision_function_shape_and_argmax_matches_predict() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y).unwrap();
+
+    let scores = lda.decision_function(&x).unwrap();
+    assert_eq!(
+        scores.shape(),
+        &[9, 3],
+        "shape must be (n_samples, n_classes)"
+    );
+
+    let preds = lda.predict(&x).unwrap();
+    let classes = lda.get_classes().unwrap();
+    for i in 0..scores.nrows() {
+        assert_eq!(
+            preds[i],
+            classes[argmax(scores.row(i))],
+            "predict must equal argmax of the decision function at row {i}"
+        );
+    }
+}
+
+/// predict_proba rows are valid probability distributions: every entry in [0,1] and each
+/// row sums to 1
+#[test]
+fn test_predict_proba_rows_are_distributions() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y).unwrap();
+
+    let proba = lda.predict_proba(&x).unwrap();
+    assert_eq!(proba.shape(), &[9, 3]);
+    for row in proba.outer_iter() {
+        assert_abs_diff_eq!(row.sum(), 1.0, epsilon = 1e-12);
+        for &p in row.iter() {
+            assert!((0.0..=1.0).contains(&p), "probability {p} outside [0,1]");
+        }
+    }
+}
+
+/// Ground truth: predict_proba is exactly the row-wise softmax of decision_function
+#[test]
+fn test_predict_proba_equals_softmax_of_decision_function() {
+    let (x, y) = make_three_class_2d();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y).unwrap();
+
+    let scores = lda.decision_function(&x).unwrap();
+    let proba = lda.predict_proba(&x).unwrap();
+    assert_eq!(scores.shape(), proba.shape());
+
+    for i in 0..scores.nrows() {
+        let row = scores.row(i);
+        let max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let exps: Vec<f64> = row.iter().map(|&v| (v - max).exp()).collect();
+        let sum: f64 = exps.iter().sum();
+        for j in 0..row.len() {
+            assert_abs_diff_eq!(proba[[i, j]], exps[j] / sum, epsilon = 1e-12);
+        }
+    }
+}
+
+/// On well-separated classes the predicted class receives a posterior close to 1
+#[test]
+fn test_predict_proba_confident_on_separated_data() {
+    let (x, y) = make_three_class_2d();
+    let (xh, yh) = make_three_class_holdout();
+    let mut lda = LDA::default();
+    lda.fit(&x, &y).unwrap();
+
+    let proba = lda.predict_proba(&xh).unwrap();
+    let classes = lda.get_classes().unwrap();
+    for (i, &true_label) in yh.iter().enumerate() {
+        let j = classes.iter().position(|&c| c == true_label).unwrap();
+        assert!(
+            proba[[i, j]] > 0.99,
+            "expected a confident posterior for the true class, got {}",
+            proba[[i, j]]
+        );
+    }
+}
+
+/// decision_function and predict_proba require a fitted model
+#[test]
+fn test_decision_function_and_predict_proba_not_fitted_error() {
+    let lda = LDA::default();
+    let (x, _) = make_three_class_2d();
+    assert!(matches!(
+        lda.decision_function(&x),
+        Err(Error::NotFitted("LDA"))
+    ));
+    assert!(matches!(
+        lda.predict_proba(&x),
+        Err(Error::NotFitted("LDA"))
+    ));
 }

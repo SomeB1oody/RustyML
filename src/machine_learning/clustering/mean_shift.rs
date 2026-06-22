@@ -268,16 +268,12 @@ impl MeanShift {
                 // Serial sum
                 let weight_sum = weights.sum();
 
-                let new_center = if weight_sum > 0.0 {
-                    let weighted_sum = if serial_gemv {
-                        gemv_par_switch(&x.t(), &weights, false)
-                    } else {
-                        gemv_par_auto(&x.t(), &weights)
-                    };
-                    weighted_sum / weight_sum
+                let weighted_sum = if serial_gemv {
+                    gemv_par_switch(&x.t(), &weights, false)
                 } else {
-                    Array1::zeros(n_features)
+                    gemv_par_auto(&x.t(), &weights)
                 };
+                let new_center = resolve_shifted_center(weighted_sum, weight_sum, &center);
 
                 // Check convergence using squared distance to avoid sqrt
                 let shift_squared = squared_euclidean_distance_row(&center, &new_center);
@@ -687,4 +683,52 @@ where
         a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(distances[k])
+}
+
+/// Resolves the shifted center for one mean-shift iteration
+///
+/// Normally the new center is the weight-normalized mean `weighted_sum / weight_sum`.
+/// When every RBF weight has underflowed to exactly zero (so `weight_sum == 0`), the
+/// window contains no usable neighbours: the center is left **where it is** rather than
+/// being teleported to the coordinate origin, which would otherwise inject a spurious
+/// cluster center unrelated to the data
+fn resolve_shifted_center(
+    weighted_sum: Array1<f64>,
+    weight_sum: f64,
+    center: &Array1<f64>,
+) -> Array1<f64> {
+    if weight_sum > 0.0 {
+        weighted_sum / weight_sum
+    } else {
+        center.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    /// A degenerate window (all weights underflowed to 0) must keep the current center,
+    /// not collapse it to the origin
+    #[test]
+    fn resolve_shifted_center_keeps_center_when_weights_underflow() {
+        let center = array![3.0, -4.0, 5.0];
+        // weight_sum == 0 implies the weighted sum is the zero vector
+        let weighted_sum = array![0.0, 0.0, 0.0];
+        let out = resolve_shifted_center(weighted_sum, 0.0, &center);
+        assert_eq!(
+            out, center,
+            "zero-weight window must keep the current center, got {out:?}"
+        );
+    }
+
+    /// With positive total weight the center is the weight-normalized mean
+    #[test]
+    fn resolve_shifted_center_normalizes_when_weights_present() {
+        let center = array![100.0, 100.0];
+        let weighted_sum = array![6.0, 9.0];
+        let out = resolve_shifted_center(weighted_sum, 3.0, &center);
+        assert_eq!(out, array![2.0, 3.0]);
+    }
 }

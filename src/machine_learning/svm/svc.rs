@@ -10,7 +10,7 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::gemv_par_switch;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
-pub use crate::types::KernelType;
+pub use crate::types::{Gamma, KernelType};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
@@ -25,7 +25,7 @@ use ndarray_rand::rand::rngs::StdRng;
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::machine_learning::{SVC, KernelType};
+/// use rustyml::machine_learning::{Gamma, SVC, KernelType};
 /// use ndarray::{Array2, Array1};
 ///
 /// // Create training data
@@ -34,7 +34,7 @@ use ndarray_rand::rand::rngs::StdRng;
 ///
 /// // Initialize SVM classifier with RBF kernel
 /// let mut svc = SVC::new(
-///     KernelType::RBF { gamma: 0.5 },
+///     KernelType::RBF { gamma: Gamma::Value(0.5) },
 ///     1.0,  // regularization parameter
 ///     1e-3, // tolerance
 ///     100,  // max iterations
@@ -89,7 +89,9 @@ impl Default for SVC {
     /// - `random_state` - None (non-deterministic working-set selection)
     fn default() -> Self {
         SVC {
-            kernel: KernelType::RBF { gamma: 0.1 },
+            kernel: KernelType::RBF {
+                gamma: Gamma::Value(0.1),
+            },
             regularization_param: 1.0,
             alphas: None,
             support_vectors: None,
@@ -255,6 +257,10 @@ impl SVC {
                 "All labels must be either 1.0 or -1.0",
             ));
         }
+
+        let x_mean = x.mean().unwrap_or(0.0);
+        let x_variance = x.iter().map(|&v| (v - x_mean).powi(2)).sum::<f64>() / x.len() as f64;
+        self.kernel = self.kernel.resolve_gamma(n_features, x_variance)?;
 
         // Initialize optimization variables
         let mut alphas = Array1::<f64>::zeros(n_samples);
@@ -827,7 +833,7 @@ mod tests {
         let svc = SVC {
             kernel: KernelType::Poly {
                 degree: 400,
-                gamma: 1.0,
+                gamma: Gamma::Value(1.0),
                 coef0: 1.0,
             },
             regularization_param: 1.0,

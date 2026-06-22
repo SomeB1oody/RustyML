@@ -16,6 +16,19 @@ use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
 
+/// Loss function minimized by [`LinearSVC`]
+///
+/// `Hinge` is `max(0, 1 - y·f(x))`; `SquaredHinge` is its square, `max(0, 1 - y·f(x))²`,
+/// which penalizes margin violations quadratically and is differentiable everywhere.
+/// scikit-learn's `LinearSVC` defaults to `SquaredHinge`; this crate defaults to `Hinge`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum Loss {
+    /// Standard hinge loss `max(0, 1 - y·f(x))`
+    Hinge,
+    /// Squared hinge loss `max(0, 1 - y·f(x))²`
+    SquaredHinge,
+}
+
 /// Linear Support Vector Classifier (LinearSVC)
 ///
 /// A classifier similar to sklearn's LinearSVC, trained with the hinge loss function
@@ -66,12 +79,17 @@ pub struct LinearSVC {
     max_iter: usize,
     /// Learning rate (step size) for gradient descent
     learning_rate: f64,
+    /// Inverse-scaling learning-rate decay: the effective rate at epoch `t` (0-indexed) is
+    /// `learning_rate / (1 + learning_rate_decay * t)`. `0.0` means a constant rate
+    learning_rate_decay: f64,
     /// Regularization type (L1 or L2) with strength parameter
     penalty: RegularizationType,
     /// Whether to calculate and use an intercept/bias term
     fit_intercept: bool,
     /// Training convergence tolerance
     tol: f64,
+    /// Loss function (hinge or squared hinge)
+    loss: Loss,
     /// Optional seed for the per-epoch minibatch shuffling, enabling reproducible training
     random_state: Option<u64>,
     /// Number of iterations that were actually performed during training
@@ -99,9 +117,11 @@ impl Default for LinearSVC {
             bias: None,
             max_iter: 1000,
             learning_rate: 0.001,
+            learning_rate_decay: 0.0,
             penalty: RegularizationType::L2(1.0),
             fit_intercept: true,
             tol: 1e-4,
+            loss: Loss::Hinge,
             random_state: None,
             n_iter: None,
         }
@@ -166,12 +186,60 @@ impl LinearSVC {
             bias: None,
             max_iter,
             learning_rate,
+            learning_rate_decay: 0.0,
             penalty,
             fit_intercept,
             tol,
+            loss: Loss::Hinge,
             random_state: None,
             n_iter: None,
         })
+    }
+
+    /// Selects the loss function (default: [`Loss::Hinge`])
+    ///
+    /// [`Loss::SquaredHinge`] penalizes margin violations quadratically and is what
+    /// scikit-learn's `LinearSVC` uses by default
+    ///
+    /// # Parameters
+    ///
+    /// - `loss` - the loss function to minimize
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_loss(mut self, loss: Loss) -> Self {
+        self.loss = loss;
+        self
+    }
+
+    /// Sets an inverse-scaling learning-rate decay (default: `0.0`, i.e. a constant rate)
+    ///
+    /// The effective learning rate at epoch `t` (0-indexed) is
+    /// `learning_rate / (1 + learning_rate_decay * t)`. A positive decay shrinks the step
+    /// size over time, which lets stochastic gradient descent settle closer to the optimum
+    /// instead of hovering at a fixed-step distance from it
+    ///
+    /// # Parameters
+    ///
+    /// - `decay` - Non-negative, finite decay rate
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - The updated instance, or an error if `decay` is invalid
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - If `decay` is negative or not finite
+    pub fn with_learning_rate_decay(mut self, decay: f64) -> Result<Self, Error> {
+        if decay < 0.0 || !decay.is_finite() {
+            return Err(Error::invalid_parameter(
+                "learning_rate_decay",
+                format!("must be non-negative and finite, got {decay}"),
+            ));
+        }
+        self.learning_rate_decay = decay;
+        Ok(self)
     }
 
     /// Sets a fixed RNG seed for the per-epoch minibatch shuffling, making training
@@ -210,12 +278,14 @@ impl LinearSVC {
     // Getters
     get_field!(get_fit_intercept, fit_intercept, bool);
     get_field!(get_learning_rate, learning_rate, f64);
+    get_field!(get_learning_rate_decay, learning_rate_decay, f64);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field_as_ref!(get_weights, weights, Option<&Array1<f64>>);
     get_field!(get_bias, bias, Option<f64>);
     get_field!(get_penalty, penalty, RegularizationType);
+    get_field!(get_loss, loss, Loss);
     get_field!(get_random_state, random_state, Option<u64>);
 
     /// Trains the model on the provided data
@@ -236,6 +306,7 @@ impl LinearSVC {
     /// # Errors
     ///
     /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid or feature dimension mismatches
+    /// - `Error::InvalidInput` - If any label is not 0.0 or 1.0 (LinearSVC is a binary classifier)
     /// - `Error::NonFinite` - If numerical issues occur during training (e.g., weights become NaN)
     ///
     /// # Performance
@@ -254,6 +325,12 @@ impl LinearSVC {
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
+
+        if !y.iter().all(|&yi| yi == 0.0 || yi == 1.0) {
+            return Err(Error::invalid_input(
+                "LinearSVC is a binary classifier; all labels must be either 0.0 or 1.0",
+            ));
+        }
 
         let mut weights = Array1::zeros(n_features);
         let mut bias = 0.0;
@@ -280,7 +357,21 @@ impl LinearSVC {
                               penalty: &RegularizationType|
          -> f64 {
             let margins: Array1<f64> = gemv_par_auto(x, weights) + bias;
-            let hinge = hinge_loss(&margins, y);
+            // Mean data loss, matching the configured loss function
+            let data_loss = match self.loss {
+                Loss::Hinge => hinge_loss(&margins, y),
+                Loss::SquaredHinge => {
+                    margins
+                        .iter()
+                        .zip(y.iter())
+                        .map(|(&m, &yi)| {
+                            let s = (1.0 - yi * m).max(0.0);
+                            s * s
+                        })
+                        .sum::<f64>()
+                        / margins.len() as f64
+                }
+            };
 
             // Regularization term
             let regularization_term = match penalty {
@@ -292,7 +383,7 @@ impl LinearSVC {
                 }
             };
 
-            hinge + regularization_term
+            data_loss + regularization_term
         };
 
         #[cfg(feature = "show_progress")]
@@ -310,18 +401,27 @@ impl LinearSVC {
             #[cfg(feature = "show_progress")]
             progress_bar.inc(1);
 
+            // Inverse-scaling learning-rate schedule
+            let lr = self.learning_rate / (1.0 + self.learning_rate_decay * (n_iter - 1) as f64);
+
             indices.shuffle(&mut rng);
 
             for batch_indices in indices.chunks(batch_size) {
                 let batch_len = batch_indices.len() as f64;
 
+                let loss = self.loss;
                 let accumulate = |idx: usize, w_grad: &mut Array1<f64>, b_grad: &mut f64| {
                     let xi = x.slice(s![idx, ..]);
                     let yi = y_binary[idx];
                     let margin = xi.dot(&weights) + bias;
-                    if yi * margin < 1.0 {
-                        w_grad.scaled_add(yi, &xi);
-                        *b_grad += yi;
+                    let slack = 1.0 - yi * margin;
+                    if slack > 0.0 {
+                        let coef = match loss {
+                            Loss::Hinge => yi,
+                            Loss::SquaredHinge => 2.0 * slack * yi,
+                        };
+                        w_grad.scaled_add(coef, &xi);
+                        *b_grad += coef;
                     }
                 };
 
@@ -337,12 +437,12 @@ impl LinearSVC {
                 };
 
                 // Update weights with the averaged hinge-loss gradient (in place, no allocation)
-                weights.scaled_add(self.learning_rate / batch_len, &weight_grad_sum);
+                weights.scaled_add(lr / batch_len, &weight_grad_sum);
 
                 match self.penalty {
                     RegularizationType::L2(lambda) => {
                         // L2 gradient is lambda * weights
-                        weights = &weights * (1.0 - self.learning_rate * lambda);
+                        weights = &weights * (1.0 - lr * lambda);
                     }
                     RegularizationType::L1(lambda) => {
                         // L1 subgradient update
@@ -355,12 +455,12 @@ impl LinearSVC {
                                 0.0
                             }
                         });
-                        weights = &weights - &(l1_grad * (self.learning_rate * lambda));
+                        weights = &weights - &(l1_grad * (lr * lambda));
                     }
                 }
 
                 if self.fit_intercept {
-                    bias += self.learning_rate * bias_grad_sum / batch_len;
+                    bias += lr * bias_grad_sum / batch_len;
                 }
 
                 // Catch weight explosion early

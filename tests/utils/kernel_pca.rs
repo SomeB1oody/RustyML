@@ -5,7 +5,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::types::KernelType;
+use rustyml::types::{Gamma, KernelType};
 use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
 
 use crate::common::assert_allclose;
@@ -137,9 +137,14 @@ fn test_new_linear_kernel() {
 
 #[test]
 fn test_new_rbf_kernel() {
-    let kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Lanczos);
+    let kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Lanczos);
     assert_eq!(kpca.get_n_components(), 2);
     assert_eq!(kpca.get_eigen_solver(), EigenSolver::Lanczos);
 }
@@ -149,7 +154,7 @@ fn test_new_poly_kernel() {
     let kpca = KernelPCA::new(
         KernelType::Poly {
             degree: 2,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 0.0,
         },
         2,
@@ -163,7 +168,7 @@ fn test_new_poly_kernel() {
 fn test_new_sigmoid_kernel() {
     let kpca = KernelPCA::new(
         KernelType::Sigmoid {
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 0.0,
         },
         1,
@@ -187,7 +192,7 @@ fn test_new_sigmoid_gamma_zero_accepted() {
     assert!(
         KernelPCA::new(
             KernelType::Sigmoid {
-                gamma: 0.0,
+                gamma: Gamma::Value(0.0),
                 coef0: 0.0
             },
             1
@@ -210,19 +215,37 @@ fn test_new_n_components_zero_returns_invalid_parameter() {
 
 #[test]
 fn test_new_rbf_gamma_zero_returns_invalid_parameter() {
-    let err = KernelPCA::new(KernelType::RBF { gamma: 0.0 }, 1).unwrap_err();
+    let err = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.0),
+        },
+        1,
+    )
+    .unwrap_err();
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_rbf_gamma_negative_returns_invalid_parameter() {
-    let err = KernelPCA::new(KernelType::RBF { gamma: -1.0 }, 1).unwrap_err();
+    let err = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(-1.0),
+        },
+        1,
+    )
+    .unwrap_err();
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
 #[test]
 fn test_new_rbf_gamma_nan_returns_invalid_parameter() {
-    let err = KernelPCA::new(KernelType::RBF { gamma: f64::NAN }, 1).unwrap_err();
+    let err = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(f64::NAN),
+        },
+        1,
+    )
+    .unwrap_err();
     assert!(matches!(err, Error::InvalidParameter { .. }));
 }
 
@@ -230,7 +253,7 @@ fn test_new_rbf_gamma_nan_returns_invalid_parameter() {
 fn test_new_rbf_gamma_infinity_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::RBF {
-            gamma: f64::INFINITY,
+            gamma: Gamma::Value(f64::INFINITY),
         },
         1,
     )
@@ -243,7 +266,7 @@ fn test_new_poly_degree_zero_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Poly {
             degree: 0,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 0.0,
         },
         1,
@@ -257,7 +280,7 @@ fn test_new_poly_gamma_zero_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Poly {
             degree: 2,
-            gamma: 0.0,
+            gamma: Gamma::Value(0.0),
             coef0: 0.0,
         },
         1,
@@ -271,7 +294,7 @@ fn test_new_poly_gamma_negative_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Poly {
             degree: 2,
-            gamma: -0.5,
+            gamma: Gamma::Value(-0.5),
             coef0: 0.0,
         },
         1,
@@ -285,7 +308,7 @@ fn test_new_poly_coef0_nan_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Poly {
             degree: 2,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: f64::NAN,
         },
         1,
@@ -299,7 +322,7 @@ fn test_new_poly_gamma_inf_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Poly {
             degree: 2,
-            gamma: f64::INFINITY,
+            gamma: Gamma::Value(f64::INFINITY),
             coef0: 0.0,
         },
         1,
@@ -312,7 +335,7 @@ fn test_new_poly_gamma_inf_returns_invalid_parameter() {
 fn test_new_sigmoid_gamma_nan_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Sigmoid {
-            gamma: f64::NAN,
+            gamma: Gamma::Value(f64::NAN),
             coef0: 0.0,
         },
         1,
@@ -325,7 +348,7 @@ fn test_new_sigmoid_gamma_nan_returns_invalid_parameter() {
 fn test_new_sigmoid_coef0_infinity_returns_invalid_parameter() {
     let err = KernelPCA::new(
         KernelType::Sigmoid {
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: f64::INFINITY,
         },
         1,
@@ -338,9 +361,14 @@ fn test_new_sigmoid_coef0_infinity_returns_invalid_parameter() {
 
 #[test]
 fn test_fit_empty_input_returns_empty_input() {
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x: Array2<f64> = Array2::zeros((0, 2));
     let err = kpca.fit(&x).unwrap_err();
     assert!(
@@ -352,9 +380,14 @@ fn test_fit_empty_input_returns_empty_input() {
 #[test]
 fn test_fit_one_sample_returns_invalid_input() {
     // KernelPCA requires at least 2 samples
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x = array![[1.0, 2.0]];
     let err = kpca.fit(&x).unwrap_err();
     assert!(
@@ -366,9 +399,14 @@ fn test_fit_one_sample_returns_invalid_input() {
 #[test]
 fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
     // 3 samples, but n_components=5 - should fail during fit, not construction
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 5)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        5,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x = array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]];
     let err = kpca.fit(&x).unwrap_err();
     assert!(
@@ -384,9 +422,14 @@ fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
 
 #[test]
 fn test_fit_nan_in_input_returns_non_finite() {
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x = array![[1.0, f64::NAN], [0.0, 1.0], [-1.0, 0.0]];
     let err = kpca.fit(&x).unwrap_err();
     assert!(
@@ -397,9 +440,14 @@ fn test_fit_nan_in_input_returns_non_finite() {
 
 #[test]
 fn test_fit_inf_in_input_returns_non_finite() {
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x = array![[f64::INFINITY, 0.0], [0.0, 1.0], [-1.0, 0.0]];
     let err = kpca.fit(&x).unwrap_err();
     assert!(
@@ -412,9 +460,14 @@ fn test_fit_inf_in_input_returns_non_finite() {
 
 #[test]
 fn test_transform_before_fit_returns_not_fitted() {
-    let kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let x = array![[1.0, 0.0], [0.0, 1.0]];
     let err = kpca.transform(&x).unwrap_err();
     assert!(
@@ -426,9 +479,14 @@ fn test_transform_before_fit_returns_not_fitted() {
 #[test]
 fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
     let x_train = make_small_dataset(); // 8 x 2
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca.fit(&x_train).unwrap();
 
     // Wrong: 3 features instead of 2
@@ -443,9 +501,14 @@ fn test_transform_wrong_feature_count_returns_dimension_mismatch() {
 #[test]
 fn test_transform_nan_in_input_returns_error() {
     let x_train = make_small_dataset();
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca.fit(&x_train).unwrap();
 
     let x_bad = array![[f64::NAN, 0.0], [0.0, 1.0]];
@@ -460,9 +523,14 @@ fn test_transform_nan_in_input_returns_error() {
 #[test]
 fn test_transform_empty_input_returns_empty_input() {
     let x_train = make_small_dataset();
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca.fit(&x_train).unwrap();
 
     let x_empty: Array2<f64> = Array2::zeros((0, 2));
@@ -511,7 +579,12 @@ fn test_fit_transform_linear_kernel() {
 
 #[test]
 fn test_fit_transform_rbf_kernel() {
-    run_fit_transform_shape_check(KernelType::RBF { gamma: 0.5 }, 2);
+    run_fit_transform_shape_check(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    );
 }
 
 #[test]
@@ -519,7 +592,7 @@ fn test_fit_transform_poly_kernel() {
     run_fit_transform_shape_check(
         KernelType::Poly {
             degree: 2,
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 1.0,
         },
         2,
@@ -531,7 +604,7 @@ fn test_fit_transform_sigmoid_kernel() {
     // K(x,y) = tanh(gamma * x.y + coef0); small gamma keeps centering well-conditioned
     run_fit_transform_shape_check(
         KernelType::Sigmoid {
-            gamma: 0.1,
+            gamma: Gamma::Value(0.1),
             coef0: 0.0,
         },
         2,
@@ -548,7 +621,9 @@ fn test_fit_transform_cosine_kernel() {
 #[test]
 fn test_fit_transform_equals_fit_then_transform() {
     let x = make_small_dataset();
-    let kernel = KernelType::RBF { gamma: 0.5 };
+    let kernel = KernelType::RBF {
+        gamma: Gamma::Value(0.5),
+    };
 
     // Path A: fit_transform in one call
     let mut kpca_a = KernelPCA::new(kernel, 2)
@@ -573,9 +648,14 @@ fn test_fit_transform_equals_fit_then_transform() {
 #[test]
 fn test_centering_training_output_has_near_zero_column_means() {
     let x = make_small_dataset(); // 8 x 2
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let proj = kpca.fit_transform(&x).unwrap();
 
     // n_samples = 8, check both components
@@ -590,9 +670,14 @@ fn test_centering_training_output_has_near_zero_column_means() {
 #[test]
 fn test_eigenvalues_are_positive_after_fit() {
     let x = make_small_dataset();
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 4)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        4,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca.fit(&x).unwrap();
 
     let evs = kpca.get_eigenvalues().unwrap();
@@ -624,15 +709,25 @@ fn test_eigensolver_dense_vs_lanczos_agree() {
     let x = make_small_dataset();
     let n_comp = 2;
 
-    let mut kpca_dense = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, n_comp)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca_dense = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        n_comp,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca_dense.fit(&x).unwrap();
     let proj_dense = kpca_dense.transform(&x).unwrap();
 
-    let mut kpca_lanczos = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, n_comp)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Lanczos);
+    let mut kpca_lanczos = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        n_comp,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Lanczos);
     kpca_lanczos.fit(&x).unwrap();
     let proj_lanczos = kpca_lanczos.transform(&x).unwrap();
 
@@ -652,15 +747,25 @@ fn test_eigensolver_dense_vs_power_iteration_agree() {
     let x = make_small_dataset();
     let n_comp = 2;
 
-    let mut kpca_dense = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, n_comp)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca_dense = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        n_comp,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca_dense.fit(&x).unwrap();
     let proj_dense = kpca_dense.transform(&x).unwrap();
 
-    let mut kpca_pi = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, n_comp)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::PowerIteration);
+    let mut kpca_pi = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        n_comp,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::PowerIteration);
     kpca_pi.fit(&x).unwrap();
     let proj_pi = kpca_pi.transform(&x).unwrap();
 
@@ -681,9 +786,14 @@ fn test_all_three_solvers_produce_finite_shapes() {
         EigenSolver::PowerIteration,
     ] {
         let x = make_small_dataset();
-        let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-            .unwrap()
-            .with_eigen_solver(solver);
+        let mut kpca = KernelPCA::new(
+            KernelType::RBF {
+                gamma: Gamma::Value(0.5),
+            },
+            2,
+        )
+        .unwrap()
+        .with_eigen_solver(solver);
         let proj = kpca.fit_transform(&x).unwrap();
         assert_eq!(proj.shape(), [8, 2], "shape mismatch for solver {solver:?}");
         for &v in proj.iter() {
@@ -699,7 +809,9 @@ fn test_all_three_solvers_produce_finite_shapes() {
 #[test]
 fn test_determinism_dense_solver() {
     let x = make_small_dataset();
-    let kernel = KernelType::RBF { gamma: 0.5 };
+    let kernel = KernelType::RBF {
+        gamma: Gamma::Value(0.5),
+    };
 
     let mut kpca1 = KernelPCA::new(kernel, 2)
         .unwrap()
@@ -722,9 +834,14 @@ fn test_rbf_separates_radial_clusters_better_than_linear() {
     // 24 samples: 12 inner (r=0.5, label=-1) + 12 outer (r=3.0, label=1)
     let (x, labels) = make_radial_clusters(12, 12);
 
-    let mut kpca_rbf = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca_rbf = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let proj_rbf = kpca_rbf.fit_transform(&x).unwrap();
 
     let mut kpca_lin = KernelPCA::new(KernelType::Linear, 2)
@@ -749,9 +866,14 @@ fn test_rbf_separates_radial_clusters_better_than_linear() {
 #[test]
 fn test_save_load_round_trip() {
     let x = make_small_dataset();
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     kpca.fit(&x).unwrap();
     let proj_before = kpca.transform(&x).unwrap();
 
@@ -783,9 +905,14 @@ fn test_load_from_nonexistent_path_returns_io_error() {
 fn test_single_feature_data_fits_and_transforms() {
     // Four 1-D points; the kernel matrix is 4x4 and centering still applies
     let x = array![[1.0], [2.0], [3.0], [4.0]];
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let proj = kpca.fit_transform(&x).unwrap();
     assert_eq!(proj.shape(), [4, 1]);
     for &v in proj.iter() {
@@ -806,9 +933,14 @@ fn test_parallel_path_n_samples_200() {
         data.push(angle.sin());
     }
     let x = Array2::from_shape_vec((n, 2), data).unwrap();
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.05 }, 2)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.05),
+        },
+        2,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let proj = kpca.fit_transform(&x).unwrap();
     assert_eq!(proj.shape(), [n, 2]);
     for &v in proj.iter() {
@@ -823,7 +955,9 @@ fn test_rbf_kernel_known_value() {
     // K(x,y) = exp(-gamma * ||x-y||^2); ||x-y||^2 = 25, gamma=0.1, so K = exp(-2.5)
     let x1 = array![3.0, 0.0];
     let x2 = array![0.0, 4.0];
-    let k = KernelType::RBF { gamma: 0.1 };
+    let k = KernelType::RBF {
+        gamma: Gamma::Value(0.1),
+    };
     let expected = (-2.5f64).exp();
     let actual = k.compute(x1.view(), x2.view());
     assert_abs_diff_eq!(actual, expected, epsilon = 1e-12);
@@ -856,7 +990,7 @@ fn test_poly_kernel_known_value() {
     let x2 = array![3.0, 4.0];
     let k = KernelType::Poly {
         degree: 2,
-        gamma: 1.0,
+        gamma: Gamma::Value(1.0),
         coef0: 1.0,
     };
     let actual = k.compute(x1.view(), x2.view());
@@ -869,7 +1003,7 @@ fn test_sigmoid_kernel_known_value() {
     let x1 = array![1.0, 0.0];
     let x2 = array![1.0, 0.0];
     let k = KernelType::Sigmoid {
-        gamma: 1.0,
+        gamma: Gamma::Value(1.0),
         coef0: 0.0,
     };
     let expected = 1.0f64.tanh();
@@ -883,9 +1017,14 @@ fn test_sigmoid_kernel_known_value() {
 fn test_n_components_equals_n_samples_boundary() {
     // 4 samples; n_components=4 is accepted (n_components <= n_samples)
     let x = array![[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0],];
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 4)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        4,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     // May succeed or fail with Computation, but must not return InvalidParameter
     match kpca.fit(&x) {
         Ok(_) => {
@@ -906,9 +1045,14 @@ fn test_n_components_equals_n_samples_boundary() {
 #[test]
 fn test_two_samples_is_valid() {
     let x = array![[1.0, 2.0], [3.0, 4.0]];
-    let mut kpca = KernelPCA::new(KernelType::RBF { gamma: 0.5 }, 1)
-        .unwrap()
-        .with_eigen_solver(EigenSolver::Dense);
+    let mut kpca = KernelPCA::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1,
+    )
+    .unwrap()
+    .with_eigen_solver(EigenSolver::Dense);
     let result = kpca.fit(&x);
     // May succeed or return Computation (rank-1 kernel), but must not panic
     // and must not return InvalidInput (2 >= minimum of 2)
@@ -926,7 +1070,7 @@ fn test_fit_indefinite_kernel_negative_eigenvalue_is_tolerated() {
     let x = array![[1.0], [4.0]]; // 2 samples, 1 feature
     let mut kpca = KernelPCA::new(
         KernelType::Sigmoid {
-            gamma: 1.0,
+            gamma: Gamma::Value(1.0),
             coef0: 0.0,
         },
         2, // == n_samples, so a non-positive eigenvalue is necessarily selected

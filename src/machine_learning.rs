@@ -9,7 +9,7 @@
 //! All estimators implement the shared [`Fit`](crate::machine_learning::traits::Fit) /
 //! [`Predict`](crate::machine_learning::traits::Predict) traits
 
-pub use crate::types::{DistanceCalculationMetric, KernelType, RegularizationType};
+pub use crate::types::{DistanceCalculationMetric, Gamma, KernelType, RegularizationType};
 
 /// Clustering estimators: DBSCAN, K-means, and Mean Shift
 pub mod clustering;
@@ -41,6 +41,6 @@ pub use discriminant_analysis::{LDA, Shrinkage, Solver};
 pub use ensemble::{IsolationForest, IsolationTree};
 pub use linear_model::{LinearRegression, LogisticRegression, generate_polynomial_features};
 pub use neighbors::{KNN, WeightingStrategy};
-pub use svm::{LinearSVC, SVC};
+pub use svm::{LinearSVC, Loss, SVC};
 pub use traits::{Fit, Predict};
 pub use tree::{Algorithm, DecisionTree, DecisionTreeParams, Node, NodeType};

@@ -797,3 +797,236 @@ fn l1_regularization_many_features_recovers_informative_feature() {
         max_other
     );
 }
+
+// score (coefficient of determination R²)
+
+/// On exactly-linear data (y = 3x0 - 2x1 + 5) a converged model achieves R² ≈ 1
+#[test]
+fn score_is_one_on_perfectly_linear_data() {
+    let x = array![
+        [1.0, 1.0],
+        [2.0, 0.0],
+        [0.0, 3.0],
+        [4.0, 2.0],
+        [3.0, 1.0],
+        [1.0, 4.0]
+    ];
+    let y = array![6.0, 11.0, -1.0, 13.0, 12.0, 0.0];
+    let mut model = LinearRegression::new(true, 0.02, 300_000, 1e-13).unwrap();
+    model.fit(&x, &y).unwrap();
+    let r2 = model.score(&x, &y).unwrap();
+    assert!(r2 <= 1.0 + 1e-9, "R² must not exceed 1, got {r2}");
+    assert!(
+        r2 > 0.999,
+        "expected R² ≈ 1 on exactly-linear data, got {r2}"
+    );
+}
+
+/// score equals the textbook R² definition computed independently from predict()
+#[test]
+fn score_matches_r2_definition() {
+    let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+    let y = array![2.1, 3.9, 6.2, 7.8, 10.1]; // noisy linear, R² strictly < 1
+    let mut model = LinearRegression::new(true, 0.01, 100_000, 1e-12).unwrap();
+    model.fit(&x, &y).unwrap();
+
+    let preds = model.predict(&x).unwrap();
+    let y_mean = y.iter().sum::<f64>() / y.len() as f64;
+    let ss_res: f64 = y
+        .iter()
+        .zip(preds.iter())
+        .map(|(yi, pi)| (yi - pi).powi(2))
+        .sum();
+    let ss_tot: f64 = y.iter().map(|yi| (yi - y_mean).powi(2)).sum();
+    let expected = 1.0 - ss_res / ss_tot;
+
+    let r2 = model.score(&x, &y).unwrap();
+    assert_abs_diff_eq!(r2, expected, epsilon = 1e-12);
+    assert!(r2 < 1.0, "noisy data must score strictly below 1, got {r2}");
+}
+
+/// A model that predicts the mean of y scores R² = 0. Here zero coefficients + an
+/// intercept fitted on mean-centered features converges to predicting ȳ.
+#[test]
+fn score_mean_predictor_is_about_zero() {
+    // Feature is uninformative about y (y alternates independently of x), so the best
+    // linear fit is ŷ ≈ ȳ and R² ≈ 0
+    let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
+    let y = array![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
+    let mut model = LinearRegression::new(true, 0.001, 200_000, 1e-13).unwrap();
+    model.fit(&x, &y).unwrap();
+    let r2 = model.score(&x, &y).unwrap();
+    assert!(
+        r2.abs() < 0.1,
+        "an uninformative feature should give R² near 0, got {r2}"
+    );
+    assert!(r2 <= 1.0 + 1e-9);
+}
+
+/// score on an unfitted model returns NotFitted
+#[test]
+fn score_not_fitted_errors() {
+    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let x = array![[1.0], [2.0]];
+    let y = array![1.0, 2.0];
+    assert!(matches!(
+        model.score(&x, &y),
+        Err(Error::NotFitted("LinearRegression"))
+    ));
+}
+
+/// score with a y of the wrong length returns DimensionMismatch
+#[test]
+fn score_y_length_mismatch_errors() {
+    let x = array![[1.0], [2.0], [3.0]];
+    let y = array![1.0, 2.0, 3.0];
+    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+    model.fit(&x, &y).unwrap();
+    let y_wrong = array![1.0, 2.0];
+    assert!(matches!(
+        model.score(&x, &y_wrong),
+        Err(Error::DimensionMismatch { .. })
+    ));
+}
+
+// Closed-form (normal-equation) solver
+
+use rustyml::machine_learning::linear_model::Solver;
+
+/// On exactly-linear data the closed-form solver recovers the true coefficients and
+/// intercept exactly (no iteration / learning-rate tuning), unlike gradient descent which
+/// only approaches them
+#[test]
+fn normal_solver_recovers_exact_coefficients() {
+    // y = 3*x0 - 2*x1 + 5, exactly
+    let x = array![
+        [1.0, 1.0],
+        [2.0, 0.0],
+        [0.0, 3.0],
+        [4.0, 2.0],
+        [3.0, 1.0],
+        [1.0, 4.0]
+    ];
+    let y = array![6.0, 11.0, -1.0, 13.0, 12.0, 0.0];
+
+    // The learning rate / max_iter / tol are ignored by the closed-form solver
+    let mut model = LinearRegression::new(true, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_solver(Solver::Normal);
+    model.fit(&x, &y).unwrap();
+
+    let coefs = model.get_coefficients().unwrap();
+    assert_abs_diff_eq!(coefs[0], 3.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(coefs[1], -2.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(model.get_intercept().unwrap(), 5.0, epsilon = 1e-9);
+    // Closed form performs no gradient-descent iterations
+    assert_eq!(model.get_actual_iterations(), Some(0));
+}
+
+/// The closed-form L2 (ridge) solution matches what gradient descent converges to on the
+/// same objective: the GD cost uses penalty (alpha/2)||w||^2, so the closed form uses
+/// ridge lambda = n*alpha. Agreement validates that matching.
+#[test]
+fn normal_solver_l2_matches_gradient_descent() {
+    let x = array![
+        [1.0, 0.5],
+        [2.0, -1.0],
+        [3.0, 0.0],
+        [-1.0, 2.0],
+        [0.5, 1.5],
+        [2.5, -0.5],
+        [1.0, 1.0],
+        [-2.0, 0.5]
+    ];
+    let y = array![2.0, 1.0, 3.5, -0.5, 1.0, 2.2, 1.8, -1.5];
+
+    let alpha = 0.3;
+    let mut gd = LinearRegression::new(true, 0.03, 400_000, 1e-13)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(alpha))
+        .unwrap();
+    gd.fit(&x, &y).unwrap();
+
+    let mut normal = LinearRegression::new(true, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(alpha))
+        .unwrap()
+        .with_solver(Solver::Normal);
+    normal.fit(&x, &y).unwrap();
+
+    let gd_c = gd.get_coefficients().unwrap();
+    let nm_c = normal.get_coefficients().unwrap();
+    for i in 0..gd_c.len() {
+        assert_abs_diff_eq!(gd_c[i], nm_c[i], epsilon = 1e-3);
+    }
+    assert_abs_diff_eq!(
+        gd.get_intercept().unwrap(),
+        normal.get_intercept().unwrap(),
+        epsilon = 1e-3
+    );
+}
+
+/// Closed-form OLS matches the hand-evaluated normal equation w = (X^T X)^-1 X^T y on a
+/// fit_intercept=false problem
+#[test]
+fn normal_solver_no_intercept_matches_normal_equation() {
+    // Simple 2-feature, no-intercept system
+    let x = array![[1.0, 2.0], [3.0, 1.0], [2.0, 4.0], [0.0, 1.0]];
+    let y = array![5.0, 5.0, 10.0, 2.0]; // y = 1*x0 + 2*x1 (exact)
+    let mut model = LinearRegression::new(false, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_solver(Solver::Normal);
+    model.fit(&x, &y).unwrap();
+    let c = model.get_coefficients().unwrap();
+    assert_abs_diff_eq!(c[0], 1.0, epsilon = 1e-9);
+    assert_abs_diff_eq!(c[1], 2.0, epsilon = 1e-9);
+    assert_eq!(model.get_intercept().unwrap(), 0.0);
+}
+
+/// The Normal solver rejects L1 regularization, which has no closed form
+#[test]
+fn normal_solver_rejects_l1_regularization() {
+    let x = array![[1.0], [2.0], [3.0]];
+    let y = array![1.0, 2.0, 3.0];
+    let mut model = LinearRegression::new(true, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L1(0.5))
+        .unwrap()
+        .with_solver(Solver::Normal);
+    let result = model.fit(&x, &y);
+    assert!(
+        matches!(result, Err(Error::InvalidInput(_))),
+        "Normal solver + L1 must error, got {result:?}"
+    );
+}
+
+/// Ridge shrinks coefficients relative to unregularized OLS (closed form)
+#[test]
+fn normal_solver_ridge_shrinks_coefficients() {
+    let x = array![[1.0, 0.9], [2.0, 2.1], [3.0, 2.9], [4.0, 4.2], [5.0, 5.1]];
+    let y = array![1.0, 2.0, 3.0, 4.0, 5.0];
+
+    let mut ols = LinearRegression::new(true, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_solver(Solver::Normal);
+    ols.fit(&x, &y).unwrap();
+
+    let mut ridge = LinearRegression::new(true, 0.01, 1, 1e-6)
+        .unwrap()
+        .with_regularization(RegularizationType::L2(1.0))
+        .unwrap()
+        .with_solver(Solver::Normal);
+    ridge.fit(&x, &y).unwrap();
+
+    let ols_norm: f64 = ols.get_coefficients().unwrap().iter().map(|c| c * c).sum();
+    let ridge_norm: f64 = ridge
+        .get_coefficients()
+        .unwrap()
+        .iter()
+        .map(|c| c * c)
+        .sum();
+    assert!(
+        ridge_norm < ols_norm,
+        "ridge ||w||^2 ({ridge_norm}) must be smaller than OLS ({ols_norm})"
+    );
+}

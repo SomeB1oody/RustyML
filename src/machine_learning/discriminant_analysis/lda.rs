@@ -350,8 +350,9 @@ pub enum Shrinkage {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LDA {
-    /// Number of components to keep after dimensionality reduction
-    n_components: usize,
+    /// Number of components to keep after dimensionality reduction. `None` means "auto":
+    /// the maximum possible, `min(n_classes - 1, n_features)`, resolved at fit time
+    n_components: Option<usize>,
     /// Solver strategy for LDA computations
     solver: Solver,
     /// Optional shrinkage strategy for covariance estimation
@@ -377,12 +378,22 @@ pub struct LDA {
 ///
 /// # Default Values
 ///
-/// - `n_components` - 2
+/// - `n_components` - `None` (auto: `min(n_classes - 1, n_features)`, resolved at fit time)
 /// - `solver` - `Solver::SVD`
 /// - `shrinkage` - `None`
 impl Default for LDA {
     fn default() -> Self {
-        Self::new(2).expect("Default LDA parameters should be valid")
+        LDA {
+            n_components: None,
+            solver: Solver::SVD,
+            shrinkage: None,
+            classes: None,
+            priors: None,
+            means: None,
+            projection: None,
+            coefficients: None,
+            intercepts: None,
+        }
     }
 }
 
@@ -418,7 +429,7 @@ impl LDA {
         }
 
         Ok(Self {
-            n_components,
+            n_components: Some(n_components),
             solver: Solver::SVD,
             shrinkage: None,
             classes: None,
@@ -471,7 +482,7 @@ impl LDA {
     }
 
     // Getters
-    get_field!(get_n_components, n_components, usize);
+    get_field!(get_n_components, n_components, Option<usize>);
     get_field!(get_solver, solver, Solver);
     get_field!(get_shrinkage, shrinkage, Option<Shrinkage>);
     get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
@@ -560,13 +571,18 @@ impl LDA {
             )));
         }
 
+        // Resolve the number of components
         let max_components = (n_classes - 1).min(n_features);
-        if self.n_components > max_components {
-            return Err(Error::invalid_input(format!(
-                "n_components should be <= {}, got {}",
-                max_components, self.n_components
-            )));
-        }
+        let n_components = match self.n_components {
+            Some(requested) if requested > max_components => {
+                return Err(Error::invalid_input(format!(
+                    "n_components should be <= {}, got {}",
+                    max_components, requested
+                )));
+            }
+            Some(requested) => requested,
+            None => max_components,
+        };
 
         #[cfg(feature = "show_progress")]
         if let Some(pb) = &progress_bar {
@@ -672,7 +688,7 @@ impl LDA {
         }
 
         // Build the discriminant projection by solving S_b w = lambda * S_w w
-        let projection = Solver::project(&cov, &sb, self.n_components)?;
+        let projection = Solver::project(&cov, &sb, n_components)?;
         self.projection = Some(projection);
 
         // Cache the per-class linear-scoring parameters (Sigma^-1 * mu_c and the intercepts)
@@ -738,18 +754,9 @@ impl LDA {
             .classes
             .as_ref()
             .ok_or_else(|| Error::not_fitted("LDA"))?;
-        // Per-class scoring parameters were precomputed at fit time
-        let coefficients = self
-            .coefficients
-            .as_ref()
-            .ok_or_else(|| Error::not_fitted("LDA"))?;
-        let intercepts = self
-            .intercepts
-            .as_ref()
-            .ok_or_else(|| Error::not_fitted("LDA"))?;
 
-        let n_features = coefficients.ncols();
-        crate::machine_learning::validation::validate_predict_input(x, n_features)?;
+        // Per-class linear discriminant scores; columns are aligned to `classes`
+        let scores = self.decision_scores(x)?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -762,9 +769,6 @@ impl LDA {
         };
 
         let n_classes = classes.len();
-
-        let mut scores = gemm_par_auto(x, &coefficients.t());
-        scores += intercepts;
 
         let predict_sample = |score_row: ArrayView1<f64>| {
             // Keep the best-scoring label; ties resolve to the lowest class index
@@ -811,6 +815,95 @@ impl LDA {
         #[cfg(feature = "show_progress")]
         progress_bar.finish_with_message("Completed");
         Ok(Array1::from(predictions))
+    }
+
+    /// Computes the per-class linear discriminant scores for every sample
+    ///
+    /// Score `j` for a sample `x` is `delta_j(x) = x . (Sigma^-1 mu_j) - 0.5 mu_j . Sigma^-1 mu_j
+    /// + ln(prior_j)`. The returned matrix has shape `(n_samples, n_classes)` with columns
+    /// ordered to match [`get_classes`](Self::get_classes). This is the shared core of
+    /// [`predict`](Self::predict), [`decision_function`](Self::decision_function), and
+    /// [`predict_proba`](Self::predict_proba)
+    fn decision_scores<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        // Per-class scoring parameters were precomputed at fit time
+        let coefficients = self
+            .coefficients
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
+        let intercepts = self
+            .intercepts
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
+
+        let n_features = coefficients.ncols();
+        crate::machine_learning::validation::validate_predict_input(x, n_features)?;
+
+        let mut scores = gemm_par_auto(x, &coefficients.t());
+        scores += intercepts;
+        Ok(scores)
+    }
+
+    /// Returns the per-class linear discriminant scores (the decision function)
+    ///
+    /// The result has shape `(n_samples, n_classes)`; column `j` is the discriminant score
+    /// for the class at index `j` of [`get_classes`](Self::get_classes). [`predict`](Self::predict)
+    /// returns the per-row argmax of these scores
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix with samples as rows and features as columns
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, Error>` - The `(n_samples, n_classes)` matrix of discriminant scores
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        self.decision_scores(x)
+    }
+
+    /// Returns the posterior class probabilities for each sample
+    ///
+    /// Under the LDA Gaussian model with a shared covariance, the posterior `P(class_j | x)`
+    /// is the softmax of the discriminant scores from [`decision_function`](Self::decision_function).
+    /// The result has shape `(n_samples, n_classes)`, each row sums to 1, and columns are
+    /// ordered to match [`get_classes`](Self::get_classes). The softmax is computed in a
+    /// numerically stable way (subtracting the per-row maximum before exponentiating)
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Feature matrix with samples as rows and features as columns
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array2<f64>, Error>` - The `(n_samples, n_classes)` matrix of class posteriors
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NotFitted` - If the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::InvalidInput` - If inputs are empty, mismatched, or contain invalid values
+    pub fn predict_proba<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        let mut scores = self.decision_scores(x)?;
+        // Row-wise numerically stable softmax
+        for mut row in scores.outer_iter_mut() {
+            let row_max = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            row.mapv_inplace(|v| (v - row_max).exp());
+            let row_sum = row.sum();
+            row.mapv_inplace(|v| v / row_sum);
+        }
+        Ok(scores)
     }
 
     /// Transforms data using the trained projection matrix

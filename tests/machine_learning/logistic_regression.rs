@@ -766,3 +766,50 @@ fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
         result
     );
 }
+
+// regularization scaling convention (sklearn-SGD: penalty NOT divided by n_samples)
+
+/// The L2-regularized objective (1/n)Σlogloss + (α/2)||w||² is invariant to replicating
+/// every sample (mean log-loss and penalty are both unchanged), so the regularized optimum
+/// must be too. With a penalty erroneously divided by n_samples, replicating the data weakens
+/// the effective penalty and inflates the weights. Full-batch GD makes the replicated run an
+/// exact copy of the original once the penalty no longer depends on n.
+#[test]
+fn l2_regularization_strength_is_sample_count_invariant() {
+    let x = array![
+        [0.0, 0.0],
+        [1.0, 0.5],
+        [0.5, 1.0],
+        [2.0, 1.5],
+        [-1.0, -0.5],
+        [-0.5, -1.0],
+        [-2.0, -1.5],
+        [1.5, 2.0]
+    ];
+    let y = array![0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+
+    // 3x row-replicated copy
+    let mut x3 = Array2::<f64>::zeros((x.nrows() * 3, x.ncols()));
+    let mut y3 = Array1::<f64>::zeros(y.len() * 3);
+    for r in 0..3 {
+        for i in 0..x.nrows() {
+            x3.row_mut(r * x.nrows() + i).assign(&x.row(i));
+            y3[r * y.len() + i] = y[i];
+        }
+    }
+
+    let train = |xx: &Array2<f64>, yy: &Array1<f64>| {
+        let mut m = LogisticRegression::new(true, 0.1, 20_000, 1e-12)
+            .unwrap()
+            .with_regularization(RegularizationType::L2(2.0))
+            .unwrap();
+        m.fit(xx, yy).unwrap();
+        m.get_weights().unwrap().clone()
+    };
+
+    let w1 = train(&x, &y);
+    let w3 = train(&x3, &y3);
+    for i in 0..w1.len() {
+        assert_abs_diff_eq!(w1[i], w3[i], epsilon = 1e-6);
+    }
+}

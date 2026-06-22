@@ -728,3 +728,38 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
         }
     }
 }
+
+// centroid-shift convergence (scikit-learn): a converged solution is a fixed point
+
+/// The centroid-shift convergence criterion stops exactly when the centroids stop moving, so
+/// a converged k-means solution must satisfy the fixed-point property: every centroid equals
+/// the mean of the points assigned to it. (With a tight tolerance the residual is far below
+/// the asserted bound.)
+#[test]
+fn converged_centroids_equal_their_cluster_means() {
+    let mut km = KMeans::new(3, 300, 1e-6).unwrap().with_random_state(42);
+    let data = three_blob_data();
+    km.fit(&data).unwrap();
+
+    let centroids = km.get_centroids().unwrap();
+    let labels = km.get_labels().unwrap();
+    let n_features = data.ncols();
+
+    for k in 0..3 {
+        let mut sum = vec![0.0_f64; n_features];
+        let mut count = 0usize;
+        for (i, &lbl) in labels.iter().enumerate() {
+            if lbl == k {
+                for j in 0..n_features {
+                    sum[j] += data[[i, j]];
+                }
+                count += 1;
+            }
+        }
+        assert!(count > 0, "cluster {k} is empty");
+        for j in 0..n_features {
+            let mean_j = sum[j] / count as f64;
+            assert_abs_diff_eq!(centroids[[k, j]], mean_j, epsilon = 1e-3);
+        }
+    }
+}

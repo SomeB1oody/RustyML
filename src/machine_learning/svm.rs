@@ -8,5 +8,5 @@ pub mod linear_svc;
 /// Support Vector Classification (SVC)
 pub mod svc;
 
-pub use linear_svc::LinearSVC;
+pub use linear_svc::{LinearSVC, Loss};
 pub use svc::SVC;

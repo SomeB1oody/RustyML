@@ -167,8 +167,7 @@ pub struct DecisionTreeParams {
     /// Minimum number of samples required at a leaf node. Splits that produce leaves with
     /// fewer samples are rejected
     pub min_samples_leaf: usize,
-    /// Minimum impurity decrease required for a split. A node is split when the impurity
-    /// decrease is greater than or equal to this value
+    /// Minimum impurity decrease required for a split
     pub min_impurity_decrease: f64,
     /// Seed for breaking ties between equally-scoring splits
     pub random_state: Option<u64>,
@@ -694,8 +693,9 @@ impl DecisionTree {
             return Ok(self.create_leaf(y, indices));
         };
 
-        // Check if split meets minimum impurity decrease
-        if impurity_decrease < self.params.min_impurity_decrease {
+        // Check if the split meets the minimum impurity decrease
+        let node_weight = n_samples as f64 / x.nrows() as f64;
+        if node_weight * impurity_decrease < self.params.min_impurity_decrease {
             return Ok(self.create_leaf(y, indices));
         }
 
@@ -739,11 +739,13 @@ impl DecisionTree {
                 feature,
                 partitions,
             } => {
-                // Every branch must satisfy the leaf size constraint
-                if partitions
+                // A multi-way categorical split is useful as long as at least two branches
+                // each satisfy the leaf-size constraint
+                let adequate_branches = partitions
                     .iter()
-                    .any(|(_, idx)| idx.len() < self.params.min_samples_leaf)
-                {
+                    .filter(|(_, idx)| idx.len() >= self.params.min_samples_leaf)
+                    .count();
+                if adequate_branches < 2 {
                     return Ok(self.create_leaf(y, indices));
                 }
 
@@ -882,12 +884,19 @@ impl DecisionTree {
         // (split position, threshold, impurity_decrease); left = order[..pos], right = order[pos..]
         let mut best: Option<(usize, f64, f64)> = None;
 
+        // Enforce the leaf-size constraint while searching, not just on the final pick
+        let min_leaf = self.params.min_samples_leaf;
+
         // Evaluates the candidate split between sorted positions `pos-1` and `pos`
         let consider = |pos: usize,
                         imp_left: f64,
                         imp_right: f64,
                         best_score: &mut f64,
                         best: &mut Option<(usize, f64, f64)>| {
+            // Skip splits whose left (`pos`) or right (`n - pos`) child is below min_samples_leaf
+            if pos < min_leaf || n - pos < min_leaf {
+                return;
+            }
             let n_left = pos as f64;
             let n_right = (n - pos) as f64;
             let weighted = (n_left / n_f) * imp_left + (n_right / n_f) * imp_right;
@@ -933,9 +942,7 @@ impl DecisionTree {
                 consider(pos, imp_left, imp_right, &mut best_score, &mut best);
             }
         } else {
-            // Regression (CART/MSE): maintain a running sum and sum of squares for the left side
-            // The sums stay serial: this runs inside the per-feature parallel split search, and
-            // the prefix scan below is inherently sequential anyway
+            // Regression (CART/MSE)
             let total_sum: f64 = order.iter().map(|&(_, idx)| y[idx]).sum();
             let total_sumsq: f64 = order.iter().map(|&(_, idx)| y[idx] * y[idx]).sum();
             let mut left_sum = 0.0;

@@ -8,5 +8,5 @@ pub mod linear_regression;
 /// Logistic regression for binary classification
 pub mod logistic_regression;
 
-pub use linear_regression::LinearRegression;
+pub use linear_regression::{LinearRegression, Solver};
 pub use logistic_regression::{LogisticRegression, generate_polynomial_features};
