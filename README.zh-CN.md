@@ -32,7 +32,7 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 - **算法覆盖广**——经典的监督/无监督学习、异常检测，以及完整的神经网络框架。
 - **统一的结构化错误处理**——所有可能失败的调用都返回 `RustymlResult<T>`；错误被归类为清晰的类别变体，而非难以解析的字符串。
 - **可复现性**——一次 `set_global_seed` 调用即可让所有随机化组件变得确定。
-- **模型持久化**——通过 [Serde](https://serde.rs/) 将训练好的模型和网络权重以 JSON 形式保存与加载。
+- **模型持久化**——通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 将训练好的模型和网络权重以紧凑的二进制格式保存与加载。
 - **丰富的评估指标**——回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
 - **模块化 feature**——可以只引入 `metrics`、只引入 `math`、引入 `default` 学习栈，或引入 `full` 全量。
 
@@ -42,7 +42,7 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 
 ```toml
 [dependencies]
-rustyml = { version = "0.12", features = ["full"] }
+rustyml = { version = "*", features = ["full"] }
 ndarray = "0.17"
 ```
 
@@ -50,16 +50,16 @@ ndarray = "0.17"
 
 ```toml
 # 默认：经典机器学习 + 神经网络
-rustyml = "0.12"
+rustyml = "*"
 
 # 仅神经网络框架
-rustyml = { version = "0.12", features = ["neural_network"] }
+rustyml = { version = "*", features = ["neural_network"] }
 
 # 全部模块（ml、nn、utils、metrics、math）
-rustyml = { version = "0.12", features = ["full"] }
+rustyml = { version = "*", features = ["full"] }
 
 # 训练时在终端显示进度条
-rustyml = { version = "0.12", features = ["full", "show_progress"] }
+rustyml = { version = "*", features = ["full", "show_progress"] }
 ```
 
 > **最低支持 Rust 版本（MSRV）：** Rust 1.89+（edition 2024）。
@@ -83,8 +83,8 @@ let predictions = model.predict(&x).unwrap();
 println!("{:?}", predictions);
 
 // 保存并重新加载训练好的模型
-model.save_to_path("linear_regression.json").unwrap();
-let restored = LinearRegression::load_from_path("linear_regression.json").unwrap();
+model.save_to_path("linear_regression.bin").unwrap();
+let restored = LinearRegression::load_from_path("linear_regression.bin").unwrap();
 ```
 
 ### 神经网络
@@ -115,7 +115,7 @@ let predictions = model.predict(&x).unwrap();
 println!("预测结果形状: {:?}", predictions.shape());
 
 // 保存训练好的权重，之后可加载到新模型中
-model.save_to_path("model.json").unwrap();
+model.save_to_path("model.bin").unwrap();
 ```
 
 ### 评估模型
@@ -137,7 +137,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ### `machine_learning`
 
-经典的监督与无监督学习算法，均带有并行优化、输入校验和 JSON 持久化能力。
+经典的监督与无监督学习算法，均带有并行优化、输入校验和二进制持久化能力。
 
 | 类别 | 算法 |
 |------|------|
@@ -166,7 +166,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 - **损失函数** - `MeanSquaredError`、`MeanAbsoluteError`、`BinaryCrossEntropy`、`CategoricalCrossEntropy`、`SparseCategoricalCrossEntropy`
 
 训练支持全批量（`fit`）与小批量（`fit_with_batches`）循环、权重查看（`get_weights`），
-以及 JSON 序列化（`save_to_path` / `load_from_path`）。
+以及二进制序列化（`save_to_path` / `load_from_path`）。
 
 ### `utils`
 
