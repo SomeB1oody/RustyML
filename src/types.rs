@@ -172,6 +172,7 @@ impl Gamma {
     ///
     /// - [`Error::InvalidInput`](crate::error::Error::InvalidInput) - If `Scale` is requested but
     ///   the data variance is zero (constant features), or `n_features` is zero
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub fn resolve(self, n_features: usize, x_variance: f64) -> Result<f64, crate::error::Error> {
         if n_features == 0 {
             return Err(crate::error::Error::invalid_input(
@@ -465,6 +466,7 @@ mod tests {
     // Gamma::resolve (data-dependent gamma)
 
     /// `Gamma::Scale` resolves to 1 / (n_features * X.var()), matching scikit-learn
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_scale_resolves_to_inverse_features_times_variance() {
         let n_features = 4;
@@ -474,6 +476,7 @@ mod tests {
     }
 
     /// `Gamma::Auto` resolves to 1 / n_features
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_auto_resolves_to_inverse_features() {
         let g = Gamma::Auto.resolve(5, 999.0).unwrap();
@@ -481,6 +484,7 @@ mod tests {
     }
 
     /// `Gamma::Value` resolves to itself, regardless of the data statistics
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_value_resolves_to_itself() {
         let g = Gamma::Value(0.73).resolve(3, 10.0).unwrap();
@@ -488,6 +492,7 @@ mod tests {
     }
 
     /// `Gamma::Scale` errors when the data variance is zero (constant features)
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_scale_errors_on_zero_variance() {
         assert!(Gamma::Scale.resolve(3, 0.0).is_err());
@@ -498,6 +503,7 @@ mod tests {
 
     /// `resolve_gamma` replaces a kernel's Scale/Auto with the concrete value, leaving
     /// gamma-free kernels (Linear/Cosine) untouched
+    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn kernel_resolve_gamma_produces_value_variant() {
         let resolved = KernelType::RBF { gamma: Gamma::Auto }

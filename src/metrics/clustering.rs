@@ -5,7 +5,8 @@
 //! clustering from the feature geometry alone (silhouette, Davies-Bouldin, Calinski-Harabasz)
 
 use ahash::AHashMap;
-use ndarray::{Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip};
+use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use super::validate_pair;
 use crate::math::squared_euclidean_distance_row;
@@ -349,6 +350,84 @@ where
     }
 }
 
+/// Accumulates the symmetric pairwise-distance contributions of the upper-triangle rows in `rows`
+/// into `acc`: for each `i` in `rows` and each `j > i`, the single distance `d(i, j)` is added to
+/// both `acc[[i, cluster[j]]]` and `acc[[j, cluster[i]]]`
+///
+/// Visiting only `j > i` (and relying on `d` being symmetric) computes each unordered pair once.
+/// The skipped diagonal term `d(i, i) = 0` is a no-op for the running sum, so the result is
+/// identical to a full `n x n` scan
+fn accumulate_upper_triangle<S>(
+    acc: &mut Array2<f64>,
+    rows: impl Iterator<Item = usize>,
+    x: &ArrayBase<S, Ix2>,
+    cluster: &[usize],
+    metric: DistanceCalculationMetric,
+) where
+    S: Data<Elem = f64>,
+{
+    let n = x.nrows();
+    for i in rows {
+        let xi = x.row(i);
+        for j in (i + 1)..n {
+            let d = metric.distance(xi, x.row(j));
+            acc[[i, cluster[j]]] += d;
+            acc[[j, cluster[i]]] += d;
+        }
+    }
+}
+
+/// Builds `dist_to_cluster[[i, c]]` = total distance from sample `i` to every sample in cluster
+/// `c`, exploiting distance symmetry so each unordered pair is evaluated once (halving the metric
+/// calls versus a full `n x n` scan)
+///
+/// Below the scanned-element gate the upper triangle is folded serially, giving a result **bitwise
+/// identical** to the old full-scan fill (the only difference, the `d(i, i) = 0` self term, adds
+/// nothing to a sum of non-negative distances). At or above the gate the upper-triangle rows are
+/// dealt round-robin into `current_num_threads()` buckets - row `i` does `n - 1 - i` pair
+/// evaluations, so contiguous splits would be lopsided while interleaving balances them - and each
+/// bucket folds into its own private `(n, k)` accumulator before they are summed in bucket order.
+/// That fixed grouping keeps the parallel result **run-to-run deterministic at a fixed thread
+/// count** (numerically equal to the serial fill, though not bitwise identical across thread
+/// counts, since the per-cell summation order changes with the bucket count - the same tradeoff
+/// the `gemm` row-split path makes)
+fn pairwise_cluster_distances<S>(
+    x: &ArrayBase<S, Ix2>,
+    cluster: &[usize],
+    k: usize,
+    metric: DistanceCalculationMetric,
+) -> Array2<f64>
+where
+    S: Data<Elem = f64> + Sync,
+{
+    let n = x.nrows();
+    let scan_work = n.saturating_mul(n).saturating_mul(x.ncols());
+
+    if scan_work < silhouette_parallel_min_elems() {
+        let mut dist = Array2::<f64>::zeros((n, k));
+        accumulate_upper_triangle(&mut dist, 0..n, x, cluster, metric);
+        return dist;
+    }
+
+    // Round-robin the rows into per-thread buckets
+    let chunks = rayon::current_num_threads().max(1).min(n);
+    let partials: Vec<Array2<f64>> = (0..chunks)
+        .into_par_iter()
+        .map(|c| {
+            let mut acc = Array2::<f64>::zeros((n, k));
+            accumulate_upper_triangle(&mut acc, (c..n).step_by(chunks), x, cluster, metric);
+            acc
+        })
+        .collect();
+    partials
+        .into_iter()
+        .reduce(|mut sum, p| {
+            sum += &p;
+            sum
+        })
+        .unwrap_or_else(|| Array2::<f64>::zeros((n, k)))
+}
+
 /// Calculates the mean Silhouette Coefficient over all samples under the given distance metric
 ///
 /// For each sample, the silhouette `s = (b - a) / max(a, b)` compares the mean intra-cluster
@@ -408,20 +487,9 @@ where
         sizes[c] += 1;
     }
 
-    // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in cluster c
-    let mut dist_to_cluster = Array2::<f64>::zeros((n, k));
-    let fill_row = |mut row_acc: ArrayViewMut1<f64>, xi: ArrayView1<f64>| {
-        for j in 0..n {
-            row_acc[cluster[j]] += metric.distance(xi, x.row(j));
-        }
-    };
-    let fill = Zip::from(dist_to_cluster.rows_mut()).and(x.rows());
-    let scan_work = n.saturating_mul(n).saturating_mul(x.ncols());
-    if scan_work >= silhouette_parallel_min_elems() {
-        fill.par_for_each(fill_row);
-    } else {
-        fill.for_each(fill_row);
-    }
+    // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in
+    // cluster c, computing each unordered pair only once (distances are symmetric)
+    let dist_to_cluster = pairwise_cluster_distances(x, &cluster, k, metric);
 
     let mut total = 0.0;
     for i in 0..n {
@@ -1054,5 +1122,86 @@ mod tests {
         assert_abs_diff_eq!(centroids[[1, 0]], 10.0, epsilon = 1e-12);
         assert_abs_diff_eq!(centroids[[1, 1]], 10.0, epsilon = 1e-12);
         assert_eq!(sizes, vec![2, 1]);
+    }
+
+    // pairwise_cluster_distances (symmetric fill, serial and parallel paths)
+
+    /// Deterministic pseudo-random feature matrix (hash-based, no rng dependency)
+    fn pseudo_random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
+        Array2::from_shape_fn((rows, cols), |(i, j)| {
+            let t = (seed as f64) * 0.731 + (i * cols + j) as f64 * 0.618_033_988_7;
+            (t.sin() * 43758.5453).fract() - 0.5
+        })
+    }
+
+    /// Independent full `n x n` scan reference (computes every ordered pair, including the diagonal)
+    fn brute_force_dist_to_cluster(
+        x: &Array2<f64>,
+        cluster: &[usize],
+        k: usize,
+        metric: DistanceCalculationMetric,
+    ) -> Array2<f64> {
+        let n = x.nrows();
+        let mut dist = Array2::<f64>::zeros((n, k));
+        for i in 0..n {
+            for j in 0..n {
+                dist[[i, cluster[j]]] += metric.distance(x.row(i), x.row(j));
+            }
+        }
+        dist
+    }
+
+    /// The serial path (input below the parallel gate) is bitwise identical to the full `n x n`
+    /// scan: the only difference, the `d(i, i) = 0` self term, adds nothing to a sum of
+    /// non-negative distances
+    #[test]
+    fn test_pairwise_cluster_distances_serial_matches_full_scan_bitwise() {
+        let x = pseudo_random_matrix(12, 5, 1); // 12*12*5 = 720 < gate -> serial
+        let cluster: Vec<usize> = (0..12).map(|i| i % 3).collect();
+        let got = pairwise_cluster_distances(&x, &cluster, 3, DistanceCalculationMetric::Euclidean);
+        let want = brute_force_dist_to_cluster(&x, &cluster, 3, DistanceCalculationMetric::Euclidean);
+        assert!(
+            got.iter().zip(want.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
+            "serial symmetric fill must be bitwise identical to the full scan"
+        );
+    }
+
+    /// The parallel path (input above the gate) matches the full-scan reference numerically, for
+    /// every supported metric
+    #[test]
+    fn test_pairwise_cluster_distances_parallel_matches_full_scan() {
+        let n = 300; // 300*300*4 = 360_000 >= the 262_144 gate -> parallel
+        let x = pseudo_random_matrix(n, 4, 2);
+        let cluster: Vec<usize> = (0..n).map(|i| i % 7).collect();
+        for metric in [
+            DistanceCalculationMetric::Euclidean,
+            DistanceCalculationMetric::Manhattan,
+            DistanceCalculationMetric::Minkowski(3.0),
+        ] {
+            let got = pairwise_cluster_distances(&x, &cluster, 7, metric);
+            let want = brute_force_dist_to_cluster(&x, &cluster, 7, metric);
+            assert_eq!(got.shape(), want.shape());
+            for (a, b) in got.iter().zip(want.iter()) {
+                assert!(
+                    (a - b).abs() <= 1e-9,
+                    "parallel fill {a} deviates from full-scan reference {b} for {metric:?}"
+                );
+            }
+        }
+    }
+
+    /// The parallel path is run-to-run deterministic at a fixed thread count (same bucket grouping
+    /// -> bitwise-identical result)
+    #[test]
+    fn test_pairwise_cluster_distances_parallel_run_to_run_deterministic() {
+        let n = 300;
+        let x = pseudo_random_matrix(n, 4, 3);
+        let cluster: Vec<usize> = (0..n).map(|i| i % 5).collect();
+        let a = pairwise_cluster_distances(&x, &cluster, 5, DistanceCalculationMetric::Euclidean);
+        let b = pairwise_cluster_distances(&x, &cluster, 5, DistanceCalculationMetric::Euclidean);
+        assert!(
+            a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
+            "repeated parallel fills must be bitwise identical"
+        );
     }
 }

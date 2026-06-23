@@ -118,6 +118,13 @@ path = "benches/calibrations/gemm_calibrate.rs"
 harness = false
 required-features = ["math"]
 
+# silhouette_score pairwise-distance fill (parallel path)
+[[bench]]
+name = "silhouette"
+path = "benches/benchmarks/silhouette.rs"
+harness = false
+required-features = ["metrics"]
+
 [profile.dev]
 opt-level = 0
 
