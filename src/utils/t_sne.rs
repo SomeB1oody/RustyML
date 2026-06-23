@@ -100,8 +100,8 @@ const GAIN_DECAY: f64 = 0.8;
 const MIN_GAIN: f64 = 0.01;
 /// Lower bound for q_ij / the Barnes-Hut normalizer Z before division and log
 const MIN_Q: f64 = f64::EPSILON;
-/// Default gradient infinity-norm threshold for early stopping, matching scikit-learn's
-/// `min_grad_norm`
+/// Default gradient infinity-norm threshold for early stopping; `min_grad_norm` defaults to
+/// 1e-7
 const DEFAULT_MIN_GRAD_NORM: f64 = 1e-7;
 
 /// serde default for [`TSNE::min_grad_norm`], so models serialized before the field existed
@@ -471,9 +471,8 @@ impl TSNE {
                 progress_bar.inc(1);
             }
 
-            // Stop once the embedding has converged (largest-magnitude gradient entry below the
-            // threshold), but only after early exaggeration, whose inflated gradients would
-            // otherwise keep the norm above any sensible threshold
+            // Stop once converged (max-magnitude gradient entry below the threshold), but only
+            // after early exaggeration, whose inflated gradients keep the norm artificially high
             if self.min_grad_norm > 0.0 && iter >= exaggeration_iter {
                 let grad_inf_norm = grad.iter().fold(0.0_f64, |acc, &g| acc.max(g.abs()));
                 if grad_inf_norm < self.min_grad_norm {
@@ -543,9 +542,8 @@ impl TSNE {
                 progress_bar.inc(1);
             }
 
-            // Stop once the embedding has converged (largest-magnitude gradient entry below the
-            // threshold), but only after early exaggeration, whose inflated gradients would
-            // otherwise keep the norm above any sensible threshold
+            // Stop once converged (max-magnitude gradient entry below the threshold), but only
+            // after early exaggeration, whose inflated gradients keep the norm artificially high
             if self.min_grad_norm > 0.0 && iter >= exaggeration_iter {
                 let grad_inf_norm = grad.iter().fold(0.0_f64, |acc, &g| acc.max(g.abs()));
                 if grad_inf_norm < self.min_grad_norm {
@@ -1031,8 +1029,8 @@ impl TSNE {
     ) -> f64 {
         let n_samples = p.nrows();
 
-        // Deterministic blocked fold over the per-row KL terms: a bare rayon `sum` would
-        // group by scheduling and make even this displayed value thread-count-dependent
+        // Blocked fold over the per-row KL terms so the displayed value is reproducible on a
+        // given machine: a bare rayon `sum` would group by scheduling and vary run to run
         crate::math::reduction::det_reduce_range(
             n_samples,
             parallel,

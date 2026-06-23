@@ -345,7 +345,8 @@ impl KMeans {
     /// The per-iteration assignment runs as one parallel GEMM; the arg-min scan
     /// parallelizes above the calibrated scan-class gate, and the centroid accumulation
     /// runs as a deterministic blocked fold above the sum gate (see
-    /// `crate::parallel_gates`), so results are bitwise identical at any thread count
+    /// `crate::parallel_gates`), so the parallel path matches the serial result and
+    /// rerunning on the same machine gives the same result (not necessarily bit-for-bit)
     pub fn fit<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<&mut Self, Error>
     where
         S: Data<Elem = f64>,
@@ -363,7 +364,7 @@ impl KMeans {
 
         self.init_centroids(data)?;
 
-        // the mean per-feature (population) variance of the data scaled by `tol`
+        // Mean per-feature population variance, scaled by `tol`, used as the shift threshold
         let feature_means = data
             .mean_axis(Axis(0))
             .ok_or_else(|| Error::empty_input("data"))?;

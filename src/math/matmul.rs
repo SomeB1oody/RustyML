@@ -6,46 +6,27 @@
 //! shapes. They differ in how parallelism is obtained, because the two products have different
 //! cost classes:
 //!
-//! - **GEMM** (`gemm_par_auto`) picks parallelism by shape (like HEAD's `gemm_par`, adapted to the
-//!   backend). Below `MatmulElem::gemm_rayon_min_flops` it runs one serial call (the per-call rayon
-//!   dispatch would dominate the tiny products in tight loops - RNN/LSTM timesteps). Above it the
-//!   split follows the longer axis: when `m >= n` *and* the columns are too few to feed the pool
-//!   (fewer than ~16 per thread) it splits the rows itself (`gemm_rowsplit`), because the `gemm`
-//!   crate only parallelizes over the columns `n` and that starves on thin/medium-tall outputs
-//!   (matvecs, training-loop GEMMs); otherwise (wide `n`, or many columns) it hands the whole
-//!   product to the `gemm` crate to parallelize over `n` on the pool.
+//! - **GEMM** (`gemm_par_auto`) picks parallelism by shape. Below `MatmulElem::gemm_rayon_min_flops`
+//!   it runs 1 serial call (the per-call rayon dispatch would dominate the tiny products in tight
+//!   loops - RNN/LSTM timesteps). Above it the split follows the longer axis: when `m >= n` *and*
+//!   the columns are too few to feed the pool (fewer than ~16 per thread) it splits the rows itself
+//!   (`gemm_rowsplit`), because the `gemm` crate only parallelizes over the columns `n` and that
+//!   starves on thin/medium-tall outputs (matvecs, training-loop GEMMs); otherwise (wide `n`, or
+//!   many columns) it hands the whole product to the `gemm` crate to parallelize over `n` on the pool
 //! - **GEMV** (`gemv_par_auto`) is the `n == 1` case: the `gemm` crate never parallelizes a matvec,
 //!   so above `MatmulElem::gemv_rayon_min_flops` it always takes the row split (a matvec is
-//!   bandwidth-bound, so the lower gate reflects that extra cores help almost immediately).
+//!   bandwidth-bound, so the lower gate reflects that extra cores help almost immediately)
 //!
 //! Because everything runs on the global rayon pool, these calls also compose safely inside a
-//! rayon region (the work nests instead of oversubscribing).
+//! rayon region (the work nests instead of oversubscribing)
 //!
 //! ## Reproducibility
 //!
-//! All paths are **run-to-run deterministic on a fixed machine, build, and thread count**. Beyond
-//! that the two products differ:
-//!
-//! - **The `n > m` GEMM path (handed to the `gemm` crate) is bitwise identical across thread
-//!   counts** (`Parallelism::None` vs `Rayon(n)` for any `n`), because it parallelizes over the
-//!   output columns rather than splitting the `k`-reduction, so no element's accumulation order
-//!   changes with the thread count. Verified, including thin-`k`, by the
-//!   `gemm_kernel_*_thread_count_independent` tests.
-//! - **The row-split path (GEMV, and the `m >= n` GEMM) is only numerically reproducible, not
-//!   bitwise, across thread counts.** Each block is a `gemm` call with a different `m`, and the kernel's
-//!   internal `k`-blocking can depend on `m`, so the per-row `k`-accumulation is regrouped at the
-//!   rounding level (still run-to-run deterministic at a fixed thread count, just not bit-identical
-//!   between, say, 8 and 16 threads).
-//!
-//! None of this is reproducible across **different CPUs** (the kernel is runtime-dispatched to
-//! AVX-512 / AVX2+FMA / NEON, and a different SIMD width changes the vectorized accumulation order)
-//! or across **`gemm` versions**, and the results no longer match the old `matrixmultiply` path
-//! bit-for-bit. Even the GEMM thread-count independence is an observed property of the current
-//! `gemm` version (it would break if a future version split the `k`-reduction), guarded by tests
-//! rather than promised as a contract.
+//! Re-running the same product on the same machine reproduces the result (not necessarily
+//! bit-for-bit)
 //!
 //! `gemm_chunk_rows` and `cache_resident` remain as tiling-strategy helpers for callers that
-//! materialize a product in row-chunks (KNN, t-SNE, MeanShift).
+//! materialize a product in row-chunks (KNN, t-SNE, MeanShift)
 
 #[cfg(any(
     feature = "machine_learning",
@@ -199,7 +180,7 @@ impl MatmulElem for f64 {
 ///
 /// The operands' strides are passed straight through (the `gemm` crate handles arbitrary,
 /// including negative, strides), so no operand is copied or transposed first. `par` selects the
-/// kernel's parallelism.
+/// kernel's parallelism
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -262,10 +243,9 @@ where
 ///
 /// The `gemm` crate parallelizes over the output columns (`n`); when `n` is too small to feed the
 /// threads (matvecs, and tall-skinny GEMMs like t-SNE's `W @ Y` with a handful of columns) that
-/// leaves the cores idle. This splits the long axis - the rows - instead, the way HEAD's
-/// shape-aware `gemm_par` did, so the parallelism comes from the dimension the backend leaves
-/// serial. The result is standard layout. (Like the serial vs rayon GEMM choice, the row split
-/// trades bitwise thread-count reproducibility for speed, since each block's `m` differs.)
+/// leaves the cores idle. This splits the long axis - the rows - instead, so the parallelism comes
+/// from the dimension the backend leaves serial. The result is standard layout. (Re-running on the
+/// same machine reproduces the result, though not necessarily bit-for-bit)
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -281,7 +261,7 @@ where
     let n = b.ncols();
     let threads = rayon::current_num_threads();
     let chunk = m.div_ceil(threads.max(1)).max(PAR_ROWSPLIT_MIN_BLOCK);
-    // One block covers every row (or an empty axis): just one serial call.
+    // 1 block covers every row (or an empty axis): just 1 serial call
     if chunk >= m {
         return gemm_kernel(a, b, gemm::Parallelism::None);
     }
@@ -300,10 +280,10 @@ where
 /// across the pool, splitting whichever axis the backend leaves serial
 ///
 /// - `m >= n` and few columns (`n < gemm_colpar_min_cols_per_thread() * threads`): split the rows
-///   ourselves via `gemm_rowsplit`, since the backend only parallelizes over `n` and that starves
-///   when the columns are too few to feed the pool (matvecs, tall-skinny, training-loop GEMMs);
+///   via `gemm_rowsplit`, since the backend only parallelizes over `n` and that starves when the
+///   columns are too few to feed the pool (matvecs, tall-skinny, training-loop GEMMs)
 /// - otherwise (wide `n > m`, or many columns): hand the whole product to the `gemm` crate, which
-///   parallelizes over the columns and packs `B` only once.
+///   parallelizes over the columns and packs `B` only once
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -328,16 +308,16 @@ where
 /// `C = A @ B` with explicit parallelism control, both arms on the `gemm` crate's kernels
 ///
 /// `A` is `(m, k)`, `B` is `(k, n)`; the result is a freshly allocated, standard-layout `(m, n)`
-/// array. Any storage works (owned, view, transpose, slice).
+/// array. Any storage works (owned, view, transpose, slice)
 ///
-/// - `parallel == false`: one serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
-///   SIMD kernel, just on one thread (faster than ndarray's `matrixmultiply` `.dot()`). Use this to
+/// - `parallel == false`: 1 serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
+///   SIMD kernel, just on 1 thread (faster than ndarray's `matrixmultiply` `.dot()`). Use this to
 ///   force a product serial from inside an already-parallel region, so it does not fork rayon again
-///   (nested parallelism / oversubscription).
-/// - `parallel == true`: the shape-aware parallel strategy ([`gemm_par_strategy`]).
+///   (nested parallelism / oversubscription)
+/// - `parallel == true`: the shape-aware parallel strategy ([`gemm_par_strategy`])
 ///
 /// Callers that want the work-size gate to make the serial-vs-parallel choice should use
-/// [`gemm_par_auto`] instead.
+/// [`gemm_par_auto`] instead
 ///
 /// # Panics
 ///
@@ -376,7 +356,7 @@ where
 /// would dominate the tiny products in tight loops, e.g. RNN/LSTM timesteps); at or above it the
 /// shape-aware parallel strategy ([`gemm_par_strategy`]) takes over. This is the entry for callers
 /// that have no opinion on parallelism and want the gate to decide; [`gemm_par_switch`] is the
-/// entry for callers that must control it explicitly.
+/// entry for callers that must control it explicitly
 ///
 /// # Panics
 ///
@@ -403,8 +383,8 @@ where
 ///
 /// The `gemm` crate never parallelizes a matrix-vector product (`n == 1`) on its own, so this is
 /// how a large matvec is given the extra cores' memory bandwidth. No gate - callers route here only
-/// once they've decided to parallelize ([`gemv_par_auto`] gates by FLOPs, [`gemv_par_switch`] takes
-/// the choice explicitly). The GEMV analogue of [`gemm_par_strategy`].
+/// once they have decided to parallelize ([`gemv_par_auto`] gates by FLOPs, [`gemv_par_switch`]
+/// takes the choice explicitly). The GEMV analogue of [`gemm_par_strategy`]
 #[cfg(any(feature = "machine_learning", feature = "utils"))]
 fn gemv_par_strategy<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
 where
@@ -419,14 +399,14 @@ where
 
 /// `y = A @ x` with explicit parallelism control (the GEMV analogue of [`gemm_par_switch`])
 ///
-/// `A` is `(m, k)`, `x` has length `k`; the result has length `m`.
-/// - `parallel == false`: one serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
-///   SIMD kernel, just on one thread (faster than ndarray's `.dot()`). Use this to force a matvec
+/// `A` is `(m, k)`, `x` has length `k`; the result has length `m`
+/// - `parallel == false`: 1 serial `gemm` call (`Parallelism::None`) - still the `gemm` crate's
+///   SIMD kernel, just on 1 thread (faster than ndarray's `.dot()`). Use this to force a matvec
 ///   serial from inside an already-parallel region so it does not fork rayon again (nested
-///   parallelism / oversubscription).
-/// - `parallel == true`: the row-split strategy ([`gemv_par_strategy`]).
+///   parallelism / oversubscription)
+/// - `parallel == true`: the row-split strategy ([`gemv_par_strategy`])
 ///
-/// Callers that want the work-size gate to make the choice should use [`gemv_par_auto`] instead.
+/// Callers that want the work-size gate to make the choice should use [`gemv_par_auto`] instead
 ///
 /// # Panics
 ///
@@ -452,7 +432,7 @@ where
     if parallel {
         gemv_par_strategy(a, x)
     } else {
-        // Treat the vector as a single-column matrix and run one serial gemm call
+        // Treat the vector as a single-column matrix and run 1 serial gemm call
         let x_col = x.view().insert_axis(Axis(1)); // [k, 1]
         gemm_kernel(a, &x_col, gemm::Parallelism::None).index_axis_move(Axis(1), 0)
     }
@@ -461,10 +441,10 @@ where
 /// `y = A @ x`: a matvec, row-split across rayon above `MatmulElem::gemv_rayon_min_flops`
 ///
 /// `A` is `(m, k)`, `x` has length `k`; the result has length `m`. Below the gate the product runs
-/// as one serial `gemm` call; at or above it [`gemv_par_strategy`] splits `A`'s rows across rayon,
+/// as 1 serial `gemm` call; at or above it [`gemv_par_strategy`] splits `A`'s rows across rayon,
 /// giving the bandwidth-bound matvec the extra cores' memory bandwidth. This is the entry for
 /// callers that have no opinion on parallelism and want the gate to decide; [`gemv_par_switch`] is
-/// the entry for callers that must control it explicitly.
+/// the entry for callers that must control it explicitly
 ///
 /// # Panics
 ///
@@ -583,7 +563,7 @@ mod tests {
         }
     }
 
-    // correctness vs an independent referenc
+    // correctness vs an independent reference
 
     /// gemm_par_auto matches the naive product for f32, on both the serial (< gate) and
     /// rayon (>= gate) shapes (f32 gate is 8M FLOPs)
@@ -641,7 +621,7 @@ mod tests {
     }
 
     /// Thin-output GEMM (`n < threads`, above the gate) takes the row-split path - check it is
-    /// correct against an independent product.
+    /// correct against an independent product
     #[test]
     fn gemm_par_auto_thin_output_rowsplit() {
         // f64: 4096*64*4*2 = 2.1M >= 1M gate, n=4 thin -> row split
@@ -654,11 +634,11 @@ mod tests {
         assert_close_f32(&gemm_par_auto(&a, &b), &a.dot(&b), 1e-2);
     }
 
-    // the reproducibility guard: bitwise thread-count independence
+    // the reproducibility guard: the parallel kernel matches the serial result
 
-    /// The gemm kernel is bitwise identical whether run serially or across any thread count.
-    /// This is the property the module relies on for thread-count-independent results; if a
-    /// future `gemm` version split the k-reduction this test would fail.
+    /// The gemm kernel matches the serial result whether run serially or across any thread count
+    /// (this test asserts bit-level equality); if a future `gemm` version split the k-reduction
+    /// this test would fail
     #[test]
     fn gemm_kernel_thread_count_independent_f64() {
         // square, dense, and a thin-k shape (the one most likely to trigger a split-k reduction)
@@ -679,7 +659,7 @@ mod tests {
         }
     }
 
-    /// Same bitwise thread-count independence for f32.
+    /// Same serial-matching guarantee for f32 (asserts bit-level equality)
     #[test]
     fn gemm_kernel_thread_count_independent_f32() {
         for &(m, k, n) in &[(96usize, 96usize, 96usize), (64, 8192, 64)] {
@@ -699,7 +679,8 @@ mod tests {
         }
     }
 
-    /// Running the same product twice is bitwise identical (run-to-run determinism).
+    /// Running the same product twice on the same machine gives the same result (this test asserts
+    /// bit-level equality)
     #[test]
     fn gemm_par_auto_run_to_run_deterministic() {
         let a = rand_f64(200, 200, 21);
@@ -732,11 +713,9 @@ mod tests {
         }
     }
 
-    /// The GEMV row split agrees with a single serial matvec numerically. It is NOT bitwise
-    /// identical: each block is a `gemm` call with a different `m`, and the kernel's internal
-    /// k-blocking can depend on `m`, so the per-row k-accumulation is regrouped (a rounding-level
-    /// difference). This is why the row split - and thus GEMV - is not thread-count-bitwise-stable
-    /// the way GEMM is.
+    /// The GEMV row split agrees with a single serial matvec numerically (this test allows a small
+    /// rounding-level tolerance rather than exact equality, since each block is a `gemm` call with a
+    /// different `m` and the kernel's internal k-blocking can depend on `m`)
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gemv_par_auto_rowsplit_matches_serial_numerically() {
@@ -756,7 +735,7 @@ mod tests {
         }
     }
 
-    /// GEMV is run-to-run deterministic at a fixed thread count (same chunks -> same result).
+    /// GEMV is run-to-run deterministic on the same machine (same chunks -> same result)
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gemv_par_auto_run_to_run_deterministic() {

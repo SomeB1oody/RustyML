@@ -5,16 +5,16 @@
 //! gate per class here keeps each calibration result in one place; the call sites import the
 //! getter matching their kernel's class instead of restating the value
 //!
-//! The classes come in two element widths: the `f32` constants serve the neural-network layers,
-//! the `f64` constants serve the classical-ML and utils modules. The crossovers differ (an f64
+//! The classes come in two element widths: the `f32` gates serve the neural-network layers,
+//! the `f64` gates serve the classical-ML and utils modules. The crossovers differ (an f64
 //! stream moves twice the bytes per element; an f64 `exp` costs more than the f32 one), so the
 //! widths are calibrated separately
 //!
 //! Each gate is a runtime-tunable atomic (see `tunable_gate!`): the default is the calibrated
-//! value, overridable at runtime through [`crate::tuning`]. These gates only pick serial vs.
-//! rayon; because the gated reductions use the deterministic blocked fold of
-//! [`crate::math::reduction`], moving a gate never changes a result (the reduction is
-//! bitwise-identical on either path)
+//! value, overridable at runtime through [`crate::tuning`]. These gates only pick serial vs. rayon;
+//! because the gated reductions use the deterministic blocked fold of
+//! [`crate::math::reduction`], moving a gate never changes a result (the parallel path matches the
+//! serial result)
 //!
 //! The engine-specific gates stay with their engines, because their work metrics are
 //! engine-specific rather than class-shared: `MatmulElem::{gemm_rayon_min_flops,
@@ -81,8 +81,8 @@ tunable_gate! {
     /// scan, gated per parameter tensor
     ///
     /// Above the gate, callers must use [`crate::math::reduction::det_reduce`] (or its
-    /// index-range twin) rather than a bare rayon `sum`/`reduce`, whose scheduling-dependent
-    /// grouping makes the float result non-reproducible
+    /// index-range twin) rather than a bare rayon `sum`/`reduce`, which is not reproducible across
+    /// runs on the same machine
     ///
     /// Measured crossover bracket: 32K-64K elements (0.88x at 32K, 1.13x at 64K, 12.7x at 1M)
     #[cfg(feature = "neural_network")]
@@ -170,7 +170,7 @@ tunable_gate! {
     ///
     /// Below the gate a parallel reduction cannot win; above it, callers must use
     /// [`crate::math::reduction::det_reduce`] (or its index-range twin) rather than a bare rayon
-    /// `sum`/`reduce`, whose scheduling-dependent grouping makes the float result non-reproducible
+    /// `sum`/`reduce`, which is not reproducible across runs on the same machine
     ///
     /// Measured crossover bracket: 131K-262K elements (1.24x at 262K, 3.5x at 1M)
     #[cfg(any(feature = "machine_learning", feature = "utils"))]

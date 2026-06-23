@@ -177,7 +177,7 @@ where
 ///
 /// Inverse of `to_categorical`. Each row is reduced to the index of its highest
 /// value, which turns model predictions back into class labels. Ties resolve to
-/// the first (lowest) index, matching numpy/sklearn/keras `argmax`
+/// the first (lowest) index, matching numpy/keras `argmax`
 ///
 /// # Parameters
 ///

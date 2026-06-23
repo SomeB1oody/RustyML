@@ -414,7 +414,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// The decision values come from one batched kernel-matrix GEMM (parallel above
+    /// The decision values come from 1 batched kernel-matrix GEMM (parallel above
     /// its FLOPs gate)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
@@ -473,7 +473,7 @@ impl SVC {
     ///
     /// # Performance
     ///
-    /// The decision values come from one batched kernel-matrix GEMM (parallel above
+    /// The decision values come from 1 batched kernel-matrix GEMM (parallel above
     /// its FLOPs gate)
     pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where

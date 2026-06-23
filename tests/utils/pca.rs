@@ -395,7 +395,7 @@ fn test_all_solvers_agree_on_singular_value() {
 }
 
 /// All three solvers agree on component signs: each axis is oriented so its largest-magnitude
-/// loading is non-negative, so the solvers produce sign-identical components (svd_flip)
+/// loading is non-negative, so the solvers produce sign-identical components
 #[test]
 fn test_all_solvers_agree_on_component_signs() {
     use approx::assert_abs_diff_eq;

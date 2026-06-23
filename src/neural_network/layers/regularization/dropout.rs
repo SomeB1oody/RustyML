@@ -108,10 +108,10 @@ fn apply_spatial_dropout_threshold(mask_2d: &mut Tensor, rate: f32, parallel_thr
 ///
 /// Each output element depends only on its own input element and its channel's scalar (no
 /// reduction), so the work splits into independent per-segment tasks and the `parallel` flag
-/// (taken from the element-count gate) never changes the result bits. The per-channel value
+/// (taken from the element-count gate) never changes the result. The per-channel value
 /// broadcasts implicitly across the segment, so no input-sized mask is ever built or stored
 ///
-/// Bit-identical to the explicit `t * broadcast(mask) * scale`: the mask is binary, so
+/// Gives the same result as the explicit `t * broadcast(mask) * scale`: the mask is binary, so
 /// `(x * 1) * scale == x * (1 * scale)` and `(x * 0) * scale == x * (0 * scale)` both hold
 /// exactly
 fn spatial_dropout_scale(
@@ -213,8 +213,8 @@ mod tests {
     use ndarray::IxDyn;
 
     /// Each output element of the per-channel scale depends only on its own input element and
-    /// its channel's scalar (no reduction), so forcing serial vs parallel must be bitwise
-    /// identical: the gate is a pure performance knob. Covers segments shorter and longer than
+    /// its channel's scalar (no reduction), so forcing serial vs parallel must produce the same
+    /// result: the gate is a pure performance knob. Covers segments shorter and longer than
     /// typical chunking and a non-divisor segment count
     #[test]
     fn spatial_dropout_scale_parallel_flag_invariant() {
@@ -238,7 +238,7 @@ mod tests {
                 "spatial_dropout_scale parallel flag changed the bits at [{n_seg}x{seg}]"
             );
 
-            // And bit-identical to the explicit `t * broadcast(mask) * scale` it replaces
+            // And the same result as the explicit `t * broadcast(mask) * scale` it replaces
             let scale = 1.0 / (1.0 - rate);
             let mut expected = vec![0.0f32; total];
             for (i, e) in expected.iter_mut().enumerate() {

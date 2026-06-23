@@ -1,44 +1,37 @@
 //! Runtime overrides for the crate's parallel/serial gate thresholds
 //!
-//! Every parallelized kernel in the crate decides *serial vs. rayon* (and, for GEMM, *which*
-//! parallel strategy) by comparing a work estimate against a calibrated threshold. Those
-//! thresholds ship as defaults tuned on the maintainer's machine; this module lets a program
-//! override them at runtime - without a recompile - to match a different machine's core count,
-//! cache sizes, or memory bandwidth.
+//! Every parallelized kernel decides serial vs. rayon (and, for GEMM, which parallel strategy)
+//! by comparing a work estimate against a calibrated threshold. The defaults are tuned on the
+//! maintainer's machine; this module overrides them at runtime, without a recompile, to match a
+//! different machine's core count, cache sizes, or memory bandwidth
 //!
 //! # What a gate does and does not change
 //!
-//! A gate only selects an execution strategy; it never changes *what* is computed. The
-//! elementwise and reduction gates are safe in the strongest sense: the deterministic blocked
-//! reductions ([`crate::math::reduction`]) produce **bitwise-identical** results whether they run
-//! serially or on rayon, and elementwise maps are independent per element, so moving these gates
-//! cannot change a result at all. The GEMM strategy gates (the `matmul` submodule) are reproducible
-//! numerically and run-to-run deterministic on a fixed machine; crossing one can move a shape onto
-//! the row-split path, whose grouping (and thus the last few ULPs) depends on the thread count. If
-//! you require bitwise-identical results across different machines or thread counts, do not retune
-//! the GEMM gates.
+//! A gate only selects an execution strategy; it never changes what is computed. The elementwise
+//! and reduction gates give the same result serial or parallel, and the GEMM strategy gates (the
+//! `matmul` submodule) reproduce their result across runs on the same machine (not necessarily
+//! bit-for-bit). Retuning the gates does not change this
 //!
 //! # Storage vs. API
 //!
-//! The default + atomic backing store for each gate lives next to the code (and calibration
-//! comment) it governs; this module is only the discoverable public entry point that forwards to
-//! those per-site setters. Each setter is a single relaxed atomic store, each getter a single
-//! relaxed load; reads sit on the kernels' hot paths and cost a single load.
+//! The default and atomic backing store for each gate lives next to the code (and calibration
+//! comment) it governs; this module is the discoverable public entry point that forwards to those
+//! per-site setters. Each setter is a single relaxed atomic store and each getter a single relaxed
+//! load that sits on the kernels' hot paths
 //!
 //! # Example
 //!
 //! ```ignore
-//! // Retune the f32 GEMM serial/parallel crossover for a machine with fewer, faster cores.
+//! // Retune the f32 GEMM serial/parallel crossover for a machine with fewer, faster cores
 //! rustyml::tuning::matmul::set_gemm_min_flops_f32(4_000_000);
 //! let current = rustyml::tuning::matmul::get_gemm_min_flops_f32();
 //! ```
 
 /// Generates a `set_*` / `get_*` forwarding pair that delegates to a per-site gate's
-/// `pub(crate)` setter/getter. Gate a `fwd!` invocation with `#[cfg(...)]` to match the backing
-/// gate's feature-gating
+/// `pub(crate)` setter/getter
 ///
 /// The `$what` string is spliced into the generated docs ("Sets {what}" / "Returns the current
-/// {what}"), so it should read as a noun phrase.
+/// {what}"), so it should read as a noun phrase
 ///
 /// # Usage and expansion
 ///
@@ -62,8 +55,7 @@
 /// pub fn get_chunk_elems() -> usize { b::gemm_chunk_elems() }
 /// ```
 ///
-/// Prefix the invocation with `#[cfg(...)]` to gate both generated functions together, e.g.
-/// `#[cfg(feature = "neural_network")] fwd!(...);`.
+/// Prefix the invocation with `#[cfg(...)]` to gate both generated functions together
 macro_rules! fwd {
     ($set:ident => $bset:path, $get:ident => $bget:path, $what:expr) => {
         #[doc = concat!("Sets ", $what)]
@@ -80,12 +72,11 @@ macro_rules! fwd {
 /// GEMM / GEMV parallelism gates for the matrix-product backend (see [`crate::math::matmul`])
 ///
 /// `gemm_min_flops` / `gemv_min_flops` are the estimated-FLOPs crossovers at or above which a
-/// product is parallelized; they are calibrated **per dtype** (`f32` and `f64` have different
-/// optimal values - the single threshold the `gemm` crate exposes cannot capture this, which is
-/// why these live here). `colpar_min_cols_per_thread` is the columns-per-thread floor below which
-/// `gemm_par_auto` splits rows itself instead of using the backend's column parallelism.
-/// `chunk_elems` and `cache_resident_max_bytes` size the tiled-product path (the latter is the
-/// natural knob to match a machine's actual L3 cache).
+/// product is parallelized, calibrated per dtype (`f32` and `f64` have different optimal values
+/// that the single threshold the `gemm` crate exposes cannot capture). `colpar_min_cols_per_thread`
+/// is the columns-per-thread floor below which `gemm_par_auto` splits rows itself instead of using
+/// the backend's column parallelism. `chunk_elems` and `cache_resident_max_bytes` size the
+/// tiled-product path; the latter matches a machine's actual L3 cache
 #[cfg(feature = "math")]
 pub mod matmul {
     use crate::math::matmul as b;
@@ -195,7 +186,7 @@ pub mod elementwise {
 }
 
 /// Deterministic-reduction parallelism gates; see `crate::parallel_gates` and
-/// [`crate::math::reduction`]. The blocked fold is bitwise-identical serial or parallel, so
+/// [`crate::math::reduction`]. The blocked fold gives the same result serial or parallel, so
 /// moving these never changes a result
 #[cfg(any(
     feature = "machine_learning",

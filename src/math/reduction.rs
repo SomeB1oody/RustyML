@@ -7,8 +7,8 @@
 //! collected in block order (rayon's indexed `collect` preserves it), and the blocks are merged
 //! sequentially. The grouping depends only on
 //! [`DET_REDUCE_BLOCK`](crate::math::reduction::DET_REDUCE_BLOCK), never on scheduling or the
-//! `parallel` flag, so the result is **bitwise identical at any thread count, with the flag on
-//! or off**: the flag is a performance hint, deciding only whether the blocks run on rayon
+//! `parallel` flag, so re-running on the same machine reproduces the result (not necessarily
+//! bit-for-bit): the flag is a performance hint, deciding only whether the blocks run on rayon
 //! or sequentially. A caller that instead pairs these helpers with some other serial kernel
 //! below a size threshold makes that switch part of its own reproducibility surface
 //!
@@ -35,7 +35,7 @@ pub const DET_REDUCE_BLOCK: usize = 16_384;
 /// sequentially per the `parallel` flag
 ///
 /// Both paths fold the same [`DET_REDUCE_BLOCK`]-sized blocks in the same order, so the flag
-/// never changes the result bits - pass the side of a calibrated size gate (or `false` when in
+/// never changes the result - pass the side of a calibrated size gate (or `false` when in
 /// doubt; an input shorter than one block gains nothing from rayon)
 ///
 /// # Parameters
@@ -48,7 +48,7 @@ pub const DET_REDUCE_BLOCK: usize = 16_384;
 ///
 /// # Returns
 ///
-/// - `A` - The merged result, identical at any thread count and either flag value
+/// - `A` - The merged result, the same on a given machine regardless of the flag value
 ///
 /// # Examples
 ///
@@ -121,7 +121,7 @@ where
 ///
 /// # Returns
 ///
-/// - `A` - The merged result, identical at any thread count and either flag value
+/// - `A` - The merged result, the same on a given machine regardless of the flag value
 ///
 /// # Examples
 ///
@@ -174,7 +174,7 @@ mod tests {
     use super::*;
 
     /// The `parallel` flag is a pure performance hint: both paths of both helpers produce
-    /// bitwise-identical results across length edge cases (empty, sub-block, multi-block)
+    /// identical results across length edge cases (empty, sub-block, multi-block)
     #[test]
     fn parallel_flag_does_not_change_bits() {
         for len in [0usize, 1, 100, DET_REDUCE_BLOCK, DET_REDUCE_BLOCK * 3 + 17] {

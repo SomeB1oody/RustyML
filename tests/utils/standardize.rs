@@ -27,7 +27,7 @@ fn test_global_closed_form_2d() {
 }
 
 /// A healthy feature is divided by the raw sqrt(variance), giving exact z-scores with no
-/// stability bias, matching scikit-learn's StandardScaler (which never perturbs healthy features)
+/// stability bias, since a healthy feature is never perturbed
 #[test]
 fn test_healthy_feature_exact_zscores() {
     let data: Array1<f64> = array![1.0, 3.0];
@@ -37,8 +37,8 @@ fn test_healthy_feature_exact_zscores() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
-/// Constant detection follows scikit-learn's `_is_constant_feature` (machine-precision,
-/// variance-based)
+/// Constant detection is machine-precision and variance-based, so a tiny but real
+/// variance is still normalized
 #[test]
 fn test_small_but_real_variance_is_normalized_like_sklearn() {
     let data: Array1<f64> = array![1.0, 1.0 + 1e-8];

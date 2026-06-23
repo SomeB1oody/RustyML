@@ -608,7 +608,7 @@ impl MulticlassConfusionMatrix {
     }
 
     /// Renders the `K x K` count matrix followed by a per-class precision/recall/F1/support table
-    /// with accuracy and macro/weighted averages (scikit-learn's `classification_report` style)
+    /// with accuracy and macro/weighted averages in a per-class report style
     ///
     /// Mirrors [`ConfusionMatrix::summary`]: a `Confusion Matrix:` grid first, then the metrics
     ///
@@ -711,8 +711,8 @@ impl MulticlassConfusionMatrix {
 /// Calculates the multi-class logarithmic loss (cross-entropy) of predicted probabilities
 ///
 /// For each sample only the probability assigned to its true class contributes:
-/// `-mean(ln(p[i, y_true[i]]))`. Each row of `y_prob` is first renormalized to sum to 1 (matching
-/// scikit-learn), so rows that do not already sum to 1 are scored consistently; the selected
+/// `-mean(ln(p[i, y_true[i]]))`. Each row of `y_prob` is first renormalized to sum to 1, so rows
+/// that do not already sum to 1 are scored consistently; the selected
 /// probability is then clamped away from 0 and 1 to keep the logarithm finite. Each value of
 /// `y_true` indexes a column of `y_prob`
 ///

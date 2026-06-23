@@ -132,7 +132,7 @@ fn cm_recall_partial() {
 
 #[test]
 fn cm_recall_no_actual_positives() {
-    // tp=0, fn=0 (all actual negatives) -> recall = 0.0 (sklearn zero_division=0 convention,
+    // tp=0, fn=0 (all actual negatives) -> recall = 0.0 (zero-denominator yields 0.0,
     // consistent with MulticlassConfusionMatrix::per_class_recall)
     let y_true = array![0.0, 0.0];
     let y_pred = array![0.0, 1.0];
@@ -676,8 +676,8 @@ fn log_loss_zero_prob_clamped() {
 
 #[test]
 fn log_loss_renormalizes_rows() {
-    // Row [2,2] does not sum to 1; sklearn renormalizes to [0.5, 0.5], so the loss for true
-    // class 0 is -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0
+    // Row [2,2] does not sum to 1; renormalizing to [0.5, 0.5] makes the loss for true
+    // class 0 equal -ln(0.5) = ln(2). Without renormalization it would clamp 2.0 -> ~1 and give ~0
     let y_true = array![0usize];
     let y_prob = arr2(&[[2.0, 2.0]]);
     let expected = 2.0_f64.ln();
@@ -1178,7 +1178,7 @@ fn precision_recall_curve_no_positive_panics() {
 }
 
 // NaN-score contract: scores cannot be ranked meaningfully (f64::total_cmp would silently treat
-// a NaN as the most confident prediction), so the ranking metrics reject NaN, matching sklearn
+// a NaN as the most confident prediction), so the ranking metrics reject NaN
 
 #[test]
 #[should_panic(expected = "must not contain NaN")]

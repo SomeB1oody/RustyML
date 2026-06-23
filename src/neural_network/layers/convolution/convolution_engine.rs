@@ -19,7 +19,7 @@
 //! output positions lets a single large image use every core even at `batch == 1`, with each task
 //! building its own im2col block and GEMM, writing a disjoint output region. The backward pass
 //! parallelizes over batch items (their weight/bias partials are reduced in batch order, so
-//! results do not depend on the thread count) and routes its two GEMMs through
+//! rerunning on the same machine gives the same result) and routes its two GEMMs through
 //! [`gemm_par_switch`](crate::math::matmul::gemm_par_switch): the per-item GEMMs stay parallel
 //! while the batch fan is too short to fill the pool, and switch to serial once the batch alone
 //! fills it (so the batch tasks do not each fork rayon inside a GEMM)
@@ -459,8 +459,8 @@ pub(super) fn conv_backward(
         out_plane,
         offsets: &offsets,
     };
-    // `serial_gemm` forces the two per-item products onto the serial `gemm` path (still the `gemm`
-    // crate, just one thread), so a per-batch task does not fork rayon again inside its GEMM
+    // `serial_gemm` forces the two per-item products onto the serial `gemm` path, so a per-batch
+    // task does not fork rayon again inside its GEMM
     let process_b = |b: usize, serial_gemm: bool| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
         let col = build_col_range(&ctx, b, 0, out_plane);
         let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
@@ -470,8 +470,7 @@ pub(super) fn conv_backward(
             .expect("grad slice matches [F, out_plane]");
 
         // Weight gradient [F, Cin*k] and input-gradient columns [Cin*k, out_plane]. When forcing
-        // serial, take the explicit serial path; otherwise let the work-size gate decide (so a
-        // below-gate small conv still runs its GEMMs serial instead of force-forking them).
+        // serial, take the explicit serial path; otherwise let the work-size gate decide
         let (wg, dcol): (Array2<f32>, Array2<f32>) = if serial_gemm {
             (
                 gemm_par_switch(&g_mat, &col_mat.t(), false),

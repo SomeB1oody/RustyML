@@ -27,8 +27,8 @@ tunable_gate! {
     /// normalize, and the backward composition) run on rayon
     ///
     /// Each normalization group is one contiguous row computed entirely inside one task with
-    /// fixed-order kernels, so the gate is a performance knob: the bits are identical at any
-    /// thread count and on either side of the gate
+    /// fixed-order kernels, so the gate is a performance knob: the result is numerically
+    /// unchanged on either side of the gate (deterministic on a given machine)
     ///
     /// Measured crossover bracket 64K-256K elements (0.73x at 64K, 1.48x at 256K), 2.5-4.1x at 1M,
     /// fading toward memory bandwidth (1.2x) at 12.6M
@@ -178,7 +178,7 @@ fn row_forward(
     }
 }
 
-/// The inference twin of [`row_forward`]: identical per-row arithmetic bit for bit, but writes
+/// The inference twin of [`row_forward`]: identical per-row arithmetic, but writes
 /// only the output. The variance folds over the deviations in registers
 /// ([`segment_sq_dev`]) instead of through a centered buffer, and nothing else is allocated
 fn row_predict(
@@ -1138,7 +1138,7 @@ mod tests {
     }
 
     /// On integer-valued data with a power-of-two row length the per-row statistics are exact,
-    /// so the row-path forward must reproduce the broadcast ndarray reference bit for bit
+    /// so the row-path forward must reproduce the broadcast ndarray reference exactly
     #[test]
     fn row_path_exact_on_integer_data_matches_broadcast_reference() {
         use ndarray::Array2;
@@ -1171,7 +1171,7 @@ mod tests {
     }
 
     /// A trailing-and-in-order Multiple axis list resolves to the zero-copy row path, which
-    /// must agree bit for bit with an explicit Default-axis layer on the reshaped input
+    /// must match an explicit Default-axis layer on the reshaped input exactly
     #[test]
     fn multiple_identity_perm_matches_default_on_reshaped_input() {
         let (b, h, w) = (3usize, 4usize, 5usize);
@@ -1217,8 +1217,8 @@ mod tests {
         }
     }
 
-    /// A Multiple axis list that genuinely needs a permutation must agree bit for bit with
-    /// merging by hand and running a Default-axis layer on the merged tensor
+    /// A Multiple axis list that genuinely needs a permutation must match merging by hand
+    /// and running a Default-axis layer on the merged tensor exactly
     #[test]
     fn multiple_nontrivial_perm_matches_default_on_merged_input() {
         let (d0, d1, d2) = (2usize, 3usize, 4usize);

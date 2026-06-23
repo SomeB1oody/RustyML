@@ -18,20 +18,19 @@ use ndarray_rand::rand::seq::SliceRandom;
 
 /// Loss function minimized by [`LinearSVC`]
 ///
-/// `Hinge` is `max(0, 1 - y·f(x))`; `SquaredHinge` is its square, `max(0, 1 - y·f(x))²`,
-/// which penalizes margin violations quadratically and is differentiable everywhere.
-/// scikit-learn's `LinearSVC` defaults to `SquaredHinge`; this crate defaults to `Hinge`
+/// `Hinge` is `max(0, 1 - y * f(x))`; `SquaredHinge` is its square, `max(0, 1 - y * f(x))^2`,
+/// which penalizes margin violations quadratically and is differentiable everywhere
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Loss {
-    /// Standard hinge loss `max(0, 1 - y·f(x))`
+    /// Standard hinge loss `max(0, 1 - y * f(x))`
     Hinge,
-    /// Squared hinge loss `max(0, 1 - y·f(x))²`
+    /// Squared hinge loss `max(0, 1 - y * f(x))^2`
     SquaredHinge,
 }
 
 /// Linear Support Vector Classifier (LinearSVC)
 ///
-/// A classifier similar to sklearn's LinearSVC, trained with the hinge loss function
+/// A linear classifier trained with the hinge loss function
 /// and L1 or L2 regularization to prevent overfitting
 ///
 /// # Examples
@@ -103,9 +102,11 @@ impl Default for LinearSVC {
     ///
     /// - `max_iter`: 1000
     /// - `learning_rate`: 0.001
+    /// - `learning_rate_decay`: 0.0 (constant rate)
     /// - `penalty`: RegularizationType::L2(1.0) - L2 regularization with strength 1.0
     /// - `fit_intercept`: true
     /// - `tol`: 1e-4
+    /// - `loss`: Loss::Hinge
     /// - `random_state`: None (non-deterministic minibatch shuffling)
     ///
     /// # Returns
@@ -198,8 +199,7 @@ impl LinearSVC {
 
     /// Selects the loss function (default: [`Loss::Hinge`])
     ///
-    /// [`Loss::SquaredHinge`] penalizes margin violations quadratically and is what
-    /// scikit-learn's `LinearSVC` uses by default
+    /// [`Loss::SquaredHinge`] penalizes margin violations quadratically
     ///
     /// # Parameters
     ///
@@ -436,7 +436,7 @@ impl LinearSVC {
                     acc
                 };
 
-                // Update weights with the averaged hinge-loss gradient (in place, no allocation)
+                // Update weights with the averaged loss gradient (in place, no allocation)
                 weights.scaled_add(lr / batch_len, &weight_grad_sum);
 
                 match self.penalty {

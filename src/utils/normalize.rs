@@ -9,7 +9,7 @@ use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-/// Norm magnitude below which a lane is treated as (near-)constant and left unscaled
+/// Norm magnitude below which a lane is treated as (near-)zero and left unscaled
 const NORM_CONSTANT_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Axis along which normalization is applied
@@ -50,7 +50,7 @@ pub enum NormalizationOrder {
 ///
 /// Divides each element by the norm computed along the chosen axis, so the norm of the
 /// data along that axis equals 1. A lane whose norm is below `10 * f64::EPSILON` (a (near-)zero
-/// lane) is left unchanged, matching scikit-learn's `normalize`, which treats such norms as 1.0
+/// lane) is left unchanged, since such a norm is treated as 1.0
 ///
 /// # Parameters
 ///
@@ -116,7 +116,7 @@ where
 
 /// Divides a single lane by its norm in place
 ///
-/// Matches scikit-learn's `normalize`: a lane is scaled unless its norm is below
+/// A lane is scaled unless its norm is below
 /// [`NORM_CONSTANT_THRESHOLD`] (`10 * f64::EPSILON`), in which case the norm is treated as `1.0`
 /// and the lane is left untouched (a (near-)zero lane has no meaningful direction to rescale)
 fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {

@@ -28,10 +28,6 @@ const KNN_KD_TREE_MAX_DIMS: usize = 8;
 
 /// Selects the class with the greatest accumulated score (vote count or summed weight),
 /// breaking ties in favor of the smallest class index
-///
-/// This keeps the prediction deterministic: `AHashMap` iteration order is randomized per
-/// process, so a plain `max_by`/`max_by_key` would resolve tied classes differently across
-/// runs. Tying by the smallest class index matches the conventional scikit-learn behavior
 fn select_top_class<T>(scores: &AHashMap<usize, T>) -> Option<usize>
 where
     T: PartialOrd + Copy,
@@ -569,7 +565,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                     let projections = match precomputed {
                         Some(p) => p,
                         None => {
-                            // Forced serial
+                            // Force serial since this runs inside a parallel predict loop
                             projections_owned = gemv_par_switch(&x_train, &x, false);
                             projections_owned.view()
                         }

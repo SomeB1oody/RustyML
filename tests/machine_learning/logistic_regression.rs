@@ -767,7 +767,7 @@ fn fit_huge_learning_rate_on_finite_data_returns_non_finite() {
     );
 }
 
-// regularization scaling convention (sklearn-SGD: penalty NOT divided by n_samples)
+// regularization scaling convention (penalty NOT divided by n_samples)
 
 /// The L2-regularized objective (1/n)Σlogloss + (α/2)||w||² is invariant to replicating
 /// every sample (mean log-loss and penalty are both unchanged), so the regularized optimum

@@ -1181,7 +1181,7 @@ fn test_min_impurity_decrease_prunes_root_split_at_half() {
     }
 }
 
-/// min_samples_leaf constrains the split SEARCH (scikit-learn semantics: a split is
+/// min_samples_leaf constrains the split SEARCH (a split is
 /// only considered if it leaves at least min_samples_leaf samples in each branch), so an
 /// impurity-optimal split with a too-small child is skipped in favour of the best valid
 /// split rather than collapsing the node entirely
@@ -1488,9 +1488,9 @@ fn min_samples_leaf_does_not_suppress_a_valid_categorical_split() {
     assert_abs_diff_eq!(pred, 1.0, epsilon = 1e-9);
 }
 
-// min_impurity_decrease must use scikit-learn's N_t/N_total node-weight scaling
+// min_impurity_decrease must use the N_t/N_total node-weight scaling
 
-/// scikit-learn scales the node-local weighted impurity decrease by N_t/N_total before
+/// The node-local weighted impurity decrease is scaled by N_t/N_total before
 /// comparing to min_impurity_decrease. Regression tree: the root (N=8) splits at 4.5; the
 /// left child {x=1..4} has a local impurity decrease of 25, but scaled by 4/8 it is 12.5.
 /// With min_impurity_decrease = 20, the scaled rule rejects the left child's split (12.5 < 20)

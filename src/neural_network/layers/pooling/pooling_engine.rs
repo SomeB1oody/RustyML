@@ -185,7 +185,8 @@ pub fn windowed_pool_forward_impl(
     // One task per (plane, output-position chunk): splitting the output positions lets a single
     // large plane (e.g. batch == 1 with few channels) use every thread, while many planes get one
     // chunk apiece. Every output element is reduced by the same serial loop regardless of the
-    // chunk boundaries, so the result is bitwise-independent of the thread count
+    // chunk boundaries, so the result matches the serial path and rerunning on the same machine
+    // gives the same result
     let process_range = |bc: usize, c0: usize, len: usize| -> (Vec<f32>, Vec<usize>) {
         let plane = &in_flat[bc * plane_in..(bc + 1) * plane_in];
         let mut out_chunk = vec![0.0f32; len];

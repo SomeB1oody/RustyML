@@ -16,8 +16,8 @@ tunable_gate! {
     /// Total-element count above which the group-normalization per-instance row passes run on rayon
     ///
     /// Each instance (one sample's channel group) is one contiguous row computed entirely inside
-    /// one task with fixed-order kernels, so the gate is a performance knob: the bits are
-    /// identical at any thread count and on either side of the gate. Shares the fused row-pass
+    /// one task with fixed-order kernels, so the gate is a performance knob: the result is the
+    /// same on either side of the gate. Shares the fused row-pass
     /// kernel class of LayerNorm's `LN_ROW_PARALLEL_MIN_ELEMS` (crossover bracket 64K-256K
     /// elements), mapped from that measurement
     ///

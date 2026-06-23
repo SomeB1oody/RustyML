@@ -37,7 +37,7 @@ tunable_gate! {
     /// (mean, variance, and the backward sums) run as row-block deterministic folds
     ///
     /// Crossover bracket 64K-256K elements, 2.8-4.5x at 1-4M (C=64), 12x for narrow C. A
-    /// channel-chunked alternative that would have preserved the serial accumulation order bitwise
+    /// channel-chunked alternative that would have preserved the serial accumulation order
     /// measured 0.3-0.9x everywhere and was rejected
     ///
     /// Overridable via [`crate::tuning`]
@@ -316,8 +316,8 @@ impl BatchNormalization {
 
     /// One fused pass `((x - running_mean) / sqrt(running_var + eps)) * gamma + beta` streamed
     /// per `[P]` plane of a `[B, C, P]` slice. The per-element operations match the broadcast
-    /// 2-D form exactly, so spatial inference outputs are bitwise identical to the folded form;
-    /// the `parallel` flag never changes the bits
+    /// 2-D form exactly, so spatial inference outputs match the folded form; the `parallel`
+    /// flag does not change the result
     fn normalize_with_running_stats(
         &self,
         x: &[f32],
@@ -864,7 +864,7 @@ mod tests {
         cl.permuted_axes(inv).as_standard_layout().to_owned()
     }
 
-    /// The row-block fold must be bitwise identical to a serial fold over the same blocks,
+    /// The row-block fold must match a serial fold over the same blocks,
     /// including shapes where the block size does not divide the row count
     #[test]
     fn par_col_folds_match_serial_blocked_reference() {
@@ -922,7 +922,7 @@ mod tests {
     }
 
     /// On integer-valued data every per-channel sum is exact in f32, so the row-block fold
-    /// must agree with ndarray's serial sum_axis bit for bit regardless of grouping - this
+    /// must agree with ndarray's serial sum_axis exactly regardless of grouping - this
     /// pins the fold against the serial path it replaces above the gate
     #[test]
     fn par_col_folds_exact_on_integer_data() {
@@ -957,7 +957,7 @@ mod tests {
         }
     }
 
-    /// The plane folds must be bitwise identical to a straight-line composition of the same
+    /// The plane folds must match a straight-line composition of the same
     /// per-channel block ranges, for both flag values, including planes that cross block
     /// boundaries, blocks that split a plane, and single-channel/single-batch shapes
     #[test]
@@ -1014,7 +1014,7 @@ mod tests {
     }
 
     /// On integer-valued data every per-channel sum is exact in f32, so the plane folds must
-    /// agree with ndarray's axis reductions bit for bit regardless of grouping or kernel
+    /// agree with ndarray's axis reductions exactly regardless of grouping or kernel
     #[test]
     fn par_plane_folds_exact_on_integer_data() {
         let (b, c, p) = (8usize, 16usize, 4_096usize);
@@ -1050,7 +1050,7 @@ mod tests {
     }
 
     /// Spatial inference is pure per-element arithmetic, so the native-layout pass must
-    /// reproduce the fold -> broadcast -> unfold reference bit for bit, both below and above
+    /// reproduce the fold -> broadcast -> unfold reference exactly, both below and above
     /// the parallel threshold
     #[test]
     fn spatial_predict_matches_folded_reference_bitwise() {
@@ -1089,7 +1089,7 @@ mod tests {
 
     /// On integer-valued data with a power-of-two sample count the batch statistics are exact
     /// (grouping-independent), so the spatial training forward and its running stats must
-    /// reproduce the fold -> broadcast -> unfold reference bit for bit
+    /// reproduce the fold -> broadcast -> unfold reference exactly
     #[test]
     fn spatial_forward_training_matches_folded_reference_on_exact_stats() {
         // B x P = 4 x 16 = 64 samples per channel: integer sums / 64 are exact dyadics

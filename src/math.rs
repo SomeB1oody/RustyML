@@ -10,8 +10,8 @@
 /// parallelized on the rayon pool for large products
 pub mod matmul;
 
-/// Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) whose
-/// float accumulation order is independent of the rayon thread count
+/// Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) that
+/// reproduce the same result across runs on the same machine
 pub mod reduction;
 
 use ahash::AHashMap;
@@ -236,8 +236,8 @@ tunable_gate! {
 /// to raw logits before evaluating the log-likelihood
 ///
 /// Above a calibrated input size the sum runs as a deterministic blocked parallel reduction
-/// ([`reduction::det_reduce_range`]): the float result is bitwise identical at any rayon
-/// thread count, though not bitwise identical to the serial sum used below the gate
+/// ([`reduction::det_reduce_range`]): the result is reproducible across runs on the same machine
+/// (not necessarily bit-for-bit), and differs from the serial sum used below the gate
 ///
 /// # Parameters
 ///

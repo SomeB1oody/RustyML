@@ -50,14 +50,6 @@ impl StandardizationAxis {
 /// Subtracts the mean and divides by the standard deviation per the chosen axis, so the
 /// standardized values have mean 0 and standard deviation 1
 ///
-/// The standard deviation uses the population variance (divides by `n`), matching scikit-learn's
-/// `StandardScaler`. There is no sample-variance (divide by `n - 1`) option
-///
-/// Constant (zero-variance) lanes are detected exactly as scikit-learn's `StandardScaler` does,
-/// via [`is_constant_feature`], and are divided by `1.0` (leaving their centered values as zeros)
-/// rather than by a vanishing standard deviation. There is no `epsilon` knob: the threshold is
-/// derived from `f64::EPSILON`, matching `StandardScaler`
-///
 /// # Parameters
 ///
 /// - `data` - Input array as `ArrayBase` with arbitrary dimensions and f64 elements
@@ -85,9 +77,9 @@ impl StandardizationAxis {
 ///
 /// # Performance
 ///
-/// - The global-axis path computes its moments through a deterministic blocked parallel
-///   reduction above the calibrated sum gate (see `crate::parallel_gates`), so results are
-///   identical at any thread count
+/// - The global-axis path computes its moments through a blocked parallel reduction above
+///   the calibrated sum gate (see `crate::parallel_gates`), so rerunning on the same machine
+///   gives the same result (not necessarily bit-for-bit)
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
@@ -141,10 +133,9 @@ fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
     (n, mean, m2)
 }
 
-/// Detects whether a lane is indistinguishable from constant, matching scikit-learn's
-/// `_is_constant_feature`
+/// Detects whether a lane is indistinguishable from constant
 ///
-/// Uses the error bound of the two-pass variance algorithm (Chan, Golub & LeVeque): a lane is
+/// Uses the error bound of the 2-pass variance algorithm (Chan, Golub & LeVeque): a lane is
 /// constant when `variance <= n*eps*variance + (n*mean*eps)^2` with `eps = f64::EPSILON`. This
 /// is variance-based and magnitude-relative, so it flags features whose spread is within
 /// floating-point noise regardless of their scale
@@ -159,8 +150,7 @@ fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
 ///
 /// Returns the raw `sqrt(variance)`, except that a constant lane (per [`is_constant_feature`])
 /// is divided by `1.0` instead, so its centered values map to zeros rather than being amplified
-/// by a vanishing divisor. This mirrors scikit-learn's `StandardScaler`, which sets the scale of
-/// constant features to `1.0`
+/// by a vanishing divisor, setting the scale of a constant feature to `1.0`
 #[inline]
 fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
     if is_constant_feature(variance, mean, n) {
@@ -213,7 +203,7 @@ where
 /// Computes the population mean and the standardization scale of a lane
 ///
 /// The returned scale is the raw `sqrt(variance)`, or `1.0` for a constant lane (see
-/// [`scale_from_variance`]), matching scikit-learn's `StandardScaler`
+/// [`scale_from_variance`])
 fn lane_mean_and_std(lane: &ArrayViewMut1<f64>) -> (f64, f64) {
     let n = lane.len() as f64;
     // Single stable pass (Welford) for both mean and population variance

@@ -194,8 +194,8 @@ impl KernelPCA {
     ///
     /// # Notes
     ///
-    /// The eigen solver defaults to `EigenSolver::Dense`. To pick another strategy (e.g.
-    /// a Lanczos solver for a few components on large data), use the builder method:
+    /// The eigen solver defaults to `EigenSolver::Dense`. To pick another strategy (e.g. a
+    /// Lanczos solver for a few components on large data), use the builder method:
     ///
     /// - [`with_eigen_solver`](Self::with_eigen_solver) - eigen solver strategy
     pub fn new(kernel: KernelType, n_components: usize) -> Result<Self, Error> {
@@ -734,7 +734,7 @@ impl KernelPCA {
     /// eigenvalues are tolerated: a centered kernel (Gram) matrix is only PSD up to round-off,
     /// and non-Mercer kernels such as `Sigmoid` produce near-zero or slightly negative trailing
     /// eigenvalues. Those components carry no information and are zeroed out at projection time
-    /// (see [`compute_scaling_factors`]), matching scikit-learn, rather than failing the whole fit
+    /// (see [`compute_scaling_factors`]), rather than failing the whole fit
     fn validate_eigenvalues(eigenvalues: &Array1<f64>) -> Result<(), Error> {
         for &value in eigenvalues.iter() {
             if !value.is_finite() {
@@ -752,7 +752,7 @@ impl KernelPCA {
     /// Components whose eigenvalue is not meaningfully positive (near-zero from round-off, or
     /// negative from a non-PSD kernel) get a scale of `0.0`, which zeroes their projection
     /// instead of producing `Inf`/`NaN`. This preserves the requested `n_components`
-    /// dimensionality while ignoring degenerate directions, as scikit-learn does
+    /// dimensionality while ignoring degenerate directions
     fn compute_scaling_factors(eigenvalues: &Array1<f64>) -> Result<Vec<f64>, Error> {
         // Relative threshold below which an eigenvalue is treated as non-informative
         let max_eig = eigenvalues

@@ -648,13 +648,12 @@ impl PCA {
     /// Fixes the sign of each principal axis so the decomposition is deterministic
     ///
     /// Each component (row of `components`) is negated when its largest-magnitude loading is
-    /// negative, making the largest-magnitude entry non-negative. This removes the sign ambiguity
-    /// inherent to eigen/SVD decompositions so that all three solvers, and repeated runs, agree on
-    /// the orientation of every axis. The decision is made from the component vectors themselves
-    /// (not from `U`, which the randomized and power-iteration solvers never form), so the
-    /// convention is internally consistent though it need not byte-match scikit-learn's U-based
-    /// `svd_flip`. Reconstructions are unaffected: flipping an axis flips its scores in step, so
-    /// their product is unchanged
+    /// negative, making that entry non-negative. This removes the sign ambiguity inherent to
+    /// eigen/SVD decompositions so all solvers and repeated runs agree on the orientation of every
+    /// axis. The decision uses the component vectors themselves, not `U` (which the randomized and
+    /// power-iteration solvers never form), so it is internally consistent but need not byte-match a
+    /// `U`-based sign convention. Reconstructions are unaffected: flipping an axis flips its
+    /// scores in step, leaving their product unchanged
     fn flip_component_signs(components: &mut Array2<f64>) {
         for mut row in components.axis_iter_mut(Axis(0)) {
             // Index of the largest-magnitude loading; ties keep the first (lowest) index

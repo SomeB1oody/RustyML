@@ -137,11 +137,8 @@ impl LogisticRegression {
 
     /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
     ///
-    /// The penalty is added to the **mean** log-loss as `alpha * R(w)` (with `R = ||w||_1`
-    /// for L1 and `R = 0.5 * ||w||^2` for L2), i.e. it is *not* divided by the sample count.
-    /// This matches scikit-learn's SGD convention and keeps the effective strength of a given
-    /// `alpha` consistent across sample sizes and with [`LinearRegression`](crate::machine_learning::LinearRegression).
-    /// The intercept is never penalized
+    /// The penalty is added to the mean log-loss as `alpha * R(w)` (with `R = ||w||_1` for L1
+    /// and `R = 0.5 * ||w||^2` for L2), not divided by the sample count
     ///
     /// # Parameters
     ///
@@ -198,8 +195,8 @@ impl LogisticRegression {
     ///
     /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs
     /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
-    /// above its exp-reduction gate (see [`crate::math::logistic_loss`]), so results are
-    /// bitwise identical at any thread count
+    /// above its exp-reduction gate (see [`crate::math::logistic_loss`]), so re-running on the
+    /// same machine reproduces the result (not necessarily bit-for-bit)
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -257,7 +254,7 @@ impl LogisticRegression {
             n_iter += 1;
 
             // Linear predictions (the raw logits feed the loss below), then the sigmoid
-            // activations (exp-map class gate: one f64 exp per element)
+            // activations (exp-map class gate: 1 f64 exp per element)
             let predictions = gemv_par_auto(&x_train_view, &weights);
             let mut sigmoid_preds = predictions.clone();
             if n_samples >= exp_map_f64_parallel_threshold() {

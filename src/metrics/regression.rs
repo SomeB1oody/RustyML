@@ -151,7 +151,7 @@ where
 /// `R^2 = 1 - SSE / SST` where `SSE = sum(y_pred - y_true)^2` and `SST = sum(y_true - mean(y_true))^2`,
 /// and since SST is computed from `y_true` alone, the argument order is significant
 ///
-/// When `y_true` has (near-)zero variance the score is undefined; following scikit-learn, this
+/// When `y_true` has (near-)zero variance the score is undefined; by convention, this
 /// returns `1.0` for a perfect fit (`SSE ~= 0`) and `0.0` otherwise
 ///
 /// # NaN handling

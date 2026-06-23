@@ -1063,7 +1063,7 @@ fn test_two_samples_is_valid() {
     }
 }
 // An indefinite Sigmoid kernel yields a non-positive eigenvalue in its centered Gram matrix;
-// Kernel PCA tolerates this (matching scikit-learn): the fit succeeds and the non-positive
+// Kernel PCA tolerates this: the fit succeeds and the non-positive
 // component is zeroed at projection time rather than failing the whole fit
 #[test]
 fn test_fit_indefinite_kernel_negative_eigenvalue_is_tolerated() {

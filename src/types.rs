@@ -142,7 +142,7 @@ pub enum RegularizationType {
 
 /// Kernel coefficient `gamma`, either an explicit value or a data-dependent rule
 ///
-/// The data-dependent rules mirror scikit-learn: `Scale` is `1 / (n_features * X.var())` and
+/// The data-dependent rules are: `Scale` is `1 / (n_features * X.var())` and
 /// `Auto` is `1 / n_features`. They are resolved to a concrete value at fit time (when the
 /// training data is known) via [`Gamma::resolve`]; kernel evaluation always operates on a
 /// resolved [`Gamma::Value`]
@@ -152,9 +152,9 @@ pub enum RegularizationType {
     derive(Deserialize, Serialize)
 )]
 pub enum Gamma {
-    /// scikit-learn `'scale'`: `1 / (n_features * X.var())`
+    /// `'scale'`: `1 / (n_features * X.var())`
     Scale,
-    /// scikit-learn `'auto'`: `1 / n_features`
+    /// `'auto'`: `1 / n_features`
     Auto,
     /// An explicit coefficient
     Value(f64),
@@ -465,7 +465,7 @@ mod tests {
 
     // Gamma::resolve (data-dependent gamma)
 
-    /// `Gamma::Scale` resolves to 1 / (n_features * X.var()), matching scikit-learn
+    /// `Gamma::Scale` resolves to 1 / (n_features * X.var())
     #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_scale_resolves_to_inverse_features_times_variance() {

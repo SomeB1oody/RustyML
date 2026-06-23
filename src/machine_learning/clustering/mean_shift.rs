@@ -242,7 +242,7 @@ impl MeanShift {
             .saturating_mul(n_features)
             >= scan_f64_parallel_min_elems();
 
-        // When the seed axis alone fills the pool, force each per-seed matvec serial so it does not fork rayon again
+        // When the seed axis alone fills the pool, keep each per-seed matvec serial to avoid nested rayon forks
         let serial_gemv = use_parallel && seeds.len() >= rayon::current_num_threads();
 
         // Mean shift on a single seed
@@ -687,11 +687,20 @@ where
 
 /// Resolves the shifted center for one mean-shift iteration
 ///
-/// Normally the new center is the weight-normalized mean `weighted_sum / weight_sum`.
-/// When every RBF weight has underflowed to exactly zero (so `weight_sum == 0`), the
-/// window contains no usable neighbours: the center is left **where it is** rather than
-/// being teleported to the coordinate origin, which would otherwise inject a spurious
-/// cluster center unrelated to the data
+/// Normally the new center is the weight-normalized mean `weighted_sum / weight_sum`. When
+/// every RBF weight underflows to exactly zero (so `weight_sum == 0`) the window has no
+/// usable neighbors, so the center is left in place rather than collapsed to the origin,
+/// which would otherwise inject a spurious cluster center unrelated to the data
+///
+/// # Parameters
+///
+/// - `weighted_sum` - Weighted sum of the points in the window
+/// - `weight_sum` - Total RBF weight over the window
+/// - `center` - Current center, returned unchanged when `weight_sum` is zero
+///
+/// # Returns
+///
+/// - `Array1<f64>` - The shifted center for the next iteration
 fn resolve_shifted_center(
     weighted_sum: Array1<f64>,
     weight_sum: f64,

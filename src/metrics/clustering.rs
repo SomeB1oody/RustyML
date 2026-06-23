@@ -354,7 +354,7 @@ where
 /// into `acc`: for each `i` in `rows` and each `j > i`, the single distance `d(i, j)` is added to
 /// both `acc[[i, cluster[j]]]` and `acc[[j, cluster[i]]]`
 ///
-/// Visiting only `j > i` (and relying on `d` being symmetric) computes each unordered pair once.
+/// Visiting only `j > i` (and relying on `d` being symmetric) computes each unordered pair once
 /// The skipped diagonal term `d(i, i) = 0` is a no-op for the running sum, so the result is
 /// identical to a full `n x n` scan
 fn accumulate_upper_triangle<S>(
@@ -381,16 +381,17 @@ fn accumulate_upper_triangle<S>(
 /// `c`, exploiting distance symmetry so each unordered pair is evaluated once (halving the metric
 /// calls versus a full `n x n` scan)
 ///
-/// Below the scanned-element gate the upper triangle is folded serially, giving a result **bitwise
-/// identical** to the old full-scan fill (the only difference, the `d(i, i) = 0` self term, adds
-/// nothing to a sum of non-negative distances). At or above the gate the upper-triangle rows are
-/// dealt round-robin into `current_num_threads()` buckets - row `i` does `n - 1 - i` pair
-/// evaluations, so contiguous splits would be lopsided while interleaving balances them - and each
-/// bucket folds into its own private `(n, k)` accumulator before they are summed in bucket order.
-/// That fixed grouping keeps the parallel result **run-to-run deterministic at a fixed thread
-/// count** (numerically equal to the serial fill, though not bitwise identical across thread
-/// counts, since the per-cell summation order changes with the bucket count - the same tradeoff
-/// the `gemm` row-split path makes)
+/// Below the scanned-element gate the upper triangle is folded serially, matching a full-scan fill
+/// (the only difference, the `d(i, i) = 0` self term, adds nothing to a sum of non-negative
+/// distances). At or above the gate the upper-triangle rows are dealt round-robin into
+/// `current_num_threads()` buckets, since row `i` does `n - 1 - i` pair evaluations and interleaving
+/// balances the buckets better than contiguous splits; each bucket folds into its own `(n, k)`
+/// accumulator and the buckets are then summed in order
+///
+/// # Notes
+///
+/// The parallel result matches the serial fill numerically, and rerunning on the same machine gives
+/// the same result (not necessarily bit-for-bit)
 fn pairwise_cluster_distances<S>(
     x: &ArrayBase<S, Ix2>,
     cluster: &[usize],
@@ -487,8 +488,7 @@ where
         sizes[c] += 1;
     }
 
-    // dist_to_cluster[[i, c]] accumulates the total distance from sample i to every sample in
-    // cluster c, computing each unordered pair only once (distances are symmetric)
+    // dist_to_cluster[[i, c]] is the total distance from sample i to every sample in cluster c
     let dist_to_cluster = pairwise_cluster_distances(x, &cluster, k, metric);
 
     let mut total = 0.0;
@@ -1151,9 +1151,8 @@ mod tests {
         dist
     }
 
-    /// The serial path (input below the parallel gate) is bitwise identical to the full `n x n`
-    /// scan: the only difference, the `d(i, i) = 0` self term, adds nothing to a sum of
-    /// non-negative distances
+    /// The serial path (input below the parallel gate) matches the full `n x n` scan: the only
+    /// difference, the `d(i, i) = 0` self term, adds nothing to a sum of non-negative distances
     #[test]
     fn test_pairwise_cluster_distances_serial_matches_full_scan_bitwise() {
         let x = pseudo_random_matrix(12, 5, 1); // 12*12*5 = 720 < gate -> serial
@@ -1193,8 +1192,8 @@ mod tests {
         }
     }
 
-    /// The parallel path is run-to-run deterministic at a fixed thread count (same bucket grouping
-    /// -> bitwise-identical result)
+    /// The parallel path is reproducible across runs on the same machine (the fixed bucket grouping
+    /// keeps the result the same)
     #[test]
     fn test_pairwise_cluster_distances_parallel_run_to_run_deterministic() {
         let n = 300;

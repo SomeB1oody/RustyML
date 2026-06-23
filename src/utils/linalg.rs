@@ -64,7 +64,7 @@ fn dominant_eigenpair(
 
     let mut prev_lambda = 0.0;
     for _ in 0..max_iter {
-        // One matvec per step
+        // 1 matvec per step
         let w = gemv_par_auto(matrix, &v);
         let lambda = v.dot(&w);
         if !lambda.is_finite() {
@@ -137,7 +137,7 @@ pub(super) fn top_eigenpairs_power_iteration(
     Ok((eigenvalues, eigenvectors))
 }
 
-/// Subtracts the rank-1 Hotelling term `value * v vᵀ` from `matrix` in place
+/// Subtracts the rank-1 Hotelling term `value * v v^T` from `matrix` in place
 ///
 /// Applies the deflation row by row (`row_i -= value * v_i * v`) instead of forming the dense
 /// `n x n` outer product first, avoiding that temporary allocation. Rows are updated in parallel

@@ -1,4 +1,4 @@
-//! Linear regression via gradient descent
+//! Linear regression with gradient-descent and closed-form solvers
 //!
 //! Provides the [`LinearRegression`] model supporting multivariate regression, an
 //! optional intercept term, and L1/L2 regularization
@@ -17,16 +17,14 @@ use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
 /// Optimization strategy used to fit [`LinearRegression`]
 ///
-/// `GradientDescent` is the iterative default and supports L1, L2, or no regularization.
-/// `Normal` is the closed-form normal-equation (ridge) solution computed via an SVD least
-/// squares: it is exact and hyperparameter-free (no learning rate / iteration count) but
-/// supports only no regularization or L2 (ridge); L1 has no closed form
+/// [`GradientDescent`](Solver::GradientDescent) is the iterative default;
+/// [`Normal`](Solver::Normal) is the exact, hyperparameter-free closed form
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Solver {
     /// Iterative gradient descent (supports L1, L2, or no regularization)
     GradientDescent,
-    /// Closed-form normal-equation / ridge solution via SVD least squares (no regularization
-    /// or L2 only)
+    /// Closed-form normal-equation / ridge solution via SVD least squares, supporting only no
+    /// regularization or L2 (L1 has no closed form)
     Normal,
 }
 
@@ -113,6 +111,7 @@ impl Default for LinearRegression {
     /// - `tol` - `1e-5` - convergence tolerance (0.00001) for stopping criteria
     /// - `n_iter` - `None` - number of actual iterations performed (set after training)
     /// - `regularization_type` - `None` - no regularization applied by default
+    /// - `solver` - [`Solver::GradientDescent`] - iterative gradient descent optimization
     ///
     /// # Returns
     ///
@@ -236,10 +235,11 @@ impl LinearRegression {
     get_field!(get_intercept, intercept, Option<f64>);
     get_field!(get_solver, solver, Solver);
 
-    /// Fits the linear regression model using gradient descent
+    /// Fits the linear regression model using the configured [`Solver`]
     ///
-    /// Iteratively updates the model's coefficients and intercept to minimize the cost function,
-    /// with early stopping once convergence is reached
+    /// With [`Solver::GradientDescent`] (the default), iteratively updates the coefficients and
+    /// intercept to minimize the cost function, with early stopping once convergence is reached;
+    /// with [`Solver::Normal`], delegates to the closed-form ridge solution instead
     ///
     /// # Parameters
     ///
@@ -257,10 +257,10 @@ impl LinearRegression {
     ///
     /// # Performance
     ///
-    /// L1 regularization and gradient updates run in parallel when the feature count clears the
-    /// cheap-map gate. The SSE and intercept-gradient sums use deterministic blocked folds above
-    /// the sum gate (see `crate::parallel_gates`), so results are bitwise identical at any thread
-    /// count
+    /// The prediction and gradient matrix-vector products run in parallel above an internal size
+    /// gate. The SSE and intercept-gradient sums use deterministic blocked folds above the sum
+    /// gate (see `crate::parallel_gates`), so re-running on the same machine reproduces the result
+    /// (not necessarily bit-for-bit)
     pub fn fit<S>(
         &mut self,
         x: &ArrayBase<S, Ix2>,
@@ -584,29 +584,27 @@ impl LinearRegression {
         self.predict(x)
     }
 
-    /// Returns the coefficient of determination R² of the prediction on `(x, y)`
+    /// Returns the coefficient of determination R^2 of the prediction on `(x, y)`
     ///
-    /// `R² = 1 - SS_res / SS_tot`, where `SS_res = Σ(y_i - ŷ_i)²` is the residual sum of
-    /// squares and `SS_tot = Σ(y_i - ȳ)²` is the total sum of squares. The best possible
-    /// score is `1.0`; a model that always predicts the mean of `y` scores `0.0`, and an
-    /// arbitrarily worse model scores negative. The degenerate constant-target case matches
-    /// scikit-learn's `r2_score`: when `SS_tot == 0`, the score is `1.0` if the fit is perfect
-    /// (`SS_res == 0`) and `0.0` otherwise
+    /// `R^2 = 1 - SS_res / SS_tot`, where `SS_res = sum((y_i - y_pred_i)^2)` is the residual
+    /// sum of squares and `SS_tot = sum((y_i - mean(y))^2)` is the total sum of squares. The
+    /// best possible score is `1.0`; a model that always predicts the mean of `y` scores `0.0`,
+    /// and an arbitrarily worse model scores negative
     ///
     /// # Parameters
     ///
-    /// - `x` - Input features with samples as rows and features as columns
-    /// - `y` - True target values aligned with the rows of `x`
+    /// - `x` - input features with samples as rows and features as columns
+    /// - `y` - true target values aligned with the rows of `x`
     ///
     /// # Returns
     ///
-    /// - `Result<f64, Error>` - The R² score
+    /// - `Result<f64, Error>` - the R^2 score
     ///
     /// # Errors
     ///
-    /// - `Error::NotFitted` - If the model has not been fitted
-    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If inputs are empty or mismatched
-    /// - `Error::NonFinite` - If `x` or `y` contain NaN or infinite values
+    /// - `Error::NotFitted` - if the model has not been fitted
+    /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if inputs are empty or mismatched
+    /// - `Error::NonFinite` - if `x` or `y` contain NaN or infinite values
     pub fn score<S>(&self, x: &ArrayBase<S, Ix2>, y: &ArrayBase<S, Ix1>) -> Result<f64, Error>
     where
         S: Data<Elem = f64>,
@@ -629,7 +627,7 @@ impl LinearRegression {
             ss_tot += (yi - y_mean).powi(2);
         }
 
-        // Constant-target handling matches scikit-learn's r2_score
+        // Constant-target handling
         let r2 = if ss_tot != 0.0 {
             1.0 - ss_res / ss_tot
         } else if ss_res == 0.0 {

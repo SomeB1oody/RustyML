@@ -514,7 +514,7 @@ fn getters_return_construction_values() {
     assert_eq!(tsne.get_method(), TSNEMethod::Exact);
 }
 
-/// min_grad_norm defaults to scikit-learn's 1e-7 and the builder overrides it
+/// min_grad_norm defaults to 1e-7 and the builder overrides it
 #[test]
 fn min_grad_norm_default_and_builder() {
     let default_tsne = TSNE::new(2, 5.0, 200.0, 100).unwrap();

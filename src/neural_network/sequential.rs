@@ -96,10 +96,10 @@ impl Default for Sequential {
 /// Global L2 norm of every gradient currently stored across `layers`, for clip-by-global-norm
 ///
 /// Squared terms accumulate in f64 to limit round-off when summing across many parameters;
-/// each tensor folds as deterministic blocks (on rayon at or above the square-sum gate, a
-/// performance switch that is bitwise identical either way), and the per-tensor totals merge
-/// in the fixed (layer, parameter) order. Layers without gradients contribute nothing; with
-/// no gradients at all the norm is 0.0
+/// each tensor folds as deterministic blocks (the rayon path at or above the square-sum gate
+/// is a performance switch that gives the same result), and the per-tensor totals merge
+/// in the fixed (layer, parameter) order, so rerunning on the same machine gives the same
+/// result. Layers without gradients contribute nothing; with no gradients at all the norm is 0.0
 fn global_grad_norm(layers: &mut [Box<dyn Layer>]) -> f32 {
     let mut sum_sq = 0.0_f64;
     for layer in layers.iter_mut() {

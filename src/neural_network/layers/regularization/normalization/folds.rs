@@ -1,8 +1,8 @@
 //! Deterministic fold kernels shared by the normalization layers
 //!
 //! Everything here computes with a fixed, shape-derived grouping and accumulation order, so a
-//! caller's `parallel` flag (or task chunking) only decides whether work runs on rayon, never
-//! the result bits
+//! caller's `parallel` flag (or task chunking) only decides whether work runs on rayon, not the
+//! result, which is reproducible across runs on the same machine
 
 use crate::math::reduction::DET_REDUCE_BLOCK;
 use crate::neural_network::Tensor;
@@ -56,7 +56,7 @@ pub(super) fn segment_dot(a: &[f32], b: &[f32], scale: f32) -> f32 {
 /// The squared-deviation twin of [`segment_dot`] with the deviation fused in:
 /// `sum_i (seg[i] - mean)^2`
 ///
-/// Bitwise identical to centering the segment into a buffer and taking
+/// Gives the same result as centering the segment into a buffer and taking
 /// `segment_dot(buf, buf, 1.0)`. The subtraction result is the same f32 whether stored or kept
 /// in a register, so callers can skip the centered temporary
 pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
@@ -80,7 +80,7 @@ pub(super) fn segment_sq_dev(seg: &[f32], mean: f32) -> f32 {
 
 /// The triple-product sibling of [`segment_dot`]: `sum_i a[i] * b[i] * c[i] * scale` over
 /// 3 equal-length contiguous segments, left-associated per term so fusing matches the
-/// 2-step `(a * b)` -> `segment_dot` composition bit for bit
+/// 2-step `(a * b)` -> `segment_dot` composition
 pub(super) fn segment_dot3(a: &[f32], b: &[f32], c: &[f32], scale: f32) -> f32 {
     let mut lanes = [0.0f32; 8];
     let mut chunks_a = a.chunks_exact(8);
@@ -156,8 +156,8 @@ fn merge_col_parts(parts: Vec<Vec<f32>>, c: usize) -> Tensor {
 /// `out[j] = sum_r x[r, j] * scale`, computed as a row-block deterministic fold
 ///
 /// Each block streams whole rows into a local `[C]` accumulator and block partials merge in
-/// block order. The `parallel` flag only decides whether the blocks run on rayon, never the
-/// result bits. `scale` is applied per term, matching the serial `(x * scale).sum_axis(Axis(0))`
+/// block order. The `parallel` flag only decides whether the blocks run on rayon, not the
+/// result. `scale` is applied per term, matching the serial `(x * scale).sum_axis(Axis(0))`
 /// form
 pub(super) fn par_col_sum(x: &[f32], c: usize, parallel: bool, scale: f32) -> Tensor {
     let block = rows_per_block(c) * c;
@@ -248,7 +248,7 @@ pub(super) fn plane_range_dot(
 /// Each channel's logical sequence (its planes in batch order) folds in
 /// [`DET_REDUCE_BLOCK`]-element blocks whose partials merge in block order, so the grouping
 /// depends only on the shape. The `parallel` flag only decides whether the (channel, block)
-/// tasks run on rayon, never the result bits
+/// tasks run on rayon, not the result
 pub(super) fn par_plane_sum(x: &[f32], c: usize, p: usize, parallel: bool, scale: f32) -> Tensor {
     if x.is_empty() {
         return Array1::zeros(c).into_dyn();

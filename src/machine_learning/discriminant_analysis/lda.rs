@@ -616,8 +616,7 @@ impl LDA {
             .ok_or_else(|| Error::computation("Error computing overall mean"))?;
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
-        // Only force each class task's scatter GEMM serial once the class fan alone fills the pool
-        // `n_classes >= `threads`
+        // Force each class task's scatter GEMM serial once the class fan alone fills the pool (`n_classes >= threads`)
         let serial_gemm = use_parallel && n_classes >= rayon::current_num_threads();
         let class_results: Vec<_> = if use_parallel {
             // Compute per-class stats in parallel
@@ -744,7 +743,7 @@ impl LDA {
     ///
     /// # Performance
     ///
-    /// Scores through one parallel GEMM; the per-row label pick parallelizes when the
+    /// Scores through 1 parallel GEMM; the per-row label pick parallelizes when the
     /// total scan work clears the calibrated scan-class gate (see `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
@@ -874,10 +873,11 @@ impl LDA {
     /// Returns the posterior class probabilities for each sample
     ///
     /// Under the LDA Gaussian model with a shared covariance, the posterior `P(class_j | x)`
-    /// is the softmax of the discriminant scores from [`decision_function`](Self::decision_function).
-    /// The result has shape `(n_samples, n_classes)`, each row sums to 1, and columns are
-    /// ordered to match [`get_classes`](Self::get_classes). The softmax is computed in a
-    /// numerically stable way (subtracting the per-row maximum before exponentiating)
+    /// is the softmax of the discriminant scores from
+    /// [`decision_function`](Self::decision_function). The result has shape `(n_samples, n_classes)`,
+    /// each row sums to 1, and columns are ordered to match
+    /// [`get_classes`](Self::get_classes). The softmax is computed in a numerically stable way
+    /// (subtracting the per-row maximum before exponentiating)
     ///
     /// # Parameters
     ///
@@ -1009,10 +1009,9 @@ impl LDA {
     /// which the Ledoit-Wolf shrinkage estimator needs
     ///
     /// `serial_gemm` forces the within-class scatter product onto the serial matmul path. Set it
-    /// when the per-class loop is parallelized across a class fan that already fills the pool
-    /// (`n_classes >= threads`), so each class task does not fork rayon again inside its scatter
-    /// GEMM (nested parallelism / oversubscription). When the class fan is too short to fill the
-    /// pool, leave it false so the scatter GEMM parallelizes and uses the otherwise-idle cores.
+    /// when the per-class loop already fills the pool (`n_classes >= threads`) so each class task
+    /// does not fork rayon again inside its scatter GEMM; otherwise leave it false so the scatter
+    /// GEMM can parallelize over the otherwise-idle cores
     fn compute_class_stats<S>(
         x: &ArrayBase<S, Ix2>,
         indices: &[usize],
@@ -1032,10 +1031,7 @@ impl LDA {
             .expect("Error computing class mean");
 
         let centered = &class_data - &class_mean;
-        // The between-class term (`class_sb`) is a rank-1 [d,1]x[1,d] outer product whose FLOPs are
-        // always below the GEMM parallel gate, so it stays on `gemm_par_auto` (which serializes it
-        // anyway). The within-class scatter is the large one: force it serial when the per-class
-        // loop already fills the pool (`serial_gemm`), otherwise let the work-size gate decide.
+
         let class_sw = if serial_gemm {
             gemm_par_switch(&centered.t(), &centered, false)
         } else {

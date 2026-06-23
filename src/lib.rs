@@ -349,7 +349,7 @@ macro_rules! model_save_and_load_methods {
 ///
 /// `[attrs..] [vis] STORE => getter / setter = default`, where the attributes (docs and any
 /// `#[cfg(...)]`) and the visibility are optional, `STORE` is the static's name, and `=>` / `/`
-/// are just separators.
+/// are just separators
 ///
 /// # Usage and expansion
 ///
@@ -357,33 +357,31 @@ macro_rules! model_save_and_load_methods {
 ///
 /// ```ignore
 /// tunable_gate! {
-///     /// Docs for the gate.
+///     /// Docs for the gate
 ///     #[cfg(feature = "neural_network")]
 ///     pub(crate) SOME_GATE => some_gate / set_some_gate = 65_536
 /// }
 /// ```
 ///
-/// expands to (every leading attribute is applied to all three items, so the gate keeps the
-/// exact docs and feature-gating of the constant it replaces):
+/// expands to:
 ///
 /// ```ignore
-/// /// Docs for the gate.
+/// /// Docs for the gate
 /// #[cfg(feature = "neural_network")]
 /// static SOME_GATE: AtomicUsize = AtomicUsize::new(65_536);
 ///
-/// /// Docs for the gate.
+/// /// Docs for the gate
 /// #[cfg(feature = "neural_network")]
 /// #[doc(hidden)]
 /// pub(crate) fn some_gate() -> usize { SOME_GATE.load(Relaxed) }
 ///
-/// /// Docs for the gate.
+/// /// Docs for the gate
 /// #[cfg(feature = "neural_network")]
 /// #[doc(hidden)]
 /// pub(crate) fn set_some_gate(value: usize) { SOME_GATE.store(value, Relaxed); }
 /// ```
 ///
-/// Call sites read the gate through `some_gate()` instead of the old `SOME_GATE` constant; the
-/// public [`crate::tuning`] facade wraps `set_some_gate` into one discoverable surface.
+/// Call sites read the gate through `some_gate()` instead of the old `SOME_GATE` constant
 #[allow(unused_macros)]
 macro_rules! tunable_gate {
     (
@@ -493,9 +491,8 @@ pub(crate) mod parallel_gates;
 /// ## Matrix Products ([`math::matmul`])
 /// - Crate-internal GEMM/GEMV backed by the [`gemm`](https://docs.rs/gemm) crate: runtime-
 ///   dispatched SIMD kernels, parallelized on the rayon pool for large products. Results are
-///   correct to floating-point rounding and run-to-run deterministic; GEMM is additionally
-///   bitwise identical across thread counts (GEMV is not). See the module docs for the full
-///   reproducibility contract
+///   correct to floating-point rounding and reproducible across runs on the same machine (not
+///   necessarily bit-for-bit)
 ///
 /// ## Statistical Functions
 /// - `sum_of_square_total` - Total variability measurement (SST)
@@ -682,7 +679,7 @@ pub mod utils;
 /// KxK confusion matrix for multi-class evaluation:
 /// - Per-class precision, recall, F1, and support
 /// - Macro / micro / weighted aggregation via the `Average` enum
-/// - `classification_report`-style text summary
+/// - Per-class precision/recall/F1/support text summary
 ///
 /// ## Classification Functions
 /// - **accuracy**: Standalone accuracy calculation for multi-class and binary classification
@@ -715,7 +712,7 @@ pub mod utils;
 ///   `nalgebra` on a dimension mismatch, the metrics panic on precondition violations (mismatched
 ///   lengths, empty input) rather than returning the crate's `Error`. The panic messages mirror
 ///   that type's wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
-/// - **Arguments are `(y_true, y_pred)`** - ground truth first, matching scikit-learn and the
+/// - **Arguments are `(y_true, y_pred)`** - ground truth first, mirroring the
 ///   clustering metrics' `(labels_true, labels_pred)`. The order is irrelevant for the symmetric
 ///   metrics (MSE, MAE, accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and
 ///   `roc_auc`

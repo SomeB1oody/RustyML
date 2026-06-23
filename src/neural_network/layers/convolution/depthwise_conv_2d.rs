@@ -276,7 +276,7 @@ impl DepthwiseConv2D {
     /// Shared numeric body of [`Layer::forward`] and [`Layer::predict`]; writes no caches. `forward`
     /// wraps this and records the input/output caches, `predict` returns its result directly. Each
     /// `(batch item, channel)` is convolved independently into a disjoint output plane, so the
-    /// FLOPs-gated parallel and sequential paths are bitwise identical
+    /// FLOPs-gated parallel and sequential paths produce the same result
     fn convolve(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 4 {
             return Err(Error::invalid_input("input tensor is not 4D"));

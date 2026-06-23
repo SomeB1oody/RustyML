@@ -729,7 +729,7 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     }
 }
 
-// centroid-shift convergence (scikit-learn): a converged solution is a fixed point
+// centroid-shift convergence: a converged solution is a fixed point
 
 /// The centroid-shift convergence criterion stops exactly when the centroids stop moving, so
 /// a converged k-means solution must satisfy the fixed-point property: every centroid equals

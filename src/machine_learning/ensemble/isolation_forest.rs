@@ -504,9 +504,7 @@ impl IsolationForest {
     /// `contamination` is the expected proportion of outliers in `x`. The
     /// `ceil(contamination * n_samples)` highest-scoring samples (see [`predict`](Self::predict))
     /// are labelled `-1` (outlier) and the rest `+1` (inlier). Ties at the threshold score are
-    /// all labelled `-1`, so at least `ceil(contamination * n_samples)` samples are flagged.
-    /// This mirrors scikit-learn's `IsolationForest.predict`, except the threshold is taken on
-    /// the provided batch `x` rather than stored from the training data
+    /// all labelled `-1`, so at least `ceil(contamination * n_samples)` samples are flagged
     ///
     /// # Parameters
     ///
@@ -537,15 +535,14 @@ impl IsolationForest {
             ));
         }
 
-        // Anomaly scores in [0, 1]; higher means more anomalous. `predict` validates input.
+        // Anomaly scores in [0, 1]; higher means more anomalous. `predict` validates input
         let scores = self.predict(x)?;
         let n = scores.len();
 
         // Flag the ceil(contamination * n) highest-scoring samples (at least 1)
         let n_outliers = (((n as f64) * contamination).ceil() as usize).clamp(1, n);
 
-        // Threshold = the n_outliers-th largest score (smallest score still flagged), found by
-        // quickselect at ascending index `n - n_outliers`
+        // Threshold = n_outliers-th largest score, via quickselect at ascending index n - n_outliers
         let mut sorted: Vec<f64> = scores.to_vec();
         let kth = n - n_outliers;
         sorted.select_nth_unstable_by(kth, |a, b| {

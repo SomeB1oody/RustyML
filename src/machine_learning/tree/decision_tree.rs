@@ -739,7 +739,7 @@ impl DecisionTree {
                 feature,
                 partitions,
             } => {
-                // A multi-way categorical split is useful as long as at least two branches
+                // A multi-way categorical split is useful as long as at least 2 branches
                 // each satisfy the leaf-size constraint
                 let adequate_branches = partitions
                     .iter()

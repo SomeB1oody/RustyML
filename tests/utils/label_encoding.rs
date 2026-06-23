@@ -134,7 +134,7 @@ fn to_sparse_categorical_soft_probabilities() {
     assert_eq!(labels, expected);
 }
 
-/// Ties resolve to the first index, matching numpy/sklearn/keras argmax semantics
+/// Ties resolve to the first index, matching numpy/keras argmax semantics
 #[test]
 fn to_sparse_categorical_tie_breaks_to_first_index() {
     let tied = arr2(&[[0.5f64, 0.5, 0.0], [0.0, 0.5, 0.5]]);
