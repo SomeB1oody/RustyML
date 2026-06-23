@@ -90,6 +90,13 @@ path = "benches/benchmarks/ml_end_to_end.rs"
 harness = false
 required-features = ["machine_learning", "utils"]
 
+# Power-iteration eigensolver (PCA / KernelPCA PowerIteration solvers) microbenchmarks
+[[bench]]
+name = "eigensolver"
+path = "benches/benchmarks/eigensolver.rs"
+harness = false
+required-features = ["utils"]
+
 # Kernel-level GEMM shape sweep through Dense::forward
 [[bench]]
 name = "matmul_kernels"

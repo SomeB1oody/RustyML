@@ -525,9 +525,12 @@ impl PCA {
         }
 
         // Compute principal axes and singular values
-        let (components, singular_values) = self
+        let (mut components, singular_values) = self
             .svd_solver
             .compute_components(&x_centered, self.n_components)?;
+
+        // Fix component signs so the result is deterministic and identical across solvers
+        Self::flip_component_signs(&mut components);
 
         #[cfg(feature = "show_progress")]
         {
@@ -638,6 +641,34 @@ impl PCA {
         } else {
             for mut row in x.axis_iter_mut(Axis(0)) {
                 row -= mean;
+            }
+        }
+    }
+
+    /// Fixes the sign of each principal axis so the decomposition is deterministic
+    ///
+    /// Each component (row of `components`) is negated when its largest-magnitude loading is
+    /// negative, making the largest-magnitude entry non-negative. This removes the sign ambiguity
+    /// inherent to eigen/SVD decompositions so that all three solvers, and repeated runs, agree on
+    /// the orientation of every axis. The decision is made from the component vectors themselves
+    /// (not from `U`, which the randomized and power-iteration solvers never form), so the
+    /// convention is internally consistent though it need not byte-match scikit-learn's U-based
+    /// `svd_flip`. Reconstructions are unaffected: flipping an axis flips its scores in step, so
+    /// their product is unchanged
+    fn flip_component_signs(components: &mut Array2<f64>) {
+        for mut row in components.axis_iter_mut(Axis(0)) {
+            // Index of the largest-magnitude loading; ties keep the first (lowest) index
+            let mut max_idx = 0;
+            let mut max_abs = 0.0;
+            for (j, &v) in row.iter().enumerate() {
+                let abs = v.abs();
+                if abs > max_abs {
+                    max_abs = abs;
+                    max_idx = j;
+                }
+            }
+            if row[max_idx] < 0.0 {
+                row.mapv_inplace(|x| -x);
             }
         }
     }

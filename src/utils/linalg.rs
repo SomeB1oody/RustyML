@@ -5,10 +5,12 @@
 //! carrying near-identical copies
 
 use crate::error::Error;
-use crate::math::matmul::{gemm_par_auto, gemv_par_auto};
+use crate::math::matmul::gemv_par_auto;
+use crate::parallel_gates::cheap_map_f64_parallel_threshold;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 
 /// Builds a random unit vector of length `n`, falling back to a uniform unit
 /// vector if the random draw is numerically zero
@@ -62,22 +64,22 @@ fn dominant_eigenpair(
 
     let mut prev_lambda = 0.0;
     for _ in 0..max_iter {
-        // Iterate toward the dominant eigenvector
+        // One matvec per step
         let w = gemv_par_auto(matrix, &v);
+        let lambda = v.dot(&w);
+        if !lambda.is_finite() {
+            return Err(Error::non_finite("power iteration eigenvalue"));
+        }
         let w_norm = w.dot(&w).sqrt();
         if w_norm <= f64::EPSILON || !w_norm.is_finite() {
             return Err(Error::not_converged("Power iteration failed to converge"));
         }
-        let v_next = &w / w_norm;
-        let lambda = v_next.dot(&gemv_par_auto(matrix, &v_next));
-        if !lambda.is_finite() {
-            return Err(Error::non_finite("power iteration eigenvalue"));
-        }
         if (lambda - prev_lambda).abs() < tol {
-            return Ok((v_next, lambda));
+            return Ok((v, lambda));
         }
         prev_lambda = lambda;
-        v = v_next;
+        // Advance toward the dominant eigenvector
+        v = &w / w_norm;
     }
 
     let lambda = v.dot(&gemv_par_auto(matrix, &v));
@@ -127,16 +129,40 @@ pub(super) fn top_eigenpairs_power_iteration(
     for _ in 0..k {
         let (vector, value) = dominant_eigenpair(&matrix, &mut rng, max_iter, tol)?;
         // Deflate the extracted component so the next iteration surfaces the next one: M = M - lambda v v^T
-        let outer = gemm_par_auto(
-            &vector.view().insert_axis(Axis(1)),
-            &vector.view().insert_axis(Axis(0)),
-        );
-        matrix.scaled_add(-value, &outer);
+        deflate_rank_one(&mut matrix, &vector, value);
         eigenvalues.push(value);
         eigenvectors.push(vector);
     }
 
     Ok((eigenvalues, eigenvectors))
+}
+
+/// Subtracts the rank-1 Hotelling term `value * v vᵀ` from `matrix` in place
+///
+/// Applies the deflation row by row (`row_i -= value * v_i * v`) instead of forming the dense
+/// `n x n` outer product first, avoiding that temporary allocation. Rows are updated in parallel
+/// once the `n^2` element work clears the cheap-map gate, and serially below it
+///
+/// # Parameters
+///
+/// - `matrix` - Symmetric matrix being deflated, modified in place
+/// - `v` - Unit eigenvector of the component to remove
+/// - `value` - Eigenvalue of the component to remove
+fn deflate_rank_one(matrix: &mut Array2<f64>, v: &Array1<f64>, value: f64) {
+    let n = matrix.nrows();
+    if n.saturating_mul(n) >= cheap_map_f64_parallel_threshold() {
+        matrix
+            .axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(i, mut row)| {
+                row.scaled_add(-value * v[i], v);
+            });
+    } else {
+        for (i, mut row) in matrix.axis_iter_mut(Axis(0)).enumerate() {
+            row.scaled_add(-value * v[i], v);
+        }
+    }
 }
 
 /// Extracts the top-`k` eigenpairs of a symmetric matrix using the Lanczos

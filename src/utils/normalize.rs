@@ -137,6 +137,9 @@ where
         } else {
             data.mapv_inplace(|x| x / norm);
         }
+    } else {
+        // An all-near-zero array has no direction to keep, so zero it
+        data.fill(0.0);
     }
 
     Ok(())

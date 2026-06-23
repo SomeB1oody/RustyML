@@ -288,6 +288,17 @@ fn test_l2_global_2x2() {
     assert_allclose(&result, &expected, 1e-12);
 }
 
+/// An all-zero array under Global normalization stays all-zeros (no division by zero, and
+/// consistent with the per-lane path which zeros effectively-zero lanes)
+#[test]
+fn test_l2_global_zero_array_preserved() {
+    let data: Array2<f64> = array![[0.0, 0.0], [0.0, 0.0]];
+    let result = normalize(&data, NormalizationAxis::Global, NormalizationOrder::L2).unwrap();
+    let expected: Array2<f64> = array![[0.0, 0.0], [0.0, 0.0]];
+    assert_allclose(&result, &expected, 0.0);
+    assert!(result.iter().all(|v| v.is_finite()));
+}
+
 /// L2 Global on the 1-D array [3, 4] normalizes to [0.6, 0.8]
 #[test]
 fn test_l2_global_1d() {

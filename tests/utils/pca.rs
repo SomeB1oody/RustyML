@@ -394,6 +394,51 @@ fn test_all_solvers_agree_on_singular_value() {
     }
 }
 
+/// All three solvers agree on component signs: each axis is oriented so its largest-magnitude
+/// loading is non-negative, so the solvers produce sign-identical components (svd_flip)
+#[test]
+fn test_all_solvers_agree_on_component_signs() {
+    use approx::assert_abs_diff_eq;
+
+    let x = anisotropic_data();
+
+    let reference = {
+        let mut pca = PCA::new(2).unwrap().with_svd_solver(SVDSolver::Full);
+        pca.fit(&x).unwrap();
+        pca.get_components()
+            .expect("fitted; components is Some")
+            .clone()
+    };
+
+    // Each component's largest-magnitude loading must be non-negative after the sign fix
+    for row in reference.rows() {
+        let signed_max = row
+            .iter()
+            .copied()
+            .max_by(|a, b| a.abs().partial_cmp(&b.abs()).unwrap())
+            .unwrap();
+        assert!(
+            signed_max >= 0.0,
+            "largest-magnitude loading should be non-negative, got {}",
+            signed_max
+        );
+    }
+
+    // The approximate solvers must land on the same orientation, not a flipped one
+    for solver in [SVDSolver::Randomized(42), SVDSolver::PowerIteration] {
+        let mut pca = PCA::new(2).unwrap().with_svd_solver(solver);
+        pca.fit(&x).unwrap();
+        let components = pca.get_components().expect("fitted; components is Some");
+        // A flipped axis would differ by ~2x the loading; 1e-3 catches it while tolerating the
+        // approximate solvers' small numerical drift on the well-separated axes
+        for (a, b) in reference.rows().into_iter().zip(components.rows()) {
+            for (&x_ref, &x_got) in a.iter().zip(b.iter()) {
+                assert_abs_diff_eq!(x_ref, x_got, epsilon = 1e-3);
+            }
+        }
+    }
+}
+
 // Randomized solver: determinism
 
 /// Same seed for Randomized produces bit-identical transform output

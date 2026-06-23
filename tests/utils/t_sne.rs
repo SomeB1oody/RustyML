@@ -514,6 +514,47 @@ fn getters_return_construction_values() {
     assert_eq!(tsne.get_method(), TSNEMethod::Exact);
 }
 
+/// min_grad_norm defaults to scikit-learn's 1e-7 and the builder overrides it
+#[test]
+fn min_grad_norm_default_and_builder() {
+    let default_tsne = TSNE::new(2, 5.0, 200.0, 100).unwrap();
+    assert_abs_diff_eq!(default_tsne.get_min_grad_norm(), 1e-7, epsilon = 0.0);
+
+    let tuned = default_tsne.with_min_grad_norm(1e-3);
+    assert_abs_diff_eq!(tuned.get_min_grad_norm(), 1e-3, epsilon = 0.0);
+}
+
+/// Early stopping (a large threshold stops right after early exaggeration) and disabling it
+/// (threshold 0 runs the full n_iter) both produce a valid, correctly shaped embedding
+#[test]
+fn min_grad_norm_early_stop_and_disable_produce_valid_output() {
+    let x = small_data();
+
+    // A huge threshold makes the post-exaggeration gradient check trip immediately
+    let early = TSNE::new(2, 2.0, 200.0, 1000)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap()
+        .with_min_grad_norm(1e9);
+    let early_embedding = early.fit_transform(&x).unwrap();
+    assert_eq!(early_embedding.shape(), &[6, 2]);
+    assert!(early_embedding.iter().all(|v| v.is_finite()));
+
+    // Disabling early stopping still runs to completion with finite output
+    let full = TSNE::new(2, 2.0, 200.0, 300)
+        .unwrap()
+        .with_random_state(42)
+        .with_init(Init::PCA)
+        .with_method(TSNEMethod::Exact)
+        .unwrap()
+        .with_min_grad_norm(0.0);
+    let full_embedding = full.fit_transform(&x).unwrap();
+    assert_eq!(full_embedding.shape(), &[6, 2]);
+    assert!(full_embedding.iter().all(|v| v.is_finite()));
+}
+
 /// When random_state is None the getter also returns None
 #[test]
 fn getter_random_state_none() {

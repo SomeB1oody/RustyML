@@ -100,6 +100,16 @@ const GAIN_DECAY: f64 = 0.8;
 const MIN_GAIN: f64 = 0.01;
 /// Lower bound for q_ij to avoid numerical instability
 const MIN_Q: f64 = 1e-12;
+/// Default gradient infinity-norm threshold for early stopping, matching scikit-learn's
+/// `min_grad_norm`
+const DEFAULT_MIN_GRAD_NORM: f64 = 1e-7;
+
+/// serde default for [`TSNE::min_grad_norm`], so models serialized before the field existed
+/// deserialize with the standard threshold instead of `0.0`
+fn default_min_grad_norm() -> f64 {
+    DEFAULT_MIN_GRAD_NORM
+}
+
 /// Strategy for initializing the low-dimensional embedding before optimization
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Init {
@@ -170,6 +180,10 @@ pub struct TSNE {
     /// Gradient computation method (defaults to [`TSNEMethod::BarnesHut`])
     #[serde(default)]
     method: TSNEMethod,
+    /// Gradient infinity-norm below which optimization stops early (after early exaggeration);
+    /// `0` disables early stopping and always runs the full `n_iter`
+    #[serde(default = "default_min_grad_norm")]
+    min_grad_norm: f64,
 }
 
 impl Default for TSNE {
@@ -266,6 +280,7 @@ impl TSNE {
             random_state: None,
             init: Init::PCA,
             method,
+            min_grad_norm: DEFAULT_MIN_GRAD_NORM,
         })
     }
 
@@ -336,6 +351,24 @@ impl TSNE {
         Ok(self)
     }
 
+    /// Sets the gradient infinity-norm threshold for early stopping (default: `1e-7`)
+    ///
+    /// Once the early-exaggeration phase is over, optimization stops as soon as the largest
+    /// absolute gradient entry drops below this value, sparing iterations after the embedding has
+    /// converged. Set it to `0.0` to disable early stopping and always run the full `n_iter`
+    ///
+    /// # Parameters
+    ///
+    /// - `min_grad_norm` - non-negative gradient-norm threshold
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - the updated instance, for method chaining
+    pub fn with_min_grad_norm(mut self, min_grad_norm: f64) -> Self {
+        self.min_grad_norm = min_grad_norm;
+        self
+    }
+
     get_field!(get_n_components, n_components, usize);
     get_field!(get_perplexity, perplexity, f64);
     get_field!(get_learning_rate, learning_rate, f64);
@@ -343,6 +376,7 @@ impl TSNE {
     get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_init, init, Init);
     get_field!(get_method, method, TSNEMethod);
+    get_field!(get_min_grad_norm, min_grad_norm, f64);
 
     /// Performs t-SNE dimensionality reduction on input data
     ///
@@ -436,6 +470,16 @@ impl TSNE {
                 progress_bar.set_message(format!("{:.6}", last_kl));
                 progress_bar.inc(1);
             }
+
+            // Stop once the embedding has converged (largest-magnitude gradient entry below the
+            // threshold), but only after early exaggeration, whose inflated gradients would
+            // otherwise keep the norm above any sensible threshold
+            if self.min_grad_norm > 0.0 && iter >= exaggeration_iter {
+                let grad_inf_norm = grad.iter().fold(0.0_f64, |acc, &g| acc.max(g.abs()));
+                if grad_inf_norm < self.min_grad_norm {
+                    break;
+                }
+            }
         }
 
         #[cfg(feature = "show_progress")]
@@ -497,6 +541,16 @@ impl TSNE {
                 last_kl = self.barnes_hut_kl(&y, &adj, _z, exaggeration);
                 progress_bar.set_message(format!("{:.6}", last_kl));
                 progress_bar.inc(1);
+            }
+
+            // Stop once the embedding has converged (largest-magnitude gradient entry below the
+            // threshold), but only after early exaggeration, whose inflated gradients would
+            // otherwise keep the norm above any sensible threshold
+            if self.min_grad_norm > 0.0 && iter >= exaggeration_iter {
+                let grad_inf_norm = grad.iter().fold(0.0_f64, |acc, &g| acc.max(g.abs()));
+                if grad_inf_norm < self.min_grad_norm {
+                    break;
+                }
             }
         }
 
