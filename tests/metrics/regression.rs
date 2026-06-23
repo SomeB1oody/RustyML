@@ -577,7 +577,7 @@ fn test_mape_nonnegative() {
     assert!(mean_absolute_percentage_error(&y_true, &y_pred) >= 0.0);
 }
 
-/// When y_true = 0 the denominator is floored at 1e-15, so MAPE blows up (> 1e13)
+/// When y_true = 0 the denominator is floored at `f64::EPSILON`, so MAPE blows up (> 1e13)
 #[test]
 fn test_mape_zero_y_true_eps_floor() {
     let y_true = array![0.0, 2.0];
@@ -585,7 +585,7 @@ fn test_mape_zero_y_true_eps_floor() {
     let mape = mean_absolute_percentage_error(&y_true, &y_pred);
     assert!(
         mape > 1e13,
-        "MAPE with y_true=0 should be very large due to 1e-15 floor; got {mape}"
+        "MAPE with y_true=0 should be very large due to the f64::EPSILON floor; got {mape}"
     );
 }
 

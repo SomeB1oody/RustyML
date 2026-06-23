@@ -372,8 +372,7 @@ where
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
-    // Floor on |y_true| to keep the division finite when a true value is zero
-    const EPS: f64 = 1e-15;
+    const EPS: f64 = f64::EPSILON;
     let sum: f64 = y_true
         .iter()
         .zip(y_pred.iter())

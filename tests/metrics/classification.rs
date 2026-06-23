@@ -654,7 +654,8 @@ fn log_loss_two_samples() {
 
 #[test]
 fn log_loss_perfect_probs() {
-    // Perfect probs clamped to 1-EPS -> loss = -ln(1-1e-15) ~= 1e-15 (finite, not inf)
+    // Perfect probs clamped to 1-EPS (EPS = f64::EPSILON)
+    // -> loss = -ln(1 - f64::EPSILON) ~= 2.2e-16 (finite, not inf)
     let y_true = array![0usize, 1];
     let y_prob = arr2(&[[1.0, 0.0], [0.0, 1.0]]);
     let loss = log_loss(&y_true, &y_prob);
@@ -664,12 +665,13 @@ fn log_loss_perfect_probs() {
 
 #[test]
 fn log_loss_zero_prob_clamped() {
-    // p=0.0 for the true class clamps to EPS=1e-15 -> loss = -ln(1e-15) ~= 34.5, finite (not +inf)
+    // p=0.0 for the true class clamps to EPS = f64::EPSILON
+    // -> loss = -ln(f64::EPSILON) ~= 36.0, finite (not +inf)
     let y_true = array![0usize];
     let y_prob = arr2(&[[0.0, 1.0]]);
     let loss = log_loss(&y_true, &y_prob);
     assert!(loss.is_finite());
-    assert!(loss > 30.0); // -ln(1e-15) ~= 34.5
+    assert!(loss > 30.0); // -ln(f64::EPSILON) ~= 36.0
 }
 
 #[test]

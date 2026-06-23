@@ -64,9 +64,6 @@ pub use sigmoid::Sigmoid;
 pub use softmax::Softmax;
 pub use tanh::Tanh;
 
-/// Epsilon guarding the softmax normalizer against division by zero
-const SOFTMAX_EPSILON: f32 = 1e-8;
-
 /// The element-wise activation functions that trainable layers can embed
 ///
 /// Dense, the convolutional layers, and the recurrent layers each carry an
@@ -284,7 +281,8 @@ fn softmax_forward(input: &Tensor) -> Result<Tensor, Error> {
         // Subtract the row max so every exp argument is <= 0 (no overflow)
         let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         row.map_inplace(|x| *x = (*x - max_val).exp());
-        let sum = row.sum().max(SOFTMAX_EPSILON);
+        // The max-shift guarantees one term is exp(0)=1.0, so the sum is always >= 1.0
+        let sum = row.sum();
         row.map_inplace(|x| *x /= sum);
     };
 

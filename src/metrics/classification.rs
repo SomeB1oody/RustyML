@@ -756,7 +756,7 @@ where
         panic!("input is empty: y_true and y_prob");
     }
 
-    const EPS: f64 = 1e-15;
+    const EPS: f64 = f64::EPSILON;
     let n_classes = y_prob.ncols();
     let mut total = 0.0;
     for (i, &label) in y_true.iter().enumerate() {
@@ -765,8 +765,7 @@ where
                 "invalid input: label {label} is out of range for {n_classes} probability columns"
             );
         }
-        // Renormalize the row to a probability distribution (scikit-learn does the same); the row
-        // sum is floored at EPS so an all-zero row divides cleanly instead of producing NaN
+        // Renormalize the row to a probability distribution
         let row_sum: f64 = y_prob.row(i).sum();
         let p = (y_prob[[i, label]] / row_sum.max(EPS)).clamp(EPS, 1.0 - EPS);
         total -= p.ln();

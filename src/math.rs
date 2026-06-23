@@ -193,8 +193,9 @@ where
 
 /// Computes the logistic sigmoid for a scalar input
 ///
-/// The sigmoid maps any real number into the open interval (0, 1) with clipping
-/// for extreme values to preserve numerical stability
+/// The sigmoid maps any real number into the interval (0, 1). No input clamping is needed:
+/// IEEE-754 arithmetic saturates correctly at the extremes (large positive `z` gives exactly
+/// `1.0`, large negative `z` gives exactly `0.0`), matching scipy/PyTorch/TensorFlow
 ///
 /// # Parameters
 ///
@@ -215,16 +216,6 @@ where
 /// ```
 #[inline]
 pub fn sigmoid(z: f64) -> f64 {
-    // Clamp extreme inputs to keep exp() from overflowing
-    const MAX_SIGMOID_INPUT: f64 = 500.0;
-    const MIN_SIGMOID_INPUT: f64 = -500.0;
-
-    if z > MAX_SIGMOID_INPUT {
-        return 1.0;
-    } else if z < MIN_SIGMOID_INPUT {
-        return 0.0;
-    }
-
     1.0 / (1.0 + (-z).exp())
 }
 

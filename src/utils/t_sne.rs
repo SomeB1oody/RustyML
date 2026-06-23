@@ -47,7 +47,7 @@ where
         }
 
         let sum_p = p.sum();
-        let epsilon = 1e-12;
+        let epsilon = 1e-8;
 
         if sum_p < epsilon {
             // Sum too small: fall back to a uniform distribution
@@ -98,8 +98,8 @@ const GAIN_INCREASE: f64 = 0.2;
 const GAIN_DECAY: f64 = 0.8;
 /// Floor for the per-parameter adaptive gain
 const MIN_GAIN: f64 = 0.01;
-/// Lower bound for q_ij to avoid numerical instability
-const MIN_Q: f64 = 1e-12;
+/// Lower bound for q_ij / the Barnes-Hut normalizer Z before division and log
+const MIN_Q: f64 = f64::EPSILON;
 /// Default gradient infinity-norm threshold for early stopping, matching scikit-learn's
 /// `min_grad_norm`
 const DEFAULT_MIN_GRAD_NORM: f64 = 1e-7;

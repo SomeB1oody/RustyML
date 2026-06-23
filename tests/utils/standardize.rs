@@ -12,7 +12,7 @@ use rustyml::utils::standardize::{StandardizationAxis, standardize};
 #[test]
 fn test_global_closed_form_1d() {
     let data: Array1<f64> = array![1.0, 3.0];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     let expected: Array1<f64> = array![-1.0, 1.0];
     assert_allclose(&result, &expected, 1e-7);
 }
@@ -21,30 +21,37 @@ fn test_global_closed_form_1d() {
 #[test]
 fn test_global_closed_form_2d() {
     let data: Array2<f64> = array![[1.0, 3.0]];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     let expected: Array2<f64> = array![[-1.0, 1.0]];
     assert_allclose(&result, &expected, 1e-7);
 }
 
-/// Epsilon flooring uses sqrt(variance + eps^2), not sqrt(variance) + eps
+/// A healthy feature is divided by the raw sqrt(variance), giving exact z-scores with no
+/// stability bias, matching scikit-learn's StandardScaler (which never perturbs healthy features)
 #[test]
-fn test_epsilon_formula_sqrt_var_plus_eps_squared() {
+fn test_healthy_feature_exact_zscores() {
     let data: Array1<f64> = array![1.0, 3.0];
-    let result = standardize(&data, StandardizationAxis::Global, 0.1).unwrap();
-    let expected: Array1<f64> = array![-0.995037190209, 0.995037190209];
-    assert_allclose(&result, &expected, 1e-8);
-    // Must not match the sqrt(var)+eps result of +/-0.909090...
-    assert!(
-        (result[0] - (-0.909090909)).abs() > 0.08,
-        "result must not match the incorrect sqrt(var)+eps formula"
-    );
+    // variance = 1.0, so the divisor is exactly 1.0 and the z-scores are exactly +/-1.0
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
+    let expected: Array1<f64> = array![-1.0, 1.0];
+    assert_allclose(&result, &expected, 1e-12);
+}
+
+/// Constant detection follows scikit-learn's `_is_constant_feature` (machine-precision,
+/// variance-based)
+#[test]
+fn test_small_but_real_variance_is_normalized_like_sklearn() {
+    let data: Array1<f64> = array![1.0, 1.0 + 1e-8];
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
+    let expected: Array1<f64> = array![-1.0, 1.0];
+    assert_allclose(&result, &expected, 1e-4);
 }
 
 /// All-identical values give zero variance and all-zero output without NaN
 #[test]
 fn test_global_zero_variance_all_zeros() {
     let data: Array2<f64> = array![[3.0, 3.0], [3.0, 3.0]];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     let expected: Array2<f64> = array![[0.0, 0.0], [0.0, 0.0]];
     assert_allclose(&result, &expected, 1e-12);
     assert!(result.iter().all(|v| v.is_finite()));
@@ -54,7 +61,7 @@ fn test_global_zero_variance_all_zeros() {
 #[test]
 fn test_global_single_element() {
     let data: Array2<f64> = array![[5.0]];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     let expected: Array2<f64> = array![[0.0]];
     assert_allclose(&result, &expected, 1e-12);
 }
@@ -63,7 +70,7 @@ fn test_global_single_element() {
 #[test]
 fn test_global_1d_five_elements() {
     let data: Array1<f64> = array![1.0, 2.0, 3.0, 4.0, 5.0];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2};
     let expected: Array1<f64> = array![-SQRT_2, -FRAC_1_SQRT_2, 0.0, FRAC_1_SQRT_2, SQRT_2];
     assert_allclose(&result, &expected, 1e-8);
@@ -73,7 +80,7 @@ fn test_global_1d_five_elements() {
 #[test]
 fn test_global_3d_array() {
     let data: Array3<f64> = array![[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]];
-    let result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Global).unwrap();
     let expected: Array3<f64> = array![[
         [-1.4638501094, -0.8783100656],
         [-0.2927700219, 0.2927700219],
@@ -89,7 +96,7 @@ fn test_global_3d_array() {
 #[test]
 fn test_column_axis_closed_form() {
     let data: Array2<f64> = array![[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]];
-    let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Column).unwrap();
     let expected: Array2<f64> = array![
         [-1.2247448714, -1.2247448714],
         [0.0, 0.0],
@@ -102,7 +109,7 @@ fn test_column_axis_closed_form() {
 #[test]
 fn test_column_axis_invariants() {
     let data: Array2<f64> = array![[1.0, 4.0], [2.0, 5.0], [3.0, 6.0]];
-    let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Column).unwrap();
     let n = result.nrows() as f64;
     for col in result.columns() {
         let mean: f64 = col.sum() / n;
@@ -119,7 +126,7 @@ fn test_column_axis_invariants() {
 #[test]
 fn test_column_axis_zero_variance_column() {
     let data: Array2<f64> = array![[3.0, 1.0], [3.0, 3.0], [3.0, 5.0]];
-    let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Column).unwrap();
     assert!(
         result.iter().all(|v| v.is_finite()),
         "no NaN or Inf expected"
@@ -142,7 +149,7 @@ fn test_column_axis_zero_variance_column() {
 #[test]
 fn test_row_axis_closed_form() {
     let data: Array2<f64> = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let result = standardize(&data, StandardizationAxis::Row, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Row).unwrap();
     let expected: Array2<f64> = array![
         [-1.2247448714, 0.0, 1.2247448714],
         [-1.2247448714, 0.0, 1.2247448714]
@@ -154,7 +161,7 @@ fn test_row_axis_closed_form() {
 #[test]
 fn test_row_axis_invariants() {
     let data: Array2<f64> = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let result = standardize(&data, StandardizationAxis::Row, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Row).unwrap();
     let n = result.ncols() as f64;
     for row in result.rows() {
         let mean: f64 = row.sum() / n;
@@ -171,7 +178,7 @@ fn test_row_axis_invariants() {
 #[test]
 fn test_row_axis_zero_variance_row() {
     let data: Array2<f64> = array![[3.0, 3.0, 3.0], [1.0, 3.0, 5.0]];
-    let result = standardize(&data, StandardizationAxis::Row, 1e-8).unwrap();
+    let result = standardize(&data, StandardizationAxis::Row).unwrap();
     assert!(
         result.iter().all(|v| v.is_finite()),
         "no NaN or Inf expected"
@@ -191,7 +198,7 @@ fn test_row_axis_zero_variance_row() {
 fn test_original_array_not_mutated() {
     let data: Array2<f64> = array![[1.0, 3.0], [5.0, 7.0]];
     let original = data.clone();
-    let _result = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap();
+    let _result = standardize(&data, StandardizationAxis::Global).unwrap();
     assert_eq!(
         data, original,
         "standardize must not modify the input array"
@@ -202,7 +209,7 @@ fn test_original_array_not_mutated() {
 fn test_original_array_not_mutated_column() {
     let data: Array2<f64> = array![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
     let original = data.clone();
-    let _result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
+    let _result = standardize(&data, StandardizationAxis::Column).unwrap();
     assert_eq!(data, original);
 }
 
@@ -212,7 +219,7 @@ fn test_original_array_not_mutated_column() {
 #[test]
 fn test_error_empty_global() {
     let data: Array2<f64> = Array2::zeros((0, 0));
-    let err = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
     assert!(
         matches!(err, Error::EmptyInput(_)),
         "expected EmptyInput, got {err:?}"
@@ -222,7 +229,7 @@ fn test_error_empty_global() {
 #[test]
 fn test_error_empty_column() {
     let data: Array2<f64> = Array2::zeros((0, 3));
-    let err = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Column).unwrap_err();
     assert!(
         matches!(err, Error::EmptyInput(_)),
         "expected EmptyInput, got {err:?}"
@@ -233,7 +240,7 @@ fn test_error_empty_column() {
 #[test]
 fn test_error_nan_input() {
     let data: Array2<f64> = array![[1.0, f64::NAN], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
     assert!(
         matches!(err, Error::NonFinite(_)),
         "expected NonFinite, got {err:?}"
@@ -244,54 +251,10 @@ fn test_error_nan_input() {
 #[test]
 fn test_error_inf_input() {
     let data: Array2<f64> = array![[1.0, f64::INFINITY], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
     assert!(
         matches!(err, Error::NonFinite(_)),
         "expected NonFinite, got {err:?}"
-    );
-}
-
-/// Negative epsilon returns InvalidParameter
-#[test]
-fn test_error_negative_epsilon() {
-    let data: Array2<f64> = array![[1.0, 2.0], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, -1e-8).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Zero epsilon returns InvalidParameter
-#[test]
-fn test_error_zero_epsilon() {
-    let data: Array2<f64> = array![[1.0, 2.0], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// NaN epsilon returns InvalidParameter
-#[test]
-fn test_error_nan_epsilon() {
-    let data: Array2<f64> = array![[1.0, 2.0], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, f64::NAN).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Infinite epsilon returns InvalidParameter
-#[test]
-fn test_error_infinite_epsilon() {
-    let data: Array2<f64> = array![[1.0, 2.0], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global, f64::INFINITY).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
     );
 }
 
@@ -299,7 +262,7 @@ fn test_error_infinite_epsilon() {
 #[test]
 fn test_error_row_on_1d_array() {
     let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = standardize(&data, StandardizationAxis::Row, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Row).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput for Row on 1-D array, got {err:?}"
@@ -310,7 +273,7 @@ fn test_error_row_on_1d_array() {
 #[test]
 fn test_error_column_on_1d_array() {
     let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap_err();
+    let err = standardize(&data, StandardizationAxis::Column).unwrap_err();
     assert!(
         matches!(err, Error::InvalidInput(_)),
         "expected InvalidInput for Column on 1-D array, got {err:?}"

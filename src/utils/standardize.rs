@@ -33,16 +33,14 @@ impl StandardizationAxis {
     ///
     /// - [`Error::InvalidInput`] - If row/column standardization is requested on an
     ///   array with fewer than 2 dimensions
-    fn apply<D>(&self, data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
+    fn apply<D>(&self, data: &mut Array<f64, D>) -> Result<(), Error>
     where
         D: Dimension,
     {
         match self {
-            StandardizationAxis::Global => standardize_global(data, epsilon),
-            StandardizationAxis::Row => standardize_lanes(data, 1, epsilon, "Row standardization"),
-            StandardizationAxis::Column => {
-                standardize_lanes(data, 2, epsilon, "Column standardization")
-            }
+            StandardizationAxis::Global => standardize_global(data),
+            StandardizationAxis::Row => standardize_lanes(data, 1, "Row standardization"),
+            StandardizationAxis::Column => standardize_lanes(data, 2, "Column standardization"),
         }
     }
 }
@@ -55,12 +53,15 @@ impl StandardizationAxis {
 /// The standard deviation uses the population variance (divides by `n`), matching scikit-learn's
 /// `StandardScaler`. There is no sample-variance (divide by `n - 1`) option
 ///
+/// Constant (zero-variance) lanes are detected exactly as scikit-learn's `StandardScaler` does,
+/// via [`is_constant_feature`], and are divided by `1.0` (leaving their centered values as zeros)
+/// rather than by a vanishing standard deviation. There is no `epsilon` knob: the threshold is
+/// derived from `f64::EPSILON`, matching `StandardScaler`
+///
 /// # Parameters
 ///
 /// - `data` - Input array as `ArrayBase` with arbitrary dimensions and f64 elements
 /// - `axis` - Axis along which to standardize (Row/Column/Global)
-/// - `epsilon` - Small value that floors the standard deviation, added in quadrature as
-///   `sqrt(variance + epsilon^2)`, to prevent division by zero
 ///
 /// # Returns
 ///
@@ -73,14 +74,13 @@ impl StandardizationAxis {
 /// use rustyml::utils::standardize::{standardize, StandardizationAxis};
 ///
 /// let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-/// let result = standardize(&data, StandardizationAxis::Column, 1e-8).unwrap();
+/// let result = standardize(&data, StandardizationAxis::Column).unwrap();
 /// ```
 ///
 /// # Errors
 ///
 /// - [`Error::EmptyInput`] - If the input array is empty
 /// - [`Error::NonFinite`] - If the input contains NaN or infinite values
-/// - [`Error::InvalidParameter`] - If epsilon is non-positive or non-finite
 /// - [`Error::Computation`] - If the global-axis path has no values to standardize
 ///
 /// # Performance
@@ -91,7 +91,6 @@ impl StandardizationAxis {
 pub fn standardize<S, D>(
     data: &ArrayBase<S, D>,
     axis: StandardizationAxis,
-    epsilon: f64,
 ) -> Result<Array<f64, D>, Error>
 where
     S: Data<Elem = f64>,
@@ -105,15 +104,8 @@ where
         return Err(Error::non_finite("input data"));
     }
 
-    if epsilon <= 0.0 || !epsilon.is_finite() {
-        return Err(Error::invalid_parameter(
-            "epsilon",
-            "Epsilon must be positive and finite",
-        ));
-    }
-
     let mut result = data.to_owned();
-    axis.apply(&mut result, epsilon)?;
+    axis.apply(&mut result)?;
     Ok(result)
 }
 
@@ -149,8 +141,37 @@ fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
     (n, mean, m2)
 }
 
+/// Detects whether a lane is indistinguishable from constant, matching scikit-learn's
+/// `_is_constant_feature`
+///
+/// Uses the error bound of the two-pass variance algorithm (Chan, Golub & LeVeque): a lane is
+/// constant when `variance <= n*eps*variance + (n*mean*eps)^2` with `eps = f64::EPSILON`. This
+/// is variance-based and magnitude-relative, so it flags features whose spread is within
+/// floating-point noise regardless of their scale
+#[inline]
+fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
+    let eps = f64::EPSILON;
+    let upper_bound = n * eps * variance + (n * mean * eps).powi(2);
+    variance <= upper_bound
+}
+
+/// Converts a lane's population variance and mean into the standardization divisor
+///
+/// Returns the raw `sqrt(variance)`, except that a constant lane (per [`is_constant_feature`])
+/// is divided by `1.0` instead, so its centered values map to zeros rather than being amplified
+/// by a vanishing divisor. This mirrors scikit-learn's `StandardScaler`, which sets the scale of
+/// constant features to `1.0`
+#[inline]
+fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
+    if is_constant_feature(variance, mean, n) {
+        1.0
+    } else {
+        variance.sqrt()
+    }
+}
+
 /// Standardizes the entire array as a single dataset
-fn standardize_global<D>(data: &mut Array<f64, D>, epsilon: f64) -> Result<(), Error>
+fn standardize_global<D>(data: &mut Array<f64, D>) -> Result<(), Error>
 where
     D: Dimension,
 {
@@ -177,30 +198,29 @@ where
             .iter()
             .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x)),
     };
-    let std_dev = (m2 / n + epsilon * epsilon).sqrt();
+    let scale = scale_from_variance(m2 / n, mean, n);
 
     // Cheap-map class gate for the transform pass
     if data.len() >= cheap_map_f64_parallel_threshold() {
-        data.par_mapv_inplace(|x| (x - mean) / std_dev);
+        data.par_mapv_inplace(|x| (x - mean) / scale);
     } else {
-        data.mapv_inplace(|x| (x - mean) / std_dev);
+        data.mapv_inplace(|x| (x - mean) / scale);
     }
 
     Ok(())
 }
 
-/// Computes the population mean and the epsilon-floored standard deviation of a lane
+/// Computes the population mean and the standardization scale of a lane
 ///
-/// The returned standard deviation is `sqrt(variance + epsilon^2)`, which stays
-/// strictly positive so the subsequent division is always well defined
-fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
+/// The returned scale is the raw `sqrt(variance)`, or `1.0` for a constant lane (see
+/// [`scale_from_variance`]), matching scikit-learn's `StandardScaler`
+fn lane_mean_and_std(lane: &ArrayViewMut1<f64>) -> (f64, f64) {
     let n = lane.len() as f64;
     // Single stable pass (Welford) for both mean and population variance
     let (_, mean, m2) = lane
         .iter()
         .fold((0.0, 0.0, 0.0), |acc, &x| welford_step(acc, x));
-    let std_dev = (m2 / n + epsilon * epsilon).sqrt();
-    (mean, std_dev)
+    (mean, scale_from_variance(m2 / n, mean, n))
 }
 
 /// Standardizes each lane along the axis `axis_from_end` positions from the end
@@ -211,7 +231,6 @@ fn lane_mean_and_std(lane: &ArrayViewMut1<f64>, epsilon: f64) -> (f64, f64) {
 fn standardize_lanes<D>(
     data: &mut Array<f64, D>,
     axis_from_end: usize,
-    epsilon: f64,
     operation_name: &str,
 ) -> Result<(), Error>
 where
@@ -230,8 +249,8 @@ where
     let data_len = data.len();
     let mut lanes: Vec<ArrayViewMut1<f64>> = data.lanes_mut(axis).into_iter().collect();
     let process = |lane: &mut ArrayViewMut1<f64>| {
-        let (mean, std_dev) = lane_mean_and_std(lane, epsilon);
-        lane.mapv_inplace(|x| (x - mean) / std_dev);
+        let (mean, scale) = lane_mean_and_std(lane);
+        lane.mapv_inplace(|x| (x - mean) / scale);
     };
 
     // Scan-class gate: one O(lane) Welford pass + map per lane, so the work is the element count

@@ -9,8 +9,8 @@ use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
-/// Tolerance for treating a norm as effectively zero
-const NORM_ZERO_THRESHOLD: f64 = 1e-15;
+/// Norm magnitude below which a lane is treated as (near-)constant and left unscaled
+const NORM_CONSTANT_THRESHOLD: f64 = 10.0 * f64::EPSILON;
 
 /// Axis along which normalization is applied
 ///
@@ -49,7 +49,8 @@ pub enum NormalizationOrder {
 /// Normalize data along the specified axis using the given norm order
 ///
 /// Divides each element by the norm computed along the chosen axis, so the norm of the
-/// data along that axis equals 1. Lanes whose norm is effectively zero are set to zero
+/// data along that axis equals 1. A lane whose norm is below `10 * f64::EPSILON` (a (near-)zero
+/// lane) is left unchanged, matching scikit-learn's `normalize`, which treats such norms as 1.0
 ///
 /// # Parameters
 ///
@@ -113,13 +114,14 @@ where
     Ok(result)
 }
 
-/// Divides a single lane by its norm in place, or zeros it when the norm is
-/// effectively zero (an all-near-zero lane has no direction to keep)
+/// Divides a single lane by its norm in place
+///
+/// Matches scikit-learn's `normalize`: a lane is scaled unless its norm is below
+/// [`NORM_CONSTANT_THRESHOLD`] (`10 * f64::EPSILON`), in which case the norm is treated as `1.0`
+/// and the lane is left untouched (a (near-)zero lane has no meaningful direction to rescale)
 fn normalize_lane(lane: &mut ArrayViewMut1<f64>, norm: f64) {
-    if norm > NORM_ZERO_THRESHOLD {
+    if norm >= NORM_CONSTANT_THRESHOLD {
         lane.mapv_inplace(|x| x / norm);
-    } else {
-        lane.fill(0.0);
     }
 }
 
@@ -130,16 +132,13 @@ where
 {
     let norm = order.norm(data.iter().copied())?;
 
-    if norm > NORM_ZERO_THRESHOLD {
+    if norm >= NORM_CONSTANT_THRESHOLD {
         // Cheap-map class gate
         if data.len() >= cheap_map_f64_parallel_threshold() {
             data.par_mapv_inplace(|x| x / norm);
         } else {
             data.mapv_inplace(|x| x / norm);
         }
-    } else {
-        // An all-near-zero array has no direction to keep, so zero it
-        data.fill(0.0);
     }
 
     Ok(())
