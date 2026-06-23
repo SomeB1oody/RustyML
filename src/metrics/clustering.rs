@@ -1159,9 +1159,12 @@ mod tests {
         let x = pseudo_random_matrix(12, 5, 1); // 12*12*5 = 720 < gate -> serial
         let cluster: Vec<usize> = (0..12).map(|i| i % 3).collect();
         let got = pairwise_cluster_distances(&x, &cluster, 3, DistanceCalculationMetric::Euclidean);
-        let want = brute_force_dist_to_cluster(&x, &cluster, 3, DistanceCalculationMetric::Euclidean);
+        let want =
+            brute_force_dist_to_cluster(&x, &cluster, 3, DistanceCalculationMetric::Euclidean);
         assert!(
-            got.iter().zip(want.iter()).all(|(a, b)| a.to_bits() == b.to_bits()),
+            got.iter()
+                .zip(want.iter())
+                .all(|(a, b)| a.to_bits() == b.to_bits()),
             "serial symmetric fill must be bitwise identical to the full scan"
         );
     }
@@ -1200,7 +1203,9 @@ mod tests {
         let a = pairwise_cluster_distances(&x, &cluster, 5, DistanceCalculationMetric::Euclidean);
         let b = pairwise_cluster_distances(&x, &cluster, 5, DistanceCalculationMetric::Euclidean);
         assert!(
-            a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
+            a.iter()
+                .zip(b.iter())
+                .all(|(x, y)| x.to_bits() == y.to_bits()),
             "repeated parallel fills must be bitwise identical"
         );
     }

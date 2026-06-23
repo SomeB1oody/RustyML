@@ -18,7 +18,7 @@ use rustyml::machine_learning::{
     KMeans, KNN, KernelType, LDA, LogisticRegression, MeanShift, SVC, Solver, WeightingStrategy,
     generate_polynomial_features,
 };
-use rustyml::types::DistanceCalculationMetric;
+use rustyml::types::{DistanceCalculationMetric, Gamma};
 use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
 use rustyml::utils::pca::{PCA, SVDSolver};
 use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
@@ -129,9 +129,16 @@ fn bench_svc_fit(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("svc_fit_rbf_1500x16", |b| {
         b.iter(|| {
-            let mut model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
-                .unwrap()
-                .with_random_state(42);
+            let mut model = SVC::new(
+                KernelType::RBF {
+                    gamma: Gamma::Value(0.5),
+                },
+                1.0,
+                1e-3,
+                100,
+            )
+            .unwrap()
+            .with_random_state(42);
             model.fit(black_box(&x), black_box(&y)).unwrap();
             black_box(model.get_bias());
         })
@@ -150,9 +157,16 @@ fn bench_svc_predict(c: &mut Criterion) {
             .into_iter()
             .map(|r| if r.sum() > 0.0 { 1.0 } else { -1.0 }),
     );
-    let mut model = SVC::new(KernelType::RBF { gamma: 0.5 }, 1.0, 1e-3, 100)
-        .unwrap()
-        .with_random_state(42);
+    let mut model = SVC::new(
+        KernelType::RBF {
+            gamma: Gamma::Value(0.5),
+        },
+        1.0,
+        1e-3,
+        100,
+    )
+    .unwrap()
+    .with_random_state(42);
     model.fit(&x, &y).unwrap();
 
     let queries = random_matrix(2000, 16, 14);
@@ -244,9 +258,14 @@ fn bench_kernel_pca(c: &mut Criterion) {
     group.sample_size(10);
     group.bench_function("kernel_pca_fit_transform_rbf_1500x32_8c", |b| {
         b.iter(|| {
-            let mut model = KernelPCA::new(KernelType::RBF { gamma: 0.1 }, 8)
-                .unwrap()
-                .with_eigen_solver(EigenSolver::Lanczos);
+            let mut model = KernelPCA::new(
+                KernelType::RBF {
+                    gamma: Gamma::Value(0.1),
+                },
+                8,
+            )
+            .unwrap()
+            .with_eigen_solver(EigenSolver::Lanczos);
             black_box(model.fit_transform(black_box(&x)).unwrap());
         })
     });
