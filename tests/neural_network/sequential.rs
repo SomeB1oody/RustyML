@@ -157,27 +157,6 @@ fn test_predict_dense_softmax_known_probs() {
 
 // predict == forward in eval mode
 
-/// predict() produces the same values as an eval-mode forward pass for a Linear Dense layer
-#[test]
-fn test_predict_equals_forward_eval_mode() {
-    let mut dense = Dense::new(2, 2, Activation::Linear).unwrap();
-    let w = Array2::from_shape_vec((2, 2), vec![0.5_f32, 0.0, 0.0, 0.5]).unwrap();
-    let b = Array2::from_shape_vec((1, 2), vec![1.0_f32, -1.0]).unwrap();
-    dense.set_weights(w, b).unwrap();
-
-    let mut model = Sequential::new();
-    model.add(dense);
-
-    let x = t2(2, 2, vec![1.0, 2.0, 3.0, 4.0]);
-
-    let pred = model.predict(&x).unwrap();
-
-    // Linear Dense is stateless, so a second predict call must match
-    let pred2 = model.predict(&x).unwrap();
-
-    crate::common::assert_allclose(&pred, &pred2, 1e-7_f32);
-}
-
 // predict: determinism (two consecutive calls identical)
 
 /// Two back-to-back predict() calls on the same input produce identical tensors

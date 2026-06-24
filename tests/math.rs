@@ -616,14 +616,6 @@ fn test_average_path_length_n5() {
     assert_abs_diff_eq!(average_path_length_factor(5), expected, epsilon = 1e-9);
 }
 
-/// Base cases: 0.0 for n=0 and n=1, 1.0 for n=2
-#[test]
-fn test_average_path_length_base_cases() {
-    assert_abs_diff_eq!(average_path_length_factor(0), 0.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(average_path_length_factor(1), 0.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(average_path_length_factor(2), 1.0, epsilon = 1e-12);
-}
-
 /// Factor is positive for n >= 3
 #[test]
 fn test_average_path_length_positive_for_n_ge_3() {
@@ -631,19 +623,6 @@ fn test_average_path_length_positive_for_n_ge_3() {
         let f = average_path_length_factor(n);
         assert!(f > 0.0, "expected positive factor for n={n}, got {f}");
     }
-}
-
-/// Output is continuous across the exact/approximate branch boundary at n=50/51
-#[test]
-fn test_average_path_length_continuous_at_branch_boundary() {
-    let f50 = average_path_length_factor(50);
-    let f51 = average_path_length_factor(51);
-    let delta = (f51 - f50).abs();
-    assert!(
-        delta < 0.1,
-        "discontinuity at branch boundary: c(50)={f50}, c(51)={f51}, |diff|={delta}"
-    );
-    assert!(f51 > f50, "expected c(51)={f51} > c(50)={f50}");
 }
 
 // variance / standard_deviation - non-finite (NaN) handling

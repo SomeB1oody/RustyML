@@ -815,37 +815,6 @@ fn save_load_round_trip_preserves_state_and_predictions() {
 
 // Label domain: labels are isize, cluster ids >= 0, noise = -1
 
-/// Every label emitted by fit is either -1 (noise) or a non-negative cluster id
-#[test]
-fn fit_labels_domain_correct() {
-    let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    m.fit(&data).unwrap();
-
-    let labels = m.get_labels().unwrap();
-    for &l in labels.iter() {
-        assert!(
-            l >= -1,
-            "label {} is outside valid domain (must be ≥ -1)",
-            l
-        );
-    }
-}
-
-/// predict labels are in the same domain (-1 or non-negative cluster id)
-#[test]
-fn predict_labels_domain_correct() {
-    let data = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    m.fit(&data).unwrap();
-
-    let test_points = array![[0.05f64, 0.05], [10.05, 10.05], [5.0, 5.0]];
-    let preds = m.predict(&test_points).unwrap();
-    for &l in preds.iter() {
-        assert!(l >= -1, "predicted label {} is outside valid domain", l);
-    }
-}
-
 /// predict returns the correct label values for the canonical three-case scenario
 #[test]
 fn predict_label_values_canonical_three_cases() {

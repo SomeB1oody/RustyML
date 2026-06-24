@@ -487,4 +487,63 @@ mod tests {
         let outer: Error = Error::from(TreeError::NotClassificationTree);
         assert_eq!(outer.to_string(), inner.to_string());
     }
+
+    // Smart-constructor behavior not pinned by the Display tests above: variants with no
+    // `#[error]` rendering exercised here (NonFinite, InvalidInput), the source-less
+    // Computation constructor, and the RustymlResult alias
+
+    /// `Error::non_finite` builds `NonFinite` carrying the supplied context string
+    #[test]
+    fn non_finite_constructor_carries_context() {
+        match Error::non_finite("weights") {
+            Error::NonFinite(ref ctx) => assert!(
+                ctx.contains("weights"),
+                "context should mention 'weights', got: {ctx}"
+            ),
+            other => panic!("expected NonFinite, got {other:?}"),
+        }
+    }
+
+    /// `Error::invalid_input` builds `InvalidInput` carrying the supplied message
+    #[test]
+    fn invalid_input_constructor_carries_message() {
+        match Error::invalid_input("unexpected rank") {
+            Error::InvalidInput(ref msg) => assert!(
+                msg.contains("unexpected rank"),
+                "message should mention the supplied text, got: {msg}"
+            ),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    /// `Error::computation` builds `Computation` with the context set and `source` `None`
+    /// (wrapping a lower-level error as the source is done through `Context::context`)
+    #[test]
+    fn computation_constructor_has_no_source() {
+        match Error::computation("overflow") {
+            Error::Computation {
+                ref context,
+                ref source,
+            } => {
+                assert!(
+                    context.contains("overflow"),
+                    "context should contain 'overflow'"
+                );
+                assert!(
+                    source.is_none(),
+                    "source should be None for Error::computation"
+                );
+            }
+            other => panic!("expected Computation, got {other:?}"),
+        }
+    }
+
+    /// `RustymlResult<T>` is a transparent alias for `Result<T, Error>` and is usable as one
+    #[test]
+    fn rustyml_result_is_result_alias() {
+        let ok: RustymlResult<i32> = Ok(42);
+        assert!(matches!(ok, Ok(42)));
+        let err: RustymlResult<i32> = Err(Error::empty_input("test"));
+        assert!(matches!(err, Err(Error::EmptyInput(_))));
+    }
 }

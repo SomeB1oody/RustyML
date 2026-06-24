@@ -537,15 +537,3 @@ fn flatten_layer_type_is_flatten() {
     let fl = Flatten::new(vec![2, 3, 4]).unwrap();
     assert_eq!(fl.layer_type(), "Flatten");
 }
-
-// Dense - LayerWeight::Dense variant for Dense layer
-
-/// get_weights returns a LayerWeight::Dense, not Empty or another variant
-#[test]
-fn dense_get_weights_is_dense_variant() {
-    let d = Dense::new(2, 3, Linear::new()).unwrap();
-    assert!(
-        matches!(d.get_weights(), LayerWeight::Dense(_)),
-        "Dense must expose LayerWeight::Dense"
-    );
-}

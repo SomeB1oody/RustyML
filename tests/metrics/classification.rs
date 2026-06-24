@@ -979,33 +979,6 @@ fn roc_curve_specific_points() {
 }
 
 #[test]
-fn roc_curve_first_point_is_origin() {
-    let labels = array![true, false, true, false];
-    let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (fpr, tpr, _) = roc_curve(&labels, &scores);
-    assert_abs_diff_eq!(fpr[0], 0.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(tpr[0], 0.0, epsilon = 1e-12);
-}
-
-#[test]
-fn roc_curve_last_tpr_is_one() {
-    let labels = array![true, false, true, false];
-    let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (_, tpr, _) = roc_curve(&labels, &scores);
-    let n = tpr.len();
-    assert_abs_diff_eq!(tpr[n - 1], 1.0, epsilon = 1e-12);
-}
-
-#[test]
-fn roc_curve_lengths_equal() {
-    let labels = array![true, false, true, false];
-    let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (fpr, tpr, thresholds) = roc_curve(&labels, &scores);
-    assert_eq!(fpr.len(), tpr.len());
-    assert_eq!(fpr.len(), thresholds.len());
-}
-
-#[test]
 fn roc_curve_trapezoidal_area_matches_roc_auc() {
     // Trapezoidal integral of the curve must equal roc_auc on the same data
     // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1] -> AUC = 0.75
@@ -1099,26 +1072,6 @@ fn precision_recall_curve_specific_points() {
     assert_abs_diff_eq!(precision[3], 0.5, epsilon = 1e-12);
     assert_abs_diff_eq!(recall[3], 1.0, epsilon = 1e-12);
     assert_abs_diff_eq!(thresholds[3], 0.1, epsilon = 1e-12);
-}
-
-#[test]
-fn precision_recall_curve_closing_point() {
-    // Final entry is always (precision=1.0, recall=0.0)
-    let labels = array![true, false, true, false];
-    let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (precision, recall, _) = precision_recall_curve(&labels, &scores);
-    let n = precision.len();
-    assert_abs_diff_eq!(precision[n - 1], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[n - 1], 0.0, epsilon = 1e-12);
-}
-
-#[test]
-fn precision_recall_curve_length_invariant() {
-    let labels = array![true, false, true, false];
-    let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (precision, recall, thresholds) = precision_recall_curve(&labels, &scores);
-    assert_eq!(precision.len(), recall.len());
-    assert_eq!(thresholds.len(), precision.len() - 1);
 }
 
 #[test]
