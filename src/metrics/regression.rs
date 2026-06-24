@@ -218,8 +218,8 @@ where
 ///
 /// # NaN handling
 ///
-/// This goes through [`crate::math::variance`], which **silently skips** non-finite samples and
-/// averages over the finite subset. So unlike [`r2_score`] (where a `NaN` propagates to a `NaN`
+/// This uses a NaN-skipping variance that **silently skips** non-finite samples and averages over
+/// the finite subset. So unlike [`r2_score`] (where a `NaN` propagates to a `NaN`
 /// result), a few `NaN`/`inf` entries here leave a normal-looking score computed from the rest,
 /// which is convenient but can mask corrupt data. Validate the inputs if a silently dropped sample
 /// would be a problem

@@ -1,5 +1,25 @@
-//! Regularization layers for neural networks: dropout, noise injection, and normalization,
-//! plus macros for the shared training-mode methods
+//! Regularization layers and the shared training-mode infrastructure that backs them
+//!
+//! Re-exports the three families of regularization layers and defines the macros that generate
+//! their common training-mode methods, plus a private `validation` submodule of parameter and
+//! input-shape checks shared across the layers.
+//!
+//! The families are:
+//! - dropout: [`Dropout`](crate::neural_network::layers::regularization::dropout::dropout::Dropout)
+//!   and the spatial variants [`SpatialDropout1D`](crate::neural_network::layers::regularization::dropout::spatial_dropout_1d::SpatialDropout1D),
+//!   [`SpatialDropout2D`](crate::neural_network::layers::regularization::dropout::spatial_dropout_2d::SpatialDropout2D),
+//!   and [`SpatialDropout3D`](crate::neural_network::layers::regularization::dropout::spatial_dropout_3d::SpatialDropout3D)
+//! - noise injection: [`GaussianNoise`](crate::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise)
+//!   and [`GaussianDropout`](crate::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout)
+//! - normalization: [`BatchNormalization`](crate::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization),
+//!   [`LayerNormalization`](crate::neural_network::layers::regularization::normalization::layer_normalization::LayerNormalization),
+//!   [`GroupNormalization`](crate::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization),
+//!   and [`InstanceNormalization`](crate::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization)
+//!
+//! Because every one of these layers behaves differently in training versus inference, the module
+//! defines two macros for toggling the shared `training` field: `mode_dependent_layer_set_training`
+//! generates the inherent `set_training` method, and `mode_dependent_layer_trait` generates the
+//! `set_training_if_mode_dependent` trait method that delegates to it.
 
 /// Dropout layers for neural networks
 pub mod dropout;

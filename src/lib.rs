@@ -414,15 +414,7 @@ macro_rules! tunable_gate {
 ))]
 pub mod tuning;
 
-/// Error handling module containing the crate's unified error type and its result alias
-///
-/// Every fallible operation returns [`error::RustymlResult<T>`](crate::error::RustymlResult),
-/// an alias for `Result<T, error::Error>`. [`error::Error`] is structured into category variants
-/// and groups domain-specific failures into
-/// the nested [`error::NnError`], [`error::TreeError`], and [`error::IoError`] sub-enums. Prefer the
-/// smart constructors (`Error::dimension_mismatch`, `Error::invalid_parameter`, ...) and
-/// [`error::Context::context`] for wrapping foreign errors. See the module docs for the full
-/// category breakdown and conventions
+/// The crate's unified error type ([`error::Error`]) and its result alias ([`error::RustymlResult`])
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -431,12 +423,6 @@ pub mod tuning;
 pub mod error;
 
 /// Crate-wide control of pseudo-random number generation for reproducibility
-///
-/// Exposes [`set_global_seed`](random::set_global_seed) / [`clear_global_seed`](random::clear_global_seed)
-/// (re-exported at the crate root) to fix a thread-local global seed. All randomized components
-/// resolve their `random_state: Option<u64>` against this global through a shared entry point, so a
-/// single `set_global_seed` call makes the crate reproducible. See the module docs for the
-/// local-vs-global-vs-entropy resolution rules and the threading contract
 #[cfg(any(
     feature = "machine_learning",
     feature = "neural_network",
@@ -461,330 +447,28 @@ pub use random::{clear_global_seed, set_global_seed};
 ))]
 pub(crate) mod parallel_gates;
 
-/// Module `math` contains mathematical utility functions for statistical operations and model evaluation
-///
-/// Functions include impurity measures for decision trees, distance calculations for clustering,
-/// statistical measures for evaluation, and other utilities for data processing
-///
-/// # What belongs here
-///
-/// A function lives in `math` only if it is **(1)** pure and stateless, **(2)**
-/// model-agnostic (it encodes no single algorithm's policy), and **(3)** is - or
-/// plausibly could be - shared by more than one caller. Per-algorithm solvers live
-/// next to their model; post-hoc evaluation metrics live in [`crate::metrics`] and
-/// call these primitives; trainable, gradient-aware losses live in
-/// `neural_network::losses`
-///
-/// # Core Functions
-///
-/// ## Distance Calculations ([`math::distance`])
-/// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
-/// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
-/// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
-/// - `DistanceCalculationMetric` - Configurable Euclidean/Manhattan/Minkowski metric dispatcher
-///
-/// ## Matrix Products ([`math::matmul`])
-/// - Crate-internal GEMM/GEMV backed by the [`gemm`](https://docs.rs/gemm) crate: runtime-
-///   dispatched SIMD kernels, parallelized on the rayon pool for large products. Results are
-///   correct to floating-point rounding and reproducible across runs on the same machine (not
-///   necessarily bit-for-bit)
-///
-/// ## Reductions ([`math::reduction`])
-/// - Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) that fold large
-///   `f64` arrays on the rayon pool while reproducing the same result across runs on the same
-///   machine (not necessarily bit-for-bit)
-///
-/// # Example
-/// ```rust
-/// use rustyml::math::{DistanceCalculationMetric, squared_euclidean_distance_row};
-/// use ndarray::array;
-///
-/// // Distance primitive plus the configurable metric dispatcher
-/// let v1 = array![1.0, 2.0];
-/// let v2 = array![4.0, 6.0];
-/// let sq = squared_euclidean_distance_row(&v1, &v2);
-/// let d = DistanceCalculationMetric::Euclidean.distance(v1.view(), v2.view());
-/// ```
+/// Shared low-level numeric primitives: distance metrics, `gemm`-backed matrix products, and
+/// deterministic parallel reductions
 #[cfg(feature = "math")]
 pub mod math;
 
-/// Module `machine_learning` provides implementations of machine learning algorithms and models
-///
-/// Includes supervised and unsupervised learning algorithms with parallel processing and error handling
-///
-/// # Supervised Learning Algorithms
-///
-/// ## Classification
-/// - **LogisticRegression**: Binary classification with gradient descent optimization and regularization support
-/// - **KNN**: K-Nearest Neighbors with customizable distance metrics (Euclidean, Manhattan, Minkowski) and weighting strategies
-/// - **DecisionTree**: Decision tree classifier supporting ID3, C4.5, and CART algorithms with pruning options
-/// - **SVC**: Support Vector Classifier using Sequential Minimal Optimization (SMO) algorithm with kernel support
-/// - **LinearSVC**: Linear Support Vector Classifier optimized for large datasets with hinge loss
-/// - **LinearDiscriminantAnalysis**: LDA for classification and dimensionality reduction with class separability preservation
-///
-/// ## Regression
-/// - **LinearRegression**: Simple and multivariate linear regression with L1/L2 regularization options
-///
-/// # Unsupervised Learning Algorithms
-///
-/// ## Clustering
-/// - **KMeans**: K-means clustering with K-means++ initialization and parallel processing
-/// - **DBSCAN**: Density-based clustering for discovering clusters of arbitrary shapes with noise detection
-/// - **MeanShift**: Non-parametric clustering that automatically determines cluster centers
-///
-/// ## Dimensionality Reduction
-/// - **PCA**: Principal Component Analysis for linear dimensionality reduction (see [`decomposition`](crate::machine_learning::decomposition))
-/// - **KernelPCA**: Nonlinear dimensionality reduction via kernel methods (RBF, Linear, Poly, Sigmoid, Cosine)
-/// - **TSNE**: t-Distributed Stochastic Neighbor Embedding for high-dimensional data visualization (see [`manifold`](crate::machine_learning::manifold))
-///
-/// ## Anomaly Detection
-/// - **IsolationForest**: Ensemble method for efficient anomaly detection in high-dimensional data
-///
-/// # Distance Metrics and Utilities
-/// - `DistanceCalculationMetric` - Enum defining Euclidean, Manhattan, and Minkowski distance metrics
-/// - `RegularizationType` - L1 and L2 regularization options for preventing overfitting
-/// - Helper macros and validation functions for consistent model interfaces
-///
-/// # Examples
-/// ```rust
-/// use rustyml::machine_learning::LinearRegression;
-/// use ndarray::{Array1, Array2, array};
-///
-/// // Linear regression example
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
-/// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
-/// let y = array![6.0, 9.0, 12.0];
-/// model.fit(&x, &y).unwrap();
-/// ```
+/// Classical supervised and unsupervised estimators: regression, classification, clustering,
+/// dimensionality reduction, and anomaly detection
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
-/// Module `prelude` re-exports the most commonly used types and traits from this crate
-///
-/// Provides a single import point for frequently used items through one `use` statement
-///
-/// # Available Components
-///
-/// ## Machine Learning Models
-/// - Classification algorithms (KNN, DecisionTree, LogisticRegression, SVC, LinearSVC, LinearDiscriminantAnalysis)
-/// - Regression algorithms (LinearRegression)
-/// - Clustering algorithms (KMeans, DBSCAN, MeanShift)
-/// - Anomaly detection (IsolationForest)
-///
-/// ## Data Processing and Utilities
-/// - Dimensionality reduction (PCA, kernel PCA, t-SNE)
-/// - Data preprocessing (standardize, train_test_split)
-/// - Feature engineering utilities
-/// - and more (See details at documentation in utility module)
-///
-/// ## Evaluation Metrics
-/// - Classification metrics (ConfusionMatrix, accuracy, roc_auc)
-/// - Regression metrics (mean_squared_error, r2_score, mean_absolute_error)
-/// - Clustering metrics (adjusted_rand_index, silhouette_score)
-/// - and more (See details at documentation in metric module)
-///
-/// ## Neural Network Components
-/// - Complete neural network framework with layers, optimizers, loss functions
-/// - Sequential model architecture for building feed-forward networks
-/// - and more (See details at documentation in neural_network module)
-///
-/// # Examples
-/// ```rust
-/// // Brings every category's items (traits, models, metrics, ...) into scope at once:
-/// use rustyml::prelude::*;
-///
-/// // Or import a single category:
-/// // `use rustyml::prelude::machine_learning::*;` for the machine learning models
-/// // `use rustyml::prelude::utils::*;`            for the utility functions
-/// // `use rustyml::prelude::metrics::*;`          for the metric functions
-/// ```
+/// Single-import re-export of the crate's most commonly used types, traits, and functions
 pub mod prelude;
 
-/// Module `utils` provides preprocessing and dataset-splitting tools for machine learning operations
-///
-/// # Preprocessing
-/// - **normalize**: Scale samples to unit norm along a chosen axis (L1 / L2 / max order)
-/// - **standardize**: Z-score standardization (zero mean, unit variance) for feature scaling
-/// - **label encoding**: Convert between dense labels and one-hot / sparse categorical formats
-///
-/// # Dataset Splitting
-/// - **train_test_split**: Split datasets into training and testing sets with configurable ratios, optionally stratified
-///
-/// # Key Features
-/// - **Parallel Processing**: Rayon-based parallel computation for performance optimization
-/// - **Robust Error Handling**: Comprehensive input validation and error reporting
-///
-/// # Examples
-/// ```rust
-/// use rustyml::utils::standardize::{standardize, StandardizationAxis};
-/// use ndarray::array;
-///
-/// let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-/// let standardized = standardize(&x, StandardizationAxis::Column).unwrap();
-/// assert_eq!(standardized.dim(), (3, 2));
-/// ```
+/// Data preprocessing (normalize, standardize, label encoding) and train/test dataset splitting
 #[cfg(feature = "utils")]
 pub mod utils;
 
-/// Module `metrics` provides evaluation metrics for statistical analysis and model performance assessment
-///
-/// Contains evaluation functions and structures for measuring model performance across
-/// regression, classification, and clustering tasks
-///
-/// # Regression Metrics
-/// - **mean_squared_error**: Average of squared differences between predicted and actual values
-/// - **root_mean_squared_error**: Square root of MSE, providing error in original data units
-/// - **mean_absolute_error**: Average magnitude of prediction errors without considering direction
-/// - **r2_score**: Coefficient of determination measuring explained variance (R^2 score)
-/// - **explained_variance_score**: Variance of the residuals relative to the data (ignores constant bias)
-/// - **median_absolute_error**: Median of the absolute errors, robust to outliers
-/// - **mean_absolute_percentage_error**: Mean relative error as a fraction of the true values
-///
-/// # Classification Metrics
-///
-/// ## ConfusionMatrix Structure
-/// Comprehensive binary classification evaluation with:
-/// - True/False Positive and Negative counts (TP, FP, TN, FN)
-/// - Derived metrics: accuracy, precision, recall, specificity, F1-score, error rate, balanced accuracy, MCC
-/// - Formatted summary generation for detailed performance reporting
-///
-/// ## MulticlassConfusionMatrix Structure
-/// KxK confusion matrix for multi-class evaluation:
-/// - Per-class precision, recall, F1, and support
-/// - Macro / micro / weighted aggregation via the `Average` enum
-/// - Per-class precision/recall/F1/support text summary
-///
-/// ## Classification Functions
-/// - **accuracy**: Standalone accuracy calculation for multi-class and binary classification
-/// - **roc_auc**: Area Under ROC Curve using Mann-Whitney U statistic for binary classification
-/// - **log_loss**: Multi-class logarithmic loss (cross-entropy) of predicted probabilities
-/// - **cohen_kappa**: Inter-labeling agreement corrected for chance
-/// - **top_k_accuracy**: Fraction of samples whose true class is among the top-k predictions
-/// - **average_precision**: Area under the precision-recall curve
-/// - **roc_curve** / **precision_recall_curve**: Curve points across decision thresholds
-///
-/// # Clustering Evaluation Metrics
-/// - **adjusted_rand_index**: Adjusted Rand Index for clustering similarity measurement with chance correction
-/// - **normalized_mutual_info**: Normalized Mutual Information measuring clustering agreement
-/// - **adjusted_mutual_info**: Mutual information adjusted for chance agreement between clusterings
-/// - **homogeneity_score** / **completeness_score** / **v_measure_score**: Entropy-based clustering quality and their harmonic mean
-/// - **fowlkes_mallows_score**: Geometric mean of pairwise precision and recall over sample pairs
-/// - **silhouette_score**: Mean silhouette coefficient measuring cluster cohesion and separation
-/// - **davies_bouldin_score** / **calinski_harabasz_score**: Internal cluster-validity indices (no ground truth needed)
-///
-/// # Key Features
-/// - **Input Validation**: Error checking with informative messages
-/// - **Numerical Stability**: Epsilon handling and stable algorithms for edge cases
-/// - **Single-pass calculations**: Efficient implementations
-/// - **Statistical Rigor**: Implementations with sound mathematical foundations
-///
-/// # Conventions
-///
-/// - **Panics instead of returning `Result`**. `metrics` is a lightweight leaf module - pure
-///   `array -> scalar` functions pulling only `ndarray` and `ahash` - so, like `ndarray` on a
-///   dimension mismatch, the metrics panic on precondition violations (mismatched lengths, empty
-///   input) rather than returning the crate's `Error`. The panic messages mirror that crate's
-///   wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
-/// - **Arguments are `(y_true, y_pred)`** - ground truth first, mirroring the
-///   clustering metrics' `(labels_true, labels_pred)`. The order is irrelevant for the symmetric
-///   metrics (MSE, MAE, accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and
-///   `roc_auc`
-///
-/// # Examples
-/// ```rust
-/// use rustyml::metrics::*;
-/// use ndarray::array;
-///
-/// // Regression evaluation - arguments are (y_true, y_pred)
-/// let y_true = array![2.8, 2.1, 3.3, 4.2];
-/// let y_pred = array![3.0, 2.0, 3.5, 4.1];
-/// let mse = mean_squared_error(&y_true.view(), &y_pred.view());
-/// let r2 = r2_score(&y_true.view(), &y_pred.view());
-///
-/// // Classification evaluation with confusion matrix
-/// let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
-/// let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
-/// let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
-/// println!("F1 Score: {:.3}", cm.f1_score());
-///
-/// // ROC AUC for binary classification
-/// let labels = array![false, true, false, true];
-/// let scores = array![0.1, 0.4, 0.35, 0.8];
-/// let auc = roc_auc(&labels.view(), &scores.view());
-/// ```
+/// Model-evaluation metrics for regression, classification, and clustering
 #[cfg(feature = "metrics")]
 pub mod metrics;
 
-/// Module `neural_network` provides components for building and training neural networks
-///
-/// A framework for constructing, training, and deploying neural networks with support for
-/// various layer types, optimization algorithms, loss functions, and model architectures
-///
-/// # Core Components
-///
-/// ## Layer Types
-/// - **Dense**: Fully connected layers with customizable activation functions
-/// - **Activation**: Standalone activation layers (ReLU, Sigmoid, Tanh, Softmax, Linear, etc.)
-/// - **Pooling Layers**: Max pooling and average pooling operations for 1D, 2D, and 3D data
-/// - **Global Pooling**: Global max pooling and global average pooling for 1D, 2D, and 3D tensors
-/// - **Recurrent Layers**: Sequential Modeling Layers like RNN, LSTM, and GRU
-/// - **Regularization layers**: Regularization layer to prevent overfitting during training
-///
-/// ## Optimization Algorithms
-/// - **SGD**: Stochastic Gradient Descent with momentum support
-/// - **Adam**: Adaptive moment estimation optimizer (classic coupled L2 weight decay)
-/// - **AdamW**: Adam with decoupled weight decay
-/// - **RMSProp**: Root Mean Square Propagation optimizer
-/// - **AdaGrad**: Adaptive gradient algorithm
-///
-/// ## Loss Functions
-/// - **MeanSquaredError**: For regression tasks
-/// - **BinaryCrossEntropy**: For binary classification
-/// - **CategoricalCrossEntropy**: For multi-class classification
-/// - **SparseCategoricalCrossEntropy**: For multi-class with integer labels
-///
-/// ## Model Architecture
-/// - **Sequential**: Linear stack of layers for feed-forward neural networks
-/// - **Tensor**: Type alias for n-dimensional arrays used throughout the framework
-///
-/// # Key Features
-/// - **Flexible Architecture**: Easy model construction with intuitive API
-/// - **Automatic Differentiation**: Built-in backpropagation implementation
-/// - **Training Loop**: Integrated training with loss tracking and convergence monitoring
-/// - **Prediction Interface**: Simple prediction methods for inference
-///
-/// # Examples
-/// ```rust
-/// use rustyml::neural_network::{
-///     sequential::Sequential,
-///     layers::{Activation, Dense},
-///     optimizers::Adam,
-///     losses::MeanSquaredError,
-/// };
-/// use ndarray::Array;
-///
-/// // Create input and target tensors
-/// let x = Array::ones((2, 4)).into_dyn();  // 2 samples, 4 features
-/// let y = Array::ones((2, 1)).into_dyn();  // 2 samples, 1 output
-///
-/// // Build sequential model
-/// let mut model = Sequential::new();
-/// model.add(Dense::new(4, 8, Activation::ReLU).unwrap())   // Input layer: 4 -> 8
-///      .add(Dense::new(8, 3, Activation::ReLU).unwrap())   // Hidden layer: 8 -> 3
-///      .add(Dense::new(3, 1, Activation::Linear).unwrap()); // Output layer: 3 -> 1
-///
-/// // Compile with optimizer and loss function
-/// model.compile(Adam::new(0.001, 0.9, 0.999, 1e-8, 0.0).unwrap(), MeanSquaredError::new());
-///
-/// // Display model architecture
-/// model.summary();
-///
-/// // Train the model
-/// model.fit(&x, &y, 100).unwrap();
-///
-/// // Make predictions
-/// let predictions = model.predict(&x);
-/// ```
+/// Neural-network framework: layers, optimizers, loss functions, and the sequential model
 #[cfg(feature = "neural_network")]
 pub mod neural_network;
 

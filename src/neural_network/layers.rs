@@ -1,5 +1,27 @@
-//! Neural network layer module: submodule declarations, the shared
-//! [`TrainingParameters`](crate::neural_network::layers::TrainingParameters) classification, and helpers for parameter-free layers
+//! Neural network layers: the layer subsystem aggregator
+//!
+//! Declares every layer submodule, glob-re-exports the public layer types, and defines the
+//! shared infrastructure used across the subsystem: the
+//! [`TrainingParameters`](crate::neural_network::layers::TrainingParameters) classification (a
+//! layer is `Trainable`, `NonTrainable`, or `NoTrainable`) and the
+//! `no_trainable_parameters_layer_functions` macro that emits the `param_count`/`get_weights`
+//! stubs for parameter-free layers.
+//!
+//! The submodules fall into a few categories:
+//!
+//! - Core layers (re-exported): [`activation`](crate::neural_network::layers::activation),
+//!   [`convolution`](crate::neural_network::layers::convolution),
+//!   [`dense`](crate::neural_network::layers::dense),
+//!   [`flatten`](crate::neural_network::layers::flatten),
+//!   [`pooling`](crate::neural_network::layers::pooling),
+//!   [`recurrent`](crate::neural_network::layers::recurrent), and
+//!   [`regularization`](crate::neural_network::layers::regularization)
+//! - Weight containers: [`layer_weight`](crate::neural_network::layers::layer_weight)
+//! - Shared (private) helpers: `conv_op_helpers` (2D/4D convolution zero-padding) and
+//!   `shape_helpers` (pooling/convolution output-shape calculators)
+//! - Validation: `validation` (shared input/weight checks)
+//! - Serialization: [`serialize_model`](crate::neural_network::layers::serialize_model)
+//!   (model-level snapshot and load-time weight application)
 
 /// Classifies a layer by its parameter training capability
 ///

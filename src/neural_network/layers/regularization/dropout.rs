@@ -1,5 +1,24 @@
-//! Regularization layers (Dropout and SpatialDropout1D/2D/3D) plus the shared
-//! backward, output-shape, and masking helpers
+//! Dropout-family regularization layers and the shared helpers that build them
+//!
+//! Re-exports the plain [`Dropout`](crate::neural_network::layers::regularization::dropout::Dropout)
+//! layer alongside its spatial variants
+//! [`SpatialDropout1D`](crate::neural_network::layers::regularization::dropout::SpatialDropout1D),
+//! [`SpatialDropout2D`](crate::neural_network::layers::regularization::dropout::SpatialDropout2D),
+//! and [`SpatialDropout3D`](crate::neural_network::layers::regularization::dropout::SpatialDropout3D),
+//! grouping each in its own submodule (`dropout`, `spatial_dropout_1d`/`2d`/`3d`)
+//!
+//! Defines the infrastructure these layers share:
+//!
+//! - `dropout_backward` - the common inverted-dropout backward pass for the plain layer
+//!   (pass-through at inference or `rate == 0`, zeros at `rate == 1`, otherwise scales by the
+//!   stored mask)
+//! - `dropout_output_shape` - formats the (unchanged) output shape, since dropout preserves the
+//!   input shape
+//! - `apply_spatial_dropout_threshold` - thresholds a random mask into a binary keep/drop mask,
+//!   parallel or sequential by element count
+//! - `spatial_dropout_scale` and `spatial_dropout_backward` - apply the per-channel inverted-dropout
+//!   scale to a `[batch, channels, *spatial]` tensor from a small `[batch, channels]` mask without
+//!   materializing a full-size mask
 
 use crate::error::Error;
 use crate::neural_network::Tensor;

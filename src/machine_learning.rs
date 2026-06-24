@@ -7,11 +7,59 @@
 //! [`tree`](crate::machine_learning::tree), [`neighbors`](crate::machine_learning::neighbors),
 //! [`discriminant_analysis`](crate::machine_learning::discriminant_analysis), and
 //! [`ensemble`](crate::machine_learning::ensemble). Every estimator is also re-exported here,
-//! so it is reachable directly as `machine_learning::<Model>`
-//! Supervised and unsupervised estimators implement the shared [`Fit`](crate::machine_learning::traits::Fit) /
+//! so it is reachable directly as `machine_learning::<Model>`. Supervised and unsupervised
+//! estimators implement the shared [`Fit`](crate::machine_learning::traits::Fit) /
 //! [`Predict`](crate::machine_learning::traits::Predict) traits; the dimensionality-reduction
 //! transformers implement [`Transform`](crate::machine_learning::traits::Transform) /
 //! [`FitTransform`](crate::machine_learning::traits::FitTransform)
+//!
+//! # Supervised learning
+//!
+//! ## Classification
+//! - **LogisticRegression**: binary classification via gradient descent, with L1/L2 regularization
+//! - **KNN**: k-nearest neighbors with selectable distance metric (Euclidean/Manhattan/Minkowski) and weighting
+//! - **DecisionTree**: classifier supporting ID3, C4.5, and CART, with pruning options
+//! - **SVC**: support vector classifier using Sequential Minimal Optimization (SMO) with kernels
+//! - **LinearSVC**: linear support vector classifier for large datasets, with hinge loss
+//! - **LDA**: linear discriminant analysis for classification and supervised dimensionality reduction
+//!
+//! ## Regression
+//! - **LinearRegression**: simple and multivariate linear regression with L1/L2 regularization
+//!
+//! # Unsupervised learning
+//!
+//! ## Clustering
+//! - **KMeans**: k-means with k-means++ initialization and parallel assignment
+//! - **DBSCAN**: density-based clustering of arbitrary-shaped clusters, with noise detection
+//! - **MeanShift**: non-parametric clustering that discovers the number of clusters
+//!
+//! ## Dimensionality reduction
+//! - **PCA**: principal component analysis (linear)
+//! - **KernelPCA**: nonlinear reduction via kernels (RBF, Linear, Poly, Sigmoid, Cosine)
+//! - **TSNE**: t-distributed stochastic neighbor embedding for visualization
+//!
+//! ## Anomaly detection
+//! - **IsolationForest**: ensemble isolation-based anomaly detector
+//!
+//! # Shared types
+//!
+//! - [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric): Euclidean/Manhattan/Minkowski
+//!   dispatcher, re-exported from [`crate::math`]
+//! - [`RegularizationType`](crate::machine_learning::types::RegularizationType): L1 / L2 regularization
+//! - [`KernelType`](crate::machine_learning::types::KernelType) /
+//!   [`Gamma`](crate::machine_learning::types::Gamma): kernel selection and coefficient
+//!
+//! # Examples
+//!
+//! ```rust
+//! use rustyml::machine_learning::LinearRegression;
+//! use ndarray::array;
+//!
+//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+//! let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
+//! let y = array![6.0, 9.0, 12.0];
+//! model.fit(&x, &y).unwrap();
+//! ```
 
 pub use crate::math::DistanceCalculationMetric;
 pub use types::{Gamma, KernelType, RegularizationType};

@@ -1,7 +1,30 @@
 //! Utilities for preprocessing and dataset splitting
 //!
 //! Preprocessing covers normalization, standardization, and label encoding; dataset
-//! splitting covers train/test partitioning.
+//! splitting covers train/test partitioning
+//!
+//! # Preprocessing
+//! - **normalize**: scale samples to unit norm along a chosen axis (L1 / L2 / max order)
+//! - **standardize**: z-score standardization (zero mean, unit variance) for feature scaling
+//! - **label encoding**: convert between dense labels and one-hot / sparse categorical formats
+//!
+//! # Dataset splitting
+//! - **train_test_split**: split into train/test sets with a configurable ratio, optionally stratified
+//!
+//! # Key features
+//! - **Parallel processing**: rayon-based parallel computation
+//! - **Input validation**: descriptive errors on malformed input
+//!
+//! # Examples
+//!
+//! ```rust
+//! use rustyml::utils::standardize::{standardize, StandardizationAxis};
+//! use ndarray::array;
+//!
+//! let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+//! let standardized = standardize(&x, StandardizationAxis::Column).unwrap();
+//! assert_eq!(standardized.dim(), (3, 2));
+//! ```
 
 /// Conversion between label formats
 pub mod label_encoding;

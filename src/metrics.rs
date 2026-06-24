@@ -3,6 +3,62 @@
 //! Each metric lives in a category submodule and is re-exported at the module root, so it is
 //! reachable both by category (`metrics::regression::mean_squared_error`) and flat
 //! (`metrics::mean_squared_error`); the crate and its prelude use the flat paths
+//!
+//! # Regression metrics
+//! - **mean_squared_error** / **root_mean_squared_error**: average squared error and its root
+//! - **mean_absolute_error** / **median_absolute_error**: mean and (outlier-robust) median absolute error
+//! - **mean_absolute_percentage_error**: mean error relative to the true values
+//! - **r2_score**: coefficient of determination (explained variance)
+//! - **explained_variance_score**: variance of the residuals relative to the data (ignores constant bias)
+//!
+//! # Classification metrics
+//! - [`ConfusionMatrix`](crate::metrics::ConfusionMatrix): binary TP/FP/TN/FN with derived accuracy,
+//!   precision, recall, specificity, F1, error rate, balanced accuracy, and MCC
+//! - [`MulticlassConfusionMatrix`](crate::metrics::MulticlassConfusionMatrix): KxK matrix with
+//!   per-class precision/recall/F1/support and macro/micro/weighted aggregation via
+//!   [`Average`](crate::metrics::Average)
+//! - **accuracy**, **roc_auc**, **log_loss**, **cohen_kappa**, **top_k_accuracy**,
+//!   **average_precision**, and the **roc_curve** / **precision_recall_curve** threshold sweeps
+//!
+//! # Clustering metrics
+//! - **adjusted_rand_index**, **normalized_mutual_info**, **adjusted_mutual_info**
+//! - **homogeneity_score** / **completeness_score** / **v_measure_score**, **fowlkes_mallows_score**
+//! - **silhouette_score**, **davies_bouldin_score**, **calinski_harabasz_score** (internal indices, no ground truth needed)
+//!
+//! # Conventions
+//!
+//! - **Panics instead of returning `Result`**. `metrics` is a lightweight leaf module - pure
+//!   `array -> scalar` functions pulling only `ndarray` and `ahash` - so, like `ndarray` on a
+//!   dimension mismatch, the metrics panic on precondition violations (mismatched lengths, empty
+//!   input) rather than returning the crate's `Error`. The panic messages mirror that crate's
+//!   wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
+//! - **Arguments are `(y_true, y_pred)`** - ground truth first, mirroring the clustering metrics'
+//!   `(labels_true, labels_pred)`. The order is irrelevant for the symmetric metrics (MSE, MAE,
+//!   accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and `roc_auc`
+//!
+//! # Examples
+//!
+//! ```rust
+//! use rustyml::metrics::*;
+//! use ndarray::array;
+//!
+//! // Regression evaluation - arguments are (y_true, y_pred)
+//! let y_true = array![2.8, 2.1, 3.3, 4.2];
+//! let y_pred = array![3.0, 2.0, 3.5, 4.1];
+//! let mse = mean_squared_error(&y_true.view(), &y_pred.view());
+//! let r2 = r2_score(&y_true.view(), &y_pred.view());
+//!
+//! // Classification evaluation with confusion matrix
+//! let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
+//! let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
+//! let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
+//! println!("F1 Score: {:.3}", cm.f1_score());
+//!
+//! // ROC AUC for binary classification
+//! let labels = array![false, true, false, true];
+//! let scores = array![0.1, 0.4, 0.35, 0.8];
+//! let auc = roc_auc(&labels.view(), &scores.view());
+//! ```
 
 /// Classification metrics: confusion matrices, accuracy, ROC/PR curves, log loss, and Cohen's kappa
 pub mod classification;
