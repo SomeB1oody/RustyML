@@ -432,6 +432,7 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `Self` - the updated instance, for method chaining
+    #[inline]
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.params.max_depth = Some(max_depth);
         self
@@ -494,6 +495,7 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `Self` - the updated instance, for method chaining
+    #[inline]
     pub fn with_random_state(mut self, seed: u64) -> Self {
         self.params.random_state = Some(seed);
         self
@@ -509,6 +511,7 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `Option<&Node>` - The root node, or `None` if the model has not been fitted
+    #[inline]
     pub fn get_root(&self) -> Option<&Node> {
         self.root.as_deref()
     }
@@ -527,6 +530,7 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `&mut Self` - A mutable reference to `self` for method chaining
+    #[inline]
     pub fn set_categorical_features(&mut self, features: Vec<usize>) -> &mut Self {
         self.categorical_features = features;
         self
@@ -537,6 +541,7 @@ impl DecisionTree {
     /// # Returns
     ///
     /// - `&[usize]` - The configured categorical feature indices (empty if none)
+    #[inline]
     pub fn get_categorical_features(&self) -> &[usize] {
         &self.categorical_features
     }

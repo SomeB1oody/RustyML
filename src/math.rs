@@ -32,12 +32,20 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 /// - when `expected == 0` (empty input)
 #[inline]
 fn validate_pair(expected: usize, found: usize, what: &str) {
+    if expected != found || expected == 0 {
+        fail_pair(expected, found, what);
+    }
+}
+
+/// Cold, out-of-line panic path for [`validate_pair`], keeping its inlined hot path down to the two
+/// comparisons. Re-checks the length condition only to select the right message
+#[cold]
+#[inline(never)]
+fn fail_pair(expected: usize, found: usize, what: &str) -> ! {
     if expected != found {
         panic!("dimension mismatch: expected {expected}, found {found}");
     }
-    if expected == 0 {
-        panic!("input is empty: {what}");
-    }
+    panic!("input is empty: {what}");
 }
 
 /// Calculates the total sum of squares (SST)

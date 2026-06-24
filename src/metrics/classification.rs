@@ -104,6 +104,7 @@ impl ConfusionMatrix {
     }
 
     /// Returns the raw counts as `(tp, fp, tn, fn)`
+    #[inline]
     pub fn get_counts(&self) -> (usize, usize, usize, usize) {
         (self.tp, self.fp, self.tn, self.fn_)
     }
@@ -113,6 +114,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Accuracy in `[0.0, 1.0]` (returns 0.0 when there are no predictions)
+    #[inline]
     pub fn accuracy(&self) -> f64 {
         let total = self.tp + self.tn + self.fp + self.fn_;
         if total == 0 {
@@ -126,6 +128,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Error rate in `[0.0, 1.0]`
+    #[inline]
     pub fn error_rate(&self) -> f64 {
         1.0 - self.accuracy()
     }
@@ -135,6 +138,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Precision in `[0.0, 1.0]` (returns 0.0 when there are no positive predictions)
+    #[inline]
     pub fn precision(&self) -> f64 {
         if self.tp + self.fp == 0 {
             return 0.0;
@@ -147,6 +151,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Recall in `[0.0, 1.0]` (returns 0.0 when there are no actual positives)
+    #[inline]
     pub fn recall(&self) -> f64 {
         if self.tp + self.fn_ == 0 {
             return 0.0;
@@ -160,6 +165,7 @@ impl ConfusionMatrix {
     ///
     /// - `f64` - Specificity in `[0.0, 1.0]` (returns 1.0 when there are no actual negatives,
     ///   avoiding a 0/0 division)
+    #[inline]
     pub fn specificity(&self) -> f64 {
         if self.tn + self.fp == 0 {
             return 1.0;
@@ -172,6 +178,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - F1 score in `[0.0, 1.0]` (returns 0.0 when both precision and recall are 0.0)
+    #[inline]
     pub fn f1_score(&self) -> f64 {
         let precision = self.precision();
         let recall = self.recall();
@@ -192,6 +199,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Matthews correlation coefficient in `[-1.0, 1.0]`
+    #[inline]
     pub fn mcc(&self) -> f64 {
         let tp = self.tp as f64;
         let tn = self.tn as f64;
@@ -214,6 +222,7 @@ impl ConfusionMatrix {
     /// # Returns
     ///
     /// - `f64` - Balanced accuracy in `[0.0, 1.0]`
+    #[inline]
     pub fn balanced_accuracy(&self) -> f64 {
         (self.recall() + self.specificity()) / 2.0
     }
@@ -485,16 +494,19 @@ impl MulticlassConfusionMatrix {
     }
 
     /// Returns a view of the raw `K x K` count matrix (row = true class, column = predicted)
+    #[inline]
     pub fn matrix(&self) -> ArrayView2<'_, usize> {
         self.matrix.view()
     }
 
     /// Returns the class labels in the order they index the matrix (sorted ascending)
+    #[inline]
     pub fn labels(&self) -> &[usize] {
         &self.labels
     }
 
     /// Returns the number of distinct classes (the matrix dimension)
+    #[inline]
     pub fn n_classes(&self) -> usize {
         self.labels.len()
     }

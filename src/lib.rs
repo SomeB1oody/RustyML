@@ -243,6 +243,7 @@ macro_rules! get_field {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
         #[doc = "# Returns\n\n"]
         #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field")]
+        #[inline]
         pub fn $method_name(&self) -> $return_type {
             self.$field_name
         }
@@ -264,6 +265,7 @@ macro_rules! get_field_as_ref {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
         #[doc = "# Returns\n\n"]
         #[doc = concat!("* `", stringify!($return_type), "` - The value of the `", stringify!($field_name), "` field as a reference")]
+        #[inline]
         pub fn $method_name(&self) -> $return_type {
             self.$field_name.as_ref()
         }
@@ -394,6 +396,7 @@ macro_rules! tunable_gate {
 
         $(#[$attr])*
         #[doc(hidden)]
+        #[inline]
         $vis fn $get() -> usize {
             $store.load(::std::sync::atomic::Ordering::Relaxed)
         }

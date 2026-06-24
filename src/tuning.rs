@@ -63,6 +63,7 @@ macro_rules! fwd {
             $bset(value);
         }
         #[doc = concat!("Returns the current ", $what)]
+        #[inline]
         pub fn $get() -> usize {
             $bget()
         }

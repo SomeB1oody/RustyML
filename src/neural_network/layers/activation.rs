@@ -231,26 +231,31 @@ impl Activation {
 }
 
 impl From<Linear> for Activation {
+    #[inline]
     fn from(_: Linear) -> Self {
         Activation::Linear
     }
 }
 impl From<ReLU> for Activation {
+    #[inline]
     fn from(_: ReLU) -> Self {
         Activation::ReLU
     }
 }
 impl From<Sigmoid> for Activation {
+    #[inline]
     fn from(_: Sigmoid) -> Self {
         Activation::Sigmoid
     }
 }
 impl From<Tanh> for Activation {
+    #[inline]
     fn from(_: Tanh) -> Self {
         Activation::Tanh
     }
 }
 impl From<Softmax> for Activation {
+    #[inline]
     fn from(_: Softmax) -> Self {
         Activation::Softmax
     }

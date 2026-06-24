@@ -126,11 +126,13 @@ pub enum Error {
 
 impl Error {
     /// Builds an [`Error::EmptyInput`] describing what was empty
+    #[cold]
     pub fn empty_input(what: impl Into<String>) -> Self {
         Self::EmptyInput(what.into())
     }
 
     /// Builds an [`Error::DimensionMismatch`] from the expected and found counts
+    #[cold]
     pub fn dimension_mismatch(expected: usize, found: usize) -> Self {
         Self::DimensionMismatch { expected, found }
     }
@@ -138,6 +140,7 @@ impl Error {
     /// Builds an [`Error::ShapeMismatch`] from the expected and found shapes
     ///
     /// Accepts anything convertible to `Vec<usize>`, including `&[usize]` (e.g. `array.shape()`)
+    #[cold]
     pub fn shape_mismatch(expected: impl Into<Vec<usize>>, found: impl Into<Vec<usize>>) -> Self {
         Self::ShapeMismatch {
             expected: expected.into(),
@@ -146,11 +149,13 @@ impl Error {
     }
 
     /// Builds an [`Error::NonFinite`] naming where the non-finite value occurred
+    #[cold]
     pub fn non_finite(context: impl Into<String>) -> Self {
         Self::NonFinite(context.into())
     }
 
     /// Builds an [`Error::InvalidParameter`] from a parameter name and the reason it is invalid
+    #[cold]
     pub fn invalid_parameter(name: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::InvalidParameter {
             name: name.into(),
@@ -160,16 +165,19 @@ impl Error {
 
     /// Builds an [`Error::InvalidInput`] (the fallback for validation failures without a more
     /// specific variant)
+    #[cold]
     pub fn invalid_input(msg: impl Into<String>) -> Self {
         Self::InvalidInput(msg.into())
     }
 
     /// Builds an [`Error::NotFitted`] for the named model
+    #[cold]
     pub fn not_fitted(model: &'static str) -> Self {
         Self::NotFitted(model)
     }
 
     /// Builds an [`Error::NotConverged`] with a description of the failure
+    #[cold]
     pub fn not_converged(msg: impl Into<String>) -> Self {
         Self::NotConverged(msg.into())
     }
@@ -177,6 +185,7 @@ impl Error {
     /// Builds an [`Error::Computation`] with no wrapped source
     ///
     /// To wrap a lower-level error, use [`Context::context`] instead
+    #[cold]
     pub fn computation(context: impl Into<String>) -> Self {
         Self::Computation {
             context: context.into(),
@@ -185,6 +194,7 @@ impl Error {
     }
 
     /// Builds [`Error::NeuralNetwork`]`(`[`NnError::ForwardPassNotRun`]`)` for the named layer
+    #[cold]
     pub fn forward_pass_not_run(layer: &'static str) -> Self {
         Self::NeuralNetwork(NnError::ForwardPassNotRun(layer))
     }
@@ -192,6 +202,7 @@ impl Error {
 
 /// Lets `?` lift a raw [`std::io::Error`] directly into [`Error`] (as [`IoError::Std`])
 impl From<std::io::Error> for Error {
+    #[cold]
     fn from(e: std::io::Error) -> Self {
         Self::Io(IoError::Std(e))
     }
@@ -199,6 +210,7 @@ impl From<std::io::Error> for Error {
 
 /// Lets `?` lift a raw [`postcard::Error`] directly into [`Error`] (as [`IoError::Serialization`])
 impl From<postcard::Error> for Error {
+    #[cold]
     fn from(e: postcard::Error) -> Self {
         Self::Io(IoError::Serialization(e))
     }
@@ -312,6 +324,7 @@ impl<T, E> Context<T> for std::result::Result<T, E>
 where
     E: std::error::Error + Send + Sync + 'static,
 {
+    #[cold]
     fn context(self, context: impl Into<String>) -> RustymlResult<T> {
         self.map_err(|e| Error::Computation {
             context: context.into(),
@@ -319,6 +332,7 @@ where
         })
     }
 
+    #[cold]
     fn with_context<F, S>(self, f: F) -> RustymlResult<T>
     where
         F: FnOnce() -> S,

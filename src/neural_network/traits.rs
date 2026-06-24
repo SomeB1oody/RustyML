@@ -29,6 +29,7 @@ pub struct ParamGrad<'a> {
 
 impl<'a> ParamGrad<'a> {
     /// A weight tensor that decoupled weight decay applies to (dense/conv/recurrent kernels)
+    #[inline]
     pub fn weight(value: &'a mut [f32], grad: &'a [f32]) -> Self {
         Self {
             value,
@@ -38,6 +39,7 @@ impl<'a> ParamGrad<'a> {
     }
 
     /// A bias or normalization scale/shift (`gamma`/`beta`) tensor that weight decay skips
+    #[inline]
     pub fn no_decay(value: &'a mut [f32], grad: &'a [f32]) -> Self {
         Self {
             value,

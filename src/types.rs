@@ -60,6 +60,7 @@ impl DistanceCalculationMetric {
     /// # Returns
     ///
     /// - `f64` - The distance between `a` and `b` under this metric
+    #[inline]
     pub fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         use crate::math::{
             manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
@@ -72,6 +73,7 @@ impl DistanceCalculationMetric {
     }
 
     /// Returns whether `distance(a, b) <= threshold` under this metric
+    #[inline]
     pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
         self.comparable_distance(a, b) <= self.comparable_scalar(threshold)
     }
@@ -319,6 +321,7 @@ impl KernelType {
     /// # Returns
     ///
     /// - `f64` - The kernel function value between `x1` and `x2`
+    #[inline]
     pub fn compute(&self, x1: ArrayView1<f64>, x2: ArrayView1<f64>) -> f64 {
         match *self {
             KernelType::Linear => x1.dot(&x2),
