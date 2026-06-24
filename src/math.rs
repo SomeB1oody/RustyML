@@ -14,8 +14,18 @@ pub mod matmul;
 /// reproduce the same result across runs on the same machine
 pub mod reduction;
 
+/// Pairwise distance primitives (`squared_euclidean_distance_row`, `manhattan_distance_row`,
+/// `minkowski_distance_row`) and the [`DistanceCalculationMetric`](distance::DistanceCalculationMetric)
+/// dispatcher layered on top of them
+pub mod distance;
+
+pub use distance::{
+    DistanceCalculationMetric, manhattan_distance_row, minkowski_distance_row,
+    squared_euclidean_distance_row,
+};
+
 use ahash::AHashMap;
-use ndarray::{ArrayBase, Data, Ix1, Zip};
+use ndarray::{ArrayBase, Data, Ix1};
 
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 
@@ -355,137 +365,6 @@ where
         .map(|(&m, &y)| (1.0 - y * m).max(0.0))
         .sum::<f64>()
         / n as f64
-}
-
-/// Calculates the squared Euclidean distance between two vectors
-///
-/// # Parameters
-///
-/// - `x1` - First vector
-/// - `x2` - Second vector
-///
-/// # Returns
-///
-/// - `f64` - Squared Euclidean distance between the two vectors
-///
-/// # Examples
-///
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::squared_euclidean_distance_row;
-///
-/// let v1 = array![1.0, 2.0, 3.0];
-/// let v2 = array![4.0, 5.0, 6.0];
-/// let dist = squared_euclidean_distance_row(&v1, &v2);
-/// // (4-1)^2 + (5-2)^2 + (6-3)^2 = 9 + 9 + 9 = 27
-/// assert!((dist - 27.0).abs() < 1e-10);
-/// ```
-#[inline]
-pub fn squared_euclidean_distance_row<S1, S2>(
-    x1: &ArrayBase<S1, Ix1>,
-    x2: &ArrayBase<S2, Ix1>,
-) -> f64
-where
-    S1: Data<Elem = f64>,
-    S2: Data<Elem = f64>,
-{
-    // Accumulate in a single pass with no intermediate allocation
-    let mut sum = 0.0;
-    Zip::from(x1).and(x2).for_each(|&a, &b| {
-        let d = a - b;
-        sum += d * d;
-    });
-    sum
-}
-
-/// Calculates the Manhattan (L1) distance between two vectors
-///
-/// # Parameters
-///
-/// - `x1` - First vector
-/// - `x2` - Second vector
-///
-/// # Returns
-///
-/// - `f64` - Manhattan distance between the two vectors
-///
-/// # Examples
-///
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::manhattan_distance_row;
-///
-/// let v1 = array![1.0, 2.0];
-/// let v2 = array![4.0, 6.0];
-/// let distance = manhattan_distance_row(&v1, &v2);
-/// // |1-4| + |2-6| = 3 + 4 = 7
-/// assert!((distance - 7.0).abs() < 1e-6);
-/// ```
-#[inline]
-pub fn manhattan_distance_row<S1, S2>(x1: &ArrayBase<S1, Ix1>, x2: &ArrayBase<S2, Ix1>) -> f64
-where
-    S1: Data<Elem = f64>,
-    S2: Data<Elem = f64>,
-{
-    // Single-pass, allocation-free L1 norm of the difference
-    let mut sum = 0.0;
-    Zip::from(x1)
-        .and(x2)
-        .for_each(|&a, &b| sum += (a - b).abs());
-    sum
-}
-
-/// Calculates the Minkowski distance between two vectors
-///
-/// Computes the p-norm of the difference between two 1D arrays
-///
-/// # Parameters
-///
-/// - `x1` - First vector
-/// - `x2` - Second vector
-/// - `p` - Order of the norm (must be at least 1.0)
-///
-/// # Returns
-///
-/// - `f64` - Minkowski distance between the two vectors
-///
-/// # Panics
-///
-/// - Panics if `p < 1.0` (or `p` is `NaN`): for such orders the result is not a valid metric
-///   (the triangle inequality fails), and `p <= 0` additionally yields a meaningless `sum^inf`
-///
-/// # Examples
-///
-/// ```rust
-/// use ndarray::array;
-/// use rustyml::math::minkowski_distance_row;
-///
-/// let v1 = array![1.0, 2.0];
-/// let v2 = array![4.0, 6.0];
-/// let distance = minkowski_distance_row(&v1, &v2, 3.0);
-/// // Expected distance is approximately 4.497
-/// assert!((distance - 4.497).abs() < 1e-3);
-/// ```
-#[inline]
-pub fn minkowski_distance_row<S1, S2>(
-    x1: &ArrayBase<S1, Ix1>,
-    x2: &ArrayBase<S2, Ix1>,
-    p: f64,
-) -> f64
-where
-    S1: Data<Elem = f64>,
-    S2: Data<Elem = f64>,
-{
-    // `p.is_nan()` is rejected alongside `p < 1.0`; orders below 1 break the triangle inequality
-    if p < 1.0 || p.is_nan() {
-        panic!("invalid parameter `p`: Minkowski order must be at least 1.0, got {p}");
-    }
-
-    let mut sum = 0.0;
-    Zip::from(x1)
-        .and(x2)
-        .for_each(|&a, &b| sum += (a - b).abs().powf(p));
-    sum.powf(1.0 / p)
 }
 
 /// Calculates the Gini impurity of a label set

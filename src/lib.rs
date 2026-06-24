@@ -181,10 +181,6 @@
 ))]
 use serde::{Deserialize, Serialize};
 
-/// Shared configuration types (kernels, distance metrics, regularization)
-#[cfg(any(feature = "machine_learning", feature = "utils", feature = "metrics"))]
-pub mod types;
-
 #[cfg(feature = "show_progress")]
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -490,6 +486,7 @@ pub(crate) mod parallel_gates;
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
+/// - `DistanceCalculationMetric` - Configurable Euclidean/Manhattan/Minkowski metric dispatcher (see [`math::distance`])
 ///
 /// ## Matrix Products ([`math::matmul`])
 /// - Crate-internal GEMM/GEMV backed by the [`gemm`](https://docs.rs/gemm) crate: runtime-

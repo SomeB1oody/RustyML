@@ -6,7 +6,7 @@ use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, KernelPCA};
-use rustyml::types::{Gamma, KernelType};
+use rustyml::machine_learning::{Gamma, KernelType};
 
 use crate::common::assert_allclose;
 

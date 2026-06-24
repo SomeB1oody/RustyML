@@ -8,9 +8,9 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_tolerance,
 };
+pub use crate::machine_learning::{Gamma, KernelType};
 use crate::math::matmul::gemv_par_switch;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
-pub use crate::types::{Gamma, KernelType};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;

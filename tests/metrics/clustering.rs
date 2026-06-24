@@ -5,8 +5,8 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
+use rustyml::math::DistanceCalculationMetric;
 use rustyml::metrics::*;
-use rustyml::types::DistanceCalculationMetric;
 
 // adjusted_rand_index
 

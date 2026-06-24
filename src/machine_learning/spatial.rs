@@ -14,7 +14,7 @@
 //! kd-trees lose their pruning power as the dimensionality grows, so callers fall back to
 //! brute force above a small feature-count threshold; this module only provides the index
 
-use crate::types::DistanceCalculationMetric;
+use crate::math::DistanceCalculationMetric;
 use ndarray::{Array2, ArrayView1, ArrayView2};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

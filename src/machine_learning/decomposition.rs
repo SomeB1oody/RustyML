@@ -8,7 +8,7 @@
 //! [`Transform`](crate::machine_learning::traits::Transform) /
 //! [`FitTransform`](crate::machine_learning::traits::FitTransform) traits
 
-pub use crate::types::{Gamma, KernelType};
+pub use crate::machine_learning::{Gamma, KernelType};
 
 /// Kernel Principal Component Analysis
 pub mod kernel_pca;

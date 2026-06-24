@@ -14,7 +14,7 @@ use rayon::prelude::{
 };
 use std::cmp::Ordering;
 
-pub use crate::types::{Gamma, KernelType};
+pub use crate::machine_learning::{Gamma, KernelType};
 
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]

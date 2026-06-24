@@ -15,8 +15,8 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::{Array1, Array2};
+use rustyml::math::DistanceCalculationMetric;
 use rustyml::metrics::silhouette_score;
-use rustyml::types::DistanceCalculationMetric;
 use std::hint::black_box;
 
 /// Deterministic pseudo-random feature matrix (hash-based, no rng dependency) so the bench builds

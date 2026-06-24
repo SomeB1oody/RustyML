@@ -9,8 +9,8 @@ use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use super::validate_pair;
+use crate::math::DistanceCalculationMetric;
 use crate::math::squared_euclidean_distance_row;
-pub use crate::types::DistanceCalculationMetric;
 
 /// Denominator magnitude below which an AMI/ARI normaliser is treated as a degenerate (perfect)
 /// clustering and the score is defined to be `1.0`
@@ -463,7 +463,7 @@ where
 /// ```rust
 /// use ndarray::array;
 /// use rustyml::metrics::silhouette_score;
-/// use rustyml::types::DistanceCalculationMetric;
+/// use rustyml::math::DistanceCalculationMetric;
 ///
 /// let x = array![[0.0, 0.0], [0.0, 1.0], [10.0, 10.0], [10.0, 11.0]];
 /// let labels = array![0, 0, 1, 1];

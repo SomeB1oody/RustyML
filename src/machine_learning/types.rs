@@ -1,137 +1,24 @@
-//! Shared configuration types used across estimators and utilities
+//! Configuration enums shared across the machine-learning estimators
 //!
-//! These enums live in one place because they are shared by more than one module:
-//! - [`RegularizationType`](crate::types::RegularizationType) and
-//!   [`DistanceCalculationMetric`](crate::types::DistanceCalculationMetric) are used by the
-//!   machine learning models
-//! - [`KernelType`](crate::types::KernelType) is used by both
+//! - [`RegularizationType`] is used by the linear models and the linear SVM
+//! - [`Gamma`] and [`KernelType`] are used by both
 //!   [`SVC`](crate::machine_learning::svm::svc::SVC) and
 //!   [`KernelPCA`](crate::machine_learning::decomposition::kernel_pca::KernelPCA)
 //!
-//! Each type carries its own behavior (distance / kernel evaluation) as inherent
-//! methods, so consumers share a single implementation instead of re-matching the
-//! enum in every model
+//! Each kernel carries its own evaluation logic (`compute` / `compute_matrix`) as inherent
+//! methods, so consumers share a single implementation instead of re-matching the enum in
+//! every model
 
-// Serde derives are only needed where models serialize (machine_learning / utils)
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
-use crate::{Deserialize, Serialize};
-// The batched kernel-matrix path is only compiled for its callers: SVC and KernelPCA
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::math::matmul::gemm_par_auto;
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
-use ndarray::ArrayView1;
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
-use ndarray::{Array2, ArrayBase, Axis, Data, Ix2, Zip};
-
-/// Distance calculation methods used across machine learning algorithms
-///
-/// Defines common distance metrics for clustering algorithms, nearest neighbor
-/// searches, and other applications where distance between points is relevant
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-#[cfg_attr(
-    any(feature = "machine_learning", feature = "utils"),
-    derive(Deserialize, Serialize)
-)]
-pub enum DistanceCalculationMetric {
-    /// Euclidean distance (L2 norm): the square root of the sum of squared
-    /// differences between corresponding coordinates
-    #[default]
-    Euclidean,
-    /// Manhattan distance (L1 norm): the sum of absolute differences between
-    /// corresponding coordinates
-    Manhattan,
-    /// Generalized metric with Euclidean and Manhattan as special cases; the
-    /// `f64` is the order parameter `p`
-    Minkowski(f64),
-}
-
-impl DistanceCalculationMetric {
-    /// Computes the distance between two vectors under this metric
-    ///
-    /// Single source of truth for metric dispatch; models such as KNN and DBSCAN
-    /// call it instead of re-implementing the `match` over variants
-    ///
-    /// # Parameters
-    ///
-    /// - `a` - First vector
-    /// - `b` - Second vector
-    ///
-    /// # Returns
-    ///
-    /// - `f64` - The distance between `a` and `b` under this metric
-    #[inline]
-    pub fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        use crate::math::{
-            manhattan_distance_row, minkowski_distance_row, squared_euclidean_distance_row,
-        };
-        match *self {
-            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b).sqrt(),
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b),
-            DistanceCalculationMetric::Minkowski(p) => minkowski_distance_row(&a, &b, p),
-        }
-    }
-
-    /// Returns whether `distance(a, b) <= threshold` under this metric
-    #[inline]
-    pub fn within(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, threshold: f64) -> bool {
-        self.comparable_distance(a, b) <= self.comparable_scalar(threshold)
-    }
-
-    /// Maps a non-negative scalar (a true distance or a per-axis coordinate gap) into this
-    /// metric's order-preserving "comparable" space, where the final root is skipped:
-    /// `Euclidean -> t^2`, `Manhattan -> t`, `Minkowski(p) -> t^p`
-    ///
-    /// Used by spatial indexes so radius thresholds and per-axis pruning bounds can be
-    /// compared against [`comparable_distance`](Self::comparable_distance) without repeated
-    /// roots. The mapping is monotonic on `t >= 0`, so all ordering decisions are preserved
-    pub(crate) fn comparable_scalar(&self, t: f64) -> f64 {
-        match *self {
-            DistanceCalculationMetric::Euclidean => t * t,
-            DistanceCalculationMetric::Manhattan => t,
-            DistanceCalculationMetric::Minkowski(p) => t.powf(p),
-        }
-    }
-
-    /// Distance between two vectors in this metric's comparable space (see
-    /// [`comparable_scalar`](Self::comparable_scalar)): the monotonic, root-free form of
-    /// [`distance`](Self::distance). Equals `distance(a, b)` raised to the metric's power
-    /// (squared for Euclidean, `^p` for Minkowski, unchanged for Manhattan)
-    pub(crate) fn comparable_distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        use crate::math::{manhattan_distance_row, squared_euclidean_distance_row};
-        match *self {
-            DistanceCalculationMetric::Euclidean => squared_euclidean_distance_row(&a, &b),
-            DistanceCalculationMetric::Manhattan => manhattan_distance_row(&a, &b),
-            DistanceCalculationMetric::Minkowski(p) => a
-                .iter()
-                .zip(b.iter())
-                .map(|(&x, &y)| (x - y).abs().powf(p))
-                .sum(),
-        }
-    }
-
-    /// Converts a comparable-space distance back to a true distance (inverse of
-    /// [`comparable_distance`](Self::comparable_distance)): `Euclidean -> sqrt`,
-    /// `Manhattan -> identity`, `Minkowski(p) -> ^(1/p)`
-    #[cfg(feature = "machine_learning")]
-    pub(crate) fn distance_from_comparable(&self, c: f64) -> f64 {
-        match *self {
-            DistanceCalculationMetric::Euclidean => c.sqrt(),
-            DistanceCalculationMetric::Manhattan => c,
-            DistanceCalculationMetric::Minkowski(p) => c.powf(1.0 / p),
-        }
-    }
-}
+use crate::{Deserialize, Serialize};
+use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 
 /// Regularization techniques used in machine learning models
 ///
 /// Regularization helps prevent overfitting by adding a penalty term to the model's
 /// loss function during training. The `f64` in each variant is the penalty coefficient
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(
-    any(feature = "machine_learning", feature = "utils"),
-    derive(Deserialize, Serialize)
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum RegularizationType {
     /// L1 regularization (Lasso): adds the sum of absolute parameter values times the
     /// coefficient. Promotes sparse solutions by driving some parameters to exactly zero
@@ -148,11 +35,7 @@ pub enum RegularizationType {
 /// `Auto` is `1 / n_features`. They are resolved to a concrete value at fit time (when the
 /// training data is known) via [`Gamma::resolve`]; kernel evaluation always operates on a
 /// resolved [`Gamma::Value`]
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[cfg_attr(
-    any(feature = "machine_learning", feature = "utils"),
-    derive(Deserialize, Serialize)
-)]
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub enum Gamma {
     /// `'scale'`: `1 / (n_features * X.var())`
     Scale,
@@ -174,7 +57,6 @@ impl Gamma {
     ///
     /// - [`Error::InvalidInput`](crate::error::Error::InvalidInput) - If `Scale` is requested but
     ///   the data variance is zero (constant features), or `n_features` is zero
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub fn resolve(self, n_features: usize, x_variance: f64) -> Result<f64, crate::error::Error> {
         if n_features == 0 {
             return Err(crate::error::Error::invalid_input(
@@ -212,7 +94,6 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite, or the gamma is an (always-valid) `Scale`/`Auto` rule
-    #[cfg(feature = "machine_learning")]
     pub(crate) fn explicit_is_finite(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite(),
@@ -221,7 +102,6 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite and positive, or an (always-valid) `Scale`/`Auto` rule
-    #[cfg(feature = "machine_learning")]
     pub(crate) fn explicit_is_positive(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite() && v > 0.0,
@@ -231,11 +111,7 @@ impl Gamma {
 }
 
 /// Kernel function types for Support Vector Machine and Kernel PCA
-#[derive(Debug, Copy, Clone, PartialEq)]
-#[cfg_attr(
-    any(feature = "machine_learning", feature = "utils"),
-    derive(Deserialize, Serialize)
-)]
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize, Serialize)]
 pub enum KernelType {
     /// Linear kernel: `K(x, y) = x*y`
     Linear,
@@ -279,7 +155,6 @@ impl KernelType {
     /// # Errors
     ///
     /// - Propagates [`Gamma::resolve`] errors (zero variance with `Scale`, or zero features)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub fn resolve_gamma(
         &self,
         n_features: usize,
@@ -378,7 +253,6 @@ impl KernelType {
     /// # Returns
     ///
     /// - `Array2<f64>` - The `[n, m]` kernel matrix
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     pub fn compute_matrix<S1, S2>(
         &self,
         x: &ArrayBase<S1, Ix2>,
@@ -469,7 +343,6 @@ mod tests {
     // Gamma::resolve (data-dependent gamma)
 
     /// `Gamma::Scale` resolves to 1 / (n_features * X.var())
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_scale_resolves_to_inverse_features_times_variance() {
         let n_features = 4;
@@ -479,7 +352,6 @@ mod tests {
     }
 
     /// `Gamma::Auto` resolves to 1 / n_features
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_auto_resolves_to_inverse_features() {
         let g = Gamma::Auto.resolve(5, 999.0).unwrap();
@@ -487,7 +359,6 @@ mod tests {
     }
 
     /// `Gamma::Value` resolves to itself, regardless of the data statistics
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_value_resolves_to_itself() {
         let g = Gamma::Value(0.73).resolve(3, 10.0).unwrap();
@@ -495,7 +366,6 @@ mod tests {
     }
 
     /// `Gamma::Scale` errors when the data variance is zero (constant features)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn gamma_scale_errors_on_zero_variance() {
         assert!(Gamma::Scale.resolve(3, 0.0).is_err());
@@ -506,7 +376,6 @@ mod tests {
 
     /// `resolve_gamma` replaces a kernel's Scale/Auto with the concrete value, leaving
     /// gamma-free kernels (Linear/Cosine) untouched
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn kernel_resolve_gamma_produces_value_variant() {
         let resolved = KernelType::RBF { gamma: Gamma::Auto }
@@ -641,7 +510,6 @@ mod tests {
     // The batched GEMM path must agree, entry for entry, with looping `compute`
     // over every pair, for every kernel variant, including the asymmetric
     // cross-matrix case `x != y`
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_matches_pairwise() {
         use ndarray::Array2;
@@ -697,7 +565,6 @@ mod tests {
     }
 
     // RBF diagonal of a Gram matrix must be exactly 1 (||x_i - x_i||^2 clamps to 0)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_rbf_diagonal_is_one() {
         use ndarray::Array2;
@@ -712,7 +579,6 @@ mod tests {
     }
 
     // Cosine guard: a zero row yields a full row/column of zeros, matching `compute`
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
     #[test]
     fn compute_matrix_cosine_zero_row_guard() {
         use ndarray::Array2;
@@ -723,73 +589,5 @@ mod tests {
             assert_abs_diff_eq!(m[[2, j]], 0.0, epsilon = 1e-12);
             assert_abs_diff_eq!(m[[j, 2]], 0.0, epsilon = 1e-12);
         }
-    }
-
-    // DistanceCalculationMetric::distance
-
-    // Euclidean: sqrt((3-0)^2 + (4-0)^2) = sqrt(9+16) = 5
-    #[test]
-    fn distance_euclidean_345_triangle() {
-        let metric = DistanceCalculationMetric::Euclidean;
-        let a = array![0.0_f64, 0.0];
-        let b = array![3.0_f64, 4.0];
-        assert_abs_diff_eq!(metric.distance(a.view(), b.view()), 5.0, epsilon = 1e-6);
-    }
-
-    // Manhattan: |3-0| + |4-0| = 7
-    #[test]
-    fn distance_manhattan_345() {
-        let metric = DistanceCalculationMetric::Manhattan;
-        let a = array![0.0_f64, 0.0];
-        let b = array![3.0_f64, 4.0];
-        assert_abs_diff_eq!(metric.distance(a.view(), b.view()), 7.0, epsilon = 1e-6);
-    }
-
-    // Minkowski(3): (|3|^3 + |4|^3)^(1/3) = (27+64)^(1/3) = 91^(1/3) ~= 4.497941
-    #[test]
-    fn distance_minkowski_p3() {
-        let metric = DistanceCalculationMetric::Minkowski(3.0);
-        let a = array![0.0_f64, 0.0];
-        let b = array![3.0_f64, 4.0];
-        let expected = 91.0_f64.powf(1.0 / 3.0); // ~= 4.497941445275415
-        assert_abs_diff_eq!(
-            metric.distance(a.view(), b.view()),
-            expected,
-            epsilon = 1e-6
-        );
-    }
-
-    // Euclidean is symmetric: distance(a,b) == distance(b,a)
-    #[test]
-    fn distance_euclidean_symmetry() {
-        let metric = DistanceCalculationMetric::Euclidean;
-        let a = array![1.0_f64, 2.0, 3.0];
-        let b = array![4.0_f64, 6.0, 8.0];
-        assert_abs_diff_eq!(
-            metric.distance(a.view(), b.view()),
-            metric.distance(b.view(), a.view()),
-            epsilon = 1e-10
-        );
-    }
-
-    // Zero distance: identical vectors -> 0
-    #[test]
-    fn distance_euclidean_identical_vectors() {
-        let metric = DistanceCalculationMetric::Euclidean;
-        let a = array![1.0_f64, 2.0];
-        assert_abs_diff_eq!(metric.distance(a.view(), a.view()), 0.0, epsilon = 1e-6);
-    }
-
-    // Manhattan is symmetric
-    #[test]
-    fn distance_manhattan_symmetry() {
-        let metric = DistanceCalculationMetric::Manhattan;
-        let a = array![1.0_f64, 5.0];
-        let b = array![3.0_f64, 2.0];
-        assert_abs_diff_eq!(
-            metric.distance(a.view(), b.view()),
-            metric.distance(b.view(), a.view()),
-            epsilon = 1e-10
-        );
     }
 }

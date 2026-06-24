@@ -13,7 +13,8 @@
 //! transformers implement [`Transform`](crate::machine_learning::traits::Transform) /
 //! [`FitTransform`](crate::machine_learning::traits::FitTransform)
 
-pub use crate::types::{DistanceCalculationMetric, Gamma, KernelType, RegularizationType};
+pub use crate::math::DistanceCalculationMetric;
+pub use types::{Gamma, KernelType, RegularizationType};
 
 /// Clustering estimators: DBSCAN, K-means, and Mean Shift
 pub mod clustering;
@@ -43,6 +44,8 @@ pub(crate) mod linalg;
 mod parallel;
 /// Internal kd-tree spatial index for fixed-radius and k-nearest-neighbor queries
 pub(crate) mod spatial;
+/// kernels (`KernelType`), kernel coefficient (`Gamma`), and regularization (`RegularizationType`)
+pub mod types;
 /// Internal shared input-validation helpers used by every model
 mod validation;
 

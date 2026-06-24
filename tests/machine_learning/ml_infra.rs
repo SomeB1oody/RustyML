@@ -11,9 +11,9 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::IsolationForest;
 use rustyml::machine_learning::KMeans;
+use rustyml::machine_learning::KernelType;
 use rustyml::machine_learning::LinearRegression;
 use rustyml::machine_learning::traits::{Fit, Predict};
-use rustyml::types::KernelType;
 
 use rustyml::machine_learning::DBSCAN;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;

@@ -6,7 +6,7 @@ use crate::harness::{Row, Section, random_matrix_f64, time_per_call_ns};
 use ndarray::Array2;
 use rayon::prelude::*;
 use rustyml::bench_internals::KdTree;
-use rustyml::types::DistanceCalculationMetric;
+use rustyml::math::DistanceCalculationMetric;
 use std::hint::black_box;
 
 // coarse-task classes: tree traversal / sort-scan / tree build
