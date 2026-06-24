@@ -101,13 +101,13 @@ pub mod matmul {
         get_gemm_min_flops_f64 => b::gemm_rayon_min_flops_f64,
         "the f64 GEMM serial-vs-rayon crossover, in estimated FLOPs (`2*m*k*n`)"
     );
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     fwd!(
         set_gemv_min_flops_f32 => b::set_gemv_rayon_min_flops_f32,
         get_gemv_min_flops_f32 => b::gemv_rayon_min_flops_f32,
         "the f32 GEMV row-split crossover, in estimated FLOPs (`2*m*k`)"
     );
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     fwd!(
         set_gemv_min_flops_f64 => b::set_gemv_rayon_min_flops_f64,
         get_gemv_min_flops_f64 => b::gemv_rayon_min_flops_f64,

@@ -150,7 +150,7 @@ impl Default for TSNEMethod {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::t_sne::{TSNE, TSNEMethod};
+/// use rustyml::machine_learning::manifold::t_sne::{TSNE, TSNEMethod};
 /// use ndarray::array;
 ///
 /// let tsne = TSNE::new(2, 2.0, 200.0, 250)
@@ -796,8 +796,8 @@ impl TSNE {
         S: Data<Elem = f64>,
     {
         // Shared shape/finiteness checks plus the common minimum-sample guard
-        super::validation::validate_fit_matrix(x)?;
-        super::validation::check_min_samples(x, 2, "t-SNE")?;
+        crate::machine_learning::validation::validate_fit_matrix(x)?;
+        crate::machine_learning::validation::check_min_samples(x, 2, "t-SNE")?;
 
         // The perplexity bound is t-SNE-specific
         if self.perplexity >= x.nrows() as f64 {
@@ -836,7 +836,8 @@ impl TSNE {
         if x.ncols() < self.n_components {
             return None;
         }
-        let mut pca = crate::utils::pca::PCA::new(self.n_components).ok()?;
+        let mut pca =
+            crate::machine_learning::decomposition::pca::PCA::new(self.n_components).ok()?;
         let mut embedding = pca.fit_transform(x).ok()?;
 
         // Rescale to a small spread on the first component, matching common t-SNE practice

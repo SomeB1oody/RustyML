@@ -208,7 +208,9 @@ where
     S: Data<Elem = f64>,
 {
     // Reject non-finite values up front so the per-row argmax comparison is total
-    super::validation::check_finite(categorical)?;
+    if categorical.iter().any(|v| !v.is_finite()) {
+        return Err(Error::non_finite("input data"));
+    }
 
     let labels = categorical
         .rows()

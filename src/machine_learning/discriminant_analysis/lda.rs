@@ -70,7 +70,7 @@ impl Solver {
     /// fall below a relative tolerance
     fn eigen_inverse(cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_features = cov.ncols();
-        let eig = crate::math::decomposition::symmetric_eigen(cov);
+        let eig = crate::machine_learning::linalg::symmetric_eigen(cov);
 
         let mut inv_vals = eig.eigenvalues.clone();
         let max_eval = inv_vals.iter().cloned().fold(0.0_f64, f64::max);
@@ -92,7 +92,7 @@ impl Solver {
 
     /// Inverts a symmetric covariance through its SVD pseudo-inverse
     fn svd_pseudo_inverse(cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
-        let decomp = crate::math::decomposition::svd(cov, true, true);
+        let decomp = crate::machine_learning::linalg::svd(cov, true, true);
         let max_sv = decomp
             .singular_values
             .iter()
@@ -118,7 +118,7 @@ impl Solver {
         sb: &Array2<f64>,
         n_components: usize,
     ) -> Result<Array2<f64>, Error> {
-        use crate::math::decomposition::symmetric_eigen;
+        use crate::machine_learning::linalg::symmetric_eigen;
 
         let n_features = cov.nrows();
 

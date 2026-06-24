@@ -63,7 +63,7 @@ impl SVDSolver {
         // Eigendecompose the covariance matrix: eigenvectors are the principal axes, eigenvalues
         // are the per-axis variances
         let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
-        let eigen = crate::math::decomposition::symmetric_eigen(&cov);
+        let eigen = crate::machine_learning::linalg::symmetric_eigen(&cov);
 
         // The solver returns eigenpairs ascending; order them by descending eigenvalue
         let mut order: Vec<usize> = (0..n_features).collect();
@@ -106,7 +106,7 @@ impl SVDSolver {
         // Oversample to improve the randomized subspace
         let k = (n_components + oversampling).min(max_rank);
 
-        use crate::math::decomposition::{qr_q, svd};
+        use crate::machine_learning::linalg::{qr_q, svd};
 
         let mut rng = StdRng::seed_from_u64(seed);
         let mut omega = Vec::with_capacity(n_features * k);
@@ -158,7 +158,13 @@ impl SVDSolver {
         // Extract the leading eigenpairs of the covariance matrix
         let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
         let (eigenvalues, eigenvectors) =
-            super::linalg::top_eigenpairs_power_iteration(cov, n_components, 0, 1000, 1e-6)?;
+            crate::machine_learning::linalg::top_eigenpairs_power_iteration(
+                cov,
+                n_components,
+                0,
+                1000,
+                1e-6,
+            )?;
 
         // Principal axes are the covariance eigenvectors, stored as rows
         let mut components = Array2::<f64>::zeros((n_components, n_features));
@@ -191,10 +197,10 @@ impl SVDSolver {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::*;
+/// use rustyml::machine_learning::decomposition::PCA;
 /// use ndarray::array;
 ///
-/// let mut pca = pca::PCA::new(2).unwrap();
+/// let mut pca = PCA::new(2).unwrap();
 /// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 /// pca.fit(&x).unwrap();
 /// let projected = pca.transform(&x).unwrap();
@@ -453,11 +459,11 @@ impl PCA {
             .ok_or_else(|| Error::not_fitted("PCA"))?;
         let mean = self.mean.as_ref().ok_or_else(|| Error::not_fitted("PCA"))?;
 
-        super::validation::check_non_empty(x)?;
+        crate::machine_learning::validation::check_non_empty(x)?;
         if x.ncols() != components.nrows() {
             return Err(Error::dimension_mismatch(components.nrows(), x.ncols()));
         }
-        super::validation::check_finite(x)?;
+        crate::machine_learning::validation::check_finite(x)?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {
@@ -494,8 +500,8 @@ impl PCA {
     where
         S: Data<Elem = f64>,
     {
-        super::validation::validate_fit_matrix(x)?;
-        super::validation::check_min_samples(x, 2, "PCA")?;
+        crate::machine_learning::validation::validate_fit_matrix(x)?;
+        crate::machine_learning::validation::check_min_samples(x, 2, "PCA")?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -594,7 +600,7 @@ impl PCA {
             .ok_or_else(|| Error::not_fitted("PCA"))?;
         let mean = self.mean.as_ref().ok_or_else(|| Error::not_fitted("PCA"))?;
 
-        super::validation::validate_transform_matrix(x, components.ncols())?;
+        crate::machine_learning::validation::validate_transform_matrix(x, components.ncols())?;
 
         #[cfg(feature = "show_progress")]
         let progress_bar = {

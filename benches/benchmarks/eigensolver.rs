@@ -1,6 +1,6 @@
-//! Power-iteration eigensolver benchmarks for the `utils` transformers.
+//! Power-iteration eigensolver benchmarks for the decomposition transformers.
 //!
-//! Isolates `utils::linalg::top_eigenpairs_power_iteration` (power iteration with Hotelling
+//! Isolates `machine_learning::linalg::top_eigenpairs_power_iteration` (power iteration with Hotelling
 //! deflation) through the two public APIs that select it: the PCA `PowerIteration` SVD solver
 //! and the KernelPCA `PowerIteration` eigen solver. Configs are chosen so the iterative inner
 //! loop - not the one-off covariance/kernel GEMM - dominates the wall clock, so a change to the
@@ -17,8 +17,10 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
-use rustyml::utils::kernel_pca::{EigenSolver, Gamma, KernelPCA, KernelType};
-use rustyml::utils::pca::{PCA, SVDSolver};
+use rustyml::machine_learning::decomposition::kernel_pca::{
+    EigenSolver, Gamma, KernelPCA, KernelType,
+};
+use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
 use std::hint::black_box;
 
 fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {

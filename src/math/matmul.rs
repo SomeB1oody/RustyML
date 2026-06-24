@@ -34,7 +34,7 @@
     feature = "utils"
 ))]
 use ndarray::parallel::prelude::IntoParallelIterator;
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 use ndarray::{Array1, Ix1};
 #[cfg(any(
     feature = "machine_learning",
@@ -104,7 +104,7 @@ pub(crate) trait MatmulElem: LinalgScalar + Send + Sync {
     /// unlike the GEMM gate this controls a row split the wrapper performs itself. The crossover is
     /// far lower than the GEMM one - extra cores add memory bandwidth, which the bandwidth-bound
     /// matvec can use almost immediately
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     fn gemv_rayon_min_flops() -> usize;
 }
 
@@ -134,14 +134,14 @@ tunable_gate! {
 
 tunable_gate! {
     /// `f32` GEMV rayon-crossover FLOPs (`<f32 as MatmulElem>::gemv_rayon_min_flops`)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     pub(crate) GEMV_RAYON_MIN_FLOPS_F32
         => gemv_rayon_min_flops_f32 / set_gemv_rayon_min_flops_f32 = 524_288
 }
 
 tunable_gate! {
     /// `f64` GEMV rayon-crossover FLOPs (`<f64 as MatmulElem>::gemv_rayon_min_flops`)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     pub(crate) GEMV_RAYON_MIN_FLOPS_F64
         => gemv_rayon_min_flops_f64 / set_gemv_rayon_min_flops_f64 = 524_288
 }
@@ -155,7 +155,7 @@ impl MatmulElem for f32 {
     fn gemm_rayon_min_flops() -> usize {
         gemm_rayon_min_flops_f32()
     }
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     fn gemv_rayon_min_flops() -> usize {
         gemv_rayon_min_flops_f32()
     }
@@ -170,7 +170,7 @@ impl MatmulElem for f64 {
     fn gemm_rayon_min_flops() -> usize {
         gemm_rayon_min_flops_f64()
     }
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     fn gemv_rayon_min_flops() -> usize {
         gemv_rayon_min_flops_f64()
     }
@@ -385,7 +385,7 @@ where
 /// how a large matvec is given the extra cores' memory bandwidth. No gate - callers route here only
 /// once they have decided to parallelize ([`gemv_par_auto`] gates by FLOPs, [`gemv_par_switch`]
 /// takes the choice explicitly). The GEMV analogue of [`gemm_par_strategy`]
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 fn gemv_par_strategy<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
 where
     T: MatmulElem,
@@ -411,7 +411,7 @@ where
 /// # Panics
 ///
 /// - If `A`'s column count differs from `x`'s length
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 pub(crate) fn gemv_par_switch<T, S1, S2>(
     a: &ArrayBase<S1, Ix2>,
     x: &ArrayBase<S2, Ix1>,
@@ -449,7 +449,7 @@ where
 /// # Panics
 ///
 /// - If `A`'s column count differs from `x`'s length
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 pub(crate) fn gemv_par_auto<T, S1, S2>(a: &ArrayBase<S1, Ix2>, x: &ArrayBase<S2, Ix1>) -> Array1<T>
 where
     T: MatmulElem,
@@ -515,7 +515,7 @@ pub fn cache_resident<T>(rows: usize, cols: usize) -> bool {
 ))]
 mod tests {
     use super::*;
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     use ndarray::Array1;
     use ndarray::{Array2, s};
 
@@ -697,7 +697,7 @@ mod tests {
     // gemv
 
     /// gemv_par_auto matches the reference for both the serial and the row-split path
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     #[test]
     fn gemv_par_auto_matches_reference() {
         // small (< 524K FLOPs -> serial) and large (>= 524K -> rayon row split)
@@ -716,7 +716,7 @@ mod tests {
     /// The GEMV row split agrees with a single serial matvec numerically (this test allows a small
     /// rounding-level tolerance rather than exact equality, since each block is a `gemm` call with a
     /// different `m` and the kernel's internal k-blocking can depend on `m`)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     #[test]
     fn gemv_par_auto_rowsplit_matches_serial_numerically() {
         let m = 8192; // 8192*64*2 ~ 1M >= the 524K gate -> row-split path
@@ -736,7 +736,7 @@ mod tests {
     }
 
     /// GEMV is run-to-run deterministic on the same machine (same chunks -> same result)
-    #[cfg(any(feature = "machine_learning", feature = "utils"))]
+    #[cfg(feature = "machine_learning")]
     #[test]
     fn gemv_par_auto_run_to_run_deterministic() {
         let a = rand_f64(8192, 64, 51);

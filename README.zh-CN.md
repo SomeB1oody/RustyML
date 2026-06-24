@@ -144,12 +144,15 @@ println!("F1 分数: {:.3}", cm.f1_score());
 | **回归** | 线性回归（可选 L1/L2 正则化） |
 | **分类** | 逻辑回归、K 近邻、决策树（ID3 / C4.5 / CART）、SVC（核 SMO）、Linear SVC、线性判别分析（LDA） |
 | **聚类** | KMeans（K-means++ 初始化）、DBSCAN、MeanShift |
+| **降维** | PCA（多种 SVD 求解器）、KernelPCA（RBF / Linear / Poly / Sigmoid / Cosine 核）、t-SNE |
 | **异常检测** | 隔离森林（Isolation Forest） |
 
 共享的配置类型位于 [`types`](https://docs.rs/rustyml/latest/rustyml/types/index.html) 模块：
 `DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）、`RegularizationType`（L1 / L2）、
-以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。所有模型都实现统一的 `Fit` 与
-`Predict` trait。
+以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。预测类模型实现统一的 `Fit` 与
+`Predict` trait；降维变换器（[`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
+与 [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html)）则实现
+`Transform` / `FitTransform`。
 
 ### `neural_network`
 
@@ -170,9 +173,9 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ### `utils`
 
-数据预处理与降维。
+数据预处理与数据集划分。（降维 - `PCA`、`KernelPCA`、`TSNE` - 现已迁至 `machine_learning`
+下的 `decomposition` 与 `manifold`。）
 
-- **降维** - `PCA`（多种 SVD 求解器）、`KernelPCA`（RBF / Linear / Poly / Sigmoid / Cosine 核）、`TSNE`
 - **缩放** - `standardize`（z-score 标准化）、`normalize`（可配置轴与范数阶数）
 - **标签编码** - `to_categorical`、`to_categorical_with_mapping`、`to_sparse_categorical`
 - **数据划分** - `train_test_split` 与 `train_test_split_stratified`，比例可配置
@@ -198,9 +201,9 @@ println!("F1 分数: {:.3}", cm.f1_score());
 按领域拆分的一站式导入，让你只引入需要的部分：
 
 ```rust
-use rustyml::prelude::machine_learning::*; // 机器学习模型、trait、配置枚举
+use rustyml::prelude::machine_learning::*; // 机器学习模型（含 PCA/KernelPCA/t-SNE）、trait、配置枚举
 use rustyml::prelude::neural_network::*;   // 层、优化器、损失函数
-use rustyml::prelude::utils::*;            // PCA、t-SNE、缩放、数据划分
+use rustyml::prelude::utils::*;            // 缩放、标签编码、数据划分
 use rustyml::prelude::metrics::*;          // 评估指标
 use rustyml::prelude::math::*;             // 数学原语
 ```
@@ -213,7 +216,7 @@ use rustyml::prelude::math::*;             // 数学原语
 |---------|------|
 | `machine_learning` | 经典机器学习算法（启用 `math`） |
 | `neural_network` | 神经网络框架 |
-| `utils` | 数据预处理与降维（启用 `math`） |
+| `utils` | 数据预处理与数据集划分（启用 `math`） |
 | `metrics` | 评估指标（启用 `math`） |
 | `math` | 数学与统计原语 |
 | `default` | `machine_learning` + `neural_network` |

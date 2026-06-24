@@ -676,5 +676,5 @@ fn solve_ridge_lstsq(
     }
 
     // SVD least-squares solve, yielding the minimum-norm solution
-    crate::math::decomposition::svd(&d, true, true).solve(&t, 1e-12)
+    crate::machine_learning::linalg::svd(&d, true, true).solve(&t, 1e-12)
 }

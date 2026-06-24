@@ -6,10 +6,7 @@
 
 mod common;
 
-mod kernel_pca;
 mod label_encoding;
 mod normalize;
-mod pca;
 mod standardize;
-mod t_sne;
 mod train_test_split;

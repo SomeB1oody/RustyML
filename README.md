@@ -146,12 +146,16 @@ input validation, and binary persistence.
 | **Regression** | Linear Regression (optional L1/L2 regularization) |
 | **Classification** | Logistic Regression, K-Nearest Neighbors, Decision Tree (ID3 / C4.5 / CART), SVC (kernel SMO), Linear SVC, Linear Discriminant Analysis |
 | **Clustering** | KMeans (K-means++ init), DBSCAN, MeanShift |
+| **Dimensionality Reduction** | PCA (multiple SVD solvers), KernelPCA (RBF / Linear / Poly / Sigmoid / Cosine kernels), t-SNE |
 | **Anomaly Detection** | Isolation Forest |
 
 Shared config types live in [`types`](https://docs.rs/rustyml/latest/rustyml/types/index.html):
 `DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski), `RegularizationType` (L1 / L2),
-and `KernelType` (Linear / Poly / RBF / Sigmoid / Cosine). Models implement the unified `Fit`
-and `Predict` traits.
+and `KernelType` (Linear / Poly / RBF / Sigmoid / Cosine). Predictive models implement the
+unified `Fit` and `Predict` traits; the dimensionality-reduction transformers
+([`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
+and [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html))
+implement `Transform` / `FitTransform`.
 
 ### `neural_network`
 
@@ -173,9 +177,9 @@ inspection (`get_weights`), and binary serialization (`save_to_path` / `load_fro
 
 ### `utils`
 
-Data preprocessing and dimensionality reduction.
+Data preprocessing and dataset splitting. (Dimensionality reduction — `PCA`, `KernelPCA`,
+`TSNE` — now lives in `machine_learning` under `decomposition` and `manifold`.)
 
-- **Dimensionality reduction** — `PCA` (multiple SVD solvers), `KernelPCA` (RBF / Linear / Poly / Sigmoid / Cosine kernels), `TSNE`
 - **Scaling** — `standardize` (z-score), `normalize` (configurable axis & order)
 - **Label encoding** — `to_categorical`, `to_categorical_with_mapping`, `to_sparse_categorical`
 - **Splitting** — `train_test_split` and `train_test_split_stratified`, with a configurable ratio
@@ -203,9 +207,9 @@ Pure, stateless numerical primitives shared across the crate: impurity measures 
 One-stop imports, split by domain so you only pull in what you need:
 
 ```rust
-use rustyml::prelude::machine_learning::*; // ML models, traits, config enums
+use rustyml::prelude::machine_learning::*; // ML models (incl. PCA/KernelPCA/t-SNE), traits, config enums
 use rustyml::prelude::neural_network::*;   // layers, optimizers, losses
-use rustyml::prelude::utils::*;            // PCA, t-SNE, scaling, splitting
+use rustyml::prelude::utils::*;            // scaling, label encoding, splitting
 use rustyml::prelude::metrics::*;          // evaluation metrics
 use rustyml::prelude::math::*;             // math primitives
 ```
@@ -218,7 +222,7 @@ The crate uses feature flags for modular compilation:
 |---------|-------------|
 | `machine_learning` | Classical ML algorithms (enables `math`) |
 | `neural_network` | Neural-network framework |
-| `utils` | Data preprocessing and dimensionality reduction (enables `math`) |
+| `utils` | Data preprocessing and dataset splitting (enables `math`) |
 | `metrics` | Evaluation metrics (enables `math`) |
 | `math` | Mathematical and statistical primitives |
 | `default` | `machine_learning` + `neural_network` |

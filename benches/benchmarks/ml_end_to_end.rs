@@ -1,4 +1,4 @@
-//! End-to-end criterion benchmarks over the classical-ML and utils public API
+//! End-to-end criterion benchmarks over the classical-ML public API
 //!
 //! Tracks the wall-clock effect of the GEMM/parallelism work (and guards against regressions)
 //! at the level a user sees: whole `fit`/`predict`/`transform` calls. Detailed reports and
@@ -14,14 +14,14 @@ use ndarray_rand::RandomExt;
 use ndarray_rand::rand::SeedableRng;
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand_distr::Uniform;
+use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, KernelPCA};
+use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
+use rustyml::machine_learning::manifold::t_sne::{Init, TSNE, TSNEMethod};
 use rustyml::machine_learning::{
     KMeans, KNN, KernelType, LDA, LogisticRegression, MeanShift, SVC, Solver, WeightingStrategy,
     generate_polynomial_features,
 };
 use rustyml::types::{DistanceCalculationMetric, Gamma};
-use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
-use rustyml::utils::pca::{PCA, SVDSolver};
-use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
 use std::hint::black_box;
 
 fn random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {

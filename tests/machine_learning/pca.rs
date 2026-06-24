@@ -1,9 +1,9 @@
-//! Integration tests for rustyml::utils::pca, covering construction/validation,
+//! Integration tests for rustyml::machine_learning::decomposition::pca, covering construction/validation,
 //! error paths, and numerical results across all three SVD solvers
 
 use ndarray::{Array2, array};
 use rustyml::error::Error;
-use rustyml::utils::pca::{PCA, SVDSolver};
+use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
 
 use crate::common::assert_allclose;
 

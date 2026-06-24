@@ -6,7 +6,7 @@
 //!   machine learning models
 //! - [`KernelType`](crate::types::KernelType) is used by both
 //!   [`SVC`](crate::machine_learning::svm::svc::SVC) and
-//!   [`KernelPCA`](crate::utils::kernel_pca::KernelPCA)
+//!   [`KernelPCA`](crate::machine_learning::decomposition::kernel_pca::KernelPCA)
 //!
 //! Each type carries its own behavior (distance / kernel evaluation) as inherent
 //! methods, so consumers share a single implementation instead of re-matching the
@@ -210,7 +210,7 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite, or the gamma is an (always-valid) `Scale`/`Auto` rule
-    #[cfg(feature = "utils")]
+    #[cfg(feature = "machine_learning")]
     pub(crate) fn explicit_is_finite(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite(),
@@ -219,7 +219,7 @@ impl Gamma {
     }
 
     /// Whether an explicit value is finite and positive, or an (always-valid) `Scale`/`Auto` rule
-    #[cfg(feature = "utils")]
+    #[cfg(feature = "machine_learning")]
     pub(crate) fn explicit_is_positive(self) -> bool {
         match self {
             Gamma::Value(v) => v.is_finite() && v > 0.0,

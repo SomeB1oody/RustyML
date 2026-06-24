@@ -1,4 +1,4 @@
-//! Integration tests for `rustyml::utils::t_sne::TSNE`
+//! Integration tests for `rustyml::machine_learning::manifold::t_sne::TSNE`
 //!
 //! Covers constructor validation, fit_transform output shape and finiteness,
 //! determinism, centered output, neighborhood preservation, error paths, and getters
@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::Array2;
 use rustyml::error::Error;
-use rustyml::utils::t_sne::{Init, TSNE, TSNEMethod};
+use rustyml::machine_learning::manifold::t_sne::{Init, TSNE, TSNEMethod};
 
 // Small valid dataset (6 points, 2 features); perplexity=2.0 < 6 passes the n_samples guard
 fn small_data() -> Array2<f64> {

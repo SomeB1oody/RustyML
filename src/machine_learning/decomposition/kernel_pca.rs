@@ -42,12 +42,16 @@ impl EigenSolver {
         match self {
             EigenSolver::Dense => Self::dense(kernel_centered, n_components),
             EigenSolver::Lanczos => Self::columns_from_pairs(
-                super::linalg::top_eigenpairs_lanczos(kernel_centered, n_components, 0)?,
+                crate::machine_learning::linalg::top_eigenpairs_lanczos(
+                    kernel_centered,
+                    n_components,
+                    0,
+                )?,
                 kernel_centered.nrows(),
                 n_components,
             ),
             EigenSolver::PowerIteration => Self::columns_from_pairs(
-                super::linalg::top_eigenpairs_power_iteration(
+                crate::machine_learning::linalg::top_eigenpairs_power_iteration(
                     kernel_centered.to_owned(),
                     n_components,
                     0,
@@ -66,7 +70,7 @@ impl EigenSolver {
         n_components: usize,
     ) -> Result<(Array1<f64>, Array2<f64>), Error> {
         let n_samples = kernel_centered.nrows();
-        let eigen = crate::math::decomposition::symmetric_eigen(kernel_centered);
+        let eigen = crate::machine_learning::linalg::symmetric_eigen(kernel_centered);
 
         // Sort eigenpairs by descending eigenvalue
         let mut pairs: Vec<(f64, usize)> = eigen
@@ -118,7 +122,7 @@ impl EigenSolver {
 /// # Examples
 ///
 /// ```rust
-/// use rustyml::utils::kernel_pca::{EigenSolver, Gamma, KernelPCA, KernelType};
+/// use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, Gamma, KernelPCA, KernelType};
 /// use ndarray::array;
 ///
 /// let mut kpca = KernelPCA::new(KernelType::RBF { gamma: Gamma::Value(0.1) }, 2).unwrap();
@@ -351,8 +355,8 @@ impl KernelPCA {
     where
         S: Data<Elem = f64> + Send + Sync,
     {
-        super::validation::validate_fit_matrix(x)?;
-        super::validation::check_min_samples(x, 2, "KernelPCA")?;
+        crate::machine_learning::validation::validate_fit_matrix(x)?;
+        crate::machine_learning::validation::check_min_samples(x, 2, "KernelPCA")?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -469,7 +473,7 @@ impl KernelPCA {
             .n_features
             .ok_or_else(|| Error::not_fitted("KernelPCA"))?;
 
-        super::validation::validate_transform_matrix(x, n_features)?;
+        crate::machine_learning::validation::validate_transform_matrix(x, n_features)?;
 
         if eigenvectors.ncols() != eigenvalues.len() {
             return Err(Error::computation(

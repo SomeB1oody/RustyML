@@ -237,7 +237,7 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
 /// - `$method_name` - The name of the getter method (e.g. get_fit_intercept)
 /// - `$field_name` - The name of the field to access (e.g. fit_intercept)
 /// - `$return_type` - The return type of the getter method
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -258,7 +258,7 @@ macro_rules! get_field {
 /// - `$method_name` - The identifier for the generated getter method name
 /// - `$field_name` - The identifier of the struct field to access
 /// - `$return_type` - The type for the return value (typically a reference type like `&Type`)
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -278,7 +278,7 @@ macro_rules! get_field_as_ref {
 /// # Parameters
 ///
 /// - `$model_type` - The type of the model struct (e.g. LinearRegression, LogisticRegression)
-#[cfg(any(feature = "machine_learning", feature = "utils"))]
+#[cfg(feature = "machine_learning")]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
         /// Saves the trained model to a binary file at the specified path
@@ -551,6 +551,11 @@ pub mod math;
 /// - **DBSCAN**: Density-based clustering for discovering clusters of arbitrary shapes with noise detection
 /// - **MeanShift**: Non-parametric clustering that automatically determines cluster centers
 ///
+/// ## Dimensionality Reduction
+/// - **PCA**: Principal Component Analysis for linear dimensionality reduction (see [`decomposition`](crate::machine_learning::decomposition))
+/// - **KernelPCA**: Nonlinear dimensionality reduction via kernel methods (RBF, Linear, Poly, Sigmoid, Cosine)
+/// - **TSNE**: t-Distributed Stochastic Neighbor Embedding for high-dimensional data visualization (see [`manifold`](crate::machine_learning::manifold))
+///
 /// ## Anomaly Detection
 /// - **IsolationForest**: Ensemble method for efficient anomaly detection in high-dimensional data
 ///
@@ -614,41 +619,28 @@ pub mod machine_learning;
 /// ```
 pub mod prelude;
 
-/// Module `utils` provides utility functions and data processing tools for machine learning operations
+/// Module `utils` provides preprocessing and dataset-splitting tools for machine learning operations
 ///
-/// Covers data transformation and preprocessing that complement the main algorithms, including
-/// dimensionality reduction, data splitting, and other preprocessing functions
+/// # Preprocessing
+/// - **normalize**: Scale samples to unit norm along a chosen axis (L1 / L2 / max order)
+/// - **standardize**: Z-score standardization (zero mean, unit variance) for feature scaling
+/// - **label encoding**: Convert between dense labels and one-hot / sparse categorical formats
 ///
-/// # Dimensionality Reduction Techniques
-///
-/// ## Linear Methods
-/// - **PCA (Principal Component Analysis)**: Linear dimensionality reduction for feature extraction and data visualization
-///
-/// ## Non-linear Methods
-/// - **Kernel PCA**: Non-linear dimensionality reduction using kernel methods for complex data patterns
-/// - **t-SNE**: t-Distributed Stochastic Neighbor Embedding for high-dimensional data visualization
-///
-/// # Data Preprocessing
-/// - **train_test_split**: Utility for splitting datasets into training and testing sets with configurable ratios
-/// - **standardize**: Data standardization (z-score normalization) for feature scaling
-/// - **KernelType**: Enumeration of supported kernel functions (RBF, Linear, Polynomial, Sigmoid, Cosine)
+/// # Dataset Splitting
+/// - **train_test_split**: Split datasets into training and testing sets with configurable ratios, optionally stratified
 ///
 /// # Key Features
 /// - **Parallel Processing**: Rayon-based parallel computation for performance optimization
-/// - **Flexible Configuration**: Customizable parameters for all algorithms
-/// - **Memory Efficient**: Optimized implementations for large datasets
 /// - **Robust Error Handling**: Comprehensive input validation and error reporting
 ///
 /// # Examples
 /// ```rust
-/// use rustyml::utils::pca::PCA;
+/// use rustyml::utils::standardize::{standardize, StandardizationAxis};
 /// use ndarray::array;
 ///
-/// let mut pca = PCA::new(2).unwrap();
-/// let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
-/// pca.fit(&x).unwrap();
-/// let projected = pca.transform(&x).unwrap();
-/// assert_eq!(projected.ncols(), 2);
+/// let x = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+/// let standardized = standardize(&x, StandardizationAxis::Column).unwrap();
+/// assert_eq!(standardized.dim(), (3, 2));
 /// ```
 #[cfg(feature = "utils")]
 pub mod utils;

@@ -1,12 +1,12 @@
-//! Integration tests for `utils::kernel_pca`: constructor validation, fit/transform
+//! Integration tests for `machine_learning::decomposition::kernel_pca`: constructor validation, fit/transform
 //! error paths, per-kernel happy paths, eigensolver agreement, and closed-form kernel
 //! value checks. Expected values come from mathematical definitions, not recorded output
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
+use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, KernelPCA};
 use rustyml::types::{Gamma, KernelType};
-use rustyml::utils::kernel_pca::{EigenSolver, KernelPCA};
 
 use crate::common::assert_allclose;
 
