@@ -8,7 +8,6 @@ use crate::error::{Error, TreeError};
 use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
-use crate::math::{entropy, gini, variance};
 use crate::parallel_gates::{sort_scan_min_elems, tree_traversal_min_visits};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
@@ -97,9 +96,45 @@ impl Algorithm {
     /// CART uses Gini impurity; ID3 and C4.5 use entropy. Regression always uses MSE,
     /// which is independent of the algorithm and handled by the caller
     fn classification_impurity(&self, y: &ArrayView1<f64>) -> f64 {
+        if y.is_empty() {
+            return 0.0;
+        }
+
+        // Bucket labels into integer class keys (rounded to 3 decimals), skipping NaN
+        let mut class_counts = AHashMap::with_capacity(10);
+        y.fold((), |_, &value| {
+            if value.is_nan() {
+                return;
+            }
+            let key = (value * 1000.0).round() as i64;
+            *class_counts.entry(key).or_insert(0) += 1;
+        });
+        if class_counts.is_empty() {
+            return 0.0;
+        }
+
+        // Normalize by the valid (non-NaN) count, not `y.len()`
+        let valid_samples: f64 = class_counts.values().map(|&c| c as f64).sum();
+
         match self {
-            Algorithm::CART => gini(y),
-            Algorithm::ID3 | Algorithm::C45 => entropy(y),
+            // Gini impurity: 1 - sum(p^2)
+            Algorithm::CART => {
+                1.0 - class_counts
+                    .values()
+                    .map(|&c| {
+                        let p = c as f64 / valid_samples;
+                        p * p
+                    })
+                    .sum::<f64>()
+            }
+            // Shannon entropy in bits: -sum(p * log2(p))
+            Algorithm::ID3 | Algorithm::C45 => -class_counts
+                .values()
+                .map(|&c| {
+                    let p = c as f64 / valid_samples;
+                    p * p.log2()
+                })
+                .sum::<f64>(),
         }
     }
 
@@ -1064,13 +1099,27 @@ impl DecisionTree {
     }
 
     /// Calculates mean squared error for regression samples
+    ///
+    /// MSE impurity is the population variance of the node's targets. Tree inputs are validated
+    /// finite by `preliminary_check`, so this is a plain two-pass mean/squared-deviation with no
+    /// NaN handling or intermediate allocation
     fn calculate_mse<S>(&self, y: &ArrayBase<S, Ix1>, indices: &[usize]) -> f64
     where
         S: Data<Elem = f64>,
     {
-        // Collect subset values into an Array1 to use math::variance
-        let subset: Array1<f64> = indices.iter().map(|&i| y[i]).collect();
-        variance(&subset)
+        let n = indices.len();
+        if n == 0 {
+            return 0.0;
+        }
+        let mean = indices.iter().map(|&i| y[i]).sum::<f64>() / n as f64;
+        indices
+            .iter()
+            .map(|&i| {
+                let d = y[i] - mean;
+                d * d
+            })
+            .sum::<f64>()
+            / n as f64
     }
 
     /// Checks if all samples in the given indices have the same label (pure node)

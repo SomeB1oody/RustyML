@@ -10,6 +10,7 @@
 //! every model
 
 use crate::math::matmul::gemm_par_auto;
+use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
@@ -206,8 +207,8 @@ impl KernelType {
                 coef0,
             } => (gamma.value() * x1.dot(&x2) + coef0).powi(degree as i32),
             KernelType::RBF { gamma } => {
-                let diff = &x1 - &x2;
-                let squared_norm = diff.dot(&diff);
+                // ||x1 - x2||^2 via the shared single-pass, allocation-free helper
+                let squared_norm = squared_euclidean_distance_row(&x1, &x2);
                 (-gamma.value() * squared_norm).exp()
             }
             KernelType::Sigmoid { gamma, coef0 } => (gamma.value() * x1.dot(&x2) + coef0).tanh(),

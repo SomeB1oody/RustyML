@@ -41,11 +41,10 @@
 //! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score
 //!
 //! ### [`math`]
-//! Mathematical utilities and statistical functions:
-//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski
-//! - **Impurity Measures**: Entropy, Gini, Information Gain
-//! - **Statistical Functions**: Variance, standard deviation, SST, SSE
-//! - **Activation Functions**: Sigmoid, logistic loss
+//! Low-level numeric primitives shared across modules:
+//! - **Distance Metrics**: Euclidean, Manhattan, Minkowski, plus the `DistanceCalculationMetric` dispatcher
+//! - **Matrix Products**: parallel `gemm`-backed GEMM/GEMV
+//! - **Reductions**: deterministic blocked parallel reductions
 //!
 //! ## Quick Start
 //!
@@ -478,15 +477,11 @@ pub(crate) mod parallel_gates;
 ///
 /// # Core Functions
 ///
-/// ## Decision Tree Mathematics
-/// - `entropy` - Calculates the entropy of a label set for information-based splitting
-/// - `gini` - Calculates the Gini impurity for CART-based splitting
-///
-/// ## Distance Calculations
+/// ## Distance Calculations ([`math::distance`])
 /// - `squared_euclidean_distance_row` - Squared Euclidean distance between two vectors
 /// - `manhattan_distance_row` - Manhattan (L1) distance between two vectors
 /// - `minkowski_distance_row` - Generalized Minkowski distance with parameter p
-/// - `DistanceCalculationMetric` - Configurable Euclidean/Manhattan/Minkowski metric dispatcher (see [`math::distance`])
+/// - `DistanceCalculationMetric` - Configurable Euclidean/Manhattan/Minkowski metric dispatcher
 ///
 /// ## Matrix Products ([`math::matmul`])
 /// - Crate-internal GEMM/GEMV backed by the [`gemm`](https://docs.rs/gemm) crate: runtime-
@@ -494,35 +489,21 @@ pub(crate) mod parallel_gates;
 ///   correct to floating-point rounding and reproducible across runs on the same machine (not
 ///   necessarily bit-for-bit)
 ///
-/// ## Statistical Functions
-/// - `sum_of_square_total` - Total variability measurement (SST)
-/// - `sum_of_squared_errors` - Sum of squared prediction errors (SSE)
-/// - `variance` - Mean squared error or variance of a dataset
-/// - `standard_deviation` - Population standard deviation calculation
-/// - `average_path_length_factor` - Adjustment factor for isolation forest algorithms
-///
-/// ## Activation and Loss Functions
-/// - `sigmoid` - Sigmoid activation function for neural networks and logistic regression
-/// - `logistic_loss` - Cross-entropy loss for binary classification
-/// - `hinge_loss` - Mean hinge loss for margin-based classifiers (e.g. SVM)
+/// ## Reductions ([`math::reduction`])
+/// - Deterministic blocked parallel reductions (`det_reduce`, `det_reduce_range`) that fold large
+///   `f64` arrays on the rayon pool while reproducing the same result across runs on the same
+///   machine (not necessarily bit-for-bit)
 ///
 /// # Example
 /// ```rust
-/// use rustyml::math::{entropy, gini, sigmoid, squared_euclidean_distance_row};
+/// use rustyml::math::{DistanceCalculationMetric, squared_euclidean_distance_row};
 /// use ndarray::array;
 ///
-/// // Decision tree impurity measures
-/// let labels = array![0.0, 1.0, 1.0, 0.0];
-/// let ent = entropy(&labels);
-/// let gini_val = gini(&labels);
-///
-/// // Distance calculations
+/// // Distance primitive plus the configurable metric dispatcher
 /// let v1 = array![1.0, 2.0];
 /// let v2 = array![4.0, 6.0];
-/// let dist = squared_euclidean_distance_row(&v1, &v2);
-///
-/// // Activation function
-/// let activated = sigmoid(0.5);
+/// let sq = squared_euclidean_distance_row(&v1, &v2);
+/// let d = DistanceCalculationMetric::Euclidean.distance(v1.view(), v2.view());
 /// ```
 #[cfg(feature = "math")]
 pub mod math;

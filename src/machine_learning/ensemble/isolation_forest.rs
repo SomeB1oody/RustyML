@@ -8,12 +8,37 @@ use crate::error::Error;
 use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
-use crate::math::average_path_length_factor;
 use crate::parallel_gates::tree_traversal_min_visits;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
+
+/// Euler–Mascheroni constant, used in the harmonic-number approximation of [`average_path_length_factor`]
+const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
+
+/// Average path-length normalization factor `c(n)` for isolation trees: the expected path length
+/// of an unsuccessful search in a binary search tree of `n` points, used to normalize raw path
+/// lengths into anomaly scores. Returns 0.0 for `n <= 1` and 1.0 for `n == 2`
+#[inline]
+fn average_path_length_factor(n: usize) -> f64 {
+    if n <= 1 {
+        return 0.0;
+    }
+    if n == 2 {
+        return 1.0;
+    }
+
+    let h_n_minus_1 = if n > 50 {
+        // Asymptotic expansion of the harmonic number H_m (m = n - 1)
+        let m = (n - 1) as f64;
+        m.ln() + EULER_GAMMA + 0.5 / m
+    } else {
+        (1..n).map(|i| 1.0 / i as f64).sum::<f64>()
+    };
+
+    2.0 * h_n_minus_1 - 2.0 * (n - 1) as f64 / n as f64
+}
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 /// Default minimum number of trees required to enable parallel tree construction
@@ -577,4 +602,77 @@ impl IsolationForest {
     }
 
     model_save_and_load_methods!(IsolationForest);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn test_average_path_length_factor_n0() {
+        assert_abs_diff_eq!(average_path_length_factor(0), 0.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_average_path_length_factor_n1() {
+        assert_abs_diff_eq!(average_path_length_factor(1), 0.0, epsilon = 1e-10);
+    }
+
+    #[test]
+    fn test_average_path_length_factor_n2() {
+        assert_abs_diff_eq!(average_path_length_factor(2), 1.0, epsilon = 1e-10);
+    }
+
+    /// c(3) uses the exact harmonic branch and equals 5/3
+    #[test]
+    fn test_average_path_length_factor_n3() {
+        let expected = 5.0_f64 / 3.0;
+        assert_abs_diff_eq!(average_path_length_factor(3), expected, epsilon = 1e-9);
+    }
+
+    /// Factor increases with n: c(10) < c(100) < c(1000)
+    #[test]
+    fn test_average_path_length_factor_monotone() {
+        let f10 = average_path_length_factor(10);
+        let f100 = average_path_length_factor(100);
+        let f1000 = average_path_length_factor(1000);
+        assert!(
+            f10 < f100,
+            "expected factor(10) < factor(100), got {f10} vs {f100}"
+        );
+        assert!(
+            f100 < f1000,
+            "expected factor(100) < factor(1000), got {f100} vs {f1000}"
+        );
+    }
+
+    /// Factor stays strictly increasing across the n=50/51 switch from the exact harmonic sum
+    /// to the ln(n-1)+gamma approximation
+    #[test]
+    fn test_average_path_length_factor_monotone_across_branch_boundary() {
+        let f49 = average_path_length_factor(49); // exact-harmonic branch
+        let f50 = average_path_length_factor(50); // exact-harmonic branch (last)
+        let f51 = average_path_length_factor(51); // ln+gamma branch (first)
+        let f52 = average_path_length_factor(52); // ln+gamma branch
+        assert!(f49 < f50, "factor(49)={f49} should be < factor(50)={f50}");
+        assert!(f50 < f51, "factor(50)={f50} should be < factor(51)={f51}");
+        assert!(f51 < f52, "factor(51)={f51} should be < factor(52)={f52}");
+    }
+
+    /// For n>50 the ln(n-1)+gamma+1/(2(n-1)) approximation stays within a tight error bound of the
+    /// exact value c(n) = 2*H_{n-1} - 2(n-1)/n. The `1/(2(n-1))` correction term shrinks the error
+    /// from ~2e-2 (ln+gamma only) to ~1e-5, so a `1e-3` tolerance now comfortably holds
+    #[test]
+    fn test_average_path_length_factor_matches_exact_harmonic_within_tolerance() {
+        for &n in &[51usize, 100, 1000] {
+            let exact_h: f64 = (1..n).map(|i| 1.0 / i as f64).sum();
+            let theoretical = 2.0 * exact_h - 2.0 * (n - 1) as f64 / n as f64;
+            let got = average_path_length_factor(n);
+            assert!(
+                (got - theoretical).abs() < 1e-3,
+                "n={n}: factor={got} deviates from theoretical {theoretical} by more than the documented approximation bound",
+            );
+        }
+    }
 }

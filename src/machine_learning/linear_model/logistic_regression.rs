@@ -10,12 +10,19 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
+use crate::math::exp_reduce_min_elems;
 use crate::math::matmul::gemv_par_auto;
-use crate::math::{logistic_loss, sigmoid};
+use crate::math::reduction::det_reduce_range;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+/// Computes the logistic sigmoid `1 / (1 + e^-z)`, mapping any real number into `(0, 1)`
+#[inline]
+fn sigmoid(z: f64) -> f64 {
+    1.0 / (1.0 + (-z).exp())
+}
 
 /// Logistic regression model for binary classification
 ///
@@ -195,7 +202,7 @@ impl LogisticRegression {
     ///
     /// The per-iteration logits and gradient run as parallel GEMVs above their FLOPs
     /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
-    /// above its exp-reduction gate (see [`crate::math::logistic_loss`]), so re-running on the
+    /// above its exp-reduction gate, so re-running on the
     /// same machine reproduces the result (not necessarily bit-for-bit)
     pub fn fit<S>(
         &mut self,
@@ -299,7 +306,24 @@ impl LogisticRegression {
             }
 
             // Loss at the CURRENT weights (before this step's update)
-            let mut cost = logistic_loss(&predictions, y);
+            let loss_term =
+                |z: f64, label: f64| z.max(0.0) - z * label + (1.0 + (-z.abs()).exp()).ln();
+            let total_loss = match (predictions.as_slice(), y.as_slice()) {
+                (Some(px), Some(py)) => det_reduce_range(
+                    px.len(),
+                    px.len() >= exp_reduce_min_elems(),
+                    |range| range.map(|i| loss_term(px[i], py[i])).sum::<f64>(),
+                    |a, b| a + b,
+                    0.0,
+                ),
+                // Non-contiguous storage: plain flat fold
+                _ => predictions
+                    .iter()
+                    .zip(y.iter())
+                    .map(|(&z, &label)| loss_term(z, label))
+                    .sum::<f64>(),
+            };
+            let mut cost = total_loss / predictions.len() as f64;
 
             if let Some(reg_type) = &self.regularization_type {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };

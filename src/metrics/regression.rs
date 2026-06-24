@@ -2,10 +2,9 @@
 //!
 //! Provides MSE, RMSE, MAE, R^2, explained variance, median absolute error, and MAPE
 
-use ndarray::{Array1, ArrayBase, Data, Ix1};
+use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix1};
 
 use super::validate_pair;
-use crate::math::{sum_of_square_total, sum_of_squared_errors, variance};
 
 /// Variance below which the total sum of squares is treated as zero (all `y_true` identical)
 const SST_EPSILON: f64 = 1e-10;
@@ -194,9 +193,13 @@ where
 {
     validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
 
-    // SSE is symmetric; SST depends only on y_true
-    let sse = sum_of_squared_errors(y_pred, y_true);
-    let sst = sum_of_square_total(y_true);
+    let mean = y_true.mean().unwrap();
+    let sse: f64 = y_pred
+        .iter()
+        .zip(y_true.iter())
+        .map(|(p, a)| (p - a).powi(2))
+        .sum();
+    let sst: f64 = y_true.mapv(|x| (x - mean).powi(2)).sum();
 
     // When all y_true are identical SST is zero and R^2 is undefined: perfect fit scores 1.0, else 0.0
     if sst < SST_EPSILON {
@@ -262,8 +265,32 @@ where
         .zip(y_pred.iter())
         .map(|(&t, &p)| t - p)
         .collect();
-    let residual_variance = variance(&residuals);
-    let true_variance = variance(y_true);
+
+    // Population variance over the finite subset
+    let variance = |v: ArrayView1<f64>| -> f64 {
+        let (sum, count) = v.iter().fold((0.0_f64, 0_usize), |(s, c), &val| {
+            if val.is_finite() {
+                (s + val, c + 1)
+            } else {
+                (s, c)
+            }
+        });
+        if count == 0 {
+            return 0.0;
+        }
+        let mean = sum / count as f64;
+        let ss = v.iter().fold(0.0, |acc, &val| {
+            if val.is_finite() {
+                let d = val - mean;
+                acc + d * d
+            } else {
+                acc
+            }
+        });
+        ss / count as f64
+    };
+    let residual_variance = variance(residuals.view());
+    let true_variance = variance(y_true.view());
 
     if true_variance < SST_EPSILON {
         return if residual_variance < SST_EPSILON {

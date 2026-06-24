@@ -10,7 +10,6 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_tolerance,
 };
-use crate::math::hinge_loss;
 use crate::math::matmul::gemv_par_auto;
 use crate::{Deserialize, Serialize};
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
@@ -359,7 +358,14 @@ impl LinearSVC {
             let margins: Array1<f64> = gemv_par_auto(x, weights) + bias;
             // Mean data loss, matching the configured loss function
             let data_loss = match self.loss {
-                Loss::Hinge => hinge_loss(&margins, y),
+                Loss::Hinge => {
+                    margins
+                        .iter()
+                        .zip(y.iter())
+                        .map(|(&m, &yi)| (1.0 - yi * m).max(0.0))
+                        .sum::<f64>()
+                        / margins.len() as f64
+                }
                 Loss::SquaredHinge => {
                     margins
                         .iter()
