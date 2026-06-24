@@ -140,23 +140,17 @@ fn max_pooling_1d_output_shape_unknown_before_forward() {
 // MaxPooling1D - constructor error paths
 
 #[test]
-fn max_pooling_1d_err_pool_size_zero() {
-    let result = MaxPooling1D::new(0, vec![1, 1, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for pool_size=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn max_pooling_1d_err_pool_size_larger_than_input() {
-    let result = MaxPooling1D::new(5, vec![1, 1, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for pool_size > input length, got {:?}",
-        result
-    );
+fn max_pooling_1d_err_pool_size_invalid() {
+    // pool_size=0 and pool_size > input length both hit the InvalidParameter guard in new()
+    for pool_size in [0_usize, 5] {
+        let result = MaxPooling1D::new(pool_size, vec![1, 1, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for pool_size={}, got {:?}",
+            pool_size,
+            result
+        );
+    }
 }
 
 #[test]
@@ -304,43 +298,17 @@ fn max_pooling_2d_output_shape_string() {
 // MaxPooling2D - constructor error paths
 
 #[test]
-fn max_pooling_2d_err_pool_size_zero_height() {
-    let result = MaxPooling2D::new((0, 2), vec![1, 1, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn max_pooling_2d_err_pool_size_zero_width() {
-    let result = MaxPooling2D::new((2, 0), vec![1, 1, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn max_pooling_2d_err_pool_larger_than_height() {
-    let result = MaxPooling2D::new((5, 2), vec![1, 1, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for pool > height, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn max_pooling_2d_err_pool_larger_than_width() {
-    let result = MaxPooling2D::new((2, 5), vec![1, 1, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for pool > width, got {:?}",
-        result
-    );
+fn max_pooling_2d_err_pool_size_invalid() {
+    // A zero or too-large pool extent in either the height or width position is rejected by new()
+    for pool in [(0, 2), (2, 0), (5, 2), (2, 5)] {
+        let result = MaxPooling2D::new(pool, vec![1, 1, 4, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for pool={:?}, got {:?}",
+            pool,
+            result
+        );
+    }
 }
 
 #[test]
@@ -486,23 +454,17 @@ fn max_pooling_3d_output_shape_string() {
 // MaxPooling3D - constructor error paths
 
 #[test]
-fn max_pooling_3d_err_pool_size_zero() {
-    let result = MaxPooling3D::new((0, 2, 2), vec![1, 1, 4, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn max_pooling_3d_err_pool_larger_than_depth() {
-    let result = MaxPooling3D::new((5, 2, 2), vec![1, 1, 4, 4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for pool > depth, got {:?}",
-        result
-    );
+fn max_pooling_3d_err_pool_size_invalid() {
+    // pool depth=0 and pool depth > input depth both hit the InvalidParameter guard in new()
+    for pool in [(0, 2, 2), (5, 2, 2)] {
+        let result = MaxPooling3D::new(pool, vec![1, 1, 4, 4, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for pool={:?}, got {:?}",
+            pool,
+            result
+        );
+    }
 }
 
 #[test]

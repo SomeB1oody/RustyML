@@ -100,7 +100,10 @@ fn test_nmi_canonical_pair() {
     let p = array![0usize, 0, 1, 2, 1, 2];
     // 1/3 + (2/3)*ln(1.5)/ln(3) ~= 0.5793801642857
     let expected = 1.0 / 3.0 + (2.0 / 3.0) * (1.5_f64).ln() / (3.0_f64).ln();
-    assert_abs_diff_eq!(normalized_mutual_info(&t, &p), expected, epsilon = 1e-9);
+    let nmi = normalized_mutual_info(&t, &p);
+    assert_abs_diff_eq!(nmi, expected, epsilon = 1e-9);
+    // NMI lies in [0.0, 1.0] for any valid inputs
+    assert!((0.0..=1.0 + 1e-12).contains(&nmi));
 }
 
 /// Independent clusterings give NMI = 0
@@ -129,15 +132,6 @@ fn test_nmi_symmetry() {
         normalized_mutual_info(&p, &t),
         epsilon = 1e-15,
     );
-}
-
-/// NMI lies in [0.0, 1.0] for any valid inputs
-#[test]
-fn test_nmi_range_zero_to_one() {
-    let t = array![0usize, 0, 1, 1, 2, 2];
-    let p = array![0usize, 0, 1, 2, 1, 2];
-    let nmi = normalized_mutual_info(&t, &p);
-    assert!((0.0..=1.0 + 1e-12).contains(&nmi));
 }
 
 /// Asymmetric case true=[0,0,1,1] pred=[0,1,2,3]: MI=ln(2), H_true=ln(2), H_pred=2ln(2), so with
@@ -202,7 +196,10 @@ fn test_ami_independent_clustering() {
 fn test_ami_canonical_pair() {
     let t = array![0usize, 0, 1, 1, 2, 2];
     let p = array![0usize, 0, 1, 2, 1, 2];
-    assert_abs_diff_eq!(adjusted_mutual_info(&t, &p), 1.0 / 6.0, epsilon = 1e-7);
+    let ami = adjusted_mutual_info(&t, &p);
+    assert_abs_diff_eq!(ami, 1.0 / 6.0, epsilon = 1e-7);
+    // AMI is at most 1.0 for any valid input
+    assert!(ami <= 1.0 + 1e-12);
 }
 
 /// AMI is symmetric: AMI(t, p) == AMI(p, t)
@@ -215,14 +212,6 @@ fn test_ami_symmetry() {
         adjusted_mutual_info(&p, &t),
         epsilon = 1e-12,
     );
-}
-
-/// AMI is at most 1.0 for any valid input
-#[test]
-fn test_ami_at_most_one() {
-    let t = array![0usize, 0, 1, 1, 2, 2];
-    let p = array![0usize, 0, 1, 2, 1, 2];
-    assert!(adjusted_mutual_info(&t, &p) <= 1.0 + 1e-12);
 }
 
 /// AMI panics on length mismatch
@@ -510,11 +499,10 @@ fn test_silhouette_well_separated() {
     let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
     let labels = array![0usize, 0, 1, 1];
     let expected = 359.0_f64 / 399.0; // = (19/21 + 17/19) / 2
-    assert_abs_diff_eq!(
-        silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean),
-        expected,
-        epsilon = 1e-9
-    );
+    let s = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
+    assert_abs_diff_eq!(s, expected, epsilon = 1e-9);
+    // Silhouette lies in [-1.0, 1.0]
+    assert!((-1.0 - 1e-12..=1.0 + 1e-12).contains(&s));
 }
 
 /// The metric is honoured: Manhattan distances give a different (closed-form) score than the
@@ -585,15 +573,6 @@ fn test_silhouette_all_same_location_zero() {
         0.0,
         epsilon = 1e-12
     );
-}
-
-/// Silhouette lies in [-1.0, 1.0]
-#[test]
-fn test_silhouette_range() {
-    let x = array![[0.0, 0.0], [1.0, 0.0], [10.0, 0.0], [11.0, 0.0]];
-    let labels = array![0usize, 0, 1, 1];
-    let s = silhouette_score(&x, &labels, DistanceCalculationMetric::Euclidean);
-    assert!((-1.0 - 1e-12..=1.0 + 1e-12).contains(&s));
 }
 
 /// Silhouette panics when the cluster count equals n_samples (all singletons)

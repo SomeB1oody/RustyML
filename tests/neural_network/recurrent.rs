@@ -130,24 +130,18 @@ fn simple_rnn_predict_equals_forward() {
     assert_allclose(&out_forward, &out_predict, 1e-6);
 }
 
-/// SimpleRNN constructor rejects input_dim=0
+/// SimpleRNN constructor rejects a zero dimension, whichever argument carries it
 #[test]
-fn simple_rnn_new_rejects_zero_input_dim() {
-    let err = SimpleRNN::new(0, 3, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
-}
-
-/// SimpleRNN constructor rejects units=0
-#[test]
-fn simple_rnn_new_rejects_zero_units() {
-    let err = SimpleRNN::new(2, 0, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
+fn simple_rnn_new_rejects_zero_dimension() {
+    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    let cases = [(0, 3, "input_dim"), (2, 0, "units")];
+    for (input_dim, units, bad_arg) in cases {
+        let err = SimpleRNN::new(input_dim, units, Tanh::new()).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for zero {bad_arg} (input_dim={input_dim}, units={units}), got: {err:?}"
+        );
+    }
 }
 
 /// SimpleRNN forward rejects a non-3D input (2D tensor)
@@ -403,24 +397,18 @@ fn lstm_predict_equals_forward() {
     assert_allclose(&out_forward, &out_predict, 1e-6);
 }
 
-/// LSTM constructor rejects input_dim=0
+/// LSTM constructor rejects a zero dimension, whichever argument carries it
 #[test]
-fn lstm_new_rejects_zero_input_dim() {
-    let err = LSTM::new(0, 3, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
-}
-
-/// LSTM constructor rejects units=0
-#[test]
-fn lstm_new_rejects_zero_units() {
-    let err = LSTM::new(2, 0, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
+fn lstm_new_rejects_zero_dimension() {
+    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    let cases = [(0, 3, "input_dim"), (2, 0, "units")];
+    for (input_dim, units, bad_arg) in cases {
+        let err = LSTM::new(input_dim, units, Tanh::new()).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for zero {bad_arg} (input_dim={input_dim}, units={units}), got: {err:?}"
+        );
+    }
 }
 
 /// LSTM forward rejects a non-3D input (2D tensor)
@@ -670,24 +658,18 @@ fn gru_predict_equals_forward() {
     assert_allclose(&out_forward, &out_predict, 1e-6);
 }
 
-/// GRU constructor rejects input_dim=0
+/// GRU constructor rejects a zero dimension, whichever argument carries it
 #[test]
-fn gru_new_rejects_zero_input_dim() {
-    let err = GRU::new(0, 3, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
-}
-
-/// GRU constructor rejects units=0
-#[test]
-fn gru_new_rejects_zero_units() {
-    let err = GRU::new(2, 0, Tanh::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got: {err:?}"
-    );
+fn gru_new_rejects_zero_dimension() {
+    // (input_dim, units, which-arg-is-bad) — covers zero input_dim and zero units
+    let cases = [(0, 3, "input_dim"), (2, 0, "units")];
+    for (input_dim, units, bad_arg) in cases {
+        let err = GRU::new(input_dim, units, Tanh::new()).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for zero {bad_arg} (input_dim={input_dim}, units={units}), got: {err:?}"
+        );
+    }
 }
 
 /// GRU forward rejects a non-3D input (2D tensor)

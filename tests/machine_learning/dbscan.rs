@@ -29,48 +29,16 @@ fn two_blobs_noise() -> Array2<f64> {
 
 // Constructor validation
 
-/// eps = 0 is rejected
+/// Invalid eps values (zero, negative, NaN, +inf) are all rejected
 #[test]
-fn constructor_rejects_eps_zero() {
-    let result = DBSCAN::new(0.0, 2);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for eps=0, got: {:?}",
-        result
-    );
-}
-
-/// eps < 0 is rejected
-#[test]
-fn constructor_rejects_eps_negative() {
-    let result = DBSCAN::new(-1.0, 2);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for eps=-1, got: {:?}",
-        result
-    );
-}
-
-/// eps = NaN is rejected
-#[test]
-fn constructor_rejects_eps_nan() {
-    let result = DBSCAN::new(f64::NAN, 2);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for eps=NaN, got: {:?}",
-        result
-    );
-}
-
-/// eps = +inf is rejected
-#[test]
-fn constructor_rejects_eps_inf() {
-    let result = DBSCAN::new(f64::INFINITY, 2);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for eps=inf, got: {:?}",
-        result
-    );
+fn constructor_rejects_invalid_eps() {
+    for eps in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let result = DBSCAN::new(eps, 2);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for eps={eps:?}, got: {result:?}"
+        );
+    }
 }
 
 /// min_samples = 0 is rejected
@@ -84,69 +52,19 @@ fn constructor_rejects_min_samples_zero() {
     );
 }
 
-/// Minkowski(0) is rejected (p must be >= 1)
+/// Invalid Minkowski exponents are rejected: 0 (p must be >= 1), 0.5 (0 < p < 1
+/// breaks the triangle inequality), -1, NaN, and +inf
 #[test]
-fn constructor_rejects_minkowski_p_zero() {
-    let result = DBSCAN::new(0.5, 2)
-        .unwrap()
-        .with_metric(DistanceCalculationMetric::Minkowski(0.0));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for Minkowski(0), got: {:?}",
-        result
-    );
-}
-
-/// Minkowski(0.5) is rejected: 0 < p < 1 is not a valid metric (triangle inequality fails)
-#[test]
-fn constructor_rejects_minkowski_p_below_one() {
-    let result = DBSCAN::new(0.5, 2)
-        .unwrap()
-        .with_metric(DistanceCalculationMetric::Minkowski(0.5));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for Minkowski(0.5), got: {:?}",
-        result
-    );
-}
-
-/// Minkowski(-1) is rejected
-#[test]
-fn constructor_rejects_minkowski_p_negative() {
-    let result = DBSCAN::new(0.5, 2)
-        .unwrap()
-        .with_metric(DistanceCalculationMetric::Minkowski(-1.0));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for Minkowski(-1), got: {:?}",
-        result
-    );
-}
-
-/// Minkowski(NaN) is rejected
-#[test]
-fn constructor_rejects_minkowski_p_nan() {
-    let result = DBSCAN::new(0.5, 2)
-        .unwrap()
-        .with_metric(DistanceCalculationMetric::Minkowski(f64::NAN));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for Minkowski(NaN), got: {:?}",
-        result
-    );
-}
-
-/// Minkowski(+inf) is rejected
-#[test]
-fn constructor_rejects_minkowski_p_inf() {
-    let result = DBSCAN::new(0.5, 2)
-        .unwrap()
-        .with_metric(DistanceCalculationMetric::Minkowski(f64::INFINITY));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for Minkowski(inf), got: {:?}",
-        result
-    );
+fn constructor_rejects_invalid_minkowski_p() {
+    for p in [0.0, 0.5, -1.0, f64::NAN, f64::INFINITY] {
+        let result = DBSCAN::new(0.5, 2)
+            .unwrap()
+            .with_metric(DistanceCalculationMetric::Minkowski(p));
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for Minkowski({p:?}), got: {result:?}"
+        );
+    }
 }
 
 /// Valid parameters are stored and readable via getters
@@ -186,26 +104,17 @@ fn fit_rejects_empty_data() {
     );
 }
 
-/// fit on data containing NaN returns NonFinite
+/// fit on data containing a non-finite value (NaN or infinity) returns NonFinite
 #[test]
-fn fit_rejects_nan_in_data() {
-    let data = array![[1.0f64, 2.0], [f64::NAN, 3.0]];
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    assert!(
-        matches!(m.fit(&data), Err(Error::NonFinite(_))),
-        "expected NonFinite for NaN in data"
-    );
-}
-
-/// fit on data containing infinity returns NonFinite
-#[test]
-fn fit_rejects_inf_in_data() {
-    let data = array![[1.0f64, 2.0], [f64::INFINITY, 3.0]];
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    assert!(
-        matches!(m.fit(&data), Err(Error::NonFinite(_))),
-        "expected NonFinite for infinity in data"
-    );
+fn fit_rejects_non_finite_in_data() {
+    for bad in [f64::NAN, f64::INFINITY] {
+        let data = array![[1.0f64, 2.0], [bad, 3.0]];
+        let mut m = DBSCAN::new(0.5, 2).unwrap();
+        assert!(
+            matches!(m.fit(&data), Err(Error::NonFinite(_))),
+            "expected NonFinite for {bad:?} in data"
+        );
+    }
 }
 
 // predict() error paths (before / without fit)
@@ -247,32 +156,20 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-/// predict with NaN in new_data returns NonFinite
+/// predict with a non-finite value (NaN or infinity) in new_data returns NonFinite
 #[test]
-fn predict_nan_in_new_data_returns_non_finite() {
+fn predict_non_finite_in_new_data_returns_non_finite() {
     let train = two_blobs_noise();
     let mut m = DBSCAN::new(0.5, 2).unwrap();
     m.fit(&train).unwrap();
 
-    let bad = array![[f64::NAN, 1.0f64]];
-    assert!(
-        matches!(m.predict(&bad), Err(Error::NonFinite(_))),
-        "expected NonFinite for NaN in new_data"
-    );
-}
-
-/// predict with infinity in new_data returns NonFinite
-#[test]
-fn predict_inf_in_new_data_returns_non_finite() {
-    let train = two_blobs_noise();
-    let mut m = DBSCAN::new(0.5, 2).unwrap();
-    m.fit(&train).unwrap();
-
-    let bad = array![[f64::INFINITY, 1.0f64]];
-    assert!(
-        matches!(m.predict(&bad), Err(Error::NonFinite(_))),
-        "expected NonFinite for infinity in new_data"
-    );
+    for bad_val in [f64::NAN, f64::INFINITY] {
+        let bad = array![[bad_val, 1.0f64]];
+        assert!(
+            matches!(m.predict(&bad), Err(Error::NonFinite(_))),
+            "expected NonFinite for {bad_val:?} in new_data"
+        );
+    }
 }
 
 // Correctness: fit + cluster structure (Euclidean metric)

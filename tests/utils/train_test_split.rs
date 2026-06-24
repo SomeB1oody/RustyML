@@ -345,56 +345,23 @@ fn test_error_dimension_mismatch() {
     );
 }
 
-/// test_size=0.0 (exclusive lower boundary) yields InvalidParameter
+/// Out-of-range test_size values all yield InvalidParameter.
+///
+/// Covers the exclusive lower boundary (0.0), the exclusive upper boundary (1.0),
+/// a negative value (-0.1), and a value above 1.0 (1.5).
 #[test]
-fn test_error_test_size_zero() {
-    let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
-    let y = Array1::from_iter(0..5i32);
-    let err = train_test_split(x, y, Some(0.0), Some(42)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for test_size=0.0, got {:?}",
-        err
-    );
-}
-
-/// test_size=1.0 (exclusive upper boundary) yields InvalidParameter
-#[test]
-fn test_error_test_size_one() {
-    let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
-    let y = Array1::from_iter(0..5i32);
-    let err = train_test_split(x, y, Some(1.0), Some(42)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for test_size=1.0, got {:?}",
-        err
-    );
-}
-
-/// test_size < 0.0 yields InvalidParameter
-#[test]
-fn test_error_test_size_negative() {
-    let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
-    let y = Array1::from_iter(0..5i32);
-    let err = train_test_split(x, y, Some(-0.1), Some(42)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for test_size=-0.1, got {:?}",
-        err
-    );
-}
-
-/// test_size > 1.0 yields InvalidParameter
-#[test]
-fn test_error_test_size_greater_than_one() {
-    let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
-    let y = Array1::from_iter(0..5i32);
-    let err = train_test_split(x, y, Some(1.5), Some(42)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for test_size=1.5, got {:?}",
-        err
-    );
+fn test_error_test_size_out_of_range() {
+    for test_size in [0.0_f64, 1.0, -0.1, 1.5] {
+        let x = Array2::from_shape_fn((5, 2), |(i, j)| (i + j) as f64);
+        let y = Array1::from_iter(0..5i32);
+        let err = train_test_split(x, y, Some(test_size), Some(42)).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for test_size={}, got {:?}",
+            test_size,
+            err
+        );
+    }
 }
 
 /// n_samples == 1 yields InvalidInput (cannot form both a train and test set)

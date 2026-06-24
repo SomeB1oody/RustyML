@@ -43,102 +43,47 @@ fn new_rejects_max_iter_zero() {
 }
 
 #[test]
-fn new_rejects_learning_rate_zero() {
-    let result = LinearSVC::new(100, 0.0, RegularizationType::L2(1.0), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "learning_rate=0.0 must return InvalidParameter"
-    );
+fn new_rejects_invalid_learning_rate() {
+    // Each invalid learning_rate (zero / negative / NaN / +Inf) hits the same
+    // guard and must return InvalidParameter.
+    for lr in [0.0, -0.001, f64::NAN, f64::INFINITY] {
+        let result = LinearSVC::new(100, lr, RegularizationType::L2(1.0), true, 1e-4);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for learning_rate={lr:?}"
+        );
+    }
 }
 
 #[test]
-fn new_rejects_learning_rate_negative() {
-    let result = LinearSVC::new(100, -0.001, RegularizationType::L2(1.0), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "learning_rate=-0.001 must return InvalidParameter"
-    );
+fn new_rejects_invalid_tol() {
+    // Each invalid tol (zero / negative / NaN) hits the same guard and must
+    // return InvalidParameter.
+    for tol in [0.0, -1e-4, f64::NAN] {
+        let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, tol);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for tol={tol:?}"
+        );
+    }
 }
 
 #[test]
-fn new_rejects_learning_rate_nan() {
-    let result = LinearSVC::new(100, f64::NAN, RegularizationType::L2(1.0), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "learning_rate=NaN must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_learning_rate_infinity() {
-    let result = LinearSVC::new(100, f64::INFINITY, RegularizationType::L2(1.0), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "learning_rate=+Inf must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_tol_zero() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, 0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=0.0 must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_tol_negative() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, -1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=-1e-4 must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_tol_nan() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(1.0), true, f64::NAN);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=NaN must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_penalty_lambda_negative_l2() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(-0.5), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "L2 with negative lambda must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_penalty_lambda_negative_l1() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L1(-1.0), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "L1 with negative lambda must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_penalty_lambda_nan() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L2(f64::NAN), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "L2(NaN) must return InvalidParameter"
-    );
-}
-
-#[test]
-fn new_rejects_penalty_lambda_infinity() {
-    let result = LinearSVC::new(100, 0.01, RegularizationType::L1(f64::INFINITY), true, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "L1(+Inf) must return InvalidParameter"
-    );
+fn new_rejects_invalid_penalty_lambda() {
+    // Each invalid penalty lambda (negative L2, negative L1, L2(NaN), L1(+Inf))
+    // hits the same guard and must return InvalidParameter.
+    for penalty in [
+        RegularizationType::L2(-0.5),
+        RegularizationType::L1(-1.0),
+        RegularizationType::L2(f64::NAN),
+        RegularizationType::L1(f64::INFINITY),
+    ] {
+        let result = LinearSVC::new(100, 0.01, penalty, true, 1e-4);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for penalty={penalty:?}"
+        );
+    }
 }
 
 /// Lambda = 0.0 is explicitly allowed (no regularization)
@@ -218,27 +163,19 @@ fn fit_rejects_dimension_mismatch_xy() {
 }
 
 #[test]
-fn fit_rejects_nan_in_x() {
-    let x = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, f64::NAN, 4.0]).unwrap();
-    let y = array![0.0, 1.0];
-    let mut model = LinearSVC::default();
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "NaN in x must return NonFinite"
-    );
-}
-
-#[test]
-fn fit_rejects_infinite_in_x() {
-    let x = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, f64::INFINITY, 4.0]).unwrap();
-    let y = array![0.0, 1.0];
-    let mut model = LinearSVC::default();
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "Inf in x must return NonFinite"
-    );
+fn fit_rejects_non_finite_in_x() {
+    // Each non-finite sentinel (NaN / +Inf) in x hits the same finiteness guard
+    // and must return NonFinite.
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let x = Array2::from_shape_vec((2, 2), vec![1.0, 2.0, sentinel, 4.0]).unwrap();
+        let y = array![0.0, 1.0];
+        let mut model = LinearSVC::default();
+        let result = model.fit(&x, &y);
+        assert!(
+            matches!(result, Err(Error::NonFinite(_))),
+            "expected NonFinite for sentinel={sentinel:?} in x"
+        );
+    }
 }
 
 // predict / decision_function error paths

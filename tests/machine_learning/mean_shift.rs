@@ -26,43 +26,16 @@ fn two_blob_data() -> Array2<f64> {
 // constructor validation
 
 #[test]
-fn test_new_zero_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "bandwidth=0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_negative_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(-1.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "bandwidth=-1 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_inf_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(f64::INFINITY);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "bandwidth=inf should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_nan_bandwidth_is_invalid_parameter() {
-    let result = MeanShift::new(f64::NAN);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "bandwidth=NaN should return InvalidParameter, got {:?}",
-        result
-    );
+fn test_new_invalid_bandwidth_is_invalid_parameter() {
+    // Each invalid bandwidth must be rejected by MeanShift::new with InvalidParameter
+    for bandwidth in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+        let result = MeanShift::new(bandwidth);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "bandwidth={bandwidth:?} should return InvalidParameter, got {:?}",
+            result
+        );
+    }
 }
 
 #[test]
@@ -76,43 +49,16 @@ fn test_new_zero_max_iter_is_invalid_parameter() {
 }
 
 #[test]
-fn test_new_zero_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0).unwrap().with_tolerance(0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_negative_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0).unwrap().with_tolerance(-1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol<0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_inf_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0).unwrap().with_tolerance(f64::INFINITY);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=inf should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_new_nan_tol_is_invalid_parameter() {
-    let result = MeanShift::new(1.0).unwrap().with_tolerance(f64::NAN);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "tol=NaN should return InvalidParameter, got {:?}",
-        result
-    );
+fn test_new_invalid_tol_is_invalid_parameter() {
+    // Each invalid tolerance must be rejected by with_tolerance with InvalidParameter
+    for tol in [0.0, -1e-6, f64::INFINITY, f64::NAN] {
+        let result = MeanShift::new(1.0).unwrap().with_tolerance(tol);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "tol={tol:?} should return InvalidParameter, got {:?}",
+            result
+        );
+    }
 }
 
 #[test]
@@ -550,47 +496,17 @@ fn non_bin_seeding_fit_is_deterministic() {
 // estimate_bandwidth
 
 #[test]
-fn test_estimate_bandwidth_quantile_zero_is_invalid() {
+fn test_estimate_bandwidth_invalid_quantile_is_invalid() {
+    // Quantile must lie strictly in (0, 1); each out-of-range value yields InvalidParameter
     let x = array![[0.0_f64, 0.0], [1.0, 1.0]];
-    let result = estimate_bandwidth(&x, Some(0.0), None, None);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "quantile=0.0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_estimate_bandwidth_quantile_one_is_invalid() {
-    let x = array![[0.0_f64, 0.0], [1.0, 1.0]];
-    let result = estimate_bandwidth(&x, Some(1.0), None, None);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "quantile=1.0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_estimate_bandwidth_quantile_negative_is_invalid() {
-    let x = array![[0.0_f64, 0.0], [1.0, 1.0]];
-    let result = estimate_bandwidth(&x, Some(-0.1), None, None);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "quantile<0 should return InvalidParameter, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn test_estimate_bandwidth_quantile_greater_than_one_is_invalid() {
-    let x = array![[0.0_f64, 0.0], [1.0, 1.0]];
-    let result = estimate_bandwidth(&x, Some(1.5), None, None);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "quantile>1 should return InvalidParameter, got {:?}",
-        result
-    );
+    for quantile in [0.0, 1.0, -0.1, 1.5] {
+        let result = estimate_bandwidth(&x, Some(quantile), None, None);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "quantile={quantile:?} should return InvalidParameter, got {:?}",
+            result
+        );
+    }
 }
 
 /// Two-point dataset has a single pair, so estimate_bandwidth returns that pair's

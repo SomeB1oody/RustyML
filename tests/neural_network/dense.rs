@@ -49,23 +49,23 @@ fn dense_2x2_with_weights(w_flat: Vec<f32>, b_flat: Vec<f32>) -> Dense {
 // Dense - constructor validation
 
 #[test]
-fn dense_new_rejects_zero_input_dim() {
-    let result = Dense::new(0, 4, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for input_dim=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn dense_new_rejects_zero_units() {
-    let result = Dense::new(4, 0, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for units=0, got {:?}",
-        result
-    );
+fn dense_new_rejects_zero_dim() {
+    // Symmetric-argument fan-out: each row makes exactly one of (input_dim, units)
+    // zero on the same Dense::new constructor and expects InvalidParameter.
+    // `which` names the offending argument for failure messages.
+    let cases: [(usize, usize, &str); 2] = [
+        (0, 4, "input_dim=0"), // dense_new_rejects_zero_input_dim
+        (4, 0, "units=0"),     // dense_new_rejects_zero_units
+    ];
+    for (input_dim, units, which) in cases {
+        let result = Dense::new(input_dim, units, Linear::new());
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for {}, got {:?}",
+            which,
+            result
+        );
+    }
 }
 
 #[test]

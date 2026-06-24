@@ -105,48 +105,19 @@ fn test_new_zero_components_errors() {
 }
 
 #[test]
-fn test_new_shrinkage_below_zero_errors() {
-    let err = LDA::new(1)
-        .unwrap()
-        .with_shrinkage(Shrinkage::Manual(-0.1))
-        .expect_err("alpha<0 must fail");
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_shrinkage_above_one_errors() {
-    let err = LDA::new(1)
-        .unwrap()
-        .with_shrinkage(Shrinkage::Manual(1.1))
-        .expect_err("alpha>1 must fail");
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_shrinkage_nan_errors() {
-    let err = LDA::new(1)
-        .unwrap()
-        .with_shrinkage(Shrinkage::Manual(f64::NAN))
-        .expect_err("NaN shrinkage must fail");
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_shrinkage_pos_infinity_errors() {
-    let err = LDA::new(1)
-        .unwrap()
-        .with_shrinkage(Shrinkage::Manual(f64::INFINITY))
-        .expect_err("Inf shrinkage must fail");
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_shrinkage_neg_infinity_errors() {
-    let err = LDA::new(1)
-        .unwrap()
-        .with_shrinkage(Shrinkage::Manual(f64::NEG_INFINITY))
-        .expect_err("-Inf shrinkage must fail");
-    assert!(matches!(err, Error::InvalidParameter { .. }));
+fn test_new_shrinkage_manual_invalid_alpha_errors() {
+    // Manual shrinkage requires alpha in [0, 1] and finite: out-of-range and
+    // non-finite alphas must all be rejected with InvalidParameter
+    for alpha in [-0.1, 1.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let err = LDA::new(1)
+            .unwrap()
+            .with_shrinkage(Shrinkage::Manual(alpha))
+            .expect_err(&format!("alpha={alpha:?} must fail"));
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for alpha={alpha:?}, got {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -254,41 +225,27 @@ fn test_fit_n_components_exceeds_max_errors() {
 }
 
 #[test]
-fn test_fit_nan_in_x_errors() {
-    let mut lda = LDA::new(1).unwrap();
-    let x = array![
-        [1.0, f64::NAN],
-        [2.0, 1.0],
-        [3.0, 1.0],
-        [7.0, 5.0],
-        [8.0, 5.0],
-        [9.0, 5.0]
-    ];
-    let y = array![0, 0, 0, 1, 1, 1];
-    let err = lda.fit(&x, &y).expect_err("NaN in x must fail");
-    assert!(
-        matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
-        "expected NonFinite or InvalidInput, got {err:?}"
-    );
-}
-
-#[test]
-fn test_fit_inf_in_x_errors() {
-    let mut lda = LDA::new(1).unwrap();
-    let x = array![
-        [1.0, f64::INFINITY],
-        [2.0, 1.0],
-        [3.0, 1.0],
-        [7.0, 5.0],
-        [8.0, 5.0],
-        [9.0, 5.0]
-    ];
-    let y = array![0, 0, 0, 1, 1, 1];
-    let err = lda.fit(&x, &y).expect_err("Inf in x must fail");
-    assert!(
-        matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
-        "expected NonFinite or InvalidInput, got {err:?}"
-    );
+fn test_fit_non_finite_in_x_errors() {
+    // A non-finite entry anywhere in x must trip the finiteness guard in fit
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut lda = LDA::new(1).unwrap();
+        let x = array![
+            [1.0, sentinel],
+            [2.0, 1.0],
+            [3.0, 1.0],
+            [7.0, 5.0],
+            [8.0, 5.0],
+            [9.0, 5.0]
+        ];
+        let y = array![0, 0, 0, 1, 1, 1];
+        let err = lda
+            .fit(&x, &y)
+            .expect_err(&format!("{sentinel:?} in x must fail"));
+        assert!(
+            matches!(err, Error::NonFinite(..) | Error::InvalidInput(..)),
+            "expected NonFinite or InvalidInput for sentinel={sentinel:?}, got {err:?}"
+        );
+    }
 }
 
 // 3. predict / transform NotFitted errors

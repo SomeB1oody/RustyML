@@ -40,48 +40,25 @@ fn bn_constructor_rejects_empty_input_shape() {
     );
 }
 
-/// BatchNormalization::new returns Err(InvalidParameter) for momentum > 1.0
+/// BatchNormalization::new returns Err(InvalidParameter) for out-of-range momentum
+/// (>1.0 or <0.0) and for non-positive epsilon (zero or negative)
 #[test]
-fn bn_constructor_rejects_momentum_above_one() {
-    let result = BatchNormalization::new(vec![4, 3], 1.5, 1e-5);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// BatchNormalization::new returns Err(InvalidParameter) for momentum < 0.0
-#[test]
-fn bn_constructor_rejects_negative_momentum() {
-    let result = BatchNormalization::new(vec![4, 3], -0.1, 1e-5);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// BatchNormalization::new returns Err(InvalidParameter) for epsilon <= 0
-#[test]
-fn bn_constructor_rejects_zero_epsilon() {
-    let result = BatchNormalization::new(vec![4, 3], 0.9, 0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// BatchNormalization::new returns Err(InvalidParameter) for negative epsilon
-#[test]
-fn bn_constructor_rejects_negative_epsilon() {
-    let result = BatchNormalization::new(vec![4, 3], 0.9, -1e-5);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn bn_constructor_rejects_invalid_scalar_params() {
+    // (momentum, epsilon, label) rows; each must yield InvalidParameter
+    let cases = [
+        (1.5, 1e-5, "momentum > 1.0"),
+        (-0.1, 1e-5, "momentum < 0.0"),
+        (0.9, 0.0, "epsilon == 0.0"),
+        (0.9, -1e-5, "epsilon < 0.0"),
+    ];
+    for (momentum, epsilon, label) in cases {
+        let result = BatchNormalization::new(vec![4, 3], momentum, epsilon);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for {label} (momentum={momentum}, epsilon={epsilon}), got {:?}",
+            result
+        );
+    }
 }
 
 /// BatchNormalization::new succeeds for boundary momentum values 0.0 and 1.0
@@ -364,26 +341,20 @@ fn bn_training_and_eval_modes_produce_different_outputs() {
 
 // Constructor validation
 
-/// LayerNormalization::new returns Err(InvalidParameter) for epsilon <= 0
+/// LayerNormalization::new returns Err(InvalidParameter) for non-positive epsilon
+/// (zero or negative)
 #[test]
-fn ln_constructor_rejects_zero_epsilon() {
-    let result = LayerNormalization::new(vec![4, 3], 0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// LayerNormalization::new returns Err(InvalidParameter) for negative epsilon
-#[test]
-fn ln_constructor_rejects_negative_epsilon() {
-    let result = LayerNormalization::new(vec![4, 3], -1e-5);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn ln_constructor_rejects_invalid_epsilon() {
+    // (epsilon, label) rows; each must yield InvalidParameter
+    let cases = [(0.0, "epsilon == 0.0"), (-1e-5, "epsilon < 0.0")];
+    for (epsilon, label) in cases {
+        let result = LayerNormalization::new(vec![4, 3], epsilon);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for {label} (epsilon={epsilon}), got {:?}",
+            result
+        );
+    }
 }
 
 /// LayerNormalization::new with Multiple([]) returns Err(InvalidParameter)

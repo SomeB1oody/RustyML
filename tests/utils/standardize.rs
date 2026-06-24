@@ -236,46 +236,28 @@ fn test_error_empty_column() {
     );
 }
 
-/// NaN in input returns NonFinite
+/// Non-finite values (NaN, +Inf) in input return NonFinite
 #[test]
-fn test_error_nan_input() {
-    let data: Array2<f64> = array![[1.0, f64::NAN], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn test_error_non_finite_input() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let data: Array2<f64> = array![[1.0, sentinel], [3.0, 4.0]];
+        let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel {sentinel}, got {err:?}"
+        );
+    }
 }
 
-/// Infinite value in input returns NonFinite
+/// Row and Column standardization on a 1-D array return InvalidInput (requires >= 2 dims)
 #[test]
-fn test_error_inf_input() {
-    let data: Array2<f64> = array![[1.0, f64::INFINITY], [3.0, 4.0]];
-    let err = standardize(&data, StandardizationAxis::Global).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// Row standardization on a 1-D array returns InvalidInput (requires >= 2 dims)
-#[test]
-fn test_error_row_on_1d_array() {
-    let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = standardize(&data, StandardizationAxis::Row).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput for Row on 1-D array, got {err:?}"
-    );
-}
-
-/// Column standardization on a 1-D array returns InvalidInput (requires >= 2 dims)
-#[test]
-fn test_error_column_on_1d_array() {
-    let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = standardize(&data, StandardizationAxis::Column).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput for Column on 1-D array, got {err:?}"
-    );
+fn test_error_axis_on_1d_array() {
+    for axis in [StandardizationAxis::Row, StandardizationAxis::Column] {
+        let data: Array1<f64> = array![1.0, 2.0, 3.0];
+        let err = standardize(&data, axis).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidInput(_)),
+            "expected InvalidInput for {axis:?} on 1-D array, got {err:?}"
+        );
+    }
 }

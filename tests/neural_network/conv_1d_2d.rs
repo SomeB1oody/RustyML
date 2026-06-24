@@ -331,79 +331,45 @@ fn conv1d_set_weights_mismatched_bias_shape_errors() {
 
 // Conv1D - constructor error paths
 
+/// Each invalid scalar hyperparameter (filters=0, kernel_size=0, stride=0)
+/// independently makes the constructor return InvalidParameter
 #[test]
-fn conv1d_filters_zero_errors() {
-    let result = Conv1D::new(0, 3, vec![1, 1, 5], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for filters=0, got {:?}",
-        result
-    );
+fn conv1d_invalid_scalar_param_errors() {
+    // (filters, kernel_size, stride, label)
+    let cases = [
+        (0usize, 3usize, 1usize, "filters=0"),
+        (1, 0, 1, "kernel_size=0"),
+        (1, 3, 0, "stride=0"),
+    ];
+    for (filters, kernel_size, stride, label) in cases {
+        let result = Conv1D::new(filters, kernel_size, vec![1, 1, 5], stride, Linear::new());
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for {label}, got {:?}",
+            result
+        );
+    }
 }
 
+/// Each invalid input_shape (wrong ndim, zero channels, or length < kernel)
+/// independently makes the constructor return InvalidInput
 #[test]
-fn conv1d_kernel_size_zero_errors() {
-    let result = Conv1D::new(1, 0, vec![1, 1, 5], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for kernel_size=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn conv1d_stride_zero_errors() {
-    let result = Conv1D::new(1, 3, vec![1, 1, 5], 0, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for stride=0, got {:?}",
-        result
-    );
-}
-
-/// input_shape must be 3D; a 2D shape returns InvalidInput
-#[test]
-fn conv1d_wrong_input_ndim_2d_errors() {
-    let result = Conv1D::new(1, 3, vec![1, 5], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for 2D input_shape, got {:?}",
-        result
-    );
-}
-
-/// input_shape must be 3D; a 4D shape returns InvalidInput
-#[test]
-fn conv1d_wrong_input_ndim_4d_errors() {
-    let result = Conv1D::new(1, 3, vec![1, 1, 5, 5], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for 4D input_shape, got {:?}",
-        result
-    );
-}
-
-/// input_shape with channels=0 returns InvalidInput
-#[test]
-fn conv1d_zero_input_channels_errors() {
-    let result = Conv1D::new(1, 3, vec![1, 0, 5], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for channels=0, got {:?}",
-        result
-    );
-}
-
-/// input length < kernel_size returns InvalidInput
-#[test]
-fn conv1d_input_smaller_than_kernel_errors() {
-    // length=2 < kernel=3
-    let result = Conv1D::new(1, 3, vec![1, 1, 2], 1, Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput when input length < kernel, got {:?}",
-        result
-    );
+fn conv1d_invalid_input_shape_errors() {
+    // (input_shape, label)
+    let cases = [
+        (vec![1, 5], "2D input_shape"),       // input_shape must be 3D
+        (vec![1, 1, 5, 5], "4D input_shape"), // input_shape must be 3D
+        (vec![1, 0, 5], "channels=0"),
+        (vec![1, 1, 2], "input length < kernel"), // length=2 < kernel=3
+    ];
+    for (input_shape, label) in cases {
+        let result = Conv1D::new(1, 3, input_shape, 1, Linear::new());
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "expected InvalidInput for {label}, got {:?}",
+            result
+        );
+    }
 }
 
 // Conv1D - forward error paths
@@ -764,100 +730,47 @@ fn conv2d_set_weights_mismatched_bias_shape_errors() {
 
 // Conv2D - constructor error paths
 
+/// Each invalid scalar hyperparameter (filters=0, kernel height/width=0,
+/// stride height/width=0) independently makes the constructor return InvalidParameter
 #[test]
-fn conv2d_filters_zero_errors() {
-    let result = Conv2D::new(0, (3, 3), vec![1, 1, 5, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for filters=0, got {:?}",
-        result
-    );
+fn conv2d_invalid_scalar_param_errors() {
+    // (filters, kernel, stride, label)
+    let cases = [
+        (0usize, (3usize, 3usize), (1usize, 1usize), "filters=0"),
+        (1, (0, 3), (1, 1), "kernel height=0"),
+        (1, (3, 0), (1, 1), "kernel width=0"),
+        (1, (3, 3), (0, 1), "stride height=0"),
+        (1, (3, 3), (1, 0), "stride width=0"),
+    ];
+    for (filters, kernel, stride, label) in cases {
+        let result = Conv2D::new(filters, kernel, vec![1, 1, 5, 5], stride, Linear::new());
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for {label}, got {:?}",
+            result
+        );
+    }
 }
 
+/// Each invalid input_shape (wrong ndim, or a spatial dim < kernel)
+/// independently makes the constructor return InvalidInput
 #[test]
-fn conv2d_kernel_height_zero_errors() {
-    let result = Conv2D::new(1, (0, 3), vec![1, 1, 5, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for kernel height=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn conv2d_kernel_width_zero_errors() {
-    let result = Conv2D::new(1, (3, 0), vec![1, 1, 5, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for kernel width=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn conv2d_stride_height_zero_errors() {
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (0, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for stride height=0, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn conv2d_stride_width_zero_errors() {
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5], (1, 0), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter for stride width=0, got {:?}",
-        result
-    );
-}
-
-/// input_shape must be 4D; a 3D shape returns InvalidInput
-#[test]
-fn conv2d_wrong_input_ndim_3d_errors() {
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for 3D input_shape, got {:?}",
-        result
-    );
-}
-
-/// input_shape must be 4D; a 5D shape returns InvalidInput
-#[test]
-fn conv2d_wrong_input_ndim_5d_errors() {
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 5, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for 5D input_shape, got {:?}",
-        result
-    );
-}
-
-/// input height < kernel height returns InvalidInput
-#[test]
-fn conv2d_input_height_smaller_than_kernel_errors() {
-    // height=2 < kernel_h=3
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 2, 5], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput when height < kernel, got {:?}",
-        result
-    );
-}
-
-/// input width < kernel width returns InvalidInput
-#[test]
-fn conv2d_input_width_smaller_than_kernel_errors() {
-    // width=2 < kernel_w=3
-    let result = Conv2D::new(1, (3, 3), vec![1, 1, 5, 2], (1, 1), Linear::new());
-    assert!(
-        matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput when width < kernel, got {:?}",
-        result
-    );
+fn conv2d_invalid_input_shape_errors() {
+    // (input_shape, label)
+    let cases = [
+        (vec![1, 1, 5], "3D input_shape"),       // input_shape must be 4D
+        (vec![1, 1, 5, 5, 5], "5D input_shape"), // input_shape must be 4D
+        (vec![1, 1, 2, 5], "height < kernel"),   // height=2 < kernel_h=3
+        (vec![1, 1, 5, 2], "width < kernel"),    // width=2 < kernel_w=3
+    ];
+    for (input_shape, label) in cases {
+        let result = Conv2D::new(1, (3, 3), input_shape, (1, 1), Linear::new());
+        assert!(
+            matches!(result, Err(Error::InvalidInput(_))),
+            "expected InvalidInput for {label}, got {:?}",
+            result
+        );
+    }
 }
 
 // Conv2D - forward error paths

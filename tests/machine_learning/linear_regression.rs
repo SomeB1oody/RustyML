@@ -12,48 +12,16 @@ use crate::common::assert_allclose;
 
 // Constructor validation
 
-/// learning_rate = 0.0 is not positive -> InvalidParameter
+/// A non-positive or non-finite learning_rate (0.0 / negative / NaN / +inf) -> InvalidParameter
 #[test]
-fn constructor_zero_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, 0.0, 100, 1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// learning_rate < 0 -> InvalidParameter
-#[test]
-fn constructor_negative_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, -0.01, 100, 1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// learning_rate = NaN -> InvalidParameter
-#[test]
-fn constructor_nan_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, f64::NAN, 100, 1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// learning_rate = +inf -> InvalidParameter
-#[test]
-fn constructor_inf_learning_rate_is_invalid() {
-    let result = LinearRegression::new(true, f64::INFINITY, 100, 1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn constructor_invalid_learning_rate_is_invalid() {
+    for lr in [0.0, -0.01, f64::NAN, f64::INFINITY] {
+        let result = LinearRegression::new(true, lr, 100, 1e-6);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for learning_rate={lr:?}, got {result:?}"
+        );
+    }
 }
 
 /// max_iterations = 0 -> InvalidParameter
@@ -67,87 +35,35 @@ fn constructor_zero_max_iter_is_invalid() {
     );
 }
 
-/// tolerance = 0.0 is not positive -> InvalidParameter
+/// A non-positive or non-finite tolerance (0.0 / negative / NaN / +inf) -> InvalidParameter
 #[test]
-fn constructor_zero_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn constructor_invalid_tolerance_is_invalid() {
+    for tol in [0.0, -1e-6, f64::NAN, f64::INFINITY] {
+        let result = LinearRegression::new(true, 0.01, 100, tol);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for tolerance={tol:?}, got {result:?}"
+        );
+    }
 }
 
-/// tolerance < 0 -> InvalidParameter
+/// A negative or non-finite regularization alpha (L2(-0.1) / L1(-0.5) / L2(NaN))
+/// -> InvalidParameter
 #[test]
-fn constructor_negative_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, -1e-6);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// tolerance = NaN -> InvalidParameter
-#[test]
-fn constructor_nan_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, f64::NAN);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// tolerance = +inf -> InvalidParameter
-#[test]
-fn constructor_inf_tolerance_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, f64::INFINITY);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Negative L2 alpha -> InvalidParameter
-#[test]
-fn constructor_negative_l2_alpha_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
-        .unwrap()
-        .with_regularization(RegularizationType::L2(-0.1));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Negative L1 alpha -> InvalidParameter
-#[test]
-fn constructor_negative_l1_alpha_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
-        .unwrap()
-        .with_regularization(RegularizationType::L1(-0.5));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// NaN L2 alpha -> InvalidParameter
-#[test]
-fn constructor_nan_l2_alpha_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 100, 1e-6)
-        .unwrap()
-        .with_regularization(RegularizationType::L2(f64::NAN));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn constructor_invalid_regularization_alpha_is_invalid() {
+    for reg in [
+        RegularizationType::L2(-0.1),
+        RegularizationType::L1(-0.5),
+        RegularizationType::L2(f64::NAN),
+    ] {
+        let result = LinearRegression::new(true, 0.01, 100, 1e-6)
+            .unwrap()
+            .with_regularization(reg);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for regularization={reg:?}, got {result:?}"
+        );
+    }
 }
 
 /// Valid constructor with all legal parameters -> Ok
@@ -201,32 +117,19 @@ fn fit_empty_x_returns_empty_input() {
     );
 }
 
-/// fit() with NaN in X -> NonFinite
+/// fit() with a non-finite sentinel (NaN / +Inf) in X -> NonFinite
 #[test]
-fn fit_nan_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
-    let x = array![[1.0, f64::NAN], [2.0, 3.0]];
-    let y = array![1.0, 2.0];
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
-}
-
-/// fit() with Inf in X -> NonFinite
-#[test]
-fn fit_inf_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
-    let x = array![[1.0, f64::INFINITY], [2.0, 3.0]];
-    let y = array![1.0, 2.0];
-    let result = model.fit(&x, &y);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+fn fit_non_finite_in_x_returns_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+        let x = array![[1.0, sentinel], [2.0, 3.0]];
+        let y = array![1.0, 2.0];
+        let result = model.fit(&x, &y);
+        assert!(
+            matches!(result, Err(Error::NonFinite(_))),
+            "expected NonFinite for sentinel={sentinel:?}, got {result:?}"
+        );
+    }
 }
 
 /// fit() with mismatched y length -> DimensionMismatch
@@ -283,38 +186,22 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
     );
 }
 
-/// predict() with NaN in X -> NonFinite
+/// predict() with a non-finite sentinel (NaN / +Inf) in X -> NonFinite
 #[test]
-fn predict_nan_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
-    let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
-    let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
-    model.fit(&x_train, &y_train).unwrap();
+fn predict_non_finite_in_x_returns_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
+        let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
+        let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
+        model.fit(&x_train, &y_train).unwrap();
 
-    let x_nan = array![[f64::NAN]];
-    let result = model.predict(&x_nan);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
-}
-
-/// predict() with +Inf in X -> NonFinite
-#[test]
-fn predict_inf_in_x_returns_non_finite() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
-    let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
-    let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
-    model.fit(&x_train, &y_train).unwrap();
-
-    let x_inf = array![[f64::INFINITY]];
-    let result = model.predict(&x_inf);
-    assert!(
-        matches!(result, Err(Error::NonFinite(_))),
-        "expected NonFinite, got {:?}",
-        result
-    );
+        let x_bad = array![[sentinel]];
+        let result = model.predict(&x_bad);
+        assert!(
+            matches!(result, Err(Error::NonFinite(_))),
+            "expected NonFinite for sentinel={sentinel:?}, got {result:?}"
+        );
+    }
 }
 
 // Correctness: univariate y = 2x + 1

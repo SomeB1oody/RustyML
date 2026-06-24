@@ -82,64 +82,27 @@ fn assert_blob_structure(labels: &Array1<usize>, blob_size: usize) {
 
 // Constructor validation
 
-/// `n_clusters = 0` must yield `Error::InvalidParameter`
+/// Each invalid constructor argument must yield `Error::InvalidParameter`. Covers
+/// `n_clusters = 0`, `max_iterations = 0`, and `tolerance` rejected for
+/// `0.0`, negative, `NaN`, and `+Inf` (every other arg held at a valid value).
 #[test]
-fn constructor_zero_clusters_is_invalid() {
-    let err = KMeans::new(0, 100, 1e-4).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// `max_iterations = 0` must yield `Error::InvalidParameter`
-#[test]
-fn constructor_zero_max_iter_is_invalid() {
-    let err = KMeans::new(3, 0, 1e-4).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// `tolerance = 0.0` must yield `Error::InvalidParameter`
-#[test]
-fn constructor_zero_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Negative tolerance must yield `Error::InvalidParameter`
-#[test]
-fn constructor_negative_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, -1e-4).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// `tolerance = f64::NAN` must yield `Error::InvalidParameter`
-#[test]
-fn constructor_nan_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, f64::NAN).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// `tolerance = f64::INFINITY` must yield `Error::InvalidParameter`
-#[test]
-fn constructor_inf_tolerance_is_invalid() {
-    let err = KMeans::new(3, 100, f64::INFINITY).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
+fn constructor_invalid_params_are_rejected() {
+    // (n_clusters, max_iterations, tolerance, label)
+    let cases: [(usize, usize, f64, &str); 6] = [
+        (0, 100, 1e-4, "n_clusters=0"),
+        (3, 0, 1e-4, "max_iterations=0"),
+        (3, 100, 0.0, "tolerance=0.0"),
+        (3, 100, -1e-4, "tolerance=-1e-4"),
+        (3, 100, f64::NAN, "tolerance=NaN"),
+        (3, 100, f64::INFINITY, "tolerance=+Inf"),
+    ];
+    for (n_clusters, max_iter, tol, label) in cases {
+        let err = KMeans::new(n_clusters, max_iter, tol).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for {label}, got {err:?}"
+        );
+    }
 }
 
 /// Valid parameters succeed and getters reflect the stored values
@@ -181,28 +144,19 @@ fn fit_empty_data_is_error() {
     );
 }
 
-/// `fit` on data with NaN must yield `Error::NonFinite`
+/// `fit` on data containing a non-finite sentinel (NaN or `+Inf`) must yield
+/// `Error::NonFinite` for each sentinel
 #[test]
-fn fit_nan_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
-    let data = array![[1.0, f64::NAN], [2.0, 3.0]];
-    let err = km.fit(&data).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// `fit` on data with Inf must yield `Error::NonFinite`
-#[test]
-fn fit_inf_data_is_error() {
-    let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
-    let data = array![[1.0, f64::INFINITY], [2.0, 3.0]];
-    let err = km.fit(&data).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn fit_non_finite_data_is_error() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut km = KMeans::new(1, 100, 1e-4).unwrap().with_random_state(0);
+        let data = array![[1.0, sentinel], [2.0, 3.0]];
+        let err = km.fit(&data).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel={sentinel:?}, got {err:?}"
+        );
+    }
 }
 
 /// `fit` with `n_samples < n_clusters` must yield `Error::InvalidInput`

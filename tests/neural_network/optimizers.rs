@@ -66,43 +66,16 @@ fn eval_mse(model: &Sequential, x: &Tensor, y: &Tensor) -> f32 {
 // SGD - constructor validation
 
 #[test]
-fn sgd_rejects_zero_learning_rate() {
-    let err = SGD::new(0.0, 0.0, false, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn sgd_rejects_negative_learning_rate() {
-    let err = SGD::new(-0.1, 0.0, false, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn sgd_rejects_infinite_learning_rate() {
-    let err = SGD::new(f32::INFINITY, 0.0, false, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn sgd_rejects_nan_learning_rate() {
-    let err = SGD::new(f32::NAN, 0.0, false, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
+fn sgd_rejects_invalid_learning_rate() {
+    for lr in [0.0_f32, -0.1, f32::INFINITY, f32::NAN] {
+        assert!(
+            matches!(
+                SGD::new(lr, 0.0, false, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for learning_rate={lr:?}"
+        );
+    }
 }
 
 #[test]
@@ -116,129 +89,67 @@ fn sgd_accepts_valid_learning_rate() {
 // Adam - constructor validation
 
 #[test]
-fn adam_rejects_zero_learning_rate() {
-    assert!(matches!(
-        Adam::new(0.0, 0.9, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn adam_rejects_invalid_learning_rate() {
+    for lr in [0.0_f32, -1e-3, f32::INFINITY, f32::NAN] {
+        assert!(
+            matches!(
+                Adam::new(lr, 0.9, 0.999, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for learning_rate={lr:?}"
+        );
+    }
+}
+
+/// beta1 must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper),
+/// out-of-range, and NaN are rejected
+#[test]
+fn adam_beta1_bounds() {
+    assert!(
+        Adam::new(0.001, 0.0, 0.999, 1e-8, 0.0).is_ok(),
+        "beta1=0.0 (inclusive lower bound) is accepted"
+    );
+    for beta1 in [1.0_f32, 1.1, -0.1, f32::NAN] {
+        assert!(
+            matches!(
+                Adam::new(0.001, beta1, 0.999, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for beta1={beta1:?}"
+        );
+    }
+}
+
+/// beta2 must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper)
+/// and NaN are rejected
+#[test]
+fn adam_beta2_bounds() {
+    assert!(
+        Adam::new(0.001, 0.9, 0.0, 1e-8, 0.0).is_ok(),
+        "beta2=0.0 (inclusive lower bound) is accepted"
+    );
+    for beta2 in [1.0_f32, f32::NAN] {
+        assert!(
+            matches!(
+                Adam::new(0.001, 0.9, beta2, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for beta2={beta2:?}"
+        );
+    }
 }
 
 #[test]
-fn adam_rejects_negative_learning_rate() {
-    assert!(matches!(
-        Adam::new(-1e-3, 0.9, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_inf_learning_rate() {
-    assert!(matches!(
-        Adam::new(f32::INFINITY, 0.9, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_nan_learning_rate() {
-    assert!(matches!(
-        Adam::new(f32::NAN, 0.9, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-/// beta1 = 0.0 (inclusive lower bound) is accepted
-#[test]
-fn adam_accepts_beta1_zero() {
-    assert!(Adam::new(0.001, 0.0, 0.999, 1e-8, 0.0).is_ok());
-}
-
-/// beta1 = 1.0 (exclusive upper bound) is rejected
-#[test]
-fn adam_rejects_beta1_one() {
-    assert!(matches!(
-        Adam::new(0.001, 1.0, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_beta1_greater_than_one() {
-    assert!(matches!(
-        Adam::new(0.001, 1.1, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_beta1_negative() {
-    assert!(matches!(
-        Adam::new(0.001, -0.1, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_beta1_nan() {
-    assert!(matches!(
-        Adam::new(0.001, f32::NAN, 0.999, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-/// beta2 = 0.0 (inclusive lower bound) is accepted
-#[test]
-fn adam_accepts_beta2_zero() {
-    assert!(Adam::new(0.001, 0.9, 0.0, 1e-8, 0.0).is_ok());
-}
-
-/// beta2 = 1.0 (exclusive upper bound) is rejected
-#[test]
-fn adam_rejects_beta2_one() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, 1.0, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_beta2_nan() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, f32::NAN, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_epsilon_zero() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, 0.0, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_epsilon_negative() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, -1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_epsilon_nan() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, f32::NAN, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adam_rejects_epsilon_inf() {
-    assert!(matches!(
-        Adam::new(0.001, 0.9, 0.999, f32::INFINITY, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn adam_rejects_invalid_epsilon() {
+    for eps in [0.0_f32, -1e-8, f32::NAN, f32::INFINITY] {
+        assert!(
+            matches!(
+                Adam::new(0.001, 0.9, 0.999, eps, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for epsilon={eps:?}"
+        );
+    }
 }
 
 #[test]
@@ -251,98 +162,48 @@ fn adam_accepts_valid_hyperparameters() {
 // RMSprop - constructor validation
 
 #[test]
-fn rmsprop_rejects_zero_learning_rate() {
-    assert!(matches!(
-        RMSprop::new(0.0, 0.9, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn rmsprop_rejects_invalid_learning_rate() {
+    for lr in [0.0_f32, -0.01, f32::INFINITY, f32::NAN] {
+        assert!(
+            matches!(
+                RMSprop::new(lr, 0.9, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for learning_rate={lr:?}"
+        );
+    }
+}
+
+/// rho must lie in [0, 1): 0.0 (inclusive lower) is accepted; 1.0 (exclusive upper),
+/// out-of-range, and NaN are rejected
+#[test]
+fn rmsprop_rho_bounds() {
+    assert!(
+        RMSprop::new(0.01, 0.0, 1e-8, 0.0).is_ok(),
+        "rho=0.0 (inclusive lower bound) is accepted"
+    );
+    for rho in [1.0_f32, 1.5, -0.5, f32::NAN] {
+        assert!(
+            matches!(
+                RMSprop::new(0.01, rho, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for rho={rho:?}"
+        );
+    }
 }
 
 #[test]
-fn rmsprop_rejects_negative_learning_rate() {
-    assert!(matches!(
-        RMSprop::new(-0.01, 0.9, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_inf_learning_rate() {
-    assert!(matches!(
-        RMSprop::new(f32::INFINITY, 0.9, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_nan_learning_rate() {
-    assert!(matches!(
-        RMSprop::new(f32::NAN, 0.9, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-/// rho = 0.0 (inclusive lower bound of [0, 1)) is accepted
-#[test]
-fn rmsprop_accepts_rho_zero() {
-    assert!(RMSprop::new(0.01, 0.0, 1e-8, 0.0).is_ok());
-}
-
-/// rho = 1.0 (exclusive upper bound) is rejected
-#[test]
-fn rmsprop_rejects_rho_one() {
-    assert!(matches!(
-        RMSprop::new(0.01, 1.0, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_rho_greater_than_one() {
-    assert!(matches!(
-        RMSprop::new(0.01, 1.5, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_rho_negative() {
-    assert!(matches!(
-        RMSprop::new(0.01, -0.5, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_rho_nan() {
-    assert!(matches!(
-        RMSprop::new(0.01, f32::NAN, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_epsilon_zero() {
-    assert!(matches!(
-        RMSprop::new(0.01, 0.9, 0.0, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_epsilon_nan() {
-    assert!(matches!(
-        RMSprop::new(0.01, 0.9, f32::NAN, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn rmsprop_rejects_epsilon_inf() {
-    assert!(matches!(
-        RMSprop::new(0.01, 0.9, f32::INFINITY, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn rmsprop_rejects_invalid_epsilon() {
+    for eps in [0.0_f32, f32::NAN, f32::INFINITY] {
+        assert!(
+            matches!(
+                RMSprop::new(0.01, 0.9, eps, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for epsilon={eps:?}"
+        );
+    }
 }
 
 #[test]
@@ -354,67 +215,29 @@ fn rmsprop_accepts_valid_hyperparameters() {
 // AdaGrad - constructor validation
 
 #[test]
-fn adagrad_rejects_zero_learning_rate() {
-    assert!(matches!(
-        AdaGrad::new(0.0, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn adagrad_rejects_invalid_learning_rate() {
+    for lr in [0.0_f32, -0.01, f32::INFINITY, f32::NAN] {
+        assert!(
+            matches!(
+                AdaGrad::new(lr, 1e-8, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for learning_rate={lr:?}"
+        );
+    }
 }
 
 #[test]
-fn adagrad_rejects_negative_learning_rate() {
-    assert!(matches!(
-        AdaGrad::new(-0.01, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_inf_learning_rate() {
-    assert!(matches!(
-        AdaGrad::new(f32::INFINITY, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_nan_learning_rate() {
-    assert!(matches!(
-        AdaGrad::new(f32::NAN, 1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_epsilon_zero() {
-    assert!(matches!(
-        AdaGrad::new(0.01, 0.0, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_epsilon_negative() {
-    assert!(matches!(
-        AdaGrad::new(0.01, -1e-8, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_epsilon_nan() {
-    assert!(matches!(
-        AdaGrad::new(0.01, f32::NAN, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
-}
-
-#[test]
-fn adagrad_rejects_epsilon_inf() {
-    assert!(matches!(
-        AdaGrad::new(0.01, f32::INFINITY, 0.0),
-        Err(Error::InvalidParameter { .. })
-    ));
+fn adagrad_rejects_invalid_epsilon() {
+    for eps in [0.0_f32, -1e-8, f32::NAN, f32::INFINITY] {
+        assert!(
+            matches!(
+                AdaGrad::new(0.01, eps, 0.0),
+                Err(Error::InvalidParameter { .. })
+            ),
+            "expected InvalidParameter for epsilon={eps:?}"
+        );
+    }
 }
 
 #[test]

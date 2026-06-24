@@ -8,33 +8,30 @@ use rustyml::machine_learning::IsolationForest;
 // Constructor validation
 
 #[test]
-fn test_new_n_estimators_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(0, 256).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { ref name, .. } if name == "n_estimators"),
-        "expected InvalidParameter for n_estimators=0, got: {err:?}"
-    );
-}
+fn test_new_rejects_invalid_scalar_arguments() {
+    // Each row: a constructor/builder invocation that supplies one invalid scalar
+    // argument, plus the parameter name the InvalidParameter error must carry.
+    // n_estimators=0 and max_samples=0 go through `new`; max_depth=Some(0) goes
+    // through the `with_max_depth` builder.
+    type Case = (&'static str, fn() -> Error);
+    let cases: [Case; 3] = [
+        ("n_estimators", || IsolationForest::new(0, 256).unwrap_err()),
+        ("max_samples", || IsolationForest::new(10, 0).unwrap_err()),
+        ("max_depth", || {
+            IsolationForest::new(10, 256)
+                .unwrap()
+                .with_max_depth(0)
+                .unwrap_err()
+        }),
+    ];
 
-#[test]
-fn test_new_max_samples_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(10, 0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { ref name, .. } if name == "max_samples"),
-        "expected InvalidParameter for max_samples=0, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_new_max_depth_zero_returns_invalid_parameter() {
-    let err = IsolationForest::new(10, 256)
-        .unwrap()
-        .with_max_depth(0)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { ref name, .. } if name == "max_depth"),
-        "expected InvalidParameter for max_depth=Some(0), got: {err:?}"
-    );
+    for (expected_name, build) in cases {
+        let err = build();
+        assert!(
+            matches!(err, Error::InvalidParameter { ref name, .. } if name == expected_name),
+            "expected InvalidParameter for {expected_name}, got: {err:?}"
+        );
+    }
 }
 
 #[test]
@@ -129,36 +126,17 @@ fn test_fit_empty_data_returns_empty_input() {
 }
 
 #[test]
-fn test_fit_nan_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x = array![[1.0, f64::NAN], [2.0, 3.0]];
-    let err = model.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite for NaN, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_fit_inf_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x = array![[1.0, f64::INFINITY], [2.0, 3.0]];
-    let err = model.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite for Inf, got: {err:?}"
-    );
-}
-
-#[test]
-fn test_fit_neg_inf_returns_non_finite() {
-    let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let x = array![[1.0, f64::NEG_INFINITY], [2.0, 3.0]];
-    let err = model.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite for -Inf, got: {err:?}"
-    );
+fn test_fit_non_finite_returns_non_finite() {
+    // The finiteness guard in `fit` must reject every non-finite sentinel.
+    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
+        let x = array![[1.0, sentinel], [2.0, 3.0]];
+        let err = model.fit(&x).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel={sentinel:?}, got: {err:?}"
+        );
+    }
 }
 
 // predict error paths (after fit)

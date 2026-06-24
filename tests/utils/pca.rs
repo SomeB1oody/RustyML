@@ -114,30 +114,20 @@ fn test_fit_n_components_exceeds_n_features_is_invalid_parameter() {
     );
 }
 
-/// NaN in input returns NonFinite
+/// Non-finite values (NaN, +Inf) in input return NonFinite at fit time
 #[test]
-fn test_fit_nan_input_is_non_finite() {
-    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    let x = array![[1.0, f64::NAN], [2.0, 4.0], [3.0, 6.0]];
-    let err = pca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
-        err
-    );
-}
-
-/// Inf in input returns NonFinite
-#[test]
-fn test_fit_inf_input_is_non_finite() {
-    let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
-    let x = array![[1.0, 2.0], [f64::INFINITY, 4.0], [3.0, 6.0]];
-    let err = pca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
-        err
-    );
+fn test_fit_non_finite_input_is_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut pca = PCA::new(1).unwrap().with_svd_solver(SVDSolver::Full);
+        let x = array![[1.0, sentinel], [2.0, 4.0], [3.0, 6.0]];
+        let err = pca.fit(&x).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel {:?}, got {:?}",
+            sentinel,
+            err
+        );
+    }
 }
 
 // Error paths: bad inputs at transform time

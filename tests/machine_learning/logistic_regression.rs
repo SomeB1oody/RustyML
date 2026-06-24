@@ -13,48 +13,17 @@ use crate::common::assert_allclose;
 
 // Constructor validation
 
-/// Zero learning rate is rejected with InvalidParameter
+/// Invalid learning rates (zero / negative / NaN / +Inf) are each rejected with InvalidParameter
 #[test]
-fn new_zero_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, 0.0, 100, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Negative learning rate is rejected with InvalidParameter
-#[test]
-fn new_negative_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, -0.01, 100, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// NaN learning rate is rejected with InvalidParameter
-#[test]
-fn new_nan_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, f64::NAN, 100, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Infinite learning rate is rejected with InvalidParameter
-#[test]
-fn new_inf_learning_rate_is_invalid() {
-    let result = LogisticRegression::new(true, f64::INFINITY, 100, 1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn new_invalid_learning_rate_is_invalid() {
+    for lr in [0.0, -0.01, f64::NAN, f64::INFINITY] {
+        let result = LogisticRegression::new(true, lr, 100, 1e-4);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for learning_rate={lr:?}, got {:?}",
+            result
+        );
+    }
 }
 
 /// max_iterations = 0 is rejected with InvalidParameter
@@ -68,65 +37,36 @@ fn new_zero_max_iterations_is_invalid() {
     );
 }
 
-/// Tolerance = 0.0 is rejected (must be strictly positive)
+/// Invalid tolerances (zero / negative) are each rejected (must be strictly positive)
 #[test]
-fn new_zero_tolerance_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 0.0);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn new_invalid_tolerance_is_invalid() {
+    for tol in [0.0, -1e-4] {
+        let result = LogisticRegression::new(true, 0.1, 100, tol);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for tol={tol:?}, got {:?}",
+            result
+        );
+    }
 }
 
-/// Negative tolerance is rejected with InvalidParameter
+/// Invalid regularization alphas (negative L1 / negative L2 / NaN L2) are each rejected with InvalidParameter
 #[test]
-fn new_negative_tolerance_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, -1e-4);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Negative L1 alpha is rejected with InvalidParameter
-#[test]
-fn new_negative_l1_alpha_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
-        .unwrap()
-        .with_regularization(RegularizationType::L1(-0.5));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// Negative L2 alpha is rejected with InvalidParameter
-#[test]
-fn new_negative_l2_alpha_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
-        .unwrap()
-        .with_regularization(RegularizationType::L2(-1.0));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// NaN L2 alpha is rejected with InvalidParameter
-#[test]
-fn new_nan_l2_alpha_is_invalid() {
-    let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
-        .unwrap()
-        .with_regularization(RegularizationType::L2(f64::NAN));
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn new_invalid_regularization_alpha_is_invalid() {
+    for reg in [
+        RegularizationType::L1(-0.5),
+        RegularizationType::L2(-1.0),
+        RegularizationType::L2(f64::NAN),
+    ] {
+        let result = LogisticRegression::new(true, 0.1, 100, 1e-4)
+            .unwrap()
+            .with_regularization(reg);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for regularization={reg:?}, got {:?}",
+            result
+        );
+    }
 }
 
 /// Valid constructor parameters succeed and getters return stored values
@@ -178,28 +118,18 @@ fn fit_empty_x_returns_empty_input() {
     );
 }
 
-/// NaN in x returns NonFinite
+/// Non-finite values in x (NaN / +Inf) each return NonFinite
 #[test]
-fn fit_nan_in_x_returns_non_finite() {
-    let mut model = LogisticRegression::default();
-    let x = array![[1.0, f64::NAN], [2.0, 3.0]];
-    let y = array![0.0, 1.0];
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::NonFinite(_))),
-        "expected NonFinite"
-    );
-}
-
-/// Infinity in x returns NonFinite
-#[test]
-fn fit_inf_in_x_returns_non_finite() {
-    let mut model = LogisticRegression::default();
-    let x = array![[1.0, f64::INFINITY], [2.0, 3.0]];
-    let y = array![0.0, 1.0];
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::NonFinite(_))),
-        "expected NonFinite"
-    );
+fn fit_non_finite_in_x_returns_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut model = LogisticRegression::default();
+        let x = array![[1.0, sentinel], [2.0, 3.0]];
+        let y = array![0.0, 1.0];
+        assert!(
+            matches!(model.fit(&x, &y), Err(Error::NonFinite(_))),
+            "expected NonFinite for x containing {sentinel:?}"
+        );
+    }
 }
 
 /// Mismatched x rows (3) and y length (2) returns DimensionMismatch
@@ -214,40 +144,22 @@ fn fit_xy_dimension_mismatch_returns_dimension_mismatch() {
     );
 }
 
-/// y containing 0.5 (non-binary) returns InvalidInput
+/// Non-binary labels each return InvalidInput: the label domain is strictly {0, 1}
+/// (0.5 rejected, 2.0 rejected, and -1.0 rejected — i.e. not the {-1, +1} convention)
 #[test]
-fn fit_non_binary_label_half_returns_invalid_input() {
-    let mut model = LogisticRegression::default();
-    let x = array![[1.0], [2.0], [3.0]];
-    let y = array![0.0, 0.5, 1.0];
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::InvalidInput(_))),
-        "expected InvalidInput for y containing 0.5"
-    );
-}
-
-/// y containing 2.0 (non-binary) returns InvalidInput
-#[test]
-fn fit_non_binary_label_two_returns_invalid_input() {
-    let mut model = LogisticRegression::default();
-    let x = array![[1.0], [2.0], [3.0]];
-    let y = array![2.0, 0.0, 1.0];
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::InvalidInput(_))),
-        "expected InvalidInput for y containing 2.0"
-    );
-}
-
-/// y containing -1.0 returns InvalidInput: label domain is strictly {0, 1}, not {-1, +1}
-#[test]
-fn fit_non_binary_label_minus_one_returns_invalid_input() {
-    let mut model = LogisticRegression::default();
-    let x = array![[1.0], [2.0]];
-    let y = array![-1.0, 1.0];
-    assert!(
-        matches!(model.fit(&x, &y), Err(Error::InvalidInput(_))),
-        "expected InvalidInput for y containing -1.0"
-    );
+fn fit_non_binary_label_returns_invalid_input() {
+    let cases = [
+        (array![[1.0], [2.0], [3.0]], array![0.0, 0.5, 1.0], 0.5),
+        (array![[1.0], [2.0], [3.0]], array![2.0, 0.0, 1.0], 2.0),
+        (array![[1.0], [2.0]], array![-1.0, 1.0], -1.0),
+    ];
+    for (x, y, bad_label) in cases {
+        let mut model = LogisticRegression::default();
+        assert!(
+            matches!(model.fit(&x, &y), Err(Error::InvalidInput(_))),
+            "expected InvalidInput for y containing {bad_label}"
+        );
+    }
 }
 
 // Predict / predict_proba error paths

@@ -422,113 +422,43 @@ fn test_empty_array_returns_empty_input() {
     );
 }
 
-/// An array containing NaN returns NonFinite
+/// An array containing a non-finite sentinel (NaN, +Inf, -Inf) returns NonFinite
 #[test]
-fn test_nan_returns_non_finite() {
-    let data: Array2<f64> = array![[1.0, f64::NAN]];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn test_non_finite_returns_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let data: Array2<f64> = array![[sentinel, 1.0]];
+        let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel {sentinel:?}, got {err:?}"
+        );
+    }
 }
 
-/// An array containing +Inf returns NonFinite
+/// Lp with a non-positive or non-finite p (0, -1, +Inf, NaN) returns InvalidParameter
 #[test]
-fn test_pos_inf_returns_non_finite() {
-    let data: Array2<f64> = array![[f64::INFINITY, 1.0]];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn test_lp_invalid_p_returns_invalid_parameter() {
+    for p in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+        let data: Array2<f64> = array![[1.0, 2.0]];
+        let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::Lp(p)).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for p = {p:?}, got {err:?}"
+        );
+    }
 }
 
-/// An array containing -Inf returns NonFinite
+/// A 1-D array with the Row or Column axis returns InvalidInput (requires at least 2 dimensions)
 #[test]
-fn test_neg_inf_returns_non_finite() {
-    let data: Array2<f64> = array![[f64::NEG_INFINITY, 1.0]];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// Lp with p = 0 returns InvalidParameter (p must be positive)
-#[test]
-fn test_lp_zero_p_returns_invalid_parameter() {
-    let data: Array2<f64> = array![[1.0, 2.0]];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::Lp(0.0)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Lp with p = -1 returns InvalidParameter (p must be positive)
-#[test]
-fn test_lp_negative_p_returns_invalid_parameter() {
-    let data: Array2<f64> = array![[1.0, 2.0]];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::Lp(-1.0)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Lp with p = +Inf returns InvalidParameter (p must be finite)
-#[test]
-fn test_lp_inf_p_returns_invalid_parameter() {
-    let data: Array2<f64> = array![[1.0, 2.0]];
-    let err = normalize(
-        &data,
-        NormalizationAxis::Row,
-        NormalizationOrder::Lp(f64::INFINITY),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Lp with p = NaN returns InvalidParameter (p must be finite)
-#[test]
-fn test_lp_nan_p_returns_invalid_parameter() {
-    let data: Array2<f64> = array![[1.0, 2.0]];
-    let err = normalize(
-        &data,
-        NormalizationAxis::Row,
-        NormalizationOrder::Lp(f64::NAN),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// A 1-D array with the Row axis returns InvalidInput (requires at least 2 dimensions)
-#[test]
-fn test_1d_row_axis_returns_invalid_input() {
-    let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = normalize(&data, NormalizationAxis::Row, NormalizationOrder::L2).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput, got {err:?}"
-    );
-}
-
-/// A 1-D array with the Column axis returns InvalidInput (requires at least 2 dimensions)
-#[test]
-fn test_1d_column_axis_returns_invalid_input() {
-    let data: Array1<f64> = array![1.0, 2.0, 3.0];
-    let err = normalize(&data, NormalizationAxis::Column, NormalizationOrder::L2).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput, got {err:?}"
-    );
+fn test_1d_lane_axis_returns_invalid_input() {
+    for axis in [NormalizationAxis::Row, NormalizationAxis::Column] {
+        let data: Array1<f64> = array![1.0, 2.0, 3.0];
+        let err = normalize(&data, axis, NormalizationOrder::L2).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidInput(_)),
+            "expected InvalidInput for axis {axis:?}, got {err:?}"
+        );
+    }
 }
 
 // Dynamic-dimension array (IxDyn)

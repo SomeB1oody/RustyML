@@ -46,81 +46,32 @@ fn concentric_rings_data() -> (Array2<f64>, Array1<f64>) {
 
 // constructor validation
 
-/// C = 0.0 is non-positive -> InvalidParameter
+/// C must be a positive, finite value: zero / negative / NaN / +Inf each
+/// yield InvalidParameter (non-positive and non-finite checks)
 #[test]
-fn new_rejects_zero_c() {
-    let result = SVC::new(KernelType::Linear, 0.0, 1e-3, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn new_rejects_invalid_c() {
+    for c in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let result = SVC::new(KernelType::Linear, c, 1e-3, 100);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for C={c:?}, got {:?}",
+            result
+        );
+    }
 }
 
-/// C = -1.0 is negative -> InvalidParameter
+/// tol must be a positive, finite value: zero / negative / NaN each yield
+/// InvalidParameter
 #[test]
-fn new_rejects_negative_c() {
-    let result = SVC::new(KernelType::Linear, -1.0, 1e-3, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// C = NaN -> InvalidParameter (non-finite check)
-#[test]
-fn new_rejects_nan_c() {
-    let result = SVC::new(KernelType::Linear, f64::NAN, 1e-3, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// C = +Inf -> InvalidParameter (non-finite check)
-#[test]
-fn new_rejects_inf_c() {
-    let result = SVC::new(KernelType::Linear, f64::INFINITY, 1e-3, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// tol = 0.0 is non-positive -> InvalidParameter
-#[test]
-fn new_rejects_zero_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, 0.0, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// tol = -1e-3 is negative -> InvalidParameter
-#[test]
-fn new_rejects_negative_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, -1e-3, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
-}
-
-/// tol = NaN -> InvalidParameter
-#[test]
-fn new_rejects_nan_tol() {
-    let result = SVC::new(KernelType::Linear, 1.0, f64::NAN, 100);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected InvalidParameter, got {:?}",
-        result
-    );
+fn new_rejects_invalid_tol() {
+    for tol in [0.0, -1e-3, f64::NAN] {
+        let result = SVC::new(KernelType::Linear, 1.0, tol, 100);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected InvalidParameter for tol={tol:?}, got {:?}",
+            result
+        );
+    }
 }
 
 /// max_iter = 0 -> InvalidParameter

@@ -214,147 +214,104 @@ fn test_new_n_components_zero_returns_invalid_parameter() {
 }
 
 #[test]
-fn test_new_rbf_gamma_zero_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.0),
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
+fn test_new_rbf_invalid_gamma_returns_invalid_parameter() {
+    // RBF rejects zero, negative, and non-finite gamma with InvalidParameter
+    for gamma in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let err = KernelPCA::new(
+            KernelType::RBF {
+                gamma: Gamma::Value(gamma),
+            },
+            1,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for RBF gamma={gamma}, got {err:?}"
+        );
+    }
 }
 
 #[test]
-fn test_new_rbf_gamma_negative_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(-1.0),
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
+fn test_new_poly_invalid_param_returns_invalid_parameter() {
+    // Each row is an otherwise-valid Poly kernel made invalid by exactly one field:
+    // degree=0, gamma in {0.0, -0.5, +Inf}, or coef0=NaN
+    let cases = [
+        (
+            "degree=0",
+            KernelType::Poly {
+                degree: 0,
+                gamma: Gamma::Value(1.0),
+                coef0: 0.0,
+            },
+        ),
+        (
+            "gamma=0.0",
+            KernelType::Poly {
+                degree: 2,
+                gamma: Gamma::Value(0.0),
+                coef0: 0.0,
+            },
+        ),
+        (
+            "gamma=-0.5",
+            KernelType::Poly {
+                degree: 2,
+                gamma: Gamma::Value(-0.5),
+                coef0: 0.0,
+            },
+        ),
+        (
+            "coef0=NaN",
+            KernelType::Poly {
+                degree: 2,
+                gamma: Gamma::Value(1.0),
+                coef0: f64::NAN,
+            },
+        ),
+        (
+            "gamma=+Inf",
+            KernelType::Poly {
+                degree: 2,
+                gamma: Gamma::Value(f64::INFINITY),
+                coef0: 0.0,
+            },
+        ),
+    ];
+    for (label, kernel) in cases {
+        let err = KernelPCA::new(kernel, 1).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for Poly {label}, got {err:?}"
+        );
+    }
 }
 
 #[test]
-fn test_new_rbf_gamma_nan_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(f64::NAN),
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_rbf_gamma_infinity_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(f64::INFINITY),
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_poly_degree_zero_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Poly {
-            degree: 0,
-            gamma: Gamma::Value(1.0),
-            coef0: 0.0,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_poly_gamma_zero_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Poly {
-            degree: 2,
-            gamma: Gamma::Value(0.0),
-            coef0: 0.0,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_poly_gamma_negative_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Poly {
-            degree: 2,
-            gamma: Gamma::Value(-0.5),
-            coef0: 0.0,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_poly_coef0_nan_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Poly {
-            degree: 2,
-            gamma: Gamma::Value(1.0),
-            coef0: f64::NAN,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_poly_gamma_inf_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Poly {
-            degree: 2,
-            gamma: Gamma::Value(f64::INFINITY),
-            coef0: 0.0,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_sigmoid_gamma_nan_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Sigmoid {
-            gamma: Gamma::Value(f64::NAN),
-            coef0: 0.0,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
-}
-
-#[test]
-fn test_new_sigmoid_coef0_infinity_returns_invalid_parameter() {
-    let err = KernelPCA::new(
-        KernelType::Sigmoid {
-            gamma: Gamma::Value(1.0),
-            coef0: f64::INFINITY,
-        },
-        1,
-    )
-    .unwrap_err();
-    assert!(matches!(err, Error::InvalidParameter { .. }));
+fn test_new_sigmoid_non_finite_param_returns_invalid_parameter() {
+    // Sigmoid rejects a non-finite value in either field: gamma=NaN or coef0=+Inf
+    let cases = [
+        (
+            "gamma=NaN",
+            KernelType::Sigmoid {
+                gamma: Gamma::Value(f64::NAN),
+                coef0: 0.0,
+            },
+        ),
+        (
+            "coef0=+Inf",
+            KernelType::Sigmoid {
+                gamma: Gamma::Value(1.0),
+                coef0: f64::INFINITY,
+            },
+        ),
+    ];
+    for (label, kernel) in cases {
+        let err = KernelPCA::new(kernel, 1).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for Sigmoid {label}, got {err:?}"
+        );
+    }
 }
 
 // fit error paths
@@ -421,39 +378,30 @@ fn test_fit_n_components_greater_than_n_samples_returns_invalid_parameter() {
 }
 
 #[test]
-fn test_fit_nan_in_input_returns_non_finite() {
-    let mut kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        1,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    let x = array![[1.0, f64::NAN], [0.0, 1.0], [-1.0, 0.0]];
-    let err = kpca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-#[test]
-fn test_fit_inf_in_input_returns_non_finite() {
-    let mut kpca = KernelPCA::new(
-        KernelType::RBF {
-            gamma: Gamma::Value(0.5),
-        },
-        1,
-    )
-    .unwrap()
-    .with_eigen_solver(EigenSolver::Dense);
-    let x = array![[f64::INFINITY, 0.0], [0.0, 1.0], [-1.0, 0.0]];
-    let err = kpca.fit(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn test_fit_non_finite_in_input_returns_non_finite() {
+    // fit rejects either sentinel (NaN or +Inf) in the input with NonFinite
+    let cases = [
+        ("NaN", array![[1.0, f64::NAN], [0.0, 1.0], [-1.0, 0.0]]),
+        (
+            "+Inf",
+            array![[f64::INFINITY, 0.0], [0.0, 1.0], [-1.0, 0.0]],
+        ),
+    ];
+    for (label, x) in cases {
+        let mut kpca = KernelPCA::new(
+            KernelType::RBF {
+                gamma: Gamma::Value(0.5),
+            },
+            1,
+        )
+        .unwrap()
+        .with_eigen_solver(EigenSolver::Dense);
+        let err = kpca.fit(&x).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for {label} in input, got {err:?}"
+        );
+    }
 }
 
 // transform error paths

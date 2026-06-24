@@ -244,56 +244,30 @@ fn group_norm_predict_equals_forward() {
 
 // GroupNormalization - constructor / forward error paths
 
+/// Constructor rejects each invalid hyperparameter with InvalidParameter. Each row
+/// makes exactly one argument bad: num_groups (zero), epsilon (zero / negative),
+/// or channel_axis (zero = batch axis, or out of bounds for a 3-D input shape).
 #[test]
-fn group_norm_error_num_groups_zero() {
-    let err = GroupNormalization::new(vec![1, 4, 4], 0, 1, 1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
+fn group_norm_constructor_invalid_parameter_errors() {
+    // (num_groups, channel_axis, epsilon, description)
+    let cases = [
+        (0, 1, 1e-5_f32, "num_groups=0"),
+        (2, 1, 0.0_f32, "epsilon=0.0"),
+        (2, 1, -1e-5_f32, "epsilon=-1e-5"),
+        (2, 0, 1e-5_f32, "channel_axis=0 (batch axis)"),
+        (2, 3, 1e-5_f32, "channel_axis=3 out of bounds"),
+    ];
 
-#[test]
-fn group_norm_error_epsilon_zero() {
-    let err = GroupNormalization::new(vec![1, 4, 4], 2, 1, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn group_norm_error_epsilon_negative() {
-    let err = GroupNormalization::new(vec![1, 4, 4], 2, 1, -1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn group_norm_error_channel_axis_zero() {
-    // axis 0 is the batch axis, not permitted
-    let err = GroupNormalization::new(vec![1, 4, 4], 2, 0, 1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn group_norm_error_channel_axis_out_of_bounds() {
-    // input_shape has 3 dims (ndim=3), so valid axes are 1 and 2
-    let err = GroupNormalization::new(vec![1, 4, 4], 2, 3, 1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
+    for (num_groups, channel_axis, epsilon, desc) in cases {
+        let err =
+            GroupNormalization::new(vec![1, 4, 4], num_groups, channel_axis, epsilon).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for {}, got {:?}",
+            desc,
+            err
+        );
+    }
 }
 
 #[test]
@@ -584,45 +558,28 @@ fn instance_norm_predict_equals_forward_training_mode() {
 
 // InstanceNormalization - constructor / forward error paths
 
+/// Constructor rejects each invalid hyperparameter with InvalidParameter. Each row
+/// makes exactly one argument bad: epsilon (zero / negative) or channel_axis
+/// (zero = batch axis, or out of bounds for a 3-D input shape).
 #[test]
-fn instance_norm_error_epsilon_zero() {
-    let err = InstanceNormalization::new(vec![1, 3, 4], 1, 0.0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
+fn instance_norm_constructor_invalid_parameter_errors() {
+    // (channel_axis, epsilon, description)
+    let cases = [
+        (1, 0.0_f32, "epsilon=0.0"),
+        (1, -1e-3_f32, "epsilon=-1e-3"),
+        (0, 1e-5_f32, "channel_axis=0 (batch axis)"),
+        (3, 1e-5_f32, "channel_axis=3 out of bounds"),
+    ];
 
-#[test]
-fn instance_norm_error_epsilon_negative() {
-    let err = InstanceNormalization::new(vec![1, 3, 4], 1, -1e-3).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn instance_norm_error_channel_axis_zero() {
-    let err = InstanceNormalization::new(vec![1, 3, 4], 0, 1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn instance_norm_error_channel_axis_out_of_bounds() {
-    // 3-D input: valid channel axes are 1 and 2 only
-    let err = InstanceNormalization::new(vec![1, 3, 4], 3, 1e-5).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
+    for (channel_axis, epsilon, desc) in cases {
+        let err = InstanceNormalization::new(vec![1, 3, 4], channel_axis, epsilon).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for {}, got {:?}",
+            desc,
+            err
+        );
+    }
 }
 
 #[test]

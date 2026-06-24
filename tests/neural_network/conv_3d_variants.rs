@@ -17,69 +17,83 @@ use crate::common::assert_allclose;
 
 // Conv3D - constructor validation
 
-/// filters=0 must be rejected with InvalidParameter
+/// Each invalid constructor argument must be rejected with the matching error variant.
+/// Rows fold the former per-argument tests:
+/// - filters=0                -> InvalidParameter (was conv3d_new_rejects_zero_filters)
+/// - zero in kernel tuple     -> InvalidParameter (was conv3d_new_rejects_zero_kernel_dimension)
+/// - zero in stride tuple     -> InvalidParameter (was conv3d_new_rejects_zero_stride)
+/// - 4D (non-5D) input_shape  -> InvalidInput     (was conv3d_new_rejects_non_5d_input_shape)
+/// - zero input dimension     -> InvalidInput     (was conv3d_new_rejects_zero_input_dimension)
 #[test]
-fn conv3d_new_rejects_zero_filters() {
-    let err = Conv3D::new(0, (2, 2, 2), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
+fn conv3d_new_rejects_invalid_args() {
+    enum Want {
+        Param,
+        Input,
+    }
+    // (label, filters, kernel, input_shape, stride, expected error)
+    type Case = (
+        &'static str,
+        usize,
+        (usize, usize, usize),
+        Vec<usize>,
+        (usize, usize, usize),
+        Want,
     );
-}
-
-/// A zero in the kernel tuple must be rejected with InvalidParameter
-#[test]
-fn conv3d_new_rejects_zero_kernel_dimension() {
-    // Second kernel dimension is 0
-    let err = Conv3D::new(2, (2, 0, 2), vec![1, 1, 4, 4, 4], (1, 1, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// A zero in the stride tuple must be rejected with InvalidParameter
-#[test]
-fn conv3d_new_rejects_zero_stride() {
-    let err = Conv3D::new(2, (2, 2, 2), vec![1, 1, 4, 4, 4], (1, 0, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// A 4D input_shape (not 5D) must be rejected with InvalidInput
-#[test]
-fn conv3d_new_rejects_non_5d_input_shape() {
-    let err = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 1, 4, 4], // only 4 dims
-        (1, 1, 1),
-        Linear::new(),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput, got {err:?}"
-    );
-}
-
-/// An input_shape containing a 0 dimension must be rejected with InvalidInput
-#[test]
-fn conv3d_new_rejects_zero_input_dimension() {
-    let err = Conv3D::new(
-        2,
-        (2, 2, 2),
-        vec![1, 0, 4, 4, 4], // channels = 0
-        (1, 1, 1),
-        Linear::new(),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput, got {err:?}"
-    );
+    let cases: [Case; 5] = [
+        (
+            "zero filters",
+            0,
+            (2, 2, 2),
+            vec![1, 1, 4, 4, 4],
+            (1, 1, 1),
+            Want::Param,
+        ),
+        (
+            "zero kernel dimension",
+            2,
+            (2, 0, 2),
+            vec![1, 1, 4, 4, 4],
+            (1, 1, 1),
+            Want::Param,
+        ),
+        (
+            "zero stride",
+            2,
+            (2, 2, 2),
+            vec![1, 1, 4, 4, 4],
+            (1, 0, 1),
+            Want::Param,
+        ),
+        (
+            "non-5D input_shape",
+            2,
+            (2, 2, 2),
+            vec![1, 1, 4, 4],
+            (1, 1, 1),
+            Want::Input,
+        ),
+        (
+            "zero input dimension",
+            2,
+            (2, 2, 2),
+            vec![1, 0, 4, 4, 4],
+            (1, 1, 1),
+            Want::Input,
+        ),
+    ];
+    for (label, filters, kernel, input_shape, stride, want) in cases {
+        let err = Conv3D::new(filters, kernel, input_shape, stride, Linear::new()).unwrap_err();
+        match want {
+            Want::Param => assert!(
+                matches!(err, Error::InvalidParameter { .. }),
+                "[{label}] expected InvalidParameter, got {err:?}"
+            ),
+            Want::Input => assert!(
+                matches!(err, Error::InvalidInput(_)),
+                "[{label}] expected InvalidInput, got {err:?}"
+            ),
+        }
+    }
 }
 
 // Conv3D - forward output shape
@@ -264,15 +278,33 @@ fn conv3d_set_weights_shape_mismatch_errors() {
 
 // DepthwiseConv2D - constructor validation
 
-/// filters != channels must be rejected with InvalidParameter
+/// Each invalid constructor argument must be rejected with InvalidParameter.
+/// Rows fold the former per-argument tests:
+/// - filters != channels    (was depthwise_conv2d_new_rejects_filters_not_equal_channels)
+/// - filters=0              (was depthwise_conv2d_new_rejects_zero_filters)
+/// - zero kernel dimension  (was depthwise_conv2d_new_rejects_zero_kernel_dimension)
 #[test]
-fn depthwise_conv2d_new_rejects_filters_not_equal_channels() {
-    // input_shape has 2 channels, but 3 filters are requested
-    let err = DepthwiseConv2D::new(3, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for filters != channels, got {err:?}"
-    );
+fn depthwise_conv2d_new_rejects_invalid_args() {
+    // (label, filters, kernel_size)
+    let cases: [(&str, usize, (usize, usize)); 3] = [
+        ("filters != channels", 3, (2, 2)),
+        ("filters=0", 0, (2, 2)),
+        ("kernel_size.0=0", 2, (0, 2)),
+    ];
+    for (label, filters, kernel_size) in cases {
+        let err = DepthwiseConv2D::new(
+            filters,
+            kernel_size,
+            vec![1, 2, 4, 4],
+            (1, 1),
+            Linear::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "[{label}] expected InvalidParameter, got {err:?}"
+        );
+    }
 }
 
 /// A runtime input whose channel count differs from `filters` returns DimensionMismatch
@@ -293,26 +325,6 @@ fn depthwise_conv2d_forward_rejects_wrong_channels() {
     assert!(
         matches!(err, Error::DimensionMismatch { .. }),
         "expected DimensionMismatch, got {err:?}"
-    );
-}
-
-/// filters=0 must be rejected
-#[test]
-fn depthwise_conv2d_new_rejects_zero_filters() {
-    let err = DepthwiseConv2D::new(0, (2, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for filters=0, got {err:?}"
-    );
-}
-
-/// A zero kernel dimension must be rejected
-#[test]
-fn depthwise_conv2d_new_rejects_zero_kernel_dimension() {
-    let err = DepthwiseConv2D::new(2, (0, 2), vec![1, 2, 4, 4], (1, 1), Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for kernel_size.0=0, got {err:?}"
     );
 }
 
@@ -500,55 +512,61 @@ fn depthwise_conv2d_set_weights_shape_mismatch_errors() {
 
 // SeparableConv2D - constructor validation
 
-/// filters=0 must be rejected
+/// Each invalid constructor argument must be rejected with the matching error variant.
+/// Rows fold the former per-argument tests:
+/// - filters=0            -> InvalidParameter (was separable_conv2d_new_rejects_zero_filters)
+/// - depth_multiplier=0   -> InvalidParameter (was separable_conv2d_new_rejects_zero_depth_multiplier)
+/// - zero kernel dim      -> InvalidParameter (was separable_conv2d_new_rejects_zero_kernel)
+/// - non-4D input_shape   -> InvalidInput     (was separable_conv2d_new_rejects_non_4d_input_shape)
 #[test]
-fn separable_conv2d_new_rejects_zero_filters() {
-    let err =
-        SeparableConv2D::new(0, (2, 2), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for filters=0, got {err:?}"
-    );
-}
-
-/// depth_multiplier=0 must be rejected
-#[test]
-fn separable_conv2d_new_rejects_zero_depth_multiplier() {
-    let err =
-        SeparableConv2D::new(2, (2, 2), vec![1, 2, 4, 4], (1, 1), 0, Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for depth_multiplier=0, got {err:?}"
-    );
-}
-
-/// Zero kernel dimension must be rejected
-#[test]
-fn separable_conv2d_new_rejects_zero_kernel() {
-    let err =
-        SeparableConv2D::new(2, (2, 0), vec![1, 2, 4, 4], (1, 1), 1, Linear::new()).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter for kernel_size.1=0, got {err:?}"
-    );
-}
-
-/// Non-4D input_shape must be rejected
-#[test]
-fn separable_conv2d_new_rejects_non_4d_input_shape() {
-    let err = SeparableConv2D::new(
-        2,
-        (2, 2),
-        vec![1, 2, 4], // only 3 dims
-        (1, 1),
-        1,
-        Linear::new(),
-    )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "expected InvalidInput for 3D input_shape, got {err:?}"
-    );
+fn separable_conv2d_new_rejects_invalid_args() {
+    enum Want {
+        Param,
+        Input,
+    }
+    // (label, filters, kernel, input_shape, depth_multiplier, expected error)
+    type Case = (&'static str, usize, (usize, usize), Vec<usize>, usize, Want);
+    let cases: [Case; 4] = [
+        ("filters=0", 0, (2, 2), vec![1, 2, 4, 4], 1, Want::Param),
+        (
+            "depth_multiplier=0",
+            2,
+            (2, 2),
+            vec![1, 2, 4, 4],
+            0,
+            Want::Param,
+        ),
+        (
+            "kernel_size.1=0",
+            2,
+            (2, 0),
+            vec![1, 2, 4, 4],
+            1,
+            Want::Param,
+        ),
+        ("3D input_shape", 2, (2, 2), vec![1, 2, 4], 1, Want::Input),
+    ];
+    for (label, filters, kernel, input_shape, depth_multiplier, want) in cases {
+        let err = SeparableConv2D::new(
+            filters,
+            kernel,
+            input_shape,
+            (1, 1),
+            depth_multiplier,
+            Linear::new(),
+        )
+        .unwrap_err();
+        match want {
+            Want::Param => assert!(
+                matches!(err, Error::InvalidParameter { .. }),
+                "[{label}] expected InvalidParameter, got {err:?}"
+            ),
+            Want::Input => assert!(
+                matches!(err, Error::InvalidInput(_)),
+                "[{label}] expected InvalidInput, got {err:?}"
+            ),
+        }
+    }
 }
 
 // SeparableConv2D - depth_multiplier behavior and output shape

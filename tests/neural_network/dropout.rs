@@ -213,23 +213,17 @@ fn dropout_backward_kept_units_scaled_correctly() {
 // Dropout - error paths
 
 #[test]
-fn dropout_constructor_rejects_negative_rate() {
-    let err = Dropout::new(-0.1, vec![10]).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-#[test]
-fn dropout_constructor_rejects_rate_above_one() {
-    let err = Dropout::new(1.5, vec![10]).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
+fn dropout_constructor_rejects_invalid_rate() {
+    // Folds negative-rate and above-one-rate fan-out: same constructor, same error,
+    // differing only by the invalid scalar
+    for rate in [-0.1_f32, 1.5_f32] {
+        let err = Dropout::new(rate, vec![10]).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "rate {rate}: expected InvalidParameter, got {:?}",
+            err
+        );
+    }
 }
 
 #[test]

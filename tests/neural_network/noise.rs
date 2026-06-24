@@ -32,15 +32,19 @@ fn tensor_std(t: &Tensor) -> f64 {
 
 // GaussianNoise: constructor validation
 
-/// Negative stddev returns Err(InvalidParameter) rather than panicking
+/// An invalid stddev (negative, or non-finite NaN/+Inf) is rejected at construction with a
+/// graceful error rather than panicking now or later inside `Normal::new(..).unwrap()` in the
+/// forward pass. Each row is one originally-separate validation case.
 #[test]
-fn gaussian_noise_negative_stddev_returns_err() {
-    let result = GaussianNoise::new(-0.1, vec![4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected Err(InvalidParameter) for negative stddev, got {:?}",
-        result
-    );
+fn gaussian_noise_invalid_stddev_returns_err() {
+    for bad in [-0.1f32, f32::NAN, f32::INFINITY] {
+        let result = GaussianNoise::new(bad, vec![4, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected Err(InvalidParameter) for stddev={bad}, got {:?}",
+            result
+        );
+    }
 }
 
 /// stddev = 0 is accepted at construction
@@ -53,20 +57,6 @@ fn gaussian_noise_zero_stddev_construction_ok() {
 #[test]
 fn gaussian_noise_positive_stddev_construction_ok() {
     assert!(GaussianNoise::new(0.5, vec![4, 4]).is_ok());
-}
-
-/// A non-finite stddev is rejected at construction with a graceful error, rather than passing
-/// validation and panicking later inside `Normal::new(..).unwrap()` in the forward pass
-#[test]
-fn gaussian_noise_non_finite_stddev_returns_err() {
-    for bad in [f32::NAN, f32::INFINITY] {
-        let result = GaussianNoise::new(bad, vec![4, 4]);
-        assert!(
-            matches!(result, Err(Error::InvalidParameter { .. })),
-            "expected Err(InvalidParameter) for stddev={bad}, got {:?}",
-            result
-        );
-    }
 }
 
 // GaussianNoise: identity paths
@@ -299,37 +289,18 @@ fn gaussian_noise_empty_input_shape_output_shape_unknown() {
 
 // GaussianDropout: constructor validation
 
-/// rate = 1.0 is rejected: the valid interval [0, 1) excludes 1.0
+/// An out-of-range rate is rejected: the valid interval is [0, 1), so rate = 1.0 (excluded
+/// upper bound), rate > 1.0, and negative rate all fail. Each row is one originally-separate case.
 #[test]
-fn gaussian_dropout_rate_one_returns_err() {
-    let result = GaussianDropout::new(1.0, vec![4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected Err(InvalidParameter) for rate=1.0, got {:?}",
-        result
-    );
-}
-
-/// rate > 1.0 is rejected
-#[test]
-fn gaussian_dropout_rate_above_one_returns_err() {
-    let result = GaussianDropout::new(1.5, vec![4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected Err(InvalidParameter) for rate=1.5, got {:?}",
-        result
-    );
-}
-
-/// Negative rate is rejected
-#[test]
-fn gaussian_dropout_negative_rate_returns_err() {
-    let result = GaussianDropout::new(-0.1, vec![4, 4]);
-    assert!(
-        matches!(result, Err(Error::InvalidParameter { .. })),
-        "expected Err(InvalidParameter) for rate=-0.1, got {:?}",
-        result
-    );
+fn gaussian_dropout_invalid_rate_returns_err() {
+    for bad in [1.0f32, 1.5, -0.1] {
+        let result = GaussianDropout::new(bad, vec![4, 4]);
+        assert!(
+            matches!(result, Err(Error::InvalidParameter { .. })),
+            "expected Err(InvalidParameter) for rate={bad}, got {:?}",
+            result
+        );
+    }
 }
 
 /// rate = 0.0 is accepted at construction

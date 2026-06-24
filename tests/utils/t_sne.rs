@@ -22,108 +22,47 @@ fn small_data() -> Array2<f64> {
 
 // Constructor validation - perplexity
 
-/// perplexity = 0.0 is rejected as not positive
+/// Non-positive (0.0, negative) and non-finite (NaN, +inf) perplexity values are all
+/// rejected as InvalidParameter
 #[test]
-fn new_perplexity_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 0.0, 200.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Negative perplexity is rejected as InvalidParameter
-#[test]
-fn new_perplexity_negative_returns_invalid_parameter() {
-    let err = TSNE::new(2, -1.0, 200.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// NaN perplexity is rejected as not finite
-#[test]
-fn new_perplexity_nan_returns_invalid_parameter() {
-    let err = TSNE::new(2, f64::NAN, 200.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// +inf perplexity is rejected as not finite
-#[test]
-fn new_perplexity_infinity_returns_invalid_parameter() {
-    let err = TSNE::new(2, f64::INFINITY, 200.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
+fn new_perplexity_invalid_returns_invalid_parameter() {
+    for bad_perplexity in [0.0_f64, -1.0, f64::NAN, f64::INFINITY] {
+        let err = TSNE::new(2, bad_perplexity, 200.0, 250).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for perplexity={bad_perplexity}, got {err:?}"
+        );
+    }
 }
 
 // Constructor validation - learning_rate
 
-/// learning_rate = 0.0 is rejected as not positive
+/// Non-positive (0.0, negative) and non-finite (NaN, +inf) learning_rate values are all
+/// rejected as InvalidParameter
 #[test]
-fn new_learning_rate_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, 0.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// Negative learning_rate is rejected as InvalidParameter
-#[test]
-fn new_learning_rate_negative_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, -100.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// NaN learning_rate is rejected as not finite
-#[test]
-fn new_learning_rate_nan_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, f64::NAN, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// +inf learning_rate is rejected as not finite
-#[test]
-fn new_learning_rate_infinity_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, f64::INFINITY, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
+fn new_learning_rate_invalid_returns_invalid_parameter() {
+    for bad_learning_rate in [0.0_f64, -100.0, f64::NAN, f64::INFINITY] {
+        let err = TSNE::new(2, 5.0, bad_learning_rate, 250).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for learning_rate={bad_learning_rate}, got {err:?}"
+        );
+    }
 }
 
 // Constructor validation - n_components and n_iter
 
-/// n_components = 0 is rejected as InvalidParameter
+/// n_components = 0 and n_iter = 0 are each rejected as InvalidParameter
 #[test]
-fn new_n_components_zero_returns_invalid_parameter() {
-    let err = TSNE::new(0, 5.0, 200.0, 250).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// n_iter = 0 is rejected as InvalidParameter
-#[test]
-fn new_n_iter_zero_returns_invalid_parameter() {
-    let err = TSNE::new(2, 5.0, 200.0, 0).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
+fn new_zero_integer_param_returns_invalid_parameter() {
+    // (n_components, n_iter): one argument is the zero offender per row
+    for (n_components, n_iter) in [(0, 250), (2, 0)] {
+        let err = TSNE::new(n_components, 5.0, 200.0, n_iter).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for (n_components={n_components}, n_iter={n_iter}), got {err:?}"
+        );
+    }
 }
 
 /// Valid parameters produce Ok
@@ -389,41 +328,25 @@ fn fit_transform_well_separated_clusters_remain_separated() {
 
 // Error paths - fit_transform
 
-/// perplexity == n_samples is rejected as InvalidParameter
+/// perplexity == n_samples (5.0) and perplexity > n_samples (10.0) are both rejected as
+/// InvalidParameter (the dataset has 5 samples)
 #[test]
-fn fit_transform_perplexity_equals_n_samples_returns_invalid_parameter() {
-    // 5 samples, perplexity = 5.0 (= n_samples)
+fn fit_transform_perplexity_not_below_n_samples_returns_invalid_parameter() {
     let x: Array2<f64> =
         ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
-    let tsne = TSNE::new(2, 5.0, 200.0, 100)
-        .unwrap()
-        .with_random_state(42)
-        .with_init(Init::PCA)
-        .with_method(TSNEMethod::Exact)
-        .unwrap();
-    let err = tsne.fit_transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// perplexity > n_samples is rejected as InvalidParameter
-#[test]
-fn fit_transform_perplexity_exceeds_n_samples_returns_invalid_parameter() {
-    let x: Array2<f64> =
-        ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
-    let tsne = TSNE::new(2, 10.0, 200.0, 100)
-        .unwrap()
-        .with_random_state(42)
-        .with_init(Init::PCA)
-        .with_method(TSNEMethod::Exact)
-        .unwrap();
-    let err = tsne.fit_transform(&x).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {err:?}"
-    );
+    for bad_perplexity in [5.0_f64, 10.0] {
+        let tsne = TSNE::new(2, bad_perplexity, 200.0, 100)
+            .unwrap()
+            .with_random_state(42)
+            .with_init(Init::PCA)
+            .with_method(TSNEMethod::Exact)
+            .unwrap();
+        let err = tsne.fit_transform(&x).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for perplexity={bad_perplexity}, got {err:?}"
+        );
+    }
 }
 
 /// A single sample is rejected as InvalidInput (fewer than 2 samples)

@@ -61,14 +61,8 @@ fn cm_accuracy_partial() {
     // accuracy = (TP+TN)/(TP+FP+TN+FN) = 5/8 = 0.625
     let cm = cm_3_1_2_2();
     assert_abs_diff_eq!(cm.accuracy(), 0.625, epsilon = 1e-12);
-}
-
-#[test]
-fn cm_accuracy_range() {
     // accuracy must be in [0, 1]
-    let cm = cm_3_1_2_2();
-    let acc = cm.accuracy();
-    assert!((0.0..=1.0).contains(&acc));
+    assert!((0.0..=1.0).contains(&cm.accuracy()));
 }
 
 #[test]
@@ -502,70 +496,41 @@ fn mcm_per_class_f1() {
     assert_abs_diff_eq!(f1[2], 0.8, epsilon = 1e-12);
 }
 
-#[test]
-fn mcm_precision_macro() {
-    // macro = (1.0 + 1.0 + 2/3) / 3 = 8/9
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.precision(Average::Macro), 8.0 / 9.0, epsilon = 1e-12);
+#[derive(Clone, Copy)]
+enum MetricKind {
+    Precision,
+    Recall,
+    F1,
 }
 
 #[test]
-fn mcm_recall_macro() {
-    // macro = (1.0 + 0.5 + 1.0) / 3 = 5/6
+fn mcm_aggregated_precision_recall_f1() {
+    // Table-driven (metric, average, expected) over the same mcm_3class() fixture.
+    // Per-class precision=[1.0,1.0,2/3], recall=[1.0,0.5,1.0], f1=[1.0,2/3,4/5];
+    // support=[1,2,2], total=5.
     let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.recall(Average::Macro), 5.0 / 6.0, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_f1_macro() {
-    // macro = (1.0 + 2/3 + 4/5) / 3 = 37/45
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.f1(Average::Macro), 37.0 / 45.0, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_precision_micro() {
-    // Micro == accuracy for single-label data -> 0.8
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.precision(Average::Micro), 0.8, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_recall_micro() {
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.recall(Average::Micro), 0.8, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_f1_micro() {
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.f1(Average::Micro), 0.8, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_precision_weighted() {
-    // weighted = sum(prec_i * support_i) / total
-    //   = (1.0*1 + 1.0*2 + (2/3)*2) / 5 = 13/15
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(
-        cm.precision(Average::Weighted),
-        13.0 / 15.0,
-        epsilon = 1e-12
-    );
-}
-
-#[test]
-fn mcm_recall_weighted() {
-    // weighted = (1.0*1 + 0.5*2 + 1.0*2) / 5 = 4/5
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.recall(Average::Weighted), 4.0 / 5.0, epsilon = 1e-12);
-}
-
-#[test]
-fn mcm_f1_weighted() {
-    // weighted = (1.0*1 + (2/3)*2 + (4/5)*2) / 5 = 59/75
-    let cm = mcm_3class();
-    assert_abs_diff_eq!(cm.f1(Average::Weighted), 59.0 / 75.0, epsilon = 1e-12);
+    let cases = [
+        // macro = mean of per-class values
+        (MetricKind::Precision, Average::Macro, 8.0 / 9.0), // (1.0 + 1.0 + 2/3) / 3
+        (MetricKind::Recall, Average::Macro, 5.0 / 6.0),    // (1.0 + 0.5 + 1.0) / 3
+        (MetricKind::F1, Average::Macro, 37.0 / 45.0),      // (1.0 + 2/3 + 4/5) / 3
+        // micro == accuracy for single-label data -> 0.8
+        (MetricKind::Precision, Average::Micro, 0.8),
+        (MetricKind::Recall, Average::Micro, 0.8),
+        (MetricKind::F1, Average::Micro, 0.8),
+        // weighted = sum(value_i * support_i) / total
+        (MetricKind::Precision, Average::Weighted, 13.0 / 15.0), // (1.0*1 + 1.0*2 + (2/3)*2) / 5
+        (MetricKind::Recall, Average::Weighted, 4.0 / 5.0),      // (1.0*1 + 0.5*2 + 1.0*2) / 5
+        (MetricKind::F1, Average::Weighted, 59.0 / 75.0),        // (1.0*1 + (2/3)*2 + (4/5)*2) / 5
+    ];
+    for (metric, average, expected) in cases {
+        let actual = match metric {
+            MetricKind::Precision => cm.precision(average),
+            MetricKind::Recall => cm.recall(average),
+            MetricKind::F1 => cm.f1(average),
+        };
+        assert_abs_diff_eq!(actual, expected, epsilon = 1e-12);
+    }
 }
 
 #[test]

@@ -90,28 +90,22 @@ fn to_categorical_negative_label_is_invalid_input() {
     );
 }
 
-/// num_classes=2 with max_label=2 is too small (2 < 3) and gives InvalidParameter
+/// num_classes smaller than max_label+1 gives InvalidParameter:
+/// Some(2) with max_label=2 (2 < 3) and Some(0) with max_label=1 (0 < 2)
 #[test]
 fn to_categorical_num_classes_too_small_is_invalid_parameter() {
-    let labels = array![0i32, 1, 2]; // max_label = 2, need >= 3 classes
-    let err = to_categorical(&labels, Some(2)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
-}
-
-/// num_classes=0 with max_label=1 gives InvalidParameter (0 < 2)
-#[test]
-fn to_categorical_num_classes_zero_with_labels_is_invalid_parameter() {
-    let labels = array![0i32, 1];
-    let err = to_categorical(&labels, Some(0)).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "expected InvalidParameter, got {:?}",
-        err
-    );
+    // (labels, num_classes) pairs where num_classes < max_label + 1
+    let cases: Vec<(ndarray::Array1<i32>, usize)> =
+        vec![(array![0i32, 1, 2], 2), (array![0i32, 1], 0)];
+    for (labels, num_classes) in cases {
+        let err = to_categorical(&labels, Some(num_classes)).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "expected InvalidParameter for num_classes={}, got {:?}",
+            num_classes,
+            err
+        );
+    }
 }
 
 // to_sparse_categorical: argmax decode
@@ -146,40 +140,24 @@ fn to_sparse_categorical_tie_breaks_to_first_index() {
 
 // to_sparse_categorical: error paths
 
-/// NaN in the matrix produces NonFinite
+/// A non-finite sentinel (NaN, +Inf, -Inf) in the matrix produces NonFinite
 #[test]
-fn to_sparse_categorical_nan_is_non_finite() {
-    let mat = arr2(&[[0.1f64, f64::NAN, 0.5], [0.2, 0.3, 0.5]]);
-    let err = to_sparse_categorical(&mat).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
-        err
-    );
-}
-
-/// Positive infinity in the matrix produces NonFinite
-#[test]
-fn to_sparse_categorical_pos_inf_is_non_finite() {
-    let mat = arr2(&[[0.0f64, f64::INFINITY, 0.0]]);
-    let err = to_sparse_categorical(&mat).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
-        err
-    );
-}
-
-/// Negative infinity in the matrix produces NonFinite
-#[test]
-fn to_sparse_categorical_neg_inf_is_non_finite() {
-    let mat = arr2(&[[0.5f64, f64::NEG_INFINITY, 0.3]]);
-    let err = to_sparse_categorical(&mat).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {:?}",
-        err
-    );
+fn to_sparse_categorical_non_finite_is_non_finite() {
+    // Each row embeds one non-finite sentinel into an otherwise valid matrix
+    let cases = [
+        ("NaN", arr2(&[[0.1f64, f64::NAN, 0.5], [0.2, 0.3, 0.5]])),
+        ("+Inf", arr2(&[[0.0f64, f64::INFINITY, 0.0]])),
+        ("-Inf", arr2(&[[0.5f64, f64::NEG_INFINITY, 0.3]])),
+    ];
+    for (name, mat) in cases {
+        let err = to_sparse_categorical(&mat).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for {}, got {:?}",
+            name,
+            err
+        );
+    }
 }
 
 // Round-trip: to_categorical -> to_sparse_categorical

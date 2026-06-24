@@ -101,38 +101,24 @@ fn fit_mismatched_y_length_returns_dimension_mismatch() {
     );
 }
 
-/// Fitting with NaN in x must return Error::NonFinite
+/// Fitting with a non-finite value in x must return Error::NonFinite
+/// (covers NaN and +Inf sentinels hitting the same finiteness guard)
 #[test]
-fn fit_nan_in_x_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x = array![[f64::NAN, 2.0]];
-    let y = array![0];
-    let err = knn.fit(&x, &y).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
-}
-
-/// Fitting with Inf in x must return Error::NonFinite
-#[test]
-fn fit_inf_in_x_returns_non_finite() {
-    let mut knn = KNN::<i32>::new(1)
-        .unwrap()
-        .with_weighting_strategy(WeightingStrategy::Uniform)
-        .with_metric(Metric::Euclidean)
-        .unwrap();
-    let x = array![[f64::INFINITY, 2.0]];
-    let y = array![0];
-    let err = knn.fit(&x, &y).unwrap_err();
-    assert!(
-        matches!(err, Error::NonFinite(_)),
-        "expected NonFinite, got {err:?}"
-    );
+fn fit_non_finite_in_x_returns_non_finite() {
+    for sentinel in [f64::NAN, f64::INFINITY] {
+        let mut knn = KNN::<i32>::new(1)
+            .unwrap()
+            .with_weighting_strategy(WeightingStrategy::Uniform)
+            .with_metric(Metric::Euclidean)
+            .unwrap();
+        let x = array![[sentinel, 2.0]];
+        let y = array![0];
+        let err = knn.fit(&x, &y).unwrap_err();
+        assert!(
+            matches!(err, Error::NonFinite(_)),
+            "expected NonFinite for sentinel={sentinel:?}, got {err:?}"
+        );
+    }
 }
 
 /// Fitting with an empty x (0 rows) must return Error::EmptyInput

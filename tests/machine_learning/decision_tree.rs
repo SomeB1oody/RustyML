@@ -45,50 +45,42 @@ fn test_constructor_default_params_cart_classifier() {
     assert_eq!(tree.get_n_features(), 0);
 }
 
-/// ID3 with is_classifier=false must return InvalidInput
+/// ID3 and C4.5 with is_classifier=false must each return InvalidInput
+/// (neither supports regression). One row per algorithm.
 #[test]
-fn test_constructor_id3_regression_returns_invalid_input() {
-    let err = DecisionTree::new(Algorithm::ID3, false).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "Expected InvalidInput, got {err:?}"
-    );
+fn test_constructor_id3_c45_regression_returns_invalid_input() {
+    for algo in [Algorithm::ID3, Algorithm::C45] {
+        let err = DecisionTree::new(algo, false).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidInput(_)),
+            "Expected InvalidInput for {algo:?} regressor, got {err:?}"
+        );
+    }
 }
 
-/// C4.5 with is_classifier=false must return InvalidInput
+/// Out-of-range min_samples_* arguments must each return InvalidParameter:
+/// min_samples_split = 1 (less than 2) and min_samples_leaf = 0. One row per
+/// (builder, bad value) pair.
 #[test]
-fn test_constructor_c45_regression_returns_invalid_input() {
-    let err = DecisionTree::new(Algorithm::C45, false).unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidInput(_)),
-        "Expected InvalidInput, got {err:?}"
+fn test_constructor_min_samples_out_of_range() {
+    // (label, bad value, which builder to call)
+    type Case = (
+        &'static str,
+        usize,
+        fn(DecisionTree, usize) -> Result<DecisionTree, Error>,
     );
-}
-
-/// min_samples_split = 1 (less than 2) must return InvalidParameter
-#[test]
-fn test_constructor_min_samples_split_too_small() {
-    let err = DecisionTree::new(Algorithm::CART, true)
-        .unwrap()
-        .with_min_samples_split(1)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "Expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// min_samples_leaf = 0 must return InvalidParameter
-#[test]
-fn test_constructor_min_samples_leaf_zero() {
-    let err = DecisionTree::new(Algorithm::CART, true)
-        .unwrap()
-        .with_min_samples_leaf(0)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "Expected InvalidParameter, got {err:?}"
-    );
+    let cases: [Case; 2] = [
+        ("min_samples_split", 1, |t, v| t.with_min_samples_split(v)),
+        ("min_samples_leaf", 0, |t, v| t.with_min_samples_leaf(v)),
+    ];
+    for (label, bad, build) in cases {
+        let tree = DecisionTree::new(Algorithm::CART, true).unwrap();
+        let err = build(tree, bad).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "Expected InvalidParameter for {label}={bad}, got {err:?}"
+        );
+    }
 }
 
 /// min_samples_leaf > min_samples_split is rejected at fit time (the two are set
@@ -110,43 +102,20 @@ fn test_min_samples_leaf_greater_than_split_rejected_at_fit() {
     );
 }
 
-/// min_impurity_decrease = -0.1 (negative) must return InvalidParameter
+/// Invalid `min_impurity_decrease` values (negative, NaN, +Inf) must each return
+/// InvalidParameter. One row per originally-tested scalar.
 #[test]
-fn test_constructor_negative_min_impurity_decrease() {
-    let err = DecisionTree::new(Algorithm::CART, true)
-        .unwrap()
-        .with_min_impurity_decrease(-0.1)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "Expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// min_impurity_decrease = f64::NAN must return InvalidParameter
-#[test]
-fn test_constructor_nan_min_impurity_decrease() {
-    let err = DecisionTree::new(Algorithm::CART, true)
-        .unwrap()
-        .with_min_impurity_decrease(f64::NAN)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "Expected InvalidParameter, got {err:?}"
-    );
-}
-
-/// min_impurity_decrease = f64::INFINITY must return InvalidParameter
-#[test]
-fn test_constructor_infinite_min_impurity_decrease() {
-    let err = DecisionTree::new(Algorithm::CART, true)
-        .unwrap()
-        .with_min_impurity_decrease(f64::INFINITY)
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::InvalidParameter { .. }),
-        "Expected InvalidParameter, got {err:?}"
-    );
+fn test_constructor_invalid_min_impurity_decrease() {
+    for v in [-0.1_f64, f64::NAN, f64::INFINITY] {
+        let err = DecisionTree::new(Algorithm::CART, true)
+            .unwrap()
+            .with_min_impurity_decrease(v)
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidParameter { .. }),
+            "Expected InvalidParameter for min_impurity_decrease={v:?}, got {err:?}"
+        );
+    }
 }
 
 /// Custom params are stored and returned by the getters
