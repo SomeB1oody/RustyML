@@ -708,10 +708,10 @@ pub mod utils;
 /// # Conventions
 ///
 /// - **Panics instead of returning `Result`**. `metrics` is a lightweight leaf module - pure
-///   `array -> scalar` functions pulling only `ndarray` and `ahash` - so, like `ndarray` and
-///   `nalgebra` on a dimension mismatch, the metrics panic on precondition violations (mismatched
-///   lengths, empty input) rather than returning the crate's `Error`. The panic messages mirror
-///   that type's wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
+///   `array -> scalar` functions pulling only `ndarray` and `ahash` - so, like `ndarray` on a
+///   dimension mismatch, the metrics panic on precondition violations (mismatched lengths, empty
+///   input) rather than returning the crate's `Error`. The panic messages mirror that crate's
+///   wording (`dimension mismatch: ...`, `input is empty: ...`) for consistency
 /// - **Arguments are `(y_true, y_pred)`** - ground truth first, mirroring the
 ///   clustering metrics' `(labels_true, labels_pred)`. The order is irrelevant for the symmetric
 ///   metrics (MSE, MAE, accuracy) but significant for `r2_score`, `ConfusionMatrix::new`, and

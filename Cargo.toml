@@ -17,11 +17,11 @@ autobenches = false
 
 [features]
 # Classical machine learning algorithms for supervised and unsupervised learning
-machine_learning = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:postcard", "dep:thiserror"]
+machine_learning = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:ahash", "dep:serde", "dep:postcard", "dep:thiserror"]
 # Complete neural network framework with flexible architecture design
 neural_network = ["math", "dep:ndarray", "dep:rayon", "dep:ndarray-rand", "dep:indicatif", "dep:serde", "dep:postcard", "dep:thiserror"]
 # Data preprocessing and dimensionality reduction utilities
-utils = ["math", "dep:ndarray", "dep:nalgebra", "dep:rayon", "dep:ahash", "dep:serde", "dep:postcard", "dep:ndarray-rand", "dep:thiserror"]
+utils = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:serde", "dep:postcard", "dep:ndarray-rand", "dep:thiserror"]
 # Comprehensive evaluation metrics for model performance assessment
 metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
@@ -36,7 +36,6 @@ show_progress = ["dep:indicatif"]
 
 [dependencies]
 ndarray = { version = "0.17.2", features = ["rayon", "serde"], optional = true }
-nalgebra = { version = "0.35.0", optional = true }
 rayon = { version = "1.12.0", optional = true }
 ndarray-rand = { version = "0.16.0", optional = true }
 ahash = { version = "0.8.12", features = ["serde"], optional = true }
@@ -49,6 +48,8 @@ gemm = { version = "0.19.0", features = ["rayon"], optional = true }
 [dev-dependencies]
 approx = "0.5.1"
 criterion = "0.8.2"
+# cross-check `math::decomposition` routines
+nalgebra = "0.35.0"
 
 [[test]]
 name = "machine_learning"

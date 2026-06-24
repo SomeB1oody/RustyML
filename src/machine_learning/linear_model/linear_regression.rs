@@ -658,28 +658,23 @@ fn solve_ridge_lstsq(
     let total_rows = n + extra;
 
     // Augmented design matrix D and target t
-    let mut d = nalgebra::DMatrix::<f64>::zeros(total_rows, p);
+    let mut d = Array2::<f64>::zeros((total_rows, p));
     for i in 0..n {
         for j in 0..p {
-            d[(i, j)] = x[[i, j]];
+            d[[i, j]] = x[[i, j]];
         }
     }
     if extra > 0 {
         let s = ridge_lambda.sqrt();
         for j in 0..p {
-            d[(n + j, j)] = s;
+            d[[n + j, j]] = s;
         }
     }
-    let mut t = nalgebra::DVector::<f64>::zeros(total_rows);
+    let mut t = Array1::<f64>::zeros(total_rows);
     for (i, &yi) in y.iter().enumerate() {
         t[i] = yi;
     }
 
-    // SVD least-squares solve
-    let svd = nalgebra::linalg::SVD::new(d, true, true);
-    let solution = svd
-        .solve(&t, 1e-12)
-        .map_err(|e| Error::computation(format!("closed-form least squares failed: {e}")))?;
-
-    Ok(Array1::from_iter(solution.iter().copied()))
+    // SVD least-squares solve, yielding the minimum-norm solution
+    crate::math::decomposition::svd(&d, true, true).solve(&t, 1e-12)
 }

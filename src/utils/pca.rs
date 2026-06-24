@@ -49,31 +49,46 @@ impl SVDSolver {
         }
     }
 
-    /// Exact, deterministic full SVD via nalgebra
+    /// Exact, deterministic full decomposition via the symmetric eigendecomposition of the
+    /// covariance matrix `Xᵀ X / (n - 1)`: its eigenvectors are the principal axes and its
+    /// eigenvalues map back to the singular values of the centered data
     fn full_svd(
         x_centered: &Array2<f64>,
         n_components: usize,
     ) -> Result<(Array2<f64>, Array1<f64>), Error> {
         let n_samples = x_centered.nrows();
         let n_features = x_centered.ncols();
-        let x_slice = x_centered
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
-        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
-        let svd = nalgebra::linalg::SVD::new(x_mat, false, true);
-        let v_t = svd
-            .v_t
-            .ok_or_else(|| Error::computation("SVD did not compute V^T matrix"))?;
+        let denom = (n_samples - 1) as f64;
 
-        let singular_values: Vec<f64> = svd
-            .singular_values
-            .iter()
-            .take(n_components)
-            .cloned()
-            .collect();
-        // Copy the top components from V^T into ndarray layout
-        let components =
-            Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
+        // Eigendecompose the covariance matrix: eigenvectors are the principal axes, eigenvalues
+        // are the per-axis variances
+        let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
+        let eigen = crate::math::decomposition::symmetric_eigen(&cov);
+
+        // The solver returns eigenpairs ascending; order them by descending eigenvalue
+        let mut order: Vec<usize> = (0..n_features).collect();
+        order.sort_by(|&a, &b| {
+            eigen.eigenvalues[b]
+                .partial_cmp(&eigen.eigenvalues[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Principal axes are the covariance eigenvectors (columns), stored as component rows
+        let mut components = Array2::<f64>::zeros((n_components, n_features));
+        let mut singular_values = Vec::with_capacity(n_components);
+        for (row, &idx) in order.iter().take(n_components).enumerate() {
+            for j in 0..n_features {
+                components[[row, j]] = eigen.eigenvectors[[j, idx]];
+            }
+            // Convert each covariance eigenvalue back into a singular value of X
+            let lambda = eigen.eigenvalues[idx];
+            let clamped = if lambda.is_finite() && lambda > 0.0 {
+                lambda
+            } else {
+                0.0
+            };
+            singular_values.push((clamped * denom).sqrt());
+        }
 
         Ok((components, Array1::from_vec(singular_values)))
     }
@@ -91,38 +106,35 @@ impl SVDSolver {
         // Oversample to improve the randomized subspace
         let k = (n_components + oversampling).min(max_rank);
 
+        use crate::math::decomposition::{qr_q, svd};
+
         let mut rng = StdRng::seed_from_u64(seed);
         let mut omega = Vec::with_capacity(n_features * k);
         for _ in 0..(n_features * k) {
             omega.push(rng.random_range(-1.0..1.0));
         }
+        // Random projection matrix Omega (n_features x k), row-major
+        let omega = Array2::from_shape_vec((n_features, k), omega)
+            .map_err(|_| Error::computation("Failed to build random projection matrix"))?;
 
-        // Build a random projection matrix and sketch X
-        let x_slice = x_centered
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert centered data to slice"))?;
-        let x_mat = nalgebra::DMatrix::from_row_slice(n_samples, n_features, x_slice);
-        let omega_mat = nalgebra::DMatrix::from_row_slice(n_features, k, &omega);
         // Initial sketch Y = X * Omega, orthonormalized to an orthonormal basis Q
-        let mut q = nalgebra::linalg::QR::new(&x_mat * &omega_mat).q();
-        let x_t = x_mat.transpose();
+        let mut q = qr_q(&gemm_par_auto(x_centered, &omega));
 
         // Subspace (power) iterations with re-orthonormalization between each step
         let n_iter = 2usize;
         for _ in 0..n_iter {
-            let w = nalgebra::linalg::QR::new(&x_t * &q).q();
-            q = nalgebra::linalg::QR::new(&x_mat * &w).q();
+            let w = qr_q(&gemm_par_auto(&x_centered.t(), &q));
+            q = qr_q(&gemm_par_auto(x_centered, &w));
         }
 
         // Project X onto the orthonormal basis and compute the SVD in the reduced space
-        let b = &q.transpose() * &x_mat;
-
-        let svd = nalgebra::linalg::SVD::new(b, false, true);
-        let v_t = svd
+        let b = gemm_par_auto(&q.t(), x_centered);
+        let decomp = svd(&b, false, true);
+        let v_t = decomp
             .v_t
             .ok_or_else(|| Error::computation("Randomized SVD did not compute V^T matrix"))?;
 
-        let singular_values: Vec<f64> = svd
+        let singular_values: Vec<f64> = decomp
             .singular_values
             .iter()
             .take(n_components)
@@ -130,7 +142,7 @@ impl SVDSolver {
             .collect();
         // Expand V^T back to full feature-space components
         let components =
-            Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[(i, j)]);
+            Array2::<f64>::from_shape_fn((n_components, n_features), |(i, j)| v_t[[i, j]]);
 
         Ok((components, Array1::from_vec(singular_values)))
     }

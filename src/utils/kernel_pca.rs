@@ -19,7 +19,7 @@ pub use crate::types::{Gamma, KernelType};
 /// Eigen solver strategy for computing eigenpairs of the centered kernel matrix
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub enum EigenSolver {
-    /// Exact dense symmetric eigendecomposition via nalgebra; best for small to mid-sized kernel matrices
+    /// Exact dense symmetric eigendecomposition (in-house Householder + QL solver); best for small to mid-sized kernel matrices
     #[default]
     Dense,
     /// Krylov-subspace iterative solver (the pure-Rust counterpart of the symmetric solver behind ARPACK); accurate for a few leading components of a large kernel matrix
@@ -66,11 +66,7 @@ impl EigenSolver {
         n_components: usize,
     ) -> Result<(Array1<f64>, Array2<f64>), Error> {
         let n_samples = kernel_centered.nrows();
-        let kernel_slice = kernel_centered
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert kernel matrix to slice"))?;
-        let matrix = nalgebra::DMatrix::from_row_slice(n_samples, n_samples, kernel_slice);
-        let eigen = nalgebra::linalg::SymmetricEigen::new(matrix);
+        let eigen = crate::math::decomposition::symmetric_eigen(kernel_centered);
 
         // Sort eigenpairs by descending eigenvalue
         let mut pairs: Vec<(f64, usize)> = eigen
@@ -87,7 +83,7 @@ impl EigenSolver {
         for (comp_idx, (_, idx)) in pairs.into_iter().take(n_components).enumerate() {
             eigenvalues.push(eigen.eigenvalues[idx]);
             for row in 0..n_samples {
-                eigenvectors[[row, comp_idx]] = eigen.eigenvectors[(row, idx)];
+                eigenvectors[[row, comp_idx]] = eigen.eigenvectors[[row, idx]];
             }
         }
 

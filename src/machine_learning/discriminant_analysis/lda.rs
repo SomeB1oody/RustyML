@@ -3,7 +3,7 @@
 //!
 //! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration enums
 
-use crate::error::{Context, Error};
+use crate::error::Error;
 use crate::math::matmul::{gemm_par_auto, gemm_par_switch, gemv_par_auto};
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
@@ -26,6 +26,14 @@ pub enum Solver {
     /// Solves each class scoring system `Sigma * coef = mu` directly with the iterative LSQR
     /// method (Paige and Saunders), forming no explicit inverse
     LSQR,
+}
+
+/// Returns the symmetric part `(m + mᵀ) / 2` of a square matrix, used to defensively symmetrize
+/// covariance and scatter matrices before a symmetric eigendecomposition
+fn symmetric_part(m: &Array2<f64>) -> Array2<f64> {
+    let mut out = m.to_owned();
+    out.zip_mut_with(&m.t(), |a, &b| *a = (*a + b) * 0.5);
+    out
 }
 
 impl Solver {
@@ -62,43 +70,36 @@ impl Solver {
     /// fall below a relative tolerance
     fn eigen_inverse(cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
         let n_features = cov.ncols();
-        let cov_slice = cov
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert covariance matrix to slice"))?;
-        let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
+        let eig = crate::math::decomposition::symmetric_eigen(cov);
 
-        let eig = nalgebra::linalg::SymmetricEigen::new(cov_mat);
         let mut inv_vals = eig.eigenvalues.clone();
         let max_eval = inv_vals.iter().cloned().fold(0.0_f64, f64::max);
         let tol = (1e-12 * max_eval).max(1e-12);
-        for i in 0..inv_vals.len() {
-            let val = inv_vals[i];
-            inv_vals[i] = if val.abs() > tol { 1.0 / val } else { 0.0 };
+        for v in inv_vals.iter_mut() {
+            *v = if v.abs() > tol { 1.0 / *v } else { 0.0 };
         }
-        let inv_diag = nalgebra::DMatrix::from_diagonal(&inv_vals);
-        let inv_mat = &eig.eigenvectors * inv_diag * eig.eigenvectors.transpose();
 
-        Array2::from_shape_vec((n_features, n_features), inv_mat.as_slice().to_vec())
-            .context("Failed to build inverse covariance")
+        // Symmetric inverse: U diag(1/lambda) U^T, formed by scaling each eigenvector column
+        let mut scaled = eig.eigenvectors.clone();
+        for j in 0..n_features {
+            let s = inv_vals[j];
+            for i in 0..n_features {
+                scaled[[i, j]] *= s;
+            }
+        }
+        Ok(gemm_par_auto(&scaled, &eig.eigenvectors.t()))
     }
 
     /// Inverts a symmetric covariance through its SVD pseudo-inverse
     fn svd_pseudo_inverse(cov: &Array2<f64>) -> Result<Array2<f64>, Error> {
-        let n_features = cov.ncols();
-        let cov_slice = cov
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert covariance matrix to slice"))?;
-        let cov_mat = nalgebra::DMatrix::from_row_slice(n_features, n_features, cov_slice);
-
-        let svd = nalgebra::linalg::SVD::new(cov_mat, true, true);
-        let max_sv = svd.singular_values.max();
+        let decomp = crate::math::decomposition::svd(cov, true, true);
+        let max_sv = decomp
+            .singular_values
+            .iter()
+            .cloned()
+            .fold(0.0_f64, f64::max);
         let tol = (1e-12 * max_sv).max(1e-12);
-        let inv_mat = svd.pseudo_inverse(tol).map_err(|_| {
-            Error::computation("Covariance matrix is singular and cannot be inverted")
-        })?;
-
-        Array2::from_shape_vec((n_features, n_features), inv_mat.as_slice().to_vec())
-            .context("Failed to build inverse covariance")
+        decomp.pseudo_inverse(tol)
     }
 
     /// Derives the LDA projection matrix by solving the generalized eigenproblem
@@ -117,22 +118,13 @@ impl Solver {
         sb: &Array2<f64>,
         n_components: usize,
     ) -> Result<Array2<f64>, Error> {
-        use nalgebra::{DMatrix, linalg::SymmetricEigen};
+        use crate::math::decomposition::symmetric_eigen;
 
         let n_features = cov.nrows();
 
-        let cov_slice = cov
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert covariance matrix to slice"))?;
-        let sb_slice = sb
-            .as_slice()
-            .ok_or_else(|| Error::computation("Failed to convert between-class matrix to slice"))?;
-        let cov_mat = DMatrix::from_row_slice(n_features, n_features, cov_slice);
-        let sb_mat = DMatrix::from_row_slice(n_features, n_features, sb_slice);
-
         // Eigendecompose the within-class covariance S_w (symmetrized defensively)
-        let cov_sym = (&cov_mat + &cov_mat.transpose()) * 0.5;
-        let cov_eig = SymmetricEigen::new(cov_sym);
+        let cov_sym = symmetric_part(cov);
+        let cov_eig = symmetric_eigen(&cov_sym);
 
         // Whitening W = U diag(d^{-1/2})
         let max_d = cov_eig.eigenvalues.iter().cloned().fold(0.0_f64, f64::max);
@@ -142,17 +134,16 @@ impl Solver {
             let d_j = cov_eig.eigenvalues[j];
             let scale = if d_j > tol { 1.0 / d_j.sqrt() } else { 0.0 };
             for i in 0..n_features {
-                w_scale[(i, j)] *= scale;
+                w_scale[[i, j]] *= scale;
             }
         }
 
         // A = W^T S_b W is symmetric
-        let wt = w_scale.transpose();
-        let sbw = &sb_mat * &w_scale;
-        let a = &wt * &sbw;
-        let a_sym = (&a + &a.transpose()) * 0.5;
-        let a_eig = SymmetricEigen::new(a_sym);
-        let directions = &w_scale * &a_eig.eigenvectors;
+        let sbw = gemm_par_auto(sb, &w_scale);
+        let a = gemm_par_auto(&w_scale.t(), &sbw);
+        let a_sym = symmetric_part(&a);
+        let a_eig = symmetric_eigen(&a_sym);
+        let directions = gemm_par_auto(&w_scale, &a_eig.eigenvectors);
 
         // Rank discriminant directions by eigenvalue (class separability), descending
         let mut order: Vec<usize> = (0..n_features).collect();
@@ -166,7 +157,7 @@ impl Solver {
         let mut w = Array2::<f64>::zeros((n_features, n_components));
         for (component_idx, &idx) in order.iter().take(n_components).enumerate() {
             let col = directions.column(idx);
-            let norm = col.norm();
+            let norm = col.dot(&col).sqrt();
             if norm <= 1e-12 {
                 return Err(Error::computation(
                     "Discriminant direction norm too small for stable projection",

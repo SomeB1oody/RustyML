@@ -5,6 +5,10 @@ This change log records updates after 2025-3-24.
 
 Please view [SomeB1oody/RustyML](https://github.com/SomeB1oody/RustyML) for more info.
 
+## [Unreleased] - 2026-06-24 (UTC-7)
+### Changed
+- **Removed the `nalgebra` runtime dependency; SVD, symmetric eigendecomposition, and QR are now hand-rolled in pure Rust.** A new crate-internal `math::decomposition` module (gated on `machine_learning`/`utils`) provides `symmetric_eigen` (Householder `tred2` + implicit-shift QL `tql2`), a one-sided Jacobi `svd` with `solve` / `pseudo_inverse`, and a modified-Gram-Schmidt `qr_q`, all operating directly on `ndarray` arrays. The PCA (`Full` / `Randomized`), KernelPCA (`Dense`), LDA, and ridge/linear-regression solvers now call these instead of `nalgebra`; `PCA`'s `SVDSolver::Full` routes through the covariance eigendecomposition, reusing `symmetric_eigen`. `nalgebra` moves from an optional runtime dependency to a `dev-dependency` used only to cross-check the new routines in tests, dropping `nalgebra` + `simba` + `safe_arch` + `wide` from the normal dependency tree. Numerically equivalent up to the usual sign/rounding freedom; all existing solver tests pass unchanged.
+
 ## [v0.13.0] - 2026-06-23 (UTC-7)
 ### Added
 - **`TSNE` gains `min_grad_norm` early stopping after early exaggeration, for scikit-learn parity.** New builder `TSNE::with_min_grad_norm` and getter `get_min_grad_norm` set a gradient infinity-norm threshold (default `1e-7`, `DEFAULT_MIN_GRAD_NORM`); past the exaggeration phase, optimization stops once the largest absolute gradient drops below it. Pass `0.0` to disable and always run the full `n_iter` (the previous behavior). The field's `#[serde(default = "default_min_grad_norm")]` makes pre-field serialized instances deserialize with `1e-7`; the `new` signature is unchanged.

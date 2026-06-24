@@ -14,6 +14,11 @@ pub mod matmul;
 /// reproduce the same result across runs on the same machine
 pub mod reduction;
 
+/// Pure-`ndarray` dense decompositions (symmetric eigendecomposition, SVD, thin QR) shared by the
+/// classical-ML and `utils` estimators, replacing the former `nalgebra` dependency
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub(crate) mod decomposition;
+
 use ahash::AHashMap;
 use ndarray::{ArrayBase, Data, Ix1, Zip};
 

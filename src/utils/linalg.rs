@@ -250,15 +250,15 @@ pub(super) fn top_eigenpairs_lanczos(
     }
 
     // Reduced symmetric tridiagonal problem: diag = alphas, off-diag = betas
-    let mut tri = nalgebra::DMatrix::<f64>::zeros(dim, dim);
+    let mut tri = Array2::<f64>::zeros((dim, dim));
     for i in 0..dim {
-        tri[(i, i)] = alphas[i];
+        tri[[i, i]] = alphas[i];
         if i + 1 < dim {
-            tri[(i, i + 1)] = betas[i];
-            tri[(i + 1, i)] = betas[i];
+            tri[[i, i + 1]] = betas[i];
+            tri[[i + 1, i]] = betas[i];
         }
     }
-    let eigen = nalgebra::linalg::SymmetricEigen::new(tri);
+    let eigen = crate::math::decomposition::symmetric_eigen(&tri);
 
     // Order Ritz values descending and keep the leading min(k, dim)
     let mut order: Vec<usize> = (0..dim).collect();
@@ -276,7 +276,7 @@ pub(super) fn top_eigenpairs_lanczos(
         // Ritz vector = sum_j T_eigenvector[j, idx] * lanczos_vectors[j]
         let mut ritz = Array1::<f64>::zeros(n);
         for (j, lv) in lanczos_vectors.iter().enumerate() {
-            ritz.scaled_add(eigen.eigenvectors[(j, idx)], lv);
+            ritz.scaled_add(eigen.eigenvectors[[j, idx]], lv);
         }
         let norm = ritz.dot(&ritz).sqrt();
         if norm > f64::EPSILON {
