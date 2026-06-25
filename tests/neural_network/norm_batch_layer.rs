@@ -3,12 +3,12 @@
 //! definition; gradient correctness lives in tests/neural_network/gradient_check.rs
 
 use ndarray::ArrayD;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layers::regularization::normalization::batch_normalization::BatchNormalization;
 use rustyml::neural_network::layers::regularization::normalization::layer_normalization::{
     LayerNormalization, LayerNormalizationAxis,
 };
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 

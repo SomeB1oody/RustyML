@@ -10,7 +10,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2};
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::activation::linear::Linear;
@@ -19,6 +18,7 @@ use rustyml::neural_network::layers::activation::sigmoid::Sigmoid;
 use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 

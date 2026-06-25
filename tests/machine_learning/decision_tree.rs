@@ -6,10 +6,10 @@
 use crate::common::assert_allclose;
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
-use rustyml::error::{Error, TreeError};
 use rustyml::machine_learning::{Algorithm, DecisionTree};
 use rustyml::machine_learning::{Node, NodeType};
 use rustyml::{clear_global_seed, set_global_seed};
+use rustyml::{error::Error, machine_learning::TreeError};
 
 // A tiny linearly-separable binary dataset; feature 0 is 0.x for class 0
 // and 1.x for class 1, so any default-param tree reaches zero training error

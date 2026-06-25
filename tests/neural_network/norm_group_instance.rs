@@ -4,11 +4,11 @@
 //! gradient correctness lives in gradient_check.rs
 
 use ndarray::Array;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::normalization::group_normalization::GroupNormalization;
 use rustyml::neural_network::layers::regularization::normalization::instance_normalization::InstanceNormalization;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 

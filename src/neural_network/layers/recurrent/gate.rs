@@ -230,7 +230,7 @@ pub fn take_cache<T>(cache: &mut Option<T>, layer: &'static str) -> crate::error
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::NnError;
+    use crate::neural_network::NnError;
     use approx::assert_abs_diff_eq;
     use ndarray::{Array2, Array3, array};
 

@@ -8,11 +8,11 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_dropout::GaussianDropout;
 use rustyml::neural_network::layers::regularization::noise_injection::gaussian_noise::GaussianNoise;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 // helpers
 

@@ -5,7 +5,6 @@
 
 use crate::common::assert_allclose;
 use ndarray::{Array, Array2};
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layers::activation::Activation;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::activation::tanh::Tanh;
@@ -13,6 +12,7 @@ use rustyml::neural_network::layers::recurrent::gru::GRU;
 use rustyml::neural_network::layers::recurrent::lstm::LSTM;
 use rustyml::neural_network::layers::recurrent::simple_rnn::SimpleRNN;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 // SimpleRNN
 

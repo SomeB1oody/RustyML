@@ -5,13 +5,13 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2};
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::Activation;
 use rustyml::neural_network::layers::dense::Dense;
 use rustyml::neural_network::losses::{CategoricalCrossEntropy, MeanSquaredError};
 use rustyml::neural_network::optimizers::{Adam, SGD};
 use rustyml::neural_network::sequential::Sequential;
+use rustyml::{error::Error, neural_network::NnError};
 
 // helpers
 

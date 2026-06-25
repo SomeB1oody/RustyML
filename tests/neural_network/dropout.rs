@@ -10,13 +10,13 @@
 //! - Shape / ndim validation error paths
 
 use ndarray::Array;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::regularization::dropout::dropout::Dropout;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_1d::SpatialDropout1D;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_2d::SpatialDropout2D;
 use rustyml::neural_network::layers::regularization::dropout::spatial_dropout_3d::SpatialDropout3D;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 

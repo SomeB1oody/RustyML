@@ -3,8 +3,9 @@
 //! Supports training, prediction, summary, and binary save/load
 
 use super::traits::{Layer, Loss, Optimizer};
-use crate::error::{Error, IoError, NnError};
+use crate::error::{Error, IoError};
 use crate::math::reduction::det_reduce;
+use crate::neural_network::NnError;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::layer_weight::LayerWeight;

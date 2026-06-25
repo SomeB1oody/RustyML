@@ -7,7 +7,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::Tensor;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::pooling::average_pooling_1d::AveragePooling1D;
@@ -17,6 +16,7 @@ use rustyml::neural_network::layers::pooling::global_average_pooling_1d::GlobalA
 use rustyml::neural_network::layers::pooling::global_average_pooling_2d::GlobalAveragePooling2D;
 use rustyml::neural_network::layers::pooling::global_average_pooling_3d::GlobalAveragePooling3D;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 // AveragePooling1D, input [batch, channels, length]
 // pooled_length = (length - pool_size) / stride + 1

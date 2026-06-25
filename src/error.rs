@@ -1,19 +1,19 @@
 //! Error types for RustyML
 //!
 //! Every fallible operation in the crate returns [`RustymlResult<T>`](crate::error::RustymlResult), an alias for
-//! `std::result::Result<T, Error>`. [`Error`](crate::error::Error) is the single, unified error type. It groups
-//! domain-specific failures into the nested [`NnError`](crate::error::NnError), [`TreeError`](crate::error::TreeError), and [`IoError`](crate::error::IoError)
-//! sub-enums so callers can `match` precisely without the shared variants carrying concerns that
-//! only apply to one part of the crate
+//! `std::result::Result<T, Error>`. [`Error`](crate::error::Error) is the single, unified error type. It aggregates
+//! the domain-specific error enums — `NnError` (defined in `neural_network`) and `TreeError` (defined in
+//! `machine_learning`) — alongside the shared [`IoError`](crate::error::IoError), so callers can `match`
+//! precisely without the shared variants carrying concerns that only apply to one part of the crate
 //!
 //! # Categories
 //!
 //! - **Input validation**: [`Error::EmptyInput`](crate::error::Error::EmptyInput), [`Error::DimensionMismatch`](crate::error::Error::DimensionMismatch),
 //!   [`Error::ShapeMismatch`](crate::error::Error::ShapeMismatch), [`Error::NonFinite`](crate::error::Error::NonFinite), [`Error::InvalidParameter`](crate::error::Error::InvalidParameter),
 //!   [`Error::InvalidInput`](crate::error::Error::InvalidInput)
-//! - **Model state**: [`Error::NotFitted`](crate::error::Error::NotFitted), and the neural-network states in [`NnError`](crate::error::NnError)
+//! - **Model state**: [`Error::NotFitted`](crate::error::Error::NotFitted), and the neural-network states in `NnError`
 //! - **Numerics / computation**: [`Error::NotConverged`](crate::error::Error::NotConverged), [`Error::Computation`](crate::error::Error::Computation)
-//! - **Domain-specific**: [`Error::NeuralNetwork`](crate::error::Error::NeuralNetwork), [`Error::Tree`](crate::error::Error::Tree)
+//! - **Domain-specific**: `Error::NeuralNetwork` (wrapping `neural_network`'s `NnError`) and `Error::Tree` (wrapping `machine_learning`'s `TreeError`)
 //! - **I/O and serialization**: [`Error::Io`](crate::error::Error::Io)
 //!
 //! # Conventions
@@ -111,13 +111,15 @@ pub enum Error {
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
 
-    /// A neural-network-specific error. See [`NnError`]
+    /// A neural-network-specific error. See [`NnError`](crate::neural_network::NnError)
+    #[cfg(feature = "neural_network")]
     #[error(transparent)]
-    NeuralNetwork(#[from] NnError),
+    NeuralNetwork(#[from] crate::neural_network::NnError),
 
-    /// A decision-tree-specific error. See [`TreeError`]
+    /// A decision-tree-specific error. See [`TreeError`](crate::machine_learning::TreeError)
+    #[cfg(feature = "machine_learning")]
     #[error(transparent)]
-    Tree(#[from] TreeError),
+    Tree(#[from] crate::machine_learning::TreeError),
 
     /// An I/O or serialization error. See [`IoError`]
     #[error(transparent)]
@@ -192,12 +194,6 @@ impl Error {
             source: None,
         }
     }
-
-    /// Builds [`Error::NeuralNetwork`]`(`[`NnError::ForwardPassNotRun`]`)` for the named layer
-    #[cold]
-    pub fn forward_pass_not_run(layer: &'static str) -> Self {
-        Self::NeuralNetwork(NnError::ForwardPassNotRun(layer))
-    }
 }
 
 /// Lets `?` lift a raw [`std::io::Error`] directly into [`Error`] (as [`IoError::Std`])
@@ -214,54 +210,6 @@ impl From<postcard::Error> for Error {
     fn from(e: postcard::Error) -> Self {
         Self::Io(IoError::Serialization(e))
     }
-}
-
-/// Neural-network-specific errors, surfaced through [`Error::NeuralNetwork`]
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum NnError {
-    /// An output or gradient was requested from a layer before its forward pass had run
-    ///
-    /// The payload is the layer's name (e.g. `"Dense"`, `"LSTM"`)
-    #[error(
-        "forward pass has not been run on layer `{0}`; run `forward` before accessing outputs or `backward`"
-    )]
-    ForwardPassNotRun(&'static str),
-
-    /// A weight array assigned to a layer did not match the shape the layer expects
-    #[error("weight shape mismatch for `{name}`: layer expects {expected:?}, got {found:?}")]
-    WeightShape {
-        /// The parameter being set (e.g. `"weight"`, `"bias"`)
-        name: String,
-        /// The shape the layer requires
-        expected: Vec<usize>,
-        /// The shape that was supplied
-        found: Vec<usize>,
-    },
-
-    /// The model was used for training/inference before a required component was configured
-    ///
-    /// The payload names the missing component (e.g. `"optimizer"`, `"loss function"`)
-    #[error("model has not been compiled: `{0}` is not specified")]
-    NotCompiled(&'static str),
-
-    /// An operation was attempted on a model that contains no layers
-    #[error("model has no layers")]
-    EmptyModel,
-}
-
-/// Decision-tree-specific errors, surfaced through [`Error::Tree`]
-#[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum TreeError {
-    /// A classification-only operation (e.g. `predict_proba`) was called on a regression tree
-    #[error("operation requires a classification tree")]
-    NotClassificationTree,
-
-    /// The tree's internal structure violated an invariant (a missing child, an absent
-    /// categorical fallback, or a leaf without stored probabilities)
-    #[error("corrupt tree structure: {0}")]
-    CorruptStructure(&'static str),
 }
 
 /// I/O and serialization errors, surfaced through [`Error::Io`]
@@ -465,41 +413,6 @@ mod tests {
             e.to_string(),
             "model `KMeans` has not been fitted; call `fit` before this operation"
         );
-    }
-
-    /// `#[error(transparent)]` on `Error::NeuralNetwork` forwards the inner `NnError`'s
-    /// own Display: `EmptyModel` => `#[error("model has no layers")]`
-    #[test]
-    fn display_neural_network_transparent_forwards_inner() {
-        let inner = NnError::EmptyModel;
-        assert_eq!(inner.to_string(), "model has no layers");
-        // The transparent outer variant must render identically to the inner enum
-        let outer: Error = Error::from(NnError::EmptyModel);
-        assert_eq!(outer.to_string(), inner.to_string());
-    }
-
-    /// Transparent forwarding also holds for a parameterized `NnError` variant:
-    /// `NotCompiled("optimizer")` => `"model has not been compiled: `optimizer` is not specified"`
-    #[test]
-    fn display_neural_network_transparent_forwards_parameterized_inner() {
-        let outer: Error = Error::from(NnError::NotCompiled("optimizer"));
-        assert_eq!(
-            outer.to_string(),
-            "model has not been compiled: `optimizer` is not specified"
-        );
-    }
-
-    /// `#[error(transparent)]` on `Error::Tree` forwards the inner `TreeError`'s Display:
-    /// `NotClassificationTree` => `#[error("operation requires a classification tree")]`
-    #[test]
-    fn display_tree_transparent_forwards_inner() {
-        let inner = TreeError::NotClassificationTree;
-        assert_eq!(
-            inner.to_string(),
-            "operation requires a classification tree"
-        );
-        let outer: Error = Error::from(TreeError::NotClassificationTree);
-        assert_eq!(outer.to_string(), inner.to_string());
     }
 
     // Smart-constructor behavior not pinned by the Display tests above: variants with no

@@ -1,6 +1,7 @@
 //! Shared input/weight validation for the layer module
 
-use crate::error::{Error, NnError};
+use crate::error::Error;
+use crate::neural_network::NnError;
 
 /// Validates that a weight array assigned to a layer has the shape the layer expects
 ///

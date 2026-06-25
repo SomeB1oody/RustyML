@@ -74,6 +74,8 @@ use ndarray::ArrayD;
 /// N-dimensional array used as a tensor in the neural network
 pub type Tensor = ArrayD<f32>;
 
+/// Neural-network error type, aggregated into the crate-wide [`Error`](crate::error::Error)
+pub mod error;
 /// Neural network layer implementations
 pub mod layers;
 /// Loss function implementations
@@ -84,3 +86,5 @@ pub mod optimizers;
 pub mod sequential;
 /// Trait interfaces for neural network models
 pub mod traits;
+
+pub use error::NnError;

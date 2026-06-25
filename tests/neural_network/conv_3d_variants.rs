@@ -5,13 +5,13 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array1, Array2, Array4, Array5};
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::convolution::conv_3d::Conv3D;
 use rustyml::neural_network::layers::convolution::depthwise_conv_2d::DepthwiseConv2D;
 use rustyml::neural_network::layers::convolution::separable_conv_2d::SeparableConv2D;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use crate::common::assert_allclose;
 

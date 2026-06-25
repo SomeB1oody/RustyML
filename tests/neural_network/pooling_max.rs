@@ -4,7 +4,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::Array;
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layers::convolution::PaddingType;
 use rustyml::neural_network::layers::pooling::global_max_pooling_1d::GlobalMaxPooling1D;
 use rustyml::neural_network::layers::pooling::global_max_pooling_2d::GlobalMaxPooling2D;
@@ -13,6 +12,7 @@ use rustyml::neural_network::layers::pooling::max_pooling_1d::MaxPooling1D;
 use rustyml::neural_network::layers::pooling::max_pooling_2d::MaxPooling2D;
 use rustyml::neural_network::layers::pooling::max_pooling_3d::MaxPooling3D;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 

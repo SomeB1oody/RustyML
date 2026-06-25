@@ -83,6 +83,8 @@ pub mod svm;
 /// Tree models: decision trees
 pub mod tree;
 
+/// Decision-tree error type, aggregated into the crate-wide [`Error`](crate::error::Error)
+pub mod error;
 /// Common `Fit` / `Predict` traits implemented by every estimator
 pub mod traits;
 
@@ -101,6 +103,7 @@ pub use clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};
 pub use decomposition::{EigenSolver, KernelPCA, PCA, SVDSolver};
 pub use discriminant_analysis::{LDA, Shrinkage, Solver};
 pub use ensemble::{IsolationForest, IsolationTree};
+pub use error::TreeError;
 pub use linear_model::{LinearRegression, LogisticRegression, generate_polynomial_features};
 pub use manifold::{Init, TSNE, TSNEMethod};
 pub use neighbors::{KNN, WeightingStrategy};

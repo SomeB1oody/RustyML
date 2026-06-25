@@ -6,7 +6,6 @@
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array, Array2, Array3, Array4};
-use rustyml::error::{Error, NnError};
 use rustyml::neural_network::layers::activation::linear::Linear;
 use rustyml::neural_network::layers::activation::relu::ReLU;
 use rustyml::neural_network::layers::convolution::PaddingType;
@@ -14,6 +13,7 @@ use rustyml::neural_network::layers::convolution::conv_1d::Conv1D;
 use rustyml::neural_network::layers::convolution::conv_2d::Conv2D;
 use rustyml::neural_network::layers::layer_weight::LayerWeight;
 use rustyml::neural_network::traits::Layer;
+use rustyml::{error::Error, neural_network::NnError};
 
 use super::common::assert_allclose;
 

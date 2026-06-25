@@ -4,7 +4,8 @@
 //! algorithms, along with its node types ([`Node`], [`NodeType`]), the
 //! [`Algorithm`] selector, and the [`DecisionTreeParams`] hyperparameters
 
-use crate::error::{Error, TreeError};
+use crate::error::Error;
+use crate::machine_learning::TreeError;
 use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
