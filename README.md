@@ -149,9 +149,11 @@ input validation, and binary persistence.
 | **Dimensionality Reduction** | PCA (multiple SVD solvers), KernelPCA (RBF / Linear / Poly / Sigmoid / Cosine kernels), t-SNE |
 | **Anomaly Detection** | Isolation Forest |
 
-Shared config types live in [`types`](https://docs.rs/rustyml/latest/rustyml/types/index.html):
-`DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski), `RegularizationType` (L1 / L2),
-and `KernelType` (Linear / Poly / RBF / Sigmoid / Cosine). Predictive models implement the
+Shared config types live in [`machine_learning::types`](https://docs.rs/rustyml/latest/rustyml/machine_learning/types/index.html):
+`RegularizationType` (L1 / L2), `Gamma`, and `KernelType` (Linear / Poly / RBF / Sigmoid / Cosine).
+The `DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski) dispatcher lives in
+[`math`](https://docs.rs/rustyml/latest/rustyml/math/index.html) and is re-exported at the
+`machine_learning` root. Predictive models implement the
 unified `Fit` and `Predict` traits; the dimensionality-reduction transformers
 ([`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
 and [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html))
@@ -196,11 +198,10 @@ module dependency-light.
 
 ### `math`
 
-Pure, stateless numerical primitives shared across the crate: impurity measures (`entropy`,
-`gini`), distances (`squared_euclidean_distance_row`, `manhattan_distance_row`,
-`minkowski_distance_row`), statistics (`variance`, `standard_deviation`, `sum_of_square_total`,
-`sum_of_squared_errors`), and activation/loss helpers (`sigmoid`, `logistic_loss`,
-`hinge_loss`).
+Pure, stateless numerical primitives shared across the crate: `gemm`-backed matrix products
+(GEMM / GEMV), deterministic blocked parallel reductions, and pairwise distances
+(`squared_euclidean_distance_row`, `manhattan_distance_row`, `minkowski_distance_row`) plus the
+`DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski) dispatcher.
 
 ### `prelude`
 
@@ -211,7 +212,6 @@ use rustyml::prelude::machine_learning::*; // ML models (incl. PCA/KernelPCA/t-S
 use rustyml::prelude::neural_network::*;   // layers, optimizers, losses
 use rustyml::prelude::utils::*;            // scaling, label encoding, splitting
 use rustyml::prelude::metrics::*;          // evaluation metrics
-use rustyml::prelude::math::*;             // math primitives
 ```
 
 ## Feature Flags
@@ -221,10 +221,10 @@ The crate uses feature flags for modular compilation:
 | Feature | Description |
 |---------|-------------|
 | `machine_learning` | Classical ML algorithms (enables `math`) |
-| `neural_network` | Neural-network framework |
+| `neural_network` | Neural-network framework (enables `math`) |
 | `utils` | Data preprocessing and dataset splitting (enables `math`) |
 | `metrics` | Evaluation metrics (enables `math`) |
-| `math` | Mathematical and statistical primitives |
+| `math` | Numerical primitives (distances, matrix products, parallel reductions) |
 | `default` | `machine_learning` + `neural_network` |
 | `full` | All of the above modules |
 | `show_progress` | Render training/iteration progress bars in the terminal |

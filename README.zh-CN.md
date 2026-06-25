@@ -147,9 +147,10 @@ println!("F1 分数: {:.3}", cm.f1_score());
 | **降维** | PCA（多种 SVD 求解器）、KernelPCA（RBF / Linear / Poly / Sigmoid / Cosine 核）、t-SNE |
 | **异常检测** | 隔离森林（Isolation Forest） |
 
-共享的配置类型位于 [`types`](https://docs.rs/rustyml/latest/rustyml/types/index.html) 模块：
-`DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）、`RegularizationType`（L1 / L2）、
-以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。预测类模型实现统一的 `Fit` 与
+共享的配置类型位于 [`machine_learning::types`](https://docs.rs/rustyml/latest/rustyml/machine_learning/types/index.html) 模块：
+`RegularizationType`（L1 / L2）、`Gamma`，以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。
+`DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）调度器定义于 `math`，并在 `machine_learning`
+根重新导出。预测类模型实现统一的 `Fit` 与
 `Predict` trait；降维变换器（[`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
 与 [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html)）则实现
 `Transform` / `FitTransform`。
@@ -191,10 +192,9 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ### `math`
 
-整个库共享的纯函数式数值原语：不纯度度量（`entropy`、`gini`）、距离
-（`squared_euclidean_distance_row`、`manhattan_distance_row`、`minkowski_distance_row`）、
-统计量（`variance`、`standard_deviation`、`sum_of_square_total`、`sum_of_squared_errors`），
-以及激活/损失辅助函数（`sigmoid`、`logistic_loss`、`hinge_loss`）。
+整个库共享的纯函数式数值原语：`gemm` 支持的矩阵乘积（GEMM / GEMV）、确定性分块并行归约，以及
+成对距离（`squared_euclidean_distance_row`、`manhattan_distance_row`、`minkowski_distance_row`）
+和 `DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）调度器。
 
 ### `prelude`
 
@@ -205,7 +205,6 @@ use rustyml::prelude::machine_learning::*; // 机器学习模型（含 PCA/Kerne
 use rustyml::prelude::neural_network::*;   // 层、优化器、损失函数
 use rustyml::prelude::utils::*;            // 缩放、标签编码、数据划分
 use rustyml::prelude::metrics::*;          // 评估指标
-use rustyml::prelude::math::*;             // 数学原语
 ```
 
 ## 特性标志（Feature Flags）
@@ -215,10 +214,10 @@ use rustyml::prelude::math::*;             // 数学原语
 | Feature | 说明 |
 |---------|------|
 | `machine_learning` | 经典机器学习算法（启用 `math`） |
-| `neural_network` | 神经网络框架 |
+| `neural_network` | 神经网络框架（启用 `math`） |
 | `utils` | 数据预处理与数据集划分（启用 `math`） |
 | `metrics` | 评估指标（启用 `math`） |
-| `math` | 数学与统计原语 |
+| `math` | 数值原语（距离、矩阵乘积、并行归约） |
 | `default` | `machine_learning` + `neural_network` |
 | `full` | 以上全部模块 |
 | `show_progress` | 在终端渲染训练/迭代进度条 |

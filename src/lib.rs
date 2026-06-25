@@ -19,6 +19,7 @@
 //! - **Regression**: Linear Regression with L1/L2 regularization
 //! - **Classification**: Logistic Regression, KNN, Decision Tree, SVC, Linear SVC, LDA
 //! - **Clustering**: KMeans, DBSCAN, MeanShift
+//! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
 //! - **Anomaly Detection**: Isolation Forest
 //!
 //! ### [`neural_network`]
@@ -29,10 +30,9 @@
 //! - **Models**: Sequential architecture for feed-forward networks
 //!
 //! ### [`utils`]
-//! Data preprocessing and dimensionality reduction utilities:
-//! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
-//! - **Preprocessing**: Standardization, train-test splitting
-//! - **Kernel Functions**: RBF, Linear, Polynomial, Sigmoid, Cosine
+//! Data preprocessing and dataset-splitting utilities:
+//! - **Preprocessing**: standardization, normalization, label encoding
+//! - **Dataset Splitting**: train/test split (optionally stratified)
 //!
 //! ### [`metrics`]
 //! Evaluation metrics for model performance assessment:
@@ -164,14 +164,16 @@
 //!
 //! | Feature | Description |
 //! |---------|-------------|
-//! | `machine_learning` | Classical ML algorithms (depends on `math`) |
+//! | `machine_learning` | Classical ML algorithms |
 //! | `neural_network` | Neural network framework |
-//! | `utils` | Data preprocessing and dimensionality reduction |
+//! | `utils` | Data preprocessing and dataset splitting |
 //! | `metrics` | Evaluation metrics |
-//! | `math` | Mathematical utilities |
+//! | `math` | Numerical primitives (distances, matrix products, parallel reductions) |
 //! | `default` | Enables `machine_learning` and `neural_network` |
 //! | `full` | Enables all features |
 //! | `show_progress` | Show progress bars when training |
+//!
+//! `machine_learning`, `neural_network`, `utils`, and `metrics` each enable `math`.
 
 #[cfg(any(
     feature = "machine_learning",
