@@ -16,6 +16,8 @@
   <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml"><img alt="doc" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/doc.yml?branch=master&label=doc"></a>
 </p>
 
+> 📖 **[RustyML 使用指南](https://someb1oody.github.io/RustyML/zh-Hans/)**——一本上手实践的指南，覆盖所有模块，从第一个模型到性能调优。
+
 ## 概述
 
 RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端到端实现，不依赖任何 C/C++ 代码。

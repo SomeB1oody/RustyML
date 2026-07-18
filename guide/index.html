@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RustyML User Guide</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #333333;
+      --links: #4183c4;
+      --border: #e0e0e0;
+      --page-padding: 15px;
+      --content-max-width: 750px;
+      --menu-bar-height: 50px;
+      font-size: 62.5%;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: hsl(226, 23%, 11%);
+        --fg: #bcbdd0;
+        --links: #2b79a2;
+        --border: #2d334f;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      font-family: "Open Sans", sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      color-scheme: light dark;
+    }
+
+    body {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+
+    .menu-bar {
+      height: var(--menu-bar-height);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--page-padding);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .menu-title {
+      margin: 0 auto;
+      color: #737480;
+      font-size: 1.6rem;
+      font-weight: 400;
+    }
+
+    main {
+      max-width: var(--content-max-width);
+      margin: 0 auto;
+      padding: 0 15px 50px;
+    }
+
+    h1 {
+      margin: 48px 0 24px;
+      font-size: 3.2rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    p {
+      line-height: 1.7;
+    }
+
+    .description {
+      margin-bottom: 28px;
+    }
+
+    .language-list {
+      margin: 0;
+      padding-left: 24px;
+      line-height: 1.9;
+    }
+
+    .language-list a {
+      color: var(--links);
+      text-decoration: none;
+    }
+
+    .language-list a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="page-wrapper">
+    <header class="menu-bar">
+      <p class="menu-title">RustyML User Guide</p>
+    </header>
+    <main>
+      <h1>Choose your language</h1>
+      <p class="description">
+        A hands-on guide to machine learning and deep learning in pure Rust with RustyML,
+        available in English and Simplified Chinese.
+        <br>
+        RustyML 使用指南：用纯 Rust 做机器学习与深度学习，提供英文和简体中文两个版本。
+      </p>
+      <ol class="language-list">
+        <li><a href="./en/">English version</a></li>
+        <li><a href="./zh-Hans/">简体中文版</a></li>
+      </ol>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+[book]
+title = "RustyML User Guide"
+authors = ["SomeB1oody"]
+description = "A hands-on guide to machine learning and deep learning in pure Rust with RustyML."
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../book/en"
+
+[output.html]
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/SomeB1oody/RustyML"
+
+[output.html.playground]
+runnable = false

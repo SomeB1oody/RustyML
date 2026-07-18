@@ -1,0 +1,16 @@
+[book]
+title = "RustyML 使用指南"
+authors = ["SomeB1oody"]
+description = "RustyML 上手指南：用纯 Rust 做机器学习与深度学习。"
+language = "zh-Hans"
+src = "src"
+
+[build]
+build-dir = "../book/zh-Hans"
+
+[output.html]
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/SomeB1oody/RustyML"
+
+[output.html.playground]
+runnable = false

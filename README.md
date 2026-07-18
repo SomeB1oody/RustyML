@@ -16,6 +16,8 @@ A high-performance machine learning and deep learning library written in **pure 
   <a href="https://github.com/SomeB1oody/RustyML/actions/workflows/doc.yml"><img alt="doc" src="https://img.shields.io/github/actions/workflow/status/SomeB1oody/RustyML/doc.yml?branch=master&label=doc"></a>
 </p>
 
+> 📖 **[RustyML User Guide](https://someb1oody.github.io/RustyML/en/)** — a hands-on book covering every module, from your first model to performance tuning.
+
 ## Overview
 
 RustyML is a complete ecosystem for machine learning and deep learning, built end to end in
