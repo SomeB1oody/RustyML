@@ -1,7 +1,9 @@
 //! Integration tests for SVC (Support Vector Classifier)
 //!
-//! Label-domain contract: fit requires labels in {+1.0, -1.0}, predict emits
-//! labels in {+1.0, -1.0}, and sign(decision_function[i]) >= 0 <-> predict[i] == +1.0
+//! Label-domain contract: fit requires labels in {0.0, 1.0}, predict emits
+//! labels in {0.0, 1.0}, and sign(decision_function[i]) >= 0 <-> predict[i] == 1.0.
+//! The ±1 encoding the SMO dual needs is internal to `fit`; only
+//! `get_support_vector_labels` still exposes it.
 
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
@@ -10,37 +12,37 @@ use rustyml::machine_learning::{Gamma, KernelType, SVC};
 
 // helpers
 
-/// Linearly separable 2-feature dataset in the +1/-1 label domain
+/// Linearly separable 2-feature dataset in the 0/1 label domain
 ///
-/// Class +1 sits in the upper-right quadrant, class -1 in the lower-left, so a
+/// Class 1 sits in the upper-right quadrant, class 0 in the lower-left, so a
 /// large-margin linear-kernel SVC classifies every point with zero error
 fn linearly_separable_data() -> (Array2<f64>, Array1<f64>) {
     let x = Array2::from_shape_vec(
         (8, 2),
         vec![
-            2.0, 2.0, 3.0, 2.0, 2.0, 3.0, 3.0, 3.0, // class +1
-            -2.0, -2.0, -3.0, -2.0, -2.0, -3.0, -3.0, -3.0, // class -1
+            2.0, 2.0, 3.0, 2.0, 2.0, 3.0, 3.0, 3.0, // class 1
+            -2.0, -2.0, -3.0, -2.0, -2.0, -3.0, -3.0, -3.0, // class 0
         ],
     )
     .unwrap();
-    let y = array![1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0];
+    let y = array![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0];
     (x, y)
 }
 
-/// Concentric-rings dataset (inner ring class +1, outer ring class -1) that a
+/// Concentric-rings dataset (inner ring class 1, outer ring class 0) that a
 /// linear kernel cannot separate but an RBF kernel with gamma=0.5 can
 fn concentric_rings_data() -> (Array2<f64>, Array1<f64>) {
     let x = Array2::from_shape_vec(
         (8, 2),
         vec![
-            1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0, // inner ring (radius 1), class +1
+            1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0, // inner ring (radius 1), class 1
             // Radius 5 (not 3) keeps every inner-inner distance strictly below every inner-outer
             // distance, so RBF can separate the rings (at radius 3 some points are equidistant)
-            5.0, 0.0, -5.0, 0.0, 0.0, 5.0, 0.0, -5.0, // outer ring (radius 5), class -1
+            5.0, 0.0, -5.0, 0.0, 0.0, 5.0, 0.0, -5.0, // outer ring (radius 5), class 0
         ],
     )
     .unwrap();
-    let y = array![1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0];
+    let y = array![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0];
     (x, y)
 }
 
@@ -121,28 +123,57 @@ fn default_has_expected_params() {
 
 // fit label-domain validation
 
-/// fit rejects labels that are not exactly +/-1.0 (e.g. 0.0/1.0 domain)
+/// fit rejects the ±1 SVM-textbook domain: the public contract is {0.0, 1.0},
+/// matching LinearSVC and LogisticRegression
 #[test]
-fn fit_rejects_labels_not_plus_minus_one() {
+fn fit_rejects_plus_minus_one_labels() {
     let x = Array2::from_shape_vec((4, 2), vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0]).unwrap();
-    // 0-based binary labels, not valid for SVC
-    let y = array![0.0, 0.0, 1.0, 1.0];
+    // ±1 labels are the SMO-internal encoding, not the public domain
+    let y = array![1.0, 1.0, -1.0, -1.0];
     let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
         .unwrap()
         .with_random_state(42);
     let result = svc.fit(&x, &y);
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
-        "expected InvalidInput for non-±1 labels, got {:?}",
+        "expected InvalidInput for ±1 labels, got {:?}",
         result
     );
+}
+
+/// SVC and LinearSVC accept the same label array, so one can be swapped for the other
+#[test]
+fn fit_accepts_the_same_labels_as_linear_svc() {
+    use rustyml::machine_learning::LinearSVC;
+
+    let (x, y) = linearly_separable_data();
+
+    let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 200)
+        .unwrap()
+        .with_random_state(42);
+    svc.fit(&x, &y).expect("SVC should accept 0/1 labels");
+
+    let mut linear = LinearSVC::default();
+    linear
+        .fit(&x, &y)
+        .expect("LinearSVC should accept the very same array");
+
+    // Both emit the same label domain, so their outputs are directly comparable
+    for p in svc
+        .predict(&x)
+        .unwrap()
+        .iter()
+        .chain(linear.predict(&x).unwrap().iter())
+    {
+        assert!(*p == 0.0 || *p == 1.0, "label {p} outside {{0.0, 1.0}}");
+    }
 }
 
 /// fit rejects labels containing fractional values (e.g. 0.5)
 #[test]
 fn fit_rejects_fractional_labels() {
     let x = Array2::from_shape_vec((4, 2), vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0]).unwrap();
-    let y = array![1.0, -1.0, 0.5, -0.5];
+    let y = array![1.0, 0.0, 0.5, -0.5];
     let mut svc = SVC::new(KernelType::Linear, 1.0, 1e-3, 100)
         .unwrap()
         .with_random_state(42);
@@ -249,9 +280,9 @@ fn linear_kernel_classifies_separable_data_perfectly() {
     }
 }
 
-/// predict output is strictly within the label domain {+1.0, -1.0}
+/// predict output is strictly within the label domain {0.0, 1.0}
 #[test]
-fn predict_output_domain_is_plus_minus_one() {
+fn predict_output_domain_is_zero_one() {
     let (x, y) = linearly_separable_data();
     let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
         .unwrap()
@@ -261,13 +292,13 @@ fn predict_output_domain_is_plus_minus_one() {
     let preds = svc.predict(&x).expect("predict must succeed");
     for &p in preds.iter() {
         assert!(
-            p == 1.0 || p == -1.0,
-            "predict returned {p}, which is not in {{+1.0, -1.0}}"
+            p == 1.0 || p == 0.0,
+            "predict returned {p}, which is not in {{0.0, 1.0}}"
         );
     }
 }
 
-/// sign(decision_function[i]) >= 0 <-> predict[i] == +1.0 for the linear kernel
+/// sign(decision_function[i]) >= 0 <-> predict[i] == 1.0 for the linear kernel
 #[test]
 fn sign_consistency_linear_kernel() {
     let (x, y) = linearly_separable_data();
@@ -282,7 +313,7 @@ fn sign_consistency_linear_kernel() {
     let preds = svc.predict(&x).expect("predict must succeed");
 
     for (i, (&dv, &p)) in df.iter().zip(preds.iter()).enumerate() {
-        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { 0.0_f64 };
         assert_eq!(
             p, expected_pred,
             "sample {i}: decision_value={dv}, predict={p} disagrees with sign"
@@ -383,7 +414,7 @@ fn sign_consistency_rbf_kernel() {
     let preds = svc.predict(&x).expect("predict must succeed");
 
     for (i, (&dv, &p)) in df.iter().zip(preds.iter()).enumerate() {
-        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { 0.0_f64 };
         assert_eq!(
             p, expected_pred,
             "sample {i}: RBF decision_value={dv}, predict={p} disagrees with sign"
@@ -428,7 +459,7 @@ fn all_kernels_fit_and_predict_without_error() {
         // predictions must be in the correct domain
         for &p in preds.iter() {
             assert!(
-                p == 1.0 || p == -1.0,
+                p == 1.0 || p == 0.0,
                 "kernel {:?} returned label {p} outside {{±1.0}}",
                 kernel
             );
@@ -481,7 +512,7 @@ fn cosine_kernel_zero_vector_does_not_panic() {
         ],
     )
     .unwrap();
-    let y = array![1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
+    let y = array![1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
 
     let mut svc = SVC::new(KernelType::Cosine, 5.0, 1e-3, 1000)
         .unwrap()
@@ -710,7 +741,7 @@ fn sigmoid_kernel_sign_consistency() {
     let preds = svc.predict(&x).expect("predict must succeed");
 
     for (i, (&dv, &p)) in df.iter().zip(preds.iter()).enumerate() {
-        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+        let expected_pred = if dv >= 0.0 { 1.0_f64 } else { 0.0_f64 };
         assert_eq!(
             p, expected_pred,
             "sample {i}: Sigmoid decision_value={dv}, predict={p} disagrees"
@@ -743,7 +774,7 @@ fn fit_single_class_data_returns_not_converged() {
 #[test]
 fn decision_function_and_bias_match_closed_form_linear_kernel() {
     let x = array![[0.0], [-1.0], [2.0], [3.0]];
-    let y = array![-1.0, -1.0, 1.0, 1.0];
+    let y = array![0.0, 0.0, 1.0, 1.0];
     let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-5, 5000)
         .unwrap()
         .with_random_state(7);
@@ -776,7 +807,7 @@ fn rbf_gamma_scale_resolves_and_matches_explicit_equivalent() {
         ],
     )
     .unwrap();
-    let y = array![-1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+    let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
 
     // Expected scale gamma: X.var() is the population variance of all matrix entries
     let n_features = x.ncols() as f64;
@@ -836,7 +867,7 @@ fn rbf_gamma_auto_resolves_to_inverse_n_features() {
         ],
     )
     .unwrap();
-    let y = array![-1.0, -1.0, 1.0, 1.0];
+    let y = array![0.0, 0.0, 1.0, 1.0];
 
     let mut model = SVC::new(KernelType::RBF { gamma: Gamma::Auto }, 1.0, 1e-3, 200)
         .unwrap()

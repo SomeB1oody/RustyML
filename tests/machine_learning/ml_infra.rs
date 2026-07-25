@@ -374,18 +374,18 @@ fn generic_fit_predict_mean_shift_outputs_usize_labels() {
 }
 
 /// SVC (supervised, Predict::Output = Array1<f64>): a linear SVC on separable data labels
-/// every sample correctly in the +/-1 domain
+/// every sample correctly in the 0/1 domain
 #[test]
-fn generic_fit_predict_svc_outputs_pm1_labels() {
+fn generic_fit_predict_svc_outputs_zero_one_labels() {
     let x_train = Array2::from_shape_vec(
         (8, 2),
         vec![
-            2.0, 2.0, 3.0, 2.0, 2.0, 3.0, 3.0, 3.0, // class +1
-            -2.0, -2.0, -3.0, -2.0, -2.0, -3.0, -3.0, -3.0, // class -1
+            2.0, 2.0, 3.0, 2.0, 2.0, 3.0, 3.0, 3.0, // class 1
+            -2.0, -2.0, -3.0, -2.0, -2.0, -3.0, -3.0, -3.0, // class 0
         ],
     )
     .unwrap();
-    let y_train = Array1::from_vec(vec![1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0]);
+    let y_train = Array1::from_vec(vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 
     let mut svc = SVC::new(KernelType::Linear, 10.0, 1e-3, 1000)
         .unwrap()

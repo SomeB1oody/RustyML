@@ -123,7 +123,7 @@ fn bench_svc_fit(c: &mut Criterion) {
     let y: Array1<f64> = Array1::from_iter(
         x.rows()
             .into_iter()
-            .map(|r| if r.sum() > 0.0 { 1.0 } else { -1.0 }),
+            .map(|r| if r.sum() > 0.0 { 1.0 } else { 0.0 }),
     );
 
     let mut group = c.benchmark_group("svc");
@@ -156,7 +156,7 @@ fn bench_svc_predict(c: &mut Criterion) {
     let y: Array1<f64> = Array1::from_iter(
         x.rows()
             .into_iter()
-            .map(|r| if r.sum() > 0.0 { 1.0 } else { -1.0 }),
+            .map(|r| if r.sum() > 0.0 { 1.0 } else { 0.0 }),
     );
     let mut model = SVC::new(
         KernelType::RBF {

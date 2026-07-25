@@ -2,6 +2,9 @@
 //!
 //! Provides the [`SVC`] binary classifier, trained with the Sequential Minimal
 //! Optimization (SMO) algorithm, and the kernel types re-exported as [`KernelType`](crate::machine_learning::KernelType)
+//!
+//! Labels are `{0.0, 1.0}` on the public API, matching the crate's other binary
+//! classifiers; the ±1 encoding the SMO dual requires is confined to `fit`
 
 use crate::error::Error;
 use crate::machine_learning::parallel::map_collect;
@@ -30,7 +33,7 @@ use ndarray_rand::rand::rngs::StdRng;
 ///
 /// // Create training data
 /// let x_train = Array2::from_shape_vec((4, 2), vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0]).unwrap();
-/// let y_train = Array1::from_vec(vec![1.0, -1.0, -1.0, 1.0]);
+/// let y_train = Array1::from_vec(vec![1.0, 0.0, 0.0, 1.0]);
 ///
 /// // Initialize SVM classifier with RBF kernel
 /// let mut svc = SVC::new(
@@ -60,7 +63,7 @@ pub struct SVC {
     alphas: Option<Array1<f64>>,
     /// Training samples that define the decision boundary
     support_vectors: Option<Array2<f64>>,
-    /// Class labels corresponding to the support vectors
+    /// Class labels corresponding to the support vectors, in the SMO-internal ±1 encoding
     support_vector_labels: Option<Array1<f64>>,
     /// Intercept term in the decision function
     bias: Option<f64>,
@@ -185,6 +188,7 @@ impl SVC {
     get_field!(get_random_state, random_state, Option<u64>);
     get_field_as_ref!(get_alphas, alphas, Option<&Array1<f64>>);
     get_field_as_ref!(get_support_vectors, support_vectors, Option<&Array2<f64>>);
+    // Note: returns the SMO-internal ±1 encoding, not the {0.0, 1.0} public label domain
     get_field_as_ref!(
         get_support_vector_labels,
         support_vector_labels,
@@ -220,16 +224,23 @@ impl SVC {
     /// # Parameters
     ///
     /// - `x` - Training data matrix where each row is a sample
-    /// - `y` - Target labels (must be +1.0 or -1.0)
+    /// - `y` - Target labels (must be `0.0` or `1.0`)
     ///
     /// # Returns
     ///
     /// - `Result<&mut Self, Error>` - A mutable reference to the fitted model
     ///
+    /// # Notes
+    ///
+    /// The SMO dual is formulated over ±1 labels; `fit` converts internally, so the
+    /// `{0.0, 1.0}` domain matches [`LinearSVC`](crate::machine_learning::LinearSVC)
+    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression) and the
+    /// two SVM classifiers are interchangeable without rewriting the label array
+    ///
     /// # Errors
     ///
     /// - `Error::EmptyInput` - If input data is empty
-    /// - `Error::InvalidInput` - If labels are not +1/-1
+    /// - `Error::InvalidInput` - If labels are not `0.0`/`1.0`
     /// - `Error::NotConverged` - If the model fails to converge and no support vectors are found
     /// - `Error::NonFinite` - If numerical instability produces non-finite values
     ///
@@ -252,11 +263,15 @@ impl SVC {
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
         // Validate labels (SVC-specific)
-        if !y.iter().all(|&yi| yi == 1.0 || yi == -1.0) {
+        if !y.iter().all(|&yi| yi == 0.0 || yi == 1.0) {
             return Err(Error::invalid_input(
-                "All labels must be either 1.0 or -1.0",
+                "SVC is a binary classifier; all labels must be either 0.0 or 1.0",
             ));
         }
+
+        // The SMO dual is formulated over ±1 labels, so convert once here and keep the
+        // convention internal; `predict` maps back to {0.0, 1.0}
+        let y = &y.mapv(|v| if v <= 0.0 { -1.0 } else { 1.0 });
 
         let x_mean = x.mean().unwrap_or(0.0);
         let x_variance = x.iter().map(|&v| (v - x_mean).powi(2)).sum::<f64>() / x.len() as f64;
@@ -403,7 +418,7 @@ impl SVC {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - A 1D array containing predicted class labels (+1.0 or -1.0)
+    /// - `Result<Array1<f64>, Error>` - A 1D array containing predicted class labels (`0.0` or `1.0`)
     ///
     /// # Errors
     ///
@@ -450,7 +465,7 @@ impl SVC {
             return Err(Error::non_finite("decision function during prediction"));
         }
 
-        let predictions = decision_values.mapv(|v| if v >= 0.0 { 1.0 } else { -1.0 });
+        let predictions = decision_values.mapv(|v| if v >= 0.0 { 1.0 } else { 0.0 });
 
         Ok(predictions)
     }
@@ -798,11 +813,11 @@ impl SVC {
     /// # Parameters
     ///
     /// - `x` - Training data matrix where each row is a sample
-    /// - `y` - Target labels (must be +1.0 or -1.0)
+    /// - `y` - Target labels (must be `0.0` or `1.0`)
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - Predicted class labels for the training data
+    /// - `Result<Array1<f64>, Error>` - Predicted class labels (`0.0` or `1.0`) for the training data
     ///
     /// # Errors
     ///
