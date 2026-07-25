@@ -8,5 +8,6 @@ mod common;
 
 mod label_encoding;
 mod normalize;
+mod scaler;
 mod standardize;
 mod train_test_split;

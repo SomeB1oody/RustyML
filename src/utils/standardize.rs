@@ -2,6 +2,11 @@
 //!
 //! Provides [`standardize()`] and the [`StandardizationAxis`] selector, with sequential
 //! and parallel paths chosen by data size
+//!
+//! This is the one-shot form: every call recomputes the statistics from the array it is
+//! handed. When the same statistics have to be applied to more than one batch - a test split
+//! scaled by the training mean, or a single sample at inference time - use
+//! [`StandardScaler`](crate::utils::StandardScaler) instead, which stores them at fit time
 
 use crate::error::Error;
 use crate::math::reduction::det_reduce;
@@ -75,6 +80,15 @@ impl StandardizationAxis {
 /// - [`Error::NonFinite`] - If the input contains NaN or infinite values
 /// - [`Error::Computation`] - If the global-axis path has no values to standardize
 ///
+/// # Notes
+///
+/// The statistics come from `data` itself on every call, so standardizing a test set this way
+/// scales it by its own column statistics - a different linear map than the one applied to the
+/// training data. Fit a [`StandardScaler`](crate::utils::StandardScaler) on the training matrix
+/// and `transform` the rest when the batches have to agree;
+/// `StandardScaler::default().fit_transform(&x)` returns exactly what
+/// [`StandardizationAxis::Column`] produces here
+///
 /// # Performance
 ///
 /// - The global-axis path computes its moments through a blocked parallel reduction above
@@ -103,11 +117,11 @@ where
 
 /// Running (count, mean, sum-of-squared-deviations) statistics for Welford's online
 /// algorithm, which computes mean and variance in a single numerically stable pass
-type WelfordState = (f64, f64, f64);
+pub(super) type WelfordState = (f64, f64, f64);
 
 /// Folds one value into a Welford accumulator
 #[inline]
-fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordState {
+pub(super) fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordState {
     let count = count + 1.0;
     let delta = x - mean;
     let mean = mean + delta / count;
@@ -116,8 +130,9 @@ fn welford_step((count, mean, m2): WelfordState, x: f64) -> WelfordState {
 }
 
 /// Merges two Welford accumulators (Chan et al.), enabling a parallel one-pass reduction
+/// and the incremental refits behind [`StandardScaler::partial_fit`](crate::utils::StandardScaler::partial_fit)
 #[inline]
-fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
+pub(super) fn welford_merge(a: WelfordState, b: WelfordState) -> WelfordState {
     let (na, ma, m2a) = a;
     let (nb, mb, m2b) = b;
     if na == 0.0 {
@@ -152,7 +167,7 @@ fn is_constant_feature(variance: f64, mean: f64, n: f64) -> bool {
 /// is divided by `1.0` instead, so its centered values map to zeros rather than being amplified
 /// by a vanishing divisor, setting the scale of a constant feature to `1.0`
 #[inline]
-fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
+pub(super) fn scale_from_variance(variance: f64, mean: f64, n: f64) -> f64 {
     if is_constant_feature(variance, mean, n) {
         1.0
     } else {

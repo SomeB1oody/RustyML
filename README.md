@@ -157,7 +157,9 @@ The `DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski) dispatcher l
 unified `Fit` and `Predict` traits; the dimensionality-reduction transformers
 ([`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
 and [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html))
-implement `Transform` / `FitTransform`.
+implement `Transform` / `FitTransform`. All four traits live at the crate root in
+[`traits`](https://docs.rs/rustyml/latest/rustyml/traits/index.html), shared with the stateful
+preprocessing transformers in `utils`.
 
 ### `neural_network`
 
@@ -182,7 +184,9 @@ inspection (`get_weights`), and binary serialization (`save_to_path` / `load_fro
 Data preprocessing and dataset splitting. (Dimensionality reduction — `PCA`, `KernelPCA`,
 `TSNE` — now lives in `machine_learning` under `decomposition` and `manifold`.)
 
-- **Scaling** — `standardize` (z-score), `normalize` (configurable axis & order)
+- **Scaling** — `standardize` (one-shot z-score), `StandardScaler` (`fit` / `transform` /
+  `inverse_transform` / `partial_fit`, storing the training mean and std for reuse on later
+  batches, and persistable with `save_to_path`), `normalize` (configurable axis & order)
 - **Label encoding** — `to_categorical`, `to_categorical_with_mapping`, `to_sparse_categorical`
 - **Splitting** — `train_test_split` and `train_test_split_stratified`, with a configurable ratio
 

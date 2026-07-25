@@ -1,7 +1,7 @@
 //! Prelude re-exports for the machine learning estimators, traits, and shared enums
 
-pub use crate::machine_learning::traits::{Fit, FitTransform, Predict, Transform};
 pub use crate::machine_learning::{DistanceCalculationMetric, RegularizationType};
+pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 
 pub use crate::machine_learning::KernelType;
 pub use crate::machine_learning::clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};

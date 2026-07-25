@@ -8,10 +8,10 @@
 //! [`discriminant_analysis`](crate::machine_learning::discriminant_analysis), and
 //! [`ensemble`](crate::machine_learning::ensemble). Every estimator is also re-exported here,
 //! so it is reachable directly as `machine_learning::<Model>`. Supervised and unsupervised
-//! estimators implement the shared [`Fit`](crate::machine_learning::traits::Fit) /
-//! [`Predict`](crate::machine_learning::traits::Predict) traits; the dimensionality-reduction
-//! transformers implement [`Transform`](crate::machine_learning::traits::Transform) /
-//! [`FitTransform`](crate::machine_learning::traits::FitTransform)
+//! estimators implement the shared [`Fit`](crate::traits::Fit) /
+//! [`Predict`](crate::traits::Predict) traits; the dimensionality-reduction
+//! transformers implement [`Transform`](crate::traits::Transform) /
+//! [`FitTransform`](crate::traits::FitTransform)
 //!
 //! # Supervised learning
 //!
@@ -62,6 +62,9 @@
 //! ```
 
 pub use crate::math::DistanceCalculationMetric;
+/// The crate-wide estimator traits, re-exported here for convenience; their canonical
+/// home is [`crate::traits`]
+pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use types::{Gamma, KernelType, RegularizationType};
 
 /// Clustering estimators: DBSCAN, K-means, and Mean Shift
@@ -85,8 +88,6 @@ pub mod tree;
 
 /// Decision-tree error type, aggregated into the crate-wide [`Error`](crate::error::Error)
 pub mod error;
-/// Common `Fit` / `Predict` traits implemented by every estimator
-pub mod traits;
 
 /// Internal linear-algebra primitives shared across estimator families: dense factorizations (symmetric eigendecomposition, SVD, thin QR) plus iterative top-`k` eigensolvers (power iteration, Lanczos)
 pub(crate) mod linalg;
@@ -108,5 +109,4 @@ pub use linear_model::{LinearRegression, LogisticRegression, generate_polynomial
 pub use manifold::{Init, TSNE, TSNEMethod};
 pub use neighbors::{KNN, WeightingStrategy};
 pub use svm::{LinearSVC, Loss, SVC};
-pub use traits::{Fit, FitTransform, Predict, Transform};
 pub use tree::{Algorithm, DecisionTree, DecisionTreeParams, Node, NodeType};

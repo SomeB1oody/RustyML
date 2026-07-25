@@ -31,7 +31,8 @@
 //!
 //! ### [`utils`]
 //! Data preprocessing and dataset-splitting utilities:
-//! - **Preprocessing**: standardization, normalization, label encoding
+//! - **Preprocessing**: standardization (one-shot `standardize`, or `StandardScaler` when the
+//!   training statistics must be reused), normalization, label encoding
 //! - **Dataset Splitting**: train/test split (optionally stratified)
 //!
 //! ### [`metrics`]
@@ -234,7 +235,7 @@ fn create_progress_bar(total: u64, template: &str) -> ProgressBar {
 /// - `$method_name` - The name of the getter method (e.g. get_fit_intercept)
 /// - `$field_name` - The name of the field to access (e.g. fit_intercept)
 /// - `$return_type` - The return type of the getter method
-#[cfg(feature = "machine_learning")]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -256,7 +257,7 @@ macro_rules! get_field {
 /// - `$method_name` - The identifier for the generated getter method name
 /// - `$field_name` - The identifier of the struct field to access
 /// - `$return_type` - The type for the return value (typically a reference type like `&Type`)
-#[cfg(feature = "machine_learning")]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! get_field_as_ref {
     ($method_name:ident, $field_name:ident, $return_type:ty) => {
         #[doc = concat!("Gets the `", stringify!($field_name), "` field.\n\n")]
@@ -277,7 +278,7 @@ macro_rules! get_field_as_ref {
 /// # Parameters
 ///
 /// - `$model_type` - The type of the model struct (e.g. LinearRegression, LogisticRegression)
-#[cfg(feature = "machine_learning")]
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
 macro_rules! model_save_and_load_methods {
     ($model_type:ty) => {
         /// Saves the trained model to a binary file at the specified path
@@ -459,10 +460,16 @@ pub mod math;
 #[cfg(feature = "machine_learning")]
 pub mod machine_learning;
 
+/// The shared estimator contract - `Fit` / `Predict` / `Transform` / `FitTransform` -
+/// implemented by every model and stateful transformer in the crate
+#[cfg(any(feature = "machine_learning", feature = "utils"))]
+pub mod traits;
+
 /// Single-import re-export of the crate's most commonly used types, traits, and functions
 pub mod prelude;
 
-/// Data preprocessing (normalize, standardize, label encoding) and train/test dataset splitting
+/// Data preprocessing (normalize, standardize, `StandardScaler`, label encoding) and
+/// train/test dataset splitting
 #[cfg(feature = "utils")]
 pub mod utils;
 

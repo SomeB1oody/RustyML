@@ -153,7 +153,9 @@ println!("F1 分数: {:.3}", cm.f1_score());
 根重新导出。预测类模型实现统一的 `Fit` 与
 `Predict` trait；降维变换器（[`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
 与 [`manifold`](https://docs.rs/rustyml/latest/rustyml/machine_learning/manifold/index.html)）则实现
-`Transform` / `FitTransform`。
+`Transform` / `FitTransform`。这四个 trait 统一定义在 crate 根的
+[`traits`](https://docs.rs/rustyml/latest/rustyml/traits/index.html) 模块，
+与 `utils` 中的有状态预处理变换器共用。
 
 ### `neural_network`
 
@@ -177,7 +179,9 @@ println!("F1 分数: {:.3}", cm.f1_score());
 数据预处理与数据集划分。（降维 - `PCA`、`KernelPCA`、`TSNE` - 现已迁至 `machine_learning`
 下的 `decomposition` 与 `manifold`。）
 
-- **缩放** - `standardize`（z-score 标准化）、`normalize`（可配置轴与范数阶数）
+- **缩放** - `standardize`（一次性 z-score 标准化）、`StandardScaler`（`fit` / `transform` /
+  `inverse_transform` / `partial_fit`，保存训练集的均值与标准差以套用到后续批次，并可用
+  `save_to_path` 持久化）、`normalize`（可配置轴与范数阶数）
 - **标签编码** - `to_categorical`、`to_categorical_with_mapping`、`to_sparse_categorical`
 - **数据划分** - `train_test_split` 与 `train_test_split_stratified`，比例可配置
 

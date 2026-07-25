@@ -13,7 +13,7 @@ use rustyml::machine_learning::IsolationForest;
 use rustyml::machine_learning::KMeans;
 use rustyml::machine_learning::KernelType;
 use rustyml::machine_learning::LinearRegression;
-use rustyml::machine_learning::traits::{Fit, Predict};
+use rustyml::traits::{Fit, Predict};
 
 use rustyml::machine_learning::DBSCAN;
 use rustyml::machine_learning::DistanceCalculationMetric as Metric;

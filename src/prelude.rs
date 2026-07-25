@@ -11,8 +11,8 @@
 //! - **Machine learning**: classification (KNN, DecisionTree, LogisticRegression, SVC, LinearSVC,
 //!   LDA), regression (LinearRegression), clustering (KMeans, DBSCAN, MeanShift), dimensionality
 //!   reduction (PCA, KernelPCA, t-SNE), and anomaly detection (IsolationForest)
-//! - **Utilities**: preprocessing (standardize, normalize, label encoding) and dataset splitting
-//!   (train_test_split)
+//! - **Utilities**: preprocessing (standardize, StandardScaler, normalize, label encoding) and
+//!   dataset splitting (train_test_split)
 //! - **Metrics**: regression, classification, and clustering evaluation metrics
 //! - **Neural network**: layers, optimizers, loss functions, and the Sequential model
 //!
