@@ -102,7 +102,7 @@ mod validation;
 pub use clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};
 pub use decomposition::{EigenSolver, KernelPCA, PCA, SVDSolver};
 pub use discriminant_analysis::{LDA, Shrinkage, Solver};
-pub use ensemble::{IsolationForest, IsolationTree};
+pub use ensemble::{Contamination, IsolationForest, IsolationTree};
 pub use error::TreeError;
 pub use linear_model::{LinearRegression, LogisticRegression, generate_polynomial_features};
 pub use manifold::{Init, TSNE, TSNEMethod};

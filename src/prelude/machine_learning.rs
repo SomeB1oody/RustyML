@@ -7,7 +7,7 @@ pub use crate::machine_learning::KernelType;
 pub use crate::machine_learning::clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};
 pub use crate::machine_learning::decomposition::{EigenSolver, KernelPCA, PCA, SVDSolver};
 pub use crate::machine_learning::discriminant_analysis::{LDA, Shrinkage, Solver};
-pub use crate::machine_learning::ensemble::IsolationForest;
+pub use crate::machine_learning::ensemble::{Contamination, IsolationForest};
 pub use crate::machine_learning::linear_model::{
     LinearRegression, LogisticRegression, generate_polynomial_features,
 };

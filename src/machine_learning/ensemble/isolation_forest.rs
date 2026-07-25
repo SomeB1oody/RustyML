@@ -3,6 +3,10 @@
 //! Provides the [`IsolationForest`] estimator and its underlying [`IsolationTree`]
 //! node type. They isolate outliers via random feature splits and score samples by
 //! their average path length across the forest
+//!
+//! The inlier/outlier decision threshold is [`Contamination`], resolved against the
+//! *training* scores at fit time, so [`IsolationForest::predict`] is a fitted rule:
+//! it gives the same answer for a sample whether it is scored alone or in a batch
 
 use crate::error::Error;
 use crate::machine_learning::validation::{
@@ -16,6 +20,22 @@ use ndarray_rand::rand::rngs::StdRng;
 
 /// Euler–Mascheroni constant, used in the harmonic-number approximation of [`average_path_length_factor`]
 const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
+
+/// The inlier/outlier decision threshold for [`IsolationForest`]
+///
+/// Resolved into a concrete score cutoff at fit time from the *training* scores (see
+/// [`IsolationForest::get_offset`]), so the resulting rule does not depend on how the
+/// samples you later predict on happen to be batched
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub enum Contamination {
+    /// `'auto'`: the `0.5` cutoff from the original Isolation Forest paper — a sample is
+    /// an outlier when its normalized score exceeds the expected path length of the forest
+    Auto,
+    /// The expected proportion of outliers in the training data, in `(0.0, 0.5]`
+    ///
+    /// The cutoff becomes the `ceil(fraction * n_train)`-th highest training score
+    Fraction(f64),
+}
 
 /// Average path-length normalization factor `c(n)` for isolation trees: the expected path length
 /// of an unsuccessful search in a binary search tree of `n` points, used to normalize raw path
@@ -52,6 +72,10 @@ const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 /// Average isolation-tree path length for the prediction work estimate, `c(256) ~= 10`
 /// (`2 * H(psi - 1) - 2(psi - 1)/psi` at the default subsample size 256)
 const ISOLATION_TREE_AVG_PATH: usize = 10;
+
+/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al., where a
+/// normalized score above `0.5` means the sample isolates faster than the forest average
+const AUTO_CONTAMINATION_OFFSET: f64 = 0.5;
 
 /// A node in an isolation tree
 ///
@@ -95,7 +119,12 @@ pub enum IsolationTree {
 /// let mut model = IsolationForest::new(100, 256).unwrap().with_random_state(42);
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(&data).unwrap();
-/// let scores = model.predict(&data).unwrap();
+///
+/// // Raw anomaly scores in [0, 1], higher meaning more anomalous
+/// let scores = model.score_samples(&data).unwrap();
+///
+/// // Hard labels: -1 for outliers, +1 for inliers, thresholded at the fitted offset
+/// let labels = model.predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IsolationForest {
@@ -115,6 +144,11 @@ pub struct IsolationForest {
     /// anomaly-score normalization `c(n)` uses this realized size, not `max_samples`, so the
     /// scores stay correct when the dataset is smaller than `max_samples`
     sample_size: usize,
+    /// Rule for choosing the inlier/outlier cutoff, resolved into `offset` at fit time
+    contamination: Contamination,
+    /// Score cutoff separating inliers from outliers, `None` before training. A sample
+    /// scoring at or above this is labelled `-1` by [`IsolationForest::predict`]
+    offset: Option<f64>,
 }
 
 impl Default for IsolationForest {
@@ -128,6 +162,7 @@ impl Default for IsolationForest {
     /// - `max_depth` - 8 (ceil(log2(256)))
     /// - `random_state` - None
     /// - `n_features` - 0
+    /// - `contamination` - `Contamination::Auto` (the paper's 0.5 cutoff)
     fn default() -> Self {
         Self {
             trees: None,
@@ -137,6 +172,8 @@ impl Default for IsolationForest {
             max_depth: 8, // ceil(log2(256)) = 8
             random_state: None,
             n_features: 0,
+            contamination: Contamination::Auto,
+            offset: None,
         }
     }
 }
@@ -160,6 +197,7 @@ impl IsolationForest {
     ///
     /// - [`with_max_depth`](Self::with_max_depth) - maximum depth of each tree (returns `Result`; the depth is validated)
     /// - [`with_random_state`](Self::with_random_state) - fixed RNG seed for reproducible forests
+    /// - [`with_contamination`](Self::with_contamination) - inlier/outlier cutoff rule (default [`Contamination::Auto`])
     ///
     /// # Errors
     ///
@@ -190,6 +228,8 @@ impl IsolationForest {
             max_depth: computed_max_depth,
             random_state: None,
             n_features: 0,
+            contamination: Contamination::Auto,
+            offset: None,
         })
     }
 
@@ -231,6 +271,36 @@ impl IsolationForest {
         self
     }
 
+    /// Sets the inlier/outlier cutoff rule used by [`predict`](Self::predict)
+    /// (default: [`Contamination::Auto`])
+    ///
+    /// The rule is resolved into a concrete score cutoff at fit time, so changing it
+    /// after fitting requires re-fitting.
+    ///
+    /// # Parameters
+    ///
+    /// - `contamination` - [`Contamination::Auto`] or [`Contamination::Fraction`]
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Self)` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - `Error::InvalidParameter` - if a `Fraction` is not finite or not in `(0.0, 0.5]`
+    pub fn with_contamination(mut self, contamination: Contamination) -> Result<Self, Error> {
+        if let Contamination::Fraction(c) = contamination
+            && (!c.is_finite() || c <= 0.0 || c > 0.5)
+        {
+            return Err(Error::invalid_parameter(
+                "contamination",
+                format!("must be in (0.0, 0.5], got {c}"),
+            ));
+        }
+        self.contamination = contamination;
+        Ok(self)
+    }
+
     // Getters
     get_field!(get_n_estimators, n_estimators, usize);
     get_field!(get_max_samples, max_samples, usize);
@@ -238,6 +308,8 @@ impl IsolationForest {
     get_field!(get_max_depth, max_depth, usize);
     get_field!(get_random_state, random_state, Option<u64>);
     get_field!(get_n_features, n_features, usize);
+    get_field!(get_contamination, contamination, Contamination);
+    get_field!(get_offset, offset, Option<f64>);
     get_field_as_ref!(get_trees, trees, Option<&Vec<IsolationTree>>);
 
     /// Trains the Isolation Forest model on the provided dataset
@@ -312,6 +384,24 @@ impl IsolationForest {
         progress_bar.finish_with_message("Trees built successfully");
 
         self.trees = Some(trees?);
+
+        // Resolve the decision threshold against the TRAINING scores, so `predict` is a
+        // fitted rule rather than a per-batch quantile of whatever it is handed
+        self.offset = Some(match self.contamination {
+            Contamination::Auto => AUTO_CONTAMINATION_OFFSET,
+            Contamination::Fraction(c) => {
+                let scores = self.score_samples(x)?;
+                let n = scores.len();
+                // Flag the ceil(c * n) highest-scoring training samples (at least 1)
+                let n_outliers = (((n as f64) * c).ceil() as usize).clamp(1, n);
+                let mut sorted = scores.to_vec();
+                let kth = n - n_outliers;
+                sorted.select_nth_unstable_by(kth, |a, b| {
+                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                sorted[kth]
+            }
+        });
 
         Ok(self)
     }
@@ -469,7 +559,11 @@ impl IsolationForest {
         2.0_f64.powf(-avg_path_length / c_n)
     }
 
-    /// Predicts anomaly scores for multiple samples
+    /// Computes the raw anomaly score for each sample
+    ///
+    /// Scores lie in `[0, 1]` and higher means more anomalous. For a hard inlier/outlier
+    /// label, use [`predict`](Self::predict), which thresholds these at the fitted
+    /// [`offset`](Self::get_offset)
     ///
     /// # Parameters
     ///
@@ -491,7 +585,7 @@ impl IsolationForest {
     ///
     /// Parallelizes when the traversal work (samples x trees x average path length) clears
     /// the calibrated tree-traversal gate (see `crate::parallel_gates`)
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
+    pub fn score_samples<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -524,17 +618,16 @@ impl IsolationForest {
         Ok(Array1::from_vec(scores))
     }
 
-    /// Classifies each sample as an inlier (`+1`) or outlier (`-1`) using a contamination rate
+    /// Classifies each sample as an inlier (`+1`) or outlier (`-1`)
     ///
-    /// `contamination` is the expected proportion of outliers in `x`. The
-    /// `ceil(contamination * n_samples)` highest-scoring samples (see [`predict`](Self::predict))
-    /// are labelled `-1` (outlier) and the rest `+1` (inlier). Ties at the threshold score are
-    /// all labelled `-1`, so at least `ceil(contamination * n_samples)` samples are flagged
+    /// A sample is an outlier when its [`score_samples`](Self::score_samples) score is at or
+    /// above the [`offset`](Self::get_offset) resolved from the training data at fit time.
+    /// Because the cutoff is model state rather than a quantile of `x`, a given sample gets
+    /// the same label whether you score it alone or inside a larger batch
     ///
     /// # Parameters
     ///
     /// - `x` - Input data matrix where each row is a sample
-    /// - `contamination` - Expected proportion of outliers, in `(0.0, 0.5]`
     ///
     /// # Returns
     ///
@@ -542,43 +635,22 @@ impl IsolationForest {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidParameter` - If `contamination` is not finite or not in `(0.0, 0.5]`
     /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
-    ///   propagated from [`predict`](Self::predict)
-    pub fn predict_labels<S>(
-        &self,
-        x: &ArrayBase<S, Ix2>,
-        contamination: f64,
-    ) -> Result<Array1<i32>, Error>
+    ///   propagated from [`score_samples`](Self::score_samples)
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
     {
-        if !contamination.is_finite() || contamination <= 0.0 || contamination > 0.5 {
-            return Err(Error::invalid_parameter(
-                "contamination",
-                format!("must be in (0.0, 0.5], got {contamination}"),
-            ));
-        }
+        // `score_samples` validates the fitted state, so `offset` is Some by the time we read it
+        let scores = self.score_samples(x)?;
+        let offset = self
+            .offset
+            .ok_or_else(|| Error::not_fitted("IsolationForest"))?;
 
-        // Anomaly scores in [0, 1]; higher means more anomalous. `predict` validates input
-        let scores = self.predict(x)?;
-        let n = scores.len();
-
-        // Flag the ceil(contamination * n) highest-scoring samples (at least 1)
-        let n_outliers = (((n as f64) * contamination).ceil() as usize).clamp(1, n);
-
-        // Threshold = n_outliers-th largest score, via quickselect at ascending index n - n_outliers
-        let mut sorted: Vec<f64> = scores.to_vec();
-        let kth = n - n_outliers;
-        sorted.select_nth_unstable_by(kth, |a, b| {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        let threshold = sorted[kth];
-
-        Ok(scores.mapv(|s| if s >= threshold { -1 } else { 1 }))
+        Ok(scores.mapv(|s| if s >= offset { -1 } else { 1 }))
     }
 
-    /// Trains the model on the dataset and immediately predicts anomaly scores
+    /// Trains the model on the dataset and immediately labels it
     ///
     /// This is a convenience method that combines `fit` and `predict` in one call
     ///
@@ -588,12 +660,13 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<f64>, Error>` - A 1D array of anomaly scores for the training data
+    /// - `Result<Array1<i32>, Error>` - Per-sample labels for the training data: `-1` for
+    ///   outliers, `+1` for inliers
     ///
     /// # Errors
     ///
     /// Returns `Error` if fitting or prediction fails
-    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64> + Send + Sync,
     {

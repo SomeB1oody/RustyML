@@ -190,9 +190,11 @@ fn isolation_forest_predict_before_fit_is_not_fitted() {
 // Fit / Predict trait forwarding for the remaining estimators: each test invokes the
 // traits explicitly to confirm dispatch for every distinct Predict::Output type
 
-/// IsolationForest (unsupervised, Fit<&Array2<f64>>, Predict::Output = Array1<f64>)
+/// IsolationForest (unsupervised, Fit<&Array2<f64>>, Predict::Output = Array1<i32>):
+/// like every other estimator, the trait yields labels, not raw scores. Scores stay
+/// reachable through the inherent `score_samples`.
 #[test]
-fn generic_fit_predict_isolation_forest_outputs_f64_scores() {
+fn generic_fit_predict_isolation_forest_outputs_i32_labels() {
     let data = Array2::from_shape_vec(
         (5, 2),
         vec![0.0, 0.0, 0.1, 0.0, 0.0, 0.1, 0.1, 0.1, 50.0, 50.0],
@@ -201,11 +203,18 @@ fn generic_fit_predict_isolation_forest_outputs_f64_scores() {
 
     let mut forest = IsolationForest::new(20, 32).unwrap().with_random_state(42);
     Fit::fit(&mut forest, &data).expect("fit via Fit trait should succeed");
-    let scores: Array1<f64> =
+    let labels: Array1<i32> =
         Predict::predict(&forest, &data).expect("predict via Predict trait should succeed");
 
-    assert_eq!(scores.len(), 5, "one anomaly score per sample");
-    // Anomaly scores are 2^(-E/c) with E,c > 0, hence strictly in (0, 1]
+    assert_eq!(labels.len(), 5, "one label per sample");
+    for (i, &l) in labels.iter().enumerate() {
+        assert!(l == -1 || l == 1, "label[{i}] = {l} not in {{-1, +1}}");
+    }
+
+    // Anomaly scores are 2^(-E/c) with E,c > 0, hence in (0, 1]
+    let scores = forest
+        .score_samples(&data)
+        .expect("score_samples should succeed");
     for (i, &s) in scores.iter().enumerate() {
         assert!((0.0..=1.0).contains(&s), "score[{i}] = {s} not in [0,1]");
     }

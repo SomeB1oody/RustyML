@@ -357,7 +357,7 @@ impl<'a, S> Predict<&'a ArrayBase<S, Ix2>> for IsolationForest
 where
     S: Data<Elem = f64>,
 {
-    type Output = Array1<f64>;
+    type Output = Array1<i32>;
     fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }

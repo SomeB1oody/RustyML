@@ -1,9 +1,10 @@
 //! Integration tests for IsolationForest: constructor validation, error paths,
-//! score properties, outlier detection, determinism, and closed-form checks
+//! score properties, outlier detection, contamination thresholding, determinism,
+//! and closed-form checks
 
 use ndarray::{Array2, array, s};
 use rustyml::error::Error;
-use rustyml::machine_learning::IsolationForest;
+use rustyml::machine_learning::{Contamination, IsolationForest};
 
 // Constructor validation
 
@@ -256,7 +257,7 @@ fn test_predict_scores_are_in_unit_interval() {
     ];
     model.fit(&train).unwrap();
 
-    let scores = model.predict(&train).unwrap();
+    let scores = model.score_samples(&train).unwrap();
     for (i, &s) in scores.iter().enumerate() {
         assert!(
             (0.0..=1.0).contains(&s),
@@ -310,7 +311,7 @@ fn test_outlier_score_exceeds_all_inlier_scores() {
 
     let mut model = IsolationForest::new(100, 64).unwrap().with_random_state(42);
     model.fit(&train_data).unwrap();
-    let scores = model.predict(&train_data).unwrap();
+    let scores = model.score_samples(&train_data).unwrap();
 
     let outlier_score = scores[10];
     let max_inlier_score = scores
@@ -374,7 +375,7 @@ fn test_identical_points_have_equal_scores() {
     ];
     let mut model = IsolationForest::new(50, 32).unwrap().with_random_state(55);
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     assert_eq!(
         scores[0], scores[2],
         "identical inputs must produce identical anomaly scores: {} vs {}",
@@ -390,11 +391,11 @@ fn test_same_seed_produces_identical_scores() {
 
     let mut model_a = IsolationForest::new(30, 20).unwrap().with_random_state(13);
     model_a.fit(&data).unwrap();
-    let scores_a = model_a.predict(&data).unwrap();
+    let scores_a = model_a.score_samples(&data).unwrap();
 
     let mut model_b = IsolationForest::new(30, 20).unwrap().with_random_state(13);
     model_b.fit(&data).unwrap();
-    let scores_b = model_b.predict(&data).unwrap();
+    let scores_b = model_b.score_samples(&data).unwrap();
 
     assert_eq!(
         scores_a, scores_b,
@@ -410,11 +411,11 @@ fn test_different_seeds_may_produce_different_scores() {
 
     let mut model_a = IsolationForest::new(50, 32).unwrap().with_random_state(1);
     model_a.fit(&data).unwrap();
-    let scores_a = model_a.predict(&data).unwrap();
+    let scores_a = model_a.score_samples(&data).unwrap();
 
     let mut model_b = IsolationForest::new(50, 32).unwrap().with_random_state(2);
     model_b.fit(&data).unwrap();
-    let scores_b = model_b.predict(&data).unwrap();
+    let scores_b = model_b.score_samples(&data).unwrap();
 
     let any_differ = scores_a
         .iter()
@@ -434,14 +435,14 @@ fn test_fit_predict_matches_fit_then_predict() {
 
     let mut model_a = IsolationForest::new(40, 32).unwrap().with_random_state(77);
     model_a.fit(&data).unwrap();
-    let scores_a = model_a.predict(&data).unwrap();
+    let labels_a = model_a.predict(&data).unwrap();
 
     let mut model_b = IsolationForest::new(40, 32).unwrap().with_random_state(77);
-    let scores_b = model_b.fit_predict(&data).unwrap();
+    let labels_b = model_b.fit_predict(&data).unwrap();
 
     assert_eq!(
-        scores_a, scores_b,
-        "fit_predict must produce the same scores as fit + predict with the same seed"
+        labels_a, labels_b,
+        "fit_predict must produce the same labels as fit + predict with the same seed"
     );
 }
 
@@ -453,7 +454,7 @@ fn test_fit_and_predict_on_single_sample() {
     let mut model = IsolationForest::new(5, 10).unwrap().with_random_state(1);
     let data = array![[3.0, 4.0]];
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 1);
     assert!(
         (scores[0] - 1.0).abs() < 1e-12,
@@ -482,7 +483,7 @@ fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
     let mut model = IsolationForest::new(10, 256).unwrap().with_random_state(1);
     let data = array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0], [9.0, 10.0]];
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
     for &s in scores.iter() {
         assert!((0.0..=1.0).contains(&s), "score {s} not in [0,1]");
@@ -497,7 +498,7 @@ fn test_fit_with_constant_feature_column_does_not_panic() {
     let mut model = IsolationForest::new(10, 32).unwrap().with_random_state(42);
     let data = array![[1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0], [5.0, 5.0]];
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
 }
 
@@ -510,7 +511,7 @@ fn test_fit_and_predict_with_single_feature() {
     let data = array![[0.0], [0.1], [-0.1], [0.2], [999.0]];
     model.fit(&data).unwrap();
     assert_eq!(model.get_n_features(), 1);
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
     // outlier (last point) should outscore the inliers
     let outlier_score = scores[4];
@@ -541,7 +542,7 @@ fn test_fit_and_predict_high_dimensional() {
         data[[6, j]] = 100.0;
     }
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
     for &s in scores.iter() {
         assert!((0.0..=1.0).contains(&s));
     }
@@ -604,7 +605,7 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
     let data = array![[2.0, 7.0], [2.0, 7.0], [2.0, 7.0], [2.0, 7.0]];
     let mut model = IsolationForest::new(20, 4).unwrap().with_random_state(123);
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
 
     // leaf size = max_samples = 4, so score = 2^(-c(4)/c(4)) = 0.5 for every row
     for (i, &s) in scores.iter().enumerate() {
@@ -625,7 +626,7 @@ fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_sa
     let data = array![[1.0, -3.0], [1.0, -3.0], [1.0, -3.0], [1.0, -3.0]];
     let mut model = IsolationForest::new(25, 8).unwrap().with_random_state(7);
     model.fit(&data).unwrap();
-    let scores = model.predict(&data).unwrap();
+    let scores = model.score_samples(&data).unwrap();
 
     // Path length c(4) is normalised by c(sample_size) = c(4): score = 2^(-c(4)/c(4)) = 0.5,
     // normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
@@ -663,12 +664,12 @@ fn predict_handles_non_contiguous_input() {
     assert_eq!(result.unwrap().len(), 3, "one score per input row");
 }
 
-// predict_labels: contamination-based {-1, +1} outlier classification
+// predict: contamination-based {-1, +1} outlier classification
 
 /// A single obvious outlier among a tight inlier cluster is flagged -1, inliers +1.
-/// With contamination 0.1 on 10 samples, exactly ceil(1.0)=1 sample is flagged.
+/// With contamination 0.1 on 10 training samples, exactly ceil(1.0)=1 sample is flagged.
 #[test]
-fn predict_labels_flags_obvious_outlier() {
+fn predict_flags_obvious_outlier() {
     let x = array![
         [0.0, 0.0],
         [0.1, 0.1],
@@ -683,10 +684,12 @@ fn predict_labels_flags_obvious_outlier() {
     ];
     let mut model = IsolationForest::new(100, 256)
         .unwrap()
+        .with_contamination(Contamination::Fraction(0.1))
+        .unwrap()
         .with_random_state(42);
     model.fit(&x).unwrap();
 
-    let labels = model.predict_labels(&x, 0.1).unwrap();
+    let labels = model.predict(&x).unwrap();
     let n_out = labels.iter().filter(|&&l| l == -1).count();
     assert_eq!(
         n_out, 1,
@@ -698,10 +701,10 @@ fn predict_labels_flags_obvious_outlier() {
     }
 }
 
-/// The number of flagged outliers equals ceil(contamination * n) when scores are
-/// well-separated (continuous isolation scores make ties negligible)
+/// The number of flagged training samples equals ceil(contamination * n_train) when scores
+/// are well-separated (continuous isolation scores make ties negligible)
 #[test]
-fn predict_labels_count_matches_contamination() {
+fn predict_count_matches_contamination() {
     let mut flat = Vec::new();
     for i in 0..20 {
         let v = i as f64;
@@ -709,10 +712,14 @@ fn predict_labels_count_matches_contamination() {
         flat.push(v.cos() * 3.0);
     }
     let x = Array2::from_shape_vec((20, 2), flat).unwrap();
-    let mut model = IsolationForest::new(100, 256).unwrap().with_random_state(7);
+    let mut model = IsolationForest::new(100, 256)
+        .unwrap()
+        .with_contamination(Contamination::Fraction(0.25))
+        .unwrap()
+        .with_random_state(7);
     model.fit(&x).unwrap();
 
-    let labels = model.predict_labels(&x, 0.25).unwrap();
+    let labels = model.predict(&x).unwrap();
     let n_out = labels.iter().filter(|&&l| l == -1).count();
     assert_eq!(
         n_out, 5,
@@ -724,21 +731,200 @@ fn predict_labels_count_matches_contamination() {
     }
 }
 
-/// contamination outside (0.0, 0.5] (or non-finite) is rejected
+/// A contamination fraction outside (0.0, 0.5] (or non-finite) is rejected by the builder,
+/// before any fitting happens
 #[test]
-fn predict_labels_rejects_invalid_contamination() {
-    let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [0.1, 0.1]];
-    let mut model = IsolationForest::new(10, 8).unwrap().with_random_state(1);
-    model.fit(&x).unwrap();
+fn with_contamination_rejects_invalid_fraction() {
     for bad in [0.0, -0.1, 0.51, 1.0, f64::NAN, f64::INFINITY] {
+        let result = IsolationForest::new(10, 8)
+            .unwrap()
+            .with_contamination(Contamination::Fraction(bad));
         assert!(
-            matches!(
-                model.predict_labels(&x, bad),
-                Err(Error::InvalidParameter { .. })
-            ),
+            matches!(result, Err(Error::InvalidParameter { .. })),
             "contamination={bad} must be rejected"
         );
     }
-    // a valid contamination still works
-    assert!(model.predict_labels(&x, 0.25).is_ok());
+    assert!(
+        IsolationForest::new(10, 8)
+            .unwrap()
+            .with_contamination(Contamination::Fraction(0.25))
+            .is_ok()
+    );
+}
+
+/// The decision threshold is model state fitted from the TRAINING scores, so a sample gets
+/// the same label whether it is predicted alone, in a slice, or in the whole batch. The old
+/// per-call contamination quantile failed all three of these.
+#[test]
+fn predict_label_is_independent_of_batching() {
+    let x = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.05, 0.15],
+        [0.15, 0.05],
+        [0.1, 0.1],
+        [10.0, 10.0]
+    ];
+    let mut model = IsolationForest::new(100, 256)
+        .unwrap()
+        .with_contamination(Contamination::Fraction(0.1))
+        .unwrap()
+        .with_random_state(42);
+    model.fit(&x).unwrap();
+
+    let whole = model.predict(&x).unwrap();
+
+    // One row at a time must agree with the full-batch labelling
+    for i in 0..x.nrows() {
+        let row = x.slice(s![i..i + 1, ..]).to_owned();
+        let single = model.predict(&row).unwrap();
+        assert_eq!(
+            single[0], whole[i],
+            "sample {i} labelled {} alone but {} in the full batch",
+            single[0], whole[i]
+        );
+    }
+
+    // And so must an arbitrary split into two halves
+    let first = model.predict(&x.slice(s![..4, ..]).to_owned()).unwrap();
+    let second = model.predict(&x.slice(s![4.., ..]).to_owned()).unwrap();
+    let halves: Vec<i32> = first.iter().chain(second.iter()).copied().collect();
+    assert_eq!(
+        halves,
+        whole.to_vec(),
+        "splitting the batch must not change any label"
+    );
+}
+
+/// A lone inlier-looking sample is not automatically an outlier. Under the old per-batch
+/// quantile a single-row predict always returned -1, since ceil(c*1) clamps to 1.
+#[test]
+fn predict_on_single_sample_is_not_forced_to_outlier() {
+    let x = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.05, 0.15],
+        [0.15, 0.05],
+        [0.1, 0.1],
+        [10.0, 10.0]
+    ];
+    let mut model = IsolationForest::new(100, 256)
+        .unwrap()
+        .with_contamination(Contamination::Fraction(0.1))
+        .unwrap()
+        .with_random_state(42);
+    model.fit(&x).unwrap();
+
+    let inlier = array![[0.1, 0.1]];
+    assert_eq!(
+        model.predict(&inlier).unwrap()[0],
+        1,
+        "a sample sitting in the middle of the training cluster must score as an inlier"
+    );
+
+    let outlier = array![[10.0, 10.0]];
+    assert_eq!(
+        model.predict(&outlier).unwrap()[0],
+        -1,
+        "the far point must still be an outlier on its own"
+    );
+}
+
+// Contamination::Auto
+
+/// Auto is the paper's fixed 0.5 cutoff, recorded on the model at fit time
+#[test]
+fn contamination_auto_uses_paper_threshold() {
+    let x = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [10.0, 10.0]];
+    let mut model = IsolationForest::new(50, 32).unwrap().with_random_state(3);
+    assert_eq!(model.get_contamination(), Contamination::Auto);
+    assert!(model.get_offset().is_none(), "offset is unset before fit");
+
+    model.fit(&x).unwrap();
+    let offset = model.get_offset().expect("offset is set by fit");
+    assert!(
+        (offset - 0.5).abs() < 1e-12,
+        "Auto must resolve to the 0.5 cutoff, got {offset}"
+    );
+
+    // Labels agree with thresholding the scores at the recorded offset
+    let scores = model.score_samples(&x).unwrap();
+    let labels = model.predict(&x).unwrap();
+    for (i, (&s, &l)) in scores.iter().zip(labels.iter()).enumerate() {
+        let expected = if s >= offset { -1 } else { 1 };
+        assert_eq!(l, expected, "sample {i}: score {s} vs offset {offset}");
+    }
+}
+
+/// A Fraction offset is drawn from the training scores, so it lands on one of them
+#[test]
+fn contamination_fraction_offset_comes_from_training_scores() {
+    let x = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.05, 0.15],
+        [0.15, 0.05],
+        [0.1, 0.1],
+        [10.0, 10.0]
+    ];
+    let mut model = IsolationForest::new(100, 256)
+        .unwrap()
+        .with_contamination(Contamination::Fraction(0.2))
+        .unwrap()
+        .with_random_state(11);
+    model.fit(&x).unwrap();
+
+    let offset = model.get_offset().expect("offset is set by fit");
+    let scores = model.score_samples(&x).unwrap();
+    assert!(
+        scores.iter().any(|&s| (s - offset).abs() < 1e-12),
+        "the fitted offset {offset} must be one of the training scores"
+    );
+}
+
+/// The offset survives a save/load round-trip, so a reloaded model labels identically
+#[test]
+fn offset_survives_save_load_round_trip() {
+    let x = array![
+        [0.0, 0.0],
+        [0.1, 0.1],
+        [0.2, 0.0],
+        [0.0, 0.2],
+        [0.1, 0.2],
+        [0.2, 0.1],
+        [0.05, 0.15],
+        [0.15, 0.05],
+        [0.1, 0.1],
+        [10.0, 10.0]
+    ];
+    let mut model = IsolationForest::new(60, 32)
+        .unwrap()
+        .with_contamination(Contamination::Fraction(0.3))
+        .unwrap()
+        .with_random_state(21);
+    model.fit(&x).unwrap();
+
+    let path = "/tmp/rustyml_test_isolation_forest_offset.bin";
+    model.save_to_path(path).expect("save should succeed");
+    let loaded = IsolationForest::load_from_path(path).expect("load should succeed");
+
+    assert_eq!(loaded.get_contamination(), Contamination::Fraction(0.3));
+    assert_eq!(loaded.get_offset(), model.get_offset());
+    assert_eq!(
+        loaded.predict(&x).unwrap(),
+        model.predict(&x).unwrap(),
+        "a reloaded model must label identically"
+    );
 }
