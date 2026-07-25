@@ -12,7 +12,7 @@ use crate::machine_learning::validation::{
 };
 use crate::math::matmul::matvec;
 use crate::{Deserialize, Serialize};
-use gemmkit::Parallelism;
+use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
 

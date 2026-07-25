@@ -11,9 +11,8 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use gemmkit::Parallelism;
 use gemmkit_ndarray::dot;
-use gemmkit_ndarray::{Activation as FusedActivation, Bias};
+use gemmkit_ndarray::{Activation as FusedActivation, Bias, Parallelism};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::borrow::Cow;

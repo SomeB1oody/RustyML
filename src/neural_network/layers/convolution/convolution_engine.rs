@@ -32,8 +32,7 @@ use super::PaddingType;
 use crate::error::Error;
 use crate::math::matmul::dot_par;
 use crate::neural_network::Tensor;
-use gemmkit::Parallelism;
-use gemmkit_ndarray::Bias;
+use gemmkit_ndarray::{Bias, Parallelism};
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 

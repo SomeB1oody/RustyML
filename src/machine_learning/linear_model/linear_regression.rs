@@ -13,7 +13,7 @@ use crate::math::matmul::matvec;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::sum_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
-use gemmkit::Parallelism;
+use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
 /// Optimization strategy used to fit [`LinearRegression`]

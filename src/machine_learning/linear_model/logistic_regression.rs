@@ -15,7 +15,7 @@ use crate::math::matmul::matvec;
 use crate::math::reduction::det_reduce_range;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use crate::{Deserialize, Serialize};
-use gemmkit::Parallelism;
+use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 

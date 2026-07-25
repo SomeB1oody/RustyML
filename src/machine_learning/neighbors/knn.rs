@@ -12,8 +12,7 @@ use crate::machine_learning::validation::{
 use crate::math::matmul::{cache_resident, gemm_chunk_rows, matvec};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
-use gemmkit::Parallelism;
-use gemmkit_ndarray::dot;
+use gemmkit_ndarray::{Parallelism, dot};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::OnceLock;

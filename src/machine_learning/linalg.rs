@@ -42,7 +42,7 @@
 use crate::error::Error;
 use crate::math::matmul::matvec;
 use crate::parallel_gates::cheap_map_f64_parallel_threshold;
-use gemmkit::Parallelism;
+use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};

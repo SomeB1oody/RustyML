@@ -8,8 +8,7 @@ use crate::math::matmul::{dot_par, matvec};
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
-use gemmkit::Parallelism;
-use gemmkit_ndarray::{Bias, dot};
+use gemmkit_ndarray::{Bias, Parallelism, dot};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
