@@ -1,6 +1,6 @@
 //! Shared low-level numeric primitives used across estimators and metrics
 //!
-//! - [`matmul`](crate::math::matmul) provides `gemm`-crate-backed matrix products, parallelized on the rayon pool
+//! - [`matmul`](crate::math::matmul) provides `gemmkit`-backed matrix products with automatic parallelism
 //! - [`reduction`](crate::math::reduction) provides deterministic blocked parallel reductions
 //! - [`distance`](crate::math::distance) holds the pairwise distance primitives and the
 //!   [`DistanceCalculationMetric`](crate::math::DistanceCalculationMetric) dispatcher
@@ -28,7 +28,7 @@
 //! let d = DistanceCalculationMetric::Euclidean.distance(v1.view(), v2.view());
 //! ```
 
-/// `gemm`-backed matrix products, parallelized on the rayon pool for large products
+/// `gemmkit`-backed matrix products with automatic parallelism
 pub mod matmul;
 
 /// Deterministic blocked parallel reductions

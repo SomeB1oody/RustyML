@@ -192,7 +192,7 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 ### `math`
 
-整个库共享的纯函数式数值原语：`gemm` 支持的矩阵乘积（GEMM / GEMV）、确定性分块并行归约，以及
+整个库共享的纯函数式数值原语：`gemmkit` 支持的矩阵乘积（GEMM / GEMV）、确定性分块并行归约，以及
 成对距离（`squared_euclidean_distance_row`、`manhattan_distance_row`、`minkowski_distance_row`）
 和 `DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）调度器。
 

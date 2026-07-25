@@ -8,9 +8,10 @@
 //! # What a gate does and does not change
 //!
 //! A gate only selects an execution strategy; it never changes what is computed. The elementwise
-//! and reduction gates give the same result serial or parallel, and the GEMM strategy gates (the
-//! `matmul` submodule) reproduce their result across runs on the same machine (not necessarily
-//! bit-for-bit). Retuning the gates does not change this
+//! and reduction gates give the same result serial or parallel. The matrix-product scheduling
+//! itself lives in the `gemmkit` backend (see the `matmul` submodule), whose results are reproducible on the
+//! same machine for a fixed configuration regardless of worker count; the `matmul` gates kept
+//! here only shape caller-side tiling. Retuning the gates does not change this
 //!
 //! # Storage vs. API
 //!
@@ -22,9 +23,11 @@
 //! # Example
 //!
 //! ```ignore
-//! // Retune the f32 GEMM serial/parallel crossover for a machine with fewer, faster cores
-//! rustyml::tuning::matmul::set_gemm_min_flops_f32(4_000_000);
-//! let current = rustyml::tuning::matmul::get_gemm_min_flops_f32();
+//! // Retune the GEMM serial/parallel work gate for a machine with fewer, faster cores
+//! // (a gemmkit knob, forwarded through the `backend` alias)
+//! rustyml::tuning::matmul::backend::set_parallel_threshold(2_000_000);
+//! // Match the tiled-product policy to the machine's actual shared L3
+//! rustyml::tuning::matmul::set_cache_resident_max_bytes(32 * 1024 * 1024);
 //! ```
 
 /// Generates a `set_*` / `get_*` forwarding pair that delegates to a per-site gate's
@@ -70,61 +73,31 @@ macro_rules! fwd {
     };
 }
 
-/// GEMM / GEMV parallelism gates for the matrix-product backend (see [`crate::math::matmul`])
+/// Tiling policy for the matrix-product callers, plus the `backend` alias to gemmkit's own
+/// tuning surface (see [`crate::math::matmul`])
 ///
-/// `gemm_min_flops` / `gemv_min_flops` are the estimated-FLOPs crossovers at or above which a
-/// product is parallelized, calibrated per dtype (`f32` and `f64` have different optimal values
-/// that the single threshold the `gemm` crate exposes cannot capture). `colpar_min_cols_per_thread`
-/// is the columns-per-thread floor below which `gemm_par_auto` splits rows itself instead of using
-/// the backend's column parallelism. `chunk_elems` and `cache_resident_max_bytes` size the
-/// tiled-product path; the latter matches a machine's actual L3 cache
+/// The GEMM/GEMV serial-vs-parallel crossovers, worker ramps, and kernel blocking all live in
+/// the [`gemmkit`](https://docs.rs/gemmkit) backend now. Retune them one of three ways:
+///
+/// - **Env profile** (no recompile): every backend knob is a `GEMMKIT_*` environment variable,
+///   read once per process. `cargo install gemmkit-tune` and run `gemmkit-tune` on the target
+///   machine to sweep them and emit a ready-to-`source` profile
+/// - **Programmatically**: through the `backend` alias, e.g.
+///   `tuning::matmul::backend::set_parallel_threshold(..)` (an in-code setter beats the env var)
+/// - **Per call**: not exposed by this crate's wrappers - they always pass the backend's
+///   automatic parallelism (or force serial inside already-parallel regions)
+///
+/// What remains here is the caller-side tiling policy: `chunk_elems` sizes the row-chunks of a
+/// tiled product and `cache_resident_max_bytes` picks GEMV-swarm vs tiled-GEMM; set the latter
+/// to the machine's actual shared-L3 size
 #[cfg(feature = "math")]
 pub mod matmul {
     use crate::math::matmul as b;
 
-    #[cfg(any(
-        feature = "machine_learning",
-        feature = "neural_network",
-        feature = "utils"
-    ))]
-    fwd!(
-        set_gemm_min_flops_f32 => b::set_gemm_rayon_min_flops_f32,
-        get_gemm_min_flops_f32 => b::gemm_rayon_min_flops_f32,
-        "the f32 GEMM serial-vs-rayon crossover, in estimated FLOPs (`2*m*k*n`)"
-    );
-    #[cfg(any(
-        feature = "machine_learning",
-        feature = "neural_network",
-        feature = "utils"
-    ))]
-    fwd!(
-        set_gemm_min_flops_f64 => b::set_gemm_rayon_min_flops_f64,
-        get_gemm_min_flops_f64 => b::gemm_rayon_min_flops_f64,
-        "the f64 GEMM serial-vs-rayon crossover, in estimated FLOPs (`2*m*k*n`)"
-    );
-    #[cfg(feature = "machine_learning")]
-    fwd!(
-        set_gemv_min_flops_f32 => b::set_gemv_rayon_min_flops_f32,
-        get_gemv_min_flops_f32 => b::gemv_rayon_min_flops_f32,
-        "the f32 GEMV row-split crossover, in estimated FLOPs (`2*m*k`)"
-    );
-    #[cfg(feature = "machine_learning")]
-    fwd!(
-        set_gemv_min_flops_f64 => b::set_gemv_rayon_min_flops_f64,
-        get_gemv_min_flops_f64 => b::gemv_rayon_min_flops_f64,
-        "the f64 GEMV row-split crossover, in estimated FLOPs (`2*m*k`)"
-    );
-    #[cfg(any(
-        feature = "machine_learning",
-        feature = "neural_network",
-        feature = "utils"
-    ))]
-    fwd!(
-        set_colpar_min_cols_per_thread => b::set_gemm_colpar_min_cols_per_thread,
-        get_colpar_min_cols_per_thread => b::gemm_colpar_min_cols_per_thread,
-        "the columns-per-thread floor below which a `m >= n` GEMM splits rows instead of using \
-         the backend's column parallelism"
-    );
+    /// gemmkit's own tuning module, re-exported so backend knobs are reachable without adding a
+    /// direct `gemmkit` dependency: every `GEMMKIT_*` env var has a `set_*`/getter pair here
+    pub use gemmkit::tuning as backend;
+
     fwd!(
         set_chunk_elems => b::set_gemm_chunk_elems,
         get_chunk_elems => b::gemm_chunk_elems,

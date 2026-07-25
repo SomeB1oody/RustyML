@@ -150,7 +150,7 @@ fn bench_svc_fit(c: &mut Criterion) {
 /// SVC predict on a fitted RBF model: batched kernel matrix + the decision-value GEMV
 /// (`[n_query, n_sv] x [n_sv]`). The model is fit once outside the timing loop so the measured
 /// work is the prediction path - the kernel evaluation plus the batched matvec that A1 reroutes
-/// from ndarray `.dot()` to the gemm-crate backend
+/// from ndarray `.dot()` to the gemmkit backend
 fn bench_svc_predict(c: &mut Criterion) {
     let x = random_matrix(1500, 16, 4);
     let y: Array1<f64> = Array1::from_iter(
@@ -184,7 +184,7 @@ fn bench_svc_predict(c: &mut Criterion) {
 /// MeanShift fit: one task per seed (all samples are seeds by default), each running RBF-weighted
 /// updates whose per-iteration cost is two matvecs over the full sample matrix. With seeds far
 /// above the core count the seed axis fills the pool, so A3 forces those inner matvecs serial via
-/// the gemm-crate backend - this bench tracks that nested-matvec path end to end
+/// the gemmkit backend - this bench tracks that nested-matvec path end to end
 fn bench_mean_shift_fit(c: &mut Criterion) {
     let x = random_matrix(1500, 16, 12);
     let mut group = c.benchmark_group("mean_shift");

@@ -43,7 +43,7 @@
 //! ### [`math`]
 //! Low-level numeric primitives shared across modules:
 //! - **Distance Metrics**: Euclidean, Manhattan, Minkowski, plus the `DistanceCalculationMetric` dispatcher
-//! - **Matrix Products**: parallel `gemm`-backed GEMM/GEMV
+//! - **Matrix Products**: `gemmkit`-backed GEMM/GEMV with automatic parallelism
 //! - **Reductions**: deterministic blocked parallel reductions
 //!
 //! ## Quick Start
@@ -449,7 +449,7 @@ pub use random::{clear_global_seed, set_global_seed};
 ))]
 pub(crate) mod parallel_gates;
 
-/// Shared low-level numeric primitives: distance metrics, `gemm`-backed matrix products, and
+/// Shared low-level numeric primitives: distance metrics, `gemmkit`-backed matrix products, and
 /// deterministic parallel reductions
 #[cfg(feature = "math")]
 pub mod math;

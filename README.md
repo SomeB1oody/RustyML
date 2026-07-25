@@ -198,7 +198,7 @@ module dependency-light.
 
 ### `math`
 
-Pure, stateless numerical primitives shared across the crate: `gemm`-backed matrix products
+Pure, stateless numerical primitives shared across the crate: `gemmkit`-backed matrix products
 (GEMM / GEMV), deterministic blocked parallel reductions, and pairwise distances
 (`squared_euclidean_distance_row`, `manhattan_distance_row`, `minkowski_distance_row`) plus the
 `DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski) dispatcher.

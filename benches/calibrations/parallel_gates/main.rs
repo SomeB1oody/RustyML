@@ -58,7 +58,7 @@ fn main() {
     println!("calibrating parallel gates (rayon threads: {threads}) ...");
 
     // Note: the GEMM/GEMV FLOP-and-block gate calibrations were removed when the matmul backend
-    // moved to the `gemm` crate, which decides serial-vs-parallel by problem size itself.
+    // moved to the `gemmkit` backend, which decides serial-vs-parallel by problem size itself.
     let mut sections = vec![
         nn_kernels::calibrate_conv_forward(),
         nn_kernels::calibrate_pooling(),
