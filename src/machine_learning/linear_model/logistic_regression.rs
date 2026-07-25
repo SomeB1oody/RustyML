@@ -215,13 +215,7 @@ impl LogisticRegression {
         S1: Data<Elem = f64>,
         S2: Data<Elem = f64>,
     {
-        // Non-empty + finiteness checks on `x`; `y` is length-checked against it separately
-        // because the two arrays may use different storage types
-        preliminary_check(x, None)?;
-
-        if y.len() != x.nrows() {
-            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
-        }
+        preliminary_check(x, Some(y.len()))?;
 
         // Check target values are binary
         for &val in y.iter() {

@@ -126,13 +126,14 @@ pub trait FitTransform<D> {
 
 // Supervised estimators: Fit<(&X, &Y)>
 
-impl<'a, S> Fit<(&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>)> for LinearRegression
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for LinearRegression
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     fn fit(
         &mut self,
-        data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
     ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
@@ -153,39 +154,42 @@ where
     }
 }
 
-impl<'a, S> Fit<(&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>)> for DecisionTree
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for DecisionTree
 where
-    S: Data<Elem = f64> + Send + Sync,
+    S1: Data<Elem = f64> + Send + Sync,
+    S2: Data<Elem = f64> + Send + Sync,
 {
     fn fit(
         &mut self,
-        data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
     ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
 }
 
-impl<'a, S> Fit<(&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>)> for LinearSVC
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for LinearSVC
 where
-    S: Data<Elem = f64> + Send + Sync,
+    S1: Data<Elem = f64> + Send + Sync,
+    S2: Data<Elem = f64> + Send + Sync,
 {
     fn fit(
         &mut self,
-        data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
     ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
     }
 }
 
-impl<'a, S> Fit<(&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>)> for SVC
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for SVC
 where
-    S: Data<Elem = f64> + Send + Sync,
+    S1: Data<Elem = f64> + Send + Sync,
+    S2: Data<Elem = f64> + Send + Sync,
 {
     fn fit(
         &mut self,
-        data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
     ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)

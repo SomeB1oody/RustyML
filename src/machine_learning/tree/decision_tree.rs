@@ -604,15 +604,16 @@ impl DecisionTree {
     ///
     /// Parallelizes the per-feature split search when the sort work clears the calibrated
     /// sort-scan gate (see `crate::parallel_gates`)
-    pub fn fit<S>(
+    pub fn fit<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
-        preliminary_check(x, Some(y))?;
+        preliminary_check(x, Some(y.len()))?;
 
         // Cross-field constraint: the two are set independently through the builder
         if self.params.min_samples_leaf > self.params.min_samples_split {
@@ -699,17 +700,18 @@ impl DecisionTree {
     }
 
     /// Recursively builds a decision tree node by finding optimal splits
-    fn build_tree<S>(
+    fn build_tree<S1, S2>(
         &self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
         indices: &[usize],
         depth: usize,
         rng: &mut Option<StdRng>,
         #[cfg(feature = "show_progress")] progress_bar: &ProgressBar,
     ) -> Result<Node, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
         #[cfg(feature = "show_progress")]
         progress_bar.inc(1);
@@ -823,15 +825,16 @@ impl DecisionTree {
     /// returned `impurity_decrease` drives the `min_impurity_decrease` stopping rule. The
     /// search parallelizes when the sort work clears the calibrated sort-scan gate (see
     /// `crate::parallel_gates`)
-    fn find_best_split<S>(
+    fn find_best_split<S1, S2>(
         &self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
         indices: &[usize],
         rng: &mut Option<StdRng>,
     ) -> Result<Option<(Split, f64)>, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
         // Calculate parent impurity once
         let parent_impurity = self.calculate_impurity(y, indices);
@@ -897,16 +900,17 @@ impl DecisionTree {
     ///
     /// Returns `(selection_score, split, impurity_decrease)`, or `None` when no
     /// impurity-reducing threshold exists
-    fn evaluate_numeric_split<S>(
+    fn evaluate_numeric_split<S1, S2>(
         &self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
         indices: &[usize],
         feature_idx: usize,
         parent_impurity: f64,
     ) -> Option<(f64, Split, f64)>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         let n = indices.len();
         if n < 2 {
@@ -1028,16 +1032,17 @@ impl DecisionTree {
     ///
     /// Returns `(selection_score, split, impurity_decrease)`, or `None` when the feature
     /// has fewer than 2 distinct values or the split does not reduce impurity
-    fn evaluate_categorical_split<S>(
+    fn evaluate_categorical_split<S1, S2>(
         &self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
         indices: &[usize],
         feature_idx: usize,
         parent_impurity: f64,
     ) -> Option<(f64, Split, f64)>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         // Partition samples by distinct category value
         let mut groups: AHashMap<String, Vec<usize>> = AHashMap::new();
@@ -1310,13 +1315,14 @@ impl DecisionTree {
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If training or prediction inputs are invalid
-    pub fn fit_predict<S>(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        x_train: &ArrayBase<S, Ix2>,
-        y_train: &ArrayBase<S, Ix1>,
+        x_train: &ArrayBase<S1, Ix2>,
+        y_train: &ArrayBase<S2, Ix1>,
     ) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
         self.fit(x_train, y_train)?;
         self.predict(x_train)

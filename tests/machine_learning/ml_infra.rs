@@ -402,3 +402,70 @@ fn generic_fit_predict_svc_outputs_zero_one_labels() {
         );
     }
 }
+
+// Storage-generic relaxation: `x` and `y` may use different storage types
+
+/// Every supervised estimator accepts an owned feature matrix paired with a borrowed
+/// label view (and vice versa). The signatures previously bound both to one `S`, so
+/// mixing owned and view storage was a compile error rather than a runtime one.
+#[test]
+fn supervised_fit_accepts_mixed_storage_for_x_and_y() {
+    let x = array![
+        [-3.0, -2.0],
+        [-2.0, -3.0],
+        [-2.0, -2.0],
+        [2.0, 3.0],
+        [3.0, 2.0],
+        [2.0, 2.0],
+    ];
+    let y = array![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+    // S1 = OwnedRepr (x), S2 = ViewRepr (y)
+    LinearRegression::default()
+        .fit(&x, &y.view())
+        .expect("LinearRegression: owned x + view y");
+    DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .fit(&x, &y.view())
+        .expect("DecisionTree: owned x + view y");
+    LinearSVC::default()
+        .fit(&x, &y.view())
+        .expect("LinearSVC: owned x + view y");
+    SVC::new(KernelType::Linear, 1.0, 1e-3, 200)
+        .unwrap()
+        .with_random_state(42)
+        .fit(&x, &y.view())
+        .expect("SVC: owned x + view y");
+
+    // S1 = ViewRepr (x), S2 = OwnedRepr (y)
+    LinearRegression::default()
+        .fit(&x.view(), &y)
+        .expect("LinearRegression: view x + owned y");
+    DecisionTree::new(Algorithm::CART, true)
+        .unwrap()
+        .fit(&x.view(), &y)
+        .expect("DecisionTree: view x + owned y");
+    LinearSVC::default()
+        .fit(&x.view(), &y)
+        .expect("LinearSVC: view x + owned y");
+    SVC::new(KernelType::Linear, 1.0, 1e-3, 200)
+        .unwrap()
+        .with_random_state(42)
+        .fit(&x.view(), &y)
+        .expect("SVC: view x + owned y");
+}
+
+/// `LinearRegression::score` takes its targets independently of the feature matrix' storage
+#[test]
+fn linear_regression_score_accepts_mixed_storage() {
+    let x = array![[1.0], [2.0], [3.0], [4.0]];
+    let y = array![2.0, 4.0, 6.0, 8.0];
+
+    let mut model = LinearRegression::default();
+    model.fit(&x, &y).expect("fit should succeed");
+
+    let r2 = model
+        .score(&x, &y.view())
+        .expect("score with a view target");
+    assert!(r2.is_finite(), "R^2 should be finite, got {r2}");
+}

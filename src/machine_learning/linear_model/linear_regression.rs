@@ -261,15 +261,16 @@ impl LinearRegression {
     /// gate. The SSE and intercept-gradient sums use deterministic blocked folds above the sum
     /// gate (see `crate::parallel_gates`), so re-running on the same machine reproduces the result
     /// (not necessarily bit-for-bit)
-    pub fn fit<S>(
+    pub fn fit<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
-        preliminary_check(x, Some(y))?;
+        preliminary_check(x, Some(y.len()))?;
 
         // Closed-form path
         if self.solver == Solver::Normal {
@@ -458,13 +459,14 @@ impl LinearRegression {
     /// intercept is recovered as `mean(y) - mean(x) . w`. The system is solved via an SVD least
     /// squares on the augmented design `[Xc; sqrt(lambda) I]`, which yields the minimum-norm
     /// solution even when `X^T X` is singular (e.g. collinear or wide data)
-    fn fit_normal<S>(
+    fn fit_normal<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         let n_samples = x.nrows();
 
@@ -572,13 +574,14 @@ impl LinearRegression {
     ///
     /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if input data is invalid
     /// - `Error::NonFinite` - if an error occurs during fitting or prediction
-    pub fn fit_predict<S>(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         self.fit(x, y)?;
         self.predict(x)
@@ -605,9 +608,14 @@ impl LinearRegression {
     /// - `Error::NotFitted` - if the model has not been fitted
     /// - `Error::EmptyInput` / `Error::DimensionMismatch` - if inputs are empty or mismatched
     /// - `Error::NonFinite` - if `x` or `y` contain NaN or infinite values
-    pub fn score<S>(&self, x: &ArrayBase<S, Ix2>, y: &ArrayBase<S, Ix1>) -> Result<f64, Error>
+    pub fn score<S1, S2>(
+        &self,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
+    ) -> Result<f64, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         // `predict` validates the model is fitted and that `x` is non-empty and finite
         let predictions = self.predict(x)?;

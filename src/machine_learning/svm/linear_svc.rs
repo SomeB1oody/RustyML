@@ -312,15 +312,16 @@ impl LinearSVC {
     ///
     /// The full-batch cost GEMV runs parallel above its FLOPs gate; the per-batch
     /// gradient accumulation is sequential so the f64 result is reproducible
-    pub fn fit<S>(
+    pub fn fit<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64>,
     {
-        preliminary_check(x, Some(y))?;
+        preliminary_check(x, Some(y.len()))?;
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -349,7 +350,7 @@ impl LinearSVC {
         let batch_size = Self::calculate_batch_size(n_samples);
 
         #[allow(unused_variables)]
-        let calculate_cost = |x: &ArrayBase<S, Ix2>,
+        let calculate_cost = |x: &ArrayBase<S1, Ix2>,
                               y: &Array1<f64>,
                               weights: &Array1<f64>,
                               bias: f64,
@@ -604,13 +605,14 @@ impl LinearSVC {
     ///
     /// - `Error::EmptyInput` / `Error::DimensionMismatch` - If input data is invalid
     /// - `Error::NonFinite` - If numerical issues occur during training
-    pub fn fit_predict<S>(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64>,
     {
         self.fit(x, y)?;
         self.predict(x)

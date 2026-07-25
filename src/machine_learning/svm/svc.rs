@@ -249,16 +249,17 @@ impl SVC {
     /// The kernel-matrix GEMM runs parallel above its FLOPs gate, and the error-cache
     /// initialization parallelizes above the calibrated scan-class gate; the SMO inner loops
     /// are sequential so the optimization trajectory is reproducible
-    pub fn fit<S>(
+    pub fn fit<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
         // Basic input validation
-        preliminary_check(x, Some(y))?;
+        preliminary_check(x, Some(y.len()))?;
 
         let (n_samples, n_features) = (x.nrows(), x.ncols());
 
@@ -823,13 +824,14 @@ impl SVC {
     ///
     /// - `Error::EmptyInput` / `Error::InvalidInput` / `Error::InvalidParameter` - If input data is invalid
     /// - `Error::NotConverged` / `Error::NonFinite` / `Error::NotFitted` / `Error::DimensionMismatch` - If an error occurs during fitting or prediction
-    pub fn fit_predict<S>(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S1: Data<Elem = f64> + Send + Sync,
+        S2: Data<Elem = f64> + Send + Sync,
     {
         self.fit(x, y)?;
         self.predict(x)

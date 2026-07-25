@@ -6,7 +6,7 @@
 
 use super::RegularizationType;
 use crate::error::Error;
-use ndarray::{ArrayBase, Data, Dimension, Ix1, Ix2};
+use ndarray::{ArrayBase, Data, Dimension, Ix2};
 
 /// Performs validation checks on the input data matrices
 ///
@@ -20,7 +20,8 @@ use ndarray::{ArrayBase, Data, Dimension, Ix1, Ix2};
 /// # Parameters
 ///
 /// - `x` - A 2D array of feature values where rows represent samples and columns represent features
-/// - `y` - An optional 1D array of target variables or labels corresponding to each sample
+/// - `y_len` - The length of the target vector, when the caller has one to check. Taking the
+///   length rather than the array keeps `x` and `y` free to use different storage types
 ///
 /// # Returns
 ///
@@ -31,10 +32,7 @@ use ndarray::{ArrayBase, Data, Dimension, Ix1, Ix2};
 /// - [`Error::EmptyInput`] - If the input data or target vector is empty
 /// - [`Error::NonFinite`] - If the input data contains NaN or infinite values
 /// - [`Error::DimensionMismatch`] - If the dimensions of `x` and `y` mismatch
-pub(super) fn preliminary_check<S>(
-    x: &ArrayBase<S, Ix2>,
-    y: Option<&ArrayBase<S, Ix1>>,
-) -> Result<(), Error>
+pub(super) fn preliminary_check<S>(x: &ArrayBase<S, Ix2>, y_len: Option<usize>) -> Result<(), Error>
 where
     S: Data<Elem = f64>,
 {
@@ -53,13 +51,13 @@ where
         }
     }
 
-    if let Some(y) = y {
-        if y.is_empty() {
+    if let Some(y_len) = y_len {
+        if y_len == 0 {
             return Err(Error::empty_input("target vector"));
         }
 
-        if y.len() != x.nrows() {
-            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
+        if y_len != x.nrows() {
+            return Err(Error::dimension_mismatch(x.nrows(), y_len));
         }
     }
     Ok(())
@@ -415,7 +413,7 @@ mod tests {
     fn preliminary_check_y_len_mismatch_gives_dimension_mismatch() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
         let y = Array1::from_vec(vec![1.0, 2.0]); // len 2, but x has 3 rows
-        let err = preliminary_check(&x, Some(&y)).unwrap_err();
+        let err = preliminary_check(&x, Some(y.len())).unwrap_err();
         match err {
             Error::DimensionMismatch { expected, found } => {
                 assert_eq!(expected, 3, "expected count should be x.nrows()=3");
@@ -437,7 +435,7 @@ mod tests {
     fn preliminary_check_valid_x_and_y_gives_ok() {
         let x = ndarray::array![[1.0, 2.0], [3.0, 4.0]];
         let y = Array1::from_vec(vec![0.0, 1.0]);
-        assert!(preliminary_check(&x, Some(&y)).is_ok());
+        assert!(preliminary_check(&x, Some(y.len())).is_ok());
     }
 
     // validate_predict_input
