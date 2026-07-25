@@ -1,8 +1,9 @@
 //! Kernel-level GEMM benchmarks: `Dense::forward` across a shape sweep.
 //!
-//! Dense forward is one `gemm_internal` call (plus a cheap bias + activation), so this isolates
-//! the matrix-multiply backend across the regimes that matter (small, medium, large, huge, wide,
-//! thin-K). Stable across backend changes since it only uses the public neural-network API.
+//! Dense forward is a single fused GEMM call - the bias add and the activation run in the
+//! kernel's epilogue, not as extra passes - so this isolates the matrix-multiply backend across
+//! the regimes that matter (small, medium, large, huge, wide, thin-K). Stable across backend
+//! changes since it only uses the public neural-network API.
 //!
 //! ```bash
 //! cargo bench --bench matmul_kernels

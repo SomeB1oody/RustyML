@@ -8,7 +8,9 @@ use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight};
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
-use ndarray::{Array, Array2, Axis};
+use gemmkit::Parallelism;
+use gemmkit_ndarray::{Activation as FusedActivation, Bias};
+use ndarray::{Array, Array2, ArrayView2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::borrow::Cow;
 
@@ -177,9 +179,110 @@ impl Dense {
         self.bias = bias.as_standard_layout().into_owned();
         Ok(())
     }
+
+    /// The layer's whole forward transform - `activation(input @ weights + bias)` - as one fused
+    /// gemmkit call, shared by [`Layer::forward`] and [`Layer::predict`]
+    ///
+    /// The bias add and the element-wise activation run in the GEMM's epilogue, on the accumulator
+    /// value the plain kernel would have stored, so the output is written exactly once: no
+    /// pre-activation buffer, no broadcast add of the `[1, output_dim]` bias, no second pass to map
+    /// the activation. The bias is the per-column addend (its length is `output_dim`, the output's
+    /// column count), which is why it lowers to [`Bias::PerCol`]
+    ///
+    /// Which epilogue each activation takes:
+    ///
+    /// - `Linear` - bias only, no activation
+    /// - `ReLU` - `Bias::PerCol` + [`FusedActivation::Relu`], the vectorized epilogue
+    /// - `Sigmoid` / `Tanh` - `gemm_map`, whose closure folds the per-column bias and the scalar
+    ///   formula into the store. `gemm_map` hands the closure the value *before* the bias, so the
+    ///   closure adds `bias[col]` itself. It costs one indirect call per output element (amortized
+    ///   over that element's `O(input_dim)` FLOPs) but is still one pass instead of three
+    /// - `Softmax` - bias only; softmax normalizes over a whole row, so it cannot be expressed as a
+    ///   per-element epilogue and stays a separate [`Activation::forward`] call on the result
+    ///
+    /// For `f32` a fused epilogue is bit-identical to the plain product followed by the same scalar
+    /// bias-add and map, so fusing changes no output value - with one exception: gemmkit's `Relu`
+    /// maps `NaN` to `0.0`, where this crate's scalar `relu` (`if x <= 0.0 { 0.0 } else { x }`)
+    /// propagates it. A `NaN` pre-activation is already a diverged model, and the cached-output ReLU
+    /// derivative treats the resulting `0.0` as a dead unit
+    ///
+    /// # Parameters
+    ///
+    /// - `input` - Input view with shape `[batch_size, input_dim]`; any strides work (gemmkit reads
+    ///   the operand in place, so a transposed or sliced view is not copied)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Tensor, Error>` - Activated output with shape `[batch_size, output_dim]`
+    ///
+    /// # Errors
+    ///
+    /// - `Error::Computation` - Softmax failed to reshape the fused pre-activation
+    ///
+    /// # Panics
+    ///
+    /// - If `input`'s column count differs from `input_dim`
+    /// - If the bias is not contiguous (it is always stored in standard layout)
+    fn project(&self, input: &ArrayView2<'_, f32>) -> Result<Tensor, Error> {
+        let bias = self.bias.as_slice().expect("bias must be contiguous");
+        // `beta == 0` means the fill is never read - this only allocates the destination the
+        // epilogue writes into
+        let mut output = Array2::from_elem((input.nrows(), self.output_dim), 0.0);
+        match self.activation {
+            Activation::ReLU => gemmkit_ndarray::gemm_fused(
+                1.0,
+                input,
+                &self.weights,
+                0.0,
+                &mut output,
+                Some(Bias::PerCol(bias)),
+                Some(FusedActivation::Relu),
+                Parallelism::Rayon(0),
+            ),
+            Activation::Sigmoid => gemmkit_ndarray::gemm_map(
+                1.0,
+                input,
+                &self.weights,
+                0.0,
+                &mut output,
+                &|z, _row, col| 1.0 / (1.0 + (-(z + bias[col])).exp()),
+                Parallelism::Rayon(0),
+            ),
+            Activation::Tanh => gemmkit_ndarray::gemm_map(
+                1.0,
+                input,
+                &self.weights,
+                0.0,
+                &mut output,
+                &|z, _row, col| (z + bias[col]).tanh(),
+                Parallelism::Rayon(0),
+            ),
+            // Linear needs nothing past the bias; Softmax's pre-activation is finished below
+            Activation::Linear | Activation::Softmax => gemmkit_ndarray::gemm_fused(
+                1.0,
+                input,
+                &self.weights,
+                0.0,
+                &mut output,
+                Some(Bias::PerCol(bias)),
+                None,
+                Parallelism::Rayon(0),
+            ),
+        }
+
+        let output = output.into_dyn();
+        match self.activation {
+            Activation::Softmax => self.activation.forward(&output),
+            _ => Ok(output),
+        }
+    }
 }
 
 impl Layer for Dense {
+    /// Training forward: caches the input and the activated output for the backward pass
+    ///
+    /// The linear product, the bias add, and the activation are one fused gemmkit call (see
+    /// `Dense::project`, which also documents the `NaN` handling of the fused `ReLU`)
     fn forward(&mut self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 2 {
             return Err(Error::invalid_input("input tensor is not 2D"));
@@ -190,16 +293,14 @@ impl Layer for Dense {
         // Cache input [batch_size, input_dim] for the backward pass
         self.input_cache = Some(input_2d.to_owned());
 
-        // Linear transform (parallel for large products)
-        let z = gemm_par_auto(&input_2d, &self.weights) + &self.bias;
-
-        // Cache the activated output for backpropagation
-        let output = self.activation.forward(&z.into_dyn())?;
+        // Fused linear + bias + activation, then cache the activated output for backpropagation
+        let output = self.project(&input_2d)?;
         self.output_cache = Some(output.clone());
         Ok(output)
     }
 
-    /// Inference forward (eval mode, writes no caches). See [`Layer::predict`]
+    /// Inference forward (eval mode, writes no caches). Same fused projection as
+    /// [`forward`](Layer::forward). See [`Layer::predict`]
     fn predict(&self, input: &Tensor) -> Result<Tensor, Error> {
         if input.ndim() != 2 {
             return Err(Error::invalid_input("input tensor is not 2D"));
@@ -207,10 +308,7 @@ impl Layer for Dense {
 
         let input_2d = input.view().into_dimensionality::<ndarray::Ix2>().unwrap();
 
-        // Linear transform (parallel for large products)
-        let z = gemm_par_auto(&input_2d, &self.weights) + &self.bias;
-
-        self.activation.forward(&z.into_dyn())
+        self.project(&input_2d)
     }
 
     fn backward(&mut self, grad_output: &Tensor) -> Result<Tensor, Error> {
