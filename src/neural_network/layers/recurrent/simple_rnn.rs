@@ -217,20 +217,21 @@ impl SimpleRNN {
     /// When `hidden_states` is `Some`, every hidden state (with `h_0 = 0` prepended) is recorded for
     /// the backward pass; `predict` passes `None` and skips both the recording and its clones
     ///
-    /// One timestep is one GEMM call: the timestep buffer starts as the pre-projected
-    /// `x_t @ kernel` slice, the recurrent product accumulates into it (`beta = 1`), and the bias
-    /// add plus the activation ride the kernel's own store as a fused epilogue. That removes the
-    /// two allocating broadcast adds and the separate activation sweep the timestep used to cost.
-    /// gemmkit's fused epilogues are bitwise-identical to the plain product followed by the same
-    /// scalar map, so every recorded hidden state is unchanged - with one exception: `ReLU` rides
-    /// the vectorized `Relu` epilogue, which maps `NaN` to `0` where this crate's scalar closure
-    /// propagates it
+    /// One timestep is one GEMM call plus at most one activation sweep: the timestep buffer
+    /// starts as the pre-projected `x_t @ kernel` slice, the recurrent product accumulates into
+    /// it (`beta = 1`), and the bias add rides the kernel's own store as a fused epilogue - that
+    /// removes the two allocating broadcast adds. `ReLU` also fuses, on the backend's vectorized
+    /// `Relu` epilogue (which maps `NaN` to `0` where this crate's scalar closure propagates it);
+    /// the exp-based `Sigmoid`/`Tanh` and the row-global `Softmax` stay a separate vectorized
+    /// [`Activation::forward`] pass, because a per-element closure epilogue (`gemm_map`) would
+    /// drop them to one indirect scalar call per element, far slower than the pass it saves.
+    /// The fused bias add is bitwise-identical to the plain product followed by the same
+    /// broadcast adds, so every recorded hidden state is unchanged
     ///
     /// Every call passes gemmkit's auto parallelism: a timestep product is `batch * units * units`
-    /// of work, which at ordinary layer sizes sits below the backend's work gate and stays on the
-    /// calling thread, so the tight loop pays no parallel dispatch; wide layers cross the gate and
-    /// the backend spreads them itself. `Softmax` is not a per-element map, so it fuses only the
-    /// bias and keeps [`Activation::forward`] as a second pass
+    /// of work, which at small layer sizes sits below the backend's work gate and stays on the
+    /// calling thread, so the tight loop pays no parallel dispatch; wider layers cross the gate
+    /// and the backend spreads them itself
     fn run(
         &self,
         x3: &ndarray::ArrayView3<f32>,
@@ -249,76 +250,27 @@ impl SimpleRNN {
         for t in 0..timesteps {
             // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
             let mut z = xw.index_axis(Axis(1), t).to_owned();
+            let fused_act = match self.activation {
+                Activation::ReLU => Some(FusedActivation::Relu),
+                _ => None,
+            };
+            gemmkit_ndarray::gemm_fused(
+                1.0,
+                &h_prev,
+                &self.recurrent_kernel,
+                1.0,
+                &mut z,
+                Some(Bias::PerCol(bias)),
+                fused_act,
+                Parallelism::Rayon(0),
+            );
             let h_t = match self.activation {
-                Activation::ReLU => {
-                    gemmkit_ndarray::gemm_fused(
-                        1.0,
-                        &h_prev,
-                        &self.recurrent_kernel,
-                        1.0,
-                        &mut z,
-                        Some(Bias::PerCol(bias)),
-                        Some(FusedActivation::Relu),
-                        Parallelism::Rayon(0),
-                    );
-                    z
-                }
-                Activation::Sigmoid => {
-                    gemmkit_ndarray::gemm_map(
-                        1.0,
-                        &h_prev,
-                        &self.recurrent_kernel,
-                        1.0,
-                        &mut z,
-                        &|v, _, col| {
-                            let x = v + bias[col];
-                            1.0 / (1.0 + (-x).exp())
-                        },
-                        Parallelism::Rayon(0),
-                    );
-                    z
-                }
-                Activation::Tanh => {
-                    gemmkit_ndarray::gemm_map(
-                        1.0,
-                        &h_prev,
-                        &self.recurrent_kernel,
-                        1.0,
-                        &mut z,
-                        &|v, _, col| (v + bias[col]).tanh(),
-                        Parallelism::Rayon(0),
-                    );
-                    z
-                }
-                Activation::Linear => {
-                    gemmkit_ndarray::gemm_fused(
-                        1.0,
-                        &h_prev,
-                        &self.recurrent_kernel,
-                        1.0,
-                        &mut z,
-                        Some(Bias::PerCol(bias)),
-                        None,
-                        Parallelism::Rayon(0),
-                    );
-                    z
-                }
-                Activation::Softmax => {
-                    gemmkit_ndarray::gemm_fused(
-                        1.0,
-                        &h_prev,
-                        &self.recurrent_kernel,
-                        1.0,
-                        &mut z,
-                        Some(Bias::PerCol(bias)),
-                        None,
-                        Parallelism::Rayon(0),
-                    );
-                    self.activation
-                        .forward(&z.into_dyn())?
-                        .into_dimensionality::<ndarray::Ix2>()
-                        .unwrap()
-                }
+                Activation::Linear | Activation::ReLU => z,
+                _ => self
+                    .activation
+                    .forward(&z.into_dyn())?
+                    .into_dimensionality::<ndarray::Ix2>()
+                    .unwrap(),
             };
             h_prev = h_t;
             if let Some(hs) = hidden_states.as_deref_mut() {

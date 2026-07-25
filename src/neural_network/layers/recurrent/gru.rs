@@ -6,6 +6,7 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{GRULayerWeight, LayerWeight};
+use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
@@ -298,18 +299,18 @@ impl GRU {
     ///
     /// Each of the two recurrent products per timestep is a single GEMM call: its buffer starts as
     /// the matching column block of the pre-projected `x_t @ kernel` slice, the product
-    /// accumulates into it (`beta = 1`), and the epilogue adds that block's bias slice and applies
-    /// the activation - the sigmoid for the fused `[r | z]` product, the configurable `act` for
-    /// the candidate. That removes the four allocating broadcast adds and the two separate
-    /// activation sweeps. gemmkit's epilogues are bitwise-identical to the plain product followed
-    /// by the same scalar map, so the cached per-gate arrays the BPTT pass consumes are unchanged
+    /// accumulates into it (`beta = 1`), and the epilogue adds that block's bias slice -
+    /// removing the four allocating broadcast adds. The gate activations stay separate
+    /// vectorized sweeps: a per-element closure epilogue (`gemm_map`) would drop the exp-based
+    /// sigmoid/tanh maps to one indirect scalar call per element, which measures far slower than
+    /// the sweeps it saves. The fused bias add is bitwise-identical to the plain product followed
+    /// by the same broadcast adds, so the cached per-gate arrays the BPTT pass consumes are
+    /// unchanged
     ///
     /// Both calls pass gemmkit's auto parallelism: `batch * units * 2*units` and
-    /// `batch * units * units` of work, which at ordinary layer sizes sit below the backend's work
-    /// gate and stay on the calling thread, so the tight loop pays no parallel dispatch; wide
-    /// layers cross the gate and the backend spreads them itself. `Softmax` is not a per-element
-    /// map, so a `Softmax` candidate fuses only its bias and keeps [`Activation::forward`] as a
-    /// second pass
+    /// `batch * units * units` of work, which at small layer sizes sit below the backend's work
+    /// gate and stay on the calling thread, so the tight loop pays no parallel dispatch; wider
+    /// layers cross the gate and the backend spreads them itself
     fn run(
         &self,
         x3: &ArrayView3<f32>,
@@ -326,16 +327,6 @@ impl GRU {
             .expect("fused bias must be contiguous")
             .split_at(2 * u);
 
-        // The candidate activation as a scalar map, when it has one; `Softmax` is defined over a
-        // whole row and cannot ride a per-element epilogue
-        let candidate: Option<fn(f32) -> f32> = match act {
-            Activation::Linear => Some(|x| x),
-            Activation::ReLU => Some(|x| if x <= 0.0 { 0.0 } else { x }),
-            Activation::Sigmoid => Some(|x| 1.0 / (1.0 + (-x).exp())),
-            Activation::Tanh => Some(|x| x.tanh()),
-            Activation::Softmax => None,
-        };
-
         let mut h_prev = Array2::<f32>::zeros((batch, u));
         if let Some(c) = caches.as_deref_mut() {
             c.hs.push(h_prev.clone());
@@ -349,18 +340,17 @@ impl GRU {
 
             // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
             let mut rz = xw_t.slice(s![.., 0..2 * u]).to_owned();
-            gemmkit_ndarray::gemm_map(
+            gemmkit_ndarray::gemm_fused(
                 1.0,
                 &h_prev,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
                 1.0,
                 &mut rz,
-                &|v, _, col| {
-                    let x = v + bias_rz[col];
-                    1.0 / (1.0 + (-x).exp())
-                },
+                Some(Bias::PerCol(bias_rz)),
+                None,
                 Parallelism::Rayon(0),
             );
+            let rz = apply_sigmoid(rz);
             let r_t = rz.slice(s![.., 0..u]).to_owned();
             let z_t = rz.slice(s![.., u..2 * u]).to_owned();
 
@@ -368,35 +358,20 @@ impl GRU {
             let r_h = &r_t * &h_prev;
             let mut h_candidate = xw_t.slice(s![.., 2 * u..]).to_owned();
             let rk_h = self.gates.recurrent_kernel.slice(s![.., 2 * u..]);
-            let h_candidate = match candidate {
-                Some(cand) => {
-                    gemmkit_ndarray::gemm_map(
-                        1.0,
-                        &r_h,
-                        &rk_h,
-                        1.0,
-                        &mut h_candidate,
-                        &|v, _, col| cand(v + bias_h[col]),
-                        Parallelism::Rayon(0),
-                    );
-                    h_candidate
-                }
-                None => {
-                    gemmkit_ndarray::gemm_fused(
-                        1.0,
-                        &r_h,
-                        &rk_h,
-                        1.0,
-                        &mut h_candidate,
-                        Some(Bias::PerCol(bias_h)),
-                        None,
-                        Parallelism::Rayon(0),
-                    );
-                    act.forward(&h_candidate.into_dyn())?
-                        .into_dimensionality::<ndarray::Ix2>()
-                        .unwrap()
-                }
-            };
+            gemmkit_ndarray::gemm_fused(
+                1.0,
+                &r_h,
+                &rk_h,
+                1.0,
+                &mut h_candidate,
+                Some(Bias::PerCol(bias_h)),
+                None,
+                Parallelism::Rayon(0),
+            );
+            let h_candidate = act
+                .forward(&h_candidate.into_dyn())?
+                .into_dimensionality::<ndarray::Ix2>()
+                .unwrap();
 
             // Hidden state update
             let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
