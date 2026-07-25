@@ -305,7 +305,7 @@ where
 
 impl<'a, S> Predict<&'a ArrayBase<S, Ix2>> for DecisionTree
 where
-    S: Data<Elem = f64> + Send + Sync,
+    S: Data<Elem = f64>,
 {
     type Output = Array1<f64>;
     fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {

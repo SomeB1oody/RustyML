@@ -1274,7 +1274,7 @@ impl DecisionTree {
     /// `crate::parallel_gates`)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64> + Send + Sync,
+        S: Data<Elem = f64>,
     {
         check_is_fitted(self.root.is_some(), "DecisionTree")?;
         validate_predict_input(x, self.n_features)?;

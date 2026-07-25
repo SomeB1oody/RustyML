@@ -469,3 +469,25 @@ fn linear_regression_score_accepts_mixed_storage() {
         .expect("score with a view target");
     assert!(r2.is_finite(), "R^2 should be finite, got {r2}");
 }
+
+/// `DecisionTree::predict` no longer requires `Send + Sync` on the storage type, so a
+/// non-Sync-friendly view works — `predict_proba` never had the bound to begin with
+#[test]
+fn decision_tree_predict_accepts_plain_data_storage() {
+    fn predict_via_plain_bound<S>(tree: &DecisionTree, x: &ndarray::ArrayBase<S, ndarray::Ix2>)
+    where
+        S: ndarray::Data<Elem = f64>,
+    {
+        let preds = tree.predict(x).expect("predict should succeed");
+        assert_eq!(preds.len(), x.nrows());
+    }
+
+    let x = array![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]];
+    let y = array![0.0, 1.0, 0.0, 1.0];
+
+    let mut tree = DecisionTree::new(Algorithm::CART, true).unwrap();
+    tree.fit(&x, &y).expect("fit should succeed");
+
+    // Callable from a context that only promises `Data<Elem = f64>`
+    predict_via_plain_bound(&tree, &x);
+}
