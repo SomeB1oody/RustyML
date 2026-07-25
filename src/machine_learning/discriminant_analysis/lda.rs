@@ -8,6 +8,8 @@ use crate::math::matmul::{gemm_par_auto, gemm_par_switch, gemv_par_auto};
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
+use gemmkit::Parallelism;
+use gemmkit_ndarray::Bias;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
@@ -831,8 +833,27 @@ impl LDA {
         let n_features = coefficients.ncols();
         crate::machine_learning::validation::validate_predict_input(x, n_features)?;
 
-        let mut scores = gemm_par_auto(x, &coefficients.t());
-        scores += intercepts;
+        // `x . coefficientsᵀ` plus the per-class intercept in one pass: the intercept is constant
+        // down each column of the `(n_samples, n_classes)` score matrix, so it rides the GEMM's
+        // fused epilogue instead of a second broadcast sweep over the whole result. The fused
+        // epilogue is bitwise-identical to the product followed by the same scalar add, and
+        // `beta = 0` means the freshly allocated buffer is written without being read. The
+        // intercepts are stored as an owned contiguous 1-D array, so the bias slice is a borrow
+        let mut scores = Array2::<f64>::zeros((x.nrows(), coefficients.nrows()));
+        gemmkit_ndarray::gemm_fused(
+            1.0,
+            x,
+            &coefficients.t(),
+            0.0,
+            &mut scores,
+            Some(Bias::PerCol(
+                intercepts
+                    .as_slice()
+                    .expect("LDA intercepts are stored contiguously"),
+            )),
+            None,
+            Parallelism::Rayon(0),
+        );
         Ok(scores)
     }
 

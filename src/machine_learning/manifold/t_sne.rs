@@ -5,7 +5,7 @@
 //! probabilities to a target perplexity
 
 use crate::error::Error;
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_switch};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
@@ -640,7 +640,10 @@ impl TSNE {
         let conditional: Vec<(Vec<usize>, Array1<f64>)> =
             if cache_resident::<f64>(n_samples, x.ncols()) {
                 let swarm_row = |i: usize| {
-                    let projections = x.dot(&x.row(i));
+                    // Forced serial on both arms: the parallel arm already runs one task per row,
+                    // so a matvec that forked again would nest inside its own rayon task, and the
+                    // sequential arm is serial by request
+                    let projections = gemv_par_switch(x, &x.row(i), false);
                     conditional_row(i, projections.view())
                 };
                 if parallel {

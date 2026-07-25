@@ -645,7 +645,9 @@ where
         (0..n_samples)
             .into_par_iter()
             .flat_map(|i| {
-                let proj_row = x_samples.dot(&x_samples.row(i));
+                // Forced serial: this already runs one task per row, so a matvec that forked
+                // again would nest inside its own rayon task
+                let proj_row = gemv_par_switch(&x_samples, &x_samples.row(i), false);
                 ((i + 1)..n_samples)
                     .map(|j| (x_sq[i] + x_sq[j] - 2.0 * proj_row[j]).max(0.0).sqrt())
                     .collect::<Vec<f64>>()
