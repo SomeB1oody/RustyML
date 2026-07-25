@@ -187,7 +187,7 @@ impl LogisticRegression {
     /// # Parameters
     ///
     /// - `x` - feature matrix where each row is a sample and each column is a feature
-    /// - `y` - target variable containing 0 or 1 indicating sample class
+    /// - `y` - target variable containing `0.0` or `1.0` indicating sample class
     ///
     /// # Returns
     ///
@@ -195,8 +195,10 @@ impl LogisticRegression {
     ///
     /// # Errors
     ///
-    /// - `Error::InvalidInput` - if the target vector contains values other than 0 or 1
-    /// - `Error::NonFinite` - if numerical issues (NaN/Infinity) occur during training
+    /// - `Error::EmptyInput` - if `x` has no rows
+    /// - `Error::DimensionMismatch` - if `y.len()` does not equal `x.nrows()`
+    /// - `Error::InvalidInput` - if the target vector contains values other than `0.0` or `1.0`
+    /// - `Error::NonFinite` - if `x` contains NaN/Infinity, or numerical issues occur during training
     ///
     /// # Performance
     ///
@@ -204,15 +206,22 @@ impl LogisticRegression {
     /// gates, the sigmoid above the exp-map gate, and the loss as a deterministic blocked fold
     /// above its exp-reduction gate, so re-running on the
     /// same machine reproduces the result (not necessarily bit-for-bit)
-    pub fn fit<S>(
+    pub fn fit<S1, S2>(
         &mut self,
-        x: &ArrayBase<S, Ix2>,
-        y: &ArrayBase<S, Ix1>,
+        x: &ArrayBase<S1, Ix2>,
+        y: &ArrayBase<S2, Ix1>,
     ) -> Result<&mut Self, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
-        preliminary_check(x, Some(y))?;
+        // Non-empty + finiteness checks on `x`; `y` is length-checked against it separately
+        // because the two arrays may use different storage types
+        preliminary_check(x, None)?;
+
+        if y.len() != x.nrows() {
+            return Err(Error::dimension_mismatch(x.nrows(), y.len()));
+        }
 
         // Check target values are binary
         for &val in y.iter() {
@@ -404,20 +413,28 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, Error>` - a 1D array containing predicted class labels (0 or 1)
+    /// - `Result<Array1<f64>, Error>` - a 1D array containing predicted class labels (`0.0` or `1.0`)
+    ///
+    /// # Notes
+    ///
+    /// Labels are `f64` rather than an integer type so they round-trip back into
+    /// [`fit`](Self::fit) and feed the `f64` classification metrics
+    /// (`ConfusionMatrix`, `accuracy`) without a conversion
     ///
     /// # Errors
     ///
     /// - `Error::NotFitted` - if the model has not been fitted yet
     /// - `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` - if input is empty, dimensions mismatch, or contains invalid values
     /// - `Error::NonFinite` - if numerical issues occur during probability calculation
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // Probabilities (with full input validation) then a 0.5 decision threshold
-        let probs = self.predict_proba(x)?;
-        Ok(probs.mapv(|prob| if prob >= 0.5 { 1 } else { 0 }))
+        // Probabilities (with full input validation) then a 0.5 decision threshold,
+        // applied in place since labels share the probabilities' element type
+        let mut probs = self.predict_proba(x)?;
+        probs.mapv_inplace(|prob| if prob >= 0.5 { 1.0 } else { 0.0 });
+        Ok(probs)
     }
 
     /// Predicts the positive-class probability for each sample
@@ -512,19 +529,20 @@ impl LogisticRegression {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<i32>, Error>` - predicted class labels for the training samples
+    /// - `Result<Array1<f64>, Error>` - predicted class labels (`0.0` or `1.0`) for the training samples
     ///
     /// # Errors
     ///
     /// - `Error::InvalidInput` - if input data does not match expectations
     /// - `Error::NonFinite` - if numerical issues occur during fitting or prediction
-    pub fn fit_predict<S>(
+    pub fn fit_predict<S1, S2>(
         &mut self,
-        train_x: &ArrayBase<S, Ix2>,
-        train_y: &ArrayBase<S, Ix1>,
-    ) -> Result<Array1<i32>, Error>
+        train_x: &ArrayBase<S1, Ix2>,
+        train_y: &ArrayBase<S2, Ix1>,
+    ) -> Result<Array1<f64>, Error>
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         self.fit(train_x, train_y)?;
         self.predict(train_x)

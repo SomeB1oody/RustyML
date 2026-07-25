@@ -1,6 +1,6 @@
 //! Integration tests for `LogisticRegression` and `generate_polynomial_features`
 //!
-//! Label contract: `predict` returns `Array1<i32>` with values in {0, 1};
+//! Label contract: `predict` returns `Array1<f64>` with values in {0.0, 1.0};
 //! `predict_proba` returns `Array1<f64>` with values in (0.0, 1.0)
 
 use approx::assert_abs_diff_eq;
@@ -8,6 +8,8 @@ use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
 use rustyml::machine_learning::RegularizationType;
 use rustyml::machine_learning::{LogisticRegression, generate_polynomial_features};
+#[cfg(feature = "metrics")]
+use rustyml::metrics::{ConfusionMatrix, accuracy};
 
 use crate::common::assert_allclose;
 
@@ -239,18 +241,18 @@ fn predict_linearly_separable_classifies_correctly() {
 
     let preds = model.predict(&x_train).expect("predict should succeed");
 
-    // Predictions must be exactly in {0, 1} (label domain contract)
+    // Predictions must be exactly in {0.0, 1.0} (label domain contract)
     for &p in preds.iter() {
-        assert!(p == 0 || p == 1, "label {p} outside {{0,1}}");
+        assert!(p == 0.0 || p == 1.0, "label {p} outside {{0.0,1.0}}");
     }
 
     // All training points must be classified correctly
-    assert_eq!(preds[0], 0, "(-10,0) should be class 0");
-    assert_eq!(preds[1], 0, "(-10,5) should be class 0");
-    assert_eq!(preds[2], 0, "(-8,-3) should be class 0");
-    assert_eq!(preds[3], 1, "(10,0) should be class 1");
-    assert_eq!(preds[4], 1, "(10,-5) should be class 1");
-    assert_eq!(preds[5], 1, "(8,3) should be class 1");
+    assert_eq!(preds[0], 0.0, "(-10,0) should be class 0");
+    assert_eq!(preds[1], 0.0, "(-10,5) should be class 0");
+    assert_eq!(preds[2], 0.0, "(-8,-3) should be class 0");
+    assert_eq!(preds[3], 1.0, "(10,0) should be class 1");
+    assert_eq!(preds[4], 1.0, "(10,-5) should be class 1");
+    assert_eq!(preds[5], 1.0, "(8,3) should be class 1");
 }
 
 /// predict_proba returns values strictly in (0, 1), with class-0 probabilities < 0.5 and class-1 > 0.5, consistent with predict
@@ -298,7 +300,7 @@ fn predict_proba_range_and_consistency_with_predict() {
     // predict and predict_proba must agree: predict thresholds at 0.5
     let preds = model.predict(&x_train).expect("predict should succeed");
     for (i, (&prob, &pred)) in probs.iter().zip(preds.iter()).enumerate() {
-        let expected_label = if prob >= 0.5 { 1 } else { 0 };
+        let expected_label = if prob >= 0.5 { 1.0 } else { 0.0 };
         assert_eq!(
             pred, expected_label,
             "predict/predict_proba disagree at sample {i}"
@@ -322,6 +324,60 @@ fn fit_predict_agrees_with_fit_then_predict() {
     let labels_separate = model_b.predict(&x).expect("predict should succeed");
 
     assert_eq!(labels_fit_predict, labels_separate);
+}
+
+// Label-type interop
+
+/// `predict` output feeds the f64 classification metrics and `fit` directly, with no conversion:
+/// this is the contract that motivates `Array1<f64>` labels over an integer type
+#[test]
+fn predict_labels_feed_metrics_and_refit_without_conversion() {
+    let x = array![[-5.0, 0.0], [-4.0, 1.0], [4.0, 0.0], [5.0, 1.0],];
+    let y = array![0.0, 0.0, 1.0, 1.0];
+
+    let mut model = LogisticRegression::new(true, 0.1, 2000, 1e-8).expect("valid params");
+    model.fit(&x, &y).expect("fit should succeed");
+    let preds = model.predict(&x).expect("predict should succeed");
+
+    // Straight into the metrics layer — no `.mapv(|v| v as f64)` bridge
+    #[cfg(feature = "metrics")]
+    {
+        let cm = ConfusionMatrix::new(&y, &preds);
+        assert_abs_diff_eq!(cm.accuracy(), 1.0, epsilon = 1e-12);
+        assert_abs_diff_eq!(accuracy(&y, &preds), 1.0, epsilon = 1e-12);
+    }
+
+    // And straight back into `fit` as labels — the round-trip the i32 output could not do
+    let mut refit = LogisticRegression::new(true, 0.1, 2000, 1e-8).expect("valid params");
+    refit
+        .fit(&x, &preds)
+        .expect("predicted labels must be valid training targets");
+}
+
+/// `fit` accepts `x` and `y` backed by different storage types (owned matrix, borrowed view),
+/// which the single-`S` signature rejected at compile time
+#[test]
+fn fit_accepts_mixed_storage_for_x_and_y() {
+    let x = array![[-5.0, 0.0], [-4.0, 1.0], [4.0, 0.0], [5.0, 1.0],];
+    let y_owned = array![0.0, 0.0, 1.0, 1.0];
+
+    // S1 = OwnedRepr (x), S2 = ViewRepr (y)
+    let mut model = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
+    model
+        .fit(&x, &y_owned.view())
+        .expect("mixed owned/view storage should fit");
+
+    // S1 = ViewRepr (x), S2 = OwnedRepr (y)
+    let mut model_swapped = LogisticRegression::new(true, 0.1, 500, 1e-8).expect("valid params");
+    model_swapped
+        .fit(&x.view(), &y_owned)
+        .expect("mixed view/owned storage should fit");
+
+    assert_allclose(
+        model.get_weights().expect("weights present"),
+        model_swapped.get_weights().expect("weights present"),
+        0.0,
+    );
 }
 
 // fit_intercept=false
@@ -613,8 +669,7 @@ fn poly_features_pipeline_makes_circular_data_separable() {
 
     // All training points must be classified correctly
     for (i, (&p, &truth)) in preds.iter().zip(y.iter()).enumerate() {
-        let expected = truth as i32;
-        assert_eq!(p, expected, "sample {i}: expected {expected}, got {p}");
+        assert_eq!(p, truth, "sample {i}: expected {truth}, got {p}");
     }
 }
 

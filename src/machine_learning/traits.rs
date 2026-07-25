@@ -139,13 +139,14 @@ where
     }
 }
 
-impl<'a, S> Fit<(&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>)> for LogisticRegression
+impl<'a, S1, S2> Fit<(&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>)> for LogisticRegression
 where
-    S: Data<Elem = f64>,
+    S1: Data<Elem = f64>,
+    S2: Data<Elem = f64>,
 {
     fn fit(
         &mut self,
-        data: (&'a ArrayBase<S, Ix2>, &'a ArrayBase<S, Ix1>),
+        data: (&'a ArrayBase<S1, Ix2>, &'a ArrayBase<S2, Ix1>),
     ) -> Result<&mut Self, Error> {
         let (x, y) = data;
         self.fit(x, y)
@@ -292,7 +293,7 @@ impl<'a, S> Predict<&'a ArrayBase<S, Ix2>> for LogisticRegression
 where
     S: Data<Elem = f64>,
 {
-    type Output = Array1<i32>;
+    type Output = Array1<f64>;
     fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
         self.predict(input)
     }
