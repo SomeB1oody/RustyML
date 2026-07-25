@@ -17,17 +17,23 @@
 //! Tensors are `[batch, channels, spatial...]`; weights are flat row-major `[F, Cin, k...]`. The
 //! forward pass parallelizes over `(batch item, output-position block)` tasks. Splitting the
 //! output positions lets a single large image use every core even at `batch == 1`, with each task
-//! building its own im2col block and GEMM, writing a disjoint output region. The backward pass
-//! parallelizes over batch items (their weight/bias partials are reduced in batch order, so
-//! rerunning on the same machine gives the same result) and routes its two GEMMs through
-//! [`gemm_par_switch`](crate::math::matmul::gemm_par_switch): the per-item GEMMs stay parallel
-//! while the batch fan is too short to fill the pool, and switch to serial once the batch alone
-//! fills it (so the batch tasks do not each fork rayon inside a GEMM)
+//! building its own im2col block and running 1 serial GEMM straight into its disjoint output
+//! region. That GEMM carries the per-filter bias as a fused `PerRow` epilogue, so a block costs
+//! 1 pass with no product temporary and no separate bias sweep (the fused result is bit-for-bit
+//! the plain product followed by the same scalar bias add).
+//!
+//! The backward pass parallelizes over batch items (their weight/bias partials are reduced in
+//! batch order, so rerunning on the same machine gives the same result) and routes its two GEMMs
+//! through [`gemm_par_switch`](crate::math::matmul::gemm_par_switch): the per-item GEMMs stay
+//! parallel while the batch fan is too short to fill the pool, and switch to serial once the
+//! batch alone fills it (so the batch tasks do not each fork rayon inside a GEMM)
 
 use super::PaddingType;
 use crate::error::Error;
 use crate::math::matmul::{gemm_par_auto, gemm_par_switch};
 use crate::neural_network::Tensor;
+use gemmkit::Parallelism;
+use gemmkit_ndarray::Bias;
 use ndarray::{Array2, Array3, ArrayD, ArrayView2, ArrayViewMut2, Axis, IxDyn};
 use rayon::prelude::*;
 
@@ -354,12 +360,25 @@ pub fn conv_forward_impl(
         let col = build_col_range(&ctx, b, c0, c0 + cols);
         let col_mat = ArrayView2::from_shape((k_total, cols), &col)
             .expect("col block length matches [Cin*k, cols]");
-        let mut prod = w_mat.dot(&col_mat); // [F, cols]
-        // Bias added last
-        for (f, mut row) in prod.outer_iter_mut().enumerate() {
-            row += bias[f];
-        }
-        blk.assign(&prod);
+        // `C <- w_mat @ col_mat + bias` in 1 fused pass. `beta == 0` overwrites the block without
+        // reading it, and `blk` is written in place, so the product needs no temporary and no
+        // separate bias sweep. The per-filter bias is 1 value per row of the `[F, cols]` product,
+        // i.e. `Bias::PerRow`, and the epilogue applies it after the accumulation - the same
+        // "bias added last" order as the elementwise pass it replaces, bit for bit. `blk` is a
+        // strided view into `out3` (rows stride `out_plane`); gemmkit consumes those strides
+        // directly, so writing into it costs no copy
+        gemmkit_ndarray::gemm_fused(
+            1.0,
+            &w_mat,
+            &col_mat,
+            0.0,
+            &mut blk,
+            Some(Bias::PerRow(bias)),
+            None,
+            // Serial: `fill_block` already runs as 1 leaf task of the batch x column-chunk
+            // par_iters above the gate, and as a plain loop body below it
+            Parallelism::Serial,
+        );
     };
 
     let gemm_flops = 2usize
