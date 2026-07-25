@@ -9,10 +9,11 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_regularization_type, validate_tolerance,
 };
-use crate::math::matmul::gemv_par_auto;
+use crate::math::matmul::matvec;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::sum_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
+use gemmkit::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
 /// Optimization strategy used to fit [`LinearRegression`]
@@ -313,7 +314,7 @@ impl LinearRegression {
             n_iter += 1;
 
             // Vectorized prediction
-            predictions.assign(&gemv_par_auto(x, &weights));
+            predictions.assign(&matvec(x, &weights, Parallelism::Rayon(0)));
             if self.fit_intercept {
                 predictions += intercept;
             }
@@ -359,7 +360,8 @@ impl LinearRegression {
             }
 
             // Gradients via matrix operations
-            let mut weight_gradients = gemv_par_auto(&x.t(), &error_vec) / (n_samples as f64);
+            let mut weight_gradients =
+                matvec(&x.t(), &error_vec, Parallelism::Rayon(0)) / (n_samples as f64);
             let intercept_gradient = if self.fit_intercept {
                 let error_sum = match error_vec.as_slice() {
                     Some(slice) => det_reduce(
@@ -545,7 +547,7 @@ impl LinearRegression {
 
         validate_predict_input(x, coeffs.len())?;
 
-        let mut predictions = gemv_par_auto(x, coeffs);
+        let mut predictions = matvec(x, coeffs, Parallelism::Rayon(0));
         if self.fit_intercept {
             predictions += intercept;
         }

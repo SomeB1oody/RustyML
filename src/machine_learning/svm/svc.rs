@@ -12,9 +12,10 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_tolerance,
 };
 pub use crate::machine_learning::{Gamma, KernelType};
-use crate::math::matmul::gemv_par_switch;
+use crate::math::matmul::matvec;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
+use gemmkit::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, Data, Ix1, Ix2};
 use ndarray_rand::rand::Rng;
 use ndarray_rand::rand::rngs::StdRng;
@@ -212,7 +213,7 @@ impl SVC {
         let coef = alphas * support_vector_labels;
         let kernel_matrix = self.kernel.compute_matrix(x, support_vectors);
         // Serial gemm-crate matvec
-        let mut decision_values = gemv_par_switch(&kernel_matrix, &coef, false);
+        let mut decision_values = matvec(&kernel_matrix, &coef, Parallelism::Serial);
         decision_values += bias;
         decision_values
     }

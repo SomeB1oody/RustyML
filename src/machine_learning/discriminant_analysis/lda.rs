@@ -4,12 +4,12 @@
 //! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration enums
 
 use crate::error::Error;
-use crate::math::matmul::{gemm_par_auto, gemm_par_switch, gemv_par_auto};
+use crate::math::matmul::{dot_par, matvec};
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::{AHashMap, AHashSet};
 use gemmkit::Parallelism;
-use gemmkit_ndarray::Bias;
+use gemmkit_ndarray::{Bias, dot};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
@@ -63,8 +63,8 @@ impl Solver {
                 Ok(coefficients)
             }
             // The covariance inverse is symmetric, so `means . inv` row c equals `inv * mu_c`
-            Solver::Eigen => Ok(gemm_par_auto(means, &Self::eigen_inverse(cov)?)),
-            Solver::SVD => Ok(gemm_par_auto(means, &Self::svd_pseudo_inverse(cov)?)),
+            Solver::Eigen => Ok(dot(means, &Self::eigen_inverse(cov)?)),
+            Solver::SVD => Ok(dot(means, &Self::svd_pseudo_inverse(cov)?)),
         }
     }
 
@@ -89,7 +89,7 @@ impl Solver {
                 scaled[[i, j]] *= s;
             }
         }
-        Ok(gemm_par_auto(&scaled, &eig.eigenvectors.t()))
+        Ok(dot(&scaled, &eig.eigenvectors.t()))
     }
 
     /// Inverts a symmetric covariance through its SVD pseudo-inverse
@@ -141,11 +141,11 @@ impl Solver {
         }
 
         // A = W^T S_b W is symmetric
-        let sbw = gemm_par_auto(sb, &w_scale);
-        let a = gemm_par_auto(&w_scale.t(), &sbw);
+        let sbw = dot(sb, &w_scale);
+        let a = dot(&w_scale.t(), &sbw);
         let a_sym = symmetric_part(&a);
         let a_eig = symmetric_eigen(&a_sym);
-        let directions = gemm_par_auto(&w_scale, &a_eig.eigenvectors);
+        let directions = dot(&w_scale, &a_eig.eigenvectors);
 
         // Rank discriminant directions by eigenvalue (class separability), descending
         let mut order: Vec<usize> = (0..n_features).collect();
@@ -204,7 +204,7 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
     }
     u.mapv_inplace(|v| v / beta);
 
-    let mut v = gemv_par_auto(&a.t(), &u);
+    let mut v = matvec(&a.t(), &u, Parallelism::Rayon(0));
     let mut alpha = v.dot(&v).sqrt();
     if alpha <= 0.0 {
         return x; // a^T b = 0 leaves no descent direction
@@ -217,14 +217,14 @@ fn lsqr_solve(a: &Array2<f64>, b: ArrayView1<f64>, max_iter: usize, tol: f64) ->
 
     for _ in 0..max_iter {
         // Advance the bidiagonalization to u_{k+1} and v_{k+1}
-        let mut u_next = gemv_par_auto(a, &v);
+        let mut u_next = matvec(a, &v, Parallelism::Rayon(0));
         u_next.scaled_add(-alpha, &u);
         beta = u_next.dot(&u_next).sqrt();
         if beta > 0.0 {
             u_next.mapv_inplace(|val| val / beta);
         }
 
-        let mut v_next = gemv_par_auto(&a.t(), &u_next);
+        let mut v_next = matvec(&a.t(), &u_next, Parallelism::Rayon(0));
         v_next.scaled_add(-beta, &v);
         alpha = v_next.dot(&v_next).sqrt();
         if alpha > 0.0 {
@@ -610,7 +610,11 @@ impl LDA {
 
         let class_pairs: Vec<_> = classes.iter().enumerate().collect();
         // Force each class task's scatter GEMM serial once the class fan alone fills the pool (`n_classes >= threads`)
-        let serial_gemm = use_parallel && n_classes >= rayon::current_num_threads();
+        let scatter_par = if use_parallel && n_classes >= rayon::current_num_threads() {
+            Parallelism::Serial
+        } else {
+            Parallelism::Rayon(0)
+        };
         let class_results: Vec<_> = if use_parallel {
             // Compute per-class stats in parallel
             let x_owned = x.to_owned();
@@ -624,7 +628,7 @@ impl LDA {
                             indices,
                             &overall_mean,
                             n_samples,
-                            serial_gemm,
+                            scatter_par,
                         );
                     (class_idx, prior, class_mean, class_sw, class_sb, class_z4)
                 })
@@ -636,7 +640,13 @@ impl LDA {
                 .map(|&(class_idx, &class)| {
                     let indices = &class_indices_map[&class];
                     let (prior, class_mean, class_sw, class_sb, class_z4) =
-                        Self::compute_class_stats(x, indices, &overall_mean, n_samples, false);
+                        Self::compute_class_stats(
+                            x,
+                            indices,
+                            &overall_mean,
+                            n_samples,
+                            Parallelism::Rayon(0),
+                        );
                     (class_idx, prior, class_mean, class_sw, class_sb, class_z4)
                 })
                 .collect()
@@ -1004,7 +1014,7 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        let transformed = gemm_par_auto(x, projection);
+        let transformed = dot(x, projection);
 
         #[cfg(feature = "show_progress")]
         {
@@ -1020,16 +1030,17 @@ impl LDA {
     /// The final tuple element is `sum_z4`, the sum over this class of `||x_i - mu_class||^4`,
     /// which the Ledoit-Wolf shrinkage estimator needs
     ///
-    /// `serial_gemm` forces the within-class scatter product onto the serial matmul path. Set it
-    /// when the per-class loop already fills the pool (`n_classes >= threads`) so each class task
-    /// does not fork rayon again inside its scatter GEMM; otherwise leave it false so the scatter
-    /// GEMM can parallelize over the otherwise-idle cores
+    /// `scatter_par` is the parallelism the within-class scatter product runs with. Pass
+    /// `Parallelism::Serial` when the per-class loop already fills the pool
+    /// (`n_classes >= threads`) so each class task does not fork rayon again inside its scatter
+    /// GEMM; otherwise `Parallelism::Rayon(0)` lets the backend spread it over the
+    /// otherwise-idle cores
     fn compute_class_stats<S>(
         x: &ArrayBase<S, Ix2>,
         indices: &[usize],
         overall_mean: &Array1<f64>,
         n_samples: usize,
-        serial_gemm: bool,
+        scatter_par: Parallelism,
     ) -> (f64, Array1<f64>, Array2<f64>, Array2<f64>, f64)
     where
         S: Data<Elem = f64>,
@@ -1044,11 +1055,7 @@ impl LDA {
 
         let centered = &class_data - &class_mean;
 
-        let class_sw = if serial_gemm {
-            gemm_par_switch(&centered.t(), &centered, false)
-        } else {
-            gemm_par_auto(&centered.t(), &centered)
-        };
+        let class_sw = dot_par(&centered.t(), &centered, scatter_par);
 
         // Fourth power of each centered row norm, summed for the Ledoit-Wolf dispersion term
         let sum_z4 = centered
@@ -1062,7 +1069,7 @@ impl LDA {
         // Between-class scatter from mean shift
         let mean_diff = &class_mean - overall_mean;
         let mean_diff_col = mean_diff.insert_axis(Axis(1));
-        let class_sb = gemm_par_auto(&mean_diff_col, &mean_diff_col.t()) * (n_class as f64);
+        let class_sb = dot(&mean_diff_col, &mean_diff_col.t()) * (n_class as f64);
 
         (prior, class_mean, class_sw, class_sb, sum_z4)
     }

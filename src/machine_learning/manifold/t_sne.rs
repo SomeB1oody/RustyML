@@ -5,11 +5,13 @@
 //! probabilities to a target perplexity
 
 use crate::error::Error;
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_switch};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, matvec};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
+use gemmkit::Parallelism;
+use gemmkit_ndarray::dot;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix1, Ix2, Zip, s};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -398,7 +400,7 @@ impl TSNE {
     /// # Performance
     ///
     /// Parallelizes when the pairwise work clears the calibrated class gates (see
-    /// `crate::parallel_gates`); the GEMMs gate themselves inside `gemm_par_auto`
+    /// `crate::parallel_gates`); the GEMMs gate themselves inside the gemmkit backend
     pub fn fit_transform<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array2<f64>, Error>
     where
         S: Data<Elem = f64>,
@@ -643,7 +645,7 @@ impl TSNE {
                     // Forced serial on both arms: the parallel arm already runs one task per row,
                     // so a matvec that forked again would nest inside its own rayon task, and the
                     // sequential arm is serial by request
-                    let projections = gemv_par_switch(x, &x.row(i), false);
+                    let projections = matvec(x, &x.row(i), Parallelism::Serial);
                     conditional_row(i, projections.view())
                 };
                 if parallel {
@@ -656,8 +658,7 @@ impl TSNE {
                 let mut conditional = Vec::with_capacity(n_samples);
                 for chunk_start in (0..n_samples).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(n_samples);
-                    let projections =
-                        gemm_par_auto(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
+                    let projections = dot(&x.slice(s![chunk_start..chunk_end, ..]), &x.t());
                     if parallel {
                         let chunk: Vec<(Vec<usize>, Array1<f64>)> = (chunk_start..chunk_end)
                             .into_par_iter()
@@ -874,7 +875,7 @@ impl TSNE {
     fn pairwise_squared_distances(&self, x: &Array2<f64>, parallel: bool) -> Array2<f64> {
         // D[i, j] = ||x_i||^2 + ||x_j||^2 - 2 x_i.x_j
         let x_sq = x.map_axis(Axis(1), |row| row.dot(&row));
-        let mut distances = gemm_par_auto(x, &x.t());
+        let mut distances = dot(x, &x.t());
 
         let fill_row = |i: usize, mut row: ArrayViewMut1<f64>| {
             let xi_sq = x_sq[i];
@@ -1017,7 +1018,7 @@ impl TSNE {
         }
 
         let row_sums = w.sum_axis(Axis(1));
-        let weighted_y = gemm_par_auto(&w, y);
+        let weighted_y = dot(&w, y);
 
         // 4 * (s_i * y_i - (W * Y)_i), assembled with broadcast elementwise ops (O(n * d))
         (y * &row_sums.insert_axis(Axis(1)) - weighted_y) * 4.0

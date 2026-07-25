@@ -1,7 +1,6 @@
 //! SimpleRNN layer: a basic recurrent layer that returns the last hidden state
 
 use crate::error::Error;
-use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -13,6 +12,7 @@ use crate::neural_network::layers::recurrent::validation::{
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit::Parallelism;
+use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -337,7 +337,7 @@ impl Layer for SimpleRNN {
             };
 
             // gradient w.r.t. previous hidden state, used by the next iteration (sequential)
-            grad_h = gemm_par_auto(&d_z, &self.recurrent_kernel.t());
+            grad_h = dot(&d_z, &self.recurrent_kernel.t());
             dz_all.index_axis_mut(Axis(1), t).assign(&d_z);
         }
 
@@ -359,13 +359,13 @@ impl Layer for SimpleRNN {
 
         // Each reduction is the whole per-call gradient, so it becomes the buffer directly rather
         // than being added into a freshly zeroed one
-        let grad_k = gemm_par_auto(&x_flat.t(), &dz_flat);
-        let grad_rk = gemm_par_auto(&h_prev_flat.t(), &dz_flat);
+        let grad_k = dot(&x_flat.t(), &dz_flat);
+        let grad_rk = dot(&h_prev_flat.t(), &dz_flat);
         let grad_b = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Layout-tolerant reshape
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            gemm_par_auto(&dz_flat, &self.kernel.t()),
+            dot(&dz_flat, &self.kernel.t()),
             (batch, timesteps, feat),
         );
 

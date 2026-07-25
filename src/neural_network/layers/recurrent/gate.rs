@@ -182,10 +182,7 @@ pub fn project_input(kernel: &Array2<f32>, x3: &ArrayView3<f32>) -> Array3<f32> 
     let x2 = x3
         .to_shape((batch * timesteps, input_dim))
         .expect("contiguous [batch*timesteps, input_dim] reshape");
-    reshape_2d_to_3d(
-        crate::math::matmul::gemm_par_auto(&x2, kernel),
-        (batch, timesteps, width),
-    )
+    reshape_2d_to_3d(gemmkit_ndarray::dot(&x2, kernel), (batch, timesteps, width))
 }
 
 /// Reshapes a GEMM result `[d0*d1, d2]` to `[d0, d1, d2]`, tolerating a column-major input

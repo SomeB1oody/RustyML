@@ -10,8 +10,9 @@ use crate::machine_learning::validation::{
     preliminary_check, validate_learning_rate, validate_max_iterations, validate_predict_input,
     validate_tolerance,
 };
-use crate::math::matmul::gemv_par_auto;
+use crate::math::matmul::matvec;
 use crate::{Deserialize, Serialize};
+use gemmkit::Parallelism;
 use ndarray::{Array1, ArrayBase, Data, Ix1, Ix2, s};
 use ndarray_rand::rand::seq::SliceRandom;
 
@@ -356,7 +357,7 @@ impl LinearSVC {
                               bias: f64,
                               penalty: &RegularizationType|
          -> f64 {
-            let margins: Array1<f64> = gemv_par_auto(x, weights) + bias;
+            let margins: Array1<f64> = matvec(x, weights, Parallelism::Rayon(0)) + bias;
             // Mean data loss, matching the configured loss function
             let data_loss = match self.loss {
                 Loss::Hinge => {
@@ -578,7 +579,7 @@ impl LinearSVC {
 
         validate_predict_input(x, weights.len())?;
 
-        let decision = gemv_par_auto(x, weights) + bias;
+        let decision = matvec(x, weights, Parallelism::Rayon(0)) + bias;
 
         // Reject NaN/Inf in decision values
         if decision.iter().any(|&val| !val.is_finite()) {

@@ -7,13 +7,13 @@ use crate::error::Error;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::math::matmul::gemm_par_auto;
 use crate::math::reduction::{DET_REDUCE_BLOCK, det_reduce, det_reduce_range};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{
     cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems, sum_f64_parallel_min_elems,
 };
 use crate::{Deserialize, Serialize};
+use gemmkit_ndarray::dot;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayViewMut1, Axis, Data, Ix2};
 use ndarray_rand::rand::Rng;
 use rayon::prelude::{
@@ -402,7 +402,7 @@ impl KMeans {
             let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
 
             let data_view = data.view();
-            let projections = gemm_par_auto(&data_view, &centroids.t());
+            let projections = dot(&data_view, &centroids.t());
 
             // Closest cluster center and distance for a single sample
             let compute_assignments = |sample_idx: usize| -> Result<(usize, f64), Error> {
@@ -621,7 +621,7 @@ impl KMeans {
         validate_predict_input(data, centroids.ncols())?;
 
         let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
-        let projections = gemm_par_auto(data, &centroids.t());
+        let projections = dot(data, &centroids.t());
 
         // Scan-class gate: n tasks, each an O(k) arg-min scan
         let scan_work = data.nrows().saturating_mul(centroids.nrows());

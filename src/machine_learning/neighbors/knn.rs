@@ -9,9 +9,11 @@ use crate::machine_learning::spatial::KdTree;
 use crate::machine_learning::validation::{
     check_is_fitted, preliminary_check, validate_predict_input,
 };
-use crate::math::matmul::{cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_switch};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, matvec};
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
+use gemmkit::Parallelism;
+use gemmkit_ndarray::dot;
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, ArrayView2, Axis, Data, Ix1, Ix2, s};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::sync::OnceLock;
@@ -367,8 +369,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                 let mut encoded = Vec::with_capacity(x.nrows());
                 for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
-                    let projections =
-                        gemm_par_auto(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                    let projections = dot(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
                     for i in chunk_start..chunk_end {
                         encoded.push(self.predict_one(
                             x.row(i),
@@ -465,8 +466,7 @@ impl<T: Clone + std::hash::Hash + Eq + Sync + Send> KNN<T> {
                 let mut encoded = Vec::with_capacity(x.nrows());
                 for chunk_start in (0..x.nrows()).step_by(chunk_rows) {
                     let chunk_end = (chunk_start + chunk_rows).min(x.nrows());
-                    let projections =
-                        gemm_par_auto(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
+                    let projections = dot(&x.slice(s![chunk_start..chunk_end, ..]), &x_train.t());
                     let chunk_results: Result<Vec<usize>, Error> = (chunk_start..chunk_end)
                         .into_par_iter()
                         .map(|i| {
@@ -566,7 +566,7 @@ impl<T: Clone + std::hash::Hash + Eq> KNN<T> {
                         Some(p) => p,
                         None => {
                             // Force serial since this runs inside a parallel predict loop
-                            projections_owned = gemv_par_switch(&x_train, &x, false);
+                            projections_owned = matvec(&x_train, &x, Parallelism::Serial);
                             projections_owned.view()
                         }
                     };

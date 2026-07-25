@@ -1,7 +1,6 @@
 //! Long Short-Term Memory (LSTM) recurrent layer with input, forget, cell, and output gates
 
 use crate::error::Error;
-use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -15,6 +14,7 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit::Parallelism;
 use gemmkit_ndarray::Bias;
+use gemmkit_ndarray::dot;
 use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 use std::borrow::Cow;
 
@@ -513,7 +513,7 @@ impl Layer for LSTM {
             dz_t.slice_mut(s![.., 3 * u..4 * u]).assign(&grad_o_raw);
 
             // Gradient w.r.t. the previous hidden state: one fused GEMM instead of 4
-            grad_h = gemm_par_auto(&dz_t, &self.gates.recurrent_kernel.t());
+            grad_h = dot(&dz_t, &self.gates.recurrent_kernel.t());
 
             dz3.index_axis_mut(Axis(1), t).assign(&dz_t);
 
@@ -536,12 +536,12 @@ impl Layer for LSTM {
             .to_shape((batch * timesteps, 4 * u))
             .expect("contiguous DZ reshape");
 
-        let grad_kernel = gemm_par_auto(&x_flat.t(), &dz_flat);
-        let grad_recurrent = gemm_par_auto(&h_prev_flat.t(), &dz_flat);
+        let grad_kernel = dot(&x_flat.t(), &dz_flat);
+        let grad_recurrent = dot(&h_prev_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            gemm_par_auto(&dz_flat, &self.gates.kernel.t()),
+            dot(&dz_flat, &self.gates.kernel.t()),
             (batch, timesteps, feat),
         );
 

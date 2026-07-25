@@ -9,13 +9,13 @@ use crate::machine_learning::parallel::map_collect;
 use crate::machine_learning::validation::{
     preliminary_check, validate_max_iterations, validate_predict_input, validate_tolerance,
 };
-use crate::math::matmul::{
-    cache_resident, gemm_chunk_rows, gemm_par_auto, gemv_par_auto, gemv_par_switch,
-};
+use crate::math::matmul::{cache_resident, gemm_chunk_rows, matvec};
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::scan_f64_parallel_min_elems;
 use crate::{Deserialize, Serialize};
 use ahash::AHashMap;
+use gemmkit::Parallelism;
+use gemmkit_ndarray::dot;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2, Zip, s};
 use ndarray_rand::rand::seq::SliceRandom;
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -243,7 +243,11 @@ impl MeanShift {
             >= scan_f64_parallel_min_elems();
 
         // When the seed axis alone fills the pool, keep each per-seed matvec serial to avoid nested rayon forks
-        let serial_gemv = use_parallel && seeds.len() >= rayon::current_num_threads();
+        let seed_matvec_par = if use_parallel && seeds.len() >= rayon::current_num_threads() {
+            Parallelism::Serial
+        } else {
+            Parallelism::Rayon(0)
+        };
 
         // Mean shift on a single seed
         let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
@@ -253,11 +257,7 @@ impl MeanShift {
             loop {
                 // RBF weights for every point via the squared-norm identity
                 let center_sq = center.dot(&center);
-                let projections = if serial_gemv {
-                    gemv_par_switch(x, &center, false)
-                } else {
-                    gemv_par_auto(x, &center)
-                };
+                let projections = matvec(x, &center, seed_matvec_par);
                 let weights: Array1<f64> =
                     Zip::from(&projections)
                         .and(&x_sq)
@@ -268,11 +268,7 @@ impl MeanShift {
                 // Serial sum
                 let weight_sum = weights.sum();
 
-                let weighted_sum = if serial_gemv {
-                    gemv_par_switch(&x.t(), &weights, false)
-                } else {
-                    gemv_par_auto(&x.t(), &weights)
-                };
+                let weighted_sum = matvec(&x.t(), &weights, seed_matvec_par);
                 let new_center = resolve_shifted_center(weighted_sum, weight_sum, &center);
 
                 // Check convergence using squared distance to avoid sqrt
@@ -647,7 +643,7 @@ where
             .flat_map(|i| {
                 // Forced serial: this already runs one task per row, so a matvec that forked
                 // again would nest inside its own rayon task
-                let proj_row = gemv_par_switch(&x_samples, &x_samples.row(i), false);
+                let proj_row = matvec(&x_samples, &x_samples.row(i), Parallelism::Serial);
                 ((i + 1)..n_samples)
                     .map(|j| (x_sq[i] + x_sq[j] - 2.0 * proj_row[j]).max(0.0).sqrt())
                     .collect::<Vec<f64>>()
@@ -658,7 +654,7 @@ where
         let mut distances: Vec<f64> = Vec::new();
         for chunk_start in (0..n_samples).step_by(chunk_rows) {
             let chunk_end = (chunk_start + chunk_rows).min(n_samples);
-            let projections = gemm_par_auto(
+            let projections = dot(
                 &x_samples.slice(s![chunk_start..chunk_end, ..]),
                 &x_samples.t(),
             );

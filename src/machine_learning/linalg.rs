@@ -40,8 +40,9 @@
 //! power iteration), and Kernel PCA (centered-kernel eigendecomposition, dense or iterative).
 
 use crate::error::Error;
-use crate::math::matmul::gemv_par_auto;
+use crate::math::matmul::matvec;
 use crate::parallel_gates::cheap_map_f64_parallel_threshold;
+use gemmkit::Parallelism;
 use ndarray::{Array1, Array2, Axis};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -670,7 +671,7 @@ fn dominant_eigenpair(
     let mut prev_lambda = 0.0;
     for _ in 0..max_iter {
         // 1 matvec per step
-        let w = gemv_par_auto(matrix, &v);
+        let w = matvec(matrix, &v, Parallelism::Rayon(0));
         let lambda = v.dot(&w);
         if !lambda.is_finite() {
             return Err(Error::non_finite("power iteration eigenvalue"));
@@ -687,7 +688,7 @@ fn dominant_eigenpair(
         v = &w / w_norm;
     }
 
-    let lambda = v.dot(&gemv_par_auto(matrix, &v));
+    let lambda = v.dot(&matvec(matrix, &v, Parallelism::Rayon(0)));
     if !lambda.is_finite() {
         return Err(Error::non_finite("power iteration eigenvalue"));
     }
@@ -816,7 +817,7 @@ pub(crate) fn top_eigenpairs_lanczos(
 
     for _ in 0..m {
         // Three-term recurrence: w = A v - alpha v - beta_prev v_prev
-        let mut w = gemv_par_auto(matrix, &v);
+        let mut w = matvec(matrix, &v, Parallelism::Rayon(0));
         let alpha = v.dot(&w);
         w.scaled_add(-alpha, &v);
         if let Some(ref vp) = v_prev {

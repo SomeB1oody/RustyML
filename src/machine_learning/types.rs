@@ -9,10 +9,10 @@
 //! methods, so consumers share a single implementation instead of re-matching the enum in
 //! every model
 
-use crate::math::matmul::gemm_par_auto;
 use crate::math::squared_euclidean_distance_row;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, exp_map_f64_parallel_threshold};
 use crate::{Deserialize, Serialize};
+use gemmkit_ndarray::dot;
 use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 
 /// Regularization techniques used in machine learning models
@@ -228,7 +228,7 @@ impl KernelType {
     ///
     /// Batched counterpart of [`compute`](Self::compute). Every kernel reduces to the
     /// cross-Gram matrix `G = X*Y^T` (one rayon-parallel, cache-blocked matrix
-    /// multiply via `gemm_par_auto`) plus a cheap elementwise transform over the
+    /// multiply on the gemmkit backend) plus a cheap elementwise transform over the
     /// `[n, m]` result:
     ///
     /// - `Linear`  - `K = G`
@@ -263,7 +263,7 @@ impl KernelType {
         S1: Data<Elem = f64> + Sync,
         S2: Data<Elem = f64> + Sync,
     {
-        let mut k = gemm_par_auto(x, &y.t());
+        let mut k = dot(x, &y.t());
         let elems = k.len();
 
         match *self {

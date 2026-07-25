@@ -24,13 +24,13 @@
 //!
 //! The backward pass parallelizes over batch items (their weight/bias partials are reduced in
 //! batch order, so rerunning on the same machine gives the same result) and routes its two GEMMs
-//! through [`gemm_par_switch`](crate::math::matmul::gemm_par_switch): the per-item GEMMs stay
+//! through the crate's [`dot_par`](crate::math::matmul::dot_par): the per-item GEMMs stay
 //! parallel while the batch fan is too short to fill the pool, and switch to serial once the
 //! batch alone fills it (so the batch tasks do not each fork rayon inside a GEMM)
 
 use super::PaddingType;
 use crate::error::Error;
-use crate::math::matmul::{gemm_par_auto, gemm_par_switch};
+use crate::math::matmul::dot_par;
 use crate::neural_network::Tensor;
 use gemmkit::Parallelism;
 use gemmkit_ndarray::Bias;
@@ -478,9 +478,9 @@ pub(super) fn conv_backward(
         out_plane,
         offsets: &offsets,
     };
-    // `serial_gemm` forces the two per-item products onto the serial `gemm` path, so a per-batch
-    // task does not fork rayon again inside its GEMM
-    let process_b = |b: usize, serial_gemm: bool| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
+    // `gemm_par` is `Serial` when the batch fan alone fills the pool, so a per-batch task does
+    // not fork rayon again inside its GEMM; `Rayon(0)` otherwise, letting the backend decide
+    let process_b = |b: usize, gemm_par: Parallelism| -> (Array2<f32>, Vec<f32>, Vec<f32>) {
         let col = build_col_range(&ctx, b, 0, out_plane);
         let col_mat = ArrayView2::from_shape((k_total, out_plane), &col)
             .expect("col length matches [Cin*k, out_plane]");
@@ -488,19 +488,9 @@ pub(super) fn conv_backward(
         let g_mat = ArrayView2::from_shape((filters, out_plane), g_slice)
             .expect("grad slice matches [F, out_plane]");
 
-        // Weight gradient [F, Cin*k] and input-gradient columns [Cin*k, out_plane]. When forcing
-        // serial, take the explicit serial path; otherwise let the work-size gate decide
-        let (wg, dcol): (Array2<f32>, Array2<f32>) = if serial_gemm {
-            (
-                gemm_par_switch(&g_mat, &col_mat.t(), false),
-                gemm_par_switch(&w_mat.t(), &g_mat, false),
-            )
-        } else {
-            (
-                gemm_par_auto(&g_mat, &col_mat.t()),
-                gemm_par_auto(&w_mat.t(), &g_mat),
-            )
-        };
+        // Weight gradient [F, Cin*k] and input-gradient columns [Cin*k, out_plane]
+        let wg = dot_par(&g_mat, &col_mat.t(), gemm_par);
+        let dcol = dot_par(&w_mat.t(), &g_mat, gemm_par);
         let bias_p: Vec<f32> = g_mat.outer_iter().map(|row| row.sum()).collect(); // [F]
 
         let dcol = dcol.as_slice().expect("matmul result is standard layout");
@@ -532,8 +522,12 @@ pub(super) fn conv_backward(
     let parallel = gemm_flops >= conv_parallel_min_flops();
     // Parallelize over the batch above the gate. Only force the per-item GEMMs serial once the
     // batch axis alone already fills the pool (`batch >= threads`)
-    let serial_gemm = parallel && batch >= rayon::current_num_threads();
-    let per_b = map_indexed(batch, parallel, |b| process_b(b, serial_gemm));
+    let gemm_par = if parallel && batch >= rayon::current_num_threads() {
+        Parallelism::Serial
+    } else {
+        Parallelism::Rayon(0)
+    };
+    let per_b = map_indexed(batch, parallel, |b| process_b(b, gemm_par));
 
     // Reduce the per-batch partials in batch order (weight/bias sum across the batch axis)
     let mut weight_grad_arr = Array2::<f32>::zeros((filters, k_total));

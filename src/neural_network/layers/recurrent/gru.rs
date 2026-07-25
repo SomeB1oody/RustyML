@@ -1,7 +1,6 @@
 //! Gated Recurrent Unit (GRU) layer with reset, update, and candidate gates
 
 use crate::error::Error;
-use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -15,6 +14,7 @@ use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit::Parallelism;
 use gemmkit_ndarray::Bias;
+use gemmkit_ndarray::dot;
 use ndarray::{Array2, Array3, ArrayView3, Axis, concatenate, s};
 use std::borrow::Cow;
 
@@ -473,7 +473,7 @@ impl Layer for GRU {
                 .unwrap();
 
             // Gradient through r_h = r_t .* h_{t-1} (one recurrent matmul shared by both terms)
-            let grad_rh = gemm_par_auto(
+            let grad_rh = dot(
                 &grad_h_candidate_raw,
                 &self.gates.recurrent_kernel.slice(s![.., 2 * u..]).t(),
             );
@@ -490,7 +490,7 @@ impl Layer for GRU {
             dz_rz_t.slice_mut(s![.., u..2 * u]).assign(&grad_z_raw);
 
             // Gradient w.r.t. the previous hidden state
-            grad_h = gemm_par_auto(
+            grad_h = dot(
                 &dz_rz_t,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]).t(),
             ) + &grad_h_prev_from_reset
@@ -524,7 +524,7 @@ impl Layer for GRU {
             .expect("contiguous DZ reshape");
 
         // Input-kernel gradient for all 3 gates in one GEMM
-        let grad_kernel = gemm_par_auto(&x_flat.t(), &dz_flat);
+        let grad_kernel = dot(&x_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Recurrent gradient: each product is written straight into its column block (`beta = 0`),
@@ -549,7 +549,7 @@ impl Layer for GRU {
 
         // Input gradient for all 3 gates in one GEMM
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
-            gemm_par_auto(&dz_flat, &self.gates.kernel.t()),
+            dot(&dz_flat, &self.gates.kernel.t()),
             (batch, timesteps, feat),
         );
 

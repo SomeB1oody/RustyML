@@ -4,10 +4,10 @@
 //! enum selecting the underlying decomposition strategy (full, randomized, or power iteration)
 
 use crate::error::Error;
-use crate::math::matmul::gemm_par_auto;
 use crate::math::reduction::det_reduce;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, sum_f64_parallel_min_elems};
 use crate::{Deserialize, Serialize};
+use gemmkit_ndarray::dot;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::rand::{Rng, SeedableRng};
@@ -62,7 +62,7 @@ impl SVDSolver {
 
         // Eigendecompose the covariance matrix: eigenvectors are the principal axes, eigenvalues
         // are the per-axis variances
-        let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
+        let cov = dot(&x_centered.t(), x_centered) / denom;
         let eigen = crate::machine_learning::linalg::symmetric_eigen(&cov);
 
         // The solver returns eigenpairs ascending; order them by descending eigenvalue
@@ -118,17 +118,17 @@ impl SVDSolver {
             .map_err(|_| Error::computation("Failed to build random projection matrix"))?;
 
         // Initial sketch Y = X * Omega, orthonormalized to an orthonormal basis Q
-        let mut q = qr_q(&gemm_par_auto(x_centered, &omega));
+        let mut q = qr_q(&dot(x_centered, &omega));
 
         // Subspace (power) iterations with re-orthonormalization between each step
         let n_iter = 2usize;
         for _ in 0..n_iter {
-            let w = qr_q(&gemm_par_auto(&x_centered.t(), &q));
-            q = qr_q(&gemm_par_auto(x_centered, &w));
+            let w = qr_q(&dot(&x_centered.t(), &q));
+            q = qr_q(&dot(x_centered, &w));
         }
 
         // Project X onto the orthonormal basis and compute the SVD in the reduced space
-        let b = gemm_par_auto(&q.t(), x_centered);
+        let b = dot(&q.t(), x_centered);
         let decomp = svd(&b, false, true);
         let v_t = decomp
             .v_t
@@ -156,7 +156,7 @@ impl SVDSolver {
         let n_features = x_centered.ncols();
         let denom = (n_samples - 1) as f64;
         // Extract the leading eigenpairs of the covariance matrix
-        let cov = gemm_par_auto(&x_centered.t(), x_centered) / denom;
+        let cov = dot(&x_centered.t(), x_centered) / denom;
         let (eigenvalues, eigenvectors) =
             crate::machine_learning::linalg::top_eigenpairs_power_iteration(
                 cov,
@@ -481,7 +481,7 @@ impl PCA {
         }
 
         // Map back to feature space; the GEMM parallelizes above its FLOPs gate
-        let mut reconstructed = gemm_par_auto(x, components);
+        let mut reconstructed = dot(x, components);
         reconstructed += mean;
 
         #[cfg(feature = "show_progress")]
@@ -629,7 +629,7 @@ impl PCA {
         }
 
         // Project into component space; the GEMM parallelizes above its FLOPs gate
-        let transformed = gemm_par_auto(&x_centered, &components.t());
+        let transformed = dot(&x_centered, &components.t());
 
         #[cfg(feature = "show_progress")]
         {

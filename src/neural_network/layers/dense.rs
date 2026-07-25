@@ -1,7 +1,6 @@
 //! Dense (fully connected) layer: a linear transform followed by an optional activation
 
 use crate::error::Error;
-use crate::math::matmul::gemm_par_auto;
 use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
@@ -9,6 +8,7 @@ use crate::neural_network::layers::layer_weight::{DenseLayerWeight, LayerWeight}
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
 use gemmkit::Parallelism;
+use gemmkit_ndarray::dot;
 use gemmkit_ndarray::{Activation as FusedActivation, Bias};
 use ndarray::{Array, Array2, ArrayView2, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
@@ -310,7 +310,7 @@ impl Layer for Dense {
             .ok_or_else(|| Error::forward_pass_not_run("Dense"))?;
 
         // Weight gradients
-        let grad_w = gemm_par_auto(&input.t(), &grad_upstream_2d);
+        let grad_w = dot(&input.t(), &grad_upstream_2d);
 
         // Bias gradients: sum over the batch dimension
         let grad_b = grad_upstream_2d.sum_axis(Axis(0)).insert_axis(Axis(0));
@@ -320,7 +320,7 @@ impl Layer for Dense {
         self.grad_bias = Some(grad_b.as_standard_layout().to_owned());
 
         // Gradient w.r.t. the input
-        let grad_input = gemm_par_auto(&grad_upstream_2d, &self.weights.t());
+        let grad_input = dot(&grad_upstream_2d, &self.weights.t());
 
         Ok(grad_input.into_dyn())
     }

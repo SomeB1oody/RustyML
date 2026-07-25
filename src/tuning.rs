@@ -84,8 +84,8 @@ macro_rules! fwd {
 ///   machine to sweep them and emit a ready-to-`source` profile
 /// - **Programmatically**: through the `backend` alias, e.g.
 ///   `tuning::matmul::backend::set_parallel_threshold(..)` (an in-code setter beats the env var)
-/// - **Per call**: not exposed by this crate's wrappers - they always pass the backend's
-///   automatic parallelism (or force serial inside already-parallel regions)
+/// - **Per call**: not exposed publicly - the estimators pass the backend's automatic
+///   parallelism (or force serial inside already-parallel regions) at each call site
 ///
 /// What remains here is the caller-side tiling policy: `chunk_elems` sizes the row-chunks of a
 /// tiled product and `cache_resident_max_bytes` picks GEMV-swarm vs tiled-GEMM; set the latter
