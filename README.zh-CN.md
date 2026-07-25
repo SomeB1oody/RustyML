@@ -179,9 +179,11 @@ println!("F1 分数: {:.3}", cm.f1_score());
 数据预处理与数据集划分。（降维 - `PCA`、`KernelPCA`、`TSNE` - 现已迁至 `machine_learning`
 下的 `decomposition` 与 `manifold`。）
 
-- **缩放** - `standardize`（一次性 z-score 标准化）、`StandardScaler`（`fit` / `transform` /
-  `inverse_transform` / `partial_fit`，保存训练集的均值与标准差以套用到后续批次，并可用
-  `save_to_path` 持久化）、`normalize`（可配置轴与范数阶数）
+- **缩放（一次性）** - `standardize`（z-score 标准化）、`normalize`（可配置轴与范数阶数）
+- **缩放（有状态）** - `StandardScaler`、`MinMaxScaler`、`MaxAbsScaler`、`RobustScaler`
+  （中位数 / 四分位距，抗离群点）与 `Normalizer`：scikit-learn 风格的变换器，提供 `fit` /
+  `transform` / `fit_transform` / `inverse_transform`（除 `RobustScaler` 外都有 `partial_fit`），
+  保存训练集统计量以让后续批次走同一个映射，并可用 `save_to_path` 持久化
 - **标签编码** - `to_categorical`、`to_categorical_with_mapping`、`to_sparse_categorical`
 - **数据划分** - `train_test_split` 与 `train_test_split_stratified`，比例可配置
 

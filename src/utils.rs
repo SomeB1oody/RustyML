@@ -6,8 +6,10 @@
 //! # Preprocessing
 //! - **normalize**: scale samples to unit norm along a chosen axis (L1 / L2 / max order)
 //! - **standardize**: z-score standardization (zero mean, unit variance) for feature scaling
-//! - **StandardScaler**: the stateful form of standardization - fit the per-feature mean and
-//!   standard deviation on the training matrix, then reuse them for every later batch
+//! - **scalers**: the stateful form of the above - fit on the training matrix, then reuse those
+//!   statistics for every later batch: `StandardScaler` (z-score), `MinMaxScaler` (bounded
+//!   range), `MaxAbsScaler` (magnitude, keeping zeros and signs), `RobustScaler` (median/IQR,
+//!   outlier-resistant), `Normalizer` (per-sample norm)
 //! - **label encoding**: convert between dense labels and one-hot / sparse categorical formats
 //!
 //! # Dataset splitting
@@ -42,7 +44,7 @@
 pub mod label_encoding;
 /// Normalize data along a specified axis using the given norm order
 pub mod normalize;
-/// Standardize data with reusable training statistics (`StandardScaler`)
+/// Stateful feature scalers that store their training statistics
 pub mod scaler;
 /// Standardize data to have zero mean and unit variance
 pub mod standardize;
@@ -54,6 +56,6 @@ pub mod train_test_split;
 pub use crate::traits::{Fit, FitTransform, Predict, Transform};
 pub use label_encoding::{to_categorical, to_categorical_with_mapping, to_sparse_categorical};
 pub use normalize::{NormalizationAxis, NormalizationOrder, normalize};
-pub use scaler::StandardScaler;
+pub use scaler::{MaxAbsScaler, MinMaxScaler, Normalizer, RobustScaler, StandardScaler};
 pub use standardize::{StandardizationAxis, standardize};
 pub use train_test_split::{TrainTestSplit, train_test_split, train_test_split_stratified};

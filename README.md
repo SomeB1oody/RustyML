@@ -184,9 +184,12 @@ inspection (`get_weights`), and binary serialization (`save_to_path` / `load_fro
 Data preprocessing and dataset splitting. (Dimensionality reduction — `PCA`, `KernelPCA`,
 `TSNE` — now lives in `machine_learning` under `decomposition` and `manifold`.)
 
-- **Scaling** — `standardize` (one-shot z-score), `StandardScaler` (`fit` / `transform` /
-  `inverse_transform` / `partial_fit`, storing the training mean and std for reuse on later
-  batches, and persistable with `save_to_path`), `normalize` (configurable axis & order)
+- **Scaling (one-shot)** — `standardize` (z-score), `normalize` (configurable axis & order)
+- **Scaling (stateful)** — `StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`
+  (median / IQR, outlier-resistant), and `Normalizer`: scikit-learn-style transformers with
+  `fit` / `transform` / `fit_transform` / `inverse_transform` (and `partial_fit` on all but
+  `RobustScaler`), storing the training statistics so later batches go through the same map,
+  persistable with `save_to_path`
 - **Label encoding** — `to_categorical`, `to_categorical_with_mapping`, `to_sparse_categorical`
 - **Splitting** — `train_test_split` and `train_test_split_stratified`, with a configurable ratio
 

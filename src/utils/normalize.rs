@@ -6,6 +6,7 @@
 
 use crate::error::Error;
 use crate::parallel_gates::{cheap_map_f64_parallel_threshold, scan_f64_parallel_min_elems};
+use crate::{Deserialize, Serialize};
 use ndarray::{Array, ArrayBase, ArrayViewMut1, Axis, Data, Dimension};
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelIterator};
 
@@ -34,7 +35,10 @@ pub enum NormalizationAxis {
 }
 
 /// Order of the norm used for normalization
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Serializable so that a fitted [`Normalizer`](crate::utils::Normalizer) round-trips through
+/// `save_to_path` / `load_from_path`
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum NormalizationOrder {
     /// L1 norm (Manhattan norm): sum of absolute values
     L1,

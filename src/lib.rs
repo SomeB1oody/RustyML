@@ -31,8 +31,9 @@
 //!
 //! ### [`utils`]
 //! Data preprocessing and dataset-splitting utilities:
-//! - **Preprocessing**: standardization (one-shot `standardize`, or `StandardScaler` when the
-//!   training statistics must be reused), normalization, label encoding
+//! - **Preprocessing**: one-shot `standardize` / `normalize`, or the stateful scaler family
+//!   (`StandardScaler`, `MinMaxScaler`, `MaxAbsScaler`, `RobustScaler`, `Normalizer`) when the
+//!   training statistics must be reused on later batches; plus label encoding
 //! - **Dataset Splitting**: train/test split (optionally stratified)
 //!
 //! ### [`metrics`]
@@ -468,8 +469,8 @@ pub mod traits;
 /// Single-import re-export of the crate's most commonly used types, traits, and functions
 pub mod prelude;
 
-/// Data preprocessing (normalize, standardize, `StandardScaler`, label encoding) and
-/// train/test dataset splitting
+/// Data preprocessing (normalize, standardize, the stateful scaler family, label encoding)
+/// and train/test dataset splitting
 #[cfg(feature = "utils")]
 pub mod utils;
 

@@ -52,7 +52,7 @@ use crate::machine_learning::{
     LinearSVC, LogisticRegression, MeanShift, PCA, SVC, TSNE,
 };
 #[cfg(feature = "utils")]
-use crate::utils::StandardScaler;
+use crate::utils::{MaxAbsScaler, MinMaxScaler, Normalizer, RobustScaler, StandardScaler};
 #[cfg(feature = "machine_learning")]
 use ndarray::{Array1, Ix1};
 use ndarray::{Array2, ArrayBase, Data, Ix2};
@@ -502,6 +502,122 @@ mod utils_impls {
     }
 
     impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for StandardScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn fit_transform(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.fit_transform(data)
+        }
+    }
+
+    impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for MinMaxScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
+            self.fit(data)
+        }
+    }
+
+    impl<'a, S> Transform<&'a ArrayBase<S, Ix2>> for MinMaxScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn transform(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.transform(input)
+        }
+    }
+
+    impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for MinMaxScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn fit_transform(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.fit_transform(data)
+        }
+    }
+
+    impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for MaxAbsScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
+            self.fit(data)
+        }
+    }
+
+    impl<'a, S> Transform<&'a ArrayBase<S, Ix2>> for MaxAbsScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn transform(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.transform(input)
+        }
+    }
+
+    impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for MaxAbsScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn fit_transform(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.fit_transform(data)
+        }
+    }
+
+    impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for RobustScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
+            self.fit(data)
+        }
+    }
+
+    impl<'a, S> Transform<&'a ArrayBase<S, Ix2>> for RobustScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn transform(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.transform(input)
+        }
+    }
+
+    impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for RobustScaler
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn fit_transform(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.fit_transform(data)
+        }
+    }
+
+    impl<'a, S> Fit<&'a ArrayBase<S, Ix2>> for Normalizer
+    where
+        S: Data<Elem = f64>,
+    {
+        fn fit(&mut self, data: &'a ArrayBase<S, Ix2>) -> Result<&mut Self, Error> {
+            self.fit(data)
+        }
+    }
+
+    impl<'a, S> Transform<&'a ArrayBase<S, Ix2>> for Normalizer
+    where
+        S: Data<Elem = f64>,
+    {
+        type Output = Array2<f64>;
+        fn transform(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
+            self.transform(input)
+        }
+    }
+
+    impl<'a, S> FitTransform<&'a ArrayBase<S, Ix2>> for Normalizer
     where
         S: Data<Elem = f64>,
     {
