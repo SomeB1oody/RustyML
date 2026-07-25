@@ -12,6 +12,8 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use gemmkit::Parallelism;
+use gemmkit_ndarray::{Activation as FusedActivation, Bias};
 use ndarray::{Array, Array2, Array3, Axis};
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 use std::borrow::Cow;
@@ -214,6 +216,21 @@ impl SimpleRNN {
     ///
     /// When `hidden_states` is `Some`, every hidden state (with `h_0 = 0` prepended) is recorded for
     /// the backward pass; `predict` passes `None` and skips both the recording and its clones
+    ///
+    /// One timestep is one GEMM call: the timestep buffer starts as the pre-projected
+    /// `x_t @ kernel` slice, the recurrent product accumulates into it (`beta = 1`), and the bias
+    /// add plus the activation ride the kernel's own store as a fused epilogue. That removes the
+    /// two allocating broadcast adds and the separate activation sweep the timestep used to cost.
+    /// gemmkit's fused epilogues are bitwise-identical to the plain product followed by the same
+    /// scalar map, so every recorded hidden state is unchanged - with one exception: `ReLU` rides
+    /// the vectorized `Relu` epilogue, which maps `NaN` to `0` where this crate's scalar closure
+    /// propagates it
+    ///
+    /// Every call passes gemmkit's auto parallelism: a timestep product is `batch * units * units`
+    /// of work, which at ordinary layer sizes sits below the backend's work gate and stays on the
+    /// calling thread, so the tight loop pays no parallel dispatch; wide layers cross the gate and
+    /// the backend spreads them itself. `Softmax` is not a per-element map, so it fuses only the
+    /// bias and keeps [`Activation::forward`] as a second pass
     fn run(
         &self,
         x3: &ndarray::ArrayView3<f32>,
@@ -221,6 +238,7 @@ impl SimpleRNN {
     ) -> Result<Array2<f32>, Error> {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let xw = self.project_input(x3);
+        let bias = self.bias.as_slice().expect("bias must be contiguous");
 
         let mut h_prev = Array2::<f32>::zeros((batch, self.units));
         if let Some(hs) = hidden_states.as_deref_mut() {
@@ -229,15 +247,79 @@ impl SimpleRNN {
 
         // Sequential timestep processing is required for an RNN
         for t in 0..timesteps {
-            // z = x_t @ W + h_{t-1} @ U + b
-            let z = gemm_par_auto(&h_prev, &self.recurrent_kernel)
-                + xw.index_axis(Axis(1), t)
-                + &self.bias;
-            let h_t = self
-                .activation
-                .forward(&z.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
+            // z = x_t @ W + h_{t-1} @ U + b, with `x_t @ W` prefilled as the accumulator
+            let mut z = xw.index_axis(Axis(1), t).to_owned();
+            let h_t = match self.activation {
+                Activation::ReLU => {
+                    gemmkit_ndarray::gemm_fused(
+                        1.0,
+                        &h_prev,
+                        &self.recurrent_kernel,
+                        1.0,
+                        &mut z,
+                        Some(Bias::PerCol(bias)),
+                        Some(FusedActivation::Relu),
+                        Parallelism::Rayon(0),
+                    );
+                    z
+                }
+                Activation::Sigmoid => {
+                    gemmkit_ndarray::gemm_map(
+                        1.0,
+                        &h_prev,
+                        &self.recurrent_kernel,
+                        1.0,
+                        &mut z,
+                        &|v, _, col| {
+                            let x = v + bias[col];
+                            1.0 / (1.0 + (-x).exp())
+                        },
+                        Parallelism::Rayon(0),
+                    );
+                    z
+                }
+                Activation::Tanh => {
+                    gemmkit_ndarray::gemm_map(
+                        1.0,
+                        &h_prev,
+                        &self.recurrent_kernel,
+                        1.0,
+                        &mut z,
+                        &|v, _, col| (v + bias[col]).tanh(),
+                        Parallelism::Rayon(0),
+                    );
+                    z
+                }
+                Activation::Linear => {
+                    gemmkit_ndarray::gemm_fused(
+                        1.0,
+                        &h_prev,
+                        &self.recurrent_kernel,
+                        1.0,
+                        &mut z,
+                        Some(Bias::PerCol(bias)),
+                        None,
+                        Parallelism::Rayon(0),
+                    );
+                    z
+                }
+                Activation::Softmax => {
+                    gemmkit_ndarray::gemm_fused(
+                        1.0,
+                        &h_prev,
+                        &self.recurrent_kernel,
+                        1.0,
+                        &mut z,
+                        Some(Bias::PerCol(bias)),
+                        None,
+                        Parallelism::Rayon(0),
+                    );
+                    self.activation
+                        .forward(&z.into_dyn())?
+                        .into_dimensionality::<ndarray::Ix2>()
+                        .unwrap()
+                }
+            };
             h_prev = h_t;
             if let Some(hs) = hidden_states.as_deref_mut() {
                 hs.push(h_prev.clone());
@@ -290,10 +372,6 @@ impl Layer for SimpleRNN {
         let timesteps = x3.shape()[1];
         let feat = x3.shape()[2];
 
-        // Fresh per-call gradient buffers
-        let mut grad_k = Array2::<f32>::zeros((self.input_dim, self.units));
-        let mut grad_rk = Array2::<f32>::zeros((self.units, self.units));
-        let mut grad_b = Array2::<f32>::zeros((1, self.units));
         // Per-timestep d_z, stored so the input-side reductions can batch into single gemms
         let mut dz_all = Array3::<f32>::zeros((batch, timesteps, self.units));
         let mut grad_h = grad_h_t;
@@ -327,9 +405,11 @@ impl Layer for SimpleRNN {
             .to_shape((batch * timesteps, self.units))
             .expect("contiguous H_prev reshape");
 
-        grad_k += &gemm_par_auto(&x_flat.t(), &dz_flat);
-        grad_rk += &gemm_par_auto(&h_prev_flat.t(), &dz_flat);
-        grad_b += &dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
+        // Each reduction is the whole per-call gradient, so it becomes the buffer directly rather
+        // than being added into a freshly zeroed one
+        let grad_k = gemm_par_auto(&x_flat.t(), &dz_flat);
+        let grad_rk = gemm_par_auto(&h_prev_flat.t(), &dz_flat);
+        let grad_b = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
         // Layout-tolerant reshape
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(

@@ -7,7 +7,9 @@ use ndarray::{Array, Array2};
 use ndarray_rand::rand::rngs::StdRng;
 use ndarray_rand::{RandomExt, rand_distr::Uniform};
 
-/// Applies the logistic sigmoid to an array. Used by both GRU and LSTM gates
+/// Applies the logistic sigmoid to an array. Used by the LSTM gate blocks on the
+/// non-scalar-candidate fallback path (the scalar-candidate path fuses the sigmoid into the
+/// recurrent GEMM's epilogue)
 ///
 /// `1/(1 + e^-x)` is finite for any finite `x` (when `e^-x` overflows to `+inf` the result is the
 /// exact limit `0`), and it saturates to `1`/`0` at `+/-inf`, so no input clamping is needed. The

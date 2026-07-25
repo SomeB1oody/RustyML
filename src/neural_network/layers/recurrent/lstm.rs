@@ -13,6 +13,8 @@ use crate::neural_network::layers::recurrent::validation::{
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use gemmkit::Parallelism;
+use gemmkit_ndarray::Bias;
 use ndarray::{Array2, Array3, ArrayView3, Axis, Ix2, Ix3, concatenate, s};
 use std::borrow::Cow;
 
@@ -311,6 +313,21 @@ impl LSTM {
     /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden/cell
     /// states, `activation(c_t)`, and the 4 gate activations) is recorded; `predict` passes
     /// `None` and skips both the recording and its clones
+    ///
+    /// A timestep's 4 gate pre-activations and their activations are one GEMM call: the `[batch,
+    /// 4*units]` buffer starts as the pre-projected `x_t @ kernel` slice, the fused recurrent
+    /// product accumulates into it (`beta = 1`), and the epilogue adds the bias and applies each
+    /// block's activation - the sigmoid for `[i | f | o]`, the configurable `act` for the
+    /// candidate block `g` - selected by `col / units`. That removes the two allocating broadcast
+    /// adds and the 4 separate activation sweeps. gemmkit's epilogues are bitwise-identical to the
+    /// plain product followed by the same scalar map, so the cached per-gate arrays the BPTT pass
+    /// consumes are unchanged
+    ///
+    /// The call passes gemmkit's auto parallelism: a timestep product is `batch * units * 4*units`
+    /// of work, which at ordinary layer sizes sits below the backend's work gate and stays on the
+    /// calling thread, so the tight loop pays no parallel dispatch; wide layers cross the gate and
+    /// the backend spreads them itself. `Softmax` is not a per-element map, so with a `Softmax`
+    /// candidate only the bias fuses and the 4 blocks are activated separately as before
     fn run(
         &self,
         x3: &ArrayView3<f32>,
@@ -319,6 +336,21 @@ impl LSTM {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let u = self.units;
         let act = self.activation;
+        let bias = self
+            .gates
+            .bias
+            .as_slice()
+            .expect("fused bias must be contiguous");
+
+        // The candidate activation as a scalar map, when it has one; `Softmax` is defined over a
+        // whole row and cannot ride a per-element epilogue
+        let candidate: Option<fn(f32) -> f32> = match act {
+            Activation::Linear => Some(|x| x),
+            Activation::ReLU => Some(|x| if x <= 0.0 { 0.0 } else { x }),
+            Activation::Sigmoid => Some(|x| 1.0 / (1.0 + (-x).exp())),
+            Activation::Tanh => Some(|x| x.tanh()),
+            Activation::Softmax => None,
+        };
 
         let mut h_prev = Array2::<f32>::zeros((batch, u));
         let mut c_prev = Array2::<f32>::zeros((batch, u));
@@ -331,20 +363,58 @@ impl LSTM {
         let xw = project_input(&self.gates.kernel, x3);
 
         for t in 0..timesteps {
-            let xw_t = xw.index_axis(Axis(1), t); // [batch, 4*units]
-
-            // All 4 gate pre-activations in one fused recurrent GEMM
-            let z_all =
-                gemm_par_auto(&h_prev, &self.gates.recurrent_kernel) + xw_t + &self.gates.bias;
+            // All 4 gate pre-activations in one fused recurrent GEMM, accumulated on top of the
+            // pre-projected `x_t @ kernel` slice
+            let mut z_all = xw.index_axis(Axis(1), t).to_owned(); // [batch, 4*units]
 
             // Gates use the recurrent activation (sigmoid); the candidate uses `act`
-            let i_t = apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned());
-            let f_t = apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned());
-            let g_t = act
-                .forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
-                .into_dimensionality::<Ix2>()
-                .unwrap();
-            let o_t = apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned());
+            let (i_t, f_t, g_t, o_t) = match candidate {
+                Some(cand) => {
+                    gemmkit_ndarray::gemm_map(
+                        1.0,
+                        &h_prev,
+                        &self.gates.recurrent_kernel,
+                        1.0,
+                        &mut z_all,
+                        &|v, _, col| {
+                            let x = v + bias[col];
+                            // Blocks [i | f | g | o]: only block 2 (the candidate) takes `act`
+                            if col / u == 2 {
+                                cand(x)
+                            } else {
+                                1.0 / (1.0 + (-x).exp())
+                            }
+                        },
+                        Parallelism::Rayon(0),
+                    );
+                    (
+                        z_all.slice(s![.., 0..u]).to_owned(),
+                        z_all.slice(s![.., u..2 * u]).to_owned(),
+                        z_all.slice(s![.., 2 * u..3 * u]).to_owned(),
+                        z_all.slice(s![.., 3 * u..4 * u]).to_owned(),
+                    )
+                }
+                None => {
+                    gemmkit_ndarray::gemm_fused(
+                        1.0,
+                        &h_prev,
+                        &self.gates.recurrent_kernel,
+                        1.0,
+                        &mut z_all,
+                        Some(Bias::PerCol(bias)),
+                        None,
+                        Parallelism::Rayon(0),
+                    );
+                    (
+                        apply_sigmoid(z_all.slice(s![.., 0..u]).to_owned()),
+                        apply_sigmoid(z_all.slice(s![.., u..2 * u]).to_owned()),
+                        act.forward(&z_all.slice(s![.., 2 * u..3 * u]).to_owned().into_dyn())?
+                            .into_dimensionality::<Ix2>()
+                            .unwrap(),
+                        apply_sigmoid(z_all.slice(s![.., 3 * u..4 * u]).to_owned()),
+                    )
+                }
+            };
 
             // Update cell state, then apply the configurable activation to it
             let c_t = &f_t * &c_prev + &i_t * &g_t;

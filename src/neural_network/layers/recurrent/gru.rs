@@ -6,13 +6,14 @@ use crate::neural_network::Tensor;
 use crate::neural_network::layers::TrainingParameters;
 use crate::neural_network::layers::activation::Activation;
 use crate::neural_network::layers::layer_weight::{GRULayerWeight, LayerWeight};
-use crate::neural_network::layers::recurrent::apply_sigmoid;
 use crate::neural_network::layers::recurrent::gate::{FusedGates, project_input, take_cache};
 use crate::neural_network::layers::recurrent::validation::{
     validate_input_3d, validate_recurrent_dimensions,
 };
 use crate::neural_network::layers::validation::validate_weight_shape;
 use crate::neural_network::traits::{Layer, ParamGrad};
+use gemmkit::Parallelism;
+use gemmkit_ndarray::Bias;
 use ndarray::{Array2, Array3, ArrayView3, Axis, concatenate, s};
 use std::borrow::Cow;
 
@@ -294,6 +295,21 @@ impl GRU {
     /// When `caches` is `Some`, every per-timestep value the backward pass needs (hidden states,
     /// the reset/update gate activations, the candidate, and `r_t .* h_{t-1}`) is recorded;
     /// `predict` passes `None` and skips both the recording and the clones
+    ///
+    /// Each of the two recurrent products per timestep is a single GEMM call: its buffer starts as
+    /// the matching column block of the pre-projected `x_t @ kernel` slice, the product
+    /// accumulates into it (`beta = 1`), and the epilogue adds that block's bias slice and applies
+    /// the activation - the sigmoid for the fused `[r | z]` product, the configurable `act` for
+    /// the candidate. That removes the four allocating broadcast adds and the two separate
+    /// activation sweeps. gemmkit's epilogues are bitwise-identical to the plain product followed
+    /// by the same scalar map, so the cached per-gate arrays the BPTT pass consumes are unchanged
+    ///
+    /// Both calls pass gemmkit's auto parallelism: `batch * units * 2*units` and
+    /// `batch * units * units` of work, which at ordinary layer sizes sit below the backend's work
+    /// gate and stay on the calling thread, so the tight loop pays no parallel dispatch; wide
+    /// layers cross the gate and the backend spreads them itself. `Softmax` is not a per-element
+    /// map, so a `Softmax` candidate fuses only its bias and keeps [`Activation::forward`] as a
+    /// second pass
     fn run(
         &self,
         x3: &ArrayView3<f32>,
@@ -302,6 +318,23 @@ impl GRU {
         let (batch, timesteps, _) = (x3.shape()[0], x3.shape()[1], x3.shape()[2]);
         let u = self.units;
         let act = self.activation;
+        // Bias blocks `[r | z]` and `[h]`, each folded into its own product's epilogue
+        let (bias_rz, bias_h) = self
+            .gates
+            .bias
+            .as_slice()
+            .expect("fused bias must be contiguous")
+            .split_at(2 * u);
+
+        // The candidate activation as a scalar map, when it has one; `Softmax` is defined over a
+        // whole row and cannot ride a per-element epilogue
+        let candidate: Option<fn(f32) -> f32> = match act {
+            Activation::Linear => Some(|x| x),
+            Activation::ReLU => Some(|x| if x <= 0.0 { 0.0 } else { x }),
+            Activation::Sigmoid => Some(|x| 1.0 / (1.0 + (-x).exp())),
+            Activation::Tanh => Some(|x| x.tanh()),
+            Activation::Softmax => None,
+        };
 
         let mut h_prev = Array2::<f32>::zeros((batch, u));
         if let Some(c) = caches.as_deref_mut() {
@@ -315,25 +348,55 @@ impl GRU {
             let xw_t = xw.index_axis(Axis(1), t); // [batch, 3*units]
 
             // Reset and update share h_prev, so their recurrent projections fuse into one GEMM
-            let rz_raw = gemm_par_auto(
+            let mut rz = xw_t.slice(s![.., 0..2 * u]).to_owned();
+            gemmkit_ndarray::gemm_map(
+                1.0,
                 &h_prev,
                 &self.gates.recurrent_kernel.slice(s![.., 0..2 * u]),
-            ) + xw_t.slice(s![.., 0..2 * u])
-                + self.gates.bias.slice(s![.., 0..2 * u]);
-            let rz = apply_sigmoid(rz_raw);
+                1.0,
+                &mut rz,
+                &|v, _, col| {
+                    let x = v + bias_rz[col];
+                    1.0 / (1.0 + (-x).exp())
+                },
+                Parallelism::Rayon(0),
+            );
             let r_t = rz.slice(s![.., 0..u]).to_owned();
             let z_t = rz.slice(s![.., u..2 * u]).to_owned();
 
             // r_t .* h_{t-1}, then the candidate hidden state
             let r_h = &r_t * &h_prev;
-            let h_candidate_raw =
-                gemm_par_auto(&r_h, &self.gates.recurrent_kernel.slice(s![.., 2 * u..]))
-                    + xw_t.slice(s![.., 2 * u..])
-                    + self.gates.bias.slice(s![.., 2 * u..]);
-            let h_candidate = act
-                .forward(&h_candidate_raw.into_dyn())?
-                .into_dimensionality::<ndarray::Ix2>()
-                .unwrap();
+            let mut h_candidate = xw_t.slice(s![.., 2 * u..]).to_owned();
+            let rk_h = self.gates.recurrent_kernel.slice(s![.., 2 * u..]);
+            let h_candidate = match candidate {
+                Some(cand) => {
+                    gemmkit_ndarray::gemm_map(
+                        1.0,
+                        &r_h,
+                        &rk_h,
+                        1.0,
+                        &mut h_candidate,
+                        &|v, _, col| cand(v + bias_h[col]),
+                        Parallelism::Rayon(0),
+                    );
+                    h_candidate
+                }
+                None => {
+                    gemmkit_ndarray::gemm_fused(
+                        1.0,
+                        &r_h,
+                        &rk_h,
+                        1.0,
+                        &mut h_candidate,
+                        Some(Bias::PerCol(bias_h)),
+                        None,
+                        Parallelism::Rayon(0),
+                    );
+                    act.forward(&h_candidate.into_dyn())?
+                        .into_dimensionality::<ndarray::Ix2>()
+                        .unwrap()
+                }
+            };
 
             // Hidden state update
             let h_t = &(1.0 - &z_t) * &h_prev + &z_t * &h_candidate;
@@ -489,20 +552,25 @@ impl Layer for GRU {
         let grad_kernel = gemm_par_auto(&x_flat.t(), &dz_flat);
         let grad_bias = dz_flat.sum_axis(Axis(0)).insert_axis(Axis(0));
 
-        // Recurrent gradient
+        // Recurrent gradient: each product is written straight into its column block (`beta = 0`),
+        // so neither needs a temporary of its own
         let mut grad_recurrent = Array2::<f32>::zeros((u, 3 * u));
-        grad_recurrent
-            .slice_mut(s![.., 0..2 * u])
-            .assign(&gemm_par_auto(
-                &h_prev_flat.t(),
-                &dz_flat.slice(s![.., 0..2 * u]),
-            ));
-        grad_recurrent
-            .slice_mut(s![.., 2 * u..])
-            .assign(&gemm_par_auto(
-                &rh_flat.t(),
-                &dz_flat.slice(s![.., 2 * u..]),
-            ));
+        gemmkit_ndarray::gemm(
+            1.0,
+            &h_prev_flat.t(),
+            &dz_flat.slice(s![.., 0..2 * u]),
+            0.0,
+            &mut grad_recurrent.slice_mut(s![.., 0..2 * u]),
+            Parallelism::Rayon(0),
+        );
+        gemmkit_ndarray::gemm(
+            1.0,
+            &rh_flat.t(),
+            &dz_flat.slice(s![.., 2 * u..]),
+            0.0,
+            &mut grad_recurrent.slice_mut(s![.., 2 * u..]),
+            Parallelism::Rayon(0),
+        );
 
         // Input gradient for all 3 gates in one GEMM
         let grad_x3 = crate::neural_network::layers::recurrent::gate::reshape_2d_to_3d(
