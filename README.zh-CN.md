@@ -35,7 +35,7 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 - **模型持久化**——通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 将训练好的模型和网络权重以紧凑的二进制格式保存与加载。
 - **丰富的评估指标**——回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
 - **与 scikit-learn 逐项校验**——估计器的默认配置、评分符号和指标的输出约定都与 scikit-learn 1.9 做了数值比对，移植过来的流水线能给出相同的结果。有意保留的差异都在相应位置注明。
-- **模块化 feature**——可以只引入 `metrics`、只引入 `math`、引入 `default` 学习栈，或引入 `full` 全量。
+- **模块化 feature**——默认打开整个 crate；也可以关掉默认，只引入 `metrics`、只引入 `math`，或任意你需要的子集。
 
 ## 安装
 
@@ -43,25 +43,29 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 
 ```toml
 [dependencies]
-rustyml = { version = "*", features = ["full"] }
+rustyml = "*"
 ndarray = "0.17"
 ```
 
-按需选择 feature 组合：
+默认 feature 集是 `full`，所以所有模块都在——一段从 scikit-learn 移植过来的脚本本来就会横跨它们
+（`utils::train_test_split` → `machine_learning` → `metrics`）。想把构建裁小，就关掉默认并显式列出所需模块：
 
 ```toml
-# 默认：经典机器学习 + 神经网络
+# 全部模块（ml、nn、utils、metrics、math）
 rustyml = "*"
 
 # 仅神经网络框架
-rustyml = { version = "*", features = ["neural_network"] }
+rustyml = { version = "*", default-features = false, features = ["neural_network"] }
 
-# 全部模块（ml、nn、utils、metrics、math）
-rustyml = { version = "*", features = ["full"] }
+# 仅评估指标
+rustyml = { version = "*", default-features = false, features = ["metrics"] }
 
 # 训练时在终端显示进度条
-rustyml = { version = "*", features = ["full", "show_progress"] }
+rustyml = { version = "*", features = ["show_progress"] }
 ```
+
+Cargo 的 feature 是叠加的：写上一个并*不会*关掉其他的。单写 `features = ["metrics"]` 编译出来
+仍然是完整的 crate——真正起裁剪作用的是 `default-features = false`。
 
 > **最低支持 Rust 版本（MSRV）：** Rust 1.89+（edition 2024）。
 
@@ -239,8 +243,8 @@ use rustyml::prelude::metrics::*;          // 评估指标
 | `utils` | 数据预处理与数据集划分（启用 `math`） |
 | `metrics` | 评估指标（启用 `math`） |
 | `math` | 数值原语（距离、矩阵乘积、并行归约） |
-| `default` | `machine_learning` + `neural_network` |
 | `full` | 以上全部模块 |
+| `default` | `full` |
 | `show_progress` | 在终端渲染训练/迭代进度条 |
 
 ## 可复现性

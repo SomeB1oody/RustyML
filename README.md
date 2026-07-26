@@ -36,7 +36,7 @@ Everything is organized into five feature-gated modules, so you compile only wha
 - **Model persistence** — save and load trained models and network weights as compact binary via [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
 - **Rich evaluation metrics** — regression, classification (binary & multiclass), and clustering, mirroring scikit-learn conventions.
 - **Checked against scikit-learn** — estimator defaults, score signs, and metric output conventions are verified numerically against scikit-learn 1.9, so a ported pipeline gives the same answers. Deliberate departures are documented where they occur.
-- **Modular features** — pull in just `metrics`, just `math`, the `default` learning stack, or the `full` crate.
+- **Modular features** — the whole crate is on by default; opt out and pull in just `metrics`, just `math`, or any subset you need.
 
 ## Installation
 
@@ -44,25 +44,30 @@ Add RustyML to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rustyml = { version = "*", features = ["full"] }
+rustyml = "*"
 ndarray = "0.17"
 ```
 
-Pick the feature set that fits your needs:
+The default feature set is `full`, so every module is there — a ported scikit-learn script reaches
+across all of them anyway (`utils::train_test_split` → `machine_learning` → `metrics`). To slim the
+build down, opt out of the default and name what you need:
 
 ```toml
-# Default: classical ML + neural networks
+# Everything (ml, nn, utils, metrics, math)
 rustyml = "*"
 
 # Just the neural-network framework
-rustyml = { version = "*", features = ["neural_network"] }
+rustyml = { version = "*", default-features = false, features = ["neural_network"] }
 
-# Everything (ml, nn, utils, metrics, math)
-rustyml = { version = "*", features = ["full"] }
+# Just the evaluation metrics
+rustyml = { version = "*", default-features = false, features = ["metrics"] }
 
 # Show training progress bars in the terminal
-rustyml = { version = "*", features = ["full", "show_progress"] }
+rustyml = { version = "*", features = ["show_progress"] }
 ```
+
+Cargo features are additive: naming one does *not* turn the others off. `features = ["metrics"]`
+alone still compiles the full crate — the `default-features = false` is what does the trimming.
 
 > **MSRV:** Rust 1.89+ (edition 2024).
 
@@ -249,8 +254,8 @@ The crate uses feature flags for modular compilation:
 | `utils` | Data preprocessing and dataset splitting (enables `math`) |
 | `metrics` | Evaluation metrics (enables `math`) |
 | `math` | Numerical primitives (distances, matrix products, parallel reductions) |
-| `default` | `machine_learning` + `neural_network` |
 | `full` | All of the above modules |
+| `default` | `full` |
 | `show_progress` | Render training/iteration progress bars in the terminal |
 
 ## Reproducibility

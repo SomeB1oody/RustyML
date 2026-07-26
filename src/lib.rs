@@ -67,9 +67,9 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = { version = "*", features = ["machine_learning"] }
-//! # Or use features = ["full"] to enable all modules
-//! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
+//! rustyml = "*"
+//! # The default feature set is `full`, so every module is available. To slim the build down,
+//! # opt out and name what you need: `{ version = "*", default-features = false, features = ["machine_learning"] }`
 //! # Add `"show_progress"` in `features` to show progress bars when training
 //! ```
 //!
@@ -118,9 +118,9 @@
 //! Add RustyML to your `Cargo.toml`:
 //! ```toml
 //! [dependencies]
-//! rustyml = { version = "*", features = ["neural_network"] }
-//! # Or use `features = ["full"]` to enable all modules
-//! # Or use `features = ["default"]` to enable default modules (`machine_learning` and `neural_network`)
+//! rustyml = "*"
+//! # The default feature set is `full`, so every module is available. To slim the build down,
+//! # opt out and name what you need: `{ version = "*", default-features = false, features = ["neural_network"] }`
 //! # Add `"show_progress"` in `features` to show progress bars when training
 //! ```
 //!
@@ -184,11 +184,16 @@
 //! | `utils` | Data preprocessing and dataset splitting |
 //! | `metrics` | Evaluation metrics |
 //! | `math` | Numerical primitives (distances, matrix products, parallel reductions) |
-//! | `default` | Enables `machine_learning` and `neural_network` |
-//! | `full` | Enables all features |
+//! | `full` | Enables all of the above |
+//! | `default` | Enables `full` |
 //! | `show_progress` | Show progress bars when training |
 //!
 //! `machine_learning`, `neural_network`, `utils`, and `metrics` each enable `math`.
+//!
+//! The default is deliberately everything: a scikit-learn workflow reaches across modules
+//! (`utils::train_test_split` -> `machine_learning` -> `metrics`), so a fresh `cargo add rustyml`
+//! should have all of it. Features are additive, so naming one does not turn the rest off; to
+//! actually restrict a build, set `default-features = false` and list what you need.
 
 #[cfg(any(
     feature = "machine_learning",

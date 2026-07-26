@@ -26,8 +26,8 @@ utils = ["math", "dep:ndarray", "dep:rayon", "dep:ahash", "dep:serde", "dep:post
 metrics = ["math", "dep:ndarray", "dep:ahash"]
 # Mathematical utilities and statistical functions
 math = ["dep:ndarray", "dep:ahash", "dep:rayon", "dep:gemmkit", "dep:gemmkit-ndarray"]
-# Enables `machine_learning` and `neural_network`
-default = ["machine_learning", "neural_network"]
+# Enables every module, so `cargo add rustyml` gives a complete workflow out of the box
+default = ["full"]
 # full access to all modules in the crate
 full = ["machine_learning", "neural_network", "utils", "math", "metrics"]
 
