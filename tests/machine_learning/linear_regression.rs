@@ -6,6 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
+use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 use rustyml::machine_learning::{LinearRegression, RegularizationType};
 
 use crate::common::assert_allclose;
@@ -14,9 +15,13 @@ use crate::common::assert_allclose;
 
 /// A non-positive or non-finite learning_rate (0.0 / negative / NaN / +inf) -> InvalidParameter
 #[test]
-fn constructor_invalid_learning_rate_is_invalid() {
+fn with_solver_rejects_invalid_learning_rate() {
     for lr in [0.0, -0.01, f64::NAN, f64::INFINITY] {
-        let result = LinearRegression::new(true, lr, 100, 1e-6);
+        let result = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: lr,
+            max_iter: 100,
+            tol: 1e-6,
+        });
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "expected InvalidParameter for learning_rate={lr:?}, got {result:?}"
@@ -26,8 +31,12 @@ fn constructor_invalid_learning_rate_is_invalid() {
 
 /// max_iterations = 0 -> InvalidParameter
 #[test]
-fn constructor_zero_max_iter_is_invalid() {
-    let result = LinearRegression::new(true, 0.01, 0, 1e-6);
+fn with_solver_rejects_zero_max_iter() {
+    let result = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent {
+        learning_rate: 0.01,
+        max_iter: 0,
+        tol: 1e-6,
+    });
     assert!(
         matches!(result, Err(Error::InvalidParameter { .. })),
         "expected InvalidParameter, got {:?}",
@@ -37,9 +46,13 @@ fn constructor_zero_max_iter_is_invalid() {
 
 /// A non-positive or non-finite tolerance (0.0 / negative / NaN / +inf) -> InvalidParameter
 #[test]
-fn constructor_invalid_tolerance_is_invalid() {
+fn with_solver_rejects_invalid_tolerance() {
     for tol in [0.0, -1e-6, f64::NAN, f64::INFINITY] {
-        let result = LinearRegression::new(true, 0.01, 100, tol);
+        let result = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol,
+        });
         assert!(
             matches!(result, Err(Error::InvalidParameter { .. })),
             "expected InvalidParameter for tolerance={tol:?}, got {result:?}"
@@ -56,7 +69,12 @@ fn constructor_invalid_regularization_alpha_is_invalid() {
         RegularizationType::L1(-0.5),
         RegularizationType::L2(f64::NAN),
     ] {
-        let result = LinearRegression::new(true, 0.01, 100, 1e-6)
+        let result = LinearRegression::new(true)
+            .with_solver(LeastSquaresSolver::GradientDescent {
+                learning_rate: 0.01,
+                max_iter: 100,
+                tol: 1e-6,
+            })
             .unwrap()
             .with_regularization(reg);
         assert!(
@@ -69,18 +87,38 @@ fn constructor_invalid_regularization_alpha_is_invalid() {
 /// Valid constructor with all legal parameters -> Ok
 #[test]
 fn constructor_valid_parameters_succeeds() {
-    let result = LinearRegression::new(true, 0.01, 1000, 1e-6);
+    let result = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent {
+        learning_rate: 0.01,
+        max_iter: 1000,
+        tol: 1e-6,
+    });
     assert!(result.is_ok(), "expected Ok, got {:?}", result);
 }
 
 /// Getters on a freshly constructed model return the supplied values
 #[test]
 fn constructor_getters_round_trip() {
-    let model = LinearRegression::new(false, 0.05, 500, 1e-4).unwrap();
+    let model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.05,
+            max_iter: 500,
+            tol: 1e-4,
+        })
+        .unwrap();
     assert!(!model.get_fit_intercept());
-    assert_abs_diff_eq!(model.get_learning_rate(), 0.05, epsilon = 1e-15);
-    assert_eq!(model.get_max_iterations(), 500);
-    assert_abs_diff_eq!(model.get_tolerance(), 1e-4, epsilon = 1e-20);
+    // The gradient-descent settings are carried by the solver variant, not by the model
+    match model.get_solver() {
+        LeastSquaresSolver::GradientDescent {
+            learning_rate,
+            max_iter,
+            tol,
+        } => {
+            assert_abs_diff_eq!(learning_rate, 0.05, epsilon = 1e-15);
+            assert_eq!(max_iter, 500);
+            assert_abs_diff_eq!(tol, 1e-4, epsilon = 1e-20);
+        }
+        LeastSquaresSolver::Normal => panic!("expected the gradient-descent solver"),
+    }
     assert!(model.get_coefficients().is_none());
     assert!(model.get_intercept().is_none());
     assert!(model.get_actual_iterations().is_none());
@@ -91,7 +129,13 @@ fn constructor_getters_round_trip() {
 /// predict() on an unfitted model -> NotFitted
 #[test]
 fn predict_before_fit_returns_not_fitted() {
-    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol: 1e-6,
+        })
+        .unwrap();
     let x = array![[1.0, 2.0]];
     let result = model.predict(&x);
     assert!(
@@ -106,7 +150,13 @@ fn predict_before_fit_returns_not_fitted() {
 /// fit() with empty X -> EmptyInput
 #[test]
 fn fit_empty_x_returns_empty_input() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol: 1e-6,
+        })
+        .unwrap();
     let x: Array2<f64> = Array2::zeros((0, 2));
     let y: Array1<f64> = Array1::zeros(0);
     let result = model.fit(&x, &y);
@@ -121,7 +171,13 @@ fn fit_empty_x_returns_empty_input() {
 #[test]
 fn fit_non_finite_in_x_returns_non_finite() {
     for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+        let mut model = LinearRegression::new(true)
+            .with_solver(LeastSquaresSolver::GradientDescent {
+                learning_rate: 0.01,
+                max_iter: 100,
+                tol: 1e-6,
+            })
+            .unwrap();
         let x = array![[1.0, sentinel], [2.0, 3.0]];
         let y = array![1.0, 2.0];
         let result = model.fit(&x, &y);
@@ -135,7 +191,13 @@ fn fit_non_finite_in_x_returns_non_finite() {
 /// fit() with mismatched y length -> DimensionMismatch
 #[test]
 fn fit_y_length_mismatch_returns_dimension_mismatch() {
-    let mut model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol: 1e-6,
+        })
+        .unwrap();
     // 3 rows in x but 2 elements in y
     let x = array![[1.0], [2.0], [3.0]];
     let y = array![1.0, 2.0];
@@ -152,7 +214,13 @@ fn fit_y_length_mismatch_returns_dimension_mismatch() {
 /// predict() with empty matrix -> EmptyInput
 #[test]
 fn predict_empty_matrix_returns_empty_input() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 5000,
+            tol: 1e-8,
+        })
+        .unwrap();
     // train on y = 2x + 1
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
@@ -170,7 +238,13 @@ fn predict_empty_matrix_returns_empty_input() {
 /// predict() with wrong number of columns -> DimensionMismatch
 #[test]
 fn predict_wrong_feature_count_returns_dimension_mismatch() {
-    let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 5000,
+            tol: 1e-8,
+        })
+        .unwrap();
     // trained on 1 feature
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
@@ -190,7 +264,13 @@ fn predict_wrong_feature_count_returns_dimension_mismatch() {
 #[test]
 fn predict_non_finite_in_x_returns_non_finite() {
     for sentinel in [f64::NAN, f64::INFINITY] {
-        let mut model = LinearRegression::new(true, 0.01, 5000, 1e-8).unwrap();
+        let mut model = LinearRegression::new(true)
+            .with_solver(LeastSquaresSolver::GradientDescent {
+                learning_rate: 0.01,
+                max_iter: 5000,
+                tol: 1e-8,
+            })
+            .unwrap();
         let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
         let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
         model.fit(&x_train, &y_train).unwrap();
@@ -211,7 +291,13 @@ fn predict_non_finite_in_x_returns_non_finite() {
 #[test]
 fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
     // small learning rate and many iterations so gradient descent converges
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -228,7 +314,13 @@ fn univariate_y_equals_2x_plus_1_coefficient_and_intercept() {
 /// predict on x=6 -> 13.0; predict on x=0 -> 1.0
 #[test]
 fn univariate_y_equals_2x_plus_1_predictions() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -242,7 +334,13 @@ fn univariate_y_equals_2x_plus_1_predictions() {
 /// After fit, n_iter is set (model ran at least 1 iteration)
 #[test]
 fn fit_sets_n_iter() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     model.fit(&x, &y).unwrap();
@@ -258,7 +356,13 @@ fn fit_sets_n_iter() {
 /// Multivariate coefficients and intercept converge to known values
 #[test]
 fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
-    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 20_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     // 6 training points spanning the feature space
     let x = Array2::from_shape_vec(
         (6, 2),
@@ -286,7 +390,13 @@ fn multivariate_y_equals_2x1_plus_3x2_plus_1_coefficients() {
 /// Multivariate predictions match closed-form y = 2*x1 + 3*x2 + 1
 #[test]
 fn multivariate_predictions_match_closed_form() {
-    let mut model = LinearRegression::new(true, 0.01, 20_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 20_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = Array2::from_shape_vec(
         (6, 2),
         vec![1.0, 1.0, 2.0, 1.0, 1.0, 2.0, 3.0, 2.0, 2.0, 3.0, 4.0, 1.0],
@@ -308,7 +418,13 @@ fn multivariate_predictions_match_closed_form() {
 /// With fit_intercept=false the stored intercept is exactly 0.0
 #[test]
 fn no_intercept_stored_intercept_is_zero() {
-    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     // y = 2x, passes through the origin
     let y = array![2.0, 4.0, 6.0, 8.0, 10.0];
@@ -321,7 +437,13 @@ fn no_intercept_stored_intercept_is_zero() {
 /// With fit_intercept=false the coefficient converges to slope ~= 2.0
 #[test]
 fn no_intercept_coefficient_converges_to_slope() {
-    let mut model = LinearRegression::new(false, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![2.0, 4.0, 6.0, 8.0, 10.0];
     model.fit(&x, &y).unwrap();
@@ -333,7 +455,13 @@ fn no_intercept_coefficient_converges_to_slope() {
 /// With fit_intercept=false get_fit_intercept() returns false
 #[test]
 fn no_intercept_getter_returns_false() {
-    let model = LinearRegression::new(false, 0.01, 1000, 1e-6).unwrap();
+    let model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1000,
+            tol: 1e-6,
+        })
+        .unwrap();
     assert!(!model.get_fit_intercept());
 }
 
@@ -343,7 +471,13 @@ fn no_intercept_getter_returns_false() {
 /// OLS converges to slope=3.0, intercept=2.0 on y=3x+2
 #[test]
 fn ols_sanity_y_equals_3x_plus_2_parameters() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![5.0, 8.0, 11.0, 14.0, 17.0];
     model.fit(&x, &y).unwrap();
@@ -360,7 +494,13 @@ fn ols_sanity_y_equals_3x_plus_2_parameters() {
 /// OLS prediction at x=6 -> 20.0, x=10 -> 32.0 on y=3x+2
 #[test]
 fn ols_sanity_y_equals_3x_plus_2_predictions() {
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![5.0, 8.0, 11.0, 14.0, 17.0];
     model.fit(&x, &y).unwrap();
@@ -378,10 +518,22 @@ fn fit_predict_matches_fit_then_predict() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_a = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let preds_a = model_a.fit_predict(&x, &y).unwrap();
 
-    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_b = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model_b.fit(&x, &y).unwrap();
     let preds_b = model_b.predict(&x).unwrap();
 
@@ -394,7 +546,13 @@ fn fit_predict_values_match_known_true_values() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let preds = model.fit_predict(&x, &y).unwrap();
 
     // Trained on exactly this data, so predictions on it closely match y = 2x + 1
@@ -411,11 +569,22 @@ fn l2_regularization_shrinks_coefficient_norm() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut unregularized = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     unregularized.fit(&x, &y).unwrap();
     let coeff_unreg = unregularized.get_coefficients().unwrap()[0].abs();
 
-    let mut ridge = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+    let mut ridge = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L2(5.0))
         .unwrap();
@@ -437,11 +606,22 @@ fn l1_regularization_shrinks_coefficient() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut unregularized = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut unregularized = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     unregularized.fit(&x, &y).unwrap();
     let coeff_unreg = unregularized.get_coefficients().unwrap()[0].abs();
 
-    let mut lasso = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+    let mut lasso = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L1(5.0))
         .unwrap();
@@ -460,7 +640,12 @@ fn l2_regularization_intercept_within_reasonable_range() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut ridge = LinearRegression::new(true, 0.01, 10_000, 1e-10)
+    let mut ridge = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L2(0.1))
         .unwrap();
@@ -484,11 +669,23 @@ fn determinism_same_data_identical_predictions() {
     let y = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [7.0], [8.0]];
 
-    let mut model_a = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_a = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model_a.fit(&x, &y).unwrap();
     let preds_a = model_a.predict(&x_test).unwrap();
 
-    let mut model_b = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_b = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model_b.fit(&x, &y).unwrap();
     let preds_b = model_b.predict(&x_test).unwrap();
 
@@ -505,7 +702,13 @@ fn save_load_round_trip_identical_predictions() {
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [7.0], [0.5]];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model.fit(&x_train, &y_train).unwrap();
     let preds_before = model.predict(&x_test).unwrap();
 
@@ -527,7 +730,13 @@ fn save_load_preserves_model_state() {
     let x_train = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
 
-    let mut model = LinearRegression::new(false, 0.005, 8_000, 1e-9).unwrap();
+    let mut model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.005,
+            max_iter: 8_000,
+            tol: 1e-9,
+        })
+        .unwrap();
     model.fit(&x_train, &y_train).unwrap();
 
     let path = "/tmp/rustyml_linear_regression_test_state.json";
@@ -535,12 +744,8 @@ fn save_load_preserves_model_state() {
     let loaded = LinearRegression::load_from_path(path).unwrap();
 
     assert_eq!(loaded.get_fit_intercept(), model.get_fit_intercept());
-    assert_abs_diff_eq!(
-        loaded.get_learning_rate(),
-        model.get_learning_rate(),
-        epsilon = 1e-15
-    );
-    assert_eq!(loaded.get_max_iterations(), model.get_max_iterations());
+    // The solver, with its settings, round-trips as one value
+    assert_eq!(loaded.get_solver(), model.get_solver());
 
     // Coefficients must survive the round-trip exactly
     let orig_coeff = model.get_coefficients().unwrap();
@@ -552,14 +757,14 @@ fn save_load_preserves_model_state() {
 
 // Default constructor
 
-/// Default model has fit_intercept=true, learning_rate=0.01, max_iter=1000, tol=1e-5
+/// `default()` is `new(true)`: fit_intercept = true and the closed-form solver
 #[test]
 fn default_constructor_has_expected_hyperparameters() {
     let model = LinearRegression::default();
     assert!(model.get_fit_intercept());
-    assert_abs_diff_eq!(model.get_learning_rate(), 0.01, epsilon = 1e-15);
-    assert_eq!(model.get_max_iterations(), 1000);
-    assert_abs_diff_eq!(model.get_tolerance(), 1e-5, epsilon = 1e-20);
+    assert_eq!(model.get_solver(), LeastSquaresSolver::Normal);
+    // The two constructors must agree, so that neither can silently build a different algorithm
+    assert_eq!(model.get_solver(), LinearRegression::new(true).get_solver());
     assert!(model.get_coefficients().is_none());
     assert!(model.get_intercept().is_none());
     assert!(model.get_actual_iterations().is_none());
@@ -586,7 +791,13 @@ fn clone_of_fitted_model_makes_identical_predictions() {
     let y_train = array![3.0, 5.0, 7.0, 9.0, 11.0];
     let x_test = array![[6.0], [0.0]];
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model.fit(&x_train, &y_train).unwrap();
     let preds_orig = model.predict(&x_test).unwrap();
 
@@ -604,7 +815,13 @@ fn clone_of_fitted_model_makes_identical_predictions() {
 #[test]
 fn fit_huge_learning_rate_diverges_returns_non_finite() {
     // learning_rate = 1e8 is positive and finite, so the constructor accepts it
-    let mut model = LinearRegression::new(true, 1e8, 1000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 1e8,
+            max_iter: 1000,
+            tol: 1e-10,
+        })
+        .unwrap();
 
     // clean, finite data: y = 2x + 1 on x = [1..5]
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
@@ -643,7 +860,12 @@ fn l1_regularization_many_features_recovers_informative_feature() {
     let y = Array1::from_shape_fn(n_samples, |i| 3.0 * ((i as f64) - 5.5));
 
     // weak L1 so the dominant coefficient is shrunk only slightly; fit_intercept = false
-    let mut model = LinearRegression::new(false, 0.01, 20_000, 1e-12)
+    let mut model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 20_000,
+            tol: 1e-12,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L1(1e-3))
         .unwrap();
@@ -699,7 +921,13 @@ fn score_is_one_on_perfectly_linear_data() {
         [1.0, 4.0]
     ];
     let y = array![6.0, 11.0, -1.0, 13.0, 12.0, 0.0];
-    let mut model = LinearRegression::new(true, 0.02, 300_000, 1e-13).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.02,
+            max_iter: 300_000,
+            tol: 1e-13,
+        })
+        .unwrap();
     model.fit(&x, &y).unwrap();
     let r2 = model.score(&x, &y).unwrap();
     assert!(r2 <= 1.0 + 1e-9, "R² must not exceed 1, got {r2}");
@@ -714,7 +942,13 @@ fn score_is_one_on_perfectly_linear_data() {
 fn score_matches_r2_definition() {
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0]];
     let y = array![2.1, 3.9, 6.2, 7.8, 10.1]; // noisy linear, R² strictly < 1
-    let mut model = LinearRegression::new(true, 0.01, 100_000, 1e-12).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100_000,
+            tol: 1e-12,
+        })
+        .unwrap();
     model.fit(&x, &y).unwrap();
 
     let preds = model.predict(&x).unwrap();
@@ -740,7 +974,13 @@ fn score_mean_predictor_is_about_zero() {
     // linear fit is ŷ ≈ ȳ and R² ≈ 0
     let x = array![[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]];
     let y = array![1.0, 0.0, 1.0, 0.0, 1.0, 0.0];
-    let mut model = LinearRegression::new(true, 0.001, 200_000, 1e-13).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.001,
+            max_iter: 200_000,
+            tol: 1e-13,
+        })
+        .unwrap();
     model.fit(&x, &y).unwrap();
     let r2 = model.score(&x, &y).unwrap();
     assert!(
@@ -753,7 +993,13 @@ fn score_mean_predictor_is_about_zero() {
 /// score on an unfitted model returns NotFitted
 #[test]
 fn score_not_fitted_errors() {
-    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol: 1e-6,
+        })
+        .unwrap();
     let x = array![[1.0], [2.0]];
     let y = array![1.0, 2.0];
     assert!(matches!(
@@ -767,7 +1013,13 @@ fn score_not_fitted_errors() {
 fn score_y_length_mismatch_errors() {
     let x = array![[1.0], [2.0], [3.0]];
     let y = array![1.0, 2.0, 3.0];
-    let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1000,
+            tol: 1e-6,
+        })
+        .unwrap();
     model.fit(&x, &y).unwrap();
     let y_wrong = array![1.0, 2.0];
     assert!(matches!(
@@ -777,8 +1029,6 @@ fn score_y_length_mismatch_errors() {
 }
 
 // Closed-form (normal-equation) solver
-
-use rustyml::machine_learning::linear_model::Solver;
 
 /// On exactly-linear data the closed-form solver recovers the true coefficients and
 /// intercept exactly (no iteration / learning-rate tuning), unlike gradient descent which
@@ -796,10 +1046,11 @@ fn normal_solver_recovers_exact_coefficients() {
     ];
     let y = array![6.0, 11.0, -1.0, 13.0, 12.0, 0.0];
 
-    // The learning rate / max_iter / tol are ignored by the closed-form solver
-    let mut model = LinearRegression::new(true, 0.01, 1, 1e-6)
-        .unwrap()
-        .with_solver(Solver::Normal);
+    // Selecting the closed form leaves no iteration settings to carry: `LeastSquaresSolver::Normal` has no
+    // fields, so a learning rate cannot even be handed to it
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     model.fit(&x, &y).unwrap();
 
     let coefs = model.get_coefficients().unwrap();
@@ -828,17 +1079,28 @@ fn normal_solver_l2_matches_gradient_descent() {
     let y = array![2.0, 1.0, 3.5, -0.5, 1.0, 2.2, 1.8, -1.5];
 
     let alpha = 0.3;
-    let mut gd = LinearRegression::new(true, 0.03, 400_000, 1e-13)
+    let mut gd = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.03,
+            max_iter: 400_000,
+            tol: 1e-13,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L2(alpha))
         .unwrap();
     gd.fit(&x, &y).unwrap();
 
-    let mut normal = LinearRegression::new(true, 0.01, 1, 1e-6)
+    let mut normal = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1,
+            tol: 1e-6,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L2(alpha))
         .unwrap()
-        .with_solver(Solver::Normal);
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     normal.fit(&x, &y).unwrap();
 
     let gd_c = gd.get_coefficients().unwrap();
@@ -860,9 +1122,15 @@ fn normal_solver_no_intercept_matches_normal_equation() {
     // Simple 2-feature, no-intercept system
     let x = array![[1.0, 2.0], [3.0, 1.0], [2.0, 4.0], [0.0, 1.0]];
     let y = array![5.0, 5.0, 10.0, 2.0]; // y = 1*x0 + 2*x1 (exact)
-    let mut model = LinearRegression::new(false, 0.01, 1, 1e-6)
+    let mut model = LinearRegression::new(false)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1,
+            tol: 1e-6,
+        })
         .unwrap()
-        .with_solver(Solver::Normal);
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     model.fit(&x, &y).unwrap();
     let c = model.get_coefficients().unwrap();
     assert_abs_diff_eq!(c[0], 1.0, epsilon = 1e-9);
@@ -875,11 +1143,17 @@ fn normal_solver_no_intercept_matches_normal_equation() {
 fn normal_solver_rejects_l1_regularization() {
     let x = array![[1.0], [2.0], [3.0]];
     let y = array![1.0, 2.0, 3.0];
-    let mut model = LinearRegression::new(true, 0.01, 1, 1e-6)
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1,
+            tol: 1e-6,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L1(0.5))
         .unwrap()
-        .with_solver(Solver::Normal);
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     let result = model.fit(&x, &y);
     assert!(
         matches!(result, Err(Error::InvalidInput(_))),
@@ -893,16 +1167,28 @@ fn normal_solver_ridge_shrinks_coefficients() {
     let x = array![[1.0, 0.9], [2.0, 2.1], [3.0, 2.9], [4.0, 4.2], [5.0, 5.1]];
     let y = array![1.0, 2.0, 3.0, 4.0, 5.0];
 
-    let mut ols = LinearRegression::new(true, 0.01, 1, 1e-6)
+    let mut ols = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1,
+            tol: 1e-6,
+        })
         .unwrap()
-        .with_solver(Solver::Normal);
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     ols.fit(&x, &y).unwrap();
 
-    let mut ridge = LinearRegression::new(true, 0.01, 1, 1e-6)
+    let mut ridge = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 1,
+            tol: 1e-6,
+        })
         .unwrap()
         .with_regularization(RegularizationType::L2(1.0))
         .unwrap()
-        .with_solver(Solver::Normal);
+        .with_solver(LeastSquaresSolver::Normal)
+        .unwrap();
     ridge.fit(&x, &y).unwrap();
 
     let ols_norm: f64 = ols.get_coefficients().unwrap().iter().map(|c| c * c).sum();
@@ -915,5 +1201,76 @@ fn normal_solver_ridge_shrinks_coefficients() {
     assert!(
         ridge_norm < ols_norm,
         "ridge ||w||^2 ({ridge_norm}) must be smaller than OLS ({ols_norm})"
+    );
+}
+
+// scikit-learn parity
+
+/// `LinearRegression::default()` is exact OLS, like Python's `LinearRegression()`
+///
+/// Reference from scikit-learn 1.9.0: `LinearRegression().fit(X, y)` on this data gives
+/// `coef_ = [1.11666667, 0.93333333]` and `intercept_ = 0.05`. The old default of gradient
+/// descent could not reproduce those numbers at any iteration count the tests could afford
+#[test]
+fn default_solver_is_exact_ols_matching_scikit_learn() {
+    let x: Array2<f64> = array![[1.0, 1.0], [2.0, 1.0], [3.0, 2.0], [4.0, 3.0], [5.0, 5.0]];
+    let y: Array1<f64> = array![2.0, 3.5, 5.1, 7.2, 10.4];
+
+    let mut model = LinearRegression::default();
+    model.fit(&x, &y).expect("fit should succeed");
+
+    let coefficients = model.get_coefficients().expect("fit sets coefficients");
+    assert_abs_diff_eq!(coefficients[0], 1.116_666_666_666_667, epsilon = 1e-12);
+    assert_abs_diff_eq!(coefficients[1], 0.933_333_333_333_333_3, epsilon = 1e-12);
+    assert_abs_diff_eq!(
+        model.get_intercept().expect("fit sets the intercept"),
+        0.05,
+        epsilon = 1e-12
+    );
+}
+
+/// L1 drives an unsupported coefficient to exactly `0.0`, not merely close to it
+///
+/// The proximal (soft-thresholding) step is what makes L1 a feature selector. The sub-gradient
+/// update it replaced could only approach zero asymptotically, so `Lasso`-style sparsity was
+/// unreachable however long the fit ran
+#[test]
+fn l1_regularization_produces_exact_zeros() {
+    // Feature 0 explains y exactly; feature 1 is noise
+    let x: Array2<f64> = array![
+        [1.0, 0.3],
+        [2.0, -0.7],
+        [3.0, 0.5],
+        [4.0, -0.2],
+        [5.0, 0.9],
+        [6.0, -0.4],
+        [7.0, 0.1],
+        [8.0, -0.8],
+        [9.0, 0.6],
+        [10.0, -0.3]
+    ];
+    let y: Array1<f64> = array![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0];
+
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 20_000,
+            tol: 1e-12,
+        })
+        .expect("valid params")
+        .with_regularization(RegularizationType::L1(0.5))
+        .expect("valid alpha");
+    model.fit(&x, &y).expect("fit should succeed");
+
+    let coefficients = model.get_coefficients().expect("fit sets coefficients");
+    assert_eq!(
+        coefficients[1], 0.0,
+        "the noise coefficient must be exactly zero, got {}",
+        coefficients[1]
+    );
+    assert!(
+        coefficients[0] > 1.0,
+        "the informative coefficient must survive, got {}",
+        coefficients[0]
     );
 }

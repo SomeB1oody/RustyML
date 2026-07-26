@@ -6,9 +6,6 @@ use ndarray::{Array1, ArrayBase, ArrayView1, Data, Ix1};
 
 use super::validate_pair;
 
-/// Variance below which the total sum of squares is treated as zero (all `y_true` identical)
-const SST_EPSILON: f64 = 1e-10;
-
 /// Calculates the Mean Squared Error (MSE) between ground-truth and predicted values
 ///
 /// MSE is the average of the squared differences between predictions and ground truth. Because the
@@ -150,8 +147,10 @@ where
 /// `R^2 = 1 - SSE / SST` where `SSE = sum(y_pred - y_true)^2` and `SST = sum(y_true - mean(y_true))^2`,
 /// and since SST is computed from `y_true` alone, the argument order is significant
 ///
-/// When `y_true` has (near-)zero variance the score is undefined; by convention, this
-/// returns `1.0` for a perfect fit (`SSE ~= 0`) and `0.0` otherwise
+/// When every entry of `y_true` is identical the score is undefined; by convention, this returns
+/// `1.0` for an exact fit (`SSE == 0`) and `0.0` otherwise, matching scikit-learn's `r2_score`.
+/// The constant case is recognised from the values themselves, so a target that varies only
+/// slightly (say `[1e-6, 2e-6, 3e-6]`) is scored normally rather than being mistaken for a constant
 ///
 /// # NaN handling
 ///
@@ -199,12 +198,21 @@ where
         .zip(y_true.iter())
         .map(|(p, a)| (p - a).powi(2))
         .sum();
-    let sst: f64 = y_true.mapv(|x| (x - mean).powi(2)).sum();
 
-    // When all y_true are identical SST is zero and R^2 is undefined: perfect fit scores 1.0, else 0.0
-    if sst < SST_EPSILON {
-        return if sse < SST_EPSILON { 1.0 } else { 0.0 };
+    // A constant `y_true` leaves R^2 undefined: a perfect fit scores 1.0, anything else 0.0.
+    //
+    // Constancy is decided from the values themselves rather than from a threshold on SST. `sum / n`
+    // does not round-trip every constant - three copies of `0.1` leave SST at 5.8e-34 rather than at
+    // zero - so an exact `sst == 0.0` test would miss real constants, while the absolute threshold
+    // this replaced went wrong in the other direction and reported a perfect 1.0 for genuinely
+    // varying targets whose spread happened to be small (`[1e-6, 2e-6, 3e-6]` has SST 2e-12)
+    let mut values = y_true.iter();
+    let first = *values.next().expect("validate_pair rejects an empty input");
+    if values.all(|&v| v == first) {
+        return if sse == 0.0 { 1.0 } else { 0.0 };
     }
+
+    let sst: f64 = y_true.mapv(|x| (x - mean).powi(2)).sum();
 
     1.0 - sse / sst
 }
@@ -266,16 +274,27 @@ where
         .map(|(&t, &p)| t - p)
         .collect();
 
-    // Population variance over the finite subset
+    // Population variance over the finite subset. A constant (or empty) finite subset has zero
+    // spread by definition, so it is detected directly from the values rather than inferred from a
+    // near-zero sum of squares: `sum / count` does not round-trip every constant (eight copies of
+    // `0.1` do not), and the exact-zero guard below must not read that rounding as real spread
     let variance = |v: ArrayView1<f64>| -> f64 {
-        let (sum, count) = v.iter().fold((0.0_f64, 0_usize), |(s, c), &val| {
-            if val.is_finite() {
-                (s + val, c + 1)
-            } else {
-                (s, c)
+        let mut sum = 0.0_f64;
+        let mut count = 0_usize;
+        let mut first: Option<f64> = None;
+        let mut constant = true;
+        for &val in v.iter() {
+            if !val.is_finite() {
+                continue;
             }
-        });
-        if count == 0 {
+            sum += val;
+            count += 1;
+            match first {
+                None => first = Some(val),
+                Some(f) => constant &= val == f,
+            }
+        }
+        if count == 0 || constant {
             return 0.0;
         }
         let mean = sum / count as f64;
@@ -292,12 +311,10 @@ where
     let residual_variance = variance(residuals.view());
     let true_variance = variance(y_true.view());
 
-    if true_variance < SST_EPSILON {
-        return if residual_variance < SST_EPSILON {
-            1.0
-        } else {
-            0.0
-        };
+    // Same convention as [`r2_score`]: a constant `y_true` leaves the ratio undefined, so residuals
+    // of zero variance score 1.0 and anything else 0.0, both decided by exact comparisons
+    if true_variance == 0.0 {
+        return if residual_variance == 0.0 { 1.0 } else { 0.0 };
     }
 
     1.0 - residual_variance / true_variance

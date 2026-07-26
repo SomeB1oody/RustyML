@@ -30,8 +30,8 @@ fn pseudo_random_matrix(rows: usize, cols: usize, seed: u64) -> Array2<f64> {
 
 /// Round-robin cluster labels: exactly `k` clusters, each of size ~n/k (no singletons), with
 /// `2 <= k < n` so `validate_clustering_inputs` accepts them.
-fn round_robin_labels(n: usize, k: usize) -> Array1<usize> {
-    Array1::from_shape_fn(n, |i| i % k)
+fn round_robin_labels(n: usize, k: usize) -> Array1<isize> {
+    Array1::from_shape_fn(n, |i| (i % k) as isize)
 }
 
 fn bench_silhouette(c: &mut Criterion) {

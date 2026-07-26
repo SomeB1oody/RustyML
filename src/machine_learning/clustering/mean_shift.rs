@@ -68,8 +68,9 @@ pub struct MeanShift {
     n_samples_per_center: Option<Array1<usize>>,
     /// Final cluster centers found by the algorithm
     cluster_centers: Option<Array2<f64>>,
-    /// Cluster labels assigned to each input sample
-    labels: Option<Array1<usize>>,
+    /// Cluster labels assigned to each input sample; `-1` marks a point left unassigned when
+    /// `cluster_all` is off
+    labels: Option<Array1<isize>>,
     /// Actual number of iterations performed during fitting
     n_iter: Option<usize>,
 }
@@ -173,6 +174,9 @@ impl MeanShift {
 
     /// Sets whether to assign every point to a cluster, including potential noise
     /// (default: `true`)
+    ///
+    /// With this off, a point further than one bandwidth from every cluster center is labelled
+    /// `-1`, as in scikit-learn
     pub fn with_cluster_all(mut self, cluster_all: bool) -> Self {
         self.cluster_all = cluster_all;
         self
@@ -181,7 +185,7 @@ impl MeanShift {
     // Getters
     get_field!(get_bandwidth, bandwidth, f64);
     get_field_as_ref!(get_cluster_centers, cluster_centers, Option<&Array2<f64>>);
-    get_field_as_ref!(get_labels, labels, Option<&Array1<usize>>);
+    get_field_as_ref!(get_labels, labels, Option<&Array1<isize>>);
     get_field_as_ref!(
         get_n_samples_per_center,
         n_samples_per_center,
@@ -227,8 +231,6 @@ impl MeanShift {
             (0..n_samples).collect()
         };
 
-        // RBF weighting: w_i = exp(-gamma * ||center - x_i||^2); gamma folds in the bandwidth
-        let gamma = 1.0 / (2.0 * self.bandwidth.powi(2));
         let tol_squared = self.tol * self.tol;
         let bandwidth_squared = self.bandwidth * self.bandwidth;
         // Per-sample squared norms, shared across all seeds and iterations
@@ -248,13 +250,17 @@ impl MeanShift {
             Parallelism::Rayon(0)
         };
 
-        // Mean shift on a single seed
-        let process_seed = |seed_idx: usize| -> (Array1<f64>, usize) {
+        // Mean shift on a single seed. The third tuple element is how many points the window held
+        // at convergence - the mode's intensity - which the merge phase below ranks modes by
+        let process_seed = |seed_idx: usize| -> (Array1<f64>, usize, f64) {
             let mut center = x.row(seed_idx).to_owned();
             let mut completed_iterations = 0;
 
-            loop {
-                // RBF weights for every point via the squared-norm identity
+            let window_weight = loop {
+                // Flat kernel: membership of the bandwidth ball, as a 0/1 weight computed through
+                // the squared-norm identity. Written as a weight vector so the two products below
+                // stay single GEMV sweeps - `weighted_sum / weight_sum` is then exactly the mean of
+                // the points inside the ball, and `weight_sum` is exactly how many there are
                 let center_sq = center.dot(&center);
                 let projections = matvec(x, &center, seed_matvec_par);
                 let weights: Array1<f64> =
@@ -262,7 +268,11 @@ impl MeanShift {
                         .and(&x_sq)
                         .map_collect(|&proj, &x_norm_sq| {
                             let dist_sq = (center_sq + x_norm_sq - 2.0 * proj).max(0.0);
-                            (-gamma * dist_sq).exp()
+                            if dist_sq <= bandwidth_squared {
+                                1.0
+                            } else {
+                                0.0
+                            }
                         });
                 // Serial sum
                 let weight_sum = weights.sum();
@@ -276,12 +286,17 @@ impl MeanShift {
 
                 completed_iterations += 1;
 
-                if shift_squared < tol_squared || completed_iterations >= self.max_iter {
-                    break;
+                // An empty ball cannot move the seed, so stop rather than spin - the same early
+                // exit scikit-learn takes when a seed's neighbourhood is empty
+                if shift_squared < tol_squared
+                    || completed_iterations >= self.max_iter
+                    || weight_sum == 0.0
+                {
+                    break weight_sum;
                 }
-            }
+            };
 
-            (center, completed_iterations)
+            (center, completed_iterations, window_weight)
         };
 
         #[cfg(feature = "show_progress")]
@@ -294,7 +309,7 @@ impl MeanShift {
             pb
         };
 
-        let results: Vec<(Array1<f64>, usize)> = if use_parallel {
+        let results: Vec<(Array1<f64>, usize, f64)> = if use_parallel {
             seeds
                 .par_iter()
                 .map(|&seed_idx| {
@@ -319,42 +334,42 @@ impl MeanShift {
         progress_bar.finish_with_message("All seeds processed");
 
         // Extract centers and calculate actual max iterations
-        let centers: Vec<Array1<f64>> = results.iter().map(|(c, _)| c.clone()).collect();
-        let max_actual_iter = results.iter().map(|(_, i)| *i).max().unwrap_or(0);
+        let centers: Vec<Array1<f64>> = results.iter().map(|(c, _, _)| c.clone()).collect();
+        let max_actual_iter = results.iter().map(|(_, i, _)| *i).max().unwrap_or(0);
         self.n_iter = Some(max_actual_iter);
 
-        // Merge centers that lie within one bandwidth of each other
+        // Merge duplicate modes, scikit-learn's way: rank the converged modes by how many points
+        // their window held, then walk that order keeping a mode and suppressing every other mode
+        // within one bandwidth of it. The kept center is the dense mode itself - averaging the
+        // suppressed ones into it, as this used to do, drags the center off the density peak and
+        // makes the result depend on the order the seeds happened to be processed in
+        let mut order: Vec<usize> = (0..centers.len()).collect();
+        order.sort_by(|&a, &b| {
+            // Descending by window weight, then descending by coordinates so equally dense modes
+            // are ordered the same way scikit-learn's `(intensity, center)` sort orders them.
+            // Only the cluster *numbering* depends on this, not the clustering
+            results[b]
+                .2
+                .partial_cmp(&results[a].2)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    centers[b]
+                        .iter()
+                        .zip(centers[a].iter())
+                        .map(|(x, y)| x.total_cmp(y))
+                        .find(|ord| *ord != std::cmp::Ordering::Equal)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+
         let mut unique_centers: Vec<Array1<f64>> = Vec::with_capacity(centers.len());
-        let mut center_counts: Vec<usize> = Vec::with_capacity(centers.len());
-
-        for center in centers {
-            let mut merged = false;
-
-            // Find closest existing center within bandwidth
-            for (i, unique_center) in unique_centers.iter_mut().enumerate() {
-                let distance_squared = squared_euclidean_distance_row(&center, unique_center);
-
-                if distance_squared < bandwidth_squared {
-                    // Update existing center using weighted average
-                    let count = center_counts[i];
-                    let new_count = count + 1;
-                    let weight_old = count as f64 / new_count as f64;
-                    let weight_new = 1.0 / new_count as f64;
-
-                    // Update the center coordinates in place
-                    unique_center.zip_mut_with(&center, |old, &new| {
-                        *old = *old * weight_old + new * weight_new;
-                    });
-
-                    center_counts[i] = new_count;
-                    merged = true;
-                    break;
-                }
-            }
-
-            if !merged {
-                unique_centers.push(center);
-                center_counts.push(1);
+        for &idx in &order {
+            let center = &centers[idx];
+            let suppressed = unique_centers
+                .iter()
+                .any(|kept| squared_euclidean_distance_row(center, kept) <= bandwidth_squared);
+            if !suppressed {
+                unique_centers.push(center.clone());
             }
         }
 
@@ -366,7 +381,7 @@ impl MeanShift {
         }
 
         // Find the nearest cluster label for one sample
-        let find_label = |i: usize| -> usize {
+        let find_label = |i: usize| -> isize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
             let mut label = 0;
@@ -379,11 +394,12 @@ impl MeanShift {
                 }
             }
 
-            // When cluster_all is off and the point is too far, mark it as an outlier
+            // With `cluster_all` off, a point further than one bandwidth from every center is
+            // noise and gets scikit-learn's `-1`, not an index one past the last real cluster
             if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                n_clusters // outlier label
+                -1
             } else {
-                label
+                label as isize
             }
         };
 
@@ -398,11 +414,11 @@ impl MeanShift {
             find_label,
         );
 
-        // Count how many samples are assigned to each cluster center
+        // Count how many samples are assigned to each cluster center, skipping the noise label
         let mut samples_per_center = vec![0usize; n_clusters];
         for &label in &labels {
-            if label < n_clusters {
-                samples_per_center[label] += 1;
+            if label >= 0 {
+                samples_per_center[label as usize] += 1;
             }
         }
 
@@ -421,7 +437,7 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - The predicted cluster labels, or an Error
+    /// - `Result<Array1<isize>, Error>` - The predicted cluster labels (`-1` for noise), or an Error
     ///
     /// # Errors
     ///
@@ -432,7 +448,7 @@ impl MeanShift {
     ///
     /// Parallelizes when the total scan work clears the calibrated scan-class gate (see
     /// `crate::parallel_gates`)
-    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
+    pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Sync,
     {
@@ -448,9 +464,9 @@ impl MeanShift {
         let n_clusters = centers.nrows();
         let bandwidth_squared = self.bandwidth * self.bandwidth;
 
-        // Nearest cluster center for one sample, or the outlier label (`n_clusters`) when
-        // `cluster_all` is off and the point lies farther than the bandwidth from every center
-        let find_nearest = |i: usize| -> usize {
+        // Nearest cluster center for one sample, or the noise label `-1` when `cluster_all` is
+        // off and the point lies farther than the bandwidth from every center
+        let find_nearest = |i: usize| -> isize {
             let point = x.row(i);
             let mut min_dist_squared = f64::INFINITY;
             let mut label = 0;
@@ -465,9 +481,9 @@ impl MeanShift {
             }
 
             if !self.cluster_all && min_dist_squared > bandwidth_squared {
-                n_clusters
+                -1
             } else {
-                label
+                label as isize
             }
         };
 
@@ -492,12 +508,12 @@ impl MeanShift {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - The predicted cluster labels, or an Error
+    /// - `Result<Array1<isize>, Error>` - The predicted cluster labels (`-1` for noise), or an Error
     ///
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If input data fails preliminary checks
-    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
+    pub fn fit_predict<S>(&mut self, x: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64> + Sync + Send,
     {
@@ -581,7 +597,12 @@ impl MeanShift {
 
 /// Estimates a bandwidth to use with the MeanShift algorithm
 ///
-/// The bandwidth is estimated from the pairwise distances between a subset of points
+/// Matches scikit-learn's `estimate_bandwidth`: with `k = max(1, floor(n * quantile))`, it takes
+/// each point's distance to its `k`-th nearest neighbour and returns the **mean** of those
+/// distances. That is a local-density statistic - it answers "how far is a typical point from the
+/// edge of its own neighbourhood" - which is what a bandwidth has to be. A quantile of the whole
+/// pairwise-distance distribution, which this used to return, is a global spread statistic instead
+/// and runs much larger on clustered data, collapsing everything into one cluster
 ///
 /// # Parameters
 ///
@@ -636,7 +657,7 @@ where
     };
 
     let x_sq = x_samples.map_axis(Axis(1), |row| row.dot(&row));
-    let mut distances: Vec<f64> = if cache_resident::<f64>(n_samples, x_samples.ncols()) {
+    let distances: Vec<f64> = if cache_resident::<f64>(n_samples, x_samples.ncols()) {
         (0..n_samples)
             .into_par_iter()
             .flat_map(|i| {
@@ -671,28 +692,62 @@ where
         distances
     };
 
-    if distances.is_empty() {
+    if n_samples < 2 {
+        // scikit-learn returns 0.0 here and lets `MeanShift` reject it, rather than erroring in
+        // the helper
         return Ok(0.0);
     }
 
-    let k = ((distances.len() as f64 * quantile) as usize).min(distances.len() - 1);
-    distances.select_nth_unstable_by(k, |a, b| {
-        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    Ok(distances[k])
+    // scikit-learn asks its neighbour index for the `k` closest points *including the query
+    // point itself* and takes the largest of them, so the statistic is really each point's
+    // distance to its `(k - 1)`-th nearest neighbour. Reproducing the off-by-one matters: at
+    // quantile 0.3 on 10 points, reading the k-th instead of the (k-1)-th moves the bandwidth
+    // from 1.1229 to 1.2213
+    let k = ((n_samples as f64 * quantile) as usize).max(1);
+    if k < 2 {
+        // Only the query point itself falls inside the window, so its farthest "neighbour" is
+        // itself, at distance zero. scikit-learn returns 0.0 here too and lets `MeanShift` reject
+        // the bandwidth rather than erroring in this helper
+        return Ok(0.0);
+    }
+    let neighbour_rank = (k - 2).min(n_samples - 2);
+
+    let total: f64 = (0..n_samples)
+        .map(|i| {
+            let mut row: Vec<f64> = (0..n_samples)
+                .filter(|&j| j != i)
+                .map(|j| distances[pair_index(i, j, n_samples)])
+                .collect();
+            row.select_nth_unstable_by(neighbour_rank, f64::total_cmp);
+            row[neighbour_rank]
+        })
+        .sum();
+
+    Ok(total / n_samples as f64)
+}
+
+/// Index of the `(i, j)` pair inside the flattened strict upper triangle of a distance matrix
+///
+/// The triangle is stored row by row, so row `i` starts at `i * n - i * (i + 1) / 2` and holds the
+/// distances to `i + 1 ..= n - 1`. The matrix is symmetric, so a query with `i > j` is answered by
+/// swapping them
+#[inline]
+fn pair_index(i: usize, j: usize, n: usize) -> usize {
+    let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+    lo * n - lo * (lo + 1) / 2 + (hi - lo - 1)
 }
 
 /// Resolves the shifted center for one mean-shift iteration
 ///
-/// Normally the new center is the weight-normalized mean `weighted_sum / weight_sum`. When
-/// every RBF weight underflows to exactly zero (so `weight_sum == 0`) the window has no
-/// usable neighbors, so the center is left in place rather than collapsed to the origin,
-/// which would otherwise inject a spurious cluster center unrelated to the data
+/// Normally the new center is the count-normalized mean `weighted_sum / weight_sum`. When the
+/// bandwidth ball is empty the total weight is exactly zero, so the center is left in place rather
+/// than collapsed to the origin, which would otherwise inject a spurious cluster center unrelated
+/// to the data
 ///
 /// # Parameters
 ///
-/// - `weighted_sum` - Weighted sum of the points in the window
-/// - `weight_sum` - Total RBF weight over the window
+/// - `weighted_sum` - Sum of the points inside the bandwidth ball
+/// - `weight_sum` - Number of points inside the bandwidth ball
 /// - `center` - Current center, returned unchanged when `weight_sum` is zero
 ///
 /// # Returns

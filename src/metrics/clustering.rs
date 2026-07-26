@@ -3,6 +3,13 @@
 //! Provides extrinsic metrics that compare a clustering against ground-truth labels (NMI, AMI, ARI,
 //! homogeneity, completeness, V-measure, Fowlkes-Mallows) and intrinsic metrics that score a
 //! clustering from the feature geometry alone (silhouette, Davies-Bouldin, Calinski-Harabasz)
+//!
+//! Every metric here takes `isize` labels, which is what the crate's clustering estimators emit -
+//! so `KMeans`, `DBSCAN` and `MeanShift` output feeds any of them directly. Label *values* carry
+//! no meaning beyond distinguishing clusters; they are densified internally, so non-contiguous ids
+//! and the `-1` noise marker are accepted. Note that `-1` is then scored as an ordinary cluster of
+//! its own, which is rarely what you want: filter the noise points out of both arrays first if the
+//! score is meant to describe only the clustered samples
 
 use ahash::AHashMap;
 use ndarray::{Array2, ArrayBase, Axis, Data, Ix1, Ix2};
@@ -29,7 +36,7 @@ tunable_gate! {
 }
 
 /// Maps each distinct label to a dense index in `0..k` in order of first appearance
-fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
+fn label_index(labels: &[isize]) -> AHashMap<isize, usize> {
     let mut index = AHashMap::new();
     for &label in labels {
         let next = index.len();
@@ -41,8 +48,8 @@ fn label_index(labels: &[usize]) -> AHashMap<usize, usize> {
 /// Builds the contingency matrix of two label assignments together with its row and column sums
 /// (the cluster sizes in `labels_true` and `labels_pred` respectively)
 fn contingency_matrix(
-    labels_true: &[usize],
-    labels_pred: &[usize],
+    labels_true: &[isize],
+    labels_pred: &[isize],
 ) -> (Array2<usize>, Vec<usize>, Vec<usize>) {
     let index_true = label_index(labels_true);
     let index_pred = label_index(labels_pred);
@@ -139,10 +146,15 @@ fn expected_mutual_information(row_sums: &[usize], col_sums: &[usize], n: usize)
     emi
 }
 
-/// Collects a `usize` label array into a contiguous `Vec`, tolerating non-contiguous views
-fn to_label_vec<S>(labels: &ArrayBase<S, Ix1>) -> Vec<usize>
+/// Collects a label array into a contiguous `Vec`, tolerating non-contiguous views
+///
+/// Labels are `isize` because that is what the crate's clustering estimators emit, and because
+/// `-1` is the conventional noise/orphan marker (scikit-learn uses it the same way). Everything
+/// downstream goes through [`label_index`], which densifies whatever values appear, so a negative
+/// label is just another distinct cluster id here
+fn to_label_vec<S>(labels: &ArrayBase<S, Ix1>) -> Vec<isize>
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     labels.iter().copied().collect()
 }
@@ -183,7 +195,7 @@ pub fn normalized_mutual_info<S>(
     labels_pred: &ArrayBase<S, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -246,7 +258,7 @@ pub fn adjusted_mutual_info<S>(
     labels_pred: &ArrayBase<S, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -310,7 +322,7 @@ pub fn adjusted_rand_index<S>(
     labels_pred: &ArrayBase<S, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -477,7 +489,7 @@ pub fn silhouette_score<S1, S2>(
 ) -> f64
 where
     S1: Data<Elem = f64> + Sync,
-    S2: Data<Elem = usize>,
+    S2: Data<Elem = isize>,
 {
     let n = x.nrows();
     let labels = to_label_vec(labels);
@@ -521,7 +533,7 @@ where
 /// Densifies labels to `0..k` and validates them against an `x` of `n_rows` rows for an internal
 /// clustering metric: equal length, non-empty, and `2..=n_rows - 1` distinct clusters. Returns the
 /// dense cluster index of each sample and the cluster count `k`
-fn validate_clustering_inputs(n_rows: usize, labels: &[usize]) -> (Vec<usize>, usize) {
+fn validate_clustering_inputs(n_rows: usize, labels: &[isize]) -> (Vec<usize>, usize) {
     if n_rows != labels.len() {
         panic!(
             "dimension mismatch: expected {n_rows}, found {}",
@@ -572,7 +584,7 @@ where
 /// Both reuse the mutual information and entropies already defined above: with `C` the classes
 /// (`labels_true`) and `K` the clusters (`labels_pred`), homogeneity is `MI / H(C)` and
 /// completeness is `MI / H(K)`. A zero entropy (single cluster) makes its score 1.0
-fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usize) -> (f64, f64) {
+fn homogeneity_completeness(labels_true: &[isize], labels_pred: &[isize], n: usize) -> (f64, f64) {
     let (contingency, row_sums, col_sums) = contingency_matrix(labels_true, labels_pred);
     let mi = mutual_information(&contingency, n, &row_sums, &col_sums);
     let h_classes = entropy_nats(&row_sums, n);
@@ -622,7 +634,7 @@ fn homogeneity_completeness(labels_true: &[usize], labels_pred: &[usize], n: usi
 /// ```
 pub fn homogeneity_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -668,7 +680,7 @@ pub fn completeness_score<S>(
     labels_pred: &ArrayBase<S, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -710,7 +722,7 @@ where
 /// ```
 pub fn v_measure_score<S>(labels_true: &ArrayBase<S, Ix1>, labels_pred: &ArrayBase<S, Ix1>) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -763,7 +775,7 @@ pub fn fowlkes_mallows_score<S>(
     labels_pred: &ArrayBase<S, Ix1>,
 ) -> f64
 where
-    S: Data<Elem = usize>,
+    S: Data<Elem = isize>,
 {
     validate_pair(
         labels_true.len(),
@@ -826,7 +838,7 @@ where
 pub fn davies_bouldin_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
-    S2: Data<Elem = usize>,
+    S2: Data<Elem = isize>,
 {
     let labels = to_label_vec(labels);
     let (cluster, k) = validate_clustering_inputs(x.nrows(), &labels);
@@ -895,7 +907,7 @@ where
 pub fn calinski_harabasz_score<S1, S2>(x: &ArrayBase<S1, Ix2>, labels: &ArrayBase<S2, Ix1>) -> f64
 where
     S1: Data<Elem = f64>,
-    S2: Data<Elem = usize>,
+    S2: Data<Elem = isize>,
 {
     let n = x.nrows();
     let labels = to_label_vec(labels);
@@ -1038,8 +1050,8 @@ mod tests {
     /// the tuple ordering (homogeneity first)
     #[test]
     fn test_homogeneity_completeness_pure_clusters() {
-        let labels_true = [0usize, 0, 1, 1];
-        let labels_pred = [0usize, 1, 2, 3];
+        let labels_true = [0isize, 0, 1, 1];
+        let labels_pred = [0isize, 1, 2, 3];
         let (h, c) = homogeneity_completeness(&labels_true, &labels_pred, 4);
         assert_abs_diff_eq!(h, 1.0, epsilon = 1e-10);
         assert_abs_diff_eq!(c, 0.5, epsilon = 1e-10);
@@ -1048,7 +1060,7 @@ mod tests {
     /// Identical labels give homogeneity and completeness both 1.0
     #[test]
     fn test_homogeneity_completeness_identical() {
-        let labels = [0usize, 0, 1, 1];
+        let labels = [0isize, 0, 1, 1];
         let (h, c) = homogeneity_completeness(&labels, &labels, 4);
         assert_abs_diff_eq!(h, 1.0, epsilon = 1e-10);
         assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
@@ -1057,8 +1069,8 @@ mod tests {
     /// Swapping the roles of the pure-clusters case swaps the scores: homogeneity 0.5, completeness 1.0
     #[test]
     fn test_homogeneity_completeness_swapped_roles() {
-        let labels_true = [0usize, 1, 2, 3];
-        let labels_pred = [0usize, 0, 1, 1];
+        let labels_true = [0isize, 1, 2, 3];
+        let labels_pred = [0isize, 0, 1, 1];
         let (h, c) = homogeneity_completeness(&labels_true, &labels_pred, 4);
         assert_abs_diff_eq!(h, 0.5, epsilon = 1e-10);
         assert_abs_diff_eq!(c, 1.0, epsilon = 1e-10);
@@ -1113,7 +1125,8 @@ mod tests {
     #[test]
     fn test_cluster_centroids_known_means_and_sizes() {
         let x = array![[0.0, 0.0], [2.0, 0.0], [10.0, 10.0]];
-        let cluster = [0usize, 0, 1];
+        let cluster = [0isize, 0, 1];
+        let cluster: Vec<usize> = cluster.iter().map(|&c| c as usize).collect();
         let (centroids, sizes) = cluster_centroids(&x, &cluster, 2);
 
         assert_eq!(centroids.shape(), &[2, 2]);

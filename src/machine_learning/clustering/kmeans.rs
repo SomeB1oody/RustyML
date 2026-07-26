@@ -22,6 +22,22 @@ use rayon::prelude::{
 };
 use std::ops::AddAssign;
 
+/// Number of k-means++ restarts a fit performs unless [`KMeans::with_n_init`] says otherwise
+const DEFAULT_N_INIT: usize = 10;
+
+/// Derives a distinct, deterministic seed for one restart from the model's `random_state`
+///
+/// SplitMix64's mixing step, so consecutive restarts get well-separated streams. Deriving them by
+/// hand rather than advancing one RNG keeps a restart's seeding independent of how much randomness
+/// the previous restarts happened to consume
+#[inline]
+fn restart_seed(base: u64, restart: usize) -> u64 {
+    let mut z = base.wrapping_add((restart as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// K-means clustering estimator
 ///
 /// Partitions n observations into k clusters where each observation belongs to
@@ -110,10 +126,13 @@ pub struct KMeans {
     tol: f64,
     /// Optional seed for random number generation
     random_state: Option<u64>,
+    /// How many times to re-run the whole fit from a fresh k-means++ seeding, keeping the run
+    /// with the lowest inertia
+    n_init: usize,
     /// Computed cluster centers after fitting
     centroids: Option<Array2<f64>>,
     /// Cluster labels for training data after fitting
-    labels: Option<Array1<usize>>,
+    labels: Option<Array1<isize>>,
     /// Sum of squared distances to the closest centroid after fitting
     inertia: Option<f64>,
     /// Number of iterations the algorithm ran for after fitting
@@ -129,6 +148,7 @@ impl Default for KMeans {
     /// - `max_iter` - 300
     /// - `tolerance` - 1e-4
     /// - `random_state` - None
+    /// - `n_init` - 10
     ///
     /// # Returns
     ///
@@ -176,11 +196,45 @@ impl KMeans {
             max_iter: max_iterations,
             tol: tolerance,
             random_state: None,
+            n_init: DEFAULT_N_INIT,
             centroids: None,
             labels: None,
             inertia: None,
             n_iter: None,
         })
+    }
+
+    /// Sets how many times the fit restarts from a fresh k-means++ seeding (default: 10)
+    ///
+    /// Each restart runs the whole Lloyd iteration and the one with the lowest inertia wins, so a
+    /// single unlucky seeding cannot decide the result. Restarts are seeded deterministically from
+    /// [`with_random_state`](Self::with_random_state), so a seeded model stays reproducible
+    ///
+    /// # scikit-learn parity
+    ///
+    /// scikit-learn's `n_init='auto'` is `1` for `init='k-means++'`, on the grounds that its
+    /// *greedy* k-means++ (which draws `2 + ln(k)` candidates per center and keeps the best) is
+    /// already low-variance. RustyML's seeding is plain k-means++ - one D^2 draw per center - so
+    /// it needs the restarts that greedy seeding would otherwise replace. Pass `1` for literal
+    /// scikit-learn parity
+    ///
+    /// # Parameters
+    ///
+    /// - `n_init` - Number of restarts (must be greater than 0)
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidParameter`] - If `n_init` is 0
+    pub fn with_n_init(mut self, n_init: usize) -> Result<Self, Error> {
+        if n_init == 0 {
+            return Err(Error::invalid_parameter("n_init", "must be greater than 0"));
+        }
+        self.n_init = n_init;
+        Ok(self)
     }
 
     /// Sets a fixed RNG seed for k-means++ centroid initialization, making fitting
@@ -203,8 +257,9 @@ impl KMeans {
     get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_tolerance, tol, f64);
     get_field!(get_random_state, random_state, Option<u64>);
+    get_field!(get_n_init, n_init, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
-    get_field_as_ref!(get_labels, labels, Option<&Array1<usize>>);
+    get_field_as_ref!(get_labels, labels, Option<&Array1<isize>>);
     get_field!(get_inertia, inertia, Option<f64>);
     get_field_as_ref!(get_centroids, centroids, Option<&Array2<f64>>);
 
@@ -236,7 +291,11 @@ impl KMeans {
     /// # Parameters
     ///
     /// - `data` - Training data as a 2D array
-    fn init_centroids<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<(), Error>
+    fn init_centroids<S>(
+        &mut self,
+        data: &ArrayBase<S, Ix2>,
+        seed: Option<u64>,
+    ) -> Result<(), Error>
     where
         S: Data<Elem = f64>,
     {
@@ -245,7 +304,7 @@ impl KMeans {
 
         let mut centroids = Array2::<f64>::zeros((self.n_clusters, n_features));
 
-        let mut rng = crate::random::make_rng(self.random_state);
+        let mut rng = crate::random::make_rng(seed);
 
         // Randomly select the first center
         let first_center_idx = rng.random_range(0..n_samples);
@@ -352,6 +411,55 @@ impl KMeans {
         S: Data<Elem = f64>,
     {
         preliminary_check(data, None)?;
+        if data.shape()[0] < self.n_clusters {
+            return Err(Error::invalid_input(
+                "Number of samples is less than number of clusters",
+            ));
+        }
+
+        // Restart the whole fit `n_init` times and keep the lowest-inertia run. Plain k-means++
+        // is a single D^2 draw per center, so one seeding can land in a poor local optimum that
+        // Lloyd's iteration cannot escape; the best-of-n rule is what makes a fit reproducible in
+        // quality rather than only in seed
+        let mut best: Option<(Array2<f64>, Array1<isize>, f64, usize)> = None;
+        for restart in 0..self.n_init {
+            let seed = self.random_state.map(|base| restart_seed(base, restart));
+            self.fit_once(data, seed)?;
+
+            let inertia = self.inertia.expect("fit_once records inertia");
+            if best
+                .as_ref()
+                .is_none_or(|(_, _, best_inertia, _)| inertia < *best_inertia)
+            {
+                best = Some((
+                    self.centroids.clone().expect("fit_once records centroids"),
+                    self.labels.clone().expect("fit_once records labels"),
+                    inertia,
+                    self.n_iter.expect("fit_once records the iteration count"),
+                ));
+            }
+        }
+
+        let (centroids, labels, inertia, n_iter) =
+            best.expect("n_init is validated to be greater than 0");
+        self.centroids = Some(centroids);
+        self.labels = Some(labels);
+        self.inertia = Some(inertia);
+        self.n_iter = Some(n_iter);
+
+        Ok(self)
+    }
+
+    /// Runs one k-means++ seeding plus Lloyd iteration, recording the result on `self`
+    ///
+    /// `seed` overrides [`random_state`](Self::get_random_state) for this run alone, so the
+    /// restarts driven by [`fit`](Self::fit) explore different seedings while staying
+    /// reproducible as a group
+    fn fit_once<S>(&mut self, data: &ArrayBase<S, Ix2>, seed: Option<u64>) -> Result<(), Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        preliminary_check(data, None)?;
 
         let n_samples = data.shape()[0];
         let n_features = data.shape()[1];
@@ -362,7 +470,7 @@ impl KMeans {
             ));
         }
 
-        self.init_centroids(data)?;
+        self.init_centroids(data, seed)?;
 
         // Mean per-feature population variance, scaled by `tol`, used as the shift threshold
         let feature_means = data
@@ -377,7 +485,8 @@ impl KMeans {
             / n_features as f64;
         let tol_scaled = mean_feature_variance * self.tol;
 
-        let mut labels = Array1::<usize>::zeros(n_samples);
+        let mut labels = Array1::<isize>::zeros(n_samples);
+        let mut converged = false;
         let mut prev_inertia: Option<f64> = None;
         let mut iter_count = 0;
 
@@ -478,12 +587,12 @@ impl KMeans {
                     .zip(results.par_chunks(DET_REDUCE_BLOCK))
                     .for_each(|(label_block, result_block)| {
                         for (label, &(cluster, _)) in label_block.iter_mut().zip(result_block) {
-                            *label = cluster;
+                            *label = cluster as isize;
                         }
                     });
             } else {
                 for (label, &(cluster, _)) in label_slice.iter_mut().zip(&results) {
-                    *label = cluster;
+                    *label = cluster as isize;
                 }
             }
 
@@ -559,9 +668,12 @@ impl KMeans {
             prev_inertia = Some(inertia);
             iter_count = i + 1;
 
-            // Converged when the centroids move no more than the variance-scaled tolerance
+            // Converged when the centroids move no more than the variance-scaled tolerance.
+            // Breaking here, *before* the swap below, leaves `self.centroids` holding exactly the
+            // centroids `labels` and `inertia` were computed against
             if center_shift <= tol_scaled {
                 self.inertia = Some(inertia);
+                converged = true;
                 break;
             }
 
@@ -584,14 +696,72 @@ impl KMeans {
             ));
         }
 
-        self.labels = Some(labels);
+        // On the max_iter exit path the last iteration installed fresh centroids *after* labelling,
+        // so `labels` and `inertia` still describe the previous ones and `predict(x) != get_labels()`.
+        // One more assignment pass against the final centroids fixes that; scikit-learn re-runs the
+        // same final E-step, and for the same reason
+        if converged {
+            self.labels = Some(labels);
+        } else {
+            let (final_labels, final_inertia) = self.assign_to_centroids(data);
+            self.labels = Some(final_labels);
+            self.inertia = Some(final_inertia);
+        }
+
         // Set inertia if max_iter was reached without convergence
         if self.inertia.is_none() {
             self.inertia = prev_inertia;
         }
         self.n_iter = Some(iter_count);
 
-        Ok(self)
+        Ok(())
+    }
+
+    /// Assigns every sample to its closest fitted centroid, returning the labels and the inertia
+    ///
+    /// Used for the final pass after a fit that stopped at `max_iter`, so the recorded labels and
+    /// inertia describe the centroids the model actually ends up holding
+    fn assign_to_centroids<S>(&self, data: &ArrayBase<S, Ix2>) -> (Array1<isize>, f64)
+    where
+        S: Data<Elem = f64>,
+    {
+        let centroids = self
+            .centroids
+            .as_ref()
+            .expect("centroids are initialized before the loop starts");
+        let centroid_sq_norms = centroids.map_axis(Axis(1), |row| row.dot(&row));
+        let data_view = data.view();
+        let projections = dot(&data_view, &centroids.t());
+
+        let assign = |sample_idx: usize| -> (isize, f64) {
+            let cluster = Self::argmin_centroid(projections.row(sample_idx), &centroid_sq_norms);
+            let dist =
+                squared_euclidean_distance_row(&data_view.row(sample_idx), &centroids.row(cluster));
+            (cluster as isize, dist)
+        };
+
+        // Scan-class gate, matching the assignment step inside the Lloyd loop
+        let n_samples = data.nrows();
+        let scan_work = n_samples.saturating_mul(self.n_clusters + centroids.ncols());
+        let results: Vec<(isize, f64)> = if scan_work >= scan_f64_parallel_min_elems() {
+            (0..n_samples).into_par_iter().map(assign).collect()
+        } else {
+            (0..n_samples).map(assign).collect()
+        };
+
+        // Deterministic blocked sum, so the parallel and serial paths agree
+        let inertia = det_reduce_range(
+            n_samples,
+            scan_work >= sum_f64_parallel_min_elems(),
+            |range| range.map(|i| results[i].1).sum::<f64>(),
+            |a, b| a + b,
+            0.0,
+        );
+
+        (
+            Array1::from_iter(results.iter().map(|&(cluster, _)| cluster)),
+            inertia,
+        )
     }
 
     /// Predicts the closest cluster for each sample in the input data
@@ -602,7 +772,7 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - An array of cluster indices for each input data point
+    /// - `Result<Array1<isize>, Error>` - An array of cluster indices for each input data point
     ///
     /// # Errors
     ///
@@ -610,7 +780,7 @@ impl KMeans {
     /// - `Error::EmptyInput` - If the input data is empty
     /// - `Error::DimensionMismatch` - If the feature count does not match the fitted data
     /// - `Error::NonFinite` - If the input data contains NaN or infinite values
-    pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
+    pub fn predict<S>(&self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64>,
     {
@@ -625,14 +795,14 @@ impl KMeans {
 
         // Scan-class gate: n tasks, each an O(k) arg-min scan
         let scan_work = data.nrows().saturating_mul(centroids.nrows());
-        let labels: Vec<usize> = if scan_work >= scan_f64_parallel_min_elems() {
+        let labels: Vec<isize> = if scan_work >= scan_f64_parallel_min_elems() {
             (0..data.nrows())
                 .into_par_iter()
-                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms))
+                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms) as isize)
                 .collect()
         } else {
             (0..data.nrows())
-                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms))
+                .map(|i| Self::argmin_centroid(projections.row(i), &centroid_sq_norms) as isize)
                 .collect()
         };
 
@@ -649,14 +819,14 @@ impl KMeans {
     ///
     /// # Returns
     ///
-    /// - `Result<Array1<usize>, Error>` - An array of cluster indices for each input data point
+    /// - `Result<Array1<isize>, Error>` - An array of cluster indices for each input data point
     ///
     /// # Errors
     ///
     /// - `Error::InvalidInput` - If the number of samples is less than `n_clusters`
     /// - `Error::EmptyInput` - If the data has no rows
     /// - `Error::NonFinite` - If the data contains NaN or infinite values
-    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<usize>, Error>
+    pub fn fit_predict<S>(&mut self, data: &ArrayBase<S, Ix2>) -> Result<Array1<isize>, Error>
     where
         S: Data<Elem = f64>,
     {

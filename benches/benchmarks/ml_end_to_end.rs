@@ -19,8 +19,8 @@ use rustyml::machine_learning::decomposition::kernel_pca::{EigenSolver, KernelPC
 use rustyml::machine_learning::decomposition::pca::{PCA, SVDSolver};
 use rustyml::machine_learning::manifold::t_sne::{Init, TSNE, TSNEMethod};
 use rustyml::machine_learning::{
-    KMeans, KNN, KernelType, LDA, LogisticRegression, MeanShift, SVC, Solver, WeightingStrategy,
-    generate_polynomial_features,
+    DiscriminantSolver, KMeans, KNN, KernelType, LDA, LogisticRegression, MeanShift, SVC,
+    WeightingStrategy, generate_polynomial_features,
 };
 use rustyml::math::DistanceCalculationMetric;
 use std::hint::black_box;
@@ -87,7 +87,9 @@ fn bench_lda_fit(c: &mut Criterion) {
         let y: Array1<i32> = Array1::from_iter((0..n_samples).map(|i| (i % n_classes) as i32));
         group.bench_function(label, |b| {
             b.iter(|| {
-                let mut model = LDA::new(n_components).unwrap().with_solver(Solver::SVD);
+                let mut model = LDA::new(n_components)
+                    .unwrap()
+                    .with_solver(DiscriminantSolver::SVD);
                 model.fit(black_box(&x), black_box(&y)).unwrap();
                 black_box(&model);
             })

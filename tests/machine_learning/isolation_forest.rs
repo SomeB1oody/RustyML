@@ -104,9 +104,9 @@ fn test_predict_before_fit_returns_not_fitted() {
 }
 
 #[test]
-fn test_anomaly_score_before_fit_returns_not_fitted() {
+fn test_score_sample_before_fit_returns_not_fitted() {
     let model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
-    let err = model.anomaly_score(&[1.0, 2.0]).unwrap_err();
+    let err = model.score_sample(&[1.0, 2.0]).unwrap_err();
     assert!(
         matches!(err, Error::NotFitted("IsolationForest")),
         "expected NotFitted, got: {err:?}"
@@ -191,16 +191,16 @@ fn test_predict_nan_returns_non_finite() {
     );
 }
 
-// anomaly_score error paths (after fit)
+// score_sample error paths (after fit)
 
 #[test]
-fn test_anomaly_score_wrong_dim_returns_dimension_mismatch() {
+fn test_score_sample_wrong_dim_returns_dimension_mismatch() {
     let mut model = IsolationForest::new(10, 50).unwrap().with_random_state(1);
     let train = array![[1.0, 2.0], [3.0, 4.0]];
     model.fit(&train).unwrap();
 
     // training had 2 features; score with 3
-    let err = model.anomaly_score(&[1.0, 2.0, 3.0]).unwrap_err();
+    let err = model.score_sample(&[1.0, 2.0, 3.0]).unwrap_err();
     assert!(
         matches!(
             err,
@@ -244,7 +244,7 @@ fn test_fit_stores_exactly_n_estimators_trees() {
 // Scores in [0, 1]
 
 #[test]
-fn test_predict_scores_are_in_unit_interval() {
+fn test_scores_are_in_negative_unit_interval() {
     // anomaly scores must lie in [0, 1] by design: 2^(-E/c) with E, c > 0
     let mut model = IsolationForest::new(50, 64).unwrap().with_random_state(7);
     let train = array![
@@ -260,27 +260,27 @@ fn test_predict_scores_are_in_unit_interval() {
     let scores = model.score_samples(&train).unwrap();
     for (i, &s) in scores.iter().enumerate() {
         assert!(
-            (0.0..=1.0).contains(&s),
+            (-1.0..0.0).contains(&s),
             "score[{i}] = {s} is outside [0, 1]"
         );
     }
 }
 
 #[test]
-fn test_anomaly_score_is_in_unit_interval() {
+fn test_score_sample_is_in_negative_unit_interval() {
     let mut model = IsolationForest::new(50, 64).unwrap().with_random_state(7);
     let train = array![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [50.0, 50.0]];
     model.fit(&train).unwrap();
 
-    let s_inlier = model.anomaly_score(&[0.0, 0.0]).unwrap();
-    let s_outlier = model.anomaly_score(&[50.0, 50.0]).unwrap();
+    let s_inlier = model.score_sample(&[0.0, 0.0]).unwrap();
+    let s_outlier = model.score_sample(&[50.0, 50.0]).unwrap();
 
     assert!(
-        (0.0..=1.0).contains(&s_inlier),
+        (-1.0..0.0).contains(&s_inlier),
         "inlier score {s_inlier} not in [0,1]"
     );
     assert!(
-        (0.0..=1.0).contains(&s_outlier),
+        (-1.0..0.0).contains(&s_outlier),
         "outlier score {s_outlier} not in [0,1]"
     );
 }
@@ -314,19 +314,19 @@ fn test_outlier_score_exceeds_all_inlier_scores() {
     let scores = model.score_samples(&train_data).unwrap();
 
     let outlier_score = scores[10];
-    let max_inlier_score = scores
+    let min_inlier_score = scores
         .slice(s![..10])
-        .fold(f64::NEG_INFINITY, |acc, &v| acc.max(v));
+        .fold(f64::INFINITY, |acc, &v| acc.min(v));
 
     assert!(
-        outlier_score > max_inlier_score,
-        "outlier score {outlier_score:.4} should exceed all inlier scores (max inlier: {max_inlier_score:.4})"
+        outlier_score < min_inlier_score,
+        "outlier score {outlier_score:.4} should fall below all inlier scores (min inlier: {min_inlier_score:.4})"
     );
 }
 
 #[test]
-fn test_outlier_anomaly_score_exceeds_inlier_via_single_sample_api() {
-    // same design as above, verified through the per-sample anomaly_score API
+fn test_outlier_score_sample_is_below_inlier_via_single_sample_api() {
+    // same design as above, verified through the per-sample score_sample API
     let mut train_data: Array2<f64> = Array2::zeros((11, 2));
     let inlier_coords: &[(f64, f64)] = &[
         (0.0, 0.0),
@@ -350,15 +350,15 @@ fn test_outlier_anomaly_score_exceeds_inlier_via_single_sample_api() {
     let mut model = IsolationForest::new(100, 64).unwrap().with_random_state(42);
     model.fit(&train_data).unwrap();
 
-    let outlier_score = model.anomaly_score(&[1000.0, 1000.0]).unwrap();
-    let max_inlier_score = inlier_coords
+    let outlier_score = model.score_sample(&[1000.0, 1000.0]).unwrap();
+    let min_inlier_score = inlier_coords
         .iter()
-        .map(|&(x, y)| model.anomaly_score(&[x, y]).unwrap())
-        .fold(f64::NEG_INFINITY, f64::max);
+        .map(|&(x, y)| model.score_sample(&[x, y]).unwrap())
+        .fold(f64::INFINITY, f64::min);
 
     assert!(
-        outlier_score > max_inlier_score,
-        "outlier score {outlier_score:.4} should exceed max inlier score {max_inlier_score:.4}"
+        outlier_score < min_inlier_score,
+        "outlier score {outlier_score:.4} should fall below min inlier score {min_inlier_score:.4}"
     );
 }
 
@@ -450,15 +450,15 @@ fn test_fit_predict_matches_fit_then_predict() {
 
 #[test]
 fn test_fit_and_predict_on_single_sample() {
-    // one training row gives a size-1 leaf with path length 0, so score = 2^0 = 1.0
+    // one training row gives a size-1 leaf with path length 0, so score = -(2^0) = -1.0
     let mut model = IsolationForest::new(5, 10).unwrap().with_random_state(1);
     let data = array![[3.0, 4.0]];
     model.fit(&data).unwrap();
     let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 1);
     assert!(
-        (scores[0] - 1.0).abs() < 1e-12,
-        "single-sample score should be 1.0, got {}",
+        (scores[0] + 1.0).abs() < 1e-12,
+        "single-sample score should be -1.0, got {}",
         scores[0]
     );
 }
@@ -486,7 +486,7 @@ fn test_fit_with_fewer_rows_than_max_samples_succeeds() {
     let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
     for &s in scores.iter() {
-        assert!((0.0..=1.0).contains(&s), "score {s} not in [0,1]");
+        assert!((-1.0..0.0).contains(&s), "score {s} not in [0,1]");
     }
 }
 
@@ -513,14 +513,12 @@ fn test_fit_and_predict_with_single_feature() {
     assert_eq!(model.get_n_features(), 1);
     let scores = model.score_samples(&data).unwrap();
     assert_eq!(scores.len(), 5);
-    // outlier (last point) should outscore the inliers
+    // outlier (last point) should score below every inlier
     let outlier_score = scores[4];
-    let max_inlier = scores
-        .slice(s![..4])
-        .fold(f64::NEG_INFINITY, |a, &v| a.max(v));
+    let min_inlier = scores.slice(s![..4]).fold(f64::INFINITY, |a, &v| a.min(v));
     assert!(
-        outlier_score > max_inlier,
-        "1-D outlier score {outlier_score:.4} should exceed inlier scores (max={max_inlier:.4})"
+        outlier_score < min_inlier,
+        "1-D outlier score {outlier_score:.4} should fall below inlier scores (min={min_inlier:.4})"
     );
 }
 
@@ -528,7 +526,7 @@ fn test_fit_and_predict_with_single_feature() {
 
 #[test]
 fn test_fit_and_predict_high_dimensional() {
-    // 5 features: scores stay in [0,1] and the outlier is detected
+    // 5 features: scores stay in [-1,0) and the outlier is detected
     let mut model = IsolationForest::new(50, 32).unwrap().with_random_state(42);
     let mut data: Array2<f64> = Array2::zeros((7, 5));
     // 6 inliers near origin
@@ -544,15 +542,13 @@ fn test_fit_and_predict_high_dimensional() {
     model.fit(&data).unwrap();
     let scores = model.score_samples(&data).unwrap();
     for &s in scores.iter() {
-        assert!((0.0..=1.0).contains(&s));
+        assert!((-1.0..0.0).contains(&s));
     }
     let outlier_score = scores[6];
-    let max_inlier = scores
-        .slice(s![..6])
-        .fold(f64::NEG_INFINITY, |a, &v| a.max(v));
+    let min_inlier = scores.slice(s![..6]).fold(f64::INFINITY, |a, &v| a.min(v));
     assert!(
-        outlier_score > max_inlier,
-        "high-dim outlier {outlier_score:.4} must exceed inlier max {max_inlier:.4}"
+        outlier_score < min_inlier,
+        "high-dim outlier {outlier_score:.4} must fall below inlier min {min_inlier:.4}"
     );
 }
 
@@ -598,7 +594,7 @@ fn test_load_from_nonexistent_path_returns_io_error() {
 // Closed-form anomaly score on identical points: every tree is one leaf, so the
 // score is 2^(-c(sample_size)/c(max_samples)) with c(n) = 2*H_{n-1} - 2(n-1)/n
 
-/// max_samples == n_rows gives score = 2^(-c(max_samples)/c(max_samples)) = 0.5, exactly
+/// max_samples == n_rows gives score = -2^(-c(max_samples)/c(max_samples)) = -0.5, exactly
 #[test]
 fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_samples() {
     // 4 identical rows; max_samples = 4 == n_rows, so sample_size = min(4,4) = 4
@@ -607,11 +603,11 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
     model.fit(&data).unwrap();
     let scores = model.score_samples(&data).unwrap();
 
-    // leaf size = max_samples = 4, so score = 2^(-c(4)/c(4)) = 0.5 for every row
+    // leaf size = max_samples = 4, so score = -2^(-c(4)/c(4)) = -0.5 for every row
     for (i, &s) in scores.iter().enumerate() {
         assert!(
-            (s - 0.5).abs() < 1e-12,
-            "row {i}: expected exactly 0.5, got {s}"
+            (s + 0.5).abs() < 1e-12,
+            "row {i}: expected exactly -0.5, got {s}"
         );
     }
 }
@@ -619,7 +615,7 @@ fn test_identical_points_score_equals_one_half_when_sample_size_equals_max_sampl
 /// max_samples > n_rows: each tree is built on sample_size = n_rows points, so the score
 /// normalization must use c(sample_size), NOT c(max_samples) (Liu et al. normalise by the
 /// actual sub-sampling size). For identical points the leaf size equals sample_size, hence
-/// score = 2^(-c(n_rows)/c(n_rows)) = 0.5, so identical points are not anomalies
+/// score = -2^(-c(n_rows)/c(n_rows)) = -0.5, so identical points are not anomalies
 #[test]
 fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_samples() {
     // 4 identical rows; max_samples = 8 > 4, so sample_size = min(8,4) = 4 (leaf size = 4)
@@ -628,14 +624,36 @@ fn test_identical_points_score_matches_closed_form_when_sample_size_below_max_sa
     model.fit(&data).unwrap();
     let scores = model.score_samples(&data).unwrap();
 
-    // Path length c(4) is normalised by c(sample_size) = c(4): score = 2^(-c(4)/c(4)) = 0.5,
+    // Path length c(4) is normalised by c(sample_size) = c(4): score = -2^(-c(4)/c(4)) = -0.5,
     // normalising by c(max_samples) = c(8) would wrongly yield ~0.6459, flagging identical
     // points as anomalous
     for (i, &s) in scores.iter().enumerate() {
         assert!(
-            (s - 0.5).abs() < 1e-12,
-            "row {i}: expected 0.5 (normalization uses c(sample_size), not c(max_samples)), got {s}"
+            (s + 0.5).abs() < 1e-12,
+            "row {i}: expected -0.5 (normalization uses c(sample_size), not c(max_samples)), got {s}"
         );
+    }
+}
+
+/// A sample landing exactly on the cutoff is an inlier, as in scikit-learn
+///
+/// Under `Contamination::Auto` an undifferentiated dataset scores exactly `-0.5`, which is exactly
+/// the offset, so every decision value is `0.0`. scikit-learn's rule is `decision < 0 -> -1`, so
+/// these rows are inliers; the `score >= offset` rule this replaced labelled them all outliers
+#[test]
+fn samples_exactly_on_the_cutoff_are_inliers() {
+    let data = array![[2.0, 7.0], [2.0, 7.0], [2.0, 7.0], [2.0, 7.0]];
+    let mut model = IsolationForest::new(20, 4).unwrap().with_random_state(123);
+    model.fit(&data).unwrap();
+
+    let decision = model.decision_function(&data).unwrap();
+    for (i, &d) in decision.iter().enumerate() {
+        assert!(d.abs() < 1e-12, "row {i}: decision should be 0.0, got {d}");
+    }
+
+    let labels = model.predict(&data).unwrap();
+    for (i, &l) in labels.iter().enumerate() {
+        assert_eq!(l, 1, "row {i}: a sample on the cutoff is an inlier");
     }
 }
 
@@ -840,7 +858,7 @@ fn predict_on_single_sample_is_not_forced_to_outlier() {
 
 // Contamination::Auto
 
-/// Auto is the paper's fixed 0.5 cutoff, recorded on the model at fit time
+/// Auto is the paper's fixed -0.5 cutoff, recorded on the model at fit time
 #[test]
 fn contamination_auto_uses_paper_threshold() {
     let x = array![[0.0, 0.0], [0.1, 0.1], [0.2, 0.0], [0.0, 0.2], [10.0, 10.0]];
@@ -851,22 +869,36 @@ fn contamination_auto_uses_paper_threshold() {
     model.fit(&x).unwrap();
     let offset = model.get_offset().expect("offset is set by fit");
     assert!(
-        (offset - 0.5).abs() < 1e-12,
-        "Auto must resolve to the 0.5 cutoff, got {offset}"
+        (offset + 0.5).abs() < 1e-12,
+        "Auto must resolve to the -0.5 cutoff, got {offset}"
     );
 
-    // Labels agree with thresholding the scores at the recorded offset
+    // Labels are exactly the sign of the decision value, and a sample sitting on the cutoff
+    // counts as an inlier
     let scores = model.score_samples(&x).unwrap();
+    let decision = model.decision_function(&x).unwrap();
     let labels = model.predict(&x).unwrap();
-    for (i, (&s, &l)) in scores.iter().zip(labels.iter()).enumerate() {
-        let expected = if s >= offset { -1 } else { 1 };
-        assert_eq!(l, expected, "sample {i}: score {s} vs offset {offset}");
+    for (i, (&s, (&d, &l))) in scores
+        .iter()
+        .zip(decision.iter().zip(labels.iter()))
+        .enumerate()
+    {
+        assert!(
+            (d - (s - offset)).abs() < 1e-12,
+            "sample {i}: decision {d} should be score {s} minus offset {offset}"
+        );
+        let expected = if d < 0.0 { -1 } else { 1 };
+        assert_eq!(l, expected, "sample {i}: decision {d}");
     }
 }
 
-/// A Fraction offset is drawn from the training scores, so it lands on one of them
+/// A Fraction offset is the NumPy-style percentile of the training scores
+///
+/// With `n = 10` and `c = 0.2` the position is `(10 - 1) * 0.2 = 1.8`, a fractional index, so the
+/// cutoff interpolates between the second and third smallest scores rather than landing on one of
+/// them - which is what makes it equal to scikit-learn's `offset_`
 #[test]
-fn contamination_fraction_offset_comes_from_training_scores() {
+fn contamination_fraction_offset_is_the_training_score_percentile() {
     let x = array![
         [0.0, 0.0],
         [0.1, 0.1],
@@ -887,10 +919,19 @@ fn contamination_fraction_offset_comes_from_training_scores() {
     model.fit(&x).unwrap();
 
     let offset = model.get_offset().expect("offset is set by fit");
-    let scores = model.score_samples(&x).unwrap();
+    let mut sorted = model.score_samples(&x).unwrap().to_vec();
+    sorted.sort_unstable_by(f64::total_cmp);
+
+    let expected = sorted[1] + 0.8 * (sorted[2] - sorted[1]);
     assert!(
-        scores.iter().any(|&s| (s - offset).abs() < 1e-12),
-        "the fitted offset {offset} must be one of the training scores"
+        (offset - expected).abs() < 1e-12,
+        "offset {offset} should be the interpolated 20th percentile {expected}"
+    );
+    assert!(
+        offset > sorted[1] && offset < sorted[2],
+        "offset {offset} should sit strictly between {} and {}",
+        sorted[1],
+        sorted[2]
     );
 }
 

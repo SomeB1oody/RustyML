@@ -9,11 +9,33 @@ use ndarray::{Array1, Array2, ArrayBase, ArrayView2, Axis, Data, Ix1, Ix2};
 
 use super::validate_pair;
 
-/// Probability threshold at or above which a value is treated as the positive class
-const POSITIVE_THRESHOLD: f64 = 0.5;
-
 /// Denominator magnitude below which a chance-corrected score is treated as degenerate (perfect)
 const DEGENERATE_DENOM: f64 = 1e-10;
+
+/// Decides which side of a binary problem a label falls on, rejecting anything that is neither
+///
+/// Exact equality is the right test here: `0.0`, `1.0` and `-1.0` are all exactly representable and
+/// every label producer in the crate emits them exactly, so a near-miss is a bug worth surfacing
+/// rather than rounding away. It also rejects `NaN` for free, which the `>= 0.5` threshold this
+/// replaced silently counted as negative
+#[inline]
+fn label_is_positive(value: f64, negative: f64, positive: f64, which: &str) -> bool {
+    if value == positive {
+        true
+    } else if value == negative {
+        false
+    } else {
+        fail_label(value, negative, positive, which)
+    }
+}
+
+/// Cold, out-of-line panic path for [`label_is_positive`], keeping its inlined hot path down to the
+/// two comparisons
+#[cold]
+#[inline(never)]
+fn fail_label(value: f64, negative: f64, positive: f64, which: &str) -> ! {
+    panic!("invalid input: {which} must hold only {negative} or {positive}, found {value}");
+}
 
 /// Averaging strategy for multi-class precision, recall, and F1
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +60,9 @@ pub enum Average {
 /// use rustyml::metrics::ConfusionMatrix;
 ///
 /// let y_true = arr1(&[1.0, 0.0, 1.0, 0.0, 1.0]);
-/// let y_pred = arr1(&[0.9, 0.2, 0.8, 0.1, 0.7]);
+/// // Hard labels only. Threshold your scores first - the constructor will not do it for you
+/// let probabilities = arr1(&[0.9, 0.2, 0.8, 0.1, 0.7]);
+/// let y_pred = probabilities.mapv(|p| if p >= 0.5 { 1.0 } else { 0.0 });
 /// let cm = ConfusionMatrix::new(&y_true, &y_pred);
 ///
 /// println!("Accuracy: {:.2}", cm.accuracy());
@@ -59,16 +83,17 @@ pub struct ConfusionMatrix {
 }
 
 impl ConfusionMatrix {
-    /// Builds a confusion matrix from ground-truth labels and predictions
+    /// Builds a confusion matrix from hard binary labels
     ///
-    /// Both arrays are binarized at a `0.5` threshold (`>= 0.5` is positive), so they may be hard
-    /// `0.0`/`1.0` labels or probabilities. Thresholding `y_true` as well is harmless for hard
-    /// labels and lets probabilistic ground truth be used directly
+    /// Both arrays must hold only `0.0` and `1.0`. Nothing is binarized: a probability, an
+    /// unbounded decision-function score, or a `-1`/`+1` label is rejected rather than silently
+    /// coerced. scikit-learn's `confusion_matrix` likewise requires hard labels. For a different
+    /// label pair, use [`new_with_labels`](Self::new_with_labels)
     ///
     /// # Parameters
     ///
-    /// - `y_true` - Ground-truth labels or probabilities (`>= 0.5` treated as positive)
-    /// - `y_pred` - Predicted labels or probabilities (`>= 0.5` treated as positive)
+    /// - `y_true` - Ground-truth labels, each exactly `0.0` or `1.0`
+    /// - `y_pred` - Predicted labels, each exactly `0.0` or `1.0`
     ///
     /// # Returns
     ///
@@ -78,11 +103,65 @@ impl ConfusionMatrix {
     ///
     /// - Panics if `y_true` and `y_pred` have different lengths
     /// - Panics if the inputs are empty
-    pub fn new<S>(y_true: &ArrayBase<S, Ix1>, y_pred: &ArrayBase<S, Ix1>) -> Self
+    /// - Panics if either array holds a value other than `0.0` or `1.0`
+    pub fn new<S1, S2>(y_true: &ArrayBase<S1, Ix1>, y_pred: &ArrayBase<S2, Ix1>) -> Self
     where
-        S: Data<Elem = f64>,
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
+    {
+        Self::new_with_labels(y_true, y_pred, 0.0, 1.0)
+    }
+
+    /// Builds a confusion matrix from an explicit pair of label values
+    ///
+    /// The binary counterpart of scikit-learn's
+    /// `confusion_matrix(y_true, y_pred, labels=[negative_label, positive_label])`. Reach for it
+    /// when the labels are not `0.0`/`1.0` - the `-1.0`/`+1.0` a margin classifier emits, say
+    ///
+    /// # Parameters
+    ///
+    /// - `y_true` - Ground-truth labels, each exactly `negative_label` or `positive_label`
+    /// - `y_pred` - Predicted labels, each exactly `negative_label` or `positive_label`
+    /// - `negative_label` - The value denoting the negative class
+    /// - `positive_label` - The value denoting the positive class
+    ///
+    /// # Returns
+    ///
+    /// - `Self` - Confusion matrix with populated counts
+    ///
+    /// # Panics
+    ///
+    /// - Panics if `y_true` and `y_pred` have different lengths
+    /// - Panics if the inputs are empty
+    /// - Panics if the two label values are equal
+    /// - Panics if either array holds a value other than the two given labels
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ndarray::array;
+    /// use rustyml::metrics::ConfusionMatrix;
+    ///
+    /// // A margin classifier's -1 / +1 convention
+    /// let y_true = array![1.0, -1.0, 1.0, -1.0];
+    /// let y_pred = array![1.0, 1.0, 1.0, -1.0];
+    /// let cm = ConfusionMatrix::new_with_labels(&y_true, &y_pred, -1.0, 1.0);
+    /// assert_eq!(cm.get_counts(), (2, 1, 1, 0));
+    /// ```
+    pub fn new_with_labels<S1, S2>(
+        y_true: &ArrayBase<S1, Ix1>,
+        y_pred: &ArrayBase<S2, Ix1>,
+        negative_label: f64,
+        positive_label: f64,
+    ) -> Self
+    where
+        S1: Data<Elem = f64>,
+        S2: Data<Elem = f64>,
     {
         validate_pair(y_true.len(), y_pred.len(), "y_true and y_pred");
+        if negative_label == positive_label {
+            panic!("invalid input: negative_label and positive_label must differ");
+        }
 
         let mut tp = 0;
         let mut fp = 0;
@@ -90,8 +169,8 @@ impl ConfusionMatrix {
         let mut fn_ = 0;
 
         for (&t, &p) in y_true.iter().zip(y_pred.iter()) {
-            let true_positive = t >= POSITIVE_THRESHOLD;
-            let pred_positive = p >= POSITIVE_THRESHOLD;
+            let true_positive = label_is_positive(t, negative_label, positive_label, "y_true");
+            let pred_positive = label_is_positive(p, negative_label, positive_label, "y_pred");
             match (true_positive, pred_positive) {
                 (true, true) => tp += 1,
                 (false, true) => fp += 1,
@@ -1021,8 +1100,12 @@ where
 ///
 /// Returns `(fpr, tpr, thresholds)`: the false-positive rate and true-positive rate at each
 /// distinct score threshold (in decreasing order), preceded by the `(0, 0)` origin. `thresholds`
-/// holds the score at each point; its leading entry is set above the maximum score so the origin
-/// classifies nothing as positive
+/// holds the score at each point; its leading entry is [`f64::INFINITY`], the only threshold that
+/// classifies nothing as positive, as in scikit-learn
+///
+/// Unlike scikit-learn's default (`drop_intermediate = True`), the full sweep is always returned:
+/// collinear interior points are kept, so the point count can be larger than scikit-learn's while
+/// the curve itself, and [`roc_auc`], are identical
 ///
 /// # Parameters
 ///
@@ -1071,10 +1154,12 @@ where
     let mut tpr = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len() + 1);
 
-    // Origin: no sample classified positive, threshold above the maximum score
+    // Origin: no sample classified positive. scikit-learn uses an infinite threshold here rather
+    // than a finite one just above the maximum, which also keeps the sentinel distinguishable from
+    // the top real threshold for large scores (`1e17 + 1.0 == 1e17`)
     fpr.push(0.0);
     tpr.push(0.0);
-    thresholds.push(points[0].0 + 1.0);
+    thresholds.push(f64::INFINITY);
 
     for &(score, tp, fp) in &points {
         tpr.push(tp as f64 / total_pos as f64);
@@ -1091,9 +1176,13 @@ where
 
 /// Computes the precision-recall curve
 ///
-/// Returns `(precision, recall, thresholds)` at each distinct score threshold (in decreasing
-/// order), with a final `(precision = 1, recall = 0)` point appended that has no threshold. Hence
-/// `precision` and `recall` are one element longer than `thresholds`
+/// Returns `(precision, recall, thresholds)` at each distinct score threshold in **increasing**
+/// order - so recall decreases along the arrays - with a final `(precision = 1, recall = 0)` point
+/// appended that has no threshold. Hence `precision` and `recall` are one element longer than
+/// `thresholds`. This is scikit-learn's `precision_recall_curve` layout element for element
+///
+/// Note that the ordering is the opposite of [`roc_curve`], which runs from the highest threshold
+/// down; scikit-learn makes the same distinction between the two
 ///
 /// # Parameters
 ///
@@ -1143,12 +1232,15 @@ where
     let mut recall = Vec::with_capacity(points.len() + 1);
     let mut thresholds = Vec::with_capacity(points.len());
 
-    for &(score, tp, fp) in &points {
+    // `points` is ranked by descending score; walking it backwards yields ascending thresholds and
+    // therefore descending recall, which is the order scikit-learn returns
+    for &(score, tp, fp) in points.iter().rev() {
         precision.push(tp as f64 / (tp + fp) as f64);
         recall.push(tp as f64 / total_pos as f64);
         thresholds.push(score);
     }
-    // Closing point of the curve (recall 0, precision 1) has no associated threshold
+    // Closing point of the curve (recall 0, precision 1) has no associated threshold, and belongs
+    // at the low-recall end - which, after the reversal above, is the end of the arrays
     precision.push(1.0);
     recall.push(0.0);
 

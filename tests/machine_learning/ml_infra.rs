@@ -13,6 +13,7 @@ use rustyml::machine_learning::IsolationForest;
 use rustyml::machine_learning::KMeans;
 use rustyml::machine_learning::KernelType;
 use rustyml::machine_learning::LinearRegression;
+use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 use rustyml::traits::{Fit, Predict};
 
 use rustyml::machine_learning::DBSCAN;
@@ -61,7 +62,13 @@ fn generic_fit_predict_with_linear_regression() {
     let y_train = Array1::from_vec(vec![3.0, 5.0, 7.0, 9.0, 11.0]);
     let x_test = Array2::from_shape_vec((3, 1), vec![6.0, 7.0, 8.0]).unwrap();
 
-    let mut model = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     let n = train_and_predict_count(&mut model, &x_train, &y_train, &x_test);
     assert_eq!(n, 3, "expected 3 predictions for 3 test points");
 }
@@ -92,12 +99,24 @@ fn trait_predictions_match_inherent_method_predictions() {
     let x_test = Array2::from_shape_vec((1, 1), vec![6.0]).unwrap();
 
     // Via trait
-    let mut model_trait = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_trait = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     Fit::fit(&mut model_trait, (&x_train, &y_train)).unwrap();
     let preds_trait = Predict::predict(&model_trait, &x_test).unwrap();
 
     // Via inherent method
-    let mut model_direct = LinearRegression::new(true, 0.01, 10_000, 1e-10).unwrap();
+    let mut model_direct = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 10_000,
+            tol: 1e-10,
+        })
+        .unwrap();
     model_direct.fit(&x_train, &y_train).unwrap();
     let preds_direct = model_direct.predict(&x_test).unwrap();
 
@@ -154,7 +173,13 @@ fn kmeans_save_load_preserves_hyperparameters() {
 /// LinearRegression (supervised): predict before fit returns NotFitted
 #[test]
 fn linear_regression_predict_before_fit_is_not_fitted() {
-    let model = LinearRegression::new(true, 0.01, 100, 1e-6).unwrap();
+    let model = LinearRegression::new(true)
+        .with_solver(LeastSquaresSolver::GradientDescent {
+            learning_rate: 0.01,
+            max_iter: 100,
+            tol: 1e-6,
+        })
+        .unwrap();
     let x = array![[1.0, 2.0]];
     let result = model.predict(&x);
     assert!(
@@ -211,12 +236,12 @@ fn generic_fit_predict_isolation_forest_outputs_i32_labels() {
         assert!(l == -1 || l == 1, "label[{i}] = {l} not in {{-1, +1}}");
     }
 
-    // Anomaly scores are 2^(-E/c) with E,c > 0, hence in (0, 1]
+    // Anomaly scores are -(2^(-E/c)) with E,c > 0, hence in [-1, 0)
     let scores = forest
         .score_samples(&data)
         .expect("score_samples should succeed");
     for (i, &s) in scores.iter().enumerate() {
-        assert!((0.0..=1.0).contains(&s), "score[{i}] = {s} not in [0,1]");
+        assert!((-1.0..0.0).contains(&s), "score[{i}] = {s} not in [-1,0)");
     }
 }
 
@@ -369,7 +394,7 @@ fn generic_fit_predict_mean_shift_outputs_usize_labels() {
         .with_bin_seeding(true)
         .with_cluster_all(true);
     Fit::fit(&mut ms, &data).expect("fit via Fit trait should succeed");
-    let labels: Array1<usize> =
+    let labels: Array1<isize> =
         Predict::predict(&ms, &data).expect("predict via Predict trait should succeed");
 
     assert_eq!(labels.len(), 6, "one label per sample");

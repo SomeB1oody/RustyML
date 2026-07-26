@@ -44,7 +44,7 @@ fn three_blob_data() -> Array2<f64> {
 
 /// Verify that all points within each blob share one label and that blobs get
 /// distinct labels
-fn assert_blob_structure(labels: &Array1<usize>, blob_size: usize) {
+fn assert_blob_structure(labels: &Array1<isize>, blob_size: usize) {
     let n_blobs = labels.len() / blob_size;
     assert_eq!(
         labels.len(),
@@ -53,7 +53,7 @@ fn assert_blob_structure(labels: &Array1<usize>, blob_size: usize) {
     );
 
     // Representative label per blob (label of its first point)
-    let blob_labels: Vec<usize> = (0..n_blobs).map(|b| labels[b * blob_size]).collect();
+    let blob_labels: Vec<isize> = (0..n_blobs).map(|b| labels[b * blob_size]).collect();
 
     // All points within each blob must share that blob's label
     for b in 0..n_blobs {
@@ -427,7 +427,10 @@ fn k_equals_n_samples_boundary() {
     let labels = km_n.get_labels().unwrap();
     assert_eq!(labels.len(), n);
     for &l in labels.iter() {
-        assert!(l < n, "label {l} out of range [0, {n})");
+        assert!(
+            l >= 0 && (l as usize) < n,
+            "label {l} out of range [0, {n})"
+        );
     }
 
     // Inertia must be non-negative
@@ -660,6 +663,7 @@ fn fit_parallel_accumulate_matches_serial_means_exactly() {
     let mut sums = Array2::<f64>::zeros((k, d));
     let mut counts = vec![0usize; k];
     for (i, &lab) in labels.iter().enumerate() {
+        let lab = lab as usize;
         counts[lab] += 1;
         for j in 0..d {
             sums[(lab, j)] += data[(i, j)];
@@ -713,7 +717,98 @@ fn converged_centroids_equal_their_cluster_means() {
         assert!(count > 0, "cluster {k} is empty");
         for j in 0..n_features {
             let mean_j = sum[j] / count as f64;
-            assert_abs_diff_eq!(centroids[[k, j]], mean_j, epsilon = 1e-3);
+            assert_abs_diff_eq!(centroids[[k as usize, j]], mean_j, epsilon = 1e-3);
         }
     }
+}
+
+// n_init and the final assignment pass
+
+/// `n_init` defaults to 10 restarts and is settable
+#[test]
+fn test_n_init_defaults_to_ten() {
+    let km = KMeans::new(3, 100, 1e-4).unwrap();
+    assert_eq!(km.get_n_init(), 10);
+
+    let km = km.with_n_init(1).unwrap();
+    assert_eq!(km.get_n_init(), 1);
+
+    assert!(
+        KMeans::new(3, 100, 1e-4).unwrap().with_n_init(0).is_err(),
+        "n_init = 0 must be rejected"
+    );
+}
+
+/// Restarts never end up worse than a single run, and are reproducible under a seed
+#[test]
+fn test_n_init_restarts_never_worsen_inertia() {
+    let data = three_blob_data();
+
+    let mut single = KMeans::new(3, 300, 1e-6)
+        .unwrap()
+        .with_random_state(7)
+        .with_n_init(1)
+        .unwrap();
+    single.fit(&data).unwrap();
+
+    let mut many = KMeans::new(3, 300, 1e-6)
+        .unwrap()
+        .with_random_state(7)
+        .with_n_init(10)
+        .unwrap();
+    many.fit(&data).unwrap();
+
+    assert!(
+        many.get_inertia().unwrap() <= single.get_inertia().unwrap() + 1e-12,
+        "10 restarts ({}) must not be worse than 1 ({})",
+        many.get_inertia().unwrap(),
+        single.get_inertia().unwrap()
+    );
+
+    // Same seed, same result
+    let mut repeat = KMeans::new(3, 300, 1e-6)
+        .unwrap()
+        .with_random_state(7)
+        .with_n_init(10)
+        .unwrap();
+    repeat.fit(&data).unwrap();
+    assert_eq!(repeat.get_labels().unwrap(), many.get_labels().unwrap());
+}
+
+/// Stored labels always describe the stored centroids, even when the fit hits `max_iter`
+///
+/// The Lloyd loop labels against the current centroids and only then installs the updated ones, so
+/// on the `max_iter` exit path the recorded labels described the previous iteration and
+/// `predict(x) != get_labels()`. scikit-learn re-runs a final E-step for the same reason
+#[test]
+fn test_labels_agree_with_predict_when_max_iter_is_hit() {
+    let data = three_blob_data();
+
+    // One iteration is nowhere near convergence, so this always exits through max_iter
+    let mut km = KMeans::new(3, 1, 1e-12)
+        .unwrap()
+        .with_random_state(3)
+        .with_n_init(1)
+        .unwrap();
+    km.fit(&data).unwrap();
+
+    let stored = km.get_labels().unwrap().clone();
+    let predicted = km.predict(&data).unwrap();
+    assert_eq!(
+        stored, predicted,
+        "stored labels must describe the stored centroids"
+    );
+
+    // The inertia must describe those same centroids too
+    let centroids = km.get_centroids().unwrap();
+    let recomputed: f64 = predicted
+        .iter()
+        .enumerate()
+        .map(|(i, &label)| {
+            (0..data.ncols())
+                .map(|j| (data[[i, j]] - centroids[[label as usize, j]]).powi(2))
+                .sum::<f64>()
+        })
+        .sum();
+    assert_abs_diff_eq!(km.get_inertia().unwrap(), recomputed, epsilon = 1e-9);
 }

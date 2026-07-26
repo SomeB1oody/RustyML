@@ -288,17 +288,14 @@ fn test_cluster_all_false_outlier_label_is_n_clusters() {
         .with_cluster_all(false);
     ms.fit(&data).unwrap();
 
-    let centers = ms.get_cluster_centers().unwrap();
-    let n_clusters = centers.nrows(); // documented outlier sentinel
-
     // (10,10) is ~14 units from both blob centers, well beyond the bandwidth of 2.0
     let x_far = Array2::from_shape_vec((1, 2), vec![10.0, 10.0]).unwrap();
     let preds = ms.predict(&x_far).unwrap();
 
     assert_eq!(
-        preds[0], n_clusters,
-        "outlier point should receive label n_clusters={}, got {}",
-        n_clusters, preds[0]
+        preds[0], -1,
+        "an unassigned point should receive scikit-learn's noise label -1, got {}",
+        preds[0]
     );
 }
 
@@ -317,18 +314,17 @@ fn test_cluster_all_true_never_produces_outlier_label() {
     ms.fit(&data).unwrap();
 
     let centers = ms.get_cluster_centers().unwrap();
-    let n_clusters = centers.nrows();
+    let n_clusters = centers.nrows() as isize;
 
     // Even a far-away point must be assigned a real cluster when cluster_all=true
     let x_far = Array2::from_shape_vec((1, 2), vec![10.0, 10.0]).unwrap();
     let preds = ms.predict(&x_far).unwrap();
 
     assert_ne!(
-        preds[0], n_clusters,
-        "cluster_all=true should never produce outlier label {}, got {}",
-        n_clusters, preds[0]
+        preds[0], -1,
+        "cluster_all=true should never produce the noise label -1"
     );
-    assert!(preds[0] < n_clusters);
+    assert!(preds[0] >= 0 && preds[0] < n_clusters);
 }
 
 /// fit labels obey the same invariant: no label equals n_clusters when cluster_all=true
@@ -351,7 +347,7 @@ fn test_fit_labels_cluster_all_true_all_assigned() {
 
     for &l in labels.iter() {
         assert!(
-            l < n_clusters,
+            l < n_clusters as isize,
             "cluster_all=true: label {} must be < n_clusters={}",
             l,
             n_clusters
@@ -509,19 +505,40 @@ fn test_estimate_bandwidth_invalid_quantile_is_invalid() {
     }
 }
 
-/// Two-point dataset has a single pair, so estimate_bandwidth returns that pair's
-/// distance (5.0) for any quantile
+/// A neighbourhood of one holds only the query point, so the bandwidth is 0.0
+///
+/// `k = floor(n * quantile)` is 0 for two points at any quantile below 1.0, and clamps to 1. The
+/// single "neighbour" is then the query point itself at distance zero. scikit-learn returns 0.0
+/// here as well and leaves it to `MeanShift` to reject the bandwidth
 #[test]
-fn test_estimate_bandwidth_two_point_known_distance() {
-    // Distance between (0,0) and (3,4) = sqrt(9+16) = sqrt(25) = 5.0 (exact)
+fn test_estimate_bandwidth_degenerate_neighbourhood_is_zero() {
     let x = Array2::from_shape_vec((2, 2), vec![0.0_f64, 0.0, 3.0, 4.0]).unwrap();
 
-    // Any quantile in (0,1) returns 5.0 because there is only one pair
-    let bw = estimate_bandwidth(&x, Some(0.3), None, Some(42)).unwrap();
-    assert_abs_diff_eq!(bw, 5.0, epsilon = 1e-10);
+    for quantile in [0.3, 0.9] {
+        let bw = estimate_bandwidth(&x, Some(quantile), None, Some(42)).unwrap();
+        assert_abs_diff_eq!(bw, 0.0, epsilon = 1e-15);
+    }
+}
 
-    let bw_high = estimate_bandwidth(&x, Some(0.9), None, Some(42)).unwrap();
-    assert_abs_diff_eq!(bw_high, 5.0, epsilon = 1e-10);
+/// Matches `sklearn.cluster.estimate_bandwidth` numerically
+///
+/// Reference from scikit-learn 1.9.0: `estimate_bandwidth(X, quantile=0.3)` on this 10-point set
+/// is `1.1228546930655043`. The value is the mean distance to each point's `(k - 1)`-th nearest
+/// neighbour with `k = floor(n * quantile)`, because scikit-learn's neighbour query counts the
+/// query point itself
+#[test]
+fn test_estimate_bandwidth_matches_scikit_learn() {
+    let x = Array2::from_shape_vec(
+        (10, 2),
+        vec![
+            1.0, 2.0, 1.1, 2.2, 0.9, 1.9, 1.0, 2.1, 10.0, 10.0, 10.2, 9.9, 10.1, 10.0, 9.9, 9.8,
+            5.0, 5.0, 5.1, 4.9,
+        ],
+    )
+    .unwrap();
+
+    let bw = estimate_bandwidth(&x, Some(0.3), None, None).unwrap();
+    assert_abs_diff_eq!(bw, 1.122_854_693_065_504_3, epsilon = 1e-12);
 }
 
 /// estimate_bandwidth returns a positive value for typical data
@@ -545,10 +562,12 @@ fn test_estimate_bandwidth_deterministic_with_seed() {
 #[test]
 fn test_estimate_bandwidth_n_samples_larger_than_rows() {
     let x = Array2::from_shape_vec((3, 2), vec![0.0, 0.0, 1.0, 0.0, 0.5, 0.866]).unwrap();
-    // Requesting 1000 samples when only 3 exist uses all 3, not a panic
-    let result = estimate_bandwidth(&x, Some(0.5), Some(1000), Some(42));
+    // Requesting 1000 samples when only 3 exist uses all 3, not a panic. Quantile 0.7 gives
+    // k = 2, the smallest neighbourhood that reaches past the query point itself; scikit-learn
+    // returns 0.9999779997579946 here, the mean nearest-neighbour distance of the triangle
+    let result = estimate_bandwidth(&x, Some(0.7), Some(1000), Some(42));
     assert!(result.is_ok());
-    assert!(result.unwrap() > 0.0);
+    assert_abs_diff_eq!(result.unwrap(), 0.999_977_999_757_994_6, epsilon = 1e-12);
 }
 
 // fit on minimal (single-point) dataset
@@ -820,6 +839,41 @@ fn test_fit_parallel_branch_three_blobs_1200() {
                 "row {i} (blob {blk}) should share label {lab}, got {}",
                 labels[i]
             );
+        }
+    }
+}
+
+// scikit-learn parity
+
+/// Reproduces `sklearn.cluster.MeanShift(bandwidth=2.0)` element for element
+///
+/// Reference from scikit-learn 1.9.0 on this 10-point set: `cluster_centers_` is
+/// `[[10.05, 9.925], [1.0, 2.05], [5.05, 4.95]]` and `labels_` is `[1,1,1,1,0,0,0,0,2,2]`.
+/// Three things have to line up for that: the flat kernel (a Gaussian one pulls the modes towards
+/// the global centre of mass), the intensity-ordered greedy merge (which fixes both the centers
+/// and their numbering), and the `(intensity, coordinates)` tiebreak between equally dense modes
+#[test]
+fn test_matches_scikit_learn_reference_clustering() {
+    let x = Array2::from_shape_vec(
+        (10, 2),
+        vec![
+            1.0, 2.0, 1.1, 2.2, 0.9, 1.9, 1.0, 2.1, 10.0, 10.0, 10.2, 9.9, 10.1, 10.0, 9.9, 9.8,
+            5.0, 5.0, 5.1, 4.9,
+        ],
+    )
+    .unwrap();
+
+    let mut ms = MeanShift::new(2.0).unwrap();
+    let labels = ms.fit_predict(&x).unwrap();
+
+    assert_eq!(labels.to_vec(), vec![1, 1, 1, 1, 0, 0, 0, 0, 2, 2]);
+
+    let centers = ms.get_cluster_centers().unwrap();
+    let expected = [[10.05, 9.925], [1.0, 2.05], [5.05, 4.95]];
+    assert_eq!(centers.nrows(), 3);
+    for (i, row) in expected.iter().enumerate() {
+        for (j, &want) in row.iter().enumerate() {
+            assert_abs_diff_eq!(centers[[i, j]], want, epsilon = 1e-12);
         }
     }
 }

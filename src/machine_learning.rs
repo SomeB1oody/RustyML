@@ -52,10 +52,10 @@
 //! # Examples
 //!
 //! ```rust
-//! use rustyml::machine_learning::LinearRegression;
+//! use rustyml::machine_learning::{LeastSquaresSolver, LinearRegression};
 //! use ndarray::array;
 //!
-//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+//! let mut model = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 //! let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 //! let y = array![6.0, 9.0, 12.0];
 //! model.fit(&x, &y).unwrap();
@@ -102,10 +102,12 @@ mod validation;
 
 pub use clustering::{DBSCAN, KMeans, MeanShift, estimate_bandwidth};
 pub use decomposition::{EigenSolver, KernelPCA, PCA, SVDSolver};
-pub use discriminant_analysis::{LDA, Shrinkage, Solver};
+pub use discriminant_analysis::{DiscriminantSolver, LDA, Shrinkage};
 pub use ensemble::{Contamination, IsolationForest, IsolationTree};
 pub use error::TreeError;
-pub use linear_model::{LinearRegression, LogisticRegression, generate_polynomial_features};
+pub use linear_model::{
+    LeastSquaresSolver, LinearRegression, LogisticRegression, generate_polynomial_features,
+};
 pub use manifold::{Init, TSNE, TSNEMethod};
 pub use neighbors::{KNN, WeightingStrategy};
 pub use svm::{LinearSVC, Loss, SVC};

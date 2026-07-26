@@ -10,17 +10,26 @@
 //! to model training and evaluation. Implementations feature error handling, parallel processing,
 //! and input validation
 //!
+//! Estimator defaults, score orientations, and metric output conventions follow scikit-learn and
+//! are checked numerically against it, so a ported pipeline produces the same numbers. Where the
+//! crate deliberately departs - `metrics` panicking instead of returning `Result`, `roc_curve`
+//! always returning the full threshold sweep, `MeanShift`'s opt-in Gaussian kernel - the item's own
+//! documentation says so
+//!
 //! ## Architecture
 //!
 //! The library is organized into 5 main modules, each gated by feature flags:
 //!
 //! ### [`machine_learning`]
 //! Classical machine learning algorithms for supervised and unsupervised learning:
-//! - **Regression**: Linear Regression with L1/L2 regularization
+//! - **Regression**: Linear Regression with L1/L2 regularization, solved in closed form by default
+//!   or by gradient descent
 //! - **Classification**: Logistic Regression, KNN, Decision Tree, SVC, Linear SVC, LDA
-//! - **Clustering**: KMeans, DBSCAN, MeanShift
+//! - **Clustering**: KMeans, DBSCAN, MeanShift - all three label samples as `Array1<isize>`, with
+//!   `-1` for noise or unassigned
 //! - **Dimensionality Reduction**: PCA, Kernel PCA, t-SNE
-//! - **Anomaly Detection**: Isolation Forest
+//! - **Anomaly Detection**: Isolation Forest, scoring in `[-1, 0)` where lower is more anomalous
+//!   and predicting `-1` (outlier) / `+1` (inlier)
 //!
 //! ### [`neural_network`]
 //! Complete neural network framework with flexible architecture design:
@@ -37,10 +46,13 @@
 //! - **Dataset Splitting**: train/test split (optionally stratified)
 //!
 //! ### [`metrics`]
-//! Evaluation metrics for model performance assessment:
+//! Evaluation metrics for model performance assessment. Unlike the rest of the crate, these
+//! functions panic on a precondition violation rather than returning a `Result`, which keeps this
+//! leaf module dependency-light:
 //! - **Regression**: MSE, RMSE, MAE, R^2 score
 //! - **Classification**: Accuracy, Confusion Matrix, AUC-ROC, F1-score
-//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score
+//! - **Clustering**: Adjusted Rand Index, Normalized/Adjusted Mutual Information, Silhouette Score -
+//!   every one of them takes `isize` labels, the type the clustering estimators return
 //!
 //! ### [`math`]
 //! Low-level numeric primitives shared across modules:
@@ -64,10 +76,11 @@
 //! In your Rust code, write:
 //! ```ignored
 //! use rustyml::machine_learning::LinearRegression;
+//! use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 //! use ndarray::{Array1, Array2};
 //!
 //! // Create a linear regression model
-//! let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+//! let mut model = LinearRegression::new(true).with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 //!
 //! // Prepare training data
 //! let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];

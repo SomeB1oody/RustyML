@@ -1,9 +1,9 @@
 //! Discriminant analysis
 //!
 //! Groups [`LDA`] for classification and supervised dimensionality reduction,
-//! with its [`Solver`] and [`Shrinkage`] configuration enums
+//! with its [`DiscriminantSolver`] and [`Shrinkage`] configuration enums
 
 /// Linear Discriminant Analysis for classification and supervised dimensionality reduction
 pub mod lda;
 
-pub use lda::{LDA, Shrinkage, Solver};
+pub use lda::{DiscriminantSolver, LDA, Shrinkage};

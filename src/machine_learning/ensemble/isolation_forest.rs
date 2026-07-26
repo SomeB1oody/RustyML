@@ -28,12 +28,13 @@ const EULER_GAMMA: f64 = 0.57721566490153286060651209008240243104215933593992;
 /// samples you later predict on happen to be batched
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Contamination {
-    /// `'auto'`: the `0.5` cutoff from the original Isolation Forest paper — a sample is
-    /// an outlier when its normalized score exceeds the expected path length of the forest
+    /// `'auto'`: the `-0.5` cutoff from the original Isolation Forest paper — a sample is an
+    /// outlier when it isolates faster than the forest's expected path length
     Auto,
     /// The expected proportion of outliers in the training data, in `(0.0, 0.5]`
     ///
-    /// The cutoff becomes the `ceil(fraction * n_train)`-th highest training score
+    /// The cutoff becomes the `100 * fraction`-th percentile of the training scores, using
+    /// NumPy's default linear interpolation so it equals scikit-learn's `offset_`
     Fraction(f64),
 }
 
@@ -73,9 +74,11 @@ const DEFAULT_PARALLEL_THRESHOLD_TREES: usize = 10;
 /// (`2 * H(psi - 1) - 2(psi - 1)/psi` at the default subsample size 256)
 const ISOLATION_TREE_AVG_PATH: usize = 10;
 
-/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al., where a
-/// normalized score above `0.5` means the sample isolates faster than the forest average
-const AUTO_CONTAMINATION_OFFSET: f64 = 0.5;
+/// Score cutoff for [`Contamination::Auto`]: the threshold from Liu et al., where a raw
+/// normalized score above `0.5` means the sample isolates faster than the forest average.
+/// Negated to match the sign convention of [`IsolationForest::score_samples`], and identical
+/// to scikit-learn's `offset_` under `contamination='auto'`
+const AUTO_CONTAMINATION_OFFSET: f64 = -0.5;
 
 /// A node in an isolation tree
 ///
@@ -120,10 +123,13 @@ pub enum IsolationTree {
 /// let data = array![[1.0, 2.0], [2.0, 3.0], [10.0, 15.0]];
 /// model.fit(&data).unwrap();
 ///
-/// // Raw anomaly scores in [0, 1], higher meaning more anomalous
+/// // Anomaly scores in [-1, 0), *lower* meaning more anomalous, as in scikit-learn
 /// let scores = model.score_samples(&data).unwrap();
 ///
-/// // Hard labels: -1 for outliers, +1 for inliers, thresholded at the fitted offset
+/// // The same scores shifted by the fitted offset, so negative marks an outlier
+/// let decision = model.decision_function(&data).unwrap();
+///
+/// // Hard labels: -1 for outliers, +1 for inliers - exactly the sign of `decision_function`
 /// let labels = model.predict(&data).unwrap();
 /// ```
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -390,16 +396,21 @@ impl IsolationForest {
         self.offset = Some(match self.contamination {
             Contamination::Auto => AUTO_CONTAMINATION_OFFSET,
             Contamination::Fraction(c) => {
+                // scikit-learn resolves the cutoff as `percentile(score_samples(X), 100 * c)`
+                // with NumPy's default linear interpolation, so `offset` matches its `offset_`
+                // numerically rather than merely flagging the same count
                 let scores = self.score_samples(x)?;
-                let n = scores.len();
-                // Flag the ceil(c * n) highest-scoring training samples (at least 1)
-                let n_outliers = (((n as f64) * c).ceil() as usize).clamp(1, n);
                 let mut sorted = scores.to_vec();
-                let kth = n - n_outliers;
-                sorted.select_nth_unstable_by(kth, |a, b| {
-                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                });
-                sorted[kth]
+                sorted.sort_unstable_by(f64::total_cmp);
+
+                let position = (sorted.len() - 1) as f64 * c;
+                let lower = position.floor() as usize;
+                let fraction = position - lower as f64;
+                if fraction == 0.0 || lower + 1 >= sorted.len() {
+                    sorted[lower]
+                } else {
+                    sorted[lower] + fraction * (sorted[lower + 1] - sorted[lower])
+                }
             }
         });
 
@@ -503,8 +514,9 @@ impl IsolationForest {
 
     /// Computes the anomaly score for a single sample
     ///
-    /// The anomaly score is normalized to the range \[0, 1\], where values close to 1
-    /// indicate anomalies and values close to 0 indicate normal samples
+    /// The single-sample form of [`score_samples`](Self::score_samples), taking a slice instead of
+    /// a matrix so a streaming caller does not have to build a one-row array. The score lies in
+    /// `[-1, 0)` and *lower* means more anomalous, exactly as the batch form does
     ///
     /// # Parameters
     ///
@@ -512,14 +524,14 @@ impl IsolationForest {
     ///
     /// # Returns
     ///
-    /// - `Result<f64, Error>` - The anomaly score between 0 and 1
+    /// - `Result<f64, Error>` - The anomaly score, in `[-1, 0)`
     ///
     /// # Errors
     ///
     /// Returns `Error` if:
     /// - Model has not been fitted
     /// - Sample feature dimension does not match training data
-    pub fn anomaly_score(&self, sample: &[f64]) -> Result<f64, Error> {
+    pub fn score_sample(&self, sample: &[f64]) -> Result<f64, Error> {
         if self.trees.is_none() {
             return Err(Error::not_fitted("IsolationForest"));
         }
@@ -550,20 +562,24 @@ impl IsolationForest {
             .sum::<f64>()
             / trees.len() as f64;
 
-        // A degenerate sub-sample of size <= 1 makes c(n) = 0
+        // A degenerate sub-sample of size <= 1 makes c(n) = 0, which is maximally anomalous
         if c_n <= 0.0 {
-            return 1.0;
+            return -1.0;
         }
 
-        // Anomaly score: s(x, n) = 2^(-E(h(x)) / c(n))
-        2.0_f64.powf(-avg_path_length / c_n)
+        // Liu et al.'s score is s(x, n) = 2^(-E(h(x)) / c(n)), rising towards 1 as the sample gets
+        // more anomalous. scikit-learn returns its negation so that *lower* means more anomalous,
+        // which is what puts `decision_function` on the usual "negative is the rejected class"
+        // footing; negating here keeps every score in this type on that one orientation
+        -(2.0_f64.powf(-avg_path_length / c_n))
     }
 
-    /// Computes the raw anomaly score for each sample
+    /// Computes the anomaly score for each sample
     ///
-    /// Scores lie in `[0, 1]` and higher means more anomalous. For a hard inlier/outlier
-    /// label, use [`predict`](Self::predict), which thresholds these at the fitted
-    /// [`offset`](Self::get_offset)
+    /// Scores lie in `[-1, 0)` and *lower* means more anomalous - `-(2^(-E[h(x)] / c(n)))`, which
+    /// is scikit-learn's `score_samples` exactly. For the same values shifted by the fitted cutoff
+    /// use [`decision_function`](Self::decision_function), and for a hard inlier/outlier label use
+    /// [`predict`](Self::predict)
     ///
     /// # Parameters
     ///
@@ -618,12 +634,42 @@ impl IsolationForest {
         Ok(Array1::from_vec(scores))
     }
 
+    /// Shifts each sample's score by the fitted cutoff, so that negative means outlier
+    ///
+    /// `score_samples(x) - offset`, matching scikit-learn's `decision_function`. Because the
+    /// [`offset`](Self::get_offset) is model state rather than a quantile of `x`, a given sample
+    /// gets the same decision value whether it is scored alone or inside a larger batch
+    ///
+    /// # Parameters
+    ///
+    /// - `x` - Input data matrix where each row is a sample
+    ///
+    /// # Returns
+    ///
+    /// - `Result<Array1<f64>, Error>` - Per-sample decision values; negative marks an outlier
+    ///
+    /// # Errors
+    ///
+    /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
+    ///   propagated from [`score_samples`](Self::score_samples)
+    pub fn decision_function<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<f64>, Error>
+    where
+        S: Data<Elem = f64>,
+    {
+        // `score_samples` validates the fitted state, so `offset` is Some by the time we read it
+        let scores = self.score_samples(x)?;
+        let offset = self
+            .offset
+            .ok_or_else(|| Error::not_fitted("IsolationForest"))?;
+
+        Ok(scores.mapv(|s| s - offset))
+    }
+
     /// Classifies each sample as an inlier (`+1`) or outlier (`-1`)
     ///
-    /// A sample is an outlier when its [`score_samples`](Self::score_samples) score is at or
-    /// above the [`offset`](Self::get_offset) resolved from the training data at fit time.
-    /// Because the cutoff is model state rather than a quantile of `x`, a given sample gets
-    /// the same label whether you score it alone or inside a larger batch
+    /// Exactly the sign of [`decision_function`](Self::decision_function): a sample is an outlier
+    /// when its decision value is strictly negative. A sample landing exactly on the cutoff is
+    /// therefore an inlier, as in scikit-learn
     ///
     /// # Parameters
     ///
@@ -636,18 +682,14 @@ impl IsolationForest {
     /// # Errors
     ///
     /// - `Error::NotFitted` / `Error::EmptyInput` / `Error::DimensionMismatch` / `Error::NonFinite` -
-    ///   propagated from [`score_samples`](Self::score_samples)
+    ///   propagated from [`decision_function`](Self::decision_function)
     pub fn predict<S>(&self, x: &ArrayBase<S, Ix2>) -> Result<Array1<i32>, Error>
     where
         S: Data<Elem = f64>,
     {
-        // `score_samples` validates the fitted state, so `offset` is Some by the time we read it
-        let scores = self.score_samples(x)?;
-        let offset = self
-            .offset
-            .ok_or_else(|| Error::not_fitted("IsolationForest"))?;
+        let decision = self.decision_function(x)?;
 
-        Ok(scores.mapv(|s| if s >= offset { -1 } else { 1 }))
+        Ok(decision.mapv(|d| if d < 0.0 { -1 } else { 1 }))
     }
 
     /// Trains the model on the dataset and immediately labels it

@@ -286,27 +286,14 @@ impl LogisticRegression {
                 return Err(Error::non_finite("gradient calculation"));
             }
 
-            if let Some(reg_type) = &self.regularization_type {
+            // L1 is deliberately absent here: it is applied after the step by the proximal
+            // operator below, so that penalized coefficients reach exactly 0.0 instead of only
+            // approaching it
+            if let Some(RegularizationType::L2(regularization_strength)) = &self.regularization_type
+            {
                 let start_idx = if self.fit_intercept { 1 } else { 0 };
-
-                match reg_type {
-                    RegularizationType::L1(regularization_strength) => {
-                        for i in start_idx..n_features {
-                            let sign = if weights[i] > 0.0 {
-                                1.0
-                            } else if weights[i] < 0.0 {
-                                -1.0
-                            } else {
-                                0.0
-                            };
-                            gradients[i] += regularization_strength * sign;
-                        }
-                    }
-                    RegularizationType::L2(regularization_strength) => {
-                        for i in start_idx..n_features {
-                            gradients[i] += regularization_strength * weights[i];
-                        }
-                    }
+                for i in start_idx..n_features {
+                    gradients[i] += regularization_strength * weights[i];
                 }
             }
 
@@ -348,6 +335,25 @@ impl LogisticRegression {
 
             // In-place gradient step, avoiding a fresh weight array every iteration
             weights.scaled_add(-self.learning_rate, &gradients);
+
+            // Proximal step for L1 (ISTA): soft-thresholding by `learning_rate * alpha` is the
+            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`, so an
+            // unsupported coefficient lands on exactly 0.0. The intercept at index 0 is skipped,
+            // since it carries no penalty
+            if let Some(RegularizationType::L1(regularization_strength)) = &self.regularization_type
+            {
+                let start_idx = if self.fit_intercept { 1 } else { 0 };
+                let shrink = self.learning_rate * regularization_strength;
+                for i in start_idx..n_features {
+                    weights[i] = if weights[i] > shrink {
+                        weights[i] - shrink
+                    } else if weights[i] < -shrink {
+                        weights[i] + shrink
+                    } else {
+                        0.0
+                    };
+                }
+            }
 
             // Check for numerical issues in updated weights
             if weights.iter().any(|&val| !val.is_finite()) {

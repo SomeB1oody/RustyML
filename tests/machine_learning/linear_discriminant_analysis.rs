@@ -6,7 +6,7 @@
 use approx::assert_abs_diff_eq;
 use ndarray::{Array1, Array2, array};
 use rustyml::error::Error;
-use rustyml::machine_learning::{LDA, Shrinkage, Solver};
+use rustyml::machine_learning::{DiscriminantSolver, LDA, Shrinkage};
 
 use crate::common::assert_allclose;
 
@@ -65,7 +65,7 @@ fn accuracy(predicted: &Array1<i32>, true_labels: &Array1<i32>) -> f64 {
 fn test_new_default_values() {
     let lda = LDA::new(2).expect("default construction should succeed");
     assert_eq!(lda.get_n_components(), Some(2));
-    assert_eq!(lda.get_solver(), Solver::SVD);
+    assert_eq!(lda.get_solver(), DiscriminantSolver::SVD);
     assert!(lda.get_shrinkage().is_none());
     // Pre-fit getters return None
     assert!(lda.get_classes().is_none());
@@ -80,7 +80,7 @@ fn test_default_impl() {
     // The default is now `None` (auto): the component count is resolved at fit time to
     // min(n_classes - 1, n_features)
     assert_eq!(lda.get_n_components(), None);
-    assert_eq!(lda.get_solver(), Solver::SVD);
+    assert_eq!(lda.get_solver(), DiscriminantSolver::SVD);
     assert!(lda.get_shrinkage().is_none());
 }
 
@@ -88,10 +88,10 @@ fn test_default_impl() {
 fn test_new_explicit_solver_and_shrinkage() {
     let lda = LDA::new(1)
         .expect("valid construction")
-        .with_solver(Solver::Eigen)
+        .with_solver(DiscriminantSolver::Eigen)
         .with_shrinkage(Shrinkage::Manual(0.3))
         .unwrap();
-    assert_eq!(lda.get_solver(), Solver::Eigen);
+    assert_eq!(lda.get_solver(), DiscriminantSolver::Eigen);
     assert_eq!(lda.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
 }
 
@@ -321,7 +321,7 @@ fn test_transform_wrong_feature_count_errors() {
 fn test_fit_predict_train_100pct_svd() {
     // Clusters 4 units apart, so perfect classification is guaranteed
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -338,7 +338,7 @@ fn test_fit_predict_holdout_svd() {
     let (x_train, y_train) = make_three_class_2d();
     let (x_test, y_test) = make_three_class_holdout();
 
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x_train, &y_train).unwrap();
 
     let preds = lda.predict(&x_test).unwrap();
@@ -381,7 +381,11 @@ fn test_classes_sorted_after_fit() {
 #[test]
 fn test_all_solvers_classify_correctly() {
     let (x, y) = make_three_class_2d();
-    for solver in [Solver::SVD, Solver::Eigen, Solver::LSQR] {
+    for solver in [
+        DiscriminantSolver::SVD,
+        DiscriminantSolver::Eigen,
+        DiscriminantSolver::LSQR,
+    ] {
         let mut lda = LDA::new(2).unwrap().with_solver(solver);
         lda.fit(&x, &y).unwrap();
 
@@ -457,7 +461,7 @@ fn test_transform_single_sample() {
 fn test_two_class_1d_classification_correctness() {
     // class 0 ~ {1,2,3}, class 1 ~ {7,8,9}: any solver must classify all 6 samples
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(1).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -473,7 +477,7 @@ fn test_two_class_1d_projected_class_separation() {
     // After projecting onto 1 component the class means must separate: with a unit
     // vector w, |8w - 2w| = 6|w| = 6.0
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(1).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let proj = lda.transform(&x).unwrap(); // shape [6, 1]
@@ -499,18 +503,21 @@ fn test_two_class_1d_projected_class_separation() {
 }
 
 #[test]
-fn test_two_class_1d_unit_projection_vector() {
-    // For a 1-feature dataset with n_components=1 the projection is a single unit
-    // vector (L2-norm = 1.0)
+fn test_two_class_1d_projection_is_the_whitening_scale() {
+    // For a 1-feature dataset with n_components=1 the projection is a single scalar: the
+    // reciprocal square root of the pooled within-class variance, not a unit vector
     let (x, y) = make_two_class_1d();
-    let mut lda = LDA::new(1).unwrap().with_solver(Solver::SVD);
-    lda.fit(&x, &y).unwrap();
+    let mut lda = LDA::new(1).unwrap().with_solver(DiscriminantSolver::SVD);
+    let z = lda.fit_transform(&x, &y).unwrap();
 
     let w = lda.get_projection().expect("projection must be set");
     // w shape: [n_features=1, n_components=1]
     assert_eq!(w.shape(), &[1, 1]);
-    let norm: f64 = w.iter().map(|v| v * v).sum::<f64>().sqrt();
-    assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+    assert_abs_diff_eq!(
+        projected_within_class_variance(&z, &y, 0),
+        1.0,
+        epsilon = 1e-4
+    );
 }
 
 // 9. fit_transform consistency
@@ -520,10 +527,10 @@ fn test_fit_transform_equals_fit_then_transform() {
     // fit_transform(x, y) must match fit(x, y) then transform(x)
     let (x, y) = make_three_class_2d();
 
-    let mut lda_a = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda_a = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     let out_a = lda_a.fit_transform(&x, &y).unwrap();
 
-    let mut lda_b = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda_b = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda_b.fit(&x, &y).unwrap();
     let out_b = lda_b.transform(&x).unwrap();
 
@@ -573,13 +580,13 @@ fn test_shrinkage_manual_zero_matches_no_shrinkage() {
     // so the result must be identical to None shrinkage
     let (x, y) = make_three_class_2d();
 
-    let mut lda_none = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda_none = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda_none.fit(&x, &y).unwrap();
     let out_none = lda_none.transform(&x).unwrap();
 
     let mut lda_zero = LDA::new(2)
         .unwrap()
-        .with_solver(Solver::SVD)
+        .with_solver(DiscriminantSolver::SVD)
         .with_shrinkage(Shrinkage::Manual(0.0))
         .unwrap();
     lda_zero.fit(&x, &y).unwrap();
@@ -604,50 +611,74 @@ fn test_shrinkage_manual_boundary_one_produces_finite_output() {
     }
 }
 
-// 11. Projection columns are unit-norm
+// 11. Projection columns are whitened, not unit-norm
+//
+// scikit-learn's `scalings_` scales each discriminant axis so the projected data has unit
+// within-class covariance. The axes are therefore NOT unit vectors, and their norms carry the
+// data's units - which is why `DiscriminantSolver::project` uses a relative degenerate-axis tolerance
+
+/// Pooled within-class variance of a single projected component, over `n - n_classes`
+fn projected_within_class_variance(z: &Array2<f64>, y: &Array1<i32>, column: usize) -> f64 {
+    let mut classes: Vec<i32> = y.to_vec();
+    classes.sort_unstable();
+    classes.dedup();
+
+    let mut within = 0.0;
+    for class in &classes {
+        let values: Vec<f64> = y
+            .iter()
+            .zip(z.column(column).iter())
+            .filter(|&(label, _)| label == class)
+            .map(|(_, &value)| value)
+            .collect();
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        within += values.iter().map(|v| (v - mean).powi(2)).sum::<f64>();
+    }
+    within / (z.nrows() - classes.len()) as f64
+}
 
 #[test]
-fn test_projection_columns_are_unit_norm_svd() {
+fn test_projection_whitens_within_class_covariance_svd() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
-    lda.fit(&x, &y).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
+    let z = lda.fit_transform(&x, &y).unwrap();
 
-    let w = lda.get_projection().unwrap(); // shape [2, 2]
-    for col_idx in 0..w.ncols() {
-        let col = w.column(col_idx);
-        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
-        assert!(
-            (norm - 1.0).abs() < 1e-10,
-            "column {col_idx} of projection must be a unit vector"
+    for column in 0..z.ncols() {
+        assert_abs_diff_eq!(
+            projected_within_class_variance(&z, &y, column),
+            1.0,
+            epsilon = 1e-4
         );
     }
 }
 
 #[test]
-fn test_projection_columns_are_unit_norm_eigen() {
+fn test_projection_whitens_within_class_covariance_eigen() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::Eigen);
-    lda.fit(&x, &y).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::Eigen);
+    let z = lda.fit_transform(&x, &y).unwrap();
 
-    let w = lda.get_projection().unwrap();
-    for col_idx in 0..w.ncols() {
-        let col = w.column(col_idx);
-        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
-        assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+    for column in 0..z.ncols() {
+        assert_abs_diff_eq!(
+            projected_within_class_variance(&z, &y, column),
+            1.0,
+            epsilon = 1e-4
+        );
     }
 }
 
 #[test]
-fn test_projection_columns_are_unit_norm_lsqr() {
+fn test_projection_whitens_within_class_covariance_lsqr() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::LSQR);
-    lda.fit(&x, &y).unwrap();
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::LSQR);
+    let z = lda.fit_transform(&x, &y).unwrap();
 
-    let w = lda.get_projection().unwrap();
-    for col_idx in 0..w.ncols() {
-        let col = w.column(col_idx);
-        let norm: f64 = col.iter().map(|v| v * v).sum::<f64>().sqrt();
-        assert_abs_diff_eq!(norm, 1.0, epsilon = 1e-10);
+    for column in 0..z.ncols() {
+        assert_abs_diff_eq!(
+            projected_within_class_variance(&z, &y, column),
+            1.0,
+            epsilon = 1e-4
+        );
     }
 }
 
@@ -701,11 +732,11 @@ fn test_determinism_svd_same_data() {
     // transforms
     let (x, y) = make_three_class_2d();
 
-    let mut lda1 = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda1 = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda1.fit(&x, &y).unwrap();
     let out1 = lda1.transform(&x).unwrap();
 
-    let mut lda2 = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda2 = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda2.fit(&x, &y).unwrap();
     let out2 = lda2.transform(&x).unwrap();
 
@@ -726,7 +757,7 @@ fn test_determinism_svd_same_data() {
 #[test]
 fn test_save_load_round_trip() {
     let (x, y) = make_three_class_2d();
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds_before = lda.predict(&x).unwrap();
@@ -752,7 +783,7 @@ fn test_save_load_round_trip() {
 fn test_save_load_preserves_hyperparameters() {
     let mut lda = LDA::new(1)
         .unwrap()
-        .with_solver(Solver::Eigen)
+        .with_solver(DiscriminantSolver::Eigen)
         .with_shrinkage(Shrinkage::Manual(0.3))
         .unwrap();
     let (x, y) = make_two_class_1d();
@@ -763,7 +794,7 @@ fn test_save_load_preserves_hyperparameters() {
     let loaded = LDA::load_from_path(path).unwrap();
 
     assert_eq!(loaded.get_n_components(), Some(1));
-    assert_eq!(loaded.get_solver(), Solver::Eigen);
+    assert_eq!(loaded.get_solver(), DiscriminantSolver::Eigen);
     assert_eq!(loaded.get_shrinkage(), Some(Shrinkage::Manual(0.3)));
 }
 
@@ -841,7 +872,7 @@ fn test_fit_predict_large_separable_parallel_paths() {
         x.nrows()
     );
 
-    let mut lda = LDA::new(2).unwrap().with_solver(Solver::SVD);
+    let mut lda = LDA::new(2).unwrap().with_solver(DiscriminantSolver::SVD);
     lda.fit(&x, &y).unwrap();
 
     let preds = lda.predict(&x).unwrap();
@@ -1005,4 +1036,74 @@ fn test_decision_function_and_predict_proba_not_fitted_error() {
         lda.predict_proba(&x),
         Err(Error::NotFitted("LDA"))
     ));
+}
+
+// 12. scikit-learn parity of transform()
+
+/// `transform` centers by the training mean, so the projected training data is mean-zero
+///
+/// scikit-learn computes `(X - xbar_) @ scalings_`. Skipping the centering shifts every projected
+/// coordinate by a constant, which is invisible in a scatter plot but wrong the moment the numbers
+/// are compared against a scikit-learn pipeline
+#[test]
+fn test_transform_projected_training_data_is_mean_zero() {
+    let x: Array2<f64> = array![
+        [1.0, 2.0],
+        [1.5, 1.8],
+        [5.0, 8.0],
+        [6.0, 9.0],
+        [1.0, 0.6],
+        [9.0, 11.0]
+    ];
+    let y: Array1<i32> = array![0, 0, 1, 1, 0, 1];
+
+    let mut lda = LDA::new(1).unwrap();
+    let z = lda.fit_transform(&x, &y).unwrap();
+
+    let column_mean = z.column(0).sum() / z.nrows() as f64;
+    assert_abs_diff_eq!(column_mean, 0.0, epsilon = 1e-10);
+
+    // The stored mean is scikit-learn's `xbar_`
+    let overall_mean = lda
+        .get_overall_mean()
+        .expect("fit records the overall mean");
+    assert_abs_diff_eq!(overall_mean[0], 3.916_666_666_666_666_5, epsilon = 1e-12);
+    assert_abs_diff_eq!(overall_mean[1], 5.4, epsilon = 1e-12);
+}
+
+/// The discriminant axes are whitened, not unit-norm, matching scikit-learn's `scalings_`
+///
+/// scikit-learn scales `scalings_` so the projected data has unit within-class covariance (with
+/// the `n - n_classes` denominator). Rescaling each axis to unit L2 norm - which this used to do -
+/// undoes that and puts the projection on a different scale from any ported pipeline
+#[test]
+fn test_transform_axes_whiten_the_within_class_covariance() {
+    let x: Array2<f64> = array![
+        [1.0, 2.0],
+        [1.5, 1.8],
+        [5.0, 8.0],
+        [6.0, 9.0],
+        [1.0, 0.6],
+        [9.0, 11.0]
+    ];
+    let y: Array1<i32> = array![0, 0, 1, 1, 0, 1];
+
+    let mut lda = LDA::new(1).unwrap();
+    let z = lda.fit_transform(&x, &y).unwrap();
+
+    // Pooled within-class sum of squares of the projected data, over n - n_classes
+    let mut within = 0.0;
+    for class in [0, 1] {
+        let values: Vec<f64> = y
+            .iter()
+            .zip(z.column(0).iter())
+            .filter(|&(&label, _)| label == class)
+            .map(|(_, &value)| value)
+            .collect();
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        within += values.iter().map(|v| (v - mean).powi(2)).sum::<f64>();
+    }
+    let within_covariance = within / (x.nrows() - 2) as f64;
+
+    assert_abs_diff_eq!(within_covariance, 1.0, epsilon = 1e-4);
 }

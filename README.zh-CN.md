@@ -31,9 +31,10 @@ RustyML 是一个完整的机器学习与深度学习生态，完全用 Rust 端
 - **默认并行**——计算密集的内核使用 [Rayon](https://github.com/rayon-rs/rayon) 进行多线程计算。
 - **算法覆盖广**——经典的监督/无监督学习、异常检测，以及完整的神经网络框架。
 - **统一的结构化错误处理**——所有可能失败的调用都返回 `RustymlResult<T>`；错误被归类为清晰的类别变体，而非难以解析的字符串。
-- **可复现性**——一次 `set_global_seed` 调用即可让所有随机化组件变得确定。
+- **可复现性**——一次 `set_global_seed` 调用即可让调用线程上所有随机化组件变得确定；其余情形交给按组件的 `random_state`。
 - **模型持久化**——通过 [Serde](https://serde.rs/) 和 [postcard](https://docs.rs/postcard/) 将训练好的模型和网络权重以紧凑的二进制格式保存与加载。
 - **丰富的评估指标**——回归、分类（二分类与多分类）、聚类，遵循 scikit-learn 的约定。
+- **与 scikit-learn 逐项校验**——估计器的默认配置、评分符号和指标的输出约定都与 scikit-learn 1.9 做了数值比对，移植过来的流水线能给出相同的结果。有意保留的差异都在相应位置注明。
 - **模块化 feature**——可以只引入 `metrics`、只引入 `math`、引入 `default` 学习栈，或引入 `full` 全量。
 
 ## 安装
@@ -73,7 +74,8 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 // 训练一个不带正则化的线性回归模型
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+let mut model = LinearRegression::new(true)
+    .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 
 let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 let y = array![6.0, 9.0, 12.0];
@@ -125,10 +127,12 @@ use rustyml::metrics::*;
 use ndarray::array;
 
 // 参数顺序始终是 (y_true, y_pred)，与 scikit-learn 一致
+// ConfusionMatrix::new 只接受 0.0/1.0 硬标签（其他标签取值对用 new_with_labels）
 let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
 let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
+// 两个参数的存储类型相互独立，持有所有权的数组和视图可以混用
+let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
 println!("准确率: {:.3}", cm.accuracy());
 println!("F1 分数: {:.3}", cm.f1_score());
 ```
@@ -141,14 +145,21 @@ println!("F1 分数: {:.3}", cm.f1_score());
 
 | 类别 | 算法 |
 |------|------|
-| **回归** | 线性回归（可选 L1/L2 正则化） |
+| **回归** | 线性回归（默认闭式 OLS，也可切换梯度下降；可选 L1/L2 正则化） |
 | **分类** | 逻辑回归、K 近邻、决策树（ID3 / C4.5 / CART）、SVC（核 SMO）、Linear SVC、线性判别分析（LDA） |
-| **聚类** | KMeans（K-means++ 初始化）、DBSCAN、MeanShift |
+| **聚类** | KMeans（K-means++ 初始化，`n_init` 次重启）、DBSCAN、MeanShift（平坦核） |
 | **降维** | PCA（多种 SVD 求解器）、KernelPCA（RBF / Linear / Poly / Sigmoid / Cosine 核）、t-SNE |
 | **异常检测** | 隔离森林（Isolation Forest） |
 
+三个聚类估计器返回的都是 `Array1<isize>` 标签，`-1` 表示噪声或未归属；每个聚类指标接收的也正是这个类型，
+所以任意估计器都能直接喂进任意指标。`IsolationForest` 遵循 scikit-learn 的符号约定：`score_samples`
+返回 `[-1, 0)` 区间内的值，越低越异常，`predict` 返回 `-1`（离群）/ `+1`（正常）。
+
 共享的配置类型位于 [`machine_learning::types`](https://docs.rs/rustyml/latest/rustyml/machine_learning/types/index.html) 模块：
 `RegularizationType`（L1 / L2）、`Gamma`，以及 `KernelType`（Linear / Poly / RBF / Sigmoid / Cosine）。
+`RegularizationType` 的文档里带有一张换算表，说明如何把 scikit-learn 的惩罚强度
+（`Lasso`/`Ridge` 的 `alpha`、`LogisticRegression` 的 `C`）折算过来；L1 走的是邻近算子软阈值，
+所以被惩罚掉的系数会恰好归零。
 `DistanceCalculationMetric`（欧几里得 / 曼哈顿 / 闵可夫斯基）调度器定义于 `math`，并在 `machine_learning`
 根重新导出。预测类模型实现统一的 `Fit` 与
 `Predict` trait；降维变换器（[`decomposition`](https://docs.rs/rustyml/latest/rustyml/machine_learning/decomposition/index.html)
@@ -190,11 +201,15 @@ println!("F1 分数: {:.3}", cm.f1_score());
 ### `metrics`
 
 一套广泛的评估指标。所有函数都以 `(y_true, y_pred)` 为参数，并在违反前置条件时（长度不匹配、
-输入为空）直接 panic 而非返回 `Result`，从而让这个叶子模块保持轻量、依赖极少。
+输入为空、标签超出取值范围）直接 panic 而非返回 `Result`，从而让这个叶子模块保持轻量、依赖极少。
 
 - **回归** - MSE、RMSE、MAE、中位数绝对误差、MAPE、R²、可解释方差
 - **分类** - 准确率、`ConfusionMatrix` 与 `MulticlassConfusionMatrix`、ROC AUC、对数损失、Cohen's κ、top-k 准确率、平均精度、ROC 与精确率-召回率曲线
 - **聚类** - 调整兰德指数、标准化 / 调整互信息、同质性 / 完整性 / V-measure、Fowlkes–Mallows、轮廓系数、Davies–Bouldin、Calinski–Harabasz
+
+曲线函数的输出点采用 scikit-learn 的排列顺序；`roc_curve` 是唯一一处有意的差异，它总是返回完整的阈值
+扫描（相当于 scikit-learn 的 `drop_intermediate=False`），点数可能比 Python 的默认值多，但描出的曲线和
+`roc_auc` 完全相同。聚类指标接收 `isize` 标签数组，与聚类估计器的返回类型一致。
 
 ### `math`
 
@@ -241,7 +256,10 @@ set_global_seed(42);
 ```
 
 单次调用传入的 `random_state` 优先级高于全局种子，全局种子又高于系统熵。完整的解析规则请见
-[`random`](https://docs.rs/rustyml/latest/rustyml/random/index.html) 模块。
+[`random`](https://docs.rs/rustyml/latest/rustyml/random/index.html) 模块。`KMeans` 会把拟合重启
+`n_init` 次（默认 10 次），每轮 k-means++ 的种子都由 `random_state` 确定性地派生，所以已播种的拟合
+依然可复现；而 `IsolationForest` 每棵树的 RNG 建在 Rayon worker 线程上，只有显式的 `random_state`
+才够得着它们。
 
 ## 错误处理
 

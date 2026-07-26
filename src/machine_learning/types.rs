@@ -19,14 +19,41 @@ use ndarray::{Array2, ArrayBase, ArrayView1, Axis, Data, Ix2, Zip};
 ///
 /// Regularization helps prevent overfitting by adding a penalty term to the model's
 /// loss function during training. The `f64` in each variant is the penalty coefficient
+///
+/// # What `alpha` means here
+///
+/// Every estimator that accepts this enum minimizes a **mean** data term plus an undivided
+/// penalty, with `n` the number of training samples:
+///
+/// ```text
+/// L1:  (1 / n) * sum(loss) + alpha * ||w||_1
+/// L2:  (1 / n) * sum(loss) + alpha * 0.5 * ||w||^2
+/// ```
+///
+/// That is exactly scikit-learn's `SGDRegressor` / `SGDClassifier` objective
+/// `E(w) = (1/n) * sum(L) + alpha * R(w)`, so `alpha` transfers **1:1** from either of those.
+/// The intercept is never penalized, as in scikit-learn
+///
+/// # Converting an `alpha` from scikit-learn's closed-form estimators
+///
+/// Those use their own conventions, which differ from each other; convert as follows, where `a`
+/// is the scikit-learn value and `n` the number of training samples:
+///
+/// | scikit-learn | RustyML |
+/// |---|---|
+/// | `Lasso(alpha=a)` | `L1(a)` - identical objective, both scale the data term by `1 / 2n` |
+/// | `Ridge(alpha=a)` | `L2(a / n)` - scikit-learn's `Ridge` does *not* divide its data term by `n` |
+/// | `SGDRegressor(alpha=a)` / `SGDClassifier(alpha=a)` | `L1(a)` or `L2(a)` - no conversion |
+/// | `LogisticRegression(C=c)` | `L1(1 / (c * n))` or `L2(1 / (c * n))`, i.e. `c = 1 / (n * alpha)` |
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum RegularizationType {
     /// L1 regularization (Lasso): adds the sum of absolute parameter values times the
-    /// coefficient. Promotes sparse solutions by driving some parameters to exactly zero
+    /// coefficient. Produces sparse solutions - [`LinearRegression`](crate::machine_learning::LinearRegression)
+    /// and [`LogisticRegression`](crate::machine_learning::LogisticRegression) apply it through a
+    /// proximal (soft-thresholding) step, so unsupported coefficients reach exactly `0.0`
     L1(f64),
-    /// L2 regularization (Ridge): adds the sum of squared parameter values times the
-    /// coefficient. Discourages large parameter values but typically does not produce
-    /// sparse solutions
+    /// L2 regularization (Ridge): adds half the sum of squared parameter values times the
+    /// coefficient. Discourages large parameter values but does not produce sparse solutions
     L2(f64),
 }
 

@@ -280,6 +280,30 @@ fn test_r2_constant_y_true_nonzero_sse() {
     assert_abs_diff_eq!(r2_score(&y_true, &y_pred), 0.0, epsilon = 1e-12);
 }
 
+/// A target that genuinely varies is scored normally however small its magnitude
+///
+/// The absolute `SST < 1e-10` guard this replaced reported a perfect 1.0 here, because the whole
+/// spread of the data sat below the threshold
+#[test]
+fn test_r2_small_magnitude_target_is_not_treated_as_constant() {
+    let y_true = array![1e-6, 2e-6, 3e-6];
+    let y_pred = array![2e-6, 3e-6, 4e-6];
+    // SST = 2e-12, SSE = 3e-12, so R2 = 1 - 1.5 = -0.5
+    assert_abs_diff_eq!(r2_score(&y_true, &y_pred), -0.5, epsilon = 1e-9);
+}
+
+/// A constant target is recognised even when `sum / n` does not round-trip it
+///
+/// Eight copies of `0.1` leave SST at 1.5e-33 rather than at exactly zero, so an `sst == 0.0` test
+/// would fall through to `1 - SSE/SST` and return garbage of order 1e31
+#[test]
+fn test_r2_constant_target_that_does_not_round_trip() {
+    let y_true = array![0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
+    assert_abs_diff_eq!(r2_score(&y_true, &y_true), 1.0, epsilon = 1e-12);
+    let y_pred = array![0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2];
+    assert_abs_diff_eq!(r2_score(&y_true, &y_pred), 0.0, epsilon = 1e-12);
+}
+
 /// R2 is bounded above by 1.0 for inputs with variance
 #[test]
 fn test_r2_bounded_above_by_one() {
@@ -377,6 +401,43 @@ fn test_evs_constant_y_true_nonzero_residual_variance() {
     assert_abs_diff_eq!(
         explained_variance_score(&y_true, &y_pred),
         0.0,
+        epsilon = 1e-12
+    );
+}
+
+/// A target that genuinely varies is scored normally however small its magnitude
+///
+/// The absolute variance guard this replaced reported a perfect 1.0 here, because both variances
+/// sat below the threshold
+#[test]
+fn test_evs_small_magnitude_target_is_not_treated_as_constant() {
+    let y_true = array![1e-6, 2e-6, 3e-6];
+    let y_pred = array![1e-6, 3e-6, 2e-6];
+    // The residuals and the target have the same spread, so none of the variance is explained
+    assert_abs_diff_eq!(
+        explained_variance_score(&y_true, &y_pred),
+        0.0,
+        epsilon = 1e-12
+    );
+}
+
+/// A constant target is recognised even when `sum / n` does not round-trip it
+///
+/// Eight copies of `0.1` leave the population variance at 1.9e-34 rather than at exactly zero, so
+/// a `variance == 0.0` test applied to that sum would fall through and return garbage
+#[test]
+fn test_evs_constant_target_that_does_not_round_trip() {
+    let y_true = array![0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
+    assert_abs_diff_eq!(
+        explained_variance_score(&y_true, &y_true),
+        1.0,
+        epsilon = 1e-12
+    );
+    // A constant bias leaves zero residual variance, so EVS still scores 1.0 here (unlike R2)
+    let y_pred = array![0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2];
+    assert_abs_diff_eq!(
+        explained_variance_score(&y_true, &y_pred),
+        1.0,
         epsilon = 1e-12
     );
 }

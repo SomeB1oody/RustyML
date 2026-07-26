@@ -32,9 +32,10 @@ Everything is organized into five feature-gated modules, so you compile only wha
 - **Parallelized by default** — heavy kernels use [Rayon](https://github.com/rayon-rs/rayon) for multi-threaded computation.
 - **Broad algorithm coverage** — classical supervised/unsupervised learning, anomaly detection, and a full neural-network framework.
 - **Unified, structured error handling** — every fallible call returns `RustymlResult<T>`; errors are grouped into clear category variants instead of opaque strings.
-- **Reproducible by design** — a single `set_global_seed` call makes every randomized component deterministic.
+- **Reproducible by design** — a single `set_global_seed` call makes every randomized component on the calling thread deterministic; per-component `random_state` covers the rest.
 - **Model persistence** — save and load trained models and network weights as compact binary via [Serde](https://serde.rs/) and [postcard](https://docs.rs/postcard/).
 - **Rich evaluation metrics** — regression, classification (binary & multiclass), and clustering, mirroring scikit-learn conventions.
+- **Checked against scikit-learn** — estimator defaults, score signs, and metric output conventions are verified numerically against scikit-learn 1.9, so a ported pipeline gives the same answers. Deliberate departures are documented where they occur.
 - **Modular features** — pull in just `metrics`, just `math`, the `default` learning stack, or the `full` crate.
 
 ## Installation
@@ -74,7 +75,8 @@ use rustyml::prelude::machine_learning::*;
 use ndarray::array;
 
 // Train a regularization-free linear regression model
-let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+let mut model = LinearRegression::new(true)
+    .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 }).unwrap();
 
 let x = array![[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]];
 let y = array![6.0, 9.0, 12.0];
@@ -126,10 +128,12 @@ use rustyml::metrics::*;
 use ndarray::array;
 
 // Arguments are always (y_true, y_pred), matching scikit-learn
+// ConfusionMatrix::new takes hard 0.0/1.0 labels (new_with_labels covers other pairs)
 let y_true = array![1.0, 0.0, 0.0, 1.0, 1.0];
 let y_pred = array![1.0, 0.0, 1.0, 1.0, 0.0];
 
-let cm = ConfusionMatrix::new(&y_true.view(), &y_pred.view());
+// The two arguments carry independent storage types, so an owned array and a view mix
+let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
 println!("Accuracy: {:.3}", cm.accuracy());
 println!("F1 score: {:.3}", cm.f1_score());
 ```
@@ -143,14 +147,22 @@ input validation, and binary persistence.
 
 | Category | Algorithms |
 |----------|------------|
-| **Regression** | Linear Regression (optional L1/L2 regularization) |
+| **Regression** | Linear Regression (closed-form OLS by default, or gradient descent; optional L1/L2 regularization) |
 | **Classification** | Logistic Regression, K-Nearest Neighbors, Decision Tree (ID3 / C4.5 / CART), SVC (kernel SMO), Linear SVC, Linear Discriminant Analysis |
-| **Clustering** | KMeans (K-means++ init), DBSCAN, MeanShift |
+| **Clustering** | KMeans (K-means++ init, `n_init` restarts), DBSCAN, MeanShift (flat kernel) |
 | **Dimensionality Reduction** | PCA (multiple SVD solvers), KernelPCA (RBF / Linear / Poly / Sigmoid / Cosine kernels), t-SNE |
 | **Anomaly Detection** | Isolation Forest |
 
+All three clustering estimators return `Array1<isize>` labels with `-1` for noise or unassigned points,
+which is also what every clustering metric consumes — so any of them feeds any metric directly.
+`IsolationForest` follows scikit-learn's sign convention: `score_samples` returns values in `[-1, 0)`
+where lower is more anomalous, and `predict` returns `-1` (outlier) / `+1` (inlier).
+
 Shared config types live in [`machine_learning::types`](https://docs.rs/rustyml/latest/rustyml/machine_learning/types/index.html):
 `RegularizationType` (L1 / L2), `Gamma`, and `KernelType` (Linear / Poly / RBF / Sigmoid / Cosine).
+`RegularizationType`'s documentation carries a conversion table for scikit-learn's penalty strengths
+(`Lasso`/`Ridge` `alpha`, `LogisticRegression` `C`); L1 is applied as a proximal soft-threshold, so
+penalized coefficients reach exactly zero.
 The `DistanceCalculationMetric` (Euclidean / Manhattan / Minkowski) dispatcher lives in
 [`math`](https://docs.rs/rustyml/latest/rustyml/math/index.html) and is re-exported at the
 `machine_learning` root. Predictive models implement the
@@ -196,12 +208,17 @@ Data preprocessing and dataset splitting. (Dimensionality reduction — `PCA`, `
 ### `metrics`
 
 A broad evaluation suite. All functions take `(y_true, y_pred)` and panic on precondition
-violations (mismatched lengths, empty input) rather than returning `Result`, keeping this leaf
-module dependency-light.
+violations (mismatched lengths, empty input, an out-of-domain label) rather than returning `Result`,
+keeping this leaf module dependency-light.
 
 - **Regression** — MSE, RMSE, MAE, median absolute error, MAPE, R², explained variance
 - **Classification** — accuracy, `ConfusionMatrix` & `MulticlassConfusionMatrix`, ROC AUC, log loss, Cohen's κ, top-k accuracy, average precision, ROC & precision-recall curves
 - **Clustering** — Adjusted Rand Index, Normalized / Adjusted Mutual Information, homogeneity / completeness / V-measure, Fowlkes–Mallows, silhouette, Davies–Bouldin, Calinski–Harabasz
+
+Curve outputs follow scikit-learn's point ordering; `roc_curve` is the one deliberate difference,
+always returning the full threshold sweep (scikit-learn's `drop_intermediate=False`), which can yield
+more points than Python's default while tracing the same curve and the same `roc_auc`. The clustering
+metrics take `isize` label arrays, matching what the clustering estimators return.
 
 ### `math`
 
@@ -251,7 +268,10 @@ set_global_seed(42);
 
 A per-call `random_state` takes precedence over the global seed, which in turn takes precedence
 over system entropy. See the [`random`](https://docs.rs/rustyml/latest/rustyml/random/index.html)
-module for the full resolution rules.
+module for the full resolution rules. `KMeans` restarts its fit `n_init` times (10 by default),
+deriving each restart's k-means++ seed deterministically from `random_state`, so a seeded fit stays
+reproducible; the seed only reaches `IsolationForest`'s per-tree RNGs through an explicit
+`random_state`, since those are built on Rayon worker threads.
 
 ## Error Handling
 

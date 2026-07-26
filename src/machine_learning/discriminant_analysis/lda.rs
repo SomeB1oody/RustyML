@@ -1,7 +1,7 @@
 //! Linear Discriminant Analysis (LDA) for supervised dimensionality reduction and
 //! classification
 //!
-//! Contains the [`LDA`] model along with its [`Solver`] and [`Shrinkage`] configuration enums
+//! Contains the [`LDA`] model along with its [`DiscriminantSolver`] and [`Shrinkage`] configuration enums
 
 use crate::error::Error;
 use crate::math::matmul::{dot_par, matvec};
@@ -12,13 +12,13 @@ use gemmkit_ndarray::{Bias, Parallelism, dot};
 use ndarray::{Array1, Array2, ArrayBase, ArrayView1, Axis, Data, Ix1, Ix2};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
-/// Solver options for Linear Discriminant Analysis
+/// Numerical strategy used to invert the shared covariance when scoring with LDA
 ///
 /// Selects the numerical method used to derive the per-class linear scoring coefficients from
 /// the shared covariance. The discriminant projection used by `transform` is solver-independent,
 /// so this choice only affects `predict`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-pub enum Solver {
+pub enum DiscriminantSolver {
     /// Inverts the shared covariance through its SVD pseudo-inverse, then scores with that inverse
     #[default]
     SVD,
@@ -37,7 +37,7 @@ fn symmetric_part(m: &Array2<f64>) -> Array2<f64> {
     out
 }
 
-impl Solver {
+impl DiscriminantSolver {
     /// Computes the per-class linear scoring coefficients `Sigma^-1 * mu_c` under this solver
     ///
     /// Returns an `(n_classes x n_features)` matrix whose row `c` is the coefficient vector for
@@ -50,7 +50,7 @@ impl Solver {
         means: &Array2<f64>,
     ) -> Result<Array2<f64>, Error> {
         match *self {
-            Solver::LSQR => {
+            DiscriminantSolver::LSQR => {
                 let n_classes = means.nrows();
                 let n_features = means.ncols();
                 let max_iter = 4 * n_features + 100;
@@ -62,8 +62,8 @@ impl Solver {
                 Ok(coefficients)
             }
             // The covariance inverse is symmetric, so `means . inv` row c equals `inv * mu_c`
-            Solver::Eigen => Ok(dot(means, &Self::eigen_inverse(cov)?)),
-            Solver::SVD => Ok(dot(means, &Self::svd_pseudo_inverse(cov)?)),
+            DiscriminantSolver::Eigen => Ok(dot(means, &Self::eigen_inverse(cov)?)),
+            DiscriminantSolver::SVD => Ok(dot(means, &Self::svd_pseudo_inverse(cov)?)),
         }
     }
 
@@ -113,7 +113,7 @@ impl Solver {
     /// back to the discriminant directions `w = W v`. This is the correct generalized-eigenvector
     /// solution, unlike taking singular vectors of the non-symmetric `S_w^{-1} S_b`, whose left
     /// singular vectors are not the discriminant axes. The result is independent of the
-    /// covariance-inversion `Solver`, which only governs the linear-scoring path used by `predict`
+    /// covariance-inversion `DiscriminantSolver`, which only governs the linear-scoring path used by `predict`
     fn project(
         cov: &Array2<f64>,
         sb: &Array2<f64>,
@@ -154,18 +154,34 @@ impl Solver {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Select the top components and normalize each axis
+        // Select the top components, keeping each axis at the scale the whitening produced. That
+        // scale is what makes the projected data have unit within-class covariance, which is the
+        // convention scikit-learn's `scalings_` follows; rescaling the columns to unit L2 norm
+        // would undo the whitening and put the projection on a different scale
+        let selected: Vec<usize> = order.iter().take(n_components).copied().collect();
+
+        // The degenerate test has to be relative, because these norms scale like the inverse
+        // square root of the within-class variance and so carry the data's units
+        let max_norm = selected
+            .iter()
+            .map(|&idx| {
+                let col = directions.column(idx);
+                col.dot(&col).sqrt()
+            })
+            .fold(0.0_f64, f64::max);
+        let norm_tol = 1e-12 * max_norm;
+
         let mut w = Array2::<f64>::zeros((n_features, n_components));
-        for (component_idx, &idx) in order.iter().take(n_components).enumerate() {
+        for (component_idx, &idx) in selected.iter().enumerate() {
             let col = directions.column(idx);
             let norm = col.dot(&col).sqrt();
-            if norm <= 1e-12 {
+            if norm <= norm_tol {
                 return Err(Error::computation(
                     "Discriminant direction norm too small for stable projection",
                 ));
             }
             for i in 0..n_features {
-                w[[i, component_idx]] = col[i] / norm;
+                w[[i, component_idx]] = col[i];
             }
         }
 
@@ -323,7 +339,7 @@ pub enum Shrinkage {
 ///
 /// ```rust
 /// use ndarray::{Array1, Array2};
-/// use rustyml::machine_learning::{LDA, Shrinkage, Solver};
+/// use rustyml::machine_learning::{LDA, Shrinkage, DiscriminantSolver};
 ///
 /// let x = Array2::from_shape_vec(
 ///     (6, 2),
@@ -333,7 +349,7 @@ pub enum Shrinkage {
 ///
 /// let mut lda = LDA::new(1)
 ///     .unwrap()
-///     .with_solver(Solver::SVD)
+///     .with_solver(DiscriminantSolver::SVD)
 ///     .with_shrinkage(Shrinkage::Manual(0.1))
 ///     .unwrap();
 /// lda.fit(&x, &y).unwrap();
@@ -345,8 +361,8 @@ pub struct LDA {
     /// Number of components to keep after dimensionality reduction. `None` means "auto":
     /// the maximum possible, `min(n_classes - 1, n_features)`, resolved at fit time
     n_components: Option<usize>,
-    /// Solver strategy for LDA computations
-    solver: Solver,
+    /// DiscriminantSolver strategy for LDA computations
+    solver: DiscriminantSolver,
     /// Optional shrinkage strategy for covariance estimation
     shrinkage: Option<Shrinkage>,
     /// Unique class labels from training data
@@ -355,6 +371,14 @@ pub struct LDA {
     priors: Option<Array1<f64>>,
     /// Mean vectors for each class
     means: Option<Array2<f64>>,
+    /// Mean of the whole training matrix, scikit-learn's `xbar_`. [`LDA::transform`] subtracts it
+    /// before projecting, which is what puts the projected coordinates on scikit-learn's scale
+    ///
+    /// Stored as the arithmetic row mean. That equals the prior-weighted average of the class
+    /// means (`priors . means`, which is how scikit-learn defines it) because the priors here are
+    /// always `n_class / n_samples`; a future `with_priors` builder would have to switch to the
+    /// weighted form
+    overall_mean: Option<Array1<f64>>,
     /// Projection matrix for dimensionality reduction
     projection: Option<Array2<f64>>,
     /// Per-class linear discriminant scoring coefficients (`Sigma^-1 * mu_c`), cached at fit
@@ -371,17 +395,18 @@ pub struct LDA {
 /// # Default Values
 ///
 /// - `n_components` - `None` (auto: `min(n_classes - 1, n_features)`, resolved at fit time)
-/// - `solver` - `Solver::SVD`
+/// - `solver` - `DiscriminantSolver::SVD`
 /// - `shrinkage` - `None`
 impl Default for LDA {
     fn default() -> Self {
         LDA {
             n_components: None,
-            solver: Solver::SVD,
+            solver: DiscriminantSolver::SVD,
             shrinkage: None,
             classes: None,
             priors: None,
             means: None,
+            overall_mean: None,
             projection: None,
             coefficients: None,
             intercepts: None,
@@ -406,7 +431,7 @@ impl LDA {
     ///
     /// # Notes
     ///
-    /// The solver defaults to `Solver::SVD` and no shrinkage is applied. Override either with
+    /// The solver defaults to `DiscriminantSolver::SVD` and no shrinkage is applied. Override either with
     /// the builder methods below (`with_shrinkage` returns `Result` because a manual shrinkage
     /// coefficient is validated):
     ///
@@ -422,18 +447,19 @@ impl LDA {
 
         Ok(Self {
             n_components: Some(n_components),
-            solver: Solver::SVD,
+            solver: DiscriminantSolver::SVD,
             shrinkage: None,
             classes: None,
             priors: None,
             means: None,
+            overall_mean: None,
             projection: None,
             coefficients: None,
             intercepts: None,
         })
     }
 
-    /// Sets the solver strategy for the LDA computation (default: `Solver::SVD`)
+    /// Sets the solver strategy for the LDA computation (default: `DiscriminantSolver::SVD`)
     ///
     /// # Parameters
     ///
@@ -442,7 +468,7 @@ impl LDA {
     /// # Returns
     ///
     /// - `Self` - the updated instance, for method chaining
-    pub fn with_solver(mut self, solver: Solver) -> Self {
+    pub fn with_solver(mut self, solver: DiscriminantSolver) -> Self {
         self.solver = solver;
         self
     }
@@ -475,11 +501,12 @@ impl LDA {
 
     // Getters
     get_field!(get_n_components, n_components, Option<usize>);
-    get_field!(get_solver, solver, Solver);
+    get_field!(get_solver, solver, DiscriminantSolver);
     get_field!(get_shrinkage, shrinkage, Option<Shrinkage>);
     get_field_as_ref!(get_classes, classes, Option<&Array1<i32>>);
     get_field_as_ref!(get_priors, priors, Option<&Array1<f64>>);
     get_field_as_ref!(get_means, means, Option<&Array2<f64>>);
+    get_field_as_ref!(get_overall_mean, overall_mean, Option<&Array1<f64>>);
     get_field_as_ref!(get_projection, projection, Option<&Array2<f64>>);
 
     /// Fits the LDA model using training data
@@ -689,8 +716,9 @@ impl LDA {
         }
 
         // Build the discriminant projection by solving S_b w = lambda * S_w w
-        let projection = Solver::project(&cov, &sb, n_components)?;
+        let projection = DiscriminantSolver::project(&cov, &sb, n_components)?;
         self.projection = Some(projection);
+        self.overall_mean = Some(overall_mean);
 
         // Cache the per-class linear-scoring parameters (Sigma^-1 * mu_c and the intercepts)
         {
@@ -1013,7 +1041,16 @@ impl LDA {
             progress_bar.set_message("Applying projection");
         }
 
-        let transformed = dot(x, projection);
+        // scikit-learn projects `(X - xbar_) @ scalings_`. The centering is materialized rather
+        // than folded into the product as `X W - xbar W`: the two are equal in real arithmetic but
+        // the folded form loses digits to cancellation whenever the data sits far from the origin
+        // relative to its spread, and matching scikit-learn numerically is the point here
+        let overall_mean = self
+            .overall_mean
+            .as_ref()
+            .ok_or_else(|| Error::not_fitted("LDA"))?;
+        let centered = x.to_owned() - overall_mean;
+        let transformed = dot(&centered, projection);
 
         #[cfg(feature = "show_progress")]
         {

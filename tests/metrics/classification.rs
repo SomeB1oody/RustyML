@@ -37,14 +37,58 @@ fn cm_new_mixed() {
     assert_eq!(cm.get_counts(), (3, 1, 2, 2));
 }
 
+/// Probabilities are rejected rather than binarized, like scikit-learn's `confusion_matrix`
 #[test]
-fn cm_new_thresholding_at_0_5() {
-    // Probabilities >= 0.5 are positive; y_true=[0.9,0.1,0.6,0.4], y_pred=[0.8,0.2,0.3,0.7]
-    // give TP=1, FP=1, TN=1, FN=1
+#[should_panic(expected = "must hold only 0 or 1")]
+fn cm_new_rejects_probabilities() {
     let y_true = array![0.9, 0.1, 0.6, 0.4];
     let y_pred = array![0.8, 0.2, 0.3, 0.7];
-    let cm = ConfusionMatrix::new(&y_true, &y_pred);
-    assert_eq!(cm.get_counts(), (1, 1, 1, 1));
+    let _ = ConfusionMatrix::new(&y_true, &y_pred);
+}
+
+/// `y_true` is never thresholded: a probabilistic ground truth is an error, not a coercion
+#[test]
+#[should_panic(expected = "y_true must hold only 0 or 1")]
+fn cm_new_rejects_soft_ground_truth() {
+    let y_true = array![0.9, 0.1, 1.0, 0.0];
+    let y_pred = array![1.0, 0.0, 1.0, 0.0];
+    let _ = ConfusionMatrix::new(&y_true, &y_pred);
+}
+
+/// A margin classifier's -1/+1 labels round-trip through `new_with_labels`
+#[test]
+fn cm_new_with_labels_handles_plus_minus_one() {
+    let y_true = array![1.0, 1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
+    let y_pred = array![1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0];
+    let cm = ConfusionMatrix::new_with_labels(&y_true, &y_pred, -1.0, 1.0);
+    assert_eq!(cm.get_counts(), (3, 1, 2, 2));
+}
+
+/// The two label values must differ
+#[test]
+#[should_panic(expected = "must differ")]
+fn cm_new_with_labels_rejects_equal_labels() {
+    let y_true = array![1.0, 0.0];
+    let y_pred = array![1.0, 0.0];
+    let _ = ConfusionMatrix::new_with_labels(&y_true, &y_pred, 1.0, 1.0);
+}
+
+/// `NaN` is rejected instead of being silently counted as negative
+#[test]
+#[should_panic(expected = "must hold only 0 or 1")]
+fn cm_new_rejects_nan() {
+    let y_true = array![1.0, 0.0];
+    let y_pred = array![f64::NAN, 0.0];
+    let _ = ConfusionMatrix::new(&y_true, &y_pred);
+}
+
+/// `y_true` and `y_pred` may now use different storage types
+#[test]
+fn cm_new_accepts_mixed_storage() {
+    let y_true = array![1.0, 0.0, 1.0, 0.0];
+    let y_pred = array![1.0, 0.0, 0.0, 0.0];
+    let cm = ConfusionMatrix::new(&y_true, &y_pred.view());
+    assert_eq!(cm.get_counts(), (1, 0, 2, 1));
 }
 
 // ConfusionMatrix derived metrics (tp=3, fp=1, tn=2, fn=2)
@@ -909,10 +953,13 @@ fn average_precision_empty_panics() {
 
 // roc_curve
 
+/// Matches `sklearn.metrics.roc_curve` element for element
+///
+/// Reference values from scikit-learn 1.9.0: `roc_curve([1,0,1,0], [0.9,0.6,0.4,0.1])` gives
+/// `fpr = [0, 0, 0.5, 0.5, 1]`, `tpr = [0, 0.5, 0.5, 1, 1]`,
+/// `thresholds = [inf, 0.9, 0.6, 0.4, 0.1]`
 #[test]
 fn roc_curve_specific_points() {
-    // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1] -> fpr=[0,0,0.5,0.5,1], tpr=[0,0.5,0.5,1,1],
-    // thresholds=[1.9,0.9,0.6,0.4,0.1] (origin point prepended)
     let labels = array![true, false, true, false];
     let scores = array![0.9, 0.6, 0.4, 0.1];
     let (fpr, tpr, thresholds) = roc_curve(&labels, &scores);
@@ -921,9 +968,10 @@ fn roc_curve_specific_points() {
     assert_eq!(tpr.len(), 5);
     assert_eq!(thresholds.len(), 5);
 
-    // Origin
+    // Origin: nothing classified positive, so the threshold is infinite as in scikit-learn
     assert_abs_diff_eq!(fpr[0], 0.0, epsilon = 1e-12);
     assert_abs_diff_eq!(tpr[0], 0.0, epsilon = 1e-12);
+    assert_eq!(thresholds[0], f64::INFINITY);
 
     // Point after threshold=0.9: 1 TP, 0 FP
     assert_abs_diff_eq!(fpr[1], 0.0, epsilon = 1e-12);
@@ -1004,10 +1052,14 @@ fn roc_curve_no_negative_panics() {
 
 // precision_recall_curve
 
+/// Matches `sklearn.metrics.precision_recall_curve` element for element
+///
+/// Reference values from scikit-learn 1.9.0:
+/// `precision_recall_curve([1,0,1,0], [0.9,0.6,0.4,0.1])` gives
+/// `precision = [0.5, 2/3, 0.5, 1, 1]`, `recall = [1, 1, 0.5, 0.5, 0]`,
+/// `thresholds = [0.1, 0.4, 0.6, 0.9]`
 #[test]
 fn precision_recall_curve_specific_points() {
-    // labels=[T,F,T,F], scores=[0.9,0.6,0.4,0.1] -> precision=[1,0.5,2/3,0.5,1(close)],
-    // recall=[0.5,0.5,1,1,0(close)], thresholds=[0.9,0.6,0.4,0.1]
     let labels = array![true, false, true, false];
     let scores = array![0.9, 0.6, 0.4, 0.1];
     let (precision, recall, thresholds) = precision_recall_curve(&labels, &scores);
@@ -1016,59 +1068,63 @@ fn precision_recall_curve_specific_points() {
     assert_eq!(precision.len(), recall.len());
     assert_eq!(thresholds.len(), precision.len() - 1);
 
-    // Closing point (last)
-    let last = precision.len() - 1;
-    assert_abs_diff_eq!(precision[last], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[last], 0.0, epsilon = 1e-12);
+    let expected_precision = [0.5, 2.0 / 3.0, 0.5, 1.0, 1.0];
+    let expected_recall = [1.0, 1.0, 0.5, 0.5, 0.0];
+    let expected_thresholds = [0.1, 0.4, 0.6, 0.9];
 
-    // Intermediate points
-    assert_abs_diff_eq!(precision[0], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[0], 0.5, epsilon = 1e-12);
-    assert_abs_diff_eq!(thresholds[0], 0.9, epsilon = 1e-12);
-
-    assert_abs_diff_eq!(precision[1], 0.5, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[1], 0.5, epsilon = 1e-12);
-    assert_abs_diff_eq!(thresholds[1], 0.6, epsilon = 1e-12);
-
-    assert_abs_diff_eq!(precision[2], 2.0 / 3.0, epsilon = 1e-9);
-    assert_abs_diff_eq!(recall[2], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(thresholds[2], 0.4, epsilon = 1e-12);
-
-    assert_abs_diff_eq!(precision[3], 0.5, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[3], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(thresholds[3], 0.1, epsilon = 1e-12);
+    for (i, &want) in expected_precision.iter().enumerate() {
+        assert_abs_diff_eq!(precision[i], want, epsilon = 1e-9);
+    }
+    for (i, &want) in expected_recall.iter().enumerate() {
+        assert_abs_diff_eq!(recall[i], want, epsilon = 1e-12);
+    }
+    for (i, &want) in expected_thresholds.iter().enumerate() {
+        assert_abs_diff_eq!(thresholds[i], want, epsilon = 1e-12);
+    }
 }
 
+/// Thresholds ascend and recall descends, as in scikit-learn
 #[test]
-fn precision_recall_curve_recall_nondecreasing_before_close() {
-    // Recall is non-decreasing across the curve (excluding the closing 0.0 point),
-    // since going from highest to lowest threshold accumulates tp
+fn precision_recall_curve_is_ordered_like_scikit_learn() {
     let labels = array![true, false, true, false];
     let scores = array![0.9, 0.6, 0.4, 0.1];
-    let (_, recall, _) = precision_recall_curve(&labels, &scores);
-    let n = recall.len();
-    // Last element is the closing 0.0 point (recall goes 0.5,0.5,1.0,1.0,0.0);
-    // check all points except the closing one are non-decreasing
-    for i in 0..n - 2 {
+    let (_, recall, thresholds) = precision_recall_curve(&labels, &scores);
+
+    for i in 0..thresholds.len() - 1 {
         assert!(
-            recall[i] <= recall[i + 1],
-            "recall not non-decreasing at i={}",
-            i
+            thresholds[i] <= thresholds[i + 1],
+            "thresholds not ascending at i={i}"
+        );
+    }
+    for i in 0..recall.len() - 1 {
+        assert!(
+            recall[i] >= recall[i + 1],
+            "recall not descending at i={i}, {} < {}",
+            recall[i],
+            recall[i + 1]
         );
     }
 }
 
+/// Matches scikit-learn when the positives separate cleanly from the negatives
+///
+/// Reference values from scikit-learn 1.9.0:
+/// `precision_recall_curve([1,1,0,0], [0.9,0.8,0.3,0.1])` gives
+/// `precision = [0.5, 2/3, 1, 1, 1]`, `recall = [1, 1, 1, 0.5, 0]`
 #[test]
 fn precision_recall_curve_perfect() {
-    // All positives scored above all negatives -> P=1.0 at recall=1.0 before close
-    // labels=[T,T,F,F], scores=[0.9,0.8,0.3,0.1]
     let labels = array![true, true, false, false];
     let scores = array![0.9, 0.8, 0.3, 0.1];
     let (precision, recall, _) = precision_recall_curve(&labels, &scores);
-    // First two points should have precision=1.0 (no FP yet)
-    assert_abs_diff_eq!(precision[0], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(precision[1], 1.0, epsilon = 1e-12);
-    assert_abs_diff_eq!(recall[1], 1.0, epsilon = 1e-12);
+
+    let expected_precision = [0.5, 2.0 / 3.0, 1.0, 1.0, 1.0];
+    let expected_recall = [1.0, 1.0, 1.0, 0.5, 0.0];
+    for (i, &want) in expected_precision.iter().enumerate() {
+        assert_abs_diff_eq!(precision[i], want, epsilon = 1e-9);
+    }
+    for (i, &want) in expected_recall.iter().enumerate() {
+        assert_abs_diff_eq!(recall[i], want, epsilon = 1e-12);
+    }
 }
 
 #[test]

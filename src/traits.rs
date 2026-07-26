@@ -360,7 +360,7 @@ mod machine_learning_impls {
     where
         S: Data<Elem = f64>,
     {
-        type Output = Array1<usize>;
+        type Output = Array1<isize>;
         fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
             self.predict(input)
         }
@@ -370,7 +370,7 @@ mod machine_learning_impls {
     where
         S: Data<Elem = f64> + Sync,
     {
-        type Output = Array1<usize>;
+        type Output = Array1<isize>;
         fn predict(&self, input: &'a ArrayBase<S, Ix2>) -> Result<Self::Output, Error> {
             self.predict(input)
         }
@@ -631,6 +631,7 @@ mod utils_impls {
 #[cfg(all(test, feature = "machine_learning"))]
 mod tests {
     use super::*;
+    use crate::machine_learning::linear_model::LeastSquaresSolver;
     use ndarray::{Array1, Array2};
 
     #[test]
@@ -639,7 +640,13 @@ mod tests {
         let x = Array2::from_shape_vec((3, 1), vec![1.0, 2.0, 3.0]).unwrap();
         let y = Array1::from_vec(vec![2.0, 4.0, 6.0]);
 
-        let mut model = LinearRegression::new(true, 0.05, 5000, 1e-9).unwrap();
+        let mut model = LinearRegression::new(true)
+            .with_solver(LeastSquaresSolver::GradientDescent {
+                learning_rate: 0.05,
+                max_iter: 5000,
+                tol: 1e-9,
+            })
+            .unwrap();
         Fit::fit(&mut model, (&x, &y)).unwrap();
         let preds = Predict::predict(&model, &x).unwrap();
 

@@ -16,33 +16,52 @@ use crate::{Deserialize, Serialize};
 use gemmkit_ndarray::Parallelism;
 use ndarray::{Array1, Array2, ArrayBase, Axis, Data, Ix1, Ix2};
 
-/// Optimization strategy used to fit [`LinearRegression`]
+/// Optimization strategy used to fit [`LinearRegression`], carrying that strategy's own settings
 ///
-/// [`GradientDescent`](Solver::GradientDescent) is the iterative default;
-/// [`Normal`](Solver::Normal) is the exact, hyperparameter-free closed form
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-pub enum Solver {
-    /// Iterative gradient descent (supports L1, L2, or no regularization)
-    GradientDescent,
-    /// Closed-form normal-equation / ridge solution via SVD least squares, supporting only no
-    /// regularization or L2 (L1 has no closed form)
+/// Each variant owns exactly the knobs it uses, so there is no way to hand a learning rate to the
+/// closed form or to leave one unset for the iterative path. Validate a variant by passing it to
+/// [`LinearRegression::with_solver`], which rejects an unusable configuration
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize, Serialize)]
+pub enum LeastSquaresSolver {
+    /// Closed-form normal-equation / ridge solution via SVD least squares
+    ///
+    /// The default, and the analogue of scikit-learn's `LinearRegression()`. Exact and
+    /// hyperparameter-free, but it supports only no regularization or L2 - L1 has no closed form
+    #[default]
     Normal,
+    /// Iterative gradient descent, supporting L1, L2, or no regularization
+    ///
+    /// The analogue of a scikit-learn iterative solver such as `Ridge(solver="sag")`. Needed for
+    /// L1, since [`Normal`](LeastSquaresSolver::Normal) cannot express it
+    GradientDescent {
+        /// Step size applied to each gradient update; must be positive and finite
+        learning_rate: f64,
+        /// Iteration cap; must be greater than 0
+        max_iter: usize,
+        /// Cost-change threshold below which the fit is treated as converged; must be positive
+        /// and finite
+        tol: f64,
+    },
 }
 
 /// Linear regression model implementation
 ///
 /// Trains a linear regression model using gradient descent. Supports multivariate regression, an
-/// optional intercept term, and adjustment of the learning rate, maximum iterations, and convergence
-/// tolerance
+/// optional intercept term. The iteration settings - learning rate, iteration cap, convergence
+/// tolerance - are carried by [`LeastSquaresSolver::GradientDescent`], the only strategy that uses them
 ///
 /// # Examples
 ///
 /// ```rust
 /// use rustyml::machine_learning::*;
+/// use rustyml::machine_learning::linear_model::LeastSquaresSolver;
 /// use ndarray::{Array1, Array2};
 ///
-/// // Create a linear regression model
-/// let mut model = LinearRegression::new(true, 0.01, 1000, 1e-6).unwrap();
+/// // Create a linear regression model. `LeastSquaresSolver::GradientDescent` carries the settings only it
+/// // uses; `LinearRegression::new(true)` alone would give the closed-form `LeastSquaresSolver::Normal`
+/// let mut model = LinearRegression::new(true)
+///     .with_solver(LeastSquaresSolver::GradientDescent { learning_rate: 0.01, max_iter: 1000, tol: 1e-6 })
+///     .unwrap();
 ///
 /// // Prepare training data
 /// let raw_x = vec![vec![1.0, 2.0], vec![2.0, 3.0], vec![3.0, 4.0]];
@@ -85,119 +104,118 @@ pub struct LinearRegression {
     intercept: Option<f64>,
     /// Whether to include an intercept term in the model
     fit_intercept: bool,
-    /// Learning rate for gradient descent
-    learning_rate: f64,
-    /// Maximum number of iterations for gradient descent
-    max_iter: usize,
-    /// Convergence tolerance
-    tol: f64,
     /// Number of iterations the algorithm ran for after fitting
     n_iter: Option<usize>,
     /// Regularization type and strength
     regularization_type: Option<RegularizationType>,
-    /// Optimization strategy (gradient descent or closed-form normal equation)
-    solver: Solver,
+    /// Optimization strategy, together with the settings that strategy uses
+    solver: LeastSquaresSolver,
 }
 
 impl Default for LinearRegression {
-    /// Creates a new LinearRegression instance with default parameter values
+    /// Creates a `LinearRegression` with default parameter values
     ///
     /// # Default Values
     ///
-    /// - `coefficients` - `None` - model coefficients are not initialized until training
-    /// - `intercept` - `None` - model intercept is not initialized until training
     /// - `fit_intercept` - `true` - include an intercept term in the linear model
-    /// - `learning_rate` - `0.01` - learning rate for gradient descent optimization
-    /// - `max_iter` - `1000` - maximum number of iterations for gradient descent
-    /// - `tol` - `1e-5` - convergence tolerance (0.00001) for stopping criteria
-    /// - `n_iter` - `None` - number of actual iterations performed (set after training)
+    /// - `solver` - [`LeastSquaresSolver::Normal`] - the exact closed-form least-squares solution
     /// - `regularization_type` - `None` - no regularization applied by default
-    /// - `solver` - [`Solver::GradientDescent`] - iterative gradient descent optimization
+    ///
+    /// Identical to [`LinearRegression::new(true)`](Self::new), so the two constructors always
+    /// agree on which algorithm they build
+    ///
+    /// # scikit-learn parity
+    ///
+    /// The analogue of Python's `LinearRegression()`, which is exact OLS - hence
+    /// [`LeastSquaresSolver::Normal`]
     ///
     /// # Returns
     ///
     /// - `LinearRegression` - a new instance with default parameters
     fn default() -> Self {
-        Self {
-            coefficients: None,
-            intercept: None,
-            fit_intercept: true,
-            learning_rate: 0.01,
-            max_iter: 1000,
-            tol: 1e-5,
-            n_iter: None,
-            regularization_type: None,
-            solver: Solver::GradientDescent,
-        }
+        Self::new(true)
     }
 }
 
 impl LinearRegression {
-    /// Creates a new linear regression model with custom parameters
+    /// Creates a linear regression model
     ///
-    /// Validates all input parameters to ensure they are within acceptable numerical ranges
-    /// before returning the model instance
+    /// The solver and any regularization are chosen afterwards through
+    /// [`with_solver`](Self::with_solver) and [`with_regularization`](Self::with_regularization).
+    /// Each solver carries its own settings, so there is nothing here to validate and no `Result`
+    /// to unwrap
     ///
     /// # Parameters
     ///
-    /// - `fit_intercept` - whether to calculate the intercept for this model
-    /// - `learning_rate` - the learning rate for gradient descent optimization
-    /// - `max_iterations` - maximum number of iterations for gradient descent
-    /// - `tolerance` - the tolerance for stopping criteria
+    /// - `fit_intercept` - whether to fit an intercept term
     ///
     /// # Returns
     ///
-    /// - `Result<Self, Error>` - a new instance of LinearRegression, or an error if parameters are invalid
+    /// - `Self` - a new instance using [`LeastSquaresSolver::Normal`] and no regularization
     ///
-    /// # Notes
+    /// # Examples
     ///
-    /// No regularization is applied by default. To add L1/L2 regularization, use the builder
-    /// method [`with_regularization`](Self::with_regularization), which returns `Result`
-    /// because the regularization alpha is validated
+    /// ```rust
+    /// use rustyml::machine_learning::linear_model::{LinearRegression, LeastSquaresSolver};
     ///
-    /// # Errors
+    /// // Exact OLS, the default
+    /// let ols = LinearRegression::new(true);
     ///
-    /// - `Error::InvalidParameter` - if learning_rate, max_iterations, or tolerance is invalid
-    pub fn new(
-        fit_intercept: bool,
-        learning_rate: f64,
-        max_iterations: usize,
-        tolerance: f64,
-    ) -> Result<Self, Error> {
-        // Input validation
-        validate_learning_rate(learning_rate)?;
-        validate_max_iterations(max_iterations)?;
-        validate_tolerance(tolerance)?;
-
-        Ok(LinearRegression {
+    /// // Gradient descent, which carries the settings only it uses
+    /// let gd = LinearRegression::new(true)
+    ///     .with_solver(LeastSquaresSolver::GradientDescent {
+    ///         learning_rate: 0.01,
+    ///         max_iter: 1000,
+    ///         tol: 1e-6,
+    ///     })
+    ///     .unwrap();
+    /// ```
+    pub fn new(fit_intercept: bool) -> Self {
+        LinearRegression {
             coefficients: None,
             intercept: None,
             fit_intercept,
-            learning_rate,
-            max_iter: max_iterations,
-            tol: tolerance,
             n_iter: None,
             regularization_type: None,
-            solver: Solver::GradientDescent,
-        })
+            solver: LeastSquaresSolver::Normal,
+        }
     }
 
-    /// Selects the optimization strategy (default: [`Solver::GradientDescent`])
+    /// Selects the optimization strategy (default: [`LeastSquaresSolver::Normal`])
     ///
-    /// [`Solver::Normal`] computes the exact closed-form normal-equation (ridge) solution and
-    /// ignores the learning rate, iteration count, and tolerance. It supports only no
-    /// regularization or L2; pairing it with L1 makes [`fit`](Self::fit) return an error
+    /// The variant carries its own settings, so a [`LeastSquaresSolver::GradientDescent`] is configured in the
+    /// same expression that selects it, and [`LeastSquaresSolver::Normal`] has nothing to configure. Those
+    /// settings are validated here, which is why this returns `Result` while the other builders on
+    /// this type do not
+    ///
+    /// [`LeastSquaresSolver::Normal`] supports only no regularization or L2; pairing it with L1 makes
+    /// [`fit`](Self::fit) return an error, since L1 has no closed form
     ///
     /// # Parameters
     ///
-    /// - `solver` - the optimization strategy to use
+    /// - `solver` - the optimization strategy, with its settings
     ///
     /// # Returns
     ///
-    /// - `Self` - the updated instance, for method chaining
-    pub fn with_solver(mut self, solver: Solver) -> Self {
+    /// - `Result<Self, Error>` - the updated instance, for method chaining
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidParameter`] - If a [`LeastSquaresSolver::GradientDescent`] carries a non-positive or
+    ///   non-finite `learning_rate` or `tol`, or a `max_iter` of 0
+    pub fn with_solver(mut self, solver: LeastSquaresSolver) -> Result<Self, Error> {
+        if let LeastSquaresSolver::GradientDescent {
+            learning_rate,
+            max_iter,
+            tol,
+        } = solver
+        {
+            validate_learning_rate(learning_rate)?;
+            validate_max_iterations(max_iter)?;
+            validate_tolerance(tol)?;
+        }
         self.solver = solver;
-        self
+        Ok(self)
     }
 
     /// Enables L1 or L2 regularization to prevent overfitting (default: no regularization)
@@ -223,9 +241,6 @@ impl LinearRegression {
     }
 
     get_field!(get_fit_intercept, fit_intercept, bool);
-    get_field!(get_learning_rate, learning_rate, f64);
-    get_field!(get_tolerance, tol, f64);
-    get_field!(get_max_iterations, max_iter, usize);
     get_field!(get_actual_iterations, n_iter, Option<usize>);
     get_field!(
         get_regularization_type,
@@ -234,13 +249,13 @@ impl LinearRegression {
     );
     get_field_as_ref!(get_coefficients, coefficients, Option<&Array1<f64>>);
     get_field!(get_intercept, intercept, Option<f64>);
-    get_field!(get_solver, solver, Solver);
+    get_field!(get_solver, solver, LeastSquaresSolver);
 
-    /// Fits the linear regression model using the configured [`Solver`]
+    /// Fits the linear regression model using the configured [`LeastSquaresSolver`]
     ///
-    /// With [`Solver::GradientDescent`] (the default), iteratively updates the coefficients and
+    /// With [`LeastSquaresSolver::GradientDescent`] (the default), iteratively updates the coefficients and
     /// intercept to minimize the cost function, with early stopping once convergence is reached;
-    /// with [`Solver::Normal`], delegates to the closed-form ridge solution instead
+    /// with [`LeastSquaresSolver::Normal`], delegates to the closed-form ridge solution instead
     ///
     /// # Parameters
     ///
@@ -273,10 +288,15 @@ impl LinearRegression {
     {
         preliminary_check(x, Some(y.len()))?;
 
-        // Closed-form path
-        if self.solver == Solver::Normal {
+        // Closed-form path; the iterative one below unpacks its own settings
+        let LeastSquaresSolver::GradientDescent {
+            learning_rate,
+            max_iter,
+            tol,
+        } = self.solver
+        else {
             return self.fit_normal(x, y);
-        }
+        };
 
         let n_samples = x.nrows();
         let n_features = x.ncols();
@@ -298,7 +318,7 @@ impl LinearRegression {
         #[cfg(feature = "show_progress")]
         let progress_bar = {
             let pb = crate::create_progress_bar(
-                self.max_iter as u64,
+                max_iter as u64,
                 "[{elapsed_precise}] {bar:40} {pos}/{len} | Cost: {msg}",
             );
             pb.set_message(format!(
@@ -310,7 +330,7 @@ impl LinearRegression {
         };
 
         // Gradient descent iterations
-        while n_iter < self.max_iter {
+        while n_iter < max_iter {
             n_iter += 1;
 
             // Vectorized prediction
@@ -388,18 +408,13 @@ impl LinearRegression {
             }
 
             // Add regularization terms to gradients
+            //
+            // L1 is deliberately absent here: it is applied after the step by the proximal
+            // operator below. Folding `alpha * sign(w)` into the gradient only lets a weight
+            // approach zero asymptotically, so a sub-gradient "Lasso" never delivers the exact
+            // zeros that make L1 a feature selector
             match &self.regularization_type {
-                None => {}
-                Some(RegularizationType::L1(alpha)) => {
-                    let alpha_val = *alpha;
-                    // L1 sub-gradient
-                    weight_gradients
-                        .iter_mut()
-                        .zip(weights.iter())
-                        .for_each(|(grad, w)| {
-                            *grad += alpha_val * w.signum();
-                        });
-                }
+                None | Some(RegularizationType::L1(_)) => {}
                 Some(RegularizationType::L2(alpha)) => {
                     // d/dw [(alpha/2) * ||w||^2] = alpha * w, matching the cost term above
                     weight_gradients.scaled_add(*alpha, &weights);
@@ -407,9 +422,26 @@ impl LinearRegression {
             }
 
             // Update parameters
-            weights.scaled_add(-self.learning_rate, &weight_gradients);
+            weights.scaled_add(-learning_rate, &weight_gradients);
             if self.fit_intercept {
-                intercept -= self.learning_rate * intercept_gradient;
+                intercept -= learning_rate * intercept_gradient;
+            }
+
+            // Proximal step for L1 (ISTA): soft-thresholding by `learning_rate * alpha` is the
+            // exact minimizer of `0.5 * ||w - v||^2 + learning_rate * alpha * ||w||_1`, so a
+            // weight the data cannot justify lands on exactly 0.0 and stays there. The intercept
+            // is left alone, since it carries no penalty
+            if let Some(RegularizationType::L1(alpha)) = &self.regularization_type {
+                let shrink = learning_rate * alpha;
+                weights.mapv_inplace(|w| {
+                    if w > shrink {
+                        w - shrink
+                    } else if w < -shrink {
+                        w + shrink
+                    } else {
+                        0.0
+                    }
+                });
             }
 
             if weights.iter().any(|&val| !val.is_finite()) || !intercept.is_finite() {
@@ -420,7 +452,7 @@ impl LinearRegression {
 
             // Require several consecutive small cost changes before declaring convergence
             let cost_change = (prev_cost - cost).abs();
-            if cost_change < self.tol {
+            if cost_change < tol {
                 convergence_count += 1;
                 if convergence_count >= CONVERGENCE_THRESHOLD {
                     break;
@@ -433,7 +465,7 @@ impl LinearRegression {
         }
 
         #[cfg(feature = "show_progress")]
-        let convergence_status = if n_iter < self.max_iter {
+        let convergence_status = if n_iter < max_iter {
             "Converged"
         } else {
             "Max iterations"
@@ -479,7 +511,7 @@ impl LinearRegression {
             Some(RegularizationType::L1(_)) => {
                 return Err(Error::invalid_input(
                     "the Normal solver does not support L1 regularization (no closed form); \
-                     use Solver::GradientDescent",
+                     use LeastSquaresSolver::GradientDescent",
                 ));
             }
         };
