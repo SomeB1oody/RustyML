@@ -231,8 +231,10 @@ impl SeparableConv2D {
         depth_multiplier: usize,
         random_state: Option<u64>,
     ) -> (Array4<f32>, Array4<f32>) {
-        // Xavier init for the depthwise weights
-        let depthwise_fan_in = kernel_size.0 * kernel_size.1;
+        // Xavier init for the depthwise weights. Keras' `compute_fans` derives both fans from the
+        // kernel tensor's last two axes, so the [kh, kw, channels, dm] depthwise kernel counts
+        // `channels` in its fan_in even though a depthwise unit sees a single channel
+        let depthwise_fan_in = channels * kernel_size.0 * kernel_size.1;
         let depthwise_fan_out = depth_multiplier * kernel_size.0 * kernel_size.1;
         let depthwise_bound = (6.0 / (depthwise_fan_in + depthwise_fan_out) as f32).sqrt();
 

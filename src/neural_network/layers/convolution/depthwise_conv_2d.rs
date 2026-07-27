@@ -254,10 +254,13 @@ impl DepthwiseConv2D {
         random_state: Option<u64>,
     ) -> Array4<f32> {
         let (kernel_height, kernel_width) = kernel_size;
-        // A depthwise kernel sees 1 input channel and emits `depth_multiplier` of them, so the
-        // fans count only the taps - unlike a dense convolution, they do not scale with `channels`
-        let fan_in = kernel_height * kernel_width;
-        let fan_out = kernel_height * kernel_width * depth_multiplier;
+        // Keras' `compute_fans` reads the kernel tensor's last two axes and knows nothing about
+        // the layer's semantics: with shape [kh, kw, channels, depth_multiplier] the receptive
+        // field is `kh * kw`, so `fan_in = channels * kh * kw` and `fan_out = dm * kh * kw`. A
+        // depthwise unit really does see only 1 input channel, but counting the fans that way
+        // gives a bound ~sqrt(channels) too wide and puts this layer at odds with `Conv2D`
+        let fan_in = channels * kernel_height * kernel_width;
+        let fan_out = depth_multiplier * kernel_height * kernel_width;
         let weight_bound = (6.0 / (fan_in + fan_out) as f32).sqrt();
         let mut rng = crate::random::make_rng(random_state);
         Array4::random_using(
