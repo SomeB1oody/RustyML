@@ -294,8 +294,8 @@ fn spatial_dropout_backward_before_forward_reports_concrete_layer_name() {
 #[test]
 fn dropout_forward_rejects_shape_mismatch() {
     let mut layer = Dropout::new(0.5, vec![2, 4]).unwrap();
-    // input has wrong first dim
-    let input = Array::ones((3, 4)).into_dyn();
+    // input has wrong feature dim
+    let input = Array::ones((2, 5)).into_dyn();
     let err = layer.forward(&input).unwrap_err();
     assert!(
         matches!(err, Error::ShapeMismatch { .. }),
@@ -304,10 +304,28 @@ fn dropout_forward_rejects_shape_mismatch() {
     );
 }
 
+/// Varying the batch size is allowed on both paths: the declared shape's leading axis is set at
+/// construction from the whole dataset, so enforcing it would reject every mini-batch
+#[test]
+fn dropout_accepts_any_batch_size() {
+    let mut layer = Dropout::new(0.5, vec![8, 4]).unwrap();
+    for batch in [1usize, 3, 8, 16] {
+        let input = Array::ones((batch, 4)).into_dyn();
+        let out = layer
+            .forward(&input)
+            .unwrap_or_else(|e| panic!("forward rejected batch {batch}: {e:?}"));
+        assert_eq!(out.shape(), &[batch, 4]);
+        let out = layer
+            .predict(&input)
+            .unwrap_or_else(|e| panic!("predict rejected batch {batch}: {e:?}"));
+        assert_eq!(out.shape(), &[batch, 4]);
+    }
+}
+
 #[test]
 fn dropout_predict_rejects_shape_mismatch() {
     let layer = Dropout::new(0.5, vec![2, 4]).unwrap();
-    let input = Array::ones((3, 4)).into_dyn();
+    let input = Array::ones((2, 5)).into_dyn();
     let err = layer.predict(&input).unwrap_err();
     assert!(
         matches!(err, Error::ShapeMismatch { .. }),

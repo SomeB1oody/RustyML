@@ -206,10 +206,14 @@ pub trait Layer: std::any::Any + Send + Sync {
 ///   [`MeanAbsoluteError`](crate::neural_network::losses::MeanAbsoluteError) and
 ///   [`BinaryCrossEntropy`](crate::neural_network::losses::BinaryCrossEntropy) average over
 ///   **every element** (`y.len()`), treating each output as an independent target
-/// - [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy) and
-///   [`SparseCategoricalCrossEntropy`](crate::neural_network::losses::SparseCategoricalCrossEntropy)
-///   sum over the class axis and average over the **batch** (`y.shape()[0]`), matching the standard
-///   per-sample categorical cross-entropy
+/// - [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy) sums over
+///   the trailing **class** axis and averages over every **prediction site** - the product of all
+///   leading axes. For a `[batch, classes]` target that divisor is the batch, and for the
+///   `[batch, height, width, classes]` output of a channels-last softmax conv head it is
+///   `batch * height * width`, one site per pixel
+/// - [`SparseCategoricalCrossEntropy`](crate::neural_network::losses::SparseCategoricalCrossEntropy)
+///   is the same per-sample categorical cross-entropy, but accepts only rank-2
+///   `[batch, classes]` predictions, so its divisor is always the batch
 pub trait Loss {
     /// Computes the loss between true and predicted values
     ///

@@ -42,11 +42,21 @@ use crate::neural_network::traits::Loss;
 /// let gradient = loss_fn.compute_grad(&y_true, &y_pred).unwrap();
 /// println!("Gradient shape: {:?}", gradient.shape());
 /// ```
+///
+/// # Input rank
+///
+/// The **last** axis is the class axis; every axis before it indexes an independent prediction
+/// site. So `[batch, classes]` is one prediction per sample, while the `[batch, height, width,
+/// classes]` output of a channels-last `Conv2D` softmax head is one prediction per pixel. The
+/// loss sums over the class axis and divides by the total number of sites (`batch * height *
+/// width`), which is what Keras' default `sum_over_batch_size` reduction computes; under
+/// `from_logits` the softmax likewise normalizes within a site and never across sites
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CategoricalCrossEntropy {
     /// When `true`, `y_pred` is treated as raw logits: the loss applies a numerically stable
-    /// log-softmax internally and `compute_grad` returns the fused `(softmax(z) - y) / batch`
-    /// gradient. When `false` (default), `y_pred` must already be a probability distribution
+    /// log-softmax over the class axis and `compute_grad` returns the fused
+    /// `(softmax(z) - y) / prediction_sites` gradient. When `false` (default), `y_pred` must
+    /// already be a probability distribution along its last axis
     from_logits: bool,
 }
 
@@ -68,19 +78,28 @@ impl CategoricalCrossEntropy {
     }
 }
 
-/// Flattens a `[batch, ...]` tensor's trailing axes into `[batch, classes]` for the logits path
-fn batch_and_classes(t: &Tensor) -> (usize, usize) {
-    let batch = t.shape()[0];
-    let classes: usize = t.shape()[1..].iter().product();
-    (batch, classes)
+/// Splits a `[..., classes]` tensor into `(prediction_sites, classes)`: the product of every
+/// leading axis, and the length of the trailing class axis
+///
+/// The class axis is the **last** one, and it is the only axis the softmax normalizer and the
+/// one-hot sum may run over. Every leading axis - the batch, plus any spatial or temporal
+/// positions - indexes an *independent* prediction site, so each contributes to the divisor
+/// rather than to the class dimension. This is Keras' rule: reduce the last axis, then divide by
+/// the element count of what remains (`sum_over_batch_size`, whose divisor is
+/// `prod(shape(values))` after the class axis is gone)
+fn leading_and_classes(t: &Tensor) -> (usize, usize) {
+    let ndim = t.ndim();
+    let classes = t.shape()[ndim - 1];
+    let sites: usize = t.shape()[..ndim - 1].iter().product();
+    (sites, classes)
 }
 
 /// Validates that one-hot targets and predictions are non-empty, at least 2D, and shape-compatible
 ///
-/// Categorical cross entropy is an elementwise product reduced over the batch, so the two tensors
-/// must share the same shape, and the batch axis must be non-empty (it is the divisor). The input
-/// must be at least 2D `[batch, classes]`: with a 1D tensor, `shape()[0]` would be the total
-/// element count rather than the batch size, which silently rescales the loss and its gradient
+/// The two tensors must share the same shape, and the input must be at least 2D so that a class
+/// axis and at least one prediction-site axis both exist. With a 1D tensor there would be no
+/// leading axis at all, leaving a divisor of 1 and a softmax over the only axis present - a
+/// single prediction dressed up as a batch
 fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
     if y_true.is_empty() {
         return Err(Error::empty_input(
@@ -99,16 +118,17 @@ fn validate_shapes(y_true: &Tensor, y_pred: &Tensor) -> Result<(), Error> {
 impl Loss for CategoricalCrossEntropy {
     fn compute_loss(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<f32, Error> {
         validate_shapes(y_true, y_pred)?;
-        let n = y_true.shape()[0] as f32;
+        let (sites, classes) = leading_and_classes(y_pred);
+        let n = sites as f32;
 
         if self.from_logits {
-            // Fused softmax-cross-entropy
-            let (b, c) = batch_and_classes(y_pred);
+            // Fused softmax-cross-entropy. The reshape merges only the *leading* axes, so the
+            // softmax below normalizes within one prediction site and never across sites
             let logits = y_pred
-                .to_shape((b, c))
+                .to_shape((sites, classes))
                 .map_err(|e| Error::computation(format!("CCE logits reshape failed: {e}")))?;
             let labels = y_true
-                .to_shape((b, c))
+                .to_shape((sites, classes))
                 .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
             let (log_sm, _) = stable_log_softmax_softmax(&logits.view());
             return Ok(-(&labels * &log_sm).sum() / n);
@@ -122,16 +142,16 @@ impl Loss for CategoricalCrossEntropy {
 
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
         validate_shapes(y_true, y_pred)?;
-        let n = y_true.shape()[0] as f32;
+        let (sites, classes) = leading_and_classes(y_pred);
+        let n = sites as f32;
 
         if self.from_logits {
-            // Fused gradient w.r.t. the logits
-            let (b, c) = batch_and_classes(y_pred);
+            // Fused gradient w.r.t. the logits, per prediction site (see `compute_loss`)
             let logits = y_pred
-                .to_shape((b, c))
+                .to_shape((sites, classes))
                 .map_err(|e| Error::computation(format!("CCE logits reshape failed: {e}")))?;
             let labels = y_true
-                .to_shape((b, c))
+                .to_shape((sites, classes))
                 .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
             let (_, sm) = stable_log_softmax_softmax(&logits.view());
             let grad2d = (&sm - &labels) / n;

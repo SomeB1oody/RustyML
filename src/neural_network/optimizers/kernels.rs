@@ -152,6 +152,20 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 /// param -= lr * (m / (1-beta1^t)) / (sqrt(v / (1-beta2^t)) + epsilon)
 /// ```
 ///
+/// # Epsilon placement
+///
+/// Unlike [`rmsprop_step`] and [`adagrad_step`], `epsilon` here goes **outside** the square root,
+/// and it is compared against the *bias-corrected* `v`. That is deliberate and matches both
+/// Keras' `Adam` and PyTorch's, as well as Algorithm 1 of Kingma & Ba - Keras is internally
+/// inconsistent on this point, placing epsilon inside the root only in `RMSprop`/`Adagrad`, so
+/// do not "unify" the three kernels here
+///
+/// One residual difference from Keras, deliberately not matched: Keras folds bias correction
+/// into a scalar `alpha = lr*sqrt(1-beta2^t)/(1-beta1^t)` and divides by `sqrt(v) + epsilon`
+/// using the *raw* `v`, which makes its effective epsilon `epsilon/sqrt(1-beta2^t)` - about
+/// 31.6x larger at `t = 1` with `beta2 = 0.999`, decaying to 1x as training proceeds. This
+/// crate follows PyTorch's form, where epsilon means the same thing at every timestep
+///
 /// # Parameters
 ///
 /// - `param` - the parameter slice to update in place
@@ -161,7 +175,7 @@ pub fn l2_regularized_grad(grad: &[f32], param: &[f32], weight_decay: f32) -> Ve
 /// - `lr` - the learning rate
 /// - `beta1` - the first-moment decay rate
 /// - `beta2` - the second-moment decay rate
-/// - `epsilon` - the denominator stabilizer
+/// - `epsilon` - the denominator stabilizer, on the gradient scale (added after the root)
 /// - `t` - the 1-based timestep used for bias correction
 #[allow(clippy::too_many_arguments)]
 pub fn adam_step(
@@ -209,8 +223,21 @@ pub fn adam_step(
 ///
 /// ```text
 /// cache = rho*cache + (1-rho)*g^2
-/// param -= lr * g / (sqrt(cache) + epsilon)
+/// param -= lr * g / sqrt(cache + epsilon)
 /// ```
+///
+/// # Epsilon placement
+///
+/// `epsilon` goes **inside** the square root, matching Keras
+/// (`denominator = velocity + epsilon; increment = lr * grad / sqrt(denominator)`). PyTorch
+/// instead adds it after the root, and so does this crate's [`adam_step`] - because Keras' own
+/// `Adam` does too, which is an inconsistency inside Keras rather than one here
+///
+/// The placement is not cosmetic, because it changes what `epsilon` is *measured in*: `cache`
+/// carries units of gradient-squared, so an epsilon added inside the root lives on the `g^2`
+/// scale while one added outside lives on the `g` scale. The two correspond roughly as
+/// `eps_inside = eps_outside^2`, so a value ported across the two forms is off by orders of
+/// magnitude. Keras' default of `1e-7` here is equivalent to `3.2e-4` in the outside form
 ///
 /// # Parameters
 ///
@@ -219,7 +246,7 @@ pub fn adam_step(
 /// - `cache` - the running average of squared gradients, updated in place
 /// - `rho` - the decay rate for the squared-gradient average
 /// - `lr` - the learning rate
-/// - `epsilon` - the denominator stabilizer
+/// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
 pub fn rmsprop_step(
     param: &mut [f32],
     grad: &[f32],
@@ -230,7 +257,7 @@ pub fn rmsprop_step(
 ) {
     let step = |p: &mut f32, g: f32, c: &mut f32| {
         *c = rho * *c + (1.0 - rho) * g * g;
-        *p -= lr * g / (c.sqrt() + epsilon);
+        *p -= lr * g / (*c + epsilon).sqrt();
     };
 
     if param.len() >= fused_slice_parallel_threshold() {
@@ -250,8 +277,15 @@ pub fn rmsprop_step(
 ///
 /// ```text
 /// accumulator += g^2
-/// param -= lr * g / (sqrt(accumulator) + epsilon)
+/// param -= lr * g / sqrt(accumulator + epsilon)
 /// ```
+///
+/// # Epsilon placement
+///
+/// `epsilon` goes **inside** the square root, matching Keras
+/// (`lr * gradient / sqrt(accumulator + epsilon)`). See [`rmsprop_step`] for why the placement
+/// changes the scale `epsilon` is measured on, and why a value cannot be ported between the two
+/// forms unchanged
 ///
 /// # Parameters
 ///
@@ -259,7 +293,7 @@ pub fn rmsprop_step(
 /// - `grad` - the gradient slice
 /// - `accumulator` - the running sum of squared gradients, updated in place
 /// - `lr` - the learning rate
-/// - `epsilon` - the denominator stabilizer
+/// - `epsilon` - the denominator stabilizer, on the squared-gradient scale
 pub fn adagrad_step(
     param: &mut [f32],
     grad: &[f32],
@@ -269,7 +303,7 @@ pub fn adagrad_step(
 ) {
     let step = |p: &mut f32, g: f32, a: &mut f32| {
         *a += g * g;
-        *p -= lr * g / (a.sqrt() + epsilon);
+        *p -= lr * g / (*a + epsilon).sqrt();
     };
 
     if param.len() >= fused_slice_parallel_threshold() {
@@ -476,7 +510,7 @@ mod tests {
         let expected_cache = 0.1_f32;
         assert_abs_diff_eq!(cache[0], expected_cache, epsilon = 1e-7);
 
-        let expected_param = 2.0_f32 - 0.01_f32 / (0.1_f32.sqrt() + 1e-8_f32);
+        let expected_param = 2.0_f32 - 0.01_f32 / (0.1_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
@@ -492,14 +526,14 @@ mod tests {
         // elem 0
         let expected_cache0 = 0.1_f32;
         assert_abs_diff_eq!(cache[0], expected_cache0, epsilon = 1e-7);
-        let expected_p0 = 2.0_f32 - 0.01_f32 / (0.1_f32.sqrt() + 1e-8_f32);
+        let expected_p0 = 2.0_f32 - 0.01_f32 / (0.1_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_p0, epsilon = 1e-6);
 
         // elem 1: cache = 0.1 * 0.25 = 0.025
         let expected_cache1 = 0.025_f32;
         assert_abs_diff_eq!(cache[1], expected_cache1, epsilon = 1e-7);
-        // grad is -0.5, so param -= lr * (-0.5) / (sqrt(0.025)+eps) => param increases
-        let expected_p1 = 3.0_f32 - 0.01_f32 * (-0.5_f32) / (0.025_f32.sqrt() + 1e-8_f32);
+        // grad is -0.5, so param -= lr * (-0.5) / sqrt(0.025+eps) => param increases
+        let expected_p1 = 3.0_f32 - 0.01_f32 * (-0.5_f32) / (0.025_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[1], expected_p1, epsilon = 1e-6);
     }
 
@@ -515,7 +549,7 @@ mod tests {
         let expected_cache = 0.9_f32 * 0.5 + 0.1_f32 * 4.0;
         assert_abs_diff_eq!(cache[0], expected_cache, epsilon = 1e-6);
 
-        let expected_param = 1.0_f32 - 0.01_f32 * 2.0_f32 / (expected_cache.sqrt() + 1e-8_f32);
+        let expected_param = 1.0_f32 - 0.01_f32 * 2.0_f32 / (expected_cache + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
@@ -533,7 +567,7 @@ mod tests {
         let expected_acc = 4.0_f32;
         assert_abs_diff_eq!(acc[0], expected_acc, epsilon = 1e-7);
 
-        let expected_param = 3.0_f32 - 0.01_f32 * 2.0_f32 / (4.0_f32.sqrt() + 1e-8_f32);
+        let expected_param = 3.0_f32 - 0.01_f32 * 2.0_f32 / (4.0_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
@@ -553,7 +587,7 @@ mod tests {
         assert_abs_diff_eq!(acc[0], 8.0_f32, epsilon = 1e-6);
 
         // second update uses sqrt(8)
-        let expected_param = param_after_step1 - 0.01_f32 * 2.0_f32 / (8.0_f32.sqrt() + 1e-8_f32);
+        let expected_param = param_after_step1 - 0.01_f32 * 2.0_f32 / (8.0_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
 
@@ -569,8 +603,8 @@ mod tests {
         // accumulator += (-0.5)^2 = 0.25
         assert_abs_diff_eq!(acc[0], 0.25_f32, epsilon = 1e-7);
 
-        // param -= 0.01*(-0.5)/(sqrt(0.25)+1e-8) => param increases
-        let expected_param = 1.0_f32 - 0.01_f32 * (-0.5_f32) / (0.25_f32.sqrt() + 1e-8_f32);
+        // param -= 0.01*(-0.5)/sqrt(0.25+1e-8) => param increases
+        let expected_param = 1.0_f32 - 0.01_f32 * (-0.5_f32) / (0.25_f32 + 1e-8_f32).sqrt();
         assert_abs_diff_eq!(param[0], expected_param, epsilon = 1e-6);
     }
     // Parallel-path coverage (>=1024 elements) for adam/rmsprop/adagrad: length fused_slice_parallel_threshold() forces the rayon branch
@@ -616,7 +650,7 @@ mod tests {
 
         rmsprop_step(&mut param, &grad, &mut cache, 0.9, 0.01, 1e-8);
 
-        let expected_param = 2.0_f32 - 0.01_f32 / (0.1_f32.sqrt() + 1e-8_f32);
+        let expected_param = 2.0_f32 - 0.01_f32 / (0.1_f32 + 1e-8_f32).sqrt();
         for i in 0..n {
             assert!(
                 (cache[i] - 0.1_f32).abs() <= 1e-7,
@@ -641,7 +675,7 @@ mod tests {
 
         adagrad_step(&mut param, &grad, &mut acc, 0.01, 1e-8);
 
-        let expected_param = 3.0_f32 - 0.01_f32 * 2.0_f32 / (4.0_f32.sqrt() + 1e-8_f32);
+        let expected_param = 3.0_f32 - 0.01_f32 * 2.0_f32 / (4.0_f32 + 1e-8_f32).sqrt();
         for i in 0..n {
             assert!(
                 (acc[i] - 4.0_f32).abs() <= 1e-7,

@@ -70,18 +70,30 @@ fn bn_constructor_accepts_boundary_momentum_values() {
 
 // Shape mismatch on forward
 
-/// BatchNormalization forward returns Err(ShapeMismatch) when input shape differs
+/// BatchNormalization forward returns Err(ShapeMismatch) when the feature axis differs
 /// from the declared [4, 3]
 #[test]
 fn bn_forward_rejects_wrong_input_shape() {
     let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
-    let wrong = tensor2(vec![1.0f32; 6], 2, 3);
+    let wrong = tensor2(vec![1.0f32; 8], 4, 2);
     let result = bn.forward(&wrong);
     assert!(
         matches!(result, Err(Error::ShapeMismatch { .. })),
         "expected ShapeMismatch, got {:?}",
         result
     );
+}
+
+/// A batch size different from the declared one is accepted: the declared shape's leading axis
+/// is not a property of the layer, and enforcing it would reject every mini-batch
+#[test]
+fn bn_forward_accepts_different_batch_size() {
+    let mut bn = BatchNormalization::new(vec![4, 3], 0.9, 1e-5).unwrap();
+    let smaller = tensor2(vec![1.0f32; 6], 2, 3);
+    let out = bn
+        .forward(&smaller)
+        .expect("a smaller batch must be accepted");
+    assert_eq!(out.shape(), &[2, 3]);
 }
 
 // Training-mode forward: output has batch-mean ~= 0 and batch-var ~= 1
@@ -673,11 +685,11 @@ fn ln_set_weights_rejects_wrong_gamma_shape() {
 
 // Shape-mismatch on LN forward
 
-/// LN forward rejects input whose shape ([3, 4]) differs from the declared [2, 4]
+/// LN forward rejects input whose feature axis ([2, 5]) differs from the declared [2, 4]
 #[test]
 fn ln_forward_rejects_wrong_input_shape() {
     let mut ln = LayerNormalization::new(vec![2, 4], 1e-5).unwrap();
-    let wrong = tensor2(vec![1.0f32; 12], 3, 4);
+    let wrong = tensor2(vec![1.0f32; 10], 2, 5);
     let result = ln.forward(&wrong);
     assert!(
         matches!(result, Err(Error::ShapeMismatch { .. })),

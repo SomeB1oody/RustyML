@@ -24,13 +24,35 @@ pub(super) fn validate_rate_exclusive(rate: f32, param_name: &str) -> Result<(),
     Ok(())
 }
 
-/// Validates that input shape matches expected shape
+/// Validates that an input's shape matches the declared one, **ignoring the batch axis**
+///
+/// The declared `expected_shape` includes a leading batch size (it is Keras' `batch_shape`, not
+/// its `input_shape`), but that axis is not a property of the layer: it varies with whoever calls
+/// `forward`. [`fit_with_batches`](crate::neural_network::sequential::Sequential::fit_with_batches)
+/// feeds `batch_size` rows per step plus a shorter final chunk when the dataset does not divide
+/// evenly, and `predict` may be handed any number of samples at all. Comparing axis 0 therefore
+/// rejected every batch whose size differed from the one named at construction - which, since the
+/// declared size is normally the *whole* dataset, meant every mini-batch. Only the rank and the
+/// per-sample axes are checked here
+///
+/// An empty `expected_shape` disables the check entirely
 pub(super) fn validate_input_shape(
     input_shape: &[usize],
     expected_shape: &[usize],
 ) -> Result<(), Error> {
-    if !expected_shape.is_empty() && input_shape != expected_shape {
+    if expected_shape.is_empty() {
+        return Ok(());
+    }
+    if input_shape.len() != expected_shape.len() {
         return Err(Error::shape_mismatch(expected_shape, input_shape));
+    }
+    if input_shape[1..] != expected_shape[1..] {
+        // Substitute the actual batch size into the reported expectation, so the printed
+        // difference is exactly the axes that really disagree rather than a declared batch
+        // size that is no longer enforced
+        let mut reported = expected_shape.to_vec();
+        reported[0] = input_shape[0];
+        return Err(Error::shape_mismatch(reported, input_shape));
     }
     Ok(())
 }
