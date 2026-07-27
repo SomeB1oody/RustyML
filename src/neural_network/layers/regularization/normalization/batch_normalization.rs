@@ -50,7 +50,7 @@ tunable_gate! {
 
 tunable_gate! {
     /// Element count above which the per-channel statistics reductions of **rank >= 3** inputs
-    /// (the plane folds over the native `[batch, channels, *spatial]` layout) run on rayon
+    /// (the plane folds over the native `[batch, *spatial, channels]` layout) run on rayon
     ///
     /// Crossover bracket 64K-256K elements (0.36x at 64K, 1.37x at 256K), 2.8-3.8x at 1M, 11.7x at
     /// the conv-scale 8.4M

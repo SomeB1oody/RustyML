@@ -52,7 +52,7 @@ tunable_gate! {
 
 tunable_gate! {
     /// The spatial-dropout per-channel scale: a copy-with-scale that multiplies each
-    /// `(batch, channel)` segment of a `[batch, channels, *spatial]` tensor by its channel's
+    /// `(batch, channel)` segment of a `[batch, *spatial, channels]` tensor by its channel's
     /// inverted-dropout factor. Each element is independent (no reduction), so the gate is a pure
     /// performance knob that never changes the result bits
     ///

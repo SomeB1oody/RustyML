@@ -38,7 +38,7 @@ use ndarray_rand::{RandomExt, rand_distr::Uniform};
 /// // Create a SpatialDropout3D layer with 20% dropout rate
 /// let mut spatial_dropout = SpatialDropout3D::new(0.2, vec![32, 16, 28, 28, 64]).unwrap();
 ///
-/// // Create input tensor (batch_size=32, channels=64, depth=16, height=28, width=28)
+/// // Create input tensor (batch_size=32, depth=16, height=28, width=28, channels=64)
 /// let input = Array5::ones((32, 16, 28, 28, 64)).into_dyn();
 ///
 /// // During training, ~20% of channels will be set to 0
