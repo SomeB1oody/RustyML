@@ -6,7 +6,7 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use ndarray::{Array2, ArrayView2};
+use ndarray::{Array1, Array2, ArrayView2, Axis, Zip};
 
 /// Epsilon used to clip predicted probabilities into the open interval `(0, 1)`,
 /// preventing `log(0)` and division-by-zero in the cross-entropy losses
@@ -53,6 +53,33 @@ fn clip_probabilities(probs: &Tensor) -> Tensor {
     let mut clipped = probs.clone();
     clipped.par_mapv_inplace(|x| x.clamp(PROB_CLIP_EPS, 1.0 - PROB_CLIP_EPS));
     clipped
+}
+
+/// Row-normalizes a `[sites, classes]` probability matrix, then clips it away from 0 and 1
+///
+/// This is Keras' probability path for the two categorical cross-entropies, in Keras' order:
+/// `output / sum(output, axis=-1, keepdims=True)` runs **before** the clip, so a head whose rows
+/// do not sum to 1 is scored as the distribution it implies rather than taken at face value. For
+/// a genuine softmax row the division is a numerical no-op, but it is still part of the function
+/// being differentiated - see the gradient derivation in
+/// [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy)
+///
+/// # Returns
+///
+/// - `(Array2<f32>, Array1<f32>)` - the normalized and clipped probabilities, and the raw row sums
+///   that normalized them. The gradient needs those sums, so they are returned rather than recomputed
+///
+/// A row summing to zero yields a non-finite result, exactly as it does in Keras; the clip guards
+/// `log(0)`, not a degenerate divisor
+fn normalize_and_clip_rows(probs: &ArrayView2<f32>) -> (Array2<f32>, Array1<f32>) {
+    let row_sums = probs.sum_axis(Axis(1));
+    let mut normalized = probs.to_owned();
+    Zip::from(normalized.rows_mut())
+        .and(&row_sums)
+        .for_each(|mut row, &sum| {
+            row.mapv_inplace(|p| (p / sum).clamp(PROB_CLIP_EPS, 1.0 - PROB_CLIP_EPS));
+        });
+    (normalized, row_sums)
 }
 
 /// Binary Cross Entropy loss function for binary classification

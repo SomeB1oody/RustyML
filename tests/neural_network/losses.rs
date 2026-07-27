@@ -6,11 +6,12 @@ use approx::assert_abs_diff_eq;
 use ndarray::Array;
 use rustyml::error::Error;
 use rustyml::neural_network::Tensor;
+use rustyml::neural_network::layers::activation::softmax::Softmax;
 use rustyml::neural_network::losses::{
     BinaryCrossEntropy, CategoricalCrossEntropy, MeanAbsoluteError, MeanSquaredError,
     SparseCategoricalCrossEntropy,
 };
-use rustyml::neural_network::traits::Loss;
+use rustyml::neural_network::traits::{Layer, Loss};
 
 use crate::common::assert_allclose;
 
@@ -315,7 +316,11 @@ fn cce_forward_value_divided_by_batch() {
     assert_abs_diff_eq!(loss, 0.31216_f32, epsilon = 1e-4);
 }
 
-/// CCE gradient equals -y_true / y_pred / batch_size, zero where y_true is zero
+/// CCE gradient equals `(sum(y_true) / row_sum - y_true / y_pred) / batch_size`
+///
+/// Differentiating Keras' row-normalizer adds a term that is constant across each row, so unlike
+/// the pre-normalization form the gradient is dense: the classes with a zero target carry that
+/// constant rather than zero. Here every row already sums to 1, so the constant is exactly `1/3`
 #[test]
 fn cce_gradient_value() {
     let cce = CategoricalCrossEntropy::new(false);
@@ -339,20 +344,23 @@ fn cce_gradient_value() {
     let flat: Vec<f32> = grad.iter().cloned().collect();
     assert_eq!(flat.len(), 9);
 
-    // Row 0: only class 0 is non-zero
-    assert_abs_diff_eq!(flat[0], -1.0_f32 / 0.8 / 3.0, epsilon = 1e-5);
-    assert_abs_diff_eq!(flat[1], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[2], 0.0_f32, epsilon = 1e-7);
+    // The row-constant term every class receives, target or not
+    let row_constant = 1.0_f32 / 3.0;
 
-    // Row 1: only class 1 is non-zero
-    assert_abs_diff_eq!(flat[3], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[4], -1.0_f32 / 0.7 / 3.0, epsilon = 1e-5);
-    assert_abs_diff_eq!(flat[5], 0.0_f32, epsilon = 1e-7);
+    // Row 0: class 0 is the target
+    assert_abs_diff_eq!(flat[0], (1.0_f32 - 1.0 / 0.8) / 3.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[1], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[2], row_constant, epsilon = 1e-5);
 
-    // Row 2: only class 2 is non-zero
-    assert_abs_diff_eq!(flat[6], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[7], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[8], -1.0_f32 / 0.7 / 3.0, epsilon = 1e-5);
+    // Row 1: class 1 is the target
+    assert_abs_diff_eq!(flat[3], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[4], (1.0_f32 - 1.0 / 0.7) / 3.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[5], row_constant, epsilon = 1e-5);
+
+    // Row 2: class 2 is the target
+    assert_abs_diff_eq!(flat[6], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[7], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[8], (1.0_f32 - 1.0 / 0.7) / 3.0, epsilon = 1e-5);
 }
 
 /// Perfect one-hot prediction gives near-zero CCE loss (< 1e-4) and finite gradient under clipping
@@ -544,7 +552,10 @@ fn scce_forward_value_equals_cce_equivalent() {
     assert_abs_diff_eq!(loss, 0.31216_f32, epsilon = 1e-4);
 }
 
-/// SCCE gradient is -1/y_pred / batch at each sample's true class and zero elsewhere
+/// SCCE gradient is `(1 / row_sum - 1 / y_pred) / batch` at the true class and `1 / (row_sum *
+/// batch)` elsewhere
+///
+/// Same row-constant term as CCE: the normalizer is differentiated, so the gradient is dense
 #[test]
 fn scce_gradient_value() {
     let scce = SparseCategoricalCrossEntropy::new(false);
@@ -563,20 +574,23 @@ fn scce_gradient_value() {
     let flat: Vec<f32> = grad.iter().cloned().collect();
     assert_eq!(flat.len(), 9);
 
+    // Every row already sums to 1, so the row-constant term is 1/3
+    let row_constant = 1.0_f32 / 3.0;
+
     // Row 0
-    assert_abs_diff_eq!(flat[0], -1.0_f32 / 0.8 / 3.0, epsilon = 1e-5);
-    assert_abs_diff_eq!(flat[1], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[2], 0.0_f32, epsilon = 1e-7);
+    assert_abs_diff_eq!(flat[0], (1.0_f32 - 1.0 / 0.8) / 3.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[1], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[2], row_constant, epsilon = 1e-5);
 
     // Row 1
-    assert_abs_diff_eq!(flat[3], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[4], -1.0_f32 / 0.7 / 3.0, epsilon = 1e-5);
-    assert_abs_diff_eq!(flat[5], 0.0_f32, epsilon = 1e-7);
+    assert_abs_diff_eq!(flat[3], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[4], (1.0_f32 - 1.0 / 0.7) / 3.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[5], row_constant, epsilon = 1e-5);
 
     // Row 2
-    assert_abs_diff_eq!(flat[6], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[7], 0.0_f32, epsilon = 1e-7);
-    assert_abs_diff_eq!(flat[8], -1.0_f32 / 0.7 / 3.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[6], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[7], row_constant, epsilon = 1e-5);
+    assert_abs_diff_eq!(flat[8], (1.0_f32 - 1.0 / 0.7) / 3.0, epsilon = 1e-5);
 }
 
 /// SCCE gradient matches CCE gradient on the equivalent one-hot encoding
@@ -825,4 +839,221 @@ fn scce_from_logits_loss_and_grad() {
         .unwrap()
         .into_dyn();
     assert_allclose(&grad, &expected, 1e-5_f32);
+}
+
+// Keras' probability-path renormalization
+
+/// CCE renormalizes each row along the class axis before clipping, so scaling a row by a positive
+/// constant leaves the loss unchanged: the row is scored as the distribution it implies
+#[test]
+fn cce_loss_is_invariant_to_row_scaling() {
+    let cce = CategoricalCrossEntropy::new(false);
+
+    let y_true: Tensor = Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0])
+        .unwrap()
+        .into_dyn();
+    let normalized: Tensor =
+        Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.2, 0.1, 0.6, 0.3])
+            .unwrap()
+            .into_dyn();
+    // Row 0 scaled by 4, row 1 by 1/4 - different factors, so this cannot pass by a global rescale
+    let scaled: Tensor =
+        Array::from_shape_vec(vec![2, 3], vec![2.0_f32, 1.2, 0.8, 0.025, 0.15, 0.075])
+            .unwrap()
+            .into_dyn();
+
+    let expected = -(0.5_f32.ln() + 0.6_f32.ln()) / 2.0;
+    assert_abs_diff_eq!(
+        cce.compute_loss(&y_true, &normalized).unwrap(),
+        expected,
+        epsilon = 1e-5
+    );
+    assert_abs_diff_eq!(
+        cce.compute_loss(&y_true, &scaled).unwrap(),
+        expected,
+        epsilon = 1e-5
+    );
+}
+
+/// SCCE renormalizes rows the same way CCE does
+#[test]
+fn scce_loss_is_invariant_to_row_scaling() {
+    let scce = SparseCategoricalCrossEntropy::new(false);
+
+    let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![0.0_f32, 1.0])
+        .unwrap()
+        .into_dyn();
+    let normalized: Tensor =
+        Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.2, 0.1, 0.6, 0.3])
+            .unwrap()
+            .into_dyn();
+    let scaled: Tensor =
+        Array::from_shape_vec(vec![2, 3], vec![2.0_f32, 1.2, 0.8, 0.025, 0.15, 0.075])
+            .unwrap()
+            .into_dyn();
+
+    let expected = -(0.5_f32.ln() + 0.6_f32.ln()) / 2.0;
+    assert_abs_diff_eq!(
+        scce.compute_loss(&y_true, &normalized).unwrap(),
+        expected,
+        epsilon = 1e-5
+    );
+    assert_abs_diff_eq!(
+        scce.compute_loss(&y_true, &scaled).unwrap(),
+        expected,
+        epsilon = 1e-5
+    );
+}
+
+/// Above rank 2 the normalizer still runs over the class axis alone, one distribution per site,
+/// never pooling the leading axes together
+#[test]
+fn cce_renormalizes_each_site_independently_above_rank_2() {
+    let cce = CategoricalCrossEntropy::new(false);
+
+    // [1, 2, 2] - one batch item, two spatial positions, two classes
+    let y_true: Tensor =
+        Array::from_shape_vec(vec![1, 2, 2], vec![1.0_f32, 0.0, 0.0, 1.0]).unwrap();
+    // Site 0 sums to 1, site 1 sums to 10; renormalized they are the same distribution
+    let y_pred: Tensor =
+        Array::from_shape_vec(vec![1, 2, 2], vec![0.8_f32, 0.2, 2.0, 8.0]).unwrap();
+
+    // Site 0 contributes -ln(0.8), site 1 contributes -ln(8/10); divisor is 2 sites
+    let expected = -(0.8_f32.ln() + 0.8_f32.ln()) / 2.0;
+    assert_abs_diff_eq!(
+        cce.compute_loss(&y_true, &y_pred).unwrap(),
+        expected,
+        epsilon = 1e-5
+    );
+}
+
+/// CCE's probability-path gradient is the true gradient of its loss, normalizer included
+///
+/// Also pinned against a transcription of Keras' own `categorical_crossentropy` (`output /
+/// sum(output, axis, keepdims=True)`, then `clip`), so this checks agreement with Keras and not
+/// merely self-consistency between `compute_loss` and `compute_grad`
+#[test]
+fn cce_probability_gradient_matches_finite_difference() {
+    let cce = CategoricalCrossEntropy::new(false);
+
+    let y_true: Tensor = Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0])
+        .unwrap()
+        .into_dyn();
+    // Deliberately unnormalized, so the row-sum divisor is exercised rather than being 1
+    let y_pred: Tensor = Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.4, 0.2, 0.7, 0.3])
+        .unwrap()
+        .into_dyn();
+
+    let grad = cce.compute_grad(&y_true, &y_pred).unwrap();
+
+    // Both rows sum to 1.2; Keras' reference values for this input
+    let expected: Tensor = Array::from_shape_vec(
+        vec![2, 3],
+        vec![
+            -0.583333_f32,
+            0.416667,
+            0.416667,
+            0.416667,
+            -0.297619,
+            0.416667,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    assert_allclose(&grad, &expected, 1e-5_f32);
+    assert_abs_diff_eq!(
+        cce.compute_loss(&y_true, &y_pred).unwrap(),
+        0.707233_f32,
+        epsilon = 1e-5
+    );
+
+    let h = 3e-3_f32;
+    for i in 0..2 {
+        for j in 0..3 {
+            let mut plus = y_pred.clone();
+            let mut minus = y_pred.clone();
+            plus[[i, j]] += h;
+            minus[[i, j]] -= h;
+            let numeric = (cce.compute_loss(&y_true, &plus).unwrap()
+                - cce.compute_loss(&y_true, &minus).unwrap())
+                / (2.0 * h);
+            assert_abs_diff_eq!(grad[[i, j]], numeric, epsilon = 1e-3);
+        }
+    }
+}
+
+/// Same finite-difference check for SCCE, whose gradient is dense for the same reason
+#[test]
+fn scce_probability_gradient_matches_finite_difference() {
+    let scce = SparseCategoricalCrossEntropy::new(false);
+
+    let y_true: Tensor = Array::from_shape_vec(vec![2, 1], vec![0.0_f32, 1.0])
+        .unwrap()
+        .into_dyn();
+    let y_pred: Tensor = Array::from_shape_vec(vec![2, 3], vec![0.5_f32, 0.3, 0.4, 0.2, 0.7, 0.3])
+        .unwrap()
+        .into_dyn();
+
+    let grad = scce.compute_grad(&y_true, &y_pred).unwrap();
+
+    // Labels 0 and 1 are the one-hot targets of the CCE test above, so the same reference applies
+    let expected: Tensor = Array::from_shape_vec(
+        vec![2, 3],
+        vec![
+            -0.583333_f32,
+            0.416667,
+            0.416667,
+            0.416667,
+            -0.297619,
+            0.416667,
+        ],
+    )
+    .unwrap()
+    .into_dyn();
+    assert_allclose(&grad, &expected, 1e-5_f32);
+
+    let h = 3e-3_f32;
+    for i in 0..2 {
+        for j in 0..3 {
+            let mut plus = y_pred.clone();
+            let mut minus = y_pred.clone();
+            plus[[i, j]] += h;
+            minus[[i, j]] -= h;
+            let numeric = (scce.compute_loss(&y_true, &plus).unwrap()
+                - scce.compute_loss(&y_true, &minus).unwrap())
+                / (2.0 * h);
+            assert_abs_diff_eq!(grad[[i, j]], numeric, epsilon = 1e-3);
+        }
+    }
+}
+
+/// The term the normalizer adds is constant across each row, and a softmax backward annihilates
+/// row-constant vectors - so a softmax head sees the exact same gradient it saw before Keras'
+/// renormalization was adopted. This is why the change is invisible to every training test
+#[test]
+fn cce_row_constant_term_vanishes_through_softmax_backward() {
+    let cce = CategoricalCrossEntropy::new(false);
+
+    let logits: Tensor =
+        Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 2.0, 0.5, -0.5, 0.25, 1.5])
+            .unwrap()
+            .into_dyn();
+    let y_true: Tensor = Array::from_shape_vec(vec![2, 3], vec![1.0_f32, 0.0, 0.0, 0.0, 1.0, 0.0])
+        .unwrap()
+        .into_dyn();
+
+    let mut current = Softmax::new();
+    let probs = current.forward(&logits).unwrap();
+    let mut legacy = Softmax::new();
+    legacy.forward(&logits).unwrap();
+
+    let grad = cce.compute_grad(&y_true, &probs).unwrap();
+    // Softmax rows sum to 1 and the targets are one-hot, so the added term is exactly 1 / batch
+    let grad_without_term = &grad - 1.0 / 2.0;
+
+    assert_allclose(
+        &current.backward(&grad).unwrap(),
+        &legacy.backward(&grad_without_term).unwrap(),
+        1e-5_f32,
+    );
 }

@@ -2,9 +2,9 @@
 
 use crate::error::Error;
 use crate::neural_network::Tensor;
-use crate::neural_network::losses::{clip_probabilities, stable_log_softmax_softmax};
+use crate::neural_network::losses::{normalize_and_clip_rows, stable_log_softmax_softmax};
 use crate::neural_network::traits::Loss;
-use ndarray::Ix2;
+use ndarray::{Array2, Ix2};
 
 /// Sparse Categorical Cross Entropy loss for multi-class classification where true labels
 /// are integers instead of one-hot vectors
@@ -42,6 +42,15 @@ use ndarray::Ix2;
 /// println!("Gradients shape: {:?}", gradients.shape());
 /// println!("Gradients: {:?}", gradients);
 /// ```
+///
+/// # Probability path
+///
+/// Identical to
+/// [`CategoricalCrossEntropy`](crate::neural_network::losses::CategoricalCrossEntropy)'s, with the
+/// one-hot target implied by the integer label: each row is renormalized along the class axis
+/// before being clipped, matching Keras. Because that division is differentiated, `compute_grad`
+/// returns a **dense** gradient - every class carries `1 / (batch * row_sum)` - rather than a
+/// gradient supported only on the labelled class
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SparseCategoricalCrossEntropy {
     /// When `true`, `y_pred` is treated as raw logits: a stable log-softmax is applied internally
@@ -147,14 +156,19 @@ impl Loss for SparseCategoricalCrossEntropy {
             return Ok(total / batch_size as f32);
         }
 
-        // Probability path. Serial sum like the logits path above: a bare rayon `sum`
-        // groups its partials by work-stealing, making the reported loss vary with thread
-        // scheduling, and one indexed `ln` per sample is far too little work to parallelize
-        let y_pred_clipped = clip_probabilities(y_pred);
+        // Probability path. Each row is renormalized before the clip, as in Keras, so an
+        // unnormalized head is scored as the distribution it implies. Serial sum like the logits
+        // path above: a bare rayon `sum` groups its partials by work-stealing, making the reported
+        // loss vary with thread scheduling, and one indexed `ln` per sample is far too little work
+        // to parallelize
+        let probs = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
+            Error::invalid_input("SparseCategoricalCrossEntropy expects 2D predictions")
+        })?;
+        let (normalized, _) = normalize_and_clip_rows(&probs);
         let total_loss: f32 = class_indices
             .iter()
             .enumerate()
-            .map(|(i, &class_idx)| -y_pred_clipped[[i, class_idx]].ln())
+            .map(|(i, &class_idx)| -normalized[[i, class_idx]].ln())
             .sum();
         Ok(total_loss / batch_size as f32)
     }
@@ -176,12 +190,20 @@ impl Loss for SparseCategoricalCrossEntropy {
             return Ok(grad.into_dyn());
         }
 
-        // Probability path
-        let y_pred_clipped = clip_probabilities(y_pred);
-        let mut grad = Tensor::zeros(y_pred.raw_dim());
+        // Probability path. Differentiating the row-normalizer contributes `1 / s` to *every*
+        // class, not just the labelled one, so unlike the pre-normalization form this gradient is
+        // dense. The extra term is constant across the row, which a softmax backward annihilates
+        let probs = y_pred.view().into_dimensionality::<Ix2>().map_err(|_| {
+            Error::invalid_input("SparseCategoricalCrossEntropy expects 2D predictions")
+        })?;
+        let (normalized, row_sums) = normalize_and_clip_rows(&probs);
+
+        let mut grad = Array2::<f32>::zeros(probs.raw_dim());
         for (i, &class_idx) in class_indices.iter().enumerate() {
-            grad[[i, class_idx]] = -1.0 / y_pred_clipped[[i, class_idx]];
+            let scale = 1.0 / (batch_size as f32 * row_sums[i]);
+            grad.row_mut(i).fill(scale);
+            grad[[i, class_idx]] = (1.0 - 1.0 / normalized[[i, class_idx]]) * scale;
         }
-        Ok(grad / batch_size as f32)
+        Ok(grad.into_dyn())
     }
 }

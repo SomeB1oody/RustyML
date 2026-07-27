@@ -214,6 +214,11 @@ pub trait Layer: std::any::Any + Send + Sync {
 /// - [`SparseCategoricalCrossEntropy`](crate::neural_network::losses::SparseCategoricalCrossEntropy)
 ///   is the same per-sample categorical cross-entropy, but accepts only rank-2
 ///   `[batch, classes]` predictions, so its divisor is always the batch
+///
+/// The two categorical losses additionally renormalize `y_pred` along the class axis before
+/// clipping when `from_logits` is off, as Keras does. That leaves the loss value alone for an
+/// already-normalized head but contributes a row-constant term to the gradient, which a softmax
+/// backward annihilates
 pub trait Loss {
     /// Computes the loss between true and predicted values
     ///

@@ -3,9 +3,10 @@
 use crate::error::Error;
 use crate::neural_network::Tensor;
 use crate::neural_network::losses::{
-    clip_probabilities, stable_log_softmax_softmax, validate_same_shape,
+    normalize_and_clip_rows, stable_log_softmax_softmax, validate_same_shape,
 };
 use crate::neural_network::traits::Loss;
+use ndarray::{Array2, Zip};
 
 /// Categorical cross entropy loss function for multi-class classification
 ///
@@ -51,6 +52,19 @@ use crate::neural_network::traits::Loss;
 /// loss sums over the class axis and divides by the total number of sites (`batch * height *
 /// width`), which is what Keras' default `sum_over_batch_size` reduction computes; under
 /// `from_logits` the softmax likewise normalizes within a site and never across sites
+///
+/// # Probability path
+///
+/// With `from_logits == false`, each row is renormalized along the class axis
+/// (`y_pred / sum(y_pred, axis=-1)`) *before* being clipped away from 0 and 1, matching Keras'
+/// order of operations. A genuine softmax row already sums to 1, so the division does not move
+/// the loss value - but it is still differentiated, which adds a row-constant term to the
+/// gradient. A softmax backward annihilates row-constant vectors, so this changes nothing for the
+/// usual softmax head; it makes the loss well-defined for an unnormalized one
+///
+/// The clip is a `log(0)` guard, not a gradient gate: like the loss itself, `compute_grad`
+/// evaluates at the clipped probability rather than zeroing out clipped positions the way Keras'
+/// autodiff does. The two agree wherever `y_pred` is inside `[1e-7, 1 - 1e-7]`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CategoricalCrossEntropy {
     /// When `true`, `y_pred` is treated as raw logits: the loss applies a numerically stable
@@ -134,10 +148,16 @@ impl Loss for CategoricalCrossEntropy {
             return Ok(-(&labels * &log_sm).sum() / n);
         }
 
-        // Probability path
-        let y_pred_clipped = clip_probabilities(y_pred);
-        let losses = y_true * &y_pred_clipped.mapv(|y_p| y_p.ln());
-        Ok(-losses.sum() / n)
+        // Probability path. The same reshape as above, because Keras' renormalizer runs over the
+        // class axis alone - a `[batch, h, w, classes]` head is one distribution per pixel
+        let probs = y_pred
+            .to_shape((sites, classes))
+            .map_err(|e| Error::computation(format!("CCE probability reshape failed: {e}")))?;
+        let labels = y_true
+            .to_shape((sites, classes))
+            .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
+        let (normalized, _) = normalize_and_clip_rows(&probs.view());
+        Ok(-(&labels * &normalized.mapv(f32::ln)).sum() / n)
     }
 
     fn compute_grad(&self, y_true: &Tensor, y_pred: &Tensor) -> Result<Tensor, Error> {
@@ -161,9 +181,35 @@ impl Loss for CategoricalCrossEntropy {
             return Ok(grad);
         }
 
-        // Probability path: gradient is -y_true / y_pred
-        let y_pred_clipped = clip_probabilities(y_pred);
-        let grad = -y_true / &y_pred_clipped;
-        Ok(grad / n)
+        // Probability path. The row-normalizer is part of the function being differentiated, so
+        // the gradient of `-sum_c y_c * ln(p_c / s)` w.r.t. `p_k` is `(sum_c y_c) / s - y_k / p_k`
+        // - the old `-y_k / p_k` plus a term that is *constant across the row*. A softmax backward
+        // annihilates any row-constant vector, so a softmax head trains identically either way;
+        // the term matters only when the loss is wired to something else
+        let probs = y_pred
+            .to_shape((sites, classes))
+            .map_err(|e| Error::computation(format!("CCE probability reshape failed: {e}")))?;
+        let labels = y_true
+            .to_shape((sites, classes))
+            .map_err(|e| Error::computation(format!("CCE labels reshape failed: {e}")))?;
+        let (normalized, row_sums) = normalize_and_clip_rows(&probs.view());
+
+        let mut grad2d = Array2::<f32>::zeros((sites, classes));
+        Zip::from(grad2d.rows_mut())
+            .and(normalized.rows())
+            .and(labels.rows())
+            .and(&row_sums)
+            .for_each(|mut grad_row, normalized_row, label_row, &sum| {
+                // One-hot targets make this 1, but the loss is defined for any target mass
+                let target_mass = label_row.sum();
+                Zip::from(&mut grad_row)
+                    .and(normalized_row)
+                    .and(label_row)
+                    .for_each(|grad, &q, &y| *grad = (target_mass - y / q) / (n * sum));
+            });
+
+        grad2d
+            .into_shape_with_order(y_pred.raw_dim())
+            .map_err(|e| Error::computation(format!("CCE gradient reshape failed: {e}")))
     }
 }
